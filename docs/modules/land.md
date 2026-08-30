@@ -34,6 +34,7 @@ the first act of building it. Agreed 2026-08-15:
 | **2b.4** | **Plans and the takeoff** — a named set of proposals, saved quantities, hand-added lines | **shipped 2026-08-29** |
 | **2b.5** | **Snap, and the ground inside the fences** — a drawn point joins what is already there, and the loops the fences make become ground you can divide | **shipped 2026-08-29** |
 | **2b.6** | **Getting rid of things** — discard a proposed paddock, and sort/filter/bulk-delete the plan list | **shipped 2026-08-30** |
+| **2b.7** | **The paddock table gets it too** — same filter/sort/select, and the bulk act is RETIRE | **shipped 2026-08-30** |
 | ~~2b.x~~ | ~~**"What is here"** — the phone screen~~ — **absorbed into 2b.1/2b.3 on 2026-08-29.** It was always the same machinery, and it is far more trustworthy once the boundary was WALKED rather than traced | |
 | 3 | **Weather + GDD** — Open-Meteo by parcel centroid | |
 | 4 | Lease screens, haul movement and cost, the improvement-payback warning | |
@@ -569,6 +570,82 @@ grounds, which were never about optimisation as such.
   - **Assuming RTK.** Everything here must be useful at 3 m.
 
 ## Build log
+
+### 2026-08-30 — Slice 2b.7: the paddock table gets it too (`claude/the-paddock-table`)
+
+**No migration.** One line the same day the last slice landed: *"do the same for
+the paddock table"*. Fair — 2b.6's own open item said the paddock table had none
+of it, and it matters at the same scale for the same reason.
+
+**BUT THE BULK ACT IS RETIRE, NOT DELETE, AND THAT ASYMMETRY IS THE WHOLE
+DESIGN.** A fence you pull out is gone. A paddock you stop managing had cattle
+on it, has a use history and has costs tagged to it, and every one of those
+questions still has an answer that a delete would erase. Deleting ground is
+`discardZones` and it only ever touches proposals — which is why it lives on the
+Proposed panel above this table and not in it. The three acts now sit in one
+place and mean three different things:
+
+| Ground | Act | What survives |
+| --- | --- | --- |
+| Proposed | **Discard** | nothing — there was nothing to keep |
+| In use | **Retire** | uses, costs, everything ever tagged to it |
+| Retired | — | it is already history |
+
+`retireZones` refuses a set containing anything already retired rather than
+skipping it: retiring closes the open use as of `endedOn`, and running that over
+ground retired last year would either do nothing or quietly move a date, while a
+count reading "3 retired" when one already was is a count nobody can act on. It
+also refuses a PROPOSAL, pointing at Discard — retiring one would archive ground
+nobody ever fenced, the outcome `discardZones` exists to prevent. Nothing can
+reach it with a planned zone today; it is a guard, not a fix.
+
+**RETIRED PADDOCKS WERE NOT HIDDEN. THEY WERE NEVER READ.** The page loaded
+`status: "active"` and nothing else, so a retired paddock was invisible here
+whatever you clicked. They now come in as a **third separate read**, for exactly
+the reason the second one is separate: every figure on this page — rest, the
+paddock count, the rotation arithmetic, `zoneCoverage`, the acreage in paddocks
+— is about ground you are USING, and folding retired rows into `zones` would put
+ground you gave up into all of them at once. Verified on screen: with two of six
+paddocks retired the table read "3 of 6" and **In paddocks** dropped to the
+remaining acreage, which is the figure that would have been wrong.
+
+**The controls mirror `feature-list.tsx` deliberately**, down to the rules that
+were argued out there:
+
+- **Filter** by use and by status. Use options are only the uses actually
+  declared, and the effective one is DERIVED — retiring the last hay paddock
+  takes "Hay" out of the options, and a filter naming something gone leaves an
+  empty list with no clue why. Status defaults to **In use**, keeping retirement
+  behind a deliberate ask.
+- **Sort** on all four columns. **Rows with no number sink in both directions**:
+  sorting by rest asks which ground has had the longest break, and a paddock
+  with cattle on it or one never grazed answers neither. An undeclared use sorts
+  last the same way — "nothing yet" is not a value on the scale.
+- **Select and retire**, narrowed to what is on screen AND to what can still be
+  retired. A retired row has no tick and no menu, so the count can never include
+  one; switch the filter to Retired and the button goes away rather than lying.
+
+**The table became a client component**, so what stays on the server is
+everything that needs the database or the parcel: the current use, rest, the
+history behind each row's menu, and whether a paddock is under this parcel's
+rest target. The component is handed facts, not queries.
+
+**Driven on Hilltop Farm** against six paddocks seeded for it: sorted by area
+descending, filtered to Hay and got the one, filtered to Retired and saw a
+paddock that had been unreachable on this page entirely, then selected two and
+retired them. The database confirmed both flipped to `retired` **and that the
+open hay use closed on today's date** — the courtesy the single retire does, now
+done in bulk. Everything seeded was removed afterwards; the parcel is back to the
+four paddocks and fifteen features it started with.
+
+**Tested:** five new db-backed cases — bulk retire closes the open uses, refuses
+a set containing one already retired without doing half of it, refuses a
+proposal in `discardZones`' own words, is owner-only, and does nothing
+successfully for an empty selection. 2,293 pure and 178 db-backed pass, the RLS
+isolation suite included.
+
+**Still no component tests.** The sort comparator and the narrowing of the
+selection are the two pieces here most worth one, in both tables now.
 
 ### 2026-08-30 — Slice 2b.6: getting rid of things (`claude/get-rid-of-things`)
 
@@ -2431,6 +2508,12 @@ rented ground, and retrofitting it means rewriting the report.
   difference: **length has no canonical store.** Nothing writes a length, so
   there is no `toMetres` matching `toAcres`; it is computed from the geometry
   every time it is shown
+- `src/packs/land/components/zone-table.tsx` — the paddocks on a parcel, with the
+  same filter/sort/select as the plan list and one deliberate difference: **the
+  bulk act is RETIRE, not delete.** A fence you pull out is gone; a paddock you
+  stop managing has a history and costs tagged to it. Deleting ground is
+  `discardZones`, on the Proposed panel, and it only ever touches proposals.
+  Retired rows are shown by a filter and have neither a tick nor a menu
 - `src/packs/land/components/feature-list.tsx` — the plan's inventory: filter by
   kind and state, sort on any column, tick rows and delete them together. Split
   out of `site-plan.tsx` in 2b.6 — the parent keeps only the thing genuinely
@@ -2664,10 +2747,12 @@ rented ground, and retrofitting it means rewriting the report.
   did not touch retirement, which stays one-way. The asymmetry is defensible —
   a proposal has no history to lose — but "discard" and "retire" sitting a
   centimetre apart on the same screen is worth watching somebody use.
-- **Nothing bulk-acts on paddocks.** Features can be filtered, sorted and
-  deleted together; the paddock table has none of that. It matters at the same
-  scale — a hundred paddocks is the number that makes both urgent — and only
-  one of them got the treatment.
+- ~~Nothing bulk-acts on paddocks~~ — **closed the same day, in 2b.7.** The
+  paddock table has the same filter, sort and multi-select; its bulk act is
+  RETIRE rather than delete, for the reason that slice's entry gives.
+- **No bulk entry, still.** Twenty paddocks is twenty dialogs. 2b.6 and 2b.7
+  made it possible to get RID of things in bulk and left creating them one at a
+  time — which is the half that a farm at 10x hits first.
 - **The takeoff has never priced a real order.** 2b.4 was driven with a made-up
   42-cent insulator; nothing has been bought off one of these lists, so nobody
   has yet found the material it cannot count or the unit it does not have.

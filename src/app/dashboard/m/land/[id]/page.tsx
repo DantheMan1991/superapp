@@ -13,14 +13,6 @@ import { DataTable } from "@/components/app/data-table";
 import { EmptyState } from "@/components/app/empty-state";
 import { Panel } from "@/components/app/panel";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   completedStayDays,
   currentUses,
   getParcel,
@@ -63,7 +55,7 @@ import { ZoneForm } from "@/packs/land/components/zone-form";
 import { PaddockLayout } from "@/packs/land/components/paddock-layout";
 import { PlannedZones } from "@/packs/land/components/planned-zones";
 import { PlanTakeoff } from "@/packs/land/components/plan-takeoff";
-import { ZoneControls } from "@/packs/land/components/zone-controls";
+import { ZoneTable } from "@/packs/land/components/zone-table";
 import { BoundarySummary } from "@/packs/land/components/boundary-summary";
 
 export const dynamic = "force-dynamic";
@@ -118,6 +110,20 @@ export default async function ParcelDetailPage({
         parcelId: id,
         status: "planned",
       });
+      /**
+       * Ground that used to be a paddock (slice 2b.7).
+       *
+       * **A THIRD SEPARATE READ, FOR THE REASON ABOVE.** Every figure on this
+       * page — rest, the paddock count, the rotation arithmetic,
+       * `zoneCoverage`, the acreage in paddocks — is about ground you are USING.
+       * Folding retired rows into `zones` would put ground you gave up into all
+       * of them at once. It travels on its own so the only thing that sees it is
+       * the table's own Retired filter.
+       */
+      const retiredZones = await listZones(tx, ctx.tenant.id, {
+        parcelId: id,
+        status: "retired",
+      });
       const zoneIds = zones.map((z) => z.id);
       const [current, history, usesInUse, pack, rest, stayDays, features, plans] =
         await Promise.all([
@@ -143,6 +149,7 @@ export default async function ParcelDetailPage({
         parcel,
         zones,
         plannedZones,
+        retiredZones,
         current,
         history,
         usesInUse,
@@ -162,6 +169,7 @@ export default async function ParcelDetailPage({
     parcel,
     zones,
     plannedZones,
+    retiredZones,
     current,
     history,
     usesInUse,
@@ -611,7 +619,7 @@ export default async function ParcelDetailPage({
         )}
 
         <DataTable
-          isEmpty={zones.length === 0}
+          isEmpty={zones.length === 0 && retiredZones.length === 0}
           empty={
             <EmptyState
               title={`No ${zoneWord.toLowerCase()} on this parcel yet`}
@@ -619,100 +627,60 @@ export default async function ParcelDetailPage({
             />
           }
         >
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{zoneWord}</TableHead>
-                <TableHead>Currently</TableHead>
-                <TableHead>Rested</TableHead>
-                <TableHead className="text-right">Area</TableHead>
-                <TableHead className="w-10" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {zones.map((zone) => {
-                const use = current.get(zone.id);
-                const zoneRestInfo = rest.get(zone.id);
-                return (
-                  <TableRow key={zone.id}>
-                    <TableCell className="font-medium">
-                      <Link
-                        href={`${BASE}/${parcel.id}/zones/${zone.id}`}
-                        className="hover:underline"
-                      >
-                        {zone.name}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {use ? (
-                        <span className="flex items-center gap-2">
-                          {zoneUseLabel(use.use)}
-                          {!use.isProductive && (
-                            <Badge variant="outline">not productive</Badge>
-                          )}
-                          <span className="text-xs">since {use.startedOn}</span>
-                        </span>
-                      ) : (
-                        "—"
-                      )}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {/* Computed from occupancy, never stored, and never
-                          entered a second time. "Never used" is not the same
-                          fact as "rested a long time". */}
-                      {zoneRestInfo?.status === "occupied" ? (
-                        <Badge variant="outline">occupied</Badge>
-                      ) : zoneRestInfo?.status === "never_grazed" ? (
-                        "—"
-                      ) : (
-                        <span className="tabular-nums">
-                          {formatDays(zoneRestInfo?.restDays ?? null)}
-                          {parcel.restTargetDays !== null &&
-                            zoneRestInfo?.restDays !== null &&
-                            zoneRestInfo !== undefined &&
-                            zoneRestInfo.restDays !== null &&
-                            zoneRestInfo.restDays < parcel.restTargetDays && (
-                              <span className="ml-2 text-xs">
-                                under target
-                              </span>
-                            )}
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatArea(zone.areaAcres, unit)}
-                    </TableCell>
-                    <TableCell>
-                      {isOwner && (
-                        <ZoneControls
-                          zone={{
-                            id: zone.id,
-                            name: zone.name,
-                            areaInput:
-                              zone.areaAcres === null
-                                ? ""
-                                : String(fromAcres(zone.areaAcres, unit)),
-                            notes: zone.notes,
-                            history: (history.get(zone.id) ?? []).map((h) => ({
-                              id: h.id,
-                              use: h.use,
-                              isProductive: h.isProductive,
-                              startedOn: h.startedOn,
-                              endedOn: h.endedOn,
-                            })),
-                          }}
-                          unit={unit}
-                          zoneWord={zoneWord}
-                          today={today}
-                          usesInUse={usesInUse.map((u) => u.use)}
-                        />
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+          {/*
+            **THE TABLE IS A CLIENT COMPONENT NOW** (slice 2b.7). It filters,
+            sorts and multi-selects, none of which a server render can do — and
+            the founder asked for exactly the treatment the plan list got the
+            day before. What is computed HERE is everything that needs the
+            database or the parcel: the current use, rest, the history behind
+            each row's menu, and whether a paddock is under this parcel's rest
+            target. The component is handed facts, not queries.
+          */}
+          <ZoneTable
+            parcelId={parcel.id}
+            basePath={BASE}
+            unit={unit}
+            zoneWord={zoneWord}
+            today={today}
+            usesInUse={usesInUse.map((u) => u.use)}
+            canEdit={isOwner && parcel.status === "active"}
+            zones={[...zones, ...retiredZones].map((zone) => {
+              const use = current.get(zone.id) ?? null;
+              const zoneRestInfo = rest.get(zone.id);
+              return {
+                id: zone.id,
+                name: zone.name,
+                status: zone.status,
+                areaAcres: zone.areaAcres,
+                notes: zone.notes,
+                use: use
+                  ? {
+                      use: use.use,
+                      isProductive: use.isProductive,
+                      startedOn: use.startedOn,
+                    }
+                  : null,
+                rest: zoneRestInfo
+                  ? {
+                      status: zoneRestInfo.status,
+                      restDays: zoneRestInfo.restDays,
+                    }
+                  : null,
+                underTarget:
+                  parcel.restTargetDays !== null &&
+                  zoneRestInfo !== undefined &&
+                  zoneRestInfo.restDays !== null &&
+                  zoneRestInfo.restDays < parcel.restTargetDays,
+                history: (history.get(zone.id) ?? []).map((h) => ({
+                  id: h.id,
+                  use: h.use,
+                  isProductive: h.isProductive,
+                  startedOn: h.startedOn,
+                  endedOn: h.endedOn,
+                })),
+              };
+            })}
+          />
         </DataTable>
       </div>
     </div>

@@ -32,6 +32,7 @@ import {
   deleteFeature,
   deleteFeatures,
   discardZones,
+  retireZones,
   deleteOccupancy,
   getFeature,
   getPlan,
@@ -2166,6 +2167,102 @@ d("land ops", () => {
       await expect(
         asOwner((tx) => discardZones(tx, staffCtx(), [zone.id])),
       ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+  });
+
+  /**
+   * The paddock table got the same treatment as the plan list in 2b.7, and the
+   * bulk act it needed is RETIRE rather than delete. A fence you pull out is
+   * gone; a paddock you stop managing had cattle on it and has costs tagged to
+   * it, and a delete would erase the answer to every one of those questions.
+   */
+  describe("retiring paddocks in bulk", () => {
+    it("retires them all, and closes their open uses", async () => {
+      const parcel = await newParcel("Bulk Retire");
+      const made: Awaited<ReturnType<typeof createZone>>[] = [];
+      for (const name of ["A", "B", "C"]) {
+        const zone = await asOwner((tx) =>
+          createZone(tx, ownerCtx(), { parcelId: parcel.id, name }),
+        );
+        await asOwner((tx) =>
+          startZoneUse(tx, ownerCtx(), zone.id, {
+            use: "pasture",
+            startedOn: "2026-01-01",
+          }),
+        );
+        made.push(zone);
+      }
+
+      const retired = await asOwner((tx) =>
+        retireZones(
+          tx,
+          ownerCtx(),
+          made.map((z) => z.id),
+          "2026-06-30",
+        ),
+      );
+      expect(retired).toHaveLength(3);
+      expect(retired.every((z) => z.status === "retired")).toBe(true);
+
+      // The open use is CLOSED, the same courtesy the single retire does: a
+      // paddock nobody manages is not still "currently pasture".
+      for (const zone of made) {
+        const uses = await asOwner((tx) => listZoneUses(tx, tenantId, zone.id));
+        expect(uses[0].endedOn).toBe("2026-06-30");
+      }
+    });
+
+    it("refuses the whole set when one is already retired", async () => {
+      const parcel = await newParcel("Half Retired");
+      const live = await asOwner((tx) =>
+        createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Live" }),
+      );
+      const done = await asOwner((tx) =>
+        createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Done" }),
+      );
+      await asOwner((tx) => retireZone(tx, ownerCtx(), done.id));
+
+      await expect(
+        asOwner((tx) => retireZones(tx, ownerCtx(), [live.id, done.id])),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+      // Nothing half-done.
+      expect(
+        (await asOwner((tx) => getZone(tx, tenantId, live.id)))?.status,
+      ).toBe("active");
+    });
+
+    /**
+     * **A PROPOSAL IS DISCARDED, NOT RETIRED.** Retiring one would archive
+     * ground nobody ever fenced — the outcome `discardZones` exists to prevent.
+     */
+    it("refuses a proposal, and says to discard it", async () => {
+      const parcel = await newParcel("Not Fenced Yet");
+      const zone = await asOwner((tx) =>
+        createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Someday" }),
+      );
+      await asOwner((tx) =>
+        tx
+          .update(schema.landZones)
+          .set({ status: "planned" })
+          .where(eq(schema.landZones.id, zone.id)),
+      );
+      await expect(
+        asOwner((tx) => retireZones(tx, ownerCtx(), [zone.id])),
+      ).rejects.toMatchObject({ code: "NOT_A_PROPOSAL" });
+    });
+
+    it("is owner-only", async () => {
+      const parcel = await newParcel("Staff Cannot Retire");
+      const zone = await asOwner((tx) =>
+        createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Theirs" }),
+      );
+      await expect(
+        asOwner((tx) => retireZones(tx, staffCtx(), [zone.id])),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+
+    it("does nothing, successfully, for an empty selection", async () => {
+      expect(await asOwner((tx) => retireZones(tx, ownerCtx(), []))).toEqual([]);
     });
   });
 

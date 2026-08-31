@@ -36,7 +36,7 @@ the first act of building it. Agreed 2026-08-15:
 | **2b.6** | **Getting rid of things** — discard a proposed paddock, and sort/filter/bulk-delete the plan list | **shipped 2026-08-30** |
 | **2b.7** | **The paddock table gets it too** — same filter/sort/select, and the bulk act is RETIRE | **shipped 2026-08-30** |
 | ~~2b.x~~ | ~~**"What is here"** — the phone screen~~ — **absorbed into 2b.1/2b.3 on 2026-08-29.** It was always the same machinery, and it is far more trustworthy once the boundary was WALKED rather than traced | |
-| 3 | **Weather + GDD** — Open-Meteo by parcel centroid | |
+| **3** | **Weather + GDD** — Open-Meteo by parcel centroid, no table and no cron | **shipped 2026-08-30** |
 | 4 | Lease screens, haul movement and cost, the improvement-payback warning | |
 
 Weather is late deliberately and it is not a lapse: Open-Meteo serves history by
@@ -577,6 +577,78 @@ grounds, which were never about optimisation as such.
   - **Assuming RTK.** Everything here must be useful at 3 m.
 
 ## Build log
+
+### 2026-08-30 — Slice 3: growing weather (`claude/weather-and-gdd`)
+
+**No migration, no table, no cron.** A pure core, one `server-only` fetch and a
+panel. **Nothing is stored, and that is the reason weather could be scheduled
+last** — Open-Meteo serves history by latitude and longitude, so a season nobody
+was watching is still there when somebody looks. Being late cost no data,
+exactly as the roadmap said when it put this after the geometry.
+
+**THE QUESTION IT ANSWERS IS "IS TWENTY-ONE DAYS OF REST ENOUGH".** Rest days
+and grazing days are already free, computed from occupancy. What is missing is
+how much the grass actually GREW in those days, and measuring that is the thing
+nobody keeps up. Degree days are a free proxy: a season running behind is one
+where the same twenty-one days bought less. It sits beside the Rotation panel
+because that is where the decision gets made.
+
+**IT REPORTS AND DOES NOT PREDICT, DELIBERATELY.** The brief's own line —
+*"you return to Paddock 4 in 16 days, not 21"* — is the destination and is NOT
+this slice. Turning degree days into a regrowth date is a correlation nobody
+here has validated, on ground nobody here has measured. The brief says the same
+in its own words: log from day one, insight in year three. So this shows what
+the weather DID next to the same window in previous years, and the person draws
+the line. Same rule as the rest of the pack: report, never assert.
+
+**Three decisions worth the words:**
+
+- **A DEGREE DAY IS NOT A TEMPERATURE AND DOES NOT CONVERT LIKE ONE.** The 32 in
+  the Fahrenheit formula is an offset between two zero points; a degree day is
+  already a difference. Adding it would put 32 extra degree days on every day of
+  the season — a wrong number that looks entirely reasonable, so it has a test
+  of its own.
+- **THE GAPS ARE COUNTED, NOT FILLED.** A missing day is an unknown, not zero
+  growth. Averaging it in as zero makes a patchy archive read as a cold season,
+  which is the same trap `totalLength` avoids for an undrawn feature.
+- **THE COMPARISON IS AGAINST THE SAME WINDOW, NOT THE WHOLE PREVIOUS YEAR**, or
+  every season reads as behind until December.
+
+**Fahrenheit is the default, which it is nowhere else in this pack.** Area and
+length are set per profile with no US bias. A degree-day figure is different: it
+is only useful if it matches the ones the person already reads, and every US
+extension service publishes GDD in Fahrenheit days over a base of 50. A grower
+comparing our 900 against their county's 1,600 would conclude the app is broken.
+Both the unit and the base live in `packConfig` — the base because **which
+threshold matters is a fact about your business, not about the ground** (ADR
+0004). Cool-season grass over a base of 0C is a config line, not a code change.
+
+**No upper cap on the daily high, and that is a decision rather than an
+omission.** Corn is always computed with the high capped at 30C. Choosing a cap
+now means choosing it on behalf of every business this pack serves; uncapped is
+also a published convention. **What would trigger adding it:** somebody
+comparing our number against a capped local one and finding a gap in a hot
+month. It belongs beside `gddBaseC` when it comes.
+
+**Driven on Hilltop Farm against the live archive, and the number checks out
+against the outside world.** Home Farm read **2,609 °F-days since 1 January over
+a base of 50°F, about level with the 5-year average for this date**, and
+**0.04 in of rain in the last seven days, last worth the name eight days ago**.
+Central Ohio runs roughly 2,400–2,700 base-50 degree days by the end of August,
+so the figure is one an extension service would recognise — which is a better
+check on the arithmetic than any assertion in the test file.
+
+**The screenshot could not be taken.** The browser pane reported the right
+scroll position and kept rendering the top of the page, the same flake this
+session hit twice before. The panel's content was read out of the DOM instead,
+so what is verified is the text and the numbers, not how it looks.
+
+**Tested:** 25 pure cases — the floor that stops a cold snap undoing a season,
+gaps counted rather than filled, the same-window comparison, a year with no data
+left out of the average instead of dragging it down, rain never counted from the
+future, the degree-day conversion that is not a temperature conversion, and
+config readers that refuse nonsense. 2,358 pure pass; lint, `tsc` and the build
+are green.
 
 ### 2026-08-30 — Fields are not rectangles (`claude/fields-are-not-rectangles`)
 
@@ -1174,6 +1246,15 @@ rented ground, and retrofitting it means rewriting the report.
   shared with the map, which is which feature is selected. **The delete count is
   narrowed to what is currently listed**, so a filter change can never leave a
   tick counting towards something off screen
+- `src/packs/land/core/weather.ts` — pure. Degree days, season accumulation, the
+  comparison against the same window in previous years, and the rain figures.
+  **Gaps are counted, never filled**, and a degree day is scaled but not
+  offset when it changes unit. The base and the unit come from `packConfig`
+- `src/packs/land/weather-service.ts` — the pack's SECOND fetch, and the same
+  rules as `parcel-lookup-service.ts`: server-only, built URL, timeout, and a
+  day-long revalidate because a day that has happened never changes. The
+  centroid is rounded to about a hundred metres, which is what makes the cache
+  work across parcels on one farm
 - `src/packs/land/core/navigate.ts` — pure. Bearing, compass point, the trend,
   and **arrival judged against the live accuracy rather than a fixed distance**.
   `targetsOf` turns a geometry into the ordered list of places to stand: the
@@ -1383,6 +1464,16 @@ rented ground, and retrofitting it means rewriting the report.
 
 ## Open items
 
+- **Weather predicts nothing yet, on purpose.** Slice 3 reports the season and
+  the comparison; the brief's *"16 days, not 21"* needs a regrowth model, and
+  that needs ground somebody has measured. The data now accumulates whether or
+  not anybody is watching, which was the point of shipping the reporting half.
+- **No upper cap on the daily high in the GDD sum.** Uncapped is a published
+  convention and capped at 30C is the corn one. It will show as a gap against a
+  local figure in a hot month; the fix is a config line beside `gddBaseC`.
+- **Nothing uses weather except the parcel page.** Rest targets, the rotation
+  finding and the crops pack all have an obvious use for it and none of them
+  read it yet.
 - ~~Nobody has watched a point snap~~ — **closed the same day.** Driven on
   Hilltop Farm and it found three bugs, all invisible to a green suite: a
   tolerance 256x too small so nothing snapped at all, a non-idempotent snap that

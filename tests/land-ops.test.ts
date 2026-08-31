@@ -2405,7 +2405,22 @@ d("land ops", () => {
         ],
       ],
     };
-    const LANE: FeatureGeometry = {
+    /**
+     * **THIS LANE IS NOT DOWN THE MIDDLE, AND FOR MONTHS EVERY TEST HERE SAID
+     * IT WAS.** It sits at −82.4798 in a field running −82.48 to −82.47526, so
+     * it is **4% across**: a 1.4-acre sliver on the west against 38 acres on the
+     * east, a ratio of **22.7 to 1**. It was called `LANE` and the feature was
+     * named "Centre lane", and both this block's comments and its author
+     * believed it.
+     *
+     * That misreading is exactly what hid the bug PR #328 fixed. The old
+     * `round(count / sides)` gave two paddocks either side whatever the sides
+     * weighed, so four came out as two of 19 acres and two of 0.7 — a **26:1
+     * spread** — under a dialog headed "Equal areas", and the suite asserted no
+     * warning about it. The name is honest now, and `CENTRAL_LANE` below covers
+     * the case everyone thought was being covered.
+     */
+    const OFF_CENTRE_LANE: FeatureGeometry = {
       type: "LineString",
       coordinates: [
         [-82.4798, 40.4],
@@ -2413,16 +2428,34 @@ d("land ops", () => {
       ],
     };
 
-    /** A parcel with a boundary and a lane drawn on it, ready to divide. */
-    async function fieldWithLane(name: string) {
+    /** Actually down the middle: equal ground either side, so equal is possible. */
+    const CENTRAL_LANE: FeatureGeometry = {
+      type: "LineString",
+      coordinates: [
+        [-82.47763, 40.4],
+        [-82.47763, 40.40361],
+      ],
+    };
+
+    /**
+     * A parcel with a boundary and a lane drawn on it, ready to divide.
+     *
+     * **Defaults to the LOPSIDED lane**, because that is what every test in this
+     * block has always run against and changing it under them would be a silent
+     * rewrite of what they cover. Pass `CENTRAL_LANE` for the ordinary field.
+     */
+    async function fieldWithLane(
+      name: string,
+      geometry: FeatureGeometry = OFF_CENTRE_LANE,
+    ) {
       const parcel = await newParcel(name);
       await asOwner((tx) => setParcelBoundary(tx, ownerCtx(), parcel.id, FIELD));
       const lane = await asOwner((tx) =>
         createFeature(tx, ownerCtx(), {
           parcelId: parcel.id,
           kind: "lane",
-          name: "Centre lane",
-          geometry: LANE,
+          name: geometry === CENTRAL_LANE ? "Centre lane" : "Side lane",
+          geometry,
         }),
       );
       return { parcel, lane };
@@ -2439,7 +2472,18 @@ d("land ops", () => {
       );
 
       expect(result.zoneIds).toHaveLength(4);
-      expect(result.warnings).toEqual([]);
+      /**
+       * **IT WARNS, AND IT IS RIGHT TO.** This lane is 22.7:1 off-centre, so
+       * four equal paddocks are arithmetically impossible: every side gets at
+       * least one, and one paddock has to hold the 1.4-acre sliver while three
+       * share the other 38 acres.
+       *
+       * This assertion used to read `toEqual([])`, and it passed only because
+       * the old code split two-and-two regardless of area and said nothing
+       * about the 26:1 spread that produced. Silence was the bug.
+       */
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0]).toMatch(/cannot come out equal/);
 
       const zones = await asOwner((tx) =>
         listZones(tx, tenantId, { parcelId: parcel.id }),
@@ -2447,9 +2491,14 @@ d("land ops", () => {
       expect(zones).toHaveLength(4);
 
       /**
-       * Four paddocks off a CENTRAL lane is two either side, so: one dividing
-       * fence per side, plus the alley's two sides. The field's own perimeter
-       * is already there and is not drawn.
+       * Four paddocks off this lane is THREE on the big side and one on the
+       * sliver, so: two dividing fences on the east, none on the west, plus the
+       * alley's two sides. The field's own perimeter is already there and is
+       * not drawn.
+       *
+       * The total is the same 2 dividers the two-and-two split gave, which is
+       * why this count kept passing while the areas were wrong — a reminder
+       * that a fence count is not an area check.
        *
        * **NO FENCE CROSSES THE LANE**, which is the whole point of the
        * corridor — the previous version drew three dividers straight through
@@ -2464,7 +2513,7 @@ d("land ops", () => {
       expect(fences.filter((f) => /lane fence/.test(f.name))).toHaveLength(2);
       expect(features.filter((f) => f.kind === "gate")).toHaveLength(4);
 
-      const laneLon = LANE.coordinates[0][0];
+      const laneLon = OFF_CENTRE_LANE.coordinates[0][0];
       for (const fence of fences.filter((f) => /division/.test(f.name))) {
         const lons = (
           fence.geometry as { coordinates: number[][] }
@@ -2563,10 +2612,19 @@ d("land ops", () => {
       ]);
     });
 
-    it("rounds an odd count up across two sides, and says the real number", async () => {
-      // Three paddocks either side of a lane is not three. The dialog's button
-      // reads the count back off the same function, so what it offers is what
-      // it builds — but the rounding is worth knowing about here too.
+    it("BUILDS THE ODD COUNT ASKED FOR instead of rounding it up", async () => {
+      /**
+       * **THIS TEST USED TO EXPECT FOUR, and it was describing the old rule
+       * rather than a requirement.** `round(count / sides)` could not express
+       * three across two sides, so three became two-and-two and the comment
+       * here said "three paddocks either side of a lane is not three".
+       *
+       * Apportioning by area can express it: two on the big side, one on the
+       * sliver. **You ask for three and you get three.** The dialog's button
+       * reads the count back off the same function — `compareLayouts` in
+       * `paddock-layout.tsx` — so what it offers is still what it builds, which
+       * is the invariant that comment was really protecting.
+       */
       const { parcel, lane } = await fieldWithLane("Odd");
       const result = await asOwner((tx) =>
         layoutPaddocks(tx, ownerCtx(), {
@@ -2575,7 +2633,39 @@ d("land ops", () => {
           count: 3,
         }),
       );
+      expect(result.zoneIds).toHaveLength(3);
+    });
+
+    it("SPLITS EVENLY AND SAYS NOTHING when the lane really is down the middle", async () => {
+      /**
+       * **THE ORDINARY FIELD, WHICH NOTHING IN THIS BLOCK HAS EVER COVERED.**
+       * Every other test here runs against a lane 4% from the edge while
+       * calling it central, so "four paddocks, two either side, all the same,
+       * no warning" — the case every drive and every dialog assumes — was
+       * asserted nowhere. That gap is why a 26:1 spread shipped.
+       *
+       * It is also the guard on the new warning: a threshold that fires on a
+       * genuinely even field would put a scary sentence under every layout
+       * anybody ever does.
+       */
+      const { parcel, lane } = await fieldWithLane("Down The Middle", CENTRAL_LANE);
+      const result = await asOwner((tx) =>
+        layoutPaddocks(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          laneFeatureId: lane.id,
+          count: 4,
+        }),
+      );
       expect(result.zoneIds).toHaveLength(4);
+      expect(result.warnings).toEqual([]);
+
+      const zones = await asOwner((tx) =>
+        listZones(tx, tenantId, { parcelId: parcel.id }),
+      );
+      const acres = zones.map((z) => Number(z.areaAcres)).sort((a, b) => a - b);
+      // Equal to within the bisection's own tolerance, which is what
+      // `EQUAL_ENOUGH` is set well above.
+      expect(acres[3] / acres[0]).toBeLessThan(1.05);
     });
 
     it("puts paddocks on ONE side when asked, and says what it left out", async () => {
@@ -2621,7 +2711,7 @@ d("land ops", () => {
         createFeature(tx, ownerCtx(), {
           parcelId: parcel.id,
           kind: "lane",
-          geometry: LANE,
+          geometry: OFF_CENTRE_LANE,
         }),
       );
       await expect(

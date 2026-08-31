@@ -50,6 +50,63 @@ half a margin, waiting on slice 4 for the other half.
 
 ## Build log
 
+### 2026-08-31 — A kill day charged Broilers and credited nobody (`claude/the-cost-side`)
+
+**Found by an adversarial review of the slice 3 diff, and it is slice 3's own
+bug.** Before slice 3 no journal line carried an enterprise, so there was no
+false per-enterprise balance to have. Slice 3 created the view and left a hole
+in it.
+
+**THE INVARIANT `postMovement`'s DOC RESTS ON WAS TRUE OF THE TOTAL AND FALSE
+PER ENTERPRISE.** *"A run nets to nothing on the P&L: its inputs were debited to
+consumption on the way in, and its output credits the same account on the way
+out."* The inputs were debited under the INPUT BATCH's line of business —
+`enterpriseForMovement` with no consumer falls back to the batch — while the
+outputs went in through `receiveStock` with no enterprise at all, so
+`createLot` inherited the **output ITEM's** tag.
+
+A Broilers pen killed into an untagged meat item:
+
+```
+inputs     Dr 5000 4,000  [Broilers]     Cr 1300 4,000  [Broilers]
+outputs    Dr 1300 4,235  [Unassigned]   Cr 5000 4,235  [Unassigned]
+                          ─────────────────────────────────────────
+5000 by enterprise:  Broilers +4,000 · Unassigned −4,235
+```
+
+**A negative cost of goods for a line of business that produced nothing**, and
+it stands until the boxes sell — a freezer, so months, usually across a year
+end. It is the same false balance slice 3 fixed in `1300`, one account over, and
+the two-tag rule did not catch it because both of the output receipt's lines are
+correctly the batch's; the batch itself was tagged wrong.
+
+**AND IT IS THE DEFAULT FOR A FARM FOLLOWING THIS PACK'S OWN ADVICE.** The new
+batch picker calls `inventory_lots.enterprise_id` *"the field the costing
+actually reads"*, so a farm tags batches — and **nothing anywhere can tag a
+production output batch**, which is minted inside `completeRun`.
+
+**THE RUN'S ENTERPRISE IS NOW DECIDED ONCE AND SPENT TWICE.**
+`enterpriseForRun` was already being computed for the fee accrual; it is hoisted
+above the output loop and passed to `receiveStock`, which gained an
+`enterpriseId` so a caller that knows better than the item can say so. A mixed
+run still derives null and its outputs are Unassigned, which is the reserved
+allocation question and not this PR's to answer.
+
+**THE PICKER HELD A STALE ITEM TAG, and the prefill design is what made it
+harmful.** `LotForm` and the item's Edit dialog are siblings on one page with no
+`key`, and `router.refresh()` is documented to merge the new server payload
+*without losing client state* — so retagging an item Broilers → Pigs updated the
+form's PROP and not its `useState`, and sending the value unconditionally wrote
+the OLD tag onto the next batch. Permanently, because there is no `updateLot`.
+
+Two guards, both needed: an untouched form sends `undefined` so the **server**
+reads the item at insert time and no client staleness can reach the database,
+and the value is re-seeded when the dialog opens so what a person LOOKS at is
+current rather than merely harmless.
+
+Both fixes have a test that fails without them — the run one read
+`Broilers +4,000` against an expected `0`.
+
 ### 2026-08-31 — A split kept the animals and lost the money (`claude/the-cost-side`)
 
 Folded into the slice 3 PR before it merged. Two defects inside slice 3's own
@@ -459,10 +516,17 @@ the same transaction as every write.
   inventing one carries an unstated decision about what else becomes editable.
   So `Speckles` on the dev tenant is mis-tagged by the old split and there is no
   way to correct it from the app. Whoever adds `updateLot` closes this.
-- **`splitLot` was the only lot-creating path copying a parent.** If another
-  appears — a merge, a reclassification — it has to make the same choice
-  deliberately, because omitting `enterpriseId` silently means "inherit the
-  item's" rather than "copy the parent's".
+- **`splitLot` and `completeRun` are the two lot-creating paths that must NOT
+  inherit the item's.** If another appears — a merge, a reclassification — it
+  has to make the choice deliberately, because omitting `enterpriseId` silently
+  means "inherit the item's" rather than "copy the parent's" or "take the run's".
+  Both existing cases were bugs before they were rules.
+- **A MIXED RUN'S OUTPUT BOXES ARE UNASSIGNED, and its inputs are not.** The
+  inputs were debited under their own lines of business and nothing credits
+  those back, so a mixed kill day leaves each contributing enterprise carrying
+  its animals' cost with no offset. That is the reserved allocation question
+  wearing a third set of clothes; it is honest rather than right, and the
+  override on the run form is how somebody says otherwise.
 - ~~**The word "Enterprise" is not label-resolved.**~~ **Closed 2026-08-26**,
   the day after it was written and by the founder noticing rather than by this
   list being read. Both the word and the kind suggestions come from the profile

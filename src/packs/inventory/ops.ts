@@ -1308,6 +1308,19 @@ export async function receiveStock(
      * so at the moment it lands them.
      */
     source?: string;
+    /**
+     * Which line of business the NEW batch belongs to, when one is being
+     * created. Omit it and the batch inherits the item's, which is right for a
+     * delivery and **wrong for a batch that was MADE from other batches.**
+     *
+     * `production` passes the run's, and the reason is the same one
+     * `postMovement`'s doc gives for a run netting to nothing on the P&L: the
+     * inputs debited the consumption account under THEIR line of business, and
+     * only an output tagged the same way credits it back. Left to inherit the
+     * output item's tag, a kill day charged Broilers and credited Unassigned —
+     * a negative cost of goods for a line of business that produced nothing.
+     */
+    enterpriseId?: string | null;
     extensionSlug?: string;
     notes?: string;
   },
@@ -1334,6 +1347,10 @@ export async function receiveStock(
       code: newLotCode,
       source: input.source ?? "purchased",
       openedOn: input.occurredOn,
+      // Absent means "not said" and inherits the item's, which is what a
+      // delivery wants. A caller that knows better — `production`, whose output
+      // belongs to the run rather than to the item — says so.
+      enterpriseId: input.enterpriseId,
     });
     lotId = lot.id;
   }

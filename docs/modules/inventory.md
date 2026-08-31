@@ -45,11 +45,18 @@ split silently moved cost between lines of business — in both directions. The
 null case is the decision, not an edge case: an explicitly untagged parent must
 not have the item's tag applied to its children behind its back.
 
-**`splitLot` IS THE ONLY LOT-CREATING PATH THAT COPIES A PARENT**, which is why
-this was the only place with the bug. `receiveStock({newLotCode})` mints a batch
-for a delivery and SHOULD inherit the item's; `createLot` from the form is a
-fresh batch. Anything added later that derives a lot from another one has to
-make the choice deliberately, because leaving the field out is not neutral.
+**`receiveStock` TAKES AN `enterpriseId` NOW, and the default is the trap.**
+Omitting it inherits the ITEM's, which is right for a delivery and wrong for a
+batch that was MADE from other batches — `production` passes the run's, because
+a kill day whose outputs took the meat item's tag credited the consumption
+account under a different line of business from the one its inputs debited. See
+[enterprises.md](enterprises.md).
+
+**TWO PATHS MUST NOT INHERIT THE ITEM'S: `splitLot` copies its parent's, and
+`completeRun` passes the run's.** Both were bugs before they were rules.
+Anything added later that derives a lot from another one has to make the choice
+deliberately, because leaving the field out is not neutral — it silently means
+"inherit the item's".
 
 **`LotForm` HAS A PICKER, PREFILLED FROM THE ITEM.** Defaulting it to *None*
 would send an explicit `null` on every batch and disable the inheritance, so the

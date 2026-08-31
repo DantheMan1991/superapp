@@ -25,6 +25,11 @@ import {
 } from "@/components/ui/select";
 import { formatMoney } from "@/lib/money";
 import {
+  EnterprisePicker,
+  NO_ENTERPRISE,
+  type EnterpriseOption,
+} from "@/components/app/enterprise-picker";
+import {
   addRunInputAction,
   addRunOutputAction,
   completeRunAction,
@@ -92,6 +97,8 @@ export function StartRunForm({
   locations,
   processors,
   processorWord,
+  enterprises,
+  enterpriseWord,
   today,
 }: {
   runWord: string;
@@ -100,12 +107,16 @@ export function StartRunForm({
   /** Who could have done it. Empty when nobody has recorded a plant. */
   processors: PlaceOption[];
   processorWord: string;
+  /** Active ones only. The picker renders nothing when the list is empty. */
+  enterprises: EnterpriseOption[];
+  enterpriseWord: string;
   today: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [kind, setKind] = useState<string>(kindOptions[0] ?? CUSTOM);
+  const [enterprise, setEnterprise] = useState<string>(NO_ENTERPRISE);
 
   function submit(formData: FormData) {
     const chosen =
@@ -119,6 +130,7 @@ export function StartRunForm({
         startedOn: String(formData.get("startedOn") ?? today),
         locationAssetId: location === NONE ? null : location,
         processorId: processor === NONE ? null : processor,
+        enterpriseId: enterprise === NO_ENTERPRISE ? null : enterprise,
         performedBy: String(formData.get("performedBy") ?? ""),
         crewSize: numberOrNull(formData.get("crewSize")),
         labourHours: numberOrNull(formData.get("labourHours")),
@@ -258,6 +270,24 @@ export function StartRunForm({
                 </p>
               </div>
             )}
+            {/*
+              **THE ONE FIELD ON THIS FORM THAT IS USUALLY RIGHT LEFT ALONE**,
+              and the hint has to say so or it becomes a question everybody
+              answers wrongly. The processing fee's line of business is derived
+              from the batches that went in; this only exists for the run that
+              mixed two, which no derivation can settle.
+
+              Slice 2 added the column and nothing could set it, so a mixed
+              {" "}{runWord.toLowerCase()} had no way to be told.
+            */}
+            <EnterprisePicker
+              id="enterpriseId"
+              word={enterpriseWord}
+              options={enterprises}
+              value={enterprise}
+              onValue={setEnterprise}
+              hint={`Only for a ${runWord.toLowerCase()} that mixes more than one — otherwise the batches going in already say, and what it costs follows them.`}
+            />
             <div className="grid grid-cols-3 gap-4">
               <div className="grid gap-2 col-span-1">
                 <Label htmlFor="performedBy">Who</Label>

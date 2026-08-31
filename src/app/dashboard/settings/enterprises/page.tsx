@@ -46,11 +46,16 @@ export const dynamic = "force-dynamic";
  * the farm profile supplies "Enterprise", "livestock" and "crop", and a profile
  * that supplies nothing gets the neutral word and a free-text field.
  *
- * **NOTHING IS TAGGED WITH ONE YET, AND THE PAGE SAYS SO.** This is the first
- * of four slices; the tagging is the next. A screen that let somebody build a
- * list and then quietly did nothing with it would be the "setting that does
- * nothing" this codebase keeps guarding against — so the panel below names what
- * exists today and what does not.
+ * **THE PANEL AT THE BOTTOM NAMES WHAT EXISTS AND WHAT DOES NOT, and it is not
+ * padding.** A screen that let somebody build a list and then quietly did
+ * nothing with it would be the "setting that does nothing" this codebase keeps
+ * guarding against.
+ *
+ * **IT IS ALSO THE FIRST THING A SLICE FORGETS.** It still said "Nothing is
+ * tagged with one yet" for four days after slice 2 made items, batches,
+ * channels and runs all taggable, telling people the feature was unbuilt while
+ * they were using it. Anything that changes what an enterprise reaches changes
+ * this paragraph in the same PR.
  */
 export default async function EnterprisesPage() {
   const ctx = await requireTenantOwner();
@@ -161,28 +166,53 @@ export default async function EnterprisesPage() {
       <Card>
         <CardContent className="space-y-2 pt-6 text-sm text-muted-foreground">
           {/**
-           * **WHAT THIS DOES AND DOES NOT DO YET, said plainly.** Slice 1 of
-           * four builds the list and the reporting registration; nothing is
-           * tagged with an enterprise until slice 2, and no posted entry
-           * carries one until slice 3. A page that implied otherwise would send
-           * somebody to a profit report that is entirely Unassigned and let
-           * them conclude the feature is broken.
+           * **WHAT THIS DOES AND DOES NOT DO YET, said plainly.** The panel
+           * exists because a screen that let somebody build a list and then
+           * quietly did nothing with it is the "setting that does nothing" this
+           * codebase keeps guarding against.
+           *
+           * **IT HAS TO BE REWRITTEN EVERY TIME A SLICE LANDS, and slice 2
+           * proved that by not being.** It still read "Nothing is tagged with
+           * one yet" a week after items, batches, channels and runs could all
+           * name one — so the page was telling people the feature was unbuilt
+           * while they were using it. Slice 3 rewrote it for the ledger and for
+           * the two things that are still true and awkward: **the costs are in
+           * and the income is not, and there is no back-fill.**
            */}
           <p className="font-medium text-foreground">
             What this list does today
           </p>
           <p>
             Everything here is registered as a reporting dimension, so
-            &ldquo;{word}&rdquo; now appears in the grouping picker on the profit
-            and loss report.
+            &ldquo;{word}&rdquo; appears in the grouping picker on the profit and
+            loss report. Items and batches can name one, and a batch inherits its
+            item&rsquo;s.
           </p>
           <p>
             <span className="font-medium text-foreground">
-              Nothing is tagged with one yet.
+              What things cost now lands against them.
             </span>{" "}
-            Until items, batches, sales channels and production runs can name
-            one, that report will show every figure under Unassigned. That is the
-            next piece of work, not a fault.
+            {/* NO NOUN FOR A PRODUCTION RUN HERE. The farm profile calls one a
+                "Batch", another profile will call it something else, and this
+                is a Layer 0 screen with no access to that pack's labels — so
+                the sentence describes what happens without naming the record. */}
+            Feed issued to a batch is charged to whatever that batch belongs to,
+            stock sold takes its cost from the batch it came out of, and a fee
+            for processing follows the batches that went in.{" "}
+            <span className="font-medium text-foreground">
+              What you sell does not yet.
+            </span>{" "}
+            So the report answers what a line of business has cost you, not what
+            it has made you. That is the next piece of work, not a fault.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">
+              Nothing before today can be counted, and it never will be.
+            </span>{" "}
+            Entries already in the books were posted without any of this and
+            cannot be given one without rewriting history, so a report over last
+            year will read Unassigned however much you tag now. Today is the day
+            the figures start being true.
           </p>
           <p>
             Retiring one stops it being offered on new records and leaves

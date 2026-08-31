@@ -77,6 +77,39 @@ becomes 1d, unchanged.
 
 ## Build log
 
+### 2026-08-30 — The plant's fee knows which line of business it is (`claude/the-cost-side`)
+
+The pack's half of [enterprises](enterprises.md) slice 3. No migration, and
+nothing about what a run does changed — only where its fee lands on a P&L
+grouped by enterprise.
+
+**THE RUN'S OWN COLUMN IS THE OVERRIDE, WHICH IS WHAT IT ALREADY SAID IT WAS.**
+`RunInput.enterpriseId` shipped in slice 2 with the rule written on it — *"Set it
+when a run mixes inputs from more than one, which is the case nothing else can
+work out; otherwise the input lots already know and this stays null"* — and
+nothing had ever read it. `enterpriseForRun` folds the input batches and the
+column settles a mixed run, so **a farm that tagged its pen months ago gets its
+kill-day fee under Broilers without ever opening the run form.** Reading the
+column as the primary answer instead would have un-tagged every run nobody filled
+the field in on, which today is all of them.
+
+**A MIXED RUN DERIVES NULL AND ITS FEE IS UNASSIGNED.** Two enterprises' animals
+through one kill day cannot have the plant's fee attributed to one of them, and
+splitting it pro rata is an allocation that wants its own decision rather than a
+helper inventing one. It is the mixed market stall's answer wearing different
+clothes.
+
+**UNTAGGED INPUTS ARE SKIPPED, NOT COUNTED AS A DISAGREEMENT.** A run that
+consumed tagged broilers and an untagged pallet of ice is still a Broilers run;
+treating the ice as a second opinion would silently un-tag it.
+
+**THE OVERRIDE HAD NO UI AT ALL, and that is why no run anywhere is tagged.**
+Slice 2 added the column and left it unreachable. `StartRunForm` gets the shared
+`EnterprisePicker` — with a hint saying it is normally left alone, because a
+field most people should skip has to say so or it becomes a question everybody
+answers wrongly. `listRunInputs` gains `lotEnterpriseId` on a join it was
+already making.
+
 ### 2026-08-26 — The pack puts on the design system (`claude/two-packs-follow-the-pattern`)
 
 No behaviour changed. PR 3 of the five bringing the packs onto the primitive

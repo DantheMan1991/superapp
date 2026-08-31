@@ -3,6 +3,8 @@ import { and, asc, eq, gt, inArray, isNotNull, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { postEntry, type LedgerCtx } from "@/modules/accounting/core";
 import { allowsWrite } from "@/lib/packs/authorize";
+import { enterpriseMemberIds } from "@/lib/enterprises";
+import type { MovementEnterpriseTags } from "./core/enterprise";
 import { InventoryError, type InventoryCtx } from "./ops";
 
 /**
@@ -360,6 +362,13 @@ export interface PostServiceAccrualInput {
   occurredOn: string;
   /** Where the work happened, for resolving the company. */
   locationAssetId: string | null;
+  /**
+   * **WHICH LINE OF BUSINESS THE FEE BELONGS TO**, already resolved by the
+   * caller — `production` derives it from the batches that went into the run,
+   * with the run's own column as the override for a mixed one. Null tags
+   * nothing, which is what a genuinely mixed kill day gets.
+   */
+  enterpriseId?: string | null;
   memo: string;
 }
 
@@ -414,6 +423,16 @@ export async function postServiceAccrual(
     ctx.tenantId,
     input.locationAssetId,
   );
+  // **THE DEBIT AND THE RECEIPT IT EXPLAINS HAVE TO AGREE.** The outputs
+  // capitalised under this line of business a moment ago and credited the
+  // consumption account for the whole pot; if the fee's own debit to that
+  // account went untagged, the enterprise would carry a credit nothing offsets
+  // and its margin would read better than it is.
+  const dimensionMemberIds = await enterpriseLineTag(
+    tx,
+    ctx.tenantId,
+    input.enterpriseId ?? null,
+  );
 
   const { entry } = await postEntry(tx, ledgerCtx(ctx), {
     entityId,
@@ -424,8 +443,16 @@ export async function postServiceAccrual(
     sourceId: input.sourceId,
     idempotencyKey: `production:processing_accrual:${input.sourceId}`,
     lines: [
-      { accountId: accounts.cogsAccountId, amountCents: input.amountCents },
-      { accountId: accruedAccountId, amountCents: -input.amountCents },
+      {
+        accountId: accounts.cogsAccountId,
+        amountCents: input.amountCents,
+        dimensionMemberIds,
+      },
+      {
+        accountId: accruedAccountId,
+        amountCents: -input.amountCents,
+        dimensionMemberIds,
+      },
     ],
   });
   return { entryId: entry.id };
@@ -530,6 +557,61 @@ export function owesASupplier(lotSource: string | null): boolean {
 }
 
 /**
+ * **THE LINE TAG FOR ONE ENTERPRISE — the whole of slice 3's contact with the
+ * ledger.**
+ *
+ * A journal line is tagged with a `dimension_members` id, never with an
+ * enterprise id, so every posting here ends in this translation.
+ * `enterpriseMemberIds` is the door; this wraps it in the shape `postEntry`
+ * wants and in the two refusals a posting path needs.
+ *
+ * **UNTAGGED RETURNS `undefined` AND NOT AN EMPTY ARRAY**, because that is what
+ * `EntryLineInput.dimensionMemberIds` reads as "no dimensions" — and it is the
+ * ordinary case rather than a failure. Most of what a business holds belongs to
+ * no line of business, and the P&L already renders an Unassigned column.
+ *
+ * **AN ENTERPRISE WITH NO ACTIVE MEMBER POSTS UNTAGGED RATHER THAN FAILING.**
+ * The map is active-only by construction, so a batch still tagged with a
+ * retired line of business simply stops contributing a member — which is
+ * exactly *"archived members stop being taggable; existing tags keep
+ * reporting."* Throwing instead would make retiring an enterprise stop stock
+ * being recorded, and `postMovement` runs inside `recordMovement`.
+ */
+async function enterpriseLineTag(
+  tx: Tx,
+  tenantId: string,
+  enterpriseId: string | null,
+): Promise<string[] | undefined> {
+  if (!enterpriseId) return undefined;
+  const members = await enterpriseMemberIds(tx, tenantId);
+  const memberId = members.get(enterpriseId);
+  return memberId ? [memberId] : undefined;
+}
+
+/**
+ * The enterprise a batch's cost belongs to — the lot's own tag, and nothing
+ * else.
+ *
+ * The two money-only postings (`postCostAdjustment`, `postCapitalisation`) have
+ * no movement to reason from, so they read the batch directly. See
+ * `core/enterprise.ts` for why a batch does not fall back to its item.
+ */
+async function enterpriseOfLot(
+  tx: Tx,
+  tenantId: string,
+  lotId: string,
+): Promise<string | null> {
+  const lot = await tx.query.inventoryLots.findFirst({
+    where: and(
+      eq(schema.inventoryLots.tenantId, tenantId),
+      eq(schema.inventoryLots.id, lotId),
+    ),
+    columns: { enterpriseId: true },
+  });
+  return lot?.enterpriseId ?? null;
+}
+
+/**
  * Movement kinds that NEVER post, whatever they carry.
  *
  * They move stock (and its cost) WITHIN inventory, so the entry would be
@@ -568,6 +650,24 @@ export interface PostMovementInput {
   lotCode?: string | null;
   /** Which place the stock moved at — how the company is resolved. */
   locationAssetId: string | null;
+  /**
+   * **WHICH LINE OF BUSINESS EACH SIDE BELONGS TO**, already resolved.
+   *
+   * Two values and not one, because a stock issue can cross enterprises and
+   * putting the consumer on the inventory line said Broilers held stock it
+   * never had — see `core/enterprise.ts`, which is where the rule lives and
+   * where it can be read without a transaction.
+   *
+   * Passed in rather than worked out here, because `recordMovement` has loaded
+   * the item, the batch and the consuming batch by the time it calls this and
+   * re-reading all three would be three queries to answer a question already in
+   * hand.
+   *
+   * Null on either side is ordinary and leaves that line untagged. There is no
+   * back-fill: every entry written before this carries no enterprise and cannot
+   * get one without rewriting history.
+   */
+  enterprises?: MovementEnterpriseTags;
 }
 
 const MEMO_VERB = {
@@ -592,6 +692,13 @@ const MEMO_VERB = {
  * out. Total inventory value is unchanged by a transformation, which is the
  * truth a run represents. Crediting GRNI instead would accrue a liability for
  * goods nobody sold the business.
+ *
+ * **EVERY LINE IS TAGGED WITH THE LINE OF BUSINESS IT DESCRIBES**, when the
+ * caller resolved one — the cost bearer on the P&L side, the batch's own on the
+ * stock side. This is what makes profit per enterprise a report rather than a
+ * substring search, and it reaches further than feed: `retail` sells through
+ * `issueStock`, so a market sale's cost of goods lands under Broilers by the
+ * same path a pen of them eating crumble does.
  *
  * Returns `null` when nothing was posted, which is the ordinary case: a tenant
  * on `none`, a kind that never posts, or a movement with no cost. **A movement
@@ -623,15 +730,42 @@ export async function postMovement(
   const bought = owesASupplier(input.lotSource);
   const cost = input.costCents;
 
+  /**
+   * **EVERY LINE IS TAGGED, BUT NOT ALL WITH THE SAME ONE.** The line that says
+   * where the cost went carries the cost bearer; the line that says whose stock
+   * moved carries the batch's own. They differ only on a cross-enterprise
+   * issue, which is exactly the movement this dimension exists to get right —
+   * see `core/enterprise.ts` for the false negative the single-tag version put
+   * in `1300`.
+   */
+  const costTag = await enterpriseLineTag(
+    tx,
+    ctx.tenantId,
+    input.enterprises?.cost ?? null,
+  );
+  const stockTag = await enterpriseLineTag(
+    tx,
+    ctx.tenantId,
+    input.enterprises?.stock ?? null,
+  );
+
   // Positive = debit, negative = credit — the ledger's own convention.
   const lines = incoming
     ? [
-        { accountId: accounts.inventoryAccountId, amountCents: cost },
         {
+          accountId: accounts.inventoryAccountId,
+          amountCents: cost,
+          dimensionMemberIds: stockTag,
+        },
+        {
+          // GRNI is what this batch's supplier is owed, and the consumption
+          // account on a made thing was charged by this batch's own inputs.
+          // Both are the batch's, never a consumer's.
           accountId: bought
             ? await resolveGrniAccount(tx, ctx.tenantId)
             : accounts.cogsAccountId,
           amountCents: -cost,
+          dimensionMemberIds: stockTag,
         },
       ]
     : [
@@ -641,8 +775,13 @@ export async function postMovement(
               ? accounts.varianceAccountId
               : accounts.cogsAccountId,
           amountCents: cost,
+          dimensionMemberIds: costTag,
         },
-        { accountId: accounts.inventoryAccountId, amountCents: -cost },
+        {
+          accountId: accounts.inventoryAccountId,
+          amountCents: -cost,
+          dimensionMemberIds: stockTag,
+        },
       ];
 
   const source = incoming
@@ -729,15 +868,38 @@ export async function postCapitalisation(
   });
 
   const out = input.direction === "out";
+  // The batch's line of business, for the same reason the company comes from
+  // the batch: a reclassification is money rather than a place.
+  const dimensionMemberIds = await enterpriseLineTag(
+    tx,
+    ctx.tenantId,
+    await enterpriseOfLot(tx, ctx.tenantId, input.lotId),
+  );
   // Positive = debit, negative = credit — the ledger's own convention.
   const lines = out
     ? [
-        { accountId: input.counterAccountId, amountCents: input.costCents },
-        { accountId: accounts.inventoryAccountId, amountCents: -input.costCents },
+        {
+          accountId: input.counterAccountId,
+          amountCents: input.costCents,
+          dimensionMemberIds,
+        },
+        {
+          accountId: accounts.inventoryAccountId,
+          amountCents: -input.costCents,
+          dimensionMemberIds,
+        },
       ]
     : [
-        { accountId: accounts.inventoryAccountId, amountCents: input.costCents },
-        { accountId: input.counterAccountId, amountCents: -input.costCents },
+        {
+          accountId: accounts.inventoryAccountId,
+          amountCents: input.costCents,
+          dimensionMemberIds,
+        },
+        {
+          accountId: input.counterAccountId,
+          amountCents: -input.costCents,
+          dimensionMemberIds,
+        },
       ];
 
   const { entry } = await postEntry(tx, ledgerCtx(ctx), {
@@ -908,6 +1070,15 @@ export async function postCostAdjustment(
     columns: { name: true },
   });
 
+  // Correcting what a batch cost is still that batch's cost, so it carries the
+  // batch's line of business — otherwise a $60 correction to a Broilers
+  // delivery would land in Unassigned while the delivery itself did not.
+  const dimensionMemberIds = await enterpriseLineTag(
+    tx,
+    ctx.tenantId,
+    await enterpriseOfLot(tx, ctx.tenantId, input.lotId),
+  );
+
   // Positive = debit, negative = credit — the ledger's own convention.
   const byAccount = new Map<string, number>();
   const add = (accountId: string, amountCents: number) => {
@@ -919,7 +1090,11 @@ export async function postCostAdjustment(
 
   const lines = [...byAccount.entries()]
     .filter(([, amountCents]) => amountCents !== 0)
-    .map(([accountId, amountCents]) => ({ accountId, amountCents }));
+    .map(([accountId, amountCents]) => ({
+      accountId,
+      amountCents,
+      dimensionMemberIds,
+    }));
   if (lines.length < 2) return null;
 
   const { entry } = await postEntry(tx, ledgerCtx(ctx), {

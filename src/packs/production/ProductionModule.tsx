@@ -20,6 +20,11 @@ import {
 import { packContext } from "@/lib/packs/tenant-context";
 import { labelFor } from "@/lib/packs/resolve";
 import { listLocations } from "@/packs/inventory/ops";
+import { listEnterprises } from "@/lib/enterprises";
+import {
+  ENTERPRISE_FALLBACK,
+  ENTERPRISE_LABEL_KEY,
+} from "@/lib/enterprises/vocabulary";
 import { listProcessors } from "@/packs/production/processor-ops";
 import { listRuns, runSummaries } from "./ops";
 import { exemptionUsage } from "./exemption-ops";
@@ -64,18 +69,29 @@ export async function ProductionModule({
   const today = todayInTimezone(ctx.tenant.timezone);
   const currencySymbol = ctx.tenant.currencySymbol;
 
-  const { runs, summaries, pack, locations, exemptions, processors } =
-    await withTenant(
+  const {
+    runs,
+    summaries,
+    pack,
+    locations,
+    exemptions,
+    processors,
+    enterprises,
+  } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
-      const [runs, pack, locations, processors] = await Promise.all([
-        listRuns(tx, ctx.tenant.id, { status }),
-        packContext(tx, ctx.tenant.id, ctx.tenant.industry, "production"),
-        listLocations(tx, ctx.tenant.id),
-        // Who could have done it. Only the active ones — an archived plant is
-        // still on old runs and must not be offered for a new one.
-        listProcessors(tx, ctx.tenant.id),
-      ]);
+      const [runs, pack, locations, processors, enterprises] =
+        await Promise.all([
+          listRuns(tx, ctx.tenant.id, { status }),
+          packContext(tx, ctx.tenant.id, ctx.tenant.industry, "production"),
+          listLocations(tx, ctx.tenant.id),
+          // Who could have done it. Only the active ones — an archived plant is
+          // still on old runs and must not be offered for a new one.
+          listProcessors(tx, ctx.tenant.id),
+          // Active only, for the same reason: a retired line of business is
+          // still on old runs and is not offered on a new one.
+          listEnterprises(tx, ctx.tenant.id, { status: "active" }),
+        ]);
       const summaries = await runSummaries(
         tx,
         ctx.tenant.id,
@@ -87,7 +103,15 @@ export async function ProductionModule({
         exemptionsFrom(pack.config),
         Number(today.slice(0, 4)),
       );
-      return { runs, summaries, pack, locations, exemptions, processors };
+      return {
+        runs,
+        summaries,
+        pack,
+        locations,
+        exemptions,
+        processors,
+        enterprises,
+      };
     },
     { role: ctx.role },
   );
@@ -121,6 +145,15 @@ export async function ProductionModule({
                 name: p.name,
               }))}
               processorWord={labelFor(pack.labels, "processor", "Processor")}
+              enterprises={enterprises.map((e) => ({
+                id: e.id,
+                name: e.name,
+              }))}
+              enterpriseWord={labelFor(
+                pack.labels,
+                ENTERPRISE_LABEL_KEY,
+                ENTERPRISE_FALLBACK,
+              )}
               today={today}
             />
           ) : undefined

@@ -34,6 +34,7 @@ import {
   isValidSlug,
 } from "./vocabulary";
 import { isKnownUnit, roundQuantity } from "./core/units";
+import { enterpriseForMovement } from "./core/enterprise";
 import type { MovementRow } from "./core/balances";
 import {
   averageCostRate,
@@ -82,6 +83,14 @@ import { postCostAdjustment, postMovement } from "./ledger-ops";
 
 /** The dimension type this pack owns. Core stores it; only this pack means anything by it. */
 export const LOT_DIMENSION = "lot";
+
+/**
+ * A uuid, for guarding a value that came off a URL before it reaches a `uuid`
+ * column. Postgres does not return nothing for a malformed one — it raises
+ * `invalid input syntax for type uuid`, which surfaces as a 500.
+ */
+const UUID_FORMAT =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class InventoryError extends Error {
   constructor(
@@ -175,6 +184,19 @@ export async function listItems(
   if (filter.enterprise === "none") {
     where.push(isNull(schema.inventoryItems.enterpriseId));
   } else if (filter.enterprise) {
+    /**
+     * **A HAND-TYPED `?enterprise=` USED TO 500 THE WHOLE HUB**, because the
+     * value went straight into a `uuid` column and Postgres refuses
+     * `invalid input syntax for type uuid` rather than returning nothing.
+     * Found by typing `?enterprise=all` at the page while driving it.
+     *
+     * **NO ROWS, not every row**, and that is the case worth getting right: a
+     * valid uuid belonging to ANOTHER tenant already returns nothing here, so
+     * a malformed one behaving the same way is the consistent answer. Ignoring
+     * the filter instead would show a person the whole list under a bar
+     * claiming to be filtered, which is the worse of the two lies.
+     */
+    if (!UUID_FORMAT.test(filter.enterprise)) return [];
     where.push(eq(schema.inventoryItems.enterpriseId, filter.enterprise));
   }
   if (filter.status) where.push(eq(schema.inventoryItems.status, filter.status));
@@ -646,6 +668,8 @@ export async function recordMovement(
   }
   let lotSource: string | null = null;
   let lotCode: string | null = null;
+  let lotEnterpriseId: string | null = null;
+  let consumerEnterpriseId: string | null = null;
   if (input.lotId) {
     const lot = await getLot(tx, ctx.tenantId, input.lotId);
     if (!lot) throw new InventoryError("LOT_INVALID", "that lot does not exist");
@@ -659,6 +683,7 @@ export async function recordMovement(
     // `postMovement`, where it decides the credit side of a receipt.
     lotSource = lot.source;
     lotCode = lot.code;
+    lotEnterpriseId = lot.enterpriseId;
   }
   if (input.issuedToLotId) {
     // The CONSUMING lot is deliberately unconstrained as to item: feed is not
@@ -668,6 +693,10 @@ export async function recordMovement(
     if (!consumer) {
       throw new InventoryError("LOT_INVALID", "that consuming lot does not exist");
     }
+    // **AND ITS LINE OF BUSINESS IS THE ONE THAT BEARS THE COST.** The same
+    // join that closes the costing loop answers the money question too — see
+    // `core/enterprise.ts`.
+    consumerEnterpriseId = consumer.enterpriseId;
   }
   if (input.costCents !== undefined && input.costCents !== null && input.costCents < 0) {
     throw new InventoryError("INVALID_COST", "a cost cannot be negative");
@@ -737,6 +766,18 @@ export async function recordMovement(
     itemId: input.itemId,
     lotCode,
     locationAssetId: input.locationAssetId ?? null,
+    /**
+     * **RESOLVED HERE BECAUSE ALL THREE TAGS ARE ALREADY IN HAND.** The item,
+     * the batch and the consuming batch have each been loaded above to be
+     * validated; asking the ledger to work the enterprise out for itself would
+     * be three more queries for an answer this function is holding.
+     */
+    enterprises: enterpriseForMovement({
+      itemEnterpriseId: item.enterpriseId,
+      lotEnterpriseId,
+      consumerEnterpriseId,
+      hasLot: !!input.lotId,
+    }),
   });
 
   return rows[0];
@@ -985,6 +1026,28 @@ export async function splitLot(
     source: parent.source,
     parentLotId: parent.id,
     openedOn: input.occurredOn,
+    /**
+     * **A SPLIT MUST NOT MOVE COST BETWEEN LINES OF BUSINESS**, and leaving
+     * this out silently did.
+     *
+     * `createLot` reads an ABSENT `enterpriseId` as "not said" and inherits the
+     * ITEM's — which is right for a delivery arriving into a brand-new batch and
+     * wrong for a piece cut off an existing one. A pen tagged Broilers, split
+     * into two pens, produced a child carrying whatever the item happened to
+     * say: nothing, or worse, a different line of business. `livestock` splits
+     * through here, so its own comment — *"the biology travels with the
+     * animals"* — was true of the species, the sex, the birth date and both
+     * parents, and not of the money.
+     *
+     * `splitIntoIndividuals` calls this once PER ANIMAL, so naming ten cows out
+     * of a pen minted ten mis-tagged lots in one click.
+     *
+     * **`parent.enterpriseId` is passed even when it is null**, which is the
+     * point rather than an edge case: an explicitly untagged parent must not
+     * have the item's tag applied to its children behind its back. The child
+     * reports exactly as the parent does, in both directions.
+     */
+    enterpriseId: parent.enterpriseId,
     notes: input.notes,
   });
 

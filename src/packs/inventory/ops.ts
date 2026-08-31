@@ -1005,6 +1005,28 @@ export async function splitLot(
     source: parent.source,
     parentLotId: parent.id,
     openedOn: input.occurredOn,
+    /**
+     * **A SPLIT MUST NOT MOVE COST BETWEEN LINES OF BUSINESS**, and leaving
+     * this out silently did.
+     *
+     * `createLot` reads an ABSENT `enterpriseId` as "not said" and inherits the
+     * ITEM's — which is right for a delivery arriving into a brand-new batch and
+     * wrong for a piece cut off an existing one. A pen tagged Broilers, split
+     * into two pens, produced a child carrying whatever the item happened to
+     * say: nothing, or worse, a different line of business. `livestock` splits
+     * through here, so its own comment — *"the biology travels with the
+     * animals"* — was true of the species, the sex, the birth date and both
+     * parents, and not of the money.
+     *
+     * `splitIntoIndividuals` calls this once PER ANIMAL, so naming ten cows out
+     * of a pen minted ten mis-tagged lots in one click.
+     *
+     * **`parent.enterpriseId` is passed even when it is null**, which is the
+     * point rather than an edge case: an explicitly untagged parent must not
+     * have the item's tag applied to its children behind its back. The child
+     * reports exactly as the parent does, in both directions.
+     */
+    enterpriseId: parent.enterpriseId,
     notes: input.notes,
   });
 

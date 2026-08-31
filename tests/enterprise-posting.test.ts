@@ -16,6 +16,7 @@ import {
   createLot,
   issueStock,
   receiveStock,
+  splitLot,
   type InventoryCtx,
 } from "../src/packs/inventory/ops";
 import { postServiceAccrual } from "../src/packs/inventory/ledger-ops";
@@ -415,5 +416,92 @@ d("enterprise costing reaches the ledger", () => {
     expect(
       (stock.get("unassigned") ?? 0) - (before.get("unassigned") ?? 0),
     ).toBe(1_500);
+  });
+
+  // ---- splitting ----------------------------------------------------------
+
+  it("CARRIES THE LINE OF BUSINESS ACROSS A SPLIT", async () => {
+    /**
+     * **A SPLIT MUST NOT MOVE COST BETWEEN LINES OF BUSINESS**, and it silently
+     * did. `splitLot` copied the parent's source, parent id, opened-on and
+     * notes and left `enterpriseId` out, so `createLot` read it as "not said"
+     * and inherited the ITEM's instead — a pen tagged Broilers split into two
+     * pens whose costs went wherever the item happened to point.
+     *
+     * `livestock` splits through here, and `splitIntoIndividuals` calls it once
+     * PER ANIMAL, so naming ten cows out of a pen minted ten mis-tagged lots.
+     */
+    const item = await newItem("Split me", null);
+    const pen = await newLot(item.id, `PEN-SPLIT-${STAMP}`, broilersId);
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: item.id,
+        lotId: pen.id,
+        quantity: 20,
+        costCents: 4_000,
+        occurredOn: "2026-07-01",
+        locationAssetId: barnId,
+      }),
+    );
+
+    const { child } = await asOwner((tx) =>
+      splitLot(tx, ownerCtx(), {
+        lotId: pen.id,
+        quantity: 8,
+        newCode: `PEN-SPLIT-B-${STAMP}`,
+        occurredOn: "2026-07-02",
+        locationAssetId: barnId,
+      }),
+    );
+    expect(child.enterpriseId).toBe(broilersId);
+
+    // And it survives to the ledger: issuing from the CHILD charges Broilers.
+    const before = (await byEnterprise(cogsAccountId)).get("broilers") ?? 0;
+    await asOwner((tx) =>
+      issueStock(tx, ownerCtx(), {
+        itemId: item.id,
+        lotId: child.id,
+        quantity: 8,
+        occurredOn: "2026-07-03",
+        locationAssetId: barnId,
+      }),
+    );
+    const cogs = await byEnterprise(cogsAccountId);
+    expect((cogs.get("broilers") ?? 0) - before).toBe(1_600);
+  });
+
+  it("does NOT give a split child the item's tag when the parent had none", async () => {
+    /**
+     * The other direction, and the one a naive fix gets wrong. An explicitly
+     * untagged parent must not have the item's tag applied to its children
+     * behind its back — that is the same "wrong and quiet" the no-fallback rule
+     * refuses everywhere else. The child reports exactly as the parent does.
+     */
+    // Broilers rather than Beef: the retirement test above archived Beef, and
+    // a fixture that quietly depends on that would be testing two things.
+    const item = await newItem("Tagged item, untagged batch", broilersId);
+    const pen = await newLot(item.id, `PEN-NULL-${STAMP}`, null);
+    expect(pen.enterpriseId).toBeNull();
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: item.id,
+        lotId: pen.id,
+        quantity: 10,
+        costCents: 1_000,
+        occurredOn: "2026-07-04",
+        locationAssetId: barnId,
+      }),
+    );
+
+    const { child } = await asOwner((tx) =>
+      splitLot(tx, ownerCtx(), {
+        lotId: pen.id,
+        quantity: 4,
+        newCode: `PEN-NULL-B-${STAMP}`,
+        occurredOn: "2026-07-05",
+        locationAssetId: barnId,
+      }),
+    );
+    expect(child.enterpriseId).toBeNull();
   });
 });

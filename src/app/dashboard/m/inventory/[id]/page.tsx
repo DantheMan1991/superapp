@@ -248,7 +248,16 @@ export default async function InventoryItemPage({
                   needs to reach, to put it back. */}
               {item.status === "active" && (
                 <>
-                  <LotForm itemId={item.id} today={today} />
+                  <LotForm
+                    itemId={item.id}
+                    today={today}
+                    enterprises={enterprises.map((e) => ({
+                      id: e.id,
+                      name: e.name,
+                    }))}
+                    enterpriseWord={enterpriseWord}
+                    itemEnterpriseId={item.enterpriseId}
+                  />
                   <MovementForm
                     itemId={item.id}
                     unitLabel={unitLabel}

@@ -65,6 +65,14 @@ export async function startRunAction(input: unknown) {
        * a cut sheet or a processing fee.
        */
       processorId: z.string().uuid().nullable().optional(),
+      /**
+       * **THE OVERRIDE, AND ONLY THE OVERRIDE.** A run's line of business is
+       * normally derived from the batches that went into it, so this is left
+       * null on nearly every run — see `enterpriseForRun`. It is here because
+       * the derivation cannot settle a mixed one, and until this the column
+       * slice 2 added could not be set from anywhere at all.
+       */
+      enterpriseId: z.string().uuid().nullable().optional(),
       performedBy: z.string().max(200).optional(),
       crewSize: z.number().int().positive().max(1000).nullable().optional(),
       labourHours: z

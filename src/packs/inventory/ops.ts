@@ -34,6 +34,7 @@ import {
   isValidSlug,
 } from "./vocabulary";
 import { isKnownUnit, roundQuantity } from "./core/units";
+import { enterpriseForMovement } from "./core/enterprise";
 import type { MovementRow } from "./core/balances";
 import {
   averageCostRate,
@@ -646,6 +647,8 @@ export async function recordMovement(
   }
   let lotSource: string | null = null;
   let lotCode: string | null = null;
+  let lotEnterpriseId: string | null = null;
+  let consumerEnterpriseId: string | null = null;
   if (input.lotId) {
     const lot = await getLot(tx, ctx.tenantId, input.lotId);
     if (!lot) throw new InventoryError("LOT_INVALID", "that lot does not exist");
@@ -659,6 +662,7 @@ export async function recordMovement(
     // `postMovement`, where it decides the credit side of a receipt.
     lotSource = lot.source;
     lotCode = lot.code;
+    lotEnterpriseId = lot.enterpriseId;
   }
   if (input.issuedToLotId) {
     // The CONSUMING lot is deliberately unconstrained as to item: feed is not
@@ -668,6 +672,10 @@ export async function recordMovement(
     if (!consumer) {
       throw new InventoryError("LOT_INVALID", "that consuming lot does not exist");
     }
+    // **AND ITS LINE OF BUSINESS IS THE ONE THAT BEARS THE COST.** The same
+    // join that closes the costing loop answers the money question too — see
+    // `core/enterprise.ts`.
+    consumerEnterpriseId = consumer.enterpriseId;
   }
   if (input.costCents !== undefined && input.costCents !== null && input.costCents < 0) {
     throw new InventoryError("INVALID_COST", "a cost cannot be negative");
@@ -737,6 +745,18 @@ export async function recordMovement(
     itemId: input.itemId,
     lotCode,
     locationAssetId: input.locationAssetId ?? null,
+    /**
+     * **RESOLVED HERE BECAUSE ALL THREE TAGS ARE ALREADY IN HAND.** The item,
+     * the batch and the consuming batch have each been loaded above to be
+     * validated; asking the ledger to work the enterprise out for itself would
+     * be three more queries for an answer this function is holding.
+     */
+    enterprises: enterpriseForMovement({
+      itemEnterpriseId: item.enterpriseId,
+      lotEnterpriseId,
+      consumerEnterpriseId,
+      hasLot: !!input.lotId,
+    }),
   });
 
   return rows[0];

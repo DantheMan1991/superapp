@@ -99,11 +99,24 @@ export async function getEnterprise(
 /**
  * The `dimension_members` row id for each enterprise, keyed by enterprise id.
  *
- * **THE TRANSLATION EVERY POSTING PATH WILL NEED**, and the reason it is here
+ * **THE TRANSLATION EVERY POSTING PATH NEEDS**, and the reason it is here
  * rather than in each pack: a journal line is tagged with a MEMBER id, not with
  * an enterprise id, and a pack that looked that up itself would be reaching
  * into core's tables — which is the boundary this whole arrangement exists to
  * keep.
+ *
+ * **ACTIVE MEMBERS ONLY, AND SKIPPING THAT FILTER WAS A BUG WAITING FOR THE
+ * FIRST RETIREMENT.** `postEntry` refuses an inactive member outright —
+ * `loadDimensionMembers` throws `DIMENSION_INVALID` — and inventory posts from
+ * inside `recordMovement`, so a map that offered an archived member would not
+ * merely mis-tag an entry: it would fail the whole stock write. Retiring Pigs
+ * would have made every subsequent movement on a batch still tagged Pigs
+ * impossible to record, which is a business stopping because of a report.
+ *
+ * This is `archiveDimensionMember`'s own contract, not a special case for
+ * posting: *"archived members stop being taggable; existing tags keep
+ * reporting."* New entries go untagged; the two years of pig costs already on
+ * the books keep their member and keep reporting.
  *
  * One query whatever the count, because the callers are lists.
  */
@@ -112,7 +125,9 @@ export async function enterpriseMemberIds(
   tenantId: string,
 ): Promise<Map<string, string>> {
   const members = await listDimensionMembers(tx, tenantId, ENTERPRISE_DIMENSION);
-  return new Map(members.map((m) => [m.packEntityId, m.id]));
+  return new Map(
+    members.filter((m) => m.isActive).map((m) => [m.packEntityId, m.id]),
+  );
 }
 
 function cleanName(name: string): string {

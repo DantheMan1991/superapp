@@ -33,6 +33,41 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-08-30 — A journal line says which line of business it is (`claude/the-cost-side`)
+
+The pack's half of [enterprises](enterprises.md) slice 3 — read that dossier for
+the argument; this is what changed in here. No migration, no new table, no
+change to what posts or when.
+
+**`postMovement` NOW TAKES TWO ENTERPRISE TAGS, NOT ONE, AND THE SECOND ONE IS
+THE FINDING.** The first version passed a single id and put it on both journal
+lines, copying `assets`' depreciation posting. That precedent does not hold
+here: an asset's expense and its accumulated depreciation are always the same
+asset's, while **a stock issue can cross enterprises.** Untagged feed issued to a
+Broilers pen credited `1300` tagged Broilers, so inventory grouped by enterprise
+read minus $40 for Broilers — stock it had never held. The P&L line carries what
+BORE the cost, the inventory and GRNI lines carry whose STOCK moved, and the two
+differ only on that crossing. `core/enterprise.ts` is pure and holds the rule.
+
+**`recordMovement` RESOLVES IT BECAUSE IT ALREADY HAS ALL THREE ANSWERS.** The
+item, the batch and the consuming batch are each loaded to be validated before
+anything is written; asking `ledger-ops` to work the enterprise out for itself
+would have been three more queries for a fact this function was holding. The
+consuming batch's tag is read one line below the existence check that was already
+there — `issued_to_lot_id`, the column that closes the livestock costing loop,
+answering the money question by the same join.
+
+**ALL FOUR POSTINGS IN `ledger-ops.ts` CARRY IT** — `postMovement`,
+`postCostAdjustment`, `postCapitalisation`, `postServiceAccrual`. The two money-
+only ones read the batch through `enterpriseOfLot`; leaving a cost correction
+untagged would put a $60 freight correction in Unassigned while the delivery it
+corrects sat under Broilers, which is the report disagreeing with itself.
+
+**AN UNTAGGED BATCH DOES NOT BORROW ITS ITEM'S TAG.** A lot inherits at
+`createLot` and a stored `null` afterwards cannot be told apart from "the item
+was untagged that day", so falling back would override an explicit *none*.
+Unassigned is incomplete and visible; the other way is wrong and quiet.
+
 ### 2026-08-26 — The pack puts on the design system (`claude/inventory-wears-the-system`)
 
 No behaviour changed. This is PR 2 of the five that bring the packs onto the

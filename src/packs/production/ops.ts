@@ -22,6 +22,7 @@ import {
 } from "@/packs/inventory/ops";
 import { convert, getUnit, roundQuantity } from "@/packs/inventory/core/units";
 import { hasRecordedCost } from "@/packs/inventory/core/valuation";
+import { enterpriseForRun } from "@/packs/inventory/core/enterprise";
 import { postServiceAccrual } from "@/packs/inventory/ledger-ops";
 import { RUN_INPUT_HANDLERS } from "@/packs/run-handlers";
 import type { RunInputBlock } from "./core/handler";
@@ -1178,6 +1179,24 @@ export async function completeRun(
         run.locationAssetId ??
         outputs.find((o) => o.locationAssetId !== null)?.locationAssetId ??
         null,
+      /**
+       * **THE BATCHES THAT WENT IN ALREADY KNOW, which is what the run's own
+       * column says it is for**: *"Set it when a run mixes inputs from more
+       * than one, which is the case nothing else can work out; otherwise the
+       * input lots already know and this stays null."* So the override is
+       * consulted first and the derivation is the ordinary path — and a farm
+       * that never opens the run form still gets its kill-day fee under
+       * Broilers, because it tagged the pen months ago.
+       *
+       * A genuinely mixed run derives null and its fee is Unassigned. That is
+       * the mixed market stall's answer wearing different clothes, and inventing
+       * a split here is the allocation the enterprises dossier says wants its
+       * own decision rather than a helper's.
+       */
+      enterpriseId: enterpriseForRun({
+        override: run.enterpriseId,
+        inputEnterpriseIds: inputs.map((i) => i.lotEnterpriseId),
+      }),
       memo: `Processing accrued — ${run.code}`,
     });
   }
@@ -1220,6 +1239,13 @@ export interface RunInputRow {
   unit: string;
   lotId: string | null;
   lotCode: string | null;
+  /**
+   * The batch's line of business, which is where a run's own comes from when
+   * nobody has overridden it. Null for lot-less stock and for an untagged
+   * batch — see `enterpriseForRun`, which skips both rather than reading them
+   * as a disagreement.
+   */
+  lotEnterpriseId: string | null;
   /** Positive, however the ledger signed it. What went in is not a negative. */
   quantity: number;
   costCents: number | null;
@@ -1253,6 +1279,7 @@ export async function listRunInputs(
       unit: schema.inventoryItems.stockingUnit,
       lotId: schema.inventoryMovements.lotId,
       lotCode: schema.inventoryLots.code,
+      lotEnterpriseId: schema.inventoryLots.enterpriseId,
       quantity: schema.inventoryMovements.quantity,
       costCents: schema.inventoryMovements.costCents,
       occurredOn: schema.inventoryMovements.occurredOn,

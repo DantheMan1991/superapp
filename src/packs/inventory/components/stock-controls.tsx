@@ -94,21 +94,41 @@ export function LotForm({
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   /**
-   * **PREFILLED WITH THE ITEM'S, WHICH IS WHAT MAKES ADDING THIS SAFE.**
+   * **SHOWN AS THE ITEM'S, SENT ONLY WHEN SOMEBODY CHANGES IT.**
    *
    * `createLot` treats an ABSENT `enterpriseId` as "not said" and inherits the
    * item's; a picker that defaulted to None would send an explicit null on
    * every batch and turn that inheritance off — so a farm that tagged "Broiler
    * chicks" once would be back to saying so on every hatch, which is the exact
-   * thing slice 2 built the inheritance to prevent.
+   * thing slice 2 built the inheritance to prevent. So the field shows what
+   * will happen rather than leaving it invisible.
    *
-   * Starting from the item's tag makes the default outcome IDENTICAL to
-   * inheriting, and shows the person what it will be instead of leaving it
-   * invisible. Overriding it is then a deliberate act on a field they can see.
+   * **BUT PREFILLING AND ALWAYS SENDING IS NOT THE SAME AS INHERITING, and the
+   * difference is a stale-state bug.** This form and the item's own Edit dialog
+   * are siblings on one page with no `key` between them, and `router.refresh()`
+   * is documented to merge the new server payload *without losing client
+   * state* — so retagging the item Broilers → Pigs updates this component's
+   * PROP and not its `useState`. Sending the value unconditionally then writes
+   * the OLD tag onto the new batch, permanently, because there is no
+   * `updateLot` to correct a batch with.
+   *
+   * Two guards, and both are needed. `touched` means an untouched form sends
+   * `undefined` and lets the SERVER read the item at insert time, so no client
+   * staleness can reach the database. Re-seeding on open means the value a
+   * person LOOKS at is current too, rather than merely harmless.
    */
   const [enterprise, setEnterprise] = useState<string>(
     itemEnterpriseId ?? NO_ENTERPRISE,
   );
+  const [touched, setTouched] = useState(false);
+
+  function onOpenChange(next: boolean) {
+    if (next) {
+      setEnterprise(itemEnterpriseId ?? NO_ENTERPRISE);
+      setTouched(false);
+    }
+    setOpen(next);
+  }
 
   function submit(formData: FormData) {
     startTransition(async () => {
@@ -118,7 +138,13 @@ export function LotForm({
         source: String(formData.get("source") ?? "purchased"),
         openedOn: String(formData.get("openedOn") ?? today),
         expiresOn: String(formData.get("expiresOn") ?? "") || null,
-        enterpriseId: enterprise === NO_ENTERPRISE ? null : enterprise,
+        // UNDEFINED WHEN UNTOUCHED — the server re-reads the item, so a stale
+        // prefill can never be written. See the state above.
+        enterpriseId: !touched
+          ? undefined
+          : enterprise === NO_ENTERPRISE
+            ? null
+            : enterprise,
         notes: String(formData.get("notes") ?? ""),
       });
       if ("error" in result) {
@@ -132,7 +158,7 @@ export function LotForm({
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
           New batch
@@ -211,7 +237,10 @@ export function LotForm({
               word={enterpriseWord}
               options={enterprises}
               value={enterprise}
-              onValue={setEnterprise}
+              onValue={(v) => {
+                setEnterprise(v);
+                setTouched(true);
+              }}
               hint={`What this batch costs is charged here. It starts from the item's, and what you feed to it follows the batch rather than the feed.`}
             />
             <div className="grid gap-2">

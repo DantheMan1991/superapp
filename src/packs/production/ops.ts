@@ -1021,6 +1021,29 @@ export async function completeRun(
   }
 
   const inputs = await listRunInputs(tx, ctx.tenantId, runId);
+
+  /**
+   * **WHICH LINE OF BUSINESS THIS RUN IS, DECIDED ONCE AND SPENT THREE TIMES.**
+   *
+   * The outputs' batches, the fee accrual and nothing else. It used to be
+   * computed inline at the accrual alone, and the outputs inherited the output
+   * ITEM's tag instead — which put the two halves of a transformation under
+   * different lines of business and broke the invariant `postMovement`'s own
+   * doc rests on: *a run nets to nothing on the P&L, because its inputs were
+   * debited to consumption on the way in and its output credits the same
+   * account on the way out.* True of the total, false per enterprise.
+   *
+   * A pen tagged Broilers killed into an untagged meat item read **Broilers
+   * +$4,235 and Unassigned −$4,235** on account 5000 — a negative cost of goods
+   * for a line of business that produced nothing, standing until the boxes sold
+   * and usually across a year end. Same false balance slice 3 fixed in 1300,
+   * one account over.
+   */
+  const runEnterpriseId = enterpriseForRun({
+    override: run.enterpriseId,
+    inputEnterpriseIds: inputs.map((i) => i.lotEnterpriseId),
+  });
+
   let potCents = 0;
   let unpricedInputs = 0;
   for (const row of inputs) {
@@ -1079,6 +1102,13 @@ export async function completeRun(
       newLotCode: output.lotCode,
       quantity: output.quantity,
       costCents: roll.byOutput.get(output.id) ?? null,
+      /**
+       * **THE BOXES BELONG TO THE RUN, NOT TO THE ITEM THEY ARE AN ITEM OF.**
+       * Nothing else can tag a production output batch, and letting it inherit
+       * the item's put the credit side of a transformation under a different
+       * line of business from its debit. See `runEnterpriseId` above.
+       */
+      enterpriseId: runEnterpriseId,
       /**
        * **THE PLANT'S OTHER FIGURE, WHICH USED TO STOP HERE.** This table has
        * recorded the pair — "38 packages, 47.5 lb" — since it was written, and
@@ -1193,10 +1223,7 @@ export async function completeRun(
        * a split here is the allocation the enterprises dossier says wants its
        * own decision rather than a helper's.
        */
-      enterpriseId: enterpriseForRun({
-        override: run.enterpriseId,
-        inputEnterpriseIds: inputs.map((i) => i.lotEnterpriseId),
-      }),
+      enterpriseId: runEnterpriseId,
       memo: `Processing accrued — ${run.code}`,
     });
   }

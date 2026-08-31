@@ -33,6 +33,35 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-08-31 — A split kept the animals and lost the money (`claude/the-cost-side`)
+
+Folded into the same PR as the entry below. Read
+[enterprises.md](enterprises.md) for the full argument; this is what changed in
+this pack.
+
+**`splitLot` NOW COPIES THE PARENT'S `enterpriseId`, INCLUDING WHEN IT IS NULL.**
+Omitting it meant `createLot` read *"not said"* and inherited the ITEM's, so a
+split silently moved cost between lines of business — in both directions. The
+null case is the decision, not an edge case: an explicitly untagged parent must
+not have the item's tag applied to its children behind its back.
+
+**`splitLot` IS THE ONLY LOT-CREATING PATH THAT COPIES A PARENT**, which is why
+this was the only place with the bug. `receiveStock({newLotCode})` mints a batch
+for a delivery and SHOULD inherit the item's; `createLot` from the form is a
+fresh batch. Anything added later that derives a lot from another one has to
+make the choice deliberately, because leaving the field out is not neutral.
+
+**`LotForm` HAS A PICKER, PREFILLED FROM THE ITEM.** Defaulting it to *None*
+would send an explicit `null` on every batch and disable the inheritance, so the
+prefill is what makes the control safe rather than a convenience.
+
+**`listItems` REFUSES A NON-UUID `enterprise` FILTER INSTEAD OF CRASHING.**
+`?enterprise=all` reached the `uuid` column and Postgres raised
+`invalid input syntax for type uuid`, taking out the whole hub. Guarded at the
+pack's door so every caller is covered, and it returns **no rows rather than
+every row** — a valid uuid from another tenant already returns nothing, so a
+malformed one matching that is the consistent answer.
+
 ### 2026-08-30 — A journal line says which line of business it is (`claude/the-cost-side`)
 
 The pack's half of [enterprises](enterprises.md) slice 3 — read that dossier for

@@ -50,6 +50,59 @@ half a margin, waiting on slice 4 for the other half.
 
 ## Build log
 
+### 2026-08-31 — A split kept the animals and lost the money (`claude/the-cost-side`)
+
+Folded into the slice 3 PR before it merged. Two defects inside slice 3's own
+remit, found by reading what the slice leans on rather than by anything failing,
+plus a crash found by typing a wrong URL at the page while driving it.
+
+**`splitLot` DROPPED THE PARENT'S ENTERPRISE, and `livestock` splits through
+it.** It copied `source`, `parentLotId`, `openedOn` and `notes` and left
+`enterpriseId` out, so `createLot` read it as *"not said"* and inherited the
+ITEM's. A pen tagged Broilers split into two produced a child carrying whatever
+the item happened to say. `livestock`'s own comment — *"the biology travels with
+the animals"* — was true of the species, the sex, the birth date and both
+parents, and not of the money. **`splitIntoIndividuals` calls it once PER
+ANIMAL**, so naming ten cows out of a pen minted ten mis-tagged lots in one
+click.
+
+**The live proof was already sitting on the dev tenant**: `Speckles`, split off
+`PEN-1` on 2026-08-28. `PEN-1` is untagged, the item *Broiler chicks* is
+Broilers, and Speckles came out **Broilers** — the item's tag, not its parent's.
+A split had moved cost from Unassigned into Broilers.
+
+**THE PARENT'S VALUE IS PASSED EVEN WHEN IT IS NULL**, which is the decision
+rather than an edge case. An explicitly untagged parent must not have the item's
+tag applied to its children behind its back — the same "wrong and quiet" the
+no-fallback rule refuses everywhere else. **A split must not move cost between
+lines of business in either direction.** Both directions have a test and the
+first fails without the fix.
+
+**A BATCH COULD NOT BE TOLD WHERE IT BELONGED.** `LotForm` had no picker, so
+`inventory_lots.enterprise_id` — the column the costing reads hardest, since the
+posting path deliberately will not fall back to the item — could only ever be set
+by inheritance at creation.
+
+**THE PICKER STARTS FROM THE ITEM'S TAG, AND THAT IS WHAT MAKES IT SAFE TO ADD.**
+Defaulting to *None* would send an explicit `null` on every batch and turn off
+slice 2's inheritance, putting a farm that tagged "Broiler chicks" once back to
+saying so on every hatch. Starting from the item makes the default outcome
+identical to inheriting and shows the person what it will be instead of leaving
+it invisible.
+
+**`?enterprise=all` 500'd THE WHOLE INVENTORY HUB.** Slice 2's filter passed the
+query value straight into a `uuid` column, and Postgres raises
+`invalid input syntax for type uuid` rather than matching nothing. Guarded at
+`listItems`, the pack's door, so every caller is covered. **No rows rather than
+every row**: a valid uuid belonging to another tenant already returns nothing
+there, so a malformed one behaving the same way is consistent — and showing
+somebody the full list under a bar claiming to be filtered is the worse lie.
+
+Driven on Hilltop Farm: the picker reads *None* on untagged *Grower crumble* and
+prefills *Broilers* on *Broiler chicks*; splitting `HATCH-4A` produced
+`HATCH-4A-SPLIT` carrying Broilers; and `?enterprise=all` renders *Nothing
+matches* with a Clear filters button.
+
 ### 2026-08-30 — The cost side (`claude/the-cost-side`)
 
 Slice 3, and the first entry in this repo where a journal line says which line
@@ -397,9 +450,19 @@ the same transaction as every write.
   Whoever builds the revenue side owns this.
 - **An item's tag does nothing for a batch created before it was set.** The
   inheritance runs at `createLot` and the posting path deliberately does not
-  fall back — so tagging an item today does not reach yesterday's batches, and
-  the fix is to tag the batch. Discoverable through the filter bar's *Not set*
-  pill; not signposted anywhere else.
+  fall back — so tagging an item today does not reach yesterday's batches.
+  Discoverable through the filter bar's *Not set* pill; not signposted anywhere
+  else.
+- **AN EXISTING BATCH CANNOT BE RETAGGED, and that is the sharpest gap left.**
+  The picker is on batch CREATION only, because `inventory` has no lot edit
+  surface at all — `ops.ts` goes `createLot` straight to `closeLot`, and
+  inventing one carries an unstated decision about what else becomes editable.
+  So `Speckles` on the dev tenant is mis-tagged by the old split and there is no
+  way to correct it from the app. Whoever adds `updateLot` closes this.
+- **`splitLot` was the only lot-creating path copying a parent.** If another
+  appears — a merge, a reclassification — it has to make the same choice
+  deliberately, because omitting `enterpriseId` silently means "inherit the
+  item's" rather than "copy the parent's".
 - ~~**The word "Enterprise" is not label-resolved.**~~ **Closed 2026-08-26**,
   the day after it was written and by the founder noticing rather than by this
   list being read. Both the word and the kind suggestions come from the profile

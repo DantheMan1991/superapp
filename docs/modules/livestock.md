@@ -133,6 +133,32 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-08-31 — The split dropped one more thing (`claude/the-cost-side`)
+
+No change in this pack; the fix is one line in `inventory`'s `splitLot`, which
+`splitLivestockLot` calls. It is recorded here because **this is the third time
+the same split has been found dropping something**, and this pack is where it
+bites hardest.
+
+The pattern is written down twice already in this dossier: the split *"carried
+her species, her sex, her birth date, her breeding and both parents across"* and
+dropped her lot membership, then dropped her feeder membership. **This time it
+dropped her line of business** — `enterpriseId` was omitted from the
+`createLot` call, which `inventory` reads as "not said" and answers by
+inheriting the ITEM's tag instead of the parent pen's.
+
+**`splitIntoIndividuals` calls the split once per animal**, so naming ten cows
+out of a pen minted ten lots whose costs went wherever the item pointed. See
+[enterprises.md](enterprises.md) for the rule and the live example on the dev
+tenant.
+
+**The lesson worth keeping is the shape, not the field.** Anything that derives
+a lot from another lot has to state every inherited property explicitly, because
+in `createLot` an omitted `enterpriseId` is not neutral — it means "inherit the
+item's". Three fields have now been lost to that one function; the fourth will
+be too unless the next person adding a column to `inventory_lots` checks the
+split.
+
 ### 2026-08-28 — An empty pen is not a lot (`claude/an-empty-pen-is-not-a-lot`)
 
 **Three the founder asked for after driving.** No migration.

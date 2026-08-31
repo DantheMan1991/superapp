@@ -1486,6 +1486,27 @@ d("inventory ops", () => {
       expect(found.every((i) => i.enterpriseId === null)).toBe(true);
     });
 
+    it("RETURNS NOTHING for a filter that is not a uuid, rather than 500ing", async () => {
+      /**
+       * **A HAND-TYPED `?enterprise=` USED TO CRASH THE WHOLE HUB.** The value
+       * went straight into a `uuid` column, and Postgres raises
+       * `invalid input syntax for type uuid` rather than matching nothing — so
+       * a stale or garbled link took out the inventory page rather than showing
+       * an empty list. Found by typing `?enterprise=all` while driving it.
+       *
+       * Nothing rather than everything: a valid uuid belonging to another
+       * tenant already returns nothing here, so a malformed one behaving the
+       * same way is the consistent answer, and showing the full list under a
+       * bar claiming to be filtered would be the worse lie.
+       */
+      for (const bad of ["all", "undefined", "Broilers", "123"]) {
+        const found = await asOwner((tx) =>
+          listItems(tx, tenantId, { enterprise: bad }),
+        );
+        expect(found).toEqual([]);
+      }
+    });
+
     it("REFUSES ANOTHER TENANT'S, and the composite FK is what refuses it", async () => {
       // Unrepresentable rather than merely refused by application code: this
       // fails at the constraint, so it would fail under `withSystem` too.

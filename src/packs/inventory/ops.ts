@@ -84,6 +84,14 @@ import { postCostAdjustment, postMovement } from "./ledger-ops";
 /** The dimension type this pack owns. Core stores it; only this pack means anything by it. */
 export const LOT_DIMENSION = "lot";
 
+/**
+ * A uuid, for guarding a value that came off a URL before it reaches a `uuid`
+ * column. Postgres does not return nothing for a malformed one — it raises
+ * `invalid input syntax for type uuid`, which surfaces as a 500.
+ */
+const UUID_FORMAT =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export class InventoryError extends Error {
   constructor(
     readonly code:
@@ -176,6 +184,19 @@ export async function listItems(
   if (filter.enterprise === "none") {
     where.push(isNull(schema.inventoryItems.enterpriseId));
   } else if (filter.enterprise) {
+    /**
+     * **A HAND-TYPED `?enterprise=` USED TO 500 THE WHOLE HUB**, because the
+     * value went straight into a `uuid` column and Postgres refuses
+     * `invalid input syntax for type uuid` rather than returning nothing.
+     * Found by typing `?enterprise=all` at the page while driving it.
+     *
+     * **NO ROWS, not every row**, and that is the case worth getting right: a
+     * valid uuid belonging to ANOTHER tenant already returns nothing here, so
+     * a malformed one behaving the same way is the consistent answer. Ignoring
+     * the filter instead would show a person the whole list under a bar
+     * claiming to be filtered, which is the worse of the two lies.
+     */
+    if (!UUID_FORMAT.test(filter.enterprise)) return [];
     where.push(eq(schema.inventoryItems.enterpriseId, filter.enterprise));
   }
   if (filter.status) where.push(eq(schema.inventoryItems.status, filter.status));

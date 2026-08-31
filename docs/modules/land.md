@@ -578,6 +578,54 @@ grounds, which were never about optimisation as such.
 
 ## Build log
 
+### 2026-08-31 — The centre lane was never in the centre (`claude/paddocks-off-by-one`)
+
+**`main` went red and stayed red for two hours, and it auto-deploys.** PR #328
+broke two tests in `tests/land-ops.test.ts`; PR #329 merged on top of the red
+build an hour later. **Neither PR carried the `full-tests` label, so CI skipped
+the suite on both of them** and the failure only appeared on the merge to main,
+where nobody was looking. This is the trap `docs/modules/ci-and-tests.md` and
+AGENTS.md both name, and it is the second time it has cost this repo a red main.
+**A PR that changes a pure core with a db-backed suite over it needs the label.**
+
+**THE TESTS WERE STALE AND THE CODE WAS RIGHT**, which took one probe to
+establish rather than one argument: calling `subdivide` directly with this
+block's own fixture and printing the acreages.
+
+**`LANE` WAS 22.7:1 OFF-CENTRE AND WAS CALLED "Centre lane".** The field runs
+−82.48 to −82.47526 and the lane sits at −82.4798 — **4% across**, a 1.4-acre
+sliver against 38 acres. The fixture said central, the test comments said
+central, and every paddock test in the block has run against a pathological
+field for as long as the block has existed. **That misnaming is what hid the bug
+#328 fixed**: `round(count / sides)` gave two either side whatever they weighed,
+so four paddocks came out 19 / 19 / 0.7 / 0.7 — **a 26:1 spread under a dialog
+headed "Equal areas"** — and the suite asserted `warnings).toEqual([])` over it.
+
+So the two failures are the new code being right:
+
+| asked | old, silent | new |
+| --- | --- | --- |
+| 4 | 2+2, **26:1** | 3+1 — 12.66 ac ×3 and 1.44 ac, **warns 8.8×** |
+| 3 | rounded up to 4 | 2+1 — **three, as asked** |
+
+**"Rounds an odd count up" was describing the old rule, not a requirement.** That
+test's comment defended a real invariant — *the dialog's button reads the count
+back off the same function, so what it offers is what it builds* — and that
+invariant still holds: `paddock-layout.tsx` runs `compareLayouts`, renders
+`chosen.warnings`, and labels the button `Lay out ${chosen.paddockCount}`.
+Apportioning by area can express three across two sides, so asking for three now
+builds three and the button says three. Renamed to say what it tests.
+
+**THE ORDINARY FIELD WAS COVERED BY NOTHING, and now is.** A new test lays four
+paddocks off a genuinely central lane and asserts two either side, all equal
+within 5%, and **no warning at all** — the case every drive and every dialog
+assumes. It is also the guard on the new threshold: one that fired on an even
+field would put a scary sentence under every layout anybody ever does.
+
+The fixture is `OFF_CENTRE_LANE` now, with `CENTRAL_LANE` beside it and
+`fieldWithLane` defaulting to the lopsided one so the fifteen other tests in the
+block keep covering exactly what they covered before.
+
 ### 2026-08-30 — Slice 3: growing weather (`claude/weather-and-gdd`)
 
 **No migration, no table, no cron.** A pure core, one `server-only` fetch and a

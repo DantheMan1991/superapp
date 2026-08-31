@@ -24,13 +24,20 @@ import {
   restByZone,
   usesByZone,
 } from "@/packs/land/ops";
-import { asBoundary, asFeatureGeometry } from "@/packs/land/core/geo";
+import { asBoundary, asFeatureGeometry, centroid } from "@/packs/land/core/geo";
 import {
   availableFeatureKinds,
   isFeatureStatus,
   readAttributes,
 } from "@/packs/land/core/features";
 import { basemapFrom } from "@/packs/land/core/basemap";
+import {
+  gddBaseCFrom,
+  temperatureUnitFrom,
+  type WeatherDay,
+} from "@/packs/land/core/weather";
+import { dailyWeather } from "@/packs/land/weather-service";
+import { WeatherPanel } from "@/packs/land/components/weather-panel";
 import { enclosuresFrom } from "@/packs/land/core/enclosure";
 import { lengthUnitFrom } from "@/packs/land/core/length";
 import { SitePlan } from "@/packs/land/components/site-plan";
@@ -191,6 +198,32 @@ export default async function ParcelDetailPage({
   });
 
   const unit = areaUnitFrom(pack.config);
+
+  /**
+   * The weather over this ground (slice 3).
+   *
+   * **OUTSIDE `withTenant`, AND AFTER IT.** It is a public archive, not tenant
+   * data: there is nothing for RLS to scope and holding a transaction open
+   * across somebody else's HTTP request is how a connection pool runs out. The
+   * fetch caches for a day, so this costs one request per parcel per day across
+   * every person who looks.
+   *
+   * **NOTHING IS STORED, and that is the reason weather could be scheduled
+   * last.** Open-Meteo serves history by latitude and longitude, so a season
+   * that nobody was watching is still there when somebody looks — being late
+   * costs no data, which is exactly what the roadmap said when it put this
+   * after the geometry.
+   */
+  const centre = parcel.geometry ? centroid(asBoundary(parcel.geometry)!) : null;
+  const weather = centre
+    ? await dailyWeather(centre[1], centre[0], today)
+    : null;
+  const weatherDays: WeatherDay[] = weather?.ok ? weather.days : [];
+  const weatherError = centre
+    ? weather && !weather.ok
+      ? weather.error
+      : null
+    : "No boundary yet, so there is nowhere to look up.";
   const zoneWord = labelFor(pack.labels, "zone", "Zone");
   const isOwner = ctx.role === "owner";
 
@@ -519,6 +552,14 @@ export default async function ParcelDetailPage({
             </dl>
           </div>
         </Panel>
+
+        <WeatherPanel
+          days={weatherDays}
+          today={today}
+          baseC={gddBaseCFrom(pack.config)}
+          unit={temperatureUnitFrom(pack.config)}
+          error={weatherError}
+        />
 
         <Panel className="p-5">
           <h2 className="font-heading text-base font-semibold tracking-heading">Rotation</h2>

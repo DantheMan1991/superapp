@@ -77,6 +77,33 @@ becomes 1d, unchanged.
 
 ## Build log
 
+### 2026-08-31 — The boxes belong to the run, not to the item (`claude/the-cost-side`)
+
+Folded into the same PR as the entry below, after an adversarial review of it.
+Read [enterprises.md](enterprises.md) for the worked numbers.
+
+**`completeRun` LANDED ITS OUTPUTS WITHOUT SAYING WHOSE THEY WERE.**
+`receiveStock({newLotCode})` with no enterprise means `createLot` inherits the
+output ITEM's tag — right for a delivery, wrong for boxes made out of specific
+batches. The inputs had already been debited to the consumption account under
+the INPUT batch's line of business, so the two halves of one transformation
+landed under different ones and **5000 grouped by enterprise did not net to
+zero**: a Broilers pen killed into an untagged meat item read Broilers +$4,000
+against Unassigned −$4,235.
+
+**THE RUN ALREADY KNEW; IT JUST WAS NOT ASKED TWICE.** `enterpriseForRun` was
+computed inline for the fee accrual only. It is now `runEnterpriseId`, hoisted
+above the output loop and spent on both — so the fee and the boxes cannot
+disagree, which was the other half of the same defect.
+
+**Nothing else can tag a production output batch**, which is why the default
+mattered so much: it is minted inside `completeRun` and there is no form
+anywhere between a person and it.
+
+A mixed run derives null and its boxes are Unassigned while its inputs keep
+their own tags — the reserved allocation question again, and the run form's
+override is how somebody says otherwise.
+
 ### 2026-08-30 — The plant's fee knows which line of business it is (`claude/the-cost-side`)
 
 The pack's half of [enterprises](enterprises.md) slice 3. No migration, and

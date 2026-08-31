@@ -20,6 +20,13 @@ import {
   type InventoryCtx,
 } from "../src/packs/inventory/ops";
 import { postServiceAccrual } from "../src/packs/inventory/ledger-ops";
+import {
+  addRunInput,
+  addRunOutput,
+  completeRun,
+  startRun,
+  type ProductionCtx,
+} from "../src/packs/production/ops";
 import type { LedgerCtx } from "../src/modules/accounting/core";
 
 const RUN = !!process.env.DATABASE_URL;
@@ -57,6 +64,8 @@ d("enterprise costing reaches the ledger", () => {
     withTenant(tenantId, fn, { role: "owner", userId: OWNER });
   const ownerCtx = (): InventoryCtx => ({ tenantId, userId: OWNER, role: "owner" });
   const ledgerOwner = (): LedgerCtx => ({ tenantId, userId: OWNER, role: "owner" });
+  /** The same person, in the shape `production` asks for. */
+  const prodOwner = (): ProductionCtx => ({ tenantId, userId: OWNER, role: "owner" });
 
   /**
    * The report, exactly as `/dashboard/reports` builds it: one row per
@@ -503,5 +512,89 @@ d("enterprise costing reaches the ledger", () => {
       }),
     );
     expect(child.enterpriseId).toBeNull();
+  });
+
+  // ---- a transformation ---------------------------------------------------
+
+  it("NETS A PRODUCTION RUN TO ZERO ON THE CONSUMPTION ACCOUNT, per enterprise", async () => {
+    /**
+     * **THE INVARIANT `postMovement`'s OWN DOC RESTS ON, checked per line of
+     * business for the first time.** *"A run nets to nothing on the P&L: its
+     * inputs were debited to consumption on the way in, and its output credits
+     * the same account on the way out."* True of the total from the day it was
+     * written, and **false per enterprise** until this: the output boxes went
+     * in through `receiveStock` with no enterprise, so they inherited the
+     * OUTPUT ITEM's tag while the inputs were debited under the INPUT BATCH's.
+     *
+     * A Broilers pen killed into an untagged meat item read Broilers +cost and
+     * Unassigned −cost on 5000 — a negative cost of goods for a line of
+     * business that produced nothing, standing until the boxes sold. The same
+     * false balance slice 3 fixed in 1300, one account over.
+     *
+     * **THE OUTPUT ITEM IS DELIBERATELY UNTAGGED HERE.** That is the case the
+     * bug needs, and it is the ordinary one for a farm following this pack's
+     * own advice to tag batches rather than items — nothing anywhere can tag a
+     * production output batch by hand.
+     */
+    const birds = await newItem("Live birds for the run", null);
+    const pen = await newLot(birds.id, `RUNPEN-${STAMP}`, broilersId);
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: birds.id,
+        lotId: pen.id,
+        quantity: 20,
+        costCents: 4_000,
+        occurredOn: "2026-09-01",
+        locationAssetId: barnId,
+      }),
+    );
+    // Untagged on purpose — see above.
+    const meat = await newItem("Boxes off the run", null);
+
+    const before = await byEnterprise(cogsAccountId);
+    const run = await asOwner((tx) =>
+      startRun(tx, prodOwner(), {
+        code: `RUN-${STAMP}`,
+        startedOn: "2026-09-02",
+        locationAssetId: barnId,
+      }),
+    );
+    await asOwner((tx) =>
+      addRunInput(
+        tx,
+        prodOwner(),
+        {
+          runId: run.id,
+          itemId: birds.id,
+          lotId: pen.id,
+          quantity: 20,
+          occurredOn: "2026-09-02",
+        },
+        "2026-09-02",
+      ),
+    );
+    await asOwner((tx) =>
+      addRunOutput(tx, prodOwner(), {
+        runId: run.id,
+        itemId: meat.id,
+        quantity: 100,
+        locationAssetId: barnId,
+      }),
+    );
+    await asOwner((tx) => completeRun(tx, prodOwner(), run.id, "2026-09-03"));
+
+    const after = await byEnterprise(cogsAccountId);
+    const delta = (k: string) =>
+      (after.get(k) ?? 0) - (before.get(k) ?? 0);
+
+    // The whole point: the transformation leaves NOTHING behind on 5000, for
+    // Broilers and for Unassigned alike. Before the fix this read +4,000 and
+    // −4,000.
+    expect(delta("broilers")).toBe(0);
+    expect(delta("unassigned")).toBe(0);
+
+    // And the boxes are Broilers' stock, so selling them will charge Broilers.
+    const stock = await byEnterprise(inventoryAccountId);
+    expect(stock.get("broilers")).toBeGreaterThan(0);
   });
 });

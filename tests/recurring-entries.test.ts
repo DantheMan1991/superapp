@@ -20,7 +20,13 @@ import { advanceMonthly } from "../src/modules/accounting/recurring/schedule";
 const ACC_A = "11111111-1111-4111-8111-111111111111";
 const ACC_B = "22222222-2222-4222-8222-222222222222";
 
-const journal = (lines: Array<{ accountId: string; amountCents: number }>) => ({
+const journal = (
+  lines: Array<{
+    accountId: string;
+    amountCents: number;
+    dimensionMemberIds?: string[];
+  }>,
+) => ({
   kind: "journal" as const,
   lines,
 });
@@ -168,6 +174,98 @@ describe("template parsing", () => {
     if (result.success && result.data.kind === "bill") {
       expect(result.data.lines[0].description).toBe("");
     }
+  });
+});
+
+describe("a template says what its entries were for", () => {
+  /**
+   * All three line schemas have accepted `dimensionMemberIds` since before any
+   * dimension had a member, and `generate.ts` has threaded them the whole
+   * time — the gap was a form that could send one. These pin the storage
+   * contract the form now depends on: a tag survives the jsonb round trip,
+   * and an untagged template stays untagged rather than acquiring `[]`.
+   */
+  const MEMBER = "33333333-3333-4333-8333-333333333333";
+
+  it("round-trips a tag on a journal line", () => {
+    const parsed = parseRecurringEntryTemplate(
+      journal([
+        { accountId: ACC_A, amountCents: 5_000, dimensionMemberIds: [MEMBER] },
+        { accountId: ACC_B, amountCents: -5_000 },
+      ]),
+    );
+    expect(parsed?.kind).toBe("journal");
+    expect(
+      (parsed as { lines: Array<{ dimensionMemberIds?: string[] }> }).lines[0]
+        .dimensionMemberIds,
+    ).toEqual([MEMBER]);
+  });
+
+  it("round-trips a tag on a bill line and an invoice line", () => {
+    const bill = parseRecurringEntryTemplate({
+      kind: "bill",
+      dueInDays: 14,
+      lines: [
+        {
+          description: "Feed",
+          amountCents: 31_840,
+          accountId: ACC_A,
+          dimensionMemberIds: [MEMBER],
+        },
+      ],
+    });
+    expect(
+      (bill as { lines: Array<{ dimensionMemberIds?: string[] }> }).lines[0]
+        .dimensionMemberIds,
+    ).toEqual([MEMBER]);
+
+    const invoice = parseRecurringEntryTemplate({
+      kind: "invoice",
+      dueInDays: 7,
+      lines: [
+        {
+          description: "Rent",
+          quantity: "1",
+          unitPriceCents: 120_000,
+          incomeAccountId: ACC_B,
+          dimensionMemberIds: [MEMBER],
+        },
+      ],
+    });
+    expect(
+      (invoice as { lines: Array<{ dimensionMemberIds?: string[] }> }).lines[0]
+        .dimensionMemberIds,
+    ).toEqual([MEMBER]);
+  });
+
+  it("leaves an untagged line ABSENT rather than an empty array", () => {
+    // The form sends undefined for an untagged row on purpose, and every write
+    // path reads `?? []`. A stored `[]` would be a lie about a decision
+    // somebody never made.
+    const parsed = parseRecurringEntryTemplate(
+      journal([
+        { accountId: ACC_A, amountCents: 100 },
+        { accountId: ACC_B, amountCents: -100 },
+      ]),
+    );
+    expect(
+      (parsed as { lines: Array<{ dimensionMemberIds?: string[] }> }).lines[0],
+    ).not.toHaveProperty("dimensionMemberIds");
+  });
+
+  it("refuses more than ten tags on one line", () => {
+    const many = Array.from(
+      { length: 11 },
+      (_, i) => `4444444${i}-4444-4444-8444-444444444444`,
+    );
+    expect(
+      parseRecurringEntryTemplate(
+        journal([
+          { accountId: ACC_A, amountCents: 100, dimensionMemberIds: many },
+          { accountId: ACC_B, amountCents: -100 },
+        ]),
+      ),
+    ).toBeNull();
   });
 });
 

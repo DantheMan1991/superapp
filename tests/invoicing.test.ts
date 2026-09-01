@@ -46,7 +46,11 @@ import {
   voidInvoice,
   loadInvoiceLines,
 } from "../src/modules/accounting/invoicing/invoices";
-import { upsertDimensionMember } from "../src/modules/accounting/core";
+import {
+  archiveDimensionMember,
+  upsertDimensionMember,
+} from "../src/modules/accounting/core";
+import { loadBillLines } from "../src/modules/accounting/payables/bills";
 import { recordPayment, unapplyPayment } from "../src/modules/accounting/invoicing/payments";
 import { listRecordHistory } from "../src/modules/accounting/history/list";
 import { logAuditInTx } from "../src/lib/audit";
@@ -821,6 +825,316 @@ d("invoicing (DB)", () => {
   });
 
   // ---- dimensions on an invoice line --------------------------------------
+
+  /**
+   * **A STANDING INSTRUCTION SAYS WHAT IT WAS FOR.**
+   *
+   * The last write surface to get a tag picker, and the only one where nobody
+   * is watching when the tag is used: a template names its members once and a
+   * sweep applies them every month at 6am. `recurringJournalLineSchema` has
+   * accepted `dimensionMemberIds` and `generate.ts` has threaded them since
+   * before any dimension had a member — the gap was a form that could send one.
+   */
+  describe("recurring templates carry their tags", () => {
+    const memberOf = async (name: string) => {
+      const m = await withTenant(tenantId, (tx) =>
+        upsertDimensionMember(tx, owner, {
+          dimensionType: "enterprise",
+          packEntityId: crypto.randomUUID(),
+          displayName: name,
+        }),
+      );
+      return m.id;
+    };
+
+    const newVendor = async (name: string) =>
+      withTenant(tenantId, async (tx) => {
+        const [party] = await tx
+          .insert(schema.parties)
+          .values({ tenantId, kind: "organization", displayName: name })
+          .returning();
+        const [v] = await tx
+          .insert(schema.vendors)
+          .values({ tenantId, partyId: party.id, name })
+          .returning();
+        return v.id;
+      });
+
+    const addTemplate = async (values: Record<string, unknown>) =>
+      withTenant(tenantId, async (tx) => {
+        const [row] = await tx
+          .insert(schema.recurringEntries)
+          .values({
+            tenantId,
+            dayOfMonth: 4,
+            createdByClerkUserId: owner.userId,
+            ...values,
+          } as never)
+          .returning();
+        return row;
+      });
+
+    /** Every member id tagged on the journal lines of one entry. */
+    const entryTags = async (entryId: string) =>
+      withTenant(tenantId, async (tx) => {
+        const lines = await tx
+          .select({ id: schema.journalLines.id })
+          .from(schema.journalLines)
+          .where(
+            and(
+              eq(schema.journalLines.tenantId, tenantId),
+              eq(schema.journalLines.entryId, entryId),
+            ),
+          );
+        const ids = new Set(lines.map((l) => l.id));
+        const dims = await tx
+          .select({
+            journalLineId: schema.lineDimensions.journalLineId,
+            memberId: schema.lineDimensions.memberId,
+          })
+          .from(schema.lineDimensions)
+          .where(eq(schema.lineDimensions.tenantId, tenantId));
+        return dims
+          .filter((d) => d.journalLineId && ids.has(d.journalLineId))
+          .map((d) => d.memberId);
+      });
+
+    it("AN AUTO-POSTING JOURNAL POSTS ITS TAG, with nobody at the keyboard", async () => {
+      /**
+       * The case the enterprises dossier called impossible. It is not: the
+       * template line carries the member, `generate.ts` maps it onto
+       * `postEntry`, and `unattended` changes only WHO the entry is credited
+       * to — never the payload. So an auto-posting template tags the ledger at
+       * 6am exactly as a person would have.
+       */
+      const cash = await accountId("1000");
+      const exp = await accountId("6700");
+      const broilers = await memberOf("Broilers (recurring)");
+      const template = await addTemplate({
+        kind: "journal",
+        name: "Depreciation — tagged",
+        nextRunDate: "2026-07-04",
+        autoPost: true,
+        template: {
+          kind: "journal",
+          lines: [
+            { accountId: exp, amountCents: 5_000, dimensionMemberIds: [broilers] },
+            { accountId: cash, amountCents: -5_000 },
+          ],
+        },
+      });
+
+      const result = await generateRecurringEntries(
+        { ...owner, userId: "cron-has-no-user" },
+        { unattended: true },
+      );
+      expect(result.errors).toHaveLength(0);
+      expect(result.tagsDropped).toBe(0);
+
+      const entries = await withTenant(tenantId, (tx) =>
+        tx.query.journalEntries.findMany({
+          where: and(
+            eq(schema.journalEntries.tenantId, tenantId),
+            eq(schema.journalEntries.memo, "Depreciation — tagged"),
+          ),
+        }),
+      );
+      expect(entries.length).toBeGreaterThan(0);
+      expect(entries.every((e) => e.status === "posted")).toBe(true);
+      for (const e of entries) {
+        expect(await entryTags(e.id)).toEqual([broilers]);
+      }
+      expect(template.id).toBeTruthy();
+    });
+
+    it("RETIRING A MEMBER DROPS THE TAG AND DOES NOT STOP THE SCHEDULE", async () => {
+      /**
+       * **THE INVARIANT THE WHOLE DECISION RESTS ON.**
+       *
+       * Every write path refuses an inactive member, so before this a retired
+       * line of business threw `DIMENSION_INVALID` inside the sweep, rolled
+       * back every catch-up month with it, and left `next_run_date` where it
+       * was — so it failed again the next morning, and every morning after,
+       * with no screen naming a template, no last-error column, and no update
+       * action to repair it with. A monthly rent bill would simply stop.
+       *
+       * `archiveDimensionMember`'s own contract settles which way to go:
+       * "archived members stop being taggable; existing tags keep reporting".
+       * Stop being TAGGABLE. The entry is still right; only its split is
+       * coarser.
+       *
+       * Three periods behind on purpose: the drop is counted once per
+       * TEMPLATE, not once per line and not once per month.
+       */
+      const cash = await accountId("1000");
+      const exp = await accountId("6700");
+      const gone = await memberOf("Wound up");
+      await withTenant(tenantId, (tx) =>
+        archiveDimensionMember(tx, owner, { memberId: gone }),
+      );
+      const template = await addTemplate({
+        kind: "journal",
+        name: "Retired tag — journal",
+        nextRunDate: "2026-05-04", // three periods behind the suite's late-July
+        autoPost: true,
+        template: {
+          kind: "journal",
+          lines: [
+            // The SAME retired member on both lines: one stale tag to fix.
+            { accountId: exp, amountCents: 700, dimensionMemberIds: [gone] },
+            { accountId: cash, amountCents: -700, dimensionMemberIds: [gone] },
+          ],
+        },
+      });
+
+      const result = await generateRecurringEntries(owner);
+      expect(result.errors).toHaveLength(0);
+      expect(result.tagsDropped).toBe(1);
+
+      const entries = await withTenant(tenantId, (tx) =>
+        tx.query.journalEntries.findMany({
+          where: and(
+            eq(schema.journalEntries.tenantId, tenantId),
+            eq(schema.journalEntries.memo, "Retired tag — journal"),
+          ),
+        }),
+      );
+      expect(entries.length).toBeGreaterThanOrEqual(3);
+      for (const e of entries) {
+        expect(await entryTags(e.id)).toEqual([]);
+      }
+
+      // The schedule MOVED. This is the half that was breaking.
+      const after = await withTenant(tenantId, (tx) =>
+        tx.query.recurringEntries.findFirst({
+          where: eq(schema.recurringEntries.id, template.id),
+        }),
+      );
+      expect(after!.nextRunDate > "2026-05-04").toBe(true);
+      expect(after!.lastGeneratedAt).not.toBeNull();
+    });
+
+    it("keeps the live tag on a line that also named a retired one", async () => {
+      const cash = await accountId("1000");
+      const exp = await accountId("6700");
+      const live = await memberOf("Still trading");
+      const dead = await memberOf("Also wound up");
+      await withTenant(tenantId, (tx) =>
+        archiveDimensionMember(tx, owner, { memberId: dead }),
+      );
+      await addTemplate({
+        kind: "journal",
+        name: "Partly retired",
+        nextRunDate: "2026-07-04",
+        autoPost: true,
+        template: {
+          kind: "journal",
+          lines: [
+            {
+              accountId: exp,
+              amountCents: 300,
+              dimensionMemberIds: [live, dead],
+            },
+            { accountId: cash, amountCents: -300 },
+          ],
+        },
+      });
+
+      const result = await generateRecurringEntries(owner);
+      expect(result.tagsDropped).toBe(1);
+      const entries = await withTenant(tenantId, (tx) =>
+        tx.query.journalEntries.findMany({
+          where: and(
+            eq(schema.journalEntries.tenantId, tenantId),
+            eq(schema.journalEntries.memo, "Partly retired"),
+          ),
+        }),
+      );
+      expect(entries.length).toBeGreaterThan(0);
+      for (const e of entries) {
+        expect(await entryTags(e.id)).toEqual([live]);
+      }
+    });
+
+    it("an invoice template's tag reaches the generated draft", async () => {
+      const sales = await accountId("4000");
+      const member = await memberOf("Market stall");
+      const template = await addTemplate({
+        kind: "invoice",
+        name: "Tagged rent — invoice",
+        customerId,
+        nextRunDate: "2026-07-04",
+        template: {
+          kind: "invoice",
+          dueInDays: 7,
+          lines: [{ ...line(4_500, sales), dimensionMemberIds: [member] }],
+        },
+      });
+
+      await generateRecurringEntries(owner);
+      const drafts = await withTenant(tenantId, (tx) =>
+        tx.query.invoices.findMany({
+          where: and(
+            eq(schema.invoices.tenantId, tenantId),
+            eq(schema.invoices.recurringEntryId, template.id),
+          ),
+        }),
+      );
+      expect(drafts.length).toBeGreaterThan(0);
+      for (const d of drafts) {
+        const lines = await withTenant(tenantId, (tx) =>
+          loadInvoiceLines(tx, tenantId, d.id),
+        );
+        expect(lines[0].dimensionMemberIds).toEqual([member]);
+      }
+    });
+
+    it("a bill template's single tag reaches the generated draft", async () => {
+      /**
+       * The bill branch of the dialog builds ONE line, so its tag is the
+       * template's rather than a line's. That is the shape, not a shortcut —
+       * with exactly one line the two are the same object.
+       */
+      const exp = await accountId("6700");
+      const vendorId = await newVendor("Feed mill (recurring)");
+      const member = await memberOf("Broiler shed");
+      await addTemplate({
+        kind: "bill",
+        name: "Tagged feed — bill",
+        vendorId,
+        nextRunDate: "2026-07-04",
+        template: {
+          kind: "bill",
+          dueInDays: 14,
+          lines: [
+            {
+              description: "Monthly feed",
+              amountCents: 31_840,
+              accountId: exp,
+              dimensionMemberIds: [member],
+            },
+          ],
+        },
+      });
+
+      await generateRecurringEntries(owner);
+      const bills = await withTenant(tenantId, (tx) =>
+        tx.query.bills.findMany({
+          where: and(
+            eq(schema.bills.tenantId, tenantId),
+            eq(schema.bills.vendorId, vendorId),
+          ),
+        }),
+      );
+      expect(bills.length).toBeGreaterThan(0);
+      for (const b of bills) {
+        const lines = await withTenant(tenantId, (tx) =>
+          loadBillLines(tx, tenantId, b.id),
+        );
+        expect(lines[0].dimensionMemberIds).toEqual([member]);
+      }
+    });
+  });
 
   describe("a line says which part of the business earned it", () => {
     /**

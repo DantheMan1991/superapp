@@ -13,6 +13,47 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-01 — A standing instruction says what it was for (`claude/a-standing-instruction-says-what-it-was-for`)
+
+Recurring templates were the last write surface without a tag picker, and the
+only one applied by a sweep rather than by a person. All three kinds — journal,
+bill and invoice — can now be created with one. **No migration, and no schema
+change:** every template line schema has accepted `dimensionMemberIds` since
+dimensions existed and `generate.ts` has threaded it the whole time.
+
+**A RETIRED MEMBER IS DROPPED AT GENERATION, NOT THROWN.** This is the decision
+the PR turns on. `loadDimensionMembers` and `validateLineDimensions` both refuse
+an inactive member, so a picker alone would have made archiving a line of
+business enough to kill a monthly rent bill: `DIMENSION_INVALID` inside the 6am
+sweep rolls back every catch-up month, `next_run_date` never advances, and the
+template fails identically every morning after — unnamed on every surface, with
+no update action to repair it.
+
+`assertTemplateReferences` is not the model to follow here. Its rule —
+*"failing the template with a reported error is right; silently posting to a
+dead account is not"* — holds because a dead account makes the ENTRY wrong, and
+`TAX_RATE_INVALID` holds because a retired rate makes the AMOUNT wrong. A
+retired tag makes neither wrong; it makes one report coarser. The governing
+precedent is `archiveDimensionMember`'s contract, *"archived members stop being
+taggable; existing tags keep reporting"*, which `enterpriseMemberIds` already
+applied to an unattended posting path to avoid *"a business stopping because of
+a report."*
+
+So the retired members are resolved once per template, above the catch-up loop,
+stripped from every line, and counted into a new `RecurringEntryResult.tagsDropped`
+— surfaced in the Generate toast the way `deferredToDraft` is, because nothing
+else ever names it. Counted as **distinct members per template**: one retired
+paddock on three lines of a template twelve months behind is one thing to fix.
+
+The recurring list now shows each template's tags as pills, marking retired ones
+`(retired)`. That is not decoration: the list is the only screen a template has,
+so a tag it did not show would be unverifiable, and a mis-tagged template can
+only be corrected by pausing it and writing a new one.
+
+**The no-update-action gap is unchanged and pre-existing** (see Open items,
+2026-08-12): a template's tag cannot be edited after creation, for the same
+reason its amount and its account cannot.
+
 ### 2026-09-01 — The journal can say what it was for (`claude/the-journal-can-say-what-it-was-for`)
 
 The last write surface without a tag picker, and the one where it matters most
@@ -2670,9 +2711,10 @@ compiled-and-tested, not seen.
 - **Drafting from an email thread is DONE** (2026-08-12) — both directions, with verified citations, and **proven against the real API** (see the build log; `RUN_LIVE_THREAD_DRAFT=1`). Now worth doing: the drafter sets no due date because it does not know `payment_terms` exists — resolving the customer's default term in the accept path would close that. What is NOT built: auto-linking the accepted draft back to the thread (deliberate, see the build log), and drafting from a thread the *reader does not own*, which RLS forbids by design
 - **The per-record History panel is DONE** (2026-08-12) on invoices and bills; journal entries, customers and vendors are a one-line addition each
 - **Products & Services, Terms and Payment Methods are DONE** (2026-08-12) — see the build log for the two deliberate gaps (customer-level default terms have a column and resolution but no control; saved items are invoice-only so far)
-- **Line account pickers are filtered in the UI ONLY.** `createInvoiceDraft`, `createBillDraft` and the recurring create action all accept whatever account id they are given, so nothing but the dropdown stops an invoice line posting revenue to Checking. Worth a server-side type check on all three paths, in one change rather than three
-- **Recurring entries GENERATE ON THEIR OWN** since 2026-08-13 (`/api/cron/recurring`, 6am in the tenant's zone). What is not built: any way to see the sweep's history in the UI — the counts come back to the cron caller and nowhere else
-- **Recurring journals and bills are DONE** (2026-08-12), and so is **folding `recurring_invoices` into them** (2026-08-12) — the module has ONE recurrence mechanism, one list and one engine. **DONE**: `drizzle/0147` dropped `recurring_invoices` and `invoices.recurring_invoice_id`. What is not built for any kind: editing a template, and any cadence other than monthly
+- ~~**Line account pickers are filtered in the UI ONLY.**~~ **Half closed 2026-09-01.** `assertLineAccounts` now refuses a BILL line coded to an account nobody may pick, on create and on update, and that was not tidiness — the client round-tripping a matched line's GRNI coding is what let the same receipts clear GRNI twice (see the build log). **Still open on the other two paths:** `createInvoiceDraft` and the recurring create action accept whatever account id they are given, so nothing but the dropdown stops a recurring invoice template posting revenue to Checking. The bill version is the model to copy
+- **Recurring entries GENERATE ON THEIR OWN** since 2026-08-13 (`/api/cron/recurring`, 6am in the tenant's zone). What is not built: any way to see the sweep's history in the UI — the counts come back to the cron caller and nowhere else. **This is what made the retired-tag decision what it was** (2026-09-01): a template that fails inside the sweep is unnamed on every surface and has no last-error column, so failing closed there is failing silently
+- **`generateRecurringEntries` counts a record it may not have written.** `created` and `posted` increment unconditionally while `postEntry` returns `deduped`, which `createEntry` does check before writing its audit row. Unreachable today — the idempotency key is `recurring:<templateId>:<date>`, `advanceMonthly` only ever moves forward, and nothing else emits that prefix — so it is a latent counter defect rather than a live one. Worth its own small PR, not a rider on something else
+- **Recurring journals and bills are DONE** (2026-08-12), and so is **folding `recurring_invoices` into them** (2026-08-12) — the module has ONE recurrence mechanism, one list and one engine. **DONE**: `drizzle/0147` dropped `recurring_invoices` and `invoices.recurring_invoice_id`. **Templates can be born with a dimension tag since 2026-09-01**, on all three kinds, and the list shows what each one carries. What is not built for any kind: **editing a template** — which is why a tag, like an amount and an account, is fixed at creation — and any cadence other than monthly
 - **Obligation statuses and the MoneyBar are DONE** (2026-08-12) on the invoice and bill LISTS. What is not built: the same language on the detail pages, and a deposits screen for the two money buckets to link into. **That closes the 2026-08-10 QuickBooks review list.**
 - **Sales tax is DONE** (2026-08-13) — a tenant-owned rate list, per-line taxability, one frozen tax block on the invoice, one Cr to the `sales_tax` account at issue, and a per-rate summary that reconciles against the ledger. Deliberately NOT built, each for a reason in the build log: **tax on bills** (US purchase tax is part of the expense; the regime where it matters is VAT/GST, a different posting model), a **customer-level default rate and tax-exempt flag** (the invoice-level control is live; this is the `resolveTaxRate` signature's obvious next argument, ~30 lines), a **one-click remittance** debiting the tax account (a journal or a bill does it today, and the summary shows the balance to remit), **cash-basis tax**, and **splitting a combined rate into components** for a return that wants state and county separately
 - **`drizzle/0147` closed the last two owed contract migrations** (2026-08-16): the `recurring_invoices` DROP and the `total_cents = subtotal_cents + tax_cents` CHECK. They ran together because both must follow this deploy — the DROP because a live build still selecting a dropped column 500s, the CHECK because it could not precede the deploy that started writing `subtotal_cents`. Nothing is owed in that lane now

@@ -178,6 +178,7 @@ export async function generateRecurringEntriesAction(): Promise<
     created: number;
     posted: number;
     deferredToDraft: number;
+    tagsDropped: number;
     errors: number;
   }>
 > {
@@ -191,6 +192,7 @@ export async function generateRecurringEntriesAction(): Promise<
         created: result.created,
         posted: result.posted,
         deferredToDraft: result.deferredToDraft,
+        tagsDropped: result.tagsDropped,
         errors: result.errors.length,
       },
     };

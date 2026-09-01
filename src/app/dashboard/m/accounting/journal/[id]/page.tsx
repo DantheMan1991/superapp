@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -20,8 +20,10 @@ import { DocumentAttachments } from "@/modules/accounting/components/document-at
 import {
   getClosedThrough,
   getSettings,
+  listDimensionMembers,
   listEntities,
 } from "@/modules/accounting/core";
+import { dimensionTypesFrom } from "@/lib/dimension-options";
 import { formatCents, todayInTimezone } from "@/modules/accounting/lib/money";
 import { EntryActions } from "../entry-actions";
 import { EntryEditor } from "../entry-editor";
@@ -75,6 +77,34 @@ export default async function EntryPage({
         ),
       )
       .orderBy(asc(schema.journalLines.lineNo));
+    /**
+     * The tags on those lines. `editEntry` deletes every line and re-inserts
+     * it, so `line_dimensions` cascades away — a tag the form does not carry
+     * through is a tag deleted by the next save, which is the same trap the
+     * invoice and bill builders each had to be shown the compiler to avoid.
+     *
+     * They are read for the READ-ONLY table too. An entry that can be tagged
+     * and cannot be seen to be tagged is half a feature, and this table is how
+     * anybody checks what a correction actually did.
+     */
+    const dims =
+      lines.length === 0
+        ? []
+        : await tx
+            .select({
+              journalLineId: schema.lineDimensions.journalLineId,
+              memberId: schema.lineDimensions.memberId,
+            })
+            .from(schema.lineDimensions)
+            .where(
+              and(
+                eq(schema.lineDimensions.tenantId, ctx.tenant.id),
+                inArray(
+                  schema.lineDimensions.journalLineId,
+                  lines.map((l) => l.id),
+                ),
+              ),
+            );
     const accounts = await tx
       .select({
         id: schema.accounts.id,
@@ -108,7 +138,14 @@ export default async function EntryPage({
     const ownerOf = new Map(registers.map((r) => [r.accountId, r.entityId]));
     return {
       entry,
-      lines,
+      lines: lines.map((l) => ({
+        ...l,
+        dimensionMemberIds: dims
+          .filter((d) => d.journalLineId === l.id)
+          .map((d) => d.memberId),
+      })),
+      // Unfiltered: `dimensionTypesFrom` owns the active-only rule.
+      dimensionMembers: await listDimensionMembers(tx, ctx.tenant.id),
       accounts: accounts.map((a) => ({
         ...a,
         ...(ownerOf.has(a.id) ? { registerEntityId: ownerOf.get(a.id)! } : {}),
@@ -144,6 +181,15 @@ export default async function EntryPage({
     edit === "1" &&
     isOwner &&
     (entry.status === "draft" || (entry.status === "posted" && canMutatePosted));
+
+  /**
+   * What to call each member on screen. Retired ones are in here too — an
+   * entry posted last spring under a line of business since wound up still has
+   * to read as what it was.
+   */
+  const memberName = new Map(
+    data.dimensionMembers.map((m) => [m.id, m.displayName]),
+  );
 
   const totalDebits = lines
     .filter((l) => l.amountCents > 0)
@@ -256,8 +302,16 @@ export default async function EntryPage({
                 accountId: l.accountId,
                 amountCents: l.amountCents,
                 memo: l.memo,
+                dimensionMemberIds: l.dimensionMemberIds,
               })),
             }}
+            /* Plus whatever these lines already hold, retired or not.
+               `postEntry` refuses an inactive member on every write, so without
+               this a retired tag makes the entry unsaveable with nothing on
+               screen to change. */
+            dimensionTypes={dimensionTypesFrom(data.dimensionMembers, {
+              keepIds: lines.flatMap((l) => l.dimensionMemberIds),
+            })}
           />
         </>
       ) : (
@@ -289,6 +343,18 @@ export default async function EntryPage({
                     </TableCell>
                     <TableCell className="hidden text-xs text-muted-foreground sm:table-cell">
                       {l.memo}
+                      {l.dimensionMemberIds.length > 0 && (
+                        <span className="ml-2 inline-flex flex-wrap gap-1 align-middle">
+                          {l.dimensionMemberIds.map((id) => (
+                            <span
+                              key={id}
+                              className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-foreground"
+                            >
+                              {memberName.get(id) ?? "—"}
+                            </span>
+                          ))}
+                        </span>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

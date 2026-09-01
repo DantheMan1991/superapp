@@ -4,7 +4,12 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
 import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
-import { getDefaultEntityId, listEntities } from "@/modules/accounting/core";
+import {
+  getDefaultEntityId,
+  listDimensionMembers,
+  listEntities,
+} from "@/modules/accounting/core";
+import { dimensionTypesFrom } from "@/lib/dimension-options";
 import { todayInTimezone } from "@/modules/accounting/lib/money";
 import { EntryEditor } from "../entry-editor";
 
@@ -14,9 +19,8 @@ export default async function NewEntryPage() {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
 
-  const { accounts, today, entities, defaultEntityId } = await withTenant(
-    ctx.tenant.id,
-    async (tx) => {
+  const { accounts, today, entities, defaultEntityId, dimensionMembers } =
+    await withTenant(ctx.tenant.id, async (tx) => {
       const accounts = await tx
         .select({
           id: schema.accounts.id,
@@ -48,9 +52,10 @@ export default async function NewEntryPage() {
         today: todayInTimezone(ctx.tenant.timezone),
         entities: await listEntities(tx, ctx.tenant.id),
         defaultEntityId: await getDefaultEntityId(tx, ctx.tenant.id),
+        // Unfiltered: `dimensionTypesFrom` owns the active-only rule.
+        dimensionMembers: await listDimensionMembers(tx, ctx.tenant.id),
       };
-    },
-  );
+    });
 
   return (
     <div className="space-y-6">
@@ -65,6 +70,7 @@ export default async function NewEntryPage() {
         defaultEntityId={defaultEntityId}
         canPost={ctx.role === "owner"}
         today={today}
+        dimensionTypes={dimensionTypesFrom(dimensionMembers)}
       />
     </div>
   );

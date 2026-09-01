@@ -30,6 +30,7 @@ import {
 import { agingBucketIndex, buildArAging } from "../src/modules/accounting/invoicing/aging";
 import {
   assertTemplateReferences,
+  createRecurringEntry,
   generateRecurringEntries,
 } from "../src/modules/accounting/recurring/generate";
 import {
@@ -621,6 +622,22 @@ d("invoicing (DB)", () => {
           expectedVersion: invoice.version,
         }),
       );
+    });
+
+    it("checks every line, and the same bad account twice is refused once", async () => {
+      // One good line does not launder a bad one, and `distinct` dedupe at the
+      // top of the check does not skip a repeated offender.
+      const sales = await accountId("4000");
+      const grni = await accountId("2050");
+      await expect(
+        withTenant(tenantId, (tx) =>
+          createInvoiceDraft(tx, owner, {
+            customerId,
+            issueDate: "2026-06-20",
+            lines: [line(1_000, sales), line(2_000, grni), line(3_000, grni)],
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "ACCOUNT_NOT_CODABLE" });
     });
 
     it("guards the edit path too, since it re-inserts every line", async () => {
@@ -1268,6 +1285,37 @@ d("invoicing (DB)", () => {
             }),
           ),
         ).rejects.toMatchObject({ code: "ACCOUNT_NOT_FOUND" });
+
+        // Inactive is the OTHER thing a journal template may not name, and the
+        // branch a future "route journals through the floor too" edit would
+        // silently change.
+        const other = await accountId("4900");
+        await withTenant(tenantId, (tx) =>
+          tx
+            .update(schema.accounts)
+            .set({ isActive: false })
+            .where(eq(schema.accounts.id, other)),
+        );
+        try {
+          await expect(
+            withTenant(tenantId, (tx) =>
+              assertTemplateReferences(tx, tenantId, {
+                kind: "journal",
+                lines: [
+                  { accountId: exp, amountCents: 500 },
+                  { accountId: other, amountCents: -500 },
+                ],
+              }),
+            ),
+          ).rejects.toMatchObject({ code: "ACCOUNT_INACTIVE" });
+        } finally {
+          await withTenant(tenantId, (tx) =>
+            tx
+              .update(schema.accounts)
+              .set({ isActive: true })
+              .where(eq(schema.accounts.id, other)),
+          );
+        }
       });
 
       it("still fails CLOSED at generation for a template that went bad after it was saved", async () => {
@@ -1301,6 +1349,16 @@ d("invoicing (DB)", () => {
           },
         });
         const result = await generateRecurringEntries(owner);
+        // Deactivated BEFORE any assertion can throw past it: a failed
+        // template keeps its `next_run_date`, so left active it would stay due
+        // and the tenant-wide counter test that follows would go red for this
+        // test's failure rather than its own.
+        await withTenant(tenantId, (tx) =>
+          tx
+            .update(schema.recurringEntries)
+            .set({ isActive: false })
+            .where(eq(schema.recurringEntries.id, template.id)),
+        );
         const failed = result.errors.find((e) => e.recurringEntryId === template.id);
         expect(failed?.error).toBe("ACCOUNT_NOT_CODABLE");
         const drafts = await withTenant(tenantId, (tx) =>
@@ -1312,12 +1370,65 @@ d("invoicing (DB)", () => {
           }),
         );
         expect(drafts).toHaveLength(0);
-        // Leave nothing due behind for the counter test that follows.
+      });
+
+      it("THE OP REFUSES BEFORE THE INSERT — the line the change is about", async () => {
+        /**
+         * `createRecurringEntryAction` is behind `gate()`; no test can call it.
+         * The validated insert is now an op so this can exist. Delete the
+         * `assertTemplateReferences` call from `createRecurringEntry` and this
+         * is the test that goes red.
+         */
+        const grni = await accountId("2050");
+        const vendorId = await newVendor("Refused at save");
+        await expect(
+          withTenant(tenantId, (tx) =>
+            createRecurringEntry(tx, owner, {
+              name: "Refused at save",
+              vendorId,
+              dayOfMonth: 4,
+              nextRunDate: "2027-06-04",
+              template: {
+                kind: "bill",
+                dueInDays: 30,
+                lines: [{ description: "Feed", amountCents: 10_000, accountId: grni }],
+              },
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "ACCOUNT_NOT_CODABLE" });
+        const saved = await withTenant(tenantId, (tx) =>
+          tx.query.recurringEntries.findMany({
+            where: and(
+              eq(schema.recurringEntries.tenantId, tenantId),
+              eq(schema.recurringEntries.name, "Refused at save"),
+            ),
+          }),
+        );
+        expect(saved).toHaveLength(0);
+
+        // And the same op saves a good one, so the refusal is the guard and
+        // not the op being broken.
+        const ok = await withTenant(tenantId, async (tx) =>
+          createRecurringEntry(tx, owner, {
+            name: "Saved fine",
+            vendorId,
+            dayOfMonth: 4,
+            nextRunDate: "2027-06-04",
+            template: {
+              kind: "bill",
+              dueInDays: 30,
+              lines: [
+                { description: "Feed", amountCents: 10_000, accountId: await accountId("5000") },
+              ],
+            },
+          }),
+        );
+        expect(ok.kind).toBe("bill");
         await withTenant(tenantId, (tx) =>
           tx
             .update(schema.recurringEntries)
             .set({ isActive: false })
-            .where(eq(schema.recurringEntries.id, template.id)),
+            .where(eq(schema.recurringEntries.id, ok.id)),
         );
       });
     });

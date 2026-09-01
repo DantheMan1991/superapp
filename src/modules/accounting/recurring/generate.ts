@@ -161,6 +161,54 @@ export async function assertTemplateReferences(
   await assertCodableAccounts(tx, tenantId, accountIds);
 }
 
+/** What the create action hands the op — the Zod-proved shape, structurally. */
+export interface NewRecurringEntryInput {
+  name: string;
+  vendorId?: string | null;
+  customerId?: string | null;
+  dayOfMonth: number;
+  nextRunDate: string;
+  autoPost?: boolean;
+  template: RecurringEntryTemplate;
+}
+
+/**
+ * **SAVE A TEMPLATE, HAVING PROVED ITS ACCOUNTS FIRST.**
+ *
+ * Lifted out of `createRecurringEntryAction` on the day the account check was
+ * added there, because an action sits behind `gate()` and Clerk and no test can
+ * reach it — so nothing could prove the one line the change was about. An op
+ * is the shape every other write in this module already has, and this is the
+ * op. The action keeps what an action owns: the gate, the owner check, the
+ * Zod, and the audit row.
+ */
+export async function createRecurringEntry(
+  tx: Tx,
+  ctx: LedgerCtx,
+  input: NewRecurringEntryInput,
+): Promise<RecurringEntry> {
+  // Zod proved the SHAPE; this proves the ids name accounts a line may
+  // actually be coded to, so a bad template is refused here with a sentence
+  // rather than failing at 6am with nothing to show for it.
+  await assertTemplateReferences(tx, ctx.tenantId, input.template);
+  const [created] = await tx
+    .insert(schema.recurringEntries)
+    .values({
+      tenantId: ctx.tenantId,
+      kind: input.template.kind,
+      name: input.name,
+      vendorId: input.vendorId ?? null,
+      customerId: input.customerId ?? null,
+      template: input.template,
+      dayOfMonth: input.dayOfMonth,
+      nextRunDate: input.nextRunDate,
+      autoPost: input.autoPost === true,
+      createdByClerkUserId: ctx.userId,
+    })
+    .returning();
+  return created;
+}
+
 /**
  * **A RETIRED TAG IS DROPPED, NOT A REASON TO REFUSE THE ENTRY.**
  *

@@ -19,7 +19,7 @@ import {
   recurringEntryTemplateSchema,
 } from "./template";
 import {
-  assertTemplateReferences,
+  createRecurringEntry,
   generateRecurringEntries,
 } from "./generate";
 
@@ -102,26 +102,8 @@ export async function createRecurringEntryAction(
   try {
     requireOwnerRole(ctx);
     const row = await withTenant(ctx.tenantId, async (tx) => {
-      // The accounts, checked where somebody is looking. Zod above proved the
-      // SHAPE; this proves the ids name accounts a line may actually be coded
-      // to, so a bad template is refused here with a sentence rather than
-      // failing at 6am with nothing to show for it.
-      await assertTemplateReferences(tx, ctx.tenantId, parsed.data.template);
-      const [created] = await tx
-        .insert(schema.recurringEntries)
-        .values({
-          tenantId: ctx.tenantId,
-          kind: parsed.data.template.kind,
-          name: parsed.data.name,
-          vendorId: parsed.data.vendorId ?? null,
-          customerId: parsed.data.customerId ?? null,
-          template: parsed.data.template,
-          dayOfMonth: parsed.data.dayOfMonth,
-          nextRunDate: parsed.data.nextRunDate,
-          autoPost: parsed.data.autoPost === true,
-          createdByClerkUserId: ctx.userId,
-        })
-        .returning();
+      // The account check lives in the op, where a test can reach it.
+      const created = await createRecurringEntry(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: "ledger.recurring_created",
         tenantId: ctx.tenantId,

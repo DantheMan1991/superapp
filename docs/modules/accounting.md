@@ -77,6 +77,17 @@ four tests red — the register, GRNI and AR refusals, the missing and inactive
 refusals, and the edit-path refusal — while the liability case stays green,
 which is what proves it was asserting the floor and not the guard.
 
+**An adversarial pass over the diff found two things, both mine.** The first
+version of this entry, and a docblock in `coa.ts`, claimed
+`assertCodableAccounts` was called "by recurring templates of every kind" and
+"by the bill path" — neither true, and contradicted by the same PR's own
+lower docblock. Fixed above. And the action's call to `assertTemplateReferences`
+— the line the whole change was about on the recurring side — was unprovable,
+because an action sits behind `gate()` and no test can reach it. The validated
+insert is now `createRecurringEntry`, an op in the shape every other write in
+the module has, and the test that names GRNI on a bill template through it is
+the one that would go red if the call were deleted.
+
 ### 2026-09-01 — The count is what was written (`claude/the-count-is-what-was-written`)
 
 **A latent counter defect, fixed on its own rather than as a rider**, which is
@@ -2866,7 +2877,7 @@ compiled-and-tested, not seen.
 - **Drafting from an email thread is DONE** (2026-08-12) — both directions, with verified citations, and **proven against the real API** (see the build log; `RUN_LIVE_THREAD_DRAFT=1`). Now worth doing: the drafter sets no due date because it does not know `payment_terms` exists — resolving the customer's default term in the accept path would close that. What is NOT built: auto-linking the accepted draft back to the thread (deliberate, see the build log), and drafting from a thread the *reader does not own*, which RLS forbids by design
 - **The per-record History panel is DONE** (2026-08-12) on invoices and bills; journal entries, customers and vendors are a one-line addition each
 - **Products & Services, Terms and Payment Methods are DONE** (2026-08-12) — see the build log for the two deliberate gaps (customer-level default terms have a column and resolution but no control; saved items are invoice-only so far)
-- ~~**Line account pickers are filtered in the UI ONLY.**~~ **Closed 2026-09-01, in two halves the same day.** The bill half came first, because a matched line's GRNI coding round-tripping through the form is what let the same receipts clear GRNI twice. The invoice and recurring halves followed once that PR's own build log admitted they were still open: `assertCodableAccounts` in core is now the one server-side rule, called by invoice lines, by every recurring template at the moment it is saved, and by the bill path through its own `assertLineAccounts`. See the build log for the two boundaries that had to be stated — a journal template may still name any account, and an invoice line may credit a liability
+- ~~**Line account pickers are filtered in the UI ONLY.**~~ **Closed 2026-09-01, in two halves the same day.** The bill half came first, because a matched line's GRNI coding round-tripping through the form is what let the same receipts clear GRNI twice. The invoice and recurring halves followed once that PR's own build log admitted they were still open: `assertCodableAccounts` in core is the shared server-side rule, called by invoice lines and by recurring **bill and invoice** templates at the moment they are saved. Bill lines enforce the same rule in their own `assertLineAccounts`, which does not call it because it needs the one exception a stock match requires; a journal template, like the hand-written journal, is checked for existence and activity only. See the build log for the two boundaries that had to be stated — a journal may still name any account, and an invoice line may credit a liability
 - **Recurring entries GENERATE ON THEIR OWN** since 2026-08-13 (`/api/cron/recurring`, 6am in the tenant's zone). What is not built: any way to see the sweep's history in the UI — the counts come back to the cron caller and nowhere else. **This is what made the retired-tag decision what it was** (2026-09-01): a template that fails inside the sweep is unnamed on every surface and has no last-error column, so failing closed there is failing silently
 - ~~**`generateRecurringEntries` counts a record it may not have written.**~~ **Closed 2026-09-01**, in its own PR as it deserved. `created`, `posted` and the deferral now all hang off `PostResult.deduped`, and `periodsWalked` carries the months the loop walked so a gap between the two is visible in the sweep's JSON. It was never reachable through the schedule; it is fixed because a count whose correctness rests on an unreachability argument goes wrong the first time somebody makes it reachable
 - **Recurring journals and bills are DONE** (2026-08-12), and so is **folding `recurring_invoices` into them** (2026-08-12) — the module has ONE recurrence mechanism, one list and one engine. **DONE**: `drizzle/0147` dropped `recurring_invoices` and `invoices.recurring_invoice_id`. **Templates can be born with a dimension tag since 2026-09-01**, on all three kinds, and the list shows what each one carries. What is not built for any kind: **editing a template** — which is why a tag, like an amount and an account, is fixed at creation — and any cadence other than monthly

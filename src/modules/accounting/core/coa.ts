@@ -273,14 +273,16 @@ export function isCodableAccount(
    * same time. It was not, because GRNI was the account somebody had just been
    * bitten by.
    *
-   * **ENFORCED ON EVERY WRITE PATH SINCE 2026-09-01, not just in the
-   * pickers.** `assertCodableAccounts` below is the server half, and it is
-   * called by invoice lines, by recurring templates of every kind at the moment
-   * they are saved, and — through its own `assertLineAccounts`, which adds the
-   * one exception a match needs — by bill lines. The picker filter was the
-   * whole rule for three weeks, and what that cost was a matched bill line's
-   * GRNI coding round-tripping through the form to clear the same receipts
-   * twice.
+   * **ENFORCED ON EVERY DOCUMENT-LINE WRITE PATH SINCE 2026-09-01, not just
+   * in the pickers.** `assertCodableAccounts` below is the shared server half,
+   * called by invoice lines and by recurring BILL and INVOICE templates at the
+   * moment they are saved. Bill lines enforce the same rule in their own
+   * `assertLineAccounts`, which does not call this because it needs the one
+   * exception a stock match requires. A journal — hand-written or a recurring
+   * template — is checked for existence and activity only, per the note above.
+   * The picker filter was the whole rule for three weeks, and what that cost
+   * was a matched bill line's GRNI coding round-tripping through the form to
+   * clear the same receipts twice.
    */
   if (account.subtype === "inventory") return false;
   /**

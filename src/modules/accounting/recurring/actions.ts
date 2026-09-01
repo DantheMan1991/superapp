@@ -18,7 +18,10 @@ import {
   journalTemplateBalances,
   recurringEntryTemplateSchema,
 } from "./template";
-import { generateRecurringEntries } from "./generate";
+import {
+  createRecurringEntry,
+  generateRecurringEntries,
+} from "./generate";
 
 /**
  * Owner actions for recurring journals and bills.
@@ -99,21 +102,8 @@ export async function createRecurringEntryAction(
   try {
     requireOwnerRole(ctx);
     const row = await withTenant(ctx.tenantId, async (tx) => {
-      const [created] = await tx
-        .insert(schema.recurringEntries)
-        .values({
-          tenantId: ctx.tenantId,
-          kind: parsed.data.template.kind,
-          name: parsed.data.name,
-          vendorId: parsed.data.vendorId ?? null,
-          customerId: parsed.data.customerId ?? null,
-          template: parsed.data.template,
-          dayOfMonth: parsed.data.dayOfMonth,
-          nextRunDate: parsed.data.nextRunDate,
-          autoPost: parsed.data.autoPost === true,
-          createdByClerkUserId: ctx.userId,
-        })
-        .returning();
+      // The account check lives in the op, where a test can reach it.
+      const created = await createRecurringEntry(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: "ledger.recurring_created",
         tenantId: ctx.tenantId,

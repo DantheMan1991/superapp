@@ -75,6 +75,7 @@ export {
   NORMAL_BALANCE,
   createAccount,
   deactivateAccount,
+  assertCodableAccounts,
   isCodableAccount,
   listAccounts,
   updateAccount,

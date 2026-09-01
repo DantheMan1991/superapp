@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { Account } from "@/db/schema";
 import { LedgerError } from "./errors";
@@ -273,13 +273,16 @@ export function isCodableAccount(
    * same time. It was not, because GRNI was the account somebody had just been
    * bitten by.
    *
-   * **Existing lines are unaffected, and that is now a rule rather than a
-   * side effect.** This filters the PICKERS, and `assertLineAccounts` refuses a
-   * bill line that is coded to one of these accounts unless it is an existing
-   * line arriving back unchanged — so the bill edit page can keep re-adding
-   * whatever accounts a bill already uses (the fix that had to be made for GRNI
-   * when a matched line rendered with an empty account box) without that also
-   * being a way to hand-code to them.
+   * **ENFORCED ON EVERY DOCUMENT-LINE WRITE PATH SINCE 2026-09-01, not just
+   * in the pickers.** `assertCodableAccounts` below is the shared server half,
+   * called by invoice lines and by recurring BILL and INVOICE templates at the
+   * moment they are saved. Bill lines enforce the same rule in their own
+   * `assertLineAccounts`, which does not call this because it needs the one
+   * exception a stock match requires. A journal — hand-written or a recurring
+   * template — is checked for existence and activity only, per the note above.
+   * The picker filter was the whole rule for three weeks, and what that cost
+   * was a matched bill line's GRNI coding round-tripping through the form to
+   * clear the same receipts twice.
    */
   if (account.subtype === "inventory") return false;
   /**
@@ -298,4 +301,69 @@ export function isCodableAccount(
     return false;
   }
   return true;
+}
+
+/**
+ * **THE SERVER HALF OF `isCodableAccount`.** Every id must name an account that
+ * exists, is active, and may be picked by hand — or the write is refused with
+ * the first thing wrong about it.
+ *
+ * **WHY THIS EXISTS AS ONE FUNCTION.** For three weeks the codable rule lived
+ * only in the pickers. The bill path got a server check on 2026-09-01 because
+ * the form round-tripped a matched line's GRNI coding and cleared the same
+ * receipts twice; `docs/modules/accounting.md` then noted, in the same entry,
+ * that `createInvoiceDraft` and the recurring create action still accepted
+ * whatever account id they were handed — so nothing but a dropdown stood
+ * between a recurring invoice template and posting revenue to Checking, every
+ * month, unattended. Three call sites each carrying their own copy of the
+ * account/register load is how one of them drifts, so the load lives here and
+ * the callers pass ids.
+ *
+ * **THE FLOOR, NOT THE PICKER.** An invoice picker offers income accounts; a
+ * bill picker offers everything codable. This checks the FLOOR: the accounts
+ * where a line is definitely wrong — a register, GRNI, Inventory, 2060, the
+ * control accounts. It does NOT insist an invoice line be income-typed,
+ * because invoicing a customer deposit legitimately credits Unearned Revenue,
+ * and a server rule stricter than the accounting would refuse a right entry.
+ *
+ * **NOT APPLIED TO A JOURNAL, of any kind** — `isCodableAccount`'s own comment
+ * says why. A recurring journal template goes through the exists-and-active
+ * check only, the same freedom the hand-written journal has.
+ *
+ * The bill path's `assertLineAccounts` does the same three checks and adds the
+ * one exception a match needs (an existing line arriving back unchanged). It
+ * is not routed through here, because that exception is the reason it exists.
+ */
+export async function assertCodableAccounts(
+  tx: Tx,
+  tenantId: string,
+  accountIds: readonly string[],
+): Promise<void> {
+  const distinct = [...new Set(accountIds)];
+  if (distinct.length === 0) return;
+  const accounts = await tx.query.accounts.findMany({
+    where: and(
+      eq(schema.accounts.tenantId, tenantId),
+      inArray(schema.accounts.id, distinct),
+    ),
+  });
+  const registers = await tx
+    .select({ accountId: schema.bankAccounts.accountId })
+    .from(schema.bankAccounts)
+    .where(eq(schema.bankAccounts.tenantId, tenantId));
+  const registerIds = new Set(registers.map((r) => r.accountId));
+  const byId = new Map(accounts.map((a) => [a.id, a]));
+  for (const id of distinct) {
+    const account = byId.get(id);
+    if (!account) throw new LedgerError("ACCOUNT_NOT_FOUND", `account ${id}`);
+    if (!account.isActive) {
+      throw new LedgerError("ACCOUNT_INACTIVE", `account ${account.code}`);
+    }
+    if (!isCodableAccount(account, registerIds)) {
+      throw new LedgerError(
+        "ACCOUNT_NOT_CODABLE",
+        `account ${account.code} may not be picked by hand`,
+      );
+    }
+  }
 }

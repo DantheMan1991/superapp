@@ -3,7 +3,12 @@ import { and, asc, eq, inArray, lte } from "drizzle-orm";
 import { schema, withTenant, type Tx } from "@/db";
 import type { RecurringEntry } from "@/db/schema";
 import { getTenantTimezone } from "@/lib/tenant-timezone";
-import { LedgerError, requireOwnerRole, type LedgerCtx } from "../core";
+import {
+  LedgerError,
+  assertCodableAccounts,
+  requireOwnerRole,
+  type LedgerCtx,
+} from "../core";
 import { getDefaultEntityId, listEntities } from "../core/entities";
 import { postEntry } from "../core/posting";
 import { createBillDraft } from "../payables/bills";
@@ -102,47 +107,106 @@ export async function listRecurringEntries(
 }
 
 /**
- * Prove the template still points at things that exist and are usable.
+ * Prove the template points at accounts that exist, are active, and — for a
+ * bill or an invoice — may be picked by hand.
+ *
+ * **CALLED AT SAVE AND AGAIN AT GENERATION, and the save-time call is the one
+ * that was missing.** Until 2026-09-01 `createRecurringEntryAction` validated
+ * the template's SHAPE and nothing else: any uuid passed as an account, and the
+ * first anybody heard of it was an error row in a 6am sweep that no screen
+ * shows and no column keeps. That is the failure mode `journalTemplateBalances`
+ * was written to avoid — *"the same rule enforced where somebody is looking at
+ * it"* — and the account rule gets the same treatment now.
  *
  * Re-checked at generation because a template saved in March can reference an
- * account somebody deactivated in June. Failing the template with a reported
- * error is right; silently posting to a dead account is not.
+ * account somebody deactivated in June, or turned into a bank register in
+ * July. Failing the template with a reported error is right; silently posting
+ * to a dead account, or revenue to Checking, is not.
+ *
+ * **A JOURNAL TEMPLATE MAY NAME ANY ACCOUNT**, exactly as the hand-written
+ * journal may — `isCodableAccount` says so and why. It gets the exists-and-
+ * active check only.
  */
-async function assertTemplateReferences(
+export async function assertTemplateReferences(
   tx: Tx,
   tenantId: string,
   template: RecurringEntryTemplate,
 ): Promise<void> {
-  // Each kind names its account differently: a journal line IS an account, an
-  // invoice line points at income, and a bill line may be uncoded (P9).
-  const accountIds =
-    template.kind === "journal"
-      ? template.lines.map((l) => l.accountId)
-      : template.kind === "invoice"
-        ? template.lines.map((l) => l.incomeAccountId)
-        : template.lines
-            .map((l) => l.accountId)
-            .filter((id): id is string => id !== null && id !== undefined);
-  if (accountIds.length === 0) return;
-
-  const found = await tx
-    .select({ id: schema.accounts.id, isActive: schema.accounts.isActive })
-    .from(schema.accounts)
-    .where(
-      and(
-        eq(schema.accounts.tenantId, tenantId),
-        inArray(schema.accounts.id, [...new Set(accountIds)]),
-      ),
-    );
-  const usable = new Set(found.filter((a) => a.isActive).map((a) => a.id));
-  for (const id of accountIds) {
-    if (!usable.has(id)) {
-      throw new LedgerError(
-        "ACCOUNT_INACTIVE",
-        "the template references an account that is missing or inactive",
+  if (template.kind === "journal") {
+    const accountIds = [...new Set(template.lines.map((l) => l.accountId))];
+    const found = await tx
+      .select({ id: schema.accounts.id, isActive: schema.accounts.isActive })
+      .from(schema.accounts)
+      .where(
+        and(
+          eq(schema.accounts.tenantId, tenantId),
+          inArray(schema.accounts.id, accountIds),
+        ),
       );
+    const byId = new Map(found.map((a) => [a.id, a]));
+    for (const id of accountIds) {
+      const row = byId.get(id);
+      if (!row) throw new LedgerError("ACCOUNT_NOT_FOUND", `account ${id}`);
+      if (!row.isActive) throw new LedgerError("ACCOUNT_INACTIVE", `account ${id}`);
     }
+    return;
   }
+  // An invoice line points at income; a bill line may be uncoded (P9).
+  const accountIds =
+    template.kind === "invoice"
+      ? template.lines.map((l) => l.incomeAccountId)
+      : template.lines
+          .map((l) => l.accountId)
+          .filter((id): id is string => id !== null && id !== undefined);
+  await assertCodableAccounts(tx, tenantId, accountIds);
+}
+
+/** What the create action hands the op — the Zod-proved shape, structurally. */
+export interface NewRecurringEntryInput {
+  name: string;
+  vendorId?: string | null;
+  customerId?: string | null;
+  dayOfMonth: number;
+  nextRunDate: string;
+  autoPost?: boolean;
+  template: RecurringEntryTemplate;
+}
+
+/**
+ * **SAVE A TEMPLATE, HAVING PROVED ITS ACCOUNTS FIRST.**
+ *
+ * Lifted out of `createRecurringEntryAction` on the day the account check was
+ * added there, because an action sits behind `gate()` and Clerk and no test can
+ * reach it — so nothing could prove the one line the change was about. An op
+ * is the shape every other write in this module already has, and this is the
+ * op. The action keeps what an action owns: the gate, the owner check, the
+ * Zod, and the audit row.
+ */
+export async function createRecurringEntry(
+  tx: Tx,
+  ctx: LedgerCtx,
+  input: NewRecurringEntryInput,
+): Promise<RecurringEntry> {
+  // Zod proved the SHAPE; this proves the ids name accounts a line may
+  // actually be coded to, so a bad template is refused here with a sentence
+  // rather than failing at 6am with nothing to show for it.
+  await assertTemplateReferences(tx, ctx.tenantId, input.template);
+  const [created] = await tx
+    .insert(schema.recurringEntries)
+    .values({
+      tenantId: ctx.tenantId,
+      kind: input.template.kind,
+      name: input.name,
+      vendorId: input.vendorId ?? null,
+      customerId: input.customerId ?? null,
+      template: input.template,
+      dayOfMonth: input.dayOfMonth,
+      nextRunDate: input.nextRunDate,
+      autoPost: input.autoPost === true,
+      createdByClerkUserId: ctx.userId,
+    })
+    .returning();
+  return created;
 }
 
 /**

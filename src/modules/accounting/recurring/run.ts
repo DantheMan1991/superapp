@@ -47,6 +47,8 @@ export interface RecurringRunResult {
   posted: number;
   /** Auto-posting journals left as drafts because their period is closed. */
   deferredToDraft: number;
+  /** Tags dropped because the member they named has since been retired. */
+  tagsDropped: number;
   /** Templates that failed. Counted, never named — S9. */
   templateErrors: number;
   /** Tenants whose whole run threw. */
@@ -90,6 +92,7 @@ export async function runRecurringEntries(
     created: 0,
     posted: 0,
     deferredToDraft: 0,
+    tagsDropped: 0,
     templateErrors: 0,
     tenantErrors: 0,
   };
@@ -122,6 +125,7 @@ export async function runRecurringEntries(
       result.created += run.created;
       result.posted += run.posted;
       result.deferredToDraft += run.deferredToDraft;
+      result.tagsDropped += run.tagsDropped;
       result.templateErrors += run.errors.length;
     } catch (err) {
       // One tenant's failure must not stop the others, exactly as one

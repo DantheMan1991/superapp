@@ -30,6 +30,10 @@ import {
 } from "@/modules/accounting/recurring/actions";
 import { journalTemplateImbalanceCents } from "@/modules/accounting/recurring/template";
 import {
+  DimensionTags,
+  type DimensionTypeOption,
+} from "@/components/app/dimension-tags";
+import {
   formatCentsSigned,
   parseMoneyToCents,
 } from "@/modules/accounting/lib/money";
@@ -53,6 +57,17 @@ interface InvoiceRow {
   quantity: string;
   unitPrice: string;
   incomeAccountId: string;
+  /**
+   * **REQUIRED, NOT OPTIONAL** — as compiler pressure, not as protection.
+   *
+   * The round-trip rule that made this required on the invoice, bill and
+   * journal builders has NO TARGET here: nothing ever reads a template back
+   * into this form, because there is no update action. What the required field
+   * still buys is that `submit()` cannot construct a line without answering
+   * the question, on all three kinds, which is how the previous three PRs
+   * found the construction sites they had missed.
+   */
+  dimensionMemberIds: string[];
 }
 
 const emptyInvoiceRow = (): InvoiceRow => ({
@@ -61,6 +76,7 @@ const emptyInvoiceRow = (): InvoiceRow => ({
   quantity: "1",
   unitPrice: "",
   incomeAccountId: "",
+  dimensionMemberIds: [],
 });
 
 interface JournalRow {
@@ -68,6 +84,8 @@ interface JournalRow {
   accountId: string;
   amount: string;
   credit: boolean;
+  /** See `InvoiceRow.dimensionMemberIds`. */
+  dimensionMemberIds: string[];
 }
 
 const emptyRow = (accountId: string): JournalRow => ({
@@ -75,6 +93,7 @@ const emptyRow = (accountId: string): JournalRow => ({
   accountId,
   amount: "",
   credit: false,
+  dimensionMemberIds: [],
 });
 
 export function GenerateRecurringEntriesButton() {
@@ -88,7 +107,8 @@ export function GenerateRecurringEntriesButton() {
         toast.error(result.error);
         return;
       }
-      const { created, posted, deferredToDraft, errors } = result.data!;
+      const { created, posted, deferredToDraft, tagsDropped, errors } =
+        result.data!;
       if (created === 0 && errors === 0) {
         toast.success("Nothing was due");
       } else {
@@ -99,6 +119,13 @@ export function GenerateRecurringEntriesButton() {
               [
                 deferredToDraft > 0
                   ? `${deferredToDraft} left as drafts — their period is closed`
+                  : "",
+                // Named here because nothing else ever will: there is no
+                // last-error column, the sweep reports counts only (S9), and
+                // the list's "template needs fixing" badge is a SHAPE check
+                // that a retired tag does not trip.
+                tagsDropped > 0
+                  ? `${tagsDropped} tag${tagsDropped === 1 ? "" : "s"} dropped — the member was retired`
                   : "",
                 errors > 0 ? `${errors} template${errors === 1 ? "" : "s"} failed` : "",
               ]
@@ -167,6 +194,7 @@ export function AddRecurringEntryButton({
   vendors,
   customers,
   today,
+  dimensionTypes = [],
 }: {
   /** A journal may touch anything. */
   journalAccounts: AccountOption[];
@@ -177,6 +205,17 @@ export function AddRecurringEntryButton({
   vendors: PartyOption[];
   customers: PartyOption[];
   today: string;
+  /**
+   * Active members grouped by type, from `dimensionTypesFrom`. Empty renders no
+   * tag control at all.
+   *
+   * **NO `keepIds`, unlike every other surface that passes this.** The three
+   * that do are re-opening a stored record and have to offer a retired member
+   * the record already holds, so it can be taken off. This dialog only ever
+   * CREATES — so every member it offers is one somebody is choosing today, and
+   * a retired one has no business being among them.
+   */
+  dimensionTypes?: DimensionTypeOption[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -196,6 +235,16 @@ export function AddRecurringEntryButton({
   const [billDesc, setBillDesc] = useState("");
   const [billAmount, setBillAmount] = useState("");
   const [billAccountId, setBillAccountId] = useState("");
+  /**
+   * **ONE TAG FOR THE WHOLE BILL TEMPLATE, and that is the shape, not a
+   * shortcut.** This dialog builds a bill template of exactly one line
+   * (`submit()` below), so per-line and per-template are the same object here.
+   * Making it an array of rows to get a per-line tag would be a bill-template
+   * feature — "a recurring bill can have more than one line" — riding along in
+   * a tagging change, and it would land a new row grid inside a dialog that has
+   * no horizontal overflow to give it.
+   */
+  const [billTags, setBillTags] = useState<string[]>([]);
   const [invoiceRows, setInvoiceRows] = useState<InvoiceRow[]>([
     emptyInvoiceRow(),
   ]);
@@ -226,6 +275,11 @@ export function AddRecurringEntryButton({
             lines: usable.map((p) => ({
               accountId: p.row.accountId,
               amountCents: p.cents!,
+              // Undefined rather than an empty array: the field is optional in
+              // the template schema, and an absent one stores nothing.
+              ...(p.row.dimensionMemberIds.length
+                ? { dimensionMemberIds: p.row.dimensionMemberIds }
+                : {}),
             })),
           }
         : kind === "invoice"
@@ -237,6 +291,9 @@ export function AddRecurringEntryButton({
                 quantity: r.quantity.trim(),
                 unitPriceCents: parseMoneyToCents(r.unitPrice) ?? 0,
                 incomeAccountId: r.incomeAccountId,
+                ...(r.dimensionMemberIds.length
+                  ? { dimensionMemberIds: r.dimensionMemberIds }
+                  : {}),
               })),
             }
           : {
@@ -247,6 +304,9 @@ export function AddRecurringEntryButton({
                   description: billDesc.trim(),
                   amountCents: parseMoneyToCents(billAmount) ?? 0,
                   accountId: billAccountId || null,
+                  ...(billTags.length
+                    ? { dimensionMemberIds: billTags }
+                    : {}),
                 },
               ],
             };
@@ -393,7 +453,8 @@ export function AddRecurringEntryButton({
                   </span>
                 </div>
                 {rows.map((row, i) => (
-                  <div key={row.key} className="flex items-end gap-2">
+                  <div key={row.key} className="space-y-1">
+                  <div className="flex items-end gap-2">
                     <div className="min-w-0 flex-1 space-y-1">
                       <Select
                         value={row.accountId}
@@ -450,6 +511,29 @@ export function AddRecurringEntryButton({
                       <Trash2 className="size-4" />
                     </Button>
                   </div>
+                  {/*
+                    A SUB-ROW, not a column. The dialog is `sm:max-w-2xl` with
+                    vertical scroll only — unlike the three one-off builders it
+                    has no `overflow-x-auto` to widen into, so a tag column
+                    would have to be paid for by re-proportioning the row for
+                    every tenant, including the ones with no dimensions who see
+                    nothing here at all.
+                  */}
+                  {dimensionTypes.length > 0 && (
+                    <div className="pl-1">
+                      <DimensionTags
+                        types={dimensionTypes}
+                        value={row.dimensionMemberIds}
+                        onValue={(v) => {
+                          const next = [...rows];
+                          next[i] = { ...row, dimensionMemberIds: v };
+                          setRows(next);
+                        }}
+                        triggerClassName="h-7 px-2 text-xs font-normal text-muted-foreground"
+                      />
+                    </div>
+                  )}
+                  </div>
                 ))}
                 <Button
                   type="button"
@@ -500,7 +584,8 @@ export function AddRecurringEntryButton({
                 <div className="space-y-2">
                   <Label>Lines</Label>
                   {invoiceRows.map((row, i) => (
-                    <div key={row.key} className="grid gap-2 sm:grid-cols-12">
+                    <div key={row.key} className="space-y-1">
+                    <div className="grid gap-2 sm:grid-cols-12">
                       <Input
                         className="sm:col-span-4"
                         value={row.description}
@@ -570,6 +655,23 @@ export function AddRecurringEntryButton({
                         <Trash2 className="size-4" />
                       </Button>
                     </div>
+                    {/* The 12 columns above are exactly spent (4+1+2+4+1), so
+                        a tag column means re-proportioning all five. */}
+                    {dimensionTypes.length > 0 && (
+                      <div className="pl-1">
+                        <DimensionTags
+                          types={dimensionTypes}
+                          value={row.dimensionMemberIds}
+                          onValue={(v) => {
+                            const next = [...invoiceRows];
+                            next[i] = { ...row, dimensionMemberIds: v };
+                            setInvoiceRows(next);
+                          }}
+                          triggerClassName="h-7 px-2 text-xs font-normal text-muted-foreground"
+                        />
+                      </div>
+                    )}
+                    </div>
                   ))}
                   <Button
                     type="button"
@@ -637,6 +739,17 @@ export function AddRecurringEntryButton({
                     </SelectContent>
                   </Select>
                 </div>
+                {dimensionTypes.length > 0 && (
+                  <div className="space-y-1.5">
+                    <Label>Tags (optional)</Label>
+                    <DimensionTags
+                      types={dimensionTypes}
+                      value={billTags}
+                      onValue={setBillTags}
+                      triggerClassName="w-full justify-start font-normal"
+                    />
+                  </div>
+                )}
                 <p className="text-xs text-muted-foreground">
                   Bills are always created as drafts — approving one is what
                   posts it.

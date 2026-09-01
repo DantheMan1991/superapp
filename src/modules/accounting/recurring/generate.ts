@@ -45,6 +45,18 @@ export interface RecurringEntryResult {
    * depreciation entry is sitting unposted.
    */
   deferredToDraft: number;
+  /**
+   * Members a template still names that have since been RETIRED. Their tags
+   * are dropped so the entry generates anyway — see `retiredMemberIds` — and
+   * counted here for the same reason `deferredToDraft` is: it ran, but not the
+   * way the template asked, and somebody has to be able to find out.
+   *
+   * **DISTINCT MEMBERS PER TEMPLATE**, counted once above the catch-up loop.
+   * Not per line and not per month: one retired paddock, named on three lines
+   * of a template that is twelve months behind, is ONE stale tag to go and
+   * fix. Counting the writes instead would report 36 and mean nothing.
+   */
+  tagsDropped: number;
   templatesRun: number;
   errors: Array<{ recurringEntryId: string; name: string; error: string }>;
 }
@@ -104,6 +116,63 @@ async function assertTemplateReferences(
 }
 
 /**
+ * **A RETIRED TAG IS DROPPED, NOT A REASON TO REFUSE THE ENTRY.**
+ *
+ * Every write path refuses an inactive dimension member outright —
+ * `loadDimensionMembers` for a journal, `validateLineDimensions` for an invoice
+ * or a bill — so a template tagged with a line of business somebody wound up in
+ * June throws `DIMENSION_INVALID` at 6am, rolls back every catch-up month with
+ * it, and leaves `next_run_date` where it was. It then fails again the next
+ * morning, and the morning after, for as long as the template exists.
+ *
+ * Nobody would find out. The sweep reports counts only and never a template
+ * name (S9, `run.ts`); the button's toast says "1 template failed" with no
+ * reason; `recurring_entries` has no last-error column; and the list's
+ * "template needs fixing" badge is a SHAPE check, so it never lights for this.
+ * There is no update action either, so an owner who somehow diagnosed it could
+ * not repair the template in place.
+ *
+ * **This is not the `ACCOUNT_INACTIVE` case, and the difference is what the
+ * stale reference is load-bearing on.** A dead account makes the entry WRONG;
+ * a retired tax rate makes the amount wrong. Both change the record, so
+ * refusing is right. A retired tag changes nothing about the record — it makes
+ * one report coarser. Refusing there is the failure `enterpriseMemberIds` was
+ * written to stop: *"a business stopping because of a report."*
+ *
+ * It is the `archiveDimensionMember` contract applied where nobody is
+ * watching — *"archived members stop being taggable; existing tags keep
+ * reporting."* Stop being taggable is what this does.
+ */
+/** The subset of `ids` that no longer names an active member. */
+async function retiredMemberIds(
+  tx: Tx,
+  tenantId: string,
+  ids: readonly string[],
+): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  const rows = await tx
+    .select({
+      id: schema.dimensionMembers.id,
+      isActive: schema.dimensionMembers.isActive,
+    })
+    .from(schema.dimensionMembers)
+    .where(
+      and(
+        eq(schema.dimensionMembers.tenantId, tenantId),
+        inArray(schema.dimensionMembers.id, [...ids]),
+      ),
+    );
+  const live = new Set(rows.filter((r) => r.isActive).map((r) => r.id));
+  // MISSING COUNTS AS RETIRED: a member deleted outright is no more taggable
+  // than one archived, and every write path treats the two the same
+  // (`!member || !member.isActive`).
+  return new Set(ids.filter((id) => !live.has(id)));
+}
+
+/** Every line shape a template can hold, viewed only through its tags. */
+type TaggedLine = { dimensionMemberIds?: string[] };
+
+/**
  * Run every template that is due.
  *
  * `now` is not injectable here — the tenant's own clock decides, through
@@ -140,6 +209,7 @@ export async function generateRecurringEntries(
     created: 0,
     posted: 0,
     deferredToDraft: 0,
+    tagsDropped: 0,
     templatesRun: 0,
     errors: [],
   };
@@ -190,6 +260,28 @@ export async function generateRecurringEntries(
           template.entityId ?? (await getDefaultEntityId(tx, ctx.tenantId));
         const closedThrough = closedByEntity.get(entityId) ?? null;
 
+        /**
+         * Resolved ONCE per template, above the catch-up loop, for the same
+         * reason `entityId` is: twelve months of one template must not
+         * straddle two answers, and one stale tag is one thing to fix rather
+         * than twelve.
+         */
+        const taggedLines = template.lines as ReadonlyArray<TaggedLine>;
+        const retired = await retiredMemberIds(
+          tx,
+          ctx.tenantId,
+          [...new Set(taggedLines.flatMap((l) => l.dimensionMemberIds ?? []))],
+        );
+        const keepTags = (ids?: string[]): string[] | undefined => {
+          const kept = (ids ?? []).filter((id) => !retired.has(id));
+          // Undefined, not an empty array: absent is what "no tags" looks
+          // like everywhere else that writes one of these.
+          return kept.length > 0 ? kept : undefined;
+        };
+        // `retired` is already the distinct set of members this template names
+        // that are no longer usable, so its size IS the number of tags to fix.
+        const tagsDropped = retired.size;
+
         let next = entry.nextRunDate;
         let runs = 0;
         let posted = 0;
@@ -214,14 +306,15 @@ export async function generateRecurringEntries(
               status,
               entryDate: next,
               memo: template.memo ?? entry.name,
-              lines: template.lines.map((l) => ({
-                accountId: l.accountId,
-                amountCents: l.amountCents,
-                ...(l.memo ? { memo: l.memo } : {}),
-                ...(l.dimensionMemberIds
-                  ? { dimensionMemberIds: l.dimensionMemberIds }
-                  : {}),
-              })),
+              lines: template.lines.map((l) => {
+                const tags = keepTags(l.dimensionMemberIds);
+                return {
+                  accountId: l.accountId,
+                  amountCents: l.amountCents,
+                  ...(l.memo ? { memo: l.memo } : {}),
+                  ...(tags ? { dimensionMemberIds: tags } : {}),
+                };
+              }),
               // Stable per (template, period): a re-run cannot double-post the
               // same month even if the version CAS is somehow beaten.
               idempotencyKey: `recurring:${entry.id}:${next}`,
@@ -238,7 +331,10 @@ export async function generateRecurringEntries(
               issueDate: next,
               dueDate: addDaysIso(next, template.dueInDays),
               memo: template.memo ?? entry.name,
-              lines: template.lines,
+              lines: template.lines.map((l) => ({
+                ...l,
+                dimensionMemberIds: keepTags(l.dimensionMemberIds),
+              })),
               // Re-resolved against the live rate every month by
               // `createInvoiceDraft`, which is the point: a template says
               // "charge the state rate", and a rate correction should reach
@@ -259,7 +355,10 @@ export async function generateRecurringEntries(
               billDate: next,
               dueDate: addDaysIso(next, template.dueInDays),
               memo: template.memo ?? entry.name,
-              lines: template.lines,
+              lines: template.lines.map((l) => ({
+                ...l,
+                dimensionMemberIds: keepTags(l.dimensionMemberIds),
+              })),
             });
           }
           next = advanceMonthly(next, entry.dayOfMonth);
@@ -287,12 +386,13 @@ export async function generateRecurringEntries(
           // whole, rather than leaving half a month's entries behind.
           throw new LedgerError("STALE_VERSION", "template generated concurrently");
         }
-        return { runs, posted, deferred };
+        return { runs, posted, deferred, tagsDropped };
       });
 
       result.created += outcome.runs;
       result.posted += outcome.posted;
       result.deferredToDraft += outcome.deferred;
+      result.tagsDropped += outcome.tagsDropped;
       result.templatesRun += 1;
     } catch (err) {
       result.errors.push({

@@ -50,6 +50,84 @@ half a margin, waiting on slice 4 for the other half.
 
 ## Build log
 
+### 2026-09-01 — A standing instruction says what it was for (`claude/a-standing-instruction-says-what-it-was-for`)
+
+The last surface, and the only one where nobody is watching when the tag is
+used: a recurring template names its members once, and a sweep applies them
+every month at 6am. All three kinds now carry one. **No migration** — every
+template line schema has accepted `dimensionMemberIds` since dimensions
+existed, and `generate.ts` has threaded it the whole time.
+
+**THE DOSSIER WAS WRONG ABOUT THE HARD CASE, AND THAT COST NOTHING ONLY BECAUSE
+SOMEBODY CHECKED.** The open item above said an `autoPost` journal template
+"can never carry" a tag, and framed it as a decision to be taken before any
+form was built. It was not a decision and it was not true: `unattended` changes
+the actor, never the payload. A claim about what the code cannot do is worth
+grepping before it is worth reasoning about.
+
+**A RETIRED MEMBER NOW DROPS ITS TAG RATHER THAN STOPPING THE SCHEDULE**, and
+this is the part that was a real design question. Every write path refuses an
+inactive member — `loadDimensionMembers` for a journal, `validateLineDimensions`
+for an invoice or a bill. So the moment a picker existed, archiving a line of
+business would have thrown `DIMENSION_INVALID` inside the 6am sweep, rolled
+back every catch-up month with it, and left `next_run_date` where it was — so
+the same template failed again the next morning, and every morning after. **A
+monthly rent bill would simply stop**, and nothing would say so: the sweep
+reports counts and never a template name (S9), `recurring_entries` has no
+last-error column, the list's "template needs fixing" badge is a shape check
+that a retired tag does not trip, and there is no update action to repair the
+template with even if somebody diagnosed it.
+
+The precedent that settles it is `archiveDimensionMember`'s own contract —
+*"archived members stop being taggable; existing tags keep reporting"* — which
+`enterpriseMemberIds` already applied to an automated posting path for exactly
+this reason: *"a business stopping because of a report."* **`ACCOUNT_INACTIVE`
+and `TAX_RATE_INVALID` are not counter-precedent**, and the difference is what
+the stale reference is load-bearing on: a dead account makes the ENTRY wrong
+and a retired rate makes the AMOUNT wrong, so refusing is right in both. A
+retired tag makes one report coarser and nothing else.
+
+So `generate.ts` resolves the retired members once per template, above the
+catch-up loop, drops those ids from every line, and counts them into
+`tagsDropped` — the shape `deferredToDraft` already uses for *it ran, but not
+the way you asked*. **Counted as DISTINCT MEMBERS per template**, not per line
+and not per month: one retired paddock on three lines of a template twelve
+months behind is one stale tag to go and fix, and reporting 36 would mean
+nothing.
+
+**The list had to learn to read tags back, and here that is not a nicety.**
+There is no detail route and no update action, so the list is the only screen a
+template has — a tag it did not show would be one nobody could ever verify, and
+a mis-tagged template can only be corrected by pausing it and writing a
+replacement. Retired members are marked `(retired)` there, using
+`dimensionTypesFrom`'s own suffix, because a tag about to be dropped is exactly
+the one worth seeing.
+
+**Two shapes worth stating, both deliberate:**
+
+- **No `keepIds`**, unlike the three surfaces that re-open a stored record.
+  This dialog only ever CREATES, so every member it offers is one somebody is
+  choosing today and a retired one has no business being among them.
+- **The bill template carries ONE tag for the whole template.** The dialog
+  builds a bill template of exactly one line, so per-line and per-template are
+  the same object; promoting it to a row array would be a bill-template feature
+  riding along in a tagging change, inside a dialog with no horizontal overflow
+  to give it.
+
+**THE ROUND-TRIP RULE HAS NO TARGET HERE, and the row field is still required.**
+Nothing reads a template back into the form. What the required field buys is
+compiler pressure across the three arms of `submit()` — which is how the
+previous three PRs found the construction sites they had missed — and not
+protection against a whole-replace. Worth saying, because the comment would
+otherwise claim a bug it could not have caught.
+
+**Scoped out, on the record:** no update action, no delete, no template detail
+route, and no wiring of `entityId`, `memo`, `taxRateId` or per-line `memo` into
+the dialog — four schema-accepted fields the form has never sent. Also left
+alone: `generate.ts` increments `created`/`posted` without checking
+`PostResult.deduped`, so a deduped run would report a record it did not write.
+Real, latent, and unreachable on this path — its own PR.
+
 ### 2026-08-31 — A kill day charged Broilers and credited nobody (`claude/the-cost-side`)
 
 **Found by an adversarial review of the slice 3 diff, and it is slice 3's own
@@ -495,15 +573,20 @@ the same transaction as every write.
   [accounting.md](accounting.md). A business that invoices now gets a real gross
   profit per line of business. Retail's till is a separate and much larger job,
   and remains the only untagged revenue path.
-- **RECURRING TEMPLATES CANNOT CARRY A TAG, and the auto-posting ones are the
-  problem.** `recurring-entry-controls.tsx` builds an invoice template's lines
-  from four fields and a journal template's from two, neither including
-  `dimensionMemberIds` — while `recurringJournalLineSchema` accepts it and
-  `generate.ts` threads it through, so the receiving end is wired to a writer
-  that does not exist. A generated INVOICE is a draft somebody reviews, and they
-  can now tag it before issuing; **an `autoPost` JOURNAL template posts
-  unattended and can never carry one.** There is no update action for a
-  template at all, so an existing one cannot be fixed in place either.
+- ~~**RECURRING TEMPLATES CANNOT CARRY A TAG, and the auto-posting ones are the
+  problem.**~~ **Closed 2026-09-01** — all three kinds can be born with one.
+  **The half of that item claiming an `autoPost` journal template "can never
+  carry a tag" was simply WRONG, and it was the sentence a session would read
+  first.** `recurringJournalLineSchema` has accepted `dimensionMemberIds` all
+  along, `generate.ts`'s journal branch maps them onto `postEntry`, and
+  `unattended` changes only WHO the entry is credited to — never the payload.
+  An auto-posting template tags the ledger at 6am exactly as a person would
+  have. Nothing was ever a decision; the writer was missing, that is all.
+  **What IS true, and is the live limit:** there is no update action for a
+  template of any kind, so a tag — like an amount, an account or a name —
+  cannot be changed after creation. That gap is pre-existing and dated
+  2026-08-12 in [accounting.md](accounting.md); this work neither widens it nor
+  is responsible for closing it.
 - ~~**SAVING A MATCHED DRAFT BILL DESTROYS ITS MATCH AND KEEPS THE CODING.**~~
   **Closed 2026-09-01**, in its own PR as it deserved. It was never a dimension
   bug — it was on `main` and predated all of this. `updateBillDraft` now keeps a
@@ -519,9 +602,11 @@ the same transaction as every write.
   no form able to send one.~~ **Closed 2026-09-01** for everything a person
   writes by hand: bank rows, invoice lines, bill lines and now the manual
   journal all carry a tag, and the round-trip trap was caught the same way each
-  time by making the row field required rather than optional. **Remaining:
-  recurring templates**, and see the item above for why the `autoPost` journal
-  case is a decision rather than a form.
+  time by making the row field required rather than optional. ~~**Remaining:
+  recurring templates**~~ — **also closed 2026-09-01**, which finishes every
+  surface a person writes by hand. **The untagged paths that remain are the
+  ones nobody types: retail's till** (`recordSale`, the whole of slice 4) **and
+  anything a pack posts without a person in the loop.**
 - **A MIXED MARKET STALL'S COSTS HAVE NOWHERE TO GO, by design for now.** A
   stall selling beef and chicken cannot attribute its $35 fee to one enterprise,
   and doing it anyway would be a confident wrong number. Splitting pro rata by

@@ -8,7 +8,11 @@ import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
 import { EmptyState } from "@/components/app/empty-state";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
-import { isCodableAccount } from "@/modules/accounting/core";
+import {
+  isCodableAccount,
+  listDimensionMembers,
+} from "@/modules/accounting/core";
+import { dimensionTypesFrom } from "@/lib/dimension-options";
 import { listRecurringEntries } from "@/modules/accounting/recurring/generate";
 import { parseRecurringEntryTemplate } from "@/modules/accounting/recurring/template";
 import { formatCentsSigned, todayInTimezone } from "@/modules/accounting/lib/money";
@@ -35,33 +39,36 @@ export default async function RecurringEntriesPage() {
   await requireModuleEnabled(ctx.tenant.id, "accounting");
 
   const data = await withTenant(ctx.tenant.id, async (tx) => {
-    const [entries, accounts, registers, vendors, customers] = await Promise.all([
-      listRecurringEntries(tx, ctx.tenant.id),
-      tx.query.accounts.findMany({
-        where: and(
-          eq(schema.accounts.tenantId, ctx.tenant.id),
-          eq(schema.accounts.isActive, true),
-        ),
-        orderBy: asc(schema.accounts.code),
-      }),
-      tx.query.bankAccounts.findMany({
-        where: eq(schema.bankAccounts.tenantId, ctx.tenant.id),
-      }),
-      tx.query.vendors.findMany({
-        where: and(
-          eq(schema.vendors.tenantId, ctx.tenant.id),
-          eq(schema.vendors.isActive, true),
-        ),
-        orderBy: asc(schema.vendors.name),
-      }),
-      tx.query.customers.findMany({
-        where: and(
-          eq(schema.customers.tenantId, ctx.tenant.id),
-          eq(schema.customers.isActive, true),
-        ),
-        orderBy: asc(schema.customers.name),
-      }),
-    ]);
+    const [entries, accounts, registers, vendors, customers, dimensionMembers] =
+      await Promise.all([
+        listRecurringEntries(tx, ctx.tenant.id),
+        tx.query.accounts.findMany({
+          where: and(
+            eq(schema.accounts.tenantId, ctx.tenant.id),
+            eq(schema.accounts.isActive, true),
+          ),
+          orderBy: asc(schema.accounts.code),
+        }),
+        tx.query.bankAccounts.findMany({
+          where: eq(schema.bankAccounts.tenantId, ctx.tenant.id),
+        }),
+        tx.query.vendors.findMany({
+          where: and(
+            eq(schema.vendors.tenantId, ctx.tenant.id),
+            eq(schema.vendors.isActive, true),
+          ),
+          orderBy: asc(schema.vendors.name),
+        }),
+        tx.query.customers.findMany({
+          where: and(
+            eq(schema.customers.tenantId, ctx.tenant.id),
+            eq(schema.customers.isActive, true),
+          ),
+          orderBy: asc(schema.customers.name),
+        }),
+        // Unfiltered: `dimensionTypesFrom` owns the active-only rule.
+        listDimensionMembers(tx, ctx.tenant.id),
+      ]);
 
     /**
      * THREE lists, because the three kinds may not post to the same places and
@@ -77,6 +84,7 @@ export default async function RecurringEntriesPage() {
     const registerIds = new Set(registers.map((r) => r.accountId));
     return {
       entries,
+      dimensionMembers,
       vendors,
       customers,
       journalAccounts: accounts,
@@ -113,6 +121,48 @@ export default async function RecurringEntriesPage() {
     return invoiceSubtotalCents(computeLineAmounts(parsed.lines));
   }
 
+  /**
+   * **WHAT A TEMPLATE IS TAGGED WITH, so somebody can check it.**
+   *
+   * This list is the only screen a template has — there is no detail route and
+   * no update action — so a tag that does not appear here is one nobody can
+   * ever verify. The same test the journal entry page had to pass: an entry
+   * that can be tagged and cannot be SEEN to be tagged is half a feature, and
+   * here it is worse, because the only way to correct a mis-tagged template is
+   * to pause it and write a new one.
+   *
+   * DISTINCT names across the template's lines, not per line: this row is one
+   * line of muted text and the question it answers is "what will next month's
+   * entry be tagged with", not "which line carries which".
+   *
+   * Retired members are named too, and MARKED — `listDimensionMembers` is
+   * unfiltered, and `dimensionTypesFrom` uses the same `(retired)` suffix for
+   * the same reason. A tag pointing at a retired member is the one worth
+   * seeing: generation will drop it and count it, and pausing the template to
+   * write a replacement is the only way to act on that. This is the sole
+   * screen where it is visible at all.
+   */
+  const memberName = new Map(
+    data.dimensionMembers.map((m) => [
+      m.id,
+      m.isActive ? m.displayName : `${m.displayName} (retired)`,
+    ]),
+  );
+
+  function templateTags(template: unknown): string[] {
+    const parsed = parseRecurringEntryTemplate(template);
+    if (!parsed) return [];
+    const ids = new Set(
+      (parsed.lines as ReadonlyArray<{ dimensionMemberIds?: string[] }>).flatMap(
+        (l) => l.dimensionMemberIds ?? [],
+      ),
+    );
+    return [...ids]
+      .map((id) => memberName.get(id))
+      .filter((name): name is string => !!name)
+      .sort((a, b) => a.localeCompare(b));
+  }
+
   const KIND_LABEL = {
     journal: "Journal",
     bill: "Bill",
@@ -135,6 +185,7 @@ export default async function RecurringEntriesPage() {
                 vendors={data.vendors.map((v) => ({ id: v.id, name: v.name }))}
                 customers={data.customers.map((c) => ({ id: c.id, name: c.name }))}
                 today={today}
+                dimensionTypes={dimensionTypesFrom(data.dimensionMembers)}
               />
             </>
           )
@@ -157,6 +208,7 @@ export default async function RecurringEntriesPage() {
           {data.entries.map((e) => {
             const broken = parseRecurringEntryTemplate(e.template) === null;
             const size = templateSize(e.template);
+            const tags = templateTags(e.template);
             const party =
               e.kind === "bill"
                 ? e.vendorId && (vendorName.get(e.vendorId) ?? "Supplier")
@@ -189,6 +241,18 @@ export default async function RecurringEntriesPage() {
                       ? ` · last generated ${e.lastGeneratedAt.toISOString().slice(0, 10)}`
                       : ""}
                   </p>
+                  {tags.length > 0 && (
+                    <p className="mt-1 flex flex-wrap gap-1">
+                      {tags.map((name) => (
+                        <span
+                          key={name}
+                          className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-foreground"
+                        >
+                          {name}
+                        </span>
+                      ))}
+                    </p>
+                  )}
                 </div>
                 {isOwner && (
                   <RecurringEntryToggle

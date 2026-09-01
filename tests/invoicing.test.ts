@@ -48,6 +48,7 @@ import {
 } from "../src/modules/accounting/invoicing/invoices";
 import {
   archiveDimensionMember,
+  postEntry,
   upsertDimensionMember,
 } from "../src/modules/accounting/core";
 import { loadBillLines } from "../src/modules/accounting/payables/bills";
@@ -1054,6 +1055,137 @@ d("invoicing (DB)", () => {
       for (const e of entries) {
         expect(await entryTags(e.id)).toEqual([live]);
       }
+    });
+
+    it("COUNTS WHAT IT WROTE, not the months it walked", async () => {
+      /**
+       * **`postEntry` IS IDEMPOTENT ON `recurring:<templateId>:<date>` AND THE
+       * LOOP IGNORED THE ANSWER.** It incremented `created` — and `posted`,
+       * and the deferral — once per period walked, whether or not the period
+       * wrote anything. `createEntry` already checks `deduped` before writing
+       * its audit row; this loop did not.
+       *
+       * It is not reachable through the schedule: `advanceMonthly` only moves
+       * forward, `next_run_date` has no backward writer, and nothing else emits
+       * that key prefix. So the test makes it reachable the only honest way —
+       * by putting the entry for the FIRST catch-up month there in advance,
+       * under the key generation will use. That is exactly the state a retried
+       * or half-rolled-back run would leave, which is the case the idempotency
+       * key exists for in the first place.
+       *
+       * **AND THE DEFERRAL IS THE HALF WORTH THE SETUP.** The first version of
+       * this test asserted `deferredToDraft === 0` with no closed period
+       * anywhere in reach, which cannot fail under either version of the code —
+       * a tautology sitting under a docblock claiming to cover it. So the
+       * fixture closes the period through July and pre-creates only June:
+       *
+       * | period | closed | already there | old code | new code |
+       * | --- | --- | --- | --- | --- |
+       * | June | yes | yes | created, deferred | nothing |
+       * | July | yes | no | created, deferred | created, deferred |
+       * | Aug  | no  | no | created, posted | created, posted |
+       *
+       * Which makes all three gates discriminating at once: revert the
+       * `created` gate and it is one too many, revert the deferral gate and it
+       * is two deferrals instead of one.
+       *
+       * June is pre-created as a DRAFT, not a posting — `assertPeriodOpen`
+       * would refuse a posted entry into a closed period, and a draft is the
+       * honest shape of what a half-rolled-back run leaves there anyway.
+       */
+      const cash = await accountId("1000");
+      const exp = await accountId("6700");
+      const template = await addTemplate({
+        kind: "journal",
+        name: "Counted once",
+        nextRunDate: "2026-06-04",
+        autoPost: true,
+        template: {
+          kind: "journal",
+          lines: [
+            { accountId: exp, amountCents: 1_100 },
+            { accountId: cash, amountCents: -1_100 },
+          ],
+        },
+      });
+
+      await withTenant(tenantId, async (tx) =>
+        setClosedThrough(tx, owner, {
+          entityId: await getDefaultEntityId(tx, tenantId),
+          date: "2026-07-31",
+        }),
+      );
+
+      // June, already there under the key generation will use — a draft,
+      // because its period is closed and a posting could not have landed.
+      await withTenant(tenantId, async (tx) =>
+        postEntry(tx, owner, {
+          entityId: await getDefaultEntityId(tx, tenantId),
+          status: "draft",
+          entryDate: "2026-06-04",
+          memo: "Counted once",
+          lines: [
+            { accountId: exp, amountCents: 1_100 },
+            { accountId: cash, amountCents: -1_100 },
+          ],
+          idempotencyKey: `recurring:${template.id}:2026-06-04`,
+        }),
+      );
+
+      const result = await generateRecurringEntries(owner);
+      // Reset before any assertion can throw past it — T-D7's own shape.
+      await withTenant(tenantId, async (tx) =>
+        setClosedThrough(tx, owner, {
+          entityId: await getDefaultEntityId(tx, tenantId),
+          date: null,
+        }),
+      );
+      expect(result.errors).toHaveLength(0);
+
+      /**
+       * **ASSERTED AS A RELATION, NOT AS THREE NUMBERS.** How many periods fall
+       * between the template's first run and today depends on when the suite is
+       * run, so `periodsWalked` is 3 this month and 4 the next — the neighbouring
+       * catch-up test uses `toBeGreaterThanOrEqual` for the same reason.
+       *
+       * The invariant does not move: exactly one of those periods was already
+       * there, so exactly one fewer record was written than periods walked. That
+       * is the whole bug, stated in a form the calendar cannot break.
+       */
+      expect(result.periodsWalked).toBeGreaterThanOrEqual(3);
+      // Exactly one period was already there, whatever the calendar says.
+      expect(result.created).toBe(result.periodsWalked - 1);
+      /**
+       * **ONE deferral, not two.** June and July are both closed and both want
+       * to post, so the old code counted a deferral for each — including June,
+       * where it wrote nothing at all and would have told somebody an entry
+       * was newly stuck when the run had left nothing.
+       */
+      expect(result.deferredToDraft).toBe(1);
+      // Everything written either posted or was deferred; nothing else.
+      expect(result.posted).toBe(result.created - result.deferredToDraft);
+
+      // One entry per period, not two for the month that was already there.
+      const entries = await withTenant(tenantId, (tx) =>
+        tx.query.journalEntries.findMany({
+          where: and(
+            eq(schema.journalEntries.tenantId, tenantId),
+            eq(schema.journalEntries.memo, "Counted once"),
+          ),
+        }),
+      );
+      expect(entries).toHaveLength(result.periodsWalked);
+      expect(new Set(entries.map((e) => e.entryDate)).size).toBe(
+        result.periodsWalked,
+      );
+
+      // And the schedule moved past every period regardless.
+      const after = await withTenant(tenantId, (tx) =>
+        tx.query.recurringEntries.findFirst({
+          where: eq(schema.recurringEntries.id, template.id),
+        }),
+      );
+      expect(after!.nextRunDate > "2026-08-04").toBe(true);
     });
 
     it("an invoice template's tag reaches the generated draft", async () => {

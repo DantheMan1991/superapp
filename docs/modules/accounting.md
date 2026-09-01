@@ -13,6 +13,97 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-01 — The count is what was written (`claude/the-count-is-what-was-written`)
+
+**A latent counter defect, fixed on its own rather than as a rider**, which is
+why it waited a PR: it was surfaced by the recurring-template tag work and had
+nothing to do with tags.
+
+`postEntry` is idempotent on `recurring:<templateId>:<date>` and returns
+`deduped` when it hands back an entry it did not write. `createEntry` checks
+that before writing its audit row. `generateRecurringEntries` did not — it
+incremented `created` once per period the catch-up loop walked, and `posted`
+with it, so a deduped month was reported as a record that had just been
+created and posted.
+
+**The deferral was wrong in the same way and is the more interesting half.**
+`deferredToDraft` means *this run wanted to post and left a draft instead*. It
+was incremented before `postEntry` was even called, so a deduped month would
+report a depreciation entry as newly stuck in a closed period when the run had
+left nothing at all. Every counter now hangs off `deduped` together.
+
+**`runs` stays unconditional and is now separate from `created`.** It bounds
+the catch-up and drives `next`, so a deduped month must still advance it or the
+loop would spin against `CATCH_UP_CAP`. Conflating the two — the number of
+periods walked with the number of records written — is what the bug was.
+
+**`periodsWalked` is reported to the sweep, and the button receives it without
+ever rendering it.** A gap between it and `created` is the only evidence a month
+was already there — something to diagnose from a log rather than to put in front
+of somebody who just pressed a button, since "Created 2" when three months were
+due needs no explanation to them.
+
+**THE FIRST VERSION OF THIS PR WITHHELD IT FROM THE BUTTON ENTIRELY, AND THAT
+WAS A BUG THE PR ITSELF INTRODUCED.** The toast opens with `created === 0 &&
+errors === 0 → "Nothing was due"`, which was an EXACT test while `created` was
+the period count: a template only reaches the loop when `next_run_date <=
+today`, so anything that ran without throwing contributed at least one. Gating
+the counters on `deduped` broke that equivalence — a due template whose every
+period was already there now writes nothing while having walked three months —
+and `tagsDropped` is computed above the loop and returned regardless, so
+`tagsDropped > 0 && created === 0` became reachable and would have landed in the
+"Nothing was due" branch. **That would have swallowed the retired-tag warning
+added the same day, whose own comment says it is named there "because nothing
+else ever will."**
+
+Found by an adversarial pass over the diff, and it is the exact failure mode the
+change was fixing, one consumer along: the count moved off "periods" and the one
+reader that still meant periods was left behind. The emptiness test now asks
+`periodsWalked === 0`. **Deciding not to show a number is not the same as
+deciding not to return it**, which is the general form of the mistake.
+
+**NOT REACHABLE THROUGH THE SCHEDULE, and fixed anyway.** `advanceMonthly` only
+ever moves forward, `next_run_date` has no backward writer, and nothing else in
+the repo emits that key prefix. The argument for fixing it is that a count
+whose correctness rests on an unreachability argument is one that goes wrong
+the first time somebody makes it reachable — and this is the figure an operator
+reasons from when a sweep looks wrong.
+
+**The test makes it reachable the only honest way**: it posts the first
+catch-up month's entry in advance under the key generation will use, which is
+exactly the state a retried or half-rolled-back run leaves and the case the
+idempotency key exists for. Reverting the gate turns it red on `created: 3` —
+checked, not assumed.
+
+**It asserts a RELATION rather than three numbers.** How many periods fall
+between the template's first run and today depends on when the suite runs, so
+the first version passed in September and would have failed in October. The
+invariant the calendar cannot touch is that one period was already there, so
+one fewer record was written than periods walked. The neighbouring catch-up
+test uses `toBeGreaterThanOrEqual` for the same reason.
+
+**AND THE DEFERRAL ASSERTION WAS A TAUTOLOGY UNTIL THE SAME REVIEW CAUGHT IT.**
+The first version asserted `deferredToDraft === 0` with no closed period
+anywhere in reach, which cannot fail under either version of the code — sitting
+under a docblock claiming to cover the deferral, in a PR whose build log calls
+the deferral the more interesting half. Nothing in the suite, before or after,
+had ever put a recurring auto-post template into a closed period.
+
+The fixture now closes the period through July and pre-creates only June, which
+makes all three gates discriminating at once:
+
+| period | closed | already there | old code | new code |
+| --- | --- | --- | --- | --- |
+| June | yes | yes | created, deferred | nothing |
+| July | yes | no | created, deferred | created, deferred |
+| Aug | no | no | created, posted | created, posted |
+
+Revert the `created` gate and it is one too many; revert the deferral gate
+alone and it is two deferrals instead of one — checked both ways. June is
+pre-created as a DRAFT rather than a posting, because `assertPeriodOpen` would
+refuse a posting into a closed period, and a draft is the honest shape of what
+a half-rolled-back run leaves there anyway.
+
 ### 2026-09-01 — A standing instruction says what it was for (`claude/a-standing-instruction-says-what-it-was-for`)
 
 Recurring templates were the last write surface without a tag picker, and the
@@ -2713,7 +2804,7 @@ compiled-and-tested, not seen.
 - **Products & Services, Terms and Payment Methods are DONE** (2026-08-12) — see the build log for the two deliberate gaps (customer-level default terms have a column and resolution but no control; saved items are invoice-only so far)
 - ~~**Line account pickers are filtered in the UI ONLY.**~~ **Half closed 2026-09-01.** `assertLineAccounts` now refuses a BILL line coded to an account nobody may pick, on create and on update, and that was not tidiness — the client round-tripping a matched line's GRNI coding is what let the same receipts clear GRNI twice (see the build log). **Still open on the other two paths:** `createInvoiceDraft` and the recurring create action accept whatever account id they are given, so nothing but the dropdown stops a recurring invoice template posting revenue to Checking. The bill version is the model to copy
 - **Recurring entries GENERATE ON THEIR OWN** since 2026-08-13 (`/api/cron/recurring`, 6am in the tenant's zone). What is not built: any way to see the sweep's history in the UI — the counts come back to the cron caller and nowhere else. **This is what made the retired-tag decision what it was** (2026-09-01): a template that fails inside the sweep is unnamed on every surface and has no last-error column, so failing closed there is failing silently
-- **`generateRecurringEntries` counts a record it may not have written.** `created` and `posted` increment unconditionally while `postEntry` returns `deduped`, which `createEntry` does check before writing its audit row. Unreachable today — the idempotency key is `recurring:<templateId>:<date>`, `advanceMonthly` only ever moves forward, and nothing else emits that prefix — so it is a latent counter defect rather than a live one. Worth its own small PR, not a rider on something else
+- ~~**`generateRecurringEntries` counts a record it may not have written.**~~ **Closed 2026-09-01**, in its own PR as it deserved. `created`, `posted` and the deferral now all hang off `PostResult.deduped`, and `periodsWalked` carries the months the loop walked so a gap between the two is visible in the sweep's JSON. It was never reachable through the schedule; it is fixed because a count whose correctness rests on an unreachability argument goes wrong the first time somebody makes it reachable
 - **Recurring journals and bills are DONE** (2026-08-12), and so is **folding `recurring_invoices` into them** (2026-08-12) — the module has ONE recurrence mechanism, one list and one engine. **DONE**: `drizzle/0147` dropped `recurring_invoices` and `invoices.recurring_invoice_id`. **Templates can be born with a dimension tag since 2026-09-01**, on all three kinds, and the list shows what each one carries. What is not built for any kind: **editing a template** — which is why a tag, like an amount and an account, is fixed at creation — and any cadence other than monthly
 - **Obligation statuses and the MoneyBar are DONE** (2026-08-12) on the invoice and bill LISTS. What is not built: the same language on the detail pages, and a deposits screen for the two money buckets to link into. **That closes the 2026-08-10 QuickBooks review list.**
 - **Sales tax is DONE** (2026-08-13) — a tenant-owned rate list, per-line taxability, one frozen tax block on the invoice, one Cr to the `sales_tax` account at issue, and a per-rate summary that reconciles against the ledger. Deliberately NOT built, each for a reason in the build log: **tax on bills** (US purchase tax is part of the expense; the regime where it matters is VAT/GST, a different posting model), a **customer-level default rate and tax-exempt flag** (the invoice-level control is live; this is the `resolveTaxRate` signature's obvious next argument, ~30 lines), a **one-click remittance** debiting the tax account (a journal or a bill does it today, and the summary shows the balance to remit), **cash-basis tax**, and **splitting a combined rate into components** for a return that wants state and county separately

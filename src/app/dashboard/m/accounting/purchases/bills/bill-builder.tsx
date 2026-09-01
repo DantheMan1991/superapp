@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Sparkles, Trash2, TriangleAlert } from "lucide-react";
+import { Lock, Plus, Sparkles, Trash2, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -59,11 +59,11 @@ interface LineRow {
   credit: boolean;
   accountId: string;
   /**
-   * **REQUIRED, NOT OPTIONAL.** `updateBillDraft` deletes every line and
-   * re-inserts it, so a row shape that could omit this would wipe a tag on the
-   * first edit of a tagged draft. Required puts every construction site in
-   * front of the compiler — which is how the invoice version of this found the
-   * page that was narrowing the shape.
+   * **REQUIRED, NOT OPTIONAL.** `updateBillDraft` whole-replaces a line's tags
+   * from what the patch sends, so a row shape that could omit this would wipe a
+   * tag on the first edit of a tagged draft. Required puts every construction
+   * site in front of the compiler — which is how the invoice version of this
+   * found the page that was narrowing the shape.
    */
   dimensionMemberIds: string[];
 }
@@ -117,6 +117,7 @@ export function BillBuilder({
   bill,
   initialDuplicates,
   dimensionTypes = [],
+  derivedAccountIds = [],
 }: {
   vendors: BuilderVendor[];
   /**
@@ -137,9 +138,24 @@ export function BillBuilder({
    * Empty renders no tag control at all.
    */
   dimensionTypes?: DimensionTypeOption[];
+  /**
+   * Accounts these lines already use that **nobody may pick** — GRNI today,
+   * because matching a line to a delivery codes it there. A row sitting on one
+   * of these is derived from a match: the server refuses to re-code, re-price
+   * or re-describe it, so the form says so plainly instead of letting somebody
+   * type into a box that will fail on save.
+   *
+   * The page computes it by subtracting the codable list from the accounts the
+   * lines hold, which keeps accounting from having to know what a delivery is.
+   */
+  derivedAccountIds?: string[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const derivedAccounts = useMemo(
+    () => new Set(derivedAccountIds),
+    [derivedAccountIds],
+  );
   // Snapshotted at mount and never set — kept as state rather than reading the
   // prop directly so the dropdown does not reorder under the user mid-edit.
   const [vendorList] = useState(vendors);
@@ -165,8 +181,8 @@ export function BillBuilder({
           credit: l.amountCents < 0,
           accountId: l.accountId ?? "",
           // THE ROUND TRIP. Read back by `loadBillLines`, carried through the
-          // form, sent again on save — because the update deletes every line,
-          // so anything not carried is deleted.
+          // form, sent again on save — the update whole-replaces a line's tags
+          // from the patch, so anything not carried is deleted.
           dimensionMemberIds: l.dimensionMemberIds,
         }))
       : [emptyRow()],
@@ -224,6 +240,11 @@ export function BillBuilder({
         return;
       }
       const lines = filled.map((p) => ({
+        // THE OTHER HALF OF THE ROUND TRIP. Without it `updateBillDraft` cannot
+        // tell an edited line from a new one, so it deletes the old row — and
+        // any delivery or processing run settled against it cascades away while
+        // the coding that clears them is saved straight back.
+        id: p.row.billLineId ?? undefined,
         description: p.row.description.trim(),
         amountCents: p.amountCents,
         accountId: p.row.accountId || null,
@@ -390,6 +411,14 @@ export function BillBuilder({
             </div>
             {rows.map((row) => {
               const suggestion = suggestionFor(row);
+              /**
+               * **DERIVED, NOT TYPED.** The line's account, amount and
+               * description are what the match computed — the description
+               * included, because that is what the matcher finds its variance
+               * sibling by. Tags stay editable: saying which enterprise a
+               * delivery was for changes nothing the match depends on.
+               */
+              const locked = !!row.accountId && derivedAccounts.has(row.accountId);
               return (
                 <div key={row.key} className="space-y-1">
                   <div className="grid grid-cols-[1fr_130px_60px_1fr_32px] items-center gap-2">
@@ -397,6 +426,7 @@ export function BillBuilder({
                       className="h-9"
                       value={row.description}
                       placeholder="What was billed"
+                      disabled={locked}
                       onChange={(e) =>
                         setRow(row.key, { description: e.target.value })
                       }
@@ -406,6 +436,7 @@ export function BillBuilder({
                       className="h-9 text-right font-mono"
                       placeholder="0.00"
                       value={row.amount}
+                      disabled={locked}
                       onChange={(e) => setRow(row.key, { amount: e.target.value })}
                     />
                     <label className="flex justify-center">
@@ -413,12 +444,14 @@ export function BillBuilder({
                         type="checkbox"
                         className="size-4"
                         checked={row.credit}
+                        disabled={locked}
                         title="Credit/discount line (negative)"
                         onChange={(e) => setRow(row.key, { credit: e.target.checked })}
                       />
                     </label>
                     <Select
                       value={row.accountId || undefined}
+                      disabled={locked}
                       onValueChange={(v) => setRow(row.key, { accountId: v })}
                     >
                       <SelectTrigger className="h-9">
@@ -455,6 +488,12 @@ export function BillBuilder({
                     nothing to pick.
                   */}
                   <div className="flex flex-wrap items-center gap-2 pl-1">
+                    {locked && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                        <Lock className="size-3" />
+                        Set by a match — undo the match to change it
+                      </span>
+                    )}
                     {suggestion && row.accountId !== suggestion.accountId && (
                       <button
                         type="button"

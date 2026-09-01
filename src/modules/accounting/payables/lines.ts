@@ -8,6 +8,21 @@ import { MAX_AMOUNT_CENTS } from "../lib/money";
  */
 
 export const billLineSchema = z.object({
+  /**
+   * **WHICH EXISTING LINE THIS ROW IS.** Absent means new.
+   *
+   * `updateBillDraft` used to delete every line and re-insert it, so a line's
+   * id did not survive an edit — and two tables hang allocations off that id
+   * with `ON DELETE CASCADE`. Saving a matched bill therefore threw its matches
+   * away while the form faithfully carried the GRNI coding back, so the bill
+   * still cleared the accrual and the same deliveries went back on the
+   * reconciliation to be matched and cleared a second time.
+   *
+   * An id the bill does not actually own is treated as new rather than
+   * refused: it is what a stale form sends, and inventing a line is the
+   * harmless reading.
+   */
+  id: z.string().uuid().optional(),
   description: z.string().trim().max(500).default(""),
   /** Signed; 0 posts nothing; negative = credit/discount line. */
   amountCents: z

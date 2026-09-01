@@ -33,6 +33,30 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-09-01 — Saving a bill unmatched its deliveries (`claude/a-match-survives-an-edit`)
+
+**GRNI COULD BE CLEARED TWICE FOR ONE DELIVERY, AND NOTHING SAID SO.** The
+mechanism is in accounting core and is written up in
+[accounting.md](accounting.md): `updateBillDraft` deleted and re-inserted every
+line of a draft, `bill_line_stock_allocations` cascades off a bill line's id, and
+the form carried the GRNI coding and the matched amount straight back. So editing
+a memo on a matched bill destroyed the match and kept its ledger effect —
+approval still debited `2050`, and `unbilledReceipts` offered the same deliveries
+for matching against a second bill.
+
+Nothing in this pack was wrong. What changed here is the reasoning on
+`bill_line_stock_allocations.bill_line_id`: the cascade means *when the LINE
+goes, the settlement goes with it*, because a deleted line no longer debits GRNI
+and the delivery is honestly un-invoiced again. It was never meant to fire on an
+ordinary edit, and the schema comment that called that fact "load-bearing" was
+describing the bug.
+
+Three tests in `inventory-posting`, all of which fail on the old behaviour: an
+edit keeps the match and GRNI clears once (with a second bill refused the same
+receipt), re-pricing a matched line is refused while **tagging it still works**,
+and deleting the line puts the delivery back on the reconciliation. **No
+migration.**
+
 ### 2026-08-31 — A split kept the animals and lost the money (`claude/the-cost-side`)
 
 Folded into the same PR as the entry below. Read
@@ -1111,7 +1135,7 @@ with no reason is one whose kind already says why.
 
 | `inventory_cost_adjustments` | **A correction to what a batch COST.** Appended, never an edit — ADR 0012 §A.4 | Composite FKs to the item and the lot, **neither cascading**: erasing the record that somebody re-stated a cost would hide the money. `amount_cents` is SIGNED and CHECKed non-zero, which is the pair of things `inventory_movements` structurally cannot carry. `on_hand_cents + issued_cents = amount_cents` is CHECKed, so a stored split can never fail to account for the whole |
 
-| `bill_line_stock_allocations` | **Which delivery a bill line is settling** | Composite FKs to `bill_lines` (**CASCADE** — a draft edit re-creates every line, so ids do not survive one) and to the receipt movement (**no cascade** — erasing the record that a bill settled it would hide the money). UNIQUE per (line, movement): a second match is a correction, not a second settlement |
+| `bill_line_stock_allocations` | **Which delivery a bill line is settling** | Composite FKs to `bill_lines` (**CASCADE** — when the LINE goes the settlement goes with it, because a deleted line no longer debits GRNI; it does NOT fire on an ordinary edit, which is what it used to do and what let GRNI be cleared twice) and to the receipt movement (**no cascade** — erasing the record that a bill settled it would hide the money). UNIQUE per (line, movement): a second match is a correction, not a second settlement |
 
 **Valuation is not a column and never will be.** What stock is worth is a fold
 over the movements (`core/valuation.ts`), exactly as an account balance is a

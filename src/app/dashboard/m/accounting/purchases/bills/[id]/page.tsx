@@ -195,6 +195,18 @@ export default async function BillDetailPage({
   const codableAccounts = data.accounts.filter(
     (a) => isCodableAccount(a, registerIds) || usedAccountIds.has(a.id),
   );
+  /**
+   * The accounts a line holds that nobody may PICK — added back above so the
+   * select can render them, and named here so the form can grey the row out.
+   *
+   * A line coded to one of these was coded by a match, and `assertLineAccounts`
+   * refuses to re-code, re-price or re-describe it. Computing it by subtraction
+   * keeps the accounting screen from having to know what a delivery is: it asks
+   * "may this be chosen?", not "is this GRNI?".
+   */
+  const derivedAccountIds = data.accounts
+    .filter((a) => usedAccountIds.has(a.id) && !isCodableAccount(a, registerIds))
+    .map((a) => a.id);
   const coding = readBillCoding(bill.aiCoding);
   const isOwner = ctx.role === "owner";
   const isDraft = bill.status === "draft";
@@ -290,9 +302,9 @@ export default async function BillDetailPage({
               amountCents: l.amountCents,
               accountId: l.accountId,
               // `loadBillLines` returns these and this mapping used to drop
-              // them. `updateBillDraft` deletes every line and re-inserts it,
-              // so a tag not carried through the form is a tag deleted by the
-              // next save.
+              // them. `updateBillDraft` whole-replaces a line's tags from what
+              // the patch sends, so a tag not carried through the form is a tag
+              // deleted by the next save.
               dimensionMemberIds: l.dimensionMemberIds,
             })),
             suggestions: coding?.suggestions ?? [],
@@ -305,6 +317,7 @@ export default async function BillDetailPage({
           dimensionTypes={dimensionTypesFrom(data.dimensionMembers, {
             keepIds: lines.flatMap((l) => l.dimensionMemberIds),
           })}
+          derivedAccountIds={derivedAccountIds}
         />
       ) : (
         <Card>

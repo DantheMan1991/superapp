@@ -5,6 +5,7 @@ import type { Bill, BillLine } from "@/db/schema";
 import {
   LedgerError,
   getDefaultEntityId,
+  isCodableAccount,
   postEntry,
   requireOwnerRole,
   voidEntry,
@@ -100,10 +101,44 @@ async function validateLineDimensions(
   return typeOf;
 }
 
+/** What a line already says, for deciding whether a save is changing it. */
+type ExistingLine = {
+  id: string;
+  description: string;
+  amountCents: number;
+  accountId: string | null;
+};
+
+/**
+ * **A LINE CODED TO AN ACCOUNT NOBODY MAY PICK IS DERIVED, NOT TYPED.**
+ *
+ * `isCodableAccount` keeps GRNI, Inventory, the affiliate accounts, AR/AP and
+ * the bank registers out of every picker, and its own comment admitted the
+ * hole: *"This filters the PICKERS; nothing validates it on save."* The form
+ * reads a bill's lines back, adds whatever accounts they already use so the
+ * select can render them, and posts the lot again — so the one coding a person
+ * could never choose was the one thing that round-tripped freely.
+ *
+ * The rule that closes it, and it has to be a rule about CHANGE rather than a
+ * flat ban, because those lines have to be saveable at all:
+ *
+ * > A line coded to an unpickable account may be **carried through unchanged**
+ * > or **deleted**. It may not be re-coded, re-priced, re-described, or created.
+ *
+ * Deleting is allowed on purpose: the allocations cascade with the line, so the
+ * match and the GRNI debit disappear together, which is consistent. Editing is
+ * not, because the account and the amount are what the match computed, and the
+ * description is what `allocateBillLineToStock` finds its variance sibling by.
+ *
+ * Tags are deliberately NOT frozen — an enterprise on a matched line is a
+ * person saying what the delivery was for, and it changes nothing the match
+ * depends on.
+ */
 async function assertLineAccounts(
   tx: Tx,
   tenantId: string,
   lines: BillLineInput[],
+  existingById: ReadonlyMap<string, ExistingLine>,
 ): Promise<void> {
   const ids = [
     ...new Set(lines.map((l) => l.accountId).filter((a): a is string => !!a)),
@@ -115,12 +150,66 @@ async function assertLineAccounts(
       inArray(schema.accounts.id, ids),
     ),
   });
+  const registers = await tx
+    .select({ accountId: schema.bankAccounts.accountId })
+    .from(schema.bankAccounts)
+    .where(eq(schema.bankAccounts.tenantId, tenantId));
+  const registerIds = new Set(registers.map((r) => r.accountId));
+
   for (const id of ids) {
     const account = accounts.find((a) => a.id === id);
     if (!account) throw new LedgerError("ACCOUNT_NOT_FOUND", `account ${id}`);
     if (!account.isActive) {
       throw new LedgerError("ACCOUNT_INACTIVE", `account ${account.code}`);
     }
+  }
+  for (const line of lines) {
+    if (!line.accountId) continue;
+    const account = accounts.find((a) => a.id === line.accountId)!;
+    if (isCodableAccount(account, registerIds)) continue;
+    const before = line.id ? existingById.get(line.id) : undefined;
+    const unchanged =
+      before !== undefined &&
+      before.accountId === line.accountId &&
+      before.amountCents === line.amountCents &&
+      before.description === line.description;
+    if (!unchanged) {
+      throw new LedgerError(
+        "ACCOUNT_NOT_CODABLE",
+        `account ${account.code} is set by matching, not by hand`,
+      );
+    }
+  }
+}
+
+/** Whole-replace the dimension tags on the lines named. */
+async function writeLineDimensions(
+  tx: Tx,
+  tenantId: string,
+  rows: ReadonlyArray<{ lineId: string; memberIds: readonly string[] }>,
+  typeOf: ReadonlyMap<string, string>,
+): Promise<void> {
+  const lineIds = rows.map((r) => r.lineId);
+  if (lineIds.length > 0) {
+    await tx
+      .delete(schema.lineDimensions)
+      .where(
+        and(
+          eq(schema.lineDimensions.tenantId, tenantId),
+          inArray(schema.lineDimensions.billLineId, lineIds),
+        ),
+      );
+  }
+  const dimRows = rows.flatMap((r) =>
+    r.memberIds.map((memberId) => ({
+      tenantId,
+      billLineId: r.lineId,
+      dimensionType: typeOf.get(memberId)!,
+      memberId,
+    })),
+  );
+  if (dimRows.length > 0) {
+    await tx.insert(schema.lineDimensions).values(dimRows);
   }
 }
 
@@ -131,7 +220,9 @@ async function insertBillLines(
   lines: BillLineInput[],
 ): Promise<number> {
   const typeOf = await validateLineDimensions(tx, tenantId, lines);
-  await assertLineAccounts(tx, tenantId, lines);
+  // No existing lines to carry anything through: on a new bill, an unpickable
+  // account is always somebody typing one.
+  await assertLineAccounts(tx, tenantId, lines, new Map());
   const inserted = await tx
     .insert(schema.billLines)
     .values(
@@ -145,18 +236,15 @@ async function insertBillLines(
       })),
     )
     .returning({ id: schema.billLines.id, lineNo: schema.billLines.lineNo });
-  const dimRows = lines.flatMap((l, i) => {
-    const lineId = inserted.find((r) => r.lineNo === i + 1)!.id;
-    return (l.dimensionMemberIds ?? []).map((memberId) => ({
-      tenantId,
-      billLineId: lineId,
-      dimensionType: typeOf.get(memberId)!,
-      memberId,
-    }));
-  });
-  if (dimRows.length > 0) {
-    await tx.insert(schema.lineDimensions).values(dimRows);
-  }
+  await writeLineDimensions(
+    tx,
+    tenantId,
+    lines.map((l, i) => ({
+      lineId: inserted.find((r) => r.lineNo === i + 1)!.id,
+      memberIds: l.dimensionMemberIds ?? [],
+    })),
+    typeOf,
+  );
   return billTotalCents(lines);
 }
 
@@ -208,8 +296,27 @@ export async function createBillDraft(
 }
 
 /**
- * Whole-replace lines; dims cascade with them. Clears ai_coding —
- * regenerated line ids make stale suggestions dangerous (P14).
+ * **A LINE KEEPS ITS IDENTITY ACROSS AN EDIT.** Lines the patch still names are
+ * UPDATED in place; lines it drops are deleted; lines it adds are inserted.
+ *
+ * This used to delete every line and re-insert the lot, which was simple and
+ * wrong. Two tables hang a settlement off a bill line's id with `ON DELETE
+ * CASCADE` — `bill_line_stock_allocations` (a delivery) and
+ * `production_run_bill_allocations` (a kill day's fee) — and the form carries
+ * the line's GRNI coding and its matched amount faithfully back. So editing the
+ * memo of a matched bill destroyed the match while keeping every ledger
+ * consequence of it: approving still debited `2050`, and the same deliveries
+ * were back on the reconciliation to be matched against a second bill and
+ * clear the same credit twice. `grniPosition` then disagreed with its own
+ * account by the full amount, with no entry anywhere explaining the gap.
+ *
+ * Nothing about the accounting needed the delete. It needed the tags replaced,
+ * which `writeLineDimensions` does per line, and it needed a stable ordering,
+ * which the two-phase renumber below gives it.
+ *
+ * `ai_coding` is still cleared. Line ids survive now, so the P14 reason no
+ * longer holds — but a suggestion made against a description somebody has since
+ * rewritten is stale for a plainer reason, and re-asking is cheap.
  */
 export async function updateBillDraft(
   tx: Tx,
@@ -224,15 +331,125 @@ export async function updateBillDraft(
   if (!vendor.isActive) {
     throw new LedgerError("VENDOR_INACTIVE", `vendor ${vendor.id} inactive`);
   }
-  await tx
-    .delete(schema.billLines)
+
+  const existing = await tx
+    .select({
+      id: schema.billLines.id,
+      description: schema.billLines.description,
+      amountCents: schema.billLines.amountCents,
+      accountId: schema.billLines.accountId,
+    })
+    .from(schema.billLines)
     .where(
       and(
         eq(schema.billLines.tenantId, ctx.tenantId),
         eq(schema.billLines.billId, bill.id),
       ),
     );
-  const totalCents = await insertBillLines(tx, ctx.tenantId, bill.id, args.patch.lines);
+  const existingById = new Map(existing.map((l) => [l.id, l]));
+
+  /**
+   * An id is honoured only if this bill actually owns it, and only once. A
+   * stale form naming a line that has since gone gets a new line, which is the
+   * harmless reading; a duplicated id would otherwise collapse two rows into
+   * one and lose an amount.
+   */
+  const claimed = new Set<string>();
+  const lines = args.patch.lines.map((l) => {
+    const id = l.id && existingById.has(l.id) && !claimed.has(l.id) ? l.id : undefined;
+    if (id) claimed.add(id);
+    return { ...l, id };
+  });
+
+  await assertLineAccounts(tx, ctx.tenantId, lines, existingById);
+  const typeOf = await validateLineDimensions(tx, ctx.tenantId, lines);
+
+  const removed = existing.filter((l) => !claimed.has(l.id));
+  if (removed.length > 0) {
+    await tx.delete(schema.billLines).where(
+      and(
+        eq(schema.billLines.tenantId, ctx.tenantId),
+        inArray(
+          schema.billLines.id,
+          removed.map((l) => l.id),
+        ),
+      ),
+    );
+  }
+
+  /**
+   * **SURVIVORS PARK ON NEGATIVE LINE NUMBERS FIRST.**
+   * `bill_lines_bill_line_no_idx` is a plain unique index, so it is enforced
+   * row by row rather than at the end of the statement — moving line 2 to line
+   * 1 while line 1 is still there fails. Negatives collide with nothing, and
+   * once every survivor is parked the whole positive range is free for the
+   * inserts and then for the final numbering.
+   */
+  for (const [i, l] of lines.entries()) {
+    if (!l.id) continue;
+    await tx
+      .update(schema.billLines)
+      .set({
+        lineNo: -(i + 1),
+        description: l.description,
+        amountCents: l.amountCents,
+        accountId: l.accountId ?? null,
+      })
+      .where(
+        and(
+          eq(schema.billLines.tenantId, ctx.tenantId),
+          eq(schema.billLines.id, l.id),
+        ),
+      );
+  }
+
+  const fresh = lines
+    .map((l, i) => ({ line: l, lineNo: i + 1 }))
+    .filter((r) => !r.line.id);
+  const inserted =
+    fresh.length === 0
+      ? []
+      : await tx
+          .insert(schema.billLines)
+          .values(
+            fresh.map((r) => ({
+              tenantId: ctx.tenantId,
+              billId: bill.id,
+              lineNo: r.lineNo,
+              description: r.line.description,
+              amountCents: r.line.amountCents,
+              accountId: r.line.accountId ?? null,
+            })),
+          )
+          .returning({
+            id: schema.billLines.id,
+            lineNo: schema.billLines.lineNo,
+          });
+
+  for (const [i, l] of lines.entries()) {
+    if (!l.id) continue;
+    await tx
+      .update(schema.billLines)
+      .set({ lineNo: i + 1 })
+      .where(
+        and(
+          eq(schema.billLines.tenantId, ctx.tenantId),
+          eq(schema.billLines.id, l.id),
+        ),
+      );
+  }
+
+  await writeLineDimensions(
+    tx,
+    ctx.tenantId,
+    lines.map((l, i) => ({
+      lineId: l.id ?? inserted.find((r) => r.lineNo === i + 1)!.id,
+      memberIds: l.dimensionMemberIds ?? [],
+    })),
+    typeOf,
+  );
+
+  const totalCents = billTotalCents(lines);
   const rows = await tx
     .update(schema.bills)
     .set({

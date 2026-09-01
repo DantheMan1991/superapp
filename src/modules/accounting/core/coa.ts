@@ -273,12 +273,23 @@ export function isCodableAccount(
    * same time. It was not, because GRNI was the account somebody had just been
    * bitten by.
    *
-   * **Existing lines are unaffected.** This filters the PICKERS; nothing
-   * validates it on save, and the bill edit page already re-adds any account a
-   * bill has actually used, which is the fix that had to be made for GRNI when
-   * a matched line rendered with an empty account box.
+   * **Existing lines are unaffected, and that is now a rule rather than a
+   * side effect.** This filters the PICKERS, and `assertLineAccounts` refuses a
+   * bill line that is coded to one of these accounts unless it is an existing
+   * line arriving back unchanged — so the bill edit page can keep re-adding
+   * whatever accounts a bill already uses (the fix that had to be made for GRNI
+   * when a matched line rendered with an empty account box) without that also
+   * being a way to hand-code to them.
    */
   if (account.subtype === "inventory") return false;
+  /**
+   * **SERVICES RECEIVED NOT INVOICED — `2060` — is GRNI one account along**,
+   * and it was missed for the same reason `inventory` was: the rule got written
+   * about the account somebody had just been bitten by. A run's accrual credits
+   * it and matching the plant's bill clears it; a line coded straight to it
+   * clears an accrual no run ever made.
+   */
+  if (account.subtype === "services_received") return false;
   if (
     account.isSystem &&
     (account.subtype === "accounts_receivable" ||

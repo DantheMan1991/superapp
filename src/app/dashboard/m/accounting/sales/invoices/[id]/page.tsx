@@ -377,7 +377,11 @@ export default async function InvoiceDetailPage({
               dimensionMemberIds: l.dimensionMemberIds,
             })),
           }}
-          dimensionTypes={dimensionTypesFrom(data.dimensionMembers)}
+          /* Plus whatever these lines already hold, retired or not — the same
+             rule the tax-rate picker above follows, and for the same reason. */
+          dimensionTypes={dimensionTypesFrom(data.dimensionMembers, {
+            keepIds: lines.flatMap((l) => l.dimensionMemberIds),
+          })}
         />
       ) : (
         <>

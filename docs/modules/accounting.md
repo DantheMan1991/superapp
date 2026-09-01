@@ -13,6 +13,64 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-01 — An invoice line says who earned it (`claude/an-invoice-line-says-who-earned-it`)
+
+The revenue half, and the cheapest possible version of it. **The read and the
+write have both existed for months with nothing joining them:**
+`invoiceLineSchema` has accepted `dimensionMemberIds` since before any dimension
+had a member, `loadInvoiceLines` returns them per line, and `issueInvoice`
+already copies them onto the income journal line — leaving the TAX line untagged
+on purpose, because a dimension answers *which part of the business earned this*
+and tax collected is money held for somebody else. The gap was a form.
+
+So profit per line of business stops being expenditure with no income beside it,
+for any business that invoices, with **no posting path and no migration**.
+
+**THE ROUND TRIP IS THE BUG THIS NEARLY SHIPPED.** `updateInvoiceDraft`
+whole-replaces the lines and their dimensions cascade with them, so a tag is only
+as durable as read → carry → send. The builder's `LineRow` did not carry it and
+the edit page's `lines.map` narrowed the shape and dropped it: the first save of
+a tagged draft would have wiped every tag on it. Making
+`LineRow.dimensionMemberIds` **required rather than optional** put all three
+construction sites in front of the compiler, and the compiler is what found the
+edit page.
+
+**A RETIRED MEMBER ON A DRAFT WOULD HAVE MADE IT UNSAVEABLE, and the fix was
+already written six lines away.** `validateLineDimensions` refuses an inactive
+member on every write, and `dimensionTypesFrom` offers only active ones — so a
+draft tagged with a line of business that was later retired showed "None" in
+every picker while still holding the id. Saving died with a uuid in a toast and
+there was nothing on screen to change. **Before this change the builder dropped
+tags on the way in, so the save always succeeded; adding the round trip turned
+silent loss into a hard failure.**
+
+The same page had solved it for tax rates: *"The editor offers active rates, plus
+whichever this draft already holds — otherwise opening a draft would silently
+drop its rate."* `dimensionTypesFrom` takes `keepIds` now and marks what it keeps
+as `(retired)`. The tag still has to come off before the invoice can issue —
+`postEntry` declines an inactive member too — which is exactly why it has to be
+visible.
+
+**AND `DimensionTags` WAS DISCARDING IDS IT COULD NOT SEE.** `pick` rebuilt the
+array from the options on screen, so any id without an option behind it vanished
+the moment another type was changed. Unreachable for a caller whose state starts
+empty — which is what both banking surfaces do — and reachable the instant a
+caller round-trips STORED ids, which the invoice builder is the first to do. The
+`splitLot` shape one level up: rebuilding a record from a filtered view of it and
+losing what the view did not show.
+
+**A SUB-ROW, NOT A NINTH COLUMN.** The line grid's two class strings are written
+out in full because Tailwind scans for literals, so a column conditional on
+having any dimensions would mean four of them — tax × tags. The grid already
+scrolls at `min-w-[700px]` and widening it is a cost paid on every invoice by
+every tenant, including the ones with no dimensions at all, who now see exactly
+what they saw before.
+
+Driven on Hilltop Farm through the whole motion: tag a line Broilers, save the
+draft, reopen it, change the description, save again — the tag survives — then
+issue. **P&L → Split by → Enterprise now reads income AND cost against Broilers,
+with a gross profit of 297.07.** First time that figure has existed.
+
 ### 2026-08-31 — A picker for the money that actually arrives (`claude/a-picker-for-the-money-that-arrives`)
 
 **Six posting paths have validated `dimensionMemberIds` since before the

@@ -490,10 +490,20 @@ the same transaction as every write.
 - ~~**Nothing is tagged with an enterprise yet.**~~ Closed by slice 2, and the
   ledger end by slice 3. **What remains: only the COST side is tagged.** The P&L
   by enterprise is expenditure with no income beside it, so it answers *what has
-  Broilers cost me* and not *what has Broilers made me*. **Invoice lines are the
-  cheapest way to change that** — `invoicing/invoices.ts` already copies a line's
-  dimensions onto the income journal line, so the revenue half needs a picker
-  rather than a posting path. Retail's till is a separate and much larger job.
+  Broilers cost me* and not *what has Broilers made me*. ~~**Invoice lines are the
+  cheapest way to change that.**~~ **Done 2026-09-01** — see
+  [accounting.md](accounting.md). A business that invoices now gets a real gross
+  profit per line of business. Retail's till is a separate and much larger job,
+  and remains the only untagged revenue path.
+- **RECURRING TEMPLATES CANNOT CARRY A TAG, and the auto-posting ones are the
+  problem.** `recurring-entry-controls.tsx` builds an invoice template's lines
+  from four fields and a journal template's from two, neither including
+  `dimensionMemberIds` — while `recurringJournalLineSchema` accepts it and
+  `generate.ts` threads it through, so the receiving end is wired to a writer
+  that does not exist. A generated INVOICE is a draft somebody reviews, and they
+  can now tag it before issuing; **an `autoPost` JOURNAL template posts
+  unattended and can never carry one.** There is no update action for a
+  template at all, so an existing one cannot be fixed in place either.
 - **THE COSTS THAT ARRIVE AS BILLS AND BANK ROWS ARE WHERE THE VOLUME IS**, and
   the bank half of that landed 2026-08-31 — see
   [accounting.md](accounting.md). Bill lines, invoice lines, the manual journal

@@ -72,6 +72,43 @@ describe("dimensionTypesFrom", () => {
     expect(out[1].members.map((m) => m.name)).toEqual(["Alpha", "Zulu"]);
   });
 
+  it("KEEPS A RETIRED MEMBER A RECORD ALREADY HOLDS, and marks it", () => {
+    /**
+     * The tax-rate picker on the same page does exactly this — *"offers active
+     * rates, plus whichever this draft already holds — otherwise opening a
+     * draft would silently drop its rate."*
+     *
+     * Without it, a draft tagged with a line of business that was later retired
+     * shows "None" in every picker while still holding the id, so saving is
+     * refused with a uuid in a toast and there is nothing on screen to change.
+     * Issuing would refuse it too — `postEntry` declines an inactive member —
+     * so the tag HAS to come off, and it can only come off if it can be seen.
+     */
+    const out = dimensionTypesFrom(
+      [
+        member("m1", "enterprise", "Broilers"),
+        member("m2", "enterprise", "Hogs", false),
+      ],
+      { keepIds: ["m2"] },
+    );
+    expect(out[0].members.map((m) => m.name)).toEqual([
+      "Broilers",
+      "Hogs (retired)",
+    ]);
+  });
+
+  it("still hides a retired member no record holds", () => {
+    // `keepIds` widens the list for one record; it does not reopen retirement.
+    const out = dimensionTypesFrom(
+      [
+        member("m1", "enterprise", "Broilers"),
+        member("m2", "enterprise", "Hogs", false),
+      ],
+      { keepIds: ["something-else"] },
+    );
+    expect(out[0].members.map((m) => m.name)).toEqual(["Broilers"]);
+  });
+
   it("returns nothing at all for a business with no dimensions", () => {
     // `DimensionTags` renders null on this, which is most tenants on most days.
     expect(dimensionTypesFrom([])).toEqual([]);

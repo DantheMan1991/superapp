@@ -176,6 +176,12 @@ export async function setRecurringEntryActiveAction(
 export async function generateRecurringEntriesAction(): Promise<
   ActionResult<{
     created: number;
+    /**
+     * Periods walked. Returned for ONE reason — the button's "nothing was due"
+     * test — and never rendered. See the toast for why `created` can no longer
+     * answer that.
+     */
+    periodsWalked: number;
     posted: number;
     deferredToDraft: number;
     tagsDropped: number;
@@ -190,6 +196,7 @@ export async function generateRecurringEntriesAction(): Promise<
       ok: true,
       data: {
         created: result.created,
+        periodsWalked: result.periodsWalked,
         posted: result.posted,
         deferredToDraft: result.deferredToDraft,
         tagsDropped: result.tagsDropped,

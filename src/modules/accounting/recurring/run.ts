@@ -48,12 +48,13 @@ export interface RecurringRunResult {
   /**
    * Periods walked, whether or not each wrote anything.
    *
-   * **Carried here and NOT into the Generate toast, deliberately.** A gap
-   * between this and `created` is the only evidence a month was already there,
-   * which is a thing to diagnose from a log rather than to put in front of
-   * somebody who just pressed a button — "Created 2" when three months were
-   * due needs no explanation to them, and would be noise. This is the surface
-   * where an operator asks why a sweep's numbers look wrong.
+   * A gap between this and `created` is the only evidence a month was already
+   * there — the thing an operator asks about when a sweep's numbers look
+   * wrong, which is why it is in this JSON.
+   *
+   * The Generate button also receives it and **never renders it**: it needs
+   * the number to decide whether anything was due at all, not to show. See the
+   * toast.
    */
   periodsWalked: number;
   posted: number;

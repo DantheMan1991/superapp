@@ -64,9 +64,15 @@ export interface RecurringEntryResult {
   /**
    * Periods the catch-up loop walked, whether or not each wrote anything.
    *
-   * `created` minus this is the number of months that were already there. The
-   * two are equal in every ordinary run, and a gap is the only evidence a
-   * dedupe happened at all.
+   * **`periodsWalked - created` is the number of months that were already
+   * there** — never the other way round, since `created` can only increment
+   * once per period and `runs` increments every time. The two are equal in
+   * every ordinary run, and a gap is the only evidence a dedupe happened.
+   *
+   * **It is also the honest test for "was anything due at all".** `created`
+   * used to answer that, exactly, because it WAS the period count; gating the
+   * counters on `deduped` broke that equivalence, so the emptiness question
+   * moved here with it.
    */
   periodsWalked: number;
   /**

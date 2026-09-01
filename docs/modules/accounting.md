@@ -37,11 +37,30 @@ the catch-up and drives `next`, so a deduped month must still advance it or the
 loop would spin against `CATCH_UP_CAP`. Conflating the two — the number of
 periods walked with the number of records written — is what the bug was.
 
-**`periodsWalked` is reported to the sweep and NOT to the Generate toast.** A
-gap between it and `created` is the only evidence a month was already there,
-which is something to diagnose from a log rather than to put in front of
-somebody who just pressed a button: "Created 2" when three months were due
-needs no explanation to them.
+**`periodsWalked` is reported to the sweep, and the button receives it without
+ever rendering it.** A gap between it and `created` is the only evidence a month
+was already there — something to diagnose from a log rather than to put in front
+of somebody who just pressed a button, since "Created 2" when three months were
+due needs no explanation to them.
+
+**THE FIRST VERSION OF THIS PR WITHHELD IT FROM THE BUTTON ENTIRELY, AND THAT
+WAS A BUG THE PR ITSELF INTRODUCED.** The toast opens with `created === 0 &&
+errors === 0 → "Nothing was due"`, which was an EXACT test while `created` was
+the period count: a template only reaches the loop when `next_run_date <=
+today`, so anything that ran without throwing contributed at least one. Gating
+the counters on `deduped` broke that equivalence — a due template whose every
+period was already there now writes nothing while having walked three months —
+and `tagsDropped` is computed above the loop and returned regardless, so
+`tagsDropped > 0 && created === 0` became reachable and would have landed in the
+"Nothing was due" branch. **That would have swallowed the retired-tag warning
+added the same day, whose own comment says it is named there "because nothing
+else ever will."**
+
+Found by an adversarial pass over the diff, and it is the exact failure mode the
+change was fixing, one consumer along: the count moved off "periods" and the one
+reader that still meant periods was left behind. The emptiness test now asks
+`periodsWalked === 0`. **Deciding not to show a number is not the same as
+deciding not to return it**, which is the general form of the mistake.
 
 **NOT REACHABLE THROUGH THE SCHEDULE, and fixed anyway.** `advanceMonthly` only
 ever moves forward, `next_run_date` has no backward writer, and nothing else in
@@ -53,9 +72,15 @@ reasons from when a sweep looks wrong.
 **The test makes it reachable the only honest way**: it posts the first
 catch-up month's entry in advance under the key generation will use, which is
 exactly the state a retried or half-rolled-back run leaves and the case the
-idempotency key exists for. Two periods due with one already there gives one
-record written, three periods walked, and a schedule that still advances past
-all three. Reverting the gate turns it red on `created: 3`.
+idempotency key exists for. Reverting the gate turns it red on `created: 3` —
+checked, not assumed.
+
+**It asserts a RELATION rather than three numbers.** How many periods fall
+between the template's first run and today depends on when the suite runs, so
+the first version passed in September and would have failed in October. The
+invariant the calendar cannot touch is that one period was already there, so
+one fewer record was written than periods walked. The neighbouring catch-up
+test uses `toBeGreaterThanOrEqual` for the same reason.
 
 ### 2026-09-01 — A standing instruction says what it was for (`claude/a-standing-instruction-says-what-it-was-for`)
 

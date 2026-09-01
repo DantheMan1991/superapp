@@ -107,9 +107,24 @@ export function GenerateRecurringEntriesButton() {
         toast.error(result.error);
         return;
       }
-      const { created, posted, deferredToDraft, tagsDropped, errors } =
+      const { created, periodsWalked, posted, deferredToDraft, tagsDropped, errors } =
         result.data!;
-      if (created === 0 && errors === 0) {
+      /**
+       * **"NOTHING WAS DUE" IS A QUESTION ABOUT PERIODS, NOT ABOUT RECORDS.**
+       *
+       * This read `created === 0`, which was an EXACT test while `created` was
+       * the period count: a template only reaches the loop when
+       * `next_run_date <= today`, so any template that ran without throwing
+       * contributed at least one. Gating the counters on `deduped` broke that
+       * equivalence — a due template whose every period was already there now
+       * writes nothing while having walked three months.
+       *
+       * Left alone it would have swallowed the retired-tag warning below,
+       * which is the one thing on this screen that says a template needs
+       * fixing. `periodsWalked` is used here and nowhere else in the UI; the
+       * number itself is never shown.
+       */
+      if (periodsWalked === 0 && errors === 0) {
         toast.success("Nothing was due");
       } else {
         toast.success(

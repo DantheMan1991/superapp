@@ -48,6 +48,7 @@ import {
 } from "../src/modules/accounting/invoicing/invoices";
 import {
   archiveDimensionMember,
+  postEntry,
   upsertDimensionMember,
 } from "../src/modules/accounting/core";
 import { loadBillLines } from "../src/modules/accounting/payables/bills";
@@ -1054,6 +1055,84 @@ d("invoicing (DB)", () => {
       for (const e of entries) {
         expect(await entryTags(e.id)).toEqual([live]);
       }
+    });
+
+    it("COUNTS WHAT IT WROTE, not the months it walked", async () => {
+      /**
+       * **`postEntry` IS IDEMPOTENT ON `recurring:<templateId>:<date>` AND THE
+       * LOOP IGNORED THE ANSWER.** It incremented `created` — and `posted`,
+       * and the deferral — once per period walked, whether or not the period
+       * wrote anything. `createEntry` already checks `deduped` before writing
+       * its audit row; this loop did not.
+       *
+       * It is not reachable through the schedule: `advanceMonthly` only moves
+       * forward, `next_run_date` has no backward writer, and nothing else emits
+       * that key prefix. So the test makes it reachable the only honest way —
+       * by putting the entry for the FIRST catch-up month there in advance,
+       * under the key generation will use. That is exactly the state a retried
+       * or half-rolled-back run would leave, which is the case the idempotency
+       * key exists for in the first place.
+       *
+       * Two periods due, one already there: one record written, two periods
+       * walked, and the schedule still advances past both.
+       */
+      const cash = await accountId("1000");
+      const exp = await accountId("6700");
+      const template = await addTemplate({
+        kind: "journal",
+        name: "Counted once",
+        nextRunDate: "2026-06-04",
+        autoPost: true,
+        template: {
+          kind: "journal",
+          lines: [
+            { accountId: exp, amountCents: 1_100 },
+            { accountId: cash, amountCents: -1_100 },
+          ],
+        },
+      });
+
+      // The first month, already posted under the key generation will use.
+      await withTenant(tenantId, async (tx) =>
+        postEntry(tx, owner, {
+          entityId: await getDefaultEntityId(tx, tenantId),
+          status: "posted",
+          entryDate: "2026-06-04",
+          memo: "Counted once",
+          lines: [
+            { accountId: exp, amountCents: 1_100 },
+            { accountId: cash, amountCents: -1_100 },
+          ],
+          idempotencyKey: `recurring:${template.id}:2026-06-04`,
+        }),
+      );
+
+      const result = await generateRecurringEntries(owner);
+      expect(result.errors).toHaveLength(0);
+      // July and August are due; June is already there.
+      expect(result.periodsWalked).toBe(3);
+      expect(result.created).toBe(2);
+      expect(result.posted).toBe(2);
+
+      // One entry per period, not two for June.
+      const entries = await withTenant(tenantId, (tx) =>
+        tx.query.journalEntries.findMany({
+          where: and(
+            eq(schema.journalEntries.tenantId, tenantId),
+            eq(schema.journalEntries.memo, "Counted once"),
+          ),
+        }),
+      );
+      expect(entries).toHaveLength(3);
+      expect(new Set(entries.map((e) => e.entryDate)).size).toBe(3);
+
+      // And the schedule moved past all three regardless.
+      const after = await withTenant(tenantId, (tx) =>
+        tx.query.recurringEntries.findFirst({
+          where: eq(schema.recurringEntries.id, template.id),
+        }),
+      );
+      expect(after!.nextRunDate > "2026-08-04").toBe(true);
     });
 
     it("an invoice template's tag reaches the generated draft", async () => {

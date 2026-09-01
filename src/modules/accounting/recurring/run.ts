@@ -43,7 +43,19 @@ export interface RecurringRunResult {
   tenantsDue: number;
   /** Of those, the ones with accounting switched on. */
   tenantsRun: number;
+  /** Records actually written. See `RecurringEntryResult.created`. */
   created: number;
+  /**
+   * Periods walked, whether or not each wrote anything.
+   *
+   * **Carried here and NOT into the Generate toast, deliberately.** A gap
+   * between this and `created` is the only evidence a month was already there,
+   * which is a thing to diagnose from a log rather than to put in front of
+   * somebody who just pressed a button — "Created 2" when three months were
+   * due needs no explanation to them, and would be noise. This is the surface
+   * where an operator asks why a sweep's numbers look wrong.
+   */
+  periodsWalked: number;
   posted: number;
   /** Auto-posting journals left as drafts because their period is closed. */
   deferredToDraft: number;
@@ -90,6 +102,7 @@ export async function runRecurringEntries(
     tenantsDue: 0,
     tenantsRun: 0,
     created: 0,
+    periodsWalked: 0,
     posted: 0,
     deferredToDraft: 0,
     tagsDropped: 0,
@@ -123,6 +136,7 @@ export async function runRecurringEntries(
       const run = await generateRecurringEntries(ctx, { unattended: true });
       result.tenantsRun += 1;
       result.created += run.created;
+      result.periodsWalked += run.periodsWalked;
       result.posted += run.posted;
       result.deferredToDraft += run.deferredToDraft;
       result.tagsDropped += run.tagsDropped;

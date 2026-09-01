@@ -35,7 +35,23 @@ import {
 const CATCH_UP_CAP = 12;
 
 export interface RecurringEntryResult {
-  /** Records created, drafts and postings together. */
+  /**
+   * Records ACTUALLY WRITTEN, drafts and postings together.
+   *
+   * **Not the number of periods the loop walked**, which is what this used to
+   * report. `postEntry` is idempotent on `recurring:<templateId>:<date>` and
+   * returns `deduped` when it hands back an entry it did not write — a signal
+   * `createEntry` already checks before writing its audit row, and this loop
+   * ignored. A deduped month was counted as created, and if it wanted to post,
+   * as posted too.
+   *
+   * It is not reachable through the schedule today: `advanceMonthly` only ever
+   * moves forward, `next_run_date` has no backward writer, and nothing else
+   * emits that key prefix. It is fixed anyway, because a count whose
+   * correctness rests on an unreachability argument is one that goes wrong the
+   * first time somebody makes it reachable — and this is the figure an operator
+   * reasons from when a sweep looks wrong.
+   */
   created: number;
   /** Of those, journals that actually posted to the ledger. */
   posted: number;
@@ -45,6 +61,14 @@ export interface RecurringEntryResult {
    * depreciation entry is sitting unposted.
    */
   deferredToDraft: number;
+  /**
+   * Periods the catch-up loop walked, whether or not each wrote anything.
+   *
+   * `created` minus this is the number of months that were already there. The
+   * two are equal in every ordinary run, and a gap is the only evidence a
+   * dedupe happened at all.
+   */
+  periodsWalked: number;
   /**
    * Members a template still names that have since been RETIRED. Their tags
    * are dropped so the entry generates anyway — see `retiredMemberIds` — and
@@ -209,6 +233,7 @@ export async function generateRecurringEntries(
     created: 0,
     posted: 0,
     deferredToDraft: 0,
+    periodsWalked: 0,
     tagsDropped: 0,
     templatesRun: 0,
     errors: [],
@@ -283,7 +308,12 @@ export async function generateRecurringEntries(
         const tagsDropped = retired.size;
 
         let next = entry.nextRunDate;
+        // `runs` bounds the catch-up and drives `next`, so it counts PERIODS
+        // and must increment whether or not the period wrote anything —
+        // otherwise a deduped month would loop forever against CATCH_UP_CAP.
+        // `created` is the separate question of what was written.
         let runs = 0;
+        let created = 0;
         let posted = 0;
         let deferred = 0;
 
@@ -299,9 +329,8 @@ export async function generateRecurringEntries(
             const inClosedPeriod = closedThrough !== null && next <= closedThrough;
             const wantsPost = entry.autoPost;
             const status = wantsPost && !inClosedPeriod ? "posted" : "draft";
-            if (wantsPost && inClosedPeriod) deferred += 1;
 
-            await postEntry(tx, actor, {
+            const outcome = await postEntry(tx, actor, {
               entityId,
               status,
               entryDate: next,
@@ -319,7 +348,20 @@ export async function generateRecurringEntries(
               // same month even if the version CAS is somehow beaten.
               idempotencyKey: `recurring:${entry.id}:${next}`,
             });
-            if (status === "posted") posted += 1;
+            /**
+             * **EVERY COUNTER HANGS OFF `deduped`, the deferral included.**
+             *
+             * A deferral is "this run wanted to post and left a draft instead".
+             * If the entry was already there, this run left nothing — the run
+             * that created it did, and counted it then. Reporting it again
+             * would tell somebody a depreciation entry is newly stuck when
+             * nothing happened at all.
+             */
+            if (!outcome.deduped) {
+              created += 1;
+              if (status === "posted") posted += 1;
+              else if (wantsPost) deferred += 1;
+            }
           } else if (template.kind === "invoice") {
             // Invoices are ALWAYS drafts too, and always were: a human reviews
             // before AR posts, and generation never touches the ledger, which
@@ -345,6 +387,9 @@ export async function generateRecurringEntries(
               taxRateId: template.taxRateId ?? null,
               recurringEntryId: entry.id,
             });
+            // No idempotency key on this path — `createInvoiceDraft` always
+            // inserts — so reaching here is always a record written.
+            created += 1;
           } else {
             // Bills are ALWAYS drafts. Approving a bill is what posts it, and
             // that approval is the control an owner already exercises over
@@ -360,6 +405,8 @@ export async function generateRecurringEntries(
                 dimensionMemberIds: keepTags(l.dimensionMemberIds),
               })),
             });
+            // As above: `createBillDraft` always inserts.
+            created += 1;
           }
           next = advanceMonthly(next, entry.dayOfMonth);
           runs += 1;
@@ -386,10 +433,11 @@ export async function generateRecurringEntries(
           // whole, rather than leaving half a month's entries behind.
           throw new LedgerError("STALE_VERSION", "template generated concurrently");
         }
-        return { runs, posted, deferred, tagsDropped };
+        return { runs, created, posted, deferred, tagsDropped };
       });
 
-      result.created += outcome.runs;
+      result.created += outcome.created;
+      result.periodsWalked += outcome.runs;
       result.posted += outcome.posted;
       result.deferredToDraft += outcome.deferred;
       result.tagsDropped += outcome.tagsDropped;

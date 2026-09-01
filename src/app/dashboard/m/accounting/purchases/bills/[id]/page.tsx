@@ -22,7 +22,12 @@ import { listRecordHistory } from "@/modules/accounting/history/list";
 import { RecordHistory } from "@/modules/accounting/components/record-history";
 import { EntityThreads } from "@/modules/email/components/entity-threads";
 import { loadBillLines, findPossibleDuplicates } from "@/modules/accounting/payables/bills";
-import { isCodableAccount, listEntities } from "@/modules/accounting/core";
+import {
+  isCodableAccount,
+  listDimensionMembers,
+  listEntities,
+} from "@/modules/accounting/core";
+import { dimensionTypesFrom } from "@/lib/dimension-options";
 import { paidCentsFor } from "@/modules/accounting/payables/payments";
 import { readBillCoding } from "@/modules/accounting/ai/bill-validate";
 import {
@@ -67,6 +72,8 @@ export default async function BillDetailPage({
       ),
     });
     const lines = await loadBillLines(tx, tenantId, bill.id);
+    // Unfiltered: `dimensionTypesFrom` owns the active-only rule.
+    const dimensionMembers = await listDimensionMembers(tx, tenantId);
     const accounts = await tx.query.accounts.findMany({
       where: and(
         eq(schema.accounts.tenantId, tenantId),
@@ -131,6 +138,7 @@ export default async function BillDetailPage({
     return {
       companies,
       bill,
+      dimensionMembers,
       vendor,
       lines,
       history,
@@ -281,9 +289,22 @@ export default async function BillDetailPage({
               description: l.description,
               amountCents: l.amountCents,
               accountId: l.accountId,
+              // `loadBillLines` returns these and this mapping used to drop
+              // them. `updateBillDraft` deletes every line and re-inserts it,
+              // so a tag not carried through the form is a tag deleted by the
+              // next save.
+              dimensionMemberIds: l.dimensionMemberIds,
             })),
             suggestions: coding?.suggestions ?? [],
           }}
+          /* Plus whatever these lines already hold, retired or not. A draft
+             that cannot show its own tag cannot have it taken off, and
+             `validateLineDimensions` refuses an inactive member on every
+             write — so without this a retired tag makes the draft unsaveable
+             with nothing on screen to change. */
+          dimensionTypes={dimensionTypesFrom(data.dimensionMembers, {
+            keepIds: lines.flatMap((l) => l.dimensionMemberIds),
+          })}
         />
       ) : (
         <Card>

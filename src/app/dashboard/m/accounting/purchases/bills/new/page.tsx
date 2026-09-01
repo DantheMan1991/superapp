@@ -10,8 +10,10 @@ import { PurchasesNav } from "../../purchases-nav";
 import {
   getDefaultEntityId,
   isCodableAccount,
+  listDimensionMembers,
   listEntities,
 } from "@/modules/accounting/core";
+import { dimensionTypesFrom } from "@/lib/dimension-options";
 import { BillBuilder } from "../bill-builder";
 
 export const dynamic = "force-dynamic";
@@ -42,6 +44,8 @@ export default async function NewBillPage() {
       defaultEntityId: await getDefaultEntityId(tx, tenantId),
       today: todayInTimezone(ctx.tenant.timezone),
       accounts: accounts.filter((a) => isCodableAccount(a, registerIds)),
+      // Unfiltered: `dimensionTypesFrom` owns the active-only rule.
+      dimensionMembers: await listDimensionMembers(tx, tenantId),
     };
   });
 
@@ -59,6 +63,7 @@ export default async function NewBillPage() {
         defaultEntityId={data.defaultEntityId}
         accounts={data.accounts.map((a) => ({ id: a.id, code: a.code, name: a.name }))}
         today={data.today}
+        dimensionTypes={dimensionTypesFrom(data.dimensionMembers)}
       />
     </div>
   );

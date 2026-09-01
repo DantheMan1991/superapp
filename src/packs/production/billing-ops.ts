@@ -602,20 +602,56 @@ export async function matchBillLineToRuns(
     );
   if (varianceCents !== 0) {
     const siblingNo = await nextLineNo(tx, ctx.tenantId, line.billId);
-    await tx.insert(schema.billLines).values({
-      tenantId: ctx.tenantId,
-      billId: line.billId,
-      lineNo: siblingNo,
-      description: varianceDescription,
-      amountCents: varianceCents,
-      /**
-       * **UNCODED ON PURPOSE.** A processing overcharge is not obviously a cost
-       * of goods — it may be a rate rise, a service nobody asked for, or a
-       * mistake to query — and this pack must not decide which. It is left for
-       * whoever codes the bill, which is the ordinary path for any line.
-       */
-      accountId: null,
-    });
+    const [sibling] = await tx
+      .insert(schema.billLines)
+      .values({
+        tenantId: ctx.tenantId,
+        billId: line.billId,
+        lineNo: siblingNo,
+        description: varianceDescription,
+        amountCents: varianceCents,
+        /**
+         * **UNCODED ON PURPOSE.** A processing overcharge is not obviously a
+         * cost of goods — it may be a rate rise, a service nobody asked for, or
+         * a mistake to query — and this pack must not decide which. It is left
+         * for whoever codes the bill, which is the ordinary path for any line.
+         */
+        accountId: null,
+      })
+      .returning({ id: schema.billLines.id });
+
+    /**
+     * **THE LINE OF BUSINESS IS INHERITED EVEN THOUGH THE ACCOUNT IS NOT, and
+     * the two are not the same question.** Which account an overcharge belongs
+     * in genuinely depends on what it was; which part of the business bore it
+     * does not — it is the same one that was billed for the processing.
+     *
+     * Deriving it is also the only way it can be right, because this row is
+     * REBUILT on every re-match: a tag somebody set by hand while coding the
+     * line would be eaten the next time another run joined the bill.
+     */
+    const parentDims = await tx
+      .select({
+        dimensionType: schema.lineDimensions.dimensionType,
+        memberId: schema.lineDimensions.memberId,
+      })
+      .from(schema.lineDimensions)
+      .where(
+        and(
+          eq(schema.lineDimensions.tenantId, ctx.tenantId),
+          eq(schema.lineDimensions.billLineId, line.id),
+        ),
+      );
+    if (parentDims.length > 0) {
+      await tx.insert(schema.lineDimensions).values(
+        parentDims.map((d) => ({
+          tenantId: ctx.tenantId,
+          billLineId: sibling.id,
+          dimensionType: d.dimensionType,
+          memberId: d.memberId,
+        })),
+      );
+    }
   }
 
   return {

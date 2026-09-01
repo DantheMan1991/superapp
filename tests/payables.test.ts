@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../src/db";
 import {
+  upsertDimensionMember,
   assertEntryNotSourceManaged,
   getDefaultEntityId,
   setClosedThrough,
@@ -309,6 +310,131 @@ d("payables (DB)", () => {
       }),
     );
   }
+
+
+  // ---- dimensions on a bill line ------------------------------------------
+
+  describe("a bill line says what it was for", () => {
+    /**
+     * A farm's feed, vet, fuel and insurance arrive as BILLS. `lines.ts` has
+     * accepted `dimensionMemberIds` and `loadBillLines` has returned them since
+     * long before any dimension had a member; `approveBill` copies them onto
+     * the expense journal lines and leaves the AP counter-leg untagged. The gap
+     * was a form.
+     */
+    const memberId = async (name: string) => {
+      const m = await withTenant(tenantId, (tx) =>
+        upsertDimensionMember(tx, owner, {
+          dimensionType: "enterprise",
+          packEntityId: crypto.randomUUID(),
+          displayName: name,
+        }),
+      );
+      return m.id;
+    };
+
+    it("SURVIVES A DRAFT EDIT, because the update deletes every line", async () => {
+      /**
+       * `updateBillDraft` whole-replaces the lines, so a tag is only as durable
+       * as read → carry → send. `BuilderBill.lines` did not carry it and the
+       * edit page's `lines.map` narrowed the shape and dropped it — the first
+       * save of a tagged draft would have wiped every tag on it.
+       */
+      const feed = await accountId("5000");
+      const broilers = await memberId("Broilers");
+      const bill = await makeBill(
+        [{ ...line(31_840, feed, "Feed mill"), dimensionMemberIds: [broilers] }],
+        { billNumber: "DIM-1" },
+      );
+      const read = await withTenant(tenantId, (tx) =>
+        loadBillLines(tx, tenantId, bill.id),
+      );
+      expect(read[0].dimensionMemberIds).toEqual([broilers]);
+
+      await withTenant(tenantId, (tx) =>
+        updateBillDraft(tx, owner, {
+          billId: bill.id,
+          expectedVersion: bill.version,
+          patch: {
+            vendorId,
+            billDate: "2026-06-15",
+            lines: read.map((l) => ({
+              description: "Feed mill — September",
+              amountCents: l.amountCents,
+              accountId: l.accountId,
+              dimensionMemberIds: l.dimensionMemberIds,
+            })),
+          },
+        }),
+      );
+      const after = await withTenant(tenantId, (tx) =>
+        loadBillLines(tx, tenantId, bill.id),
+      );
+      expect(after[0].description).toBe("Feed mill — September");
+      expect(after[0].dimensionMemberIds).toEqual([broilers]);
+    });
+
+    it("clears the tag when the edit genuinely says none", async () => {
+      const feed = await accountId("5000");
+      const beef = await memberId("Beef");
+      const bill = await makeBill(
+        [{ ...line(5_000, feed), dimensionMemberIds: [beef] }],
+        { billNumber: "DIM-2" },
+      );
+      await withTenant(tenantId, (tx) =>
+        updateBillDraft(tx, owner, {
+          billId: bill.id,
+          expectedVersion: bill.version,
+          patch: {
+            vendorId,
+            billDate: "2026-06-15",
+            lines: [line(5_000, feed)],
+          },
+        }),
+      );
+      const after = await withTenant(tenantId, (tx) =>
+        loadBillLines(tx, tenantId, bill.id),
+      );
+      expect(after[0].dimensionMemberIds).toEqual([]);
+    });
+
+    it("CARRIES THE TAG ONTO THE EXPENSE LINE AT APPROVAL, and leaves AP untagged", async () => {
+      /**
+       * The payoff, and the AP assertion is the two-sided rule the enterprise
+       * work proved: the expense leg says which part of the business spent the
+       * money; what is owed to the supplier is not that enterprise's liability
+       * to report on.
+       */
+      const feed = await accountId("5000");
+      const pigs = await memberId("Pigs");
+      const bill = await makeBill(
+        [{ ...line(12_000, feed), dimensionMemberIds: [pigs] }],
+        { billNumber: "DIM-3" },
+      );
+      const approved = await withTenant(tenantId, (tx) =>
+        approveBill(tx, owner, { billId: bill.id, expectedVersion: bill.version }),
+      );
+      const rows = await withTenant(tenantId, (tx) =>
+        tx
+          .select({
+            accountId: schema.journalLines.accountId,
+            memberId: schema.lineDimensions.memberId,
+          })
+          .from(schema.journalLines)
+          .leftJoin(
+            schema.lineDimensions,
+            eq(schema.lineDimensions.journalLineId, schema.journalLines.id),
+          )
+          .where(eq(schema.journalLines.entryId, approved.journalEntryId!)),
+      );
+      const expense = rows.filter((r) => r.accountId === feed);
+      expect(expense).toHaveLength(1);
+      expect(expense[0].memberId).toBe(pigs);
+      expect(
+        rows.filter((r) => r.accountId !== feed).every((r) => r.memberId === null),
+      ).toBe(true);
+    });
+  });
 
   beforeAll(async () => {
     tenantId = await withSystem(async (tx) => {

@@ -25,6 +25,10 @@ import {
   formatCentsSigned,
   parseMoneyToCents,
 } from "@/modules/accounting/lib/money";
+import {
+  DimensionTags,
+  type DimensionTypeOption,
+} from "@/components/app/dimension-tags";
 
 export interface BuilderVendor {
   id: string;
@@ -54,6 +58,14 @@ interface LineRow {
   amount: string;
   credit: boolean;
   accountId: string;
+  /**
+   * **REQUIRED, NOT OPTIONAL.** `updateBillDraft` deletes every line and
+   * re-inserts it, so a row shape that could omit this would wipe a tag on the
+   * first edit of a tagged draft. Required puts every construction site in
+   * front of the compiler — which is how the invoice version of this found the
+   * page that was narrowing the shape.
+   */
+  dimensionMemberIds: string[];
 }
 
 export interface BuilderBill {
@@ -71,6 +83,8 @@ export interface BuilderBill {
     description: string;
     amountCents: number;
     accountId: string | null;
+    /** `loadBillLines` already returns these; the page passes them through. */
+    dimensionMemberIds: string[];
   }>;
   suggestions: BuilderSuggestion[];
 }
@@ -90,6 +104,7 @@ function emptyRow(): LineRow {
     amount: "",
     credit: false,
     accountId: "",
+    dimensionMemberIds: [],
   };
 }
 
@@ -101,6 +116,7 @@ export function BillBuilder({
   today,
   bill,
   initialDuplicates,
+  dimensionTypes = [],
 }: {
   vendors: BuilderVendor[];
   /**
@@ -115,6 +131,12 @@ export function BillBuilder({
   /** When set, edits this draft instead of creating. */
   bill?: BuilderBill;
   initialDuplicates?: DuplicateWarning[];
+  /**
+   * Active members, grouped by type, from `dimensionTypesFrom` — plus any
+   * retired one these lines already hold, so it can be seen and taken off.
+   * Empty renders no tag control at all.
+   */
+  dimensionTypes?: DimensionTypeOption[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -142,6 +164,10 @@ export function BillBuilder({
           amount: l.amountCents === 0 ? "" : (Math.abs(l.amountCents) / 100).toFixed(2),
           credit: l.amountCents < 0,
           accountId: l.accountId ?? "",
+          // THE ROUND TRIP. Read back by `loadBillLines`, carried through the
+          // form, sent again on save — because the update deletes every line,
+          // so anything not carried is deleted.
+          dimensionMemberIds: l.dimensionMemberIds,
         }))
       : [emptyRow()],
   );
@@ -201,6 +227,11 @@ export function BillBuilder({
         description: p.row.description.trim(),
         amountCents: p.amountCents,
         accountId: p.row.accountId || null,
+        // Undefined rather than an empty array: the schema's field is optional
+        // and an absent one writes no `line_dimensions` rows.
+        dimensionMemberIds: p.row.dimensionMemberIds.length
+          ? p.row.dimensionMemberIds
+          : undefined,
       }));
       const payload = {
         entityId: entityId || undefined,
@@ -414,23 +445,40 @@ export function BillBuilder({
                       <Trash2 className="size-4" />
                     </Button>
                   </div>
-                  {suggestion && row.accountId !== suggestion.accountId && (
-                    <button
-                      type="button"
-                      className={cn(
-                        "ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]",
-                        suggestion.confidence >= 0.7
-                          ? "bg-module-accent/10 text-module-accent"
-                          : "bg-muted text-muted-foreground",
-                      )}
-                      title={suggestion.reason}
-                      onClick={() => setRow(row.key, { accountId: suggestion.accountId })}
-                    >
-                      <Sparkles className="size-3" />
-                      Use {suggestion.accountCode} ·{" "}
-                      {Math.round(suggestion.confidence * 100)}%
-                    </button>
-                  )}
+                  {/*
+                    **THE SUB-ROW WAS ALREADY HERE**, holding the coding
+                    suggestion, so the tag joins it rather than inventing a
+                    second one. A ninth grid column would have meant widening a
+                    grid that already scrolls, on every bill, for every tenant —
+                    including the ones with no dimensions, who see nothing here
+                    because `DimensionTags` renders nothing when there is
+                    nothing to pick.
+                  */}
+                  <div className="flex flex-wrap items-center gap-2 pl-1">
+                    {suggestion && row.accountId !== suggestion.accountId && (
+                      <button
+                        type="button"
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]",
+                          suggestion.confidence >= 0.7
+                            ? "bg-module-accent/10 text-module-accent"
+                            : "bg-muted text-muted-foreground",
+                        )}
+                        title={suggestion.reason}
+                        onClick={() => setRow(row.key, { accountId: suggestion.accountId })}
+                      >
+                        <Sparkles className="size-3" />
+                        Use {suggestion.accountCode} ·{" "}
+                        {Math.round(suggestion.confidence * 100)}%
+                      </button>
+                    )}
+                    <DimensionTags
+                      types={dimensionTypes}
+                      value={row.dimensionMemberIds}
+                      onValue={(v) => setRow(row.key, { dimensionMemberIds: v })}
+                      triggerClassName="h-7 px-2 text-xs font-normal text-muted-foreground"
+                    />
+                  </div>
                 </div>
               );
             })}

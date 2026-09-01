@@ -1637,14 +1637,54 @@ export async function allocateBillLineToStock(
       siblings.reduce((max, r) => Math.max(max, r.lineNo), 0) + 1;
     // A NEGATIVE line is legal and is the cheaper-than-quoted case: the schema
     // calls it a credit line, and it credits the variance account instead.
-    await tx.insert(schema.billLines).values({
-      tenantId: ctx.tenantId,
-      billId: line.billId,
-      lineNo: nextLineNo,
-      description: varianceDescription,
-      amountCents: varianceCents,
-      accountId: accounts.varianceAccountId,
-    });
+    const [sibling] = await tx
+      .insert(schema.billLines)
+      .values({
+        tenantId: ctx.tenantId,
+        billId: line.billId,
+        lineNo: nextLineNo,
+        description: varianceDescription,
+        amountCents: varianceCents,
+        accountId: accounts.varianceAccountId,
+      })
+      .returning({ id: schema.billLines.id });
+
+    /**
+     * **THE VARIANCE INHERITS THE LINE IT IS A VARIANCE OF.**
+     *
+     * `varianceAccountId` defaults to the consumption account, so this is a
+     * real P&L line — a delivery that cost $60 more than the ticket said is
+     * $60 of somebody's cost of goods. It belongs to whatever the matched line
+     * belongs to, and deriving it here is the only way it can be right: this
+     * row is REPLACED on every re-match, so a tag a person put on it by hand
+     * would be eaten the next time another delivery joined the bill.
+     *
+     * Same rule `splitLot` had to learn — anything derived from another record
+     * states every inherited property explicitly, because omitting one is not
+     * neutral.
+     */
+    const parentDims = await tx
+      .select({
+        dimensionType: schema.lineDimensions.dimensionType,
+        memberId: schema.lineDimensions.memberId,
+      })
+      .from(schema.lineDimensions)
+      .where(
+        and(
+          eq(schema.lineDimensions.tenantId, ctx.tenantId),
+          eq(schema.lineDimensions.billLineId, line.id),
+        ),
+      );
+    if (parentDims.length > 0) {
+      await tx.insert(schema.lineDimensions).values(
+        parentDims.map((d) => ({
+          tenantId: ctx.tenantId,
+          billLineId: sibling.id,
+          dimensionType: d.dimensionType,
+          memberId: d.memberId,
+        })),
+      );
+    }
   }
 
   return { allocations: shares.length, varianceCents, shortfallCents };

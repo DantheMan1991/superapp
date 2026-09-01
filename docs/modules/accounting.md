@@ -13,6 +13,44 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-01 — A bill line says what it was for (`claude/a-bill-line-says-what-it-was-for`)
+
+The third and highest-volume surface: a farm's feed, vet, fuel, hatchery and
+insurance arrive as BILLS. `payables/lines.ts` has accepted `dimensionMemberIds`
+since before any dimension had a member, `loadBillLines` returns them, and
+`approveBill` copies them onto the expense journal lines while leaving the AP
+counter-leg untagged. **No posting path, no migration.**
+
+**THE SAME ROUND-TRIP TRAP, CAUGHT THE SAME WAY, AND THAT MAKES IT A RULE.**
+`updateBillDraft` deletes every line and re-inserts, `BuilderBill.lines` did not
+carry the field, and the edit page's `lines.map` narrowed the shape and dropped
+it. Making the row field **required rather than optional** put every
+construction site in front of the compiler, and the compiler found the page —
+exactly as on the invoice side. Twice is a pattern: **if a form round-trips
+stored ids, the row type carries them and the field is required.**
+
+`keepIds` went in from the outset here rather than being retrofitted after a
+sweep, which is the whole value of having paid for that lesson once.
+
+**THE SUB-ROW ALREADY EXISTED.** Unlike the invoice grid, the bill row already
+had a `space-y-1` wrapper holding the AI coding suggestion, so the tag joins it
+in a flex row. A ninth column would have widened a grid that already scrolls.
+
+**THE MATCHER'S VARIANCE LINE NOW INHERITS THE TAG OF THE LINE IT VARIES FROM**,
+and that is this PR's own doing: putting a picker on every builder row made a
+matcher-owned row taggable, and that row is **replaced on every re-match** — so
+a tag set on it by hand would be eaten the next time another delivery joined the
+bill. It is a real P&L line (`varianceAccountId` defaults to the consumption
+account), so losing it moves money out of an enterprise column into Unassigned.
+Inheriting is both the right answer and the only durable one; `splitLot` taught
+the same lesson. **`production`'s sibling inherits too even though it stays
+deliberately UNCODED** — which account an overcharge belongs in depends on what
+it was, but which part of the business bore it does not.
+
+Driven on Hilltop Farm: tag a line Broilers, save, reopen, change the
+description, save again — the tag survives — then approve, and
+`Dr 5000 [Broilers] / Cr 2000 (untagged)` lands in the ledger.
+
 ### 2026-09-01 — An invoice line says who earned it (`claude/an-invoice-line-says-who-earned-it`)
 
 The revenue half, and the cheapest possible version of it. **The read and the

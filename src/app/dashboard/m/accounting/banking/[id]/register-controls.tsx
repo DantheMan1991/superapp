@@ -5,6 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Filter, Paperclip, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import {
+  DimensionTags,
+  type DimensionTypeOption,
+} from "@/components/app/dimension-tags";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -230,16 +234,26 @@ export function ReviewTable({
   tab,
   rows,
   categories,
+  dimensionTypes,
   canAct,
 }: {
   tab: "unreviewed" | "all" | "excluded";
   rows: ReviewRow[];
   categories: CategoryOption[];
+  /** Active members, grouped by type. Empty renders no tag control at all. */
+  dimensionTypes: DimensionTypeOption[];
   canAct: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [chosen, setChosen] = useState<Record<string, string>>({});
+  /**
+   * **PER ROW, and keyed the same way `chosen` is.** Categorising is a list
+   * activity — a person works down twenty rows without leaving the page — so the
+   * tags have to belong to a row rather than to the table, exactly as the
+   * category selection already does.
+   */
+  const [tags, setTags] = useState<Record<string, string[]>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const acceptable = rows.filter(
@@ -260,6 +274,10 @@ export function ReviewTable({
       const result = await categorizeTransactionAction({
         transactionId: row.id,
         accountId,
+        // Undefined rather than an empty array when nothing is tagged: the
+        // action's schema treats the field as optional and `postEntry` writes
+        // no `line_dimensions` rows for it, which is what "untagged" means.
+        dimensionMemberIds: tags[row.id]?.length ? tags[row.id] : undefined,
       });
       if ("error" in result) toast.error(result.error);
       else toast.success("Posted");
@@ -487,6 +505,25 @@ export function ReviewTable({
                               ))}
                             </SelectContent>
                           </Select>
+                        )}
+                        {/*
+                          UNDER the category, not beside it: the category is
+                          required and the tag is not, and a row where both look
+                          equally mandatory is a row people stop filling in.
+                          Renders nothing at all when the business has no
+                          dimensions, which is most of them.
+                        */}
+                        {row.status === "unreviewed" && (
+                          <div className="mt-1">
+                            <DimensionTags
+                              types={dimensionTypes}
+                              value={tags[row.id] ?? []}
+                              onValue={(v) =>
+                                setTags((t) => ({ ...t, [row.id]: v }))
+                              }
+                              triggerClassName="h-7 w-full justify-start px-2 text-xs font-normal text-muted-foreground"
+                            />
+                          </div>
                         )}
                       </TableCell>
                     )}

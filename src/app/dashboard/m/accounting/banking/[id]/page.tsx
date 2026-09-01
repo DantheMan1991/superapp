@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
-import { getBalances } from "@/modules/accounting/core";
+import { getBalances, listDimensionMembers } from "@/modules/accounting/core";
+import { dimensionTypesFrom } from "@/lib/dimension-options";
 import {
   formatCentsSigned,
   todayInTimezone,
@@ -139,6 +140,9 @@ export default async function BankRegisterPage({
             ),
             columns: { id: true, name: true },
           });
+    // Unfiltered on purpose — `dimensionTypesFrom` owns the active-only rule,
+    // so no screen can forget it.
+    const dimensionMembers = await listDimensionMembers(tx, tenantId);
     return {
       bankAccount,
       balance,
@@ -148,6 +152,7 @@ export default async function BankRegisterPage({
       matchCandidates,
       attachmentCounts,
       vendorRows,
+      dimensionMembers,
     };
   });
   if (!data) notFound();
@@ -193,6 +198,8 @@ export default async function BankRegisterPage({
       matchCandidates: data.matchCandidates.get(t.id) ?? [],
     };
   });
+  const dimensionTypes = dimensionTypesFrom(data.dimensionMembers);
+
   const categoryOptions = data.categories
     .filter((a) => a.id !== bankAccount.accountId)
     .map((a) => ({ id: a.id, code: a.code, name: a.name, accountType: a.accountType }));
@@ -290,6 +297,7 @@ export default async function BankRegisterPage({
           tab={tab}
           rows={rows}
           categories={categoryOptions}
+          dimensionTypes={dimensionTypes}
           canAct={isOwner}
         />
       )}

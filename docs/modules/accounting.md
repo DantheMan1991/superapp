@@ -82,6 +82,28 @@ invariant the calendar cannot touch is that one period was already there, so
 one fewer record was written than periods walked. The neighbouring catch-up
 test uses `toBeGreaterThanOrEqual` for the same reason.
 
+**AND THE DEFERRAL ASSERTION WAS A TAUTOLOGY UNTIL THE SAME REVIEW CAUGHT IT.**
+The first version asserted `deferredToDraft === 0` with no closed period
+anywhere in reach, which cannot fail under either version of the code — sitting
+under a docblock claiming to cover the deferral, in a PR whose build log calls
+the deferral the more interesting half. Nothing in the suite, before or after,
+had ever put a recurring auto-post template into a closed period.
+
+The fixture now closes the period through July and pre-creates only June, which
+makes all three gates discriminating at once:
+
+| period | closed | already there | old code | new code |
+| --- | --- | --- | --- | --- |
+| June | yes | yes | created, deferred | nothing |
+| July | yes | no | created, deferred | created, deferred |
+| Aug | no | no | created, posted | created, posted |
+
+Revert the `created` gate and it is one too many; revert the deferral gate
+alone and it is two deferrals instead of one — checked both ways. June is
+pre-created as a DRAFT rather than a posting, because `assertPeriodOpen` would
+refuse a posting into a closed period, and a draft is the honest shape of what
+a half-rolled-back run leaves there anyway.
+
 ### 2026-09-01 — A standing instruction says what it was for (`claude/a-standing-instruction-says-what-it-was-for`)
 
 Recurring templates were the last write surface without a tag picker, and the

@@ -1073,8 +1073,25 @@ d("invoicing (DB)", () => {
        * or half-rolled-back run would leave, which is the case the idempotency
        * key exists for in the first place.
        *
-       * Two periods due, one already there: one record written, two periods
-       * walked, and the schedule still advances past both.
+       * **AND THE DEFERRAL IS THE HALF WORTH THE SETUP.** The first version of
+       * this test asserted `deferredToDraft === 0` with no closed period
+       * anywhere in reach, which cannot fail under either version of the code —
+       * a tautology sitting under a docblock claiming to cover it. So the
+       * fixture closes the period through July and pre-creates only June:
+       *
+       * | period | closed | already there | old code | new code |
+       * | --- | --- | --- | --- | --- |
+       * | June | yes | yes | created, deferred | nothing |
+       * | July | yes | no | created, deferred | created, deferred |
+       * | Aug  | no  | no | created, posted | created, posted |
+       *
+       * Which makes all three gates discriminating at once: revert the
+       * `created` gate and it is one too many, revert the deferral gate and it
+       * is two deferrals instead of one.
+       *
+       * June is pre-created as a DRAFT, not a posting — `assertPeriodOpen`
+       * would refuse a posted entry into a closed period, and a draft is the
+       * honest shape of what a half-rolled-back run leaves there anyway.
        */
       const cash = await accountId("1000");
       const exp = await accountId("6700");
@@ -1092,11 +1109,19 @@ d("invoicing (DB)", () => {
         },
       });
 
-      // The first month, already posted under the key generation will use.
+      await withTenant(tenantId, async (tx) =>
+        setClosedThrough(tx, owner, {
+          entityId: await getDefaultEntityId(tx, tenantId),
+          date: "2026-07-31",
+        }),
+      );
+
+      // June, already there under the key generation will use — a draft,
+      // because its period is closed and a posting could not have landed.
       await withTenant(tenantId, async (tx) =>
         postEntry(tx, owner, {
           entityId: await getDefaultEntityId(tx, tenantId),
-          status: "posted",
+          status: "draft",
           entryDate: "2026-06-04",
           memo: "Counted once",
           lines: [
@@ -1108,6 +1133,13 @@ d("invoicing (DB)", () => {
       );
 
       const result = await generateRecurringEntries(owner);
+      // Reset before any assertion can throw past it — T-D7's own shape.
+      await withTenant(tenantId, async (tx) =>
+        setClosedThrough(tx, owner, {
+          entityId: await getDefaultEntityId(tx, tenantId),
+          date: null,
+        }),
+      );
       expect(result.errors).toHaveLength(0);
 
       /**
@@ -1121,10 +1153,17 @@ d("invoicing (DB)", () => {
        * is the whole bug, stated in a form the calendar cannot break.
        */
       expect(result.periodsWalked).toBeGreaterThanOrEqual(3);
+      // Exactly one period was already there, whatever the calendar says.
       expect(result.created).toBe(result.periodsWalked - 1);
-      // Nothing is in a closed period here, so every record written also posted.
-      expect(result.posted).toBe(result.created);
-      expect(result.deferredToDraft).toBe(0);
+      /**
+       * **ONE deferral, not two.** June and July are both closed and both want
+       * to post, so the old code counted a deferral for each — including June,
+       * where it wrote nothing at all and would have told somebody an entry
+       * was newly stuck when the run had left nothing.
+       */
+      expect(result.deferredToDraft).toBe(1);
+      // Everything written either posted or was deferred; nothing else.
+      expect(result.posted).toBe(result.created - result.deferredToDraft);
 
       // One entry per period, not two for the month that was already there.
       const entries = await withTenant(tenantId, (tx) =>

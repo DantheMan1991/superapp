@@ -22,7 +22,11 @@ import {
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { DocumentAttachments } from "@/modules/accounting/components/document-attachments";
 import { EntityThreads } from "@/modules/email/components/entity-threads";
-import { listEntities } from "@/modules/accounting/core";
+import {
+  listDimensionMembers,
+  listEntities,
+} from "@/modules/accounting/core";
+import { dimensionTypesFrom } from "@/lib/dimension-options";
 import { loadInvoiceLines } from "@/modules/accounting/invoicing/invoices";
 import { paidCentsFor } from "@/modules/accounting/invoicing/payments";
 import {
@@ -171,6 +175,8 @@ export default async function InvoiceDetailPage({
       invoice,
       customer,
       lines,
+      // Unfiltered: `dimensionTypesFrom` owns the active-only rule.
+      dimensionMembers: await listDimensionMembers(tx, ctx.tenant.id),
       accounts,
       payments,
       paid,
@@ -364,8 +370,18 @@ export default async function InvoiceDetailPage({
               unitPriceCents: l.unitPriceCents,
               isTaxable: l.isTaxable,
               incomeAccountId: l.incomeAccountId,
+              // `loadInvoiceLines` returns these and this mapping used to drop
+              // them. Since `updateInvoiceDraft` deletes every line and
+              // re-inserts it, a tag not carried through the form is a tag
+              // deleted by the next save.
+              dimensionMemberIds: l.dimensionMemberIds,
             })),
           }}
+          /* Plus whatever these lines already hold, retired or not — the same
+             rule the tax-rate picker above follows, and for the same reason. */
+          dimensionTypes={dimensionTypesFrom(data.dimensionMembers, {
+            keepIds: lines.flatMap((l) => l.dimensionMemberIds),
+          })}
         />
       ) : (
         <>

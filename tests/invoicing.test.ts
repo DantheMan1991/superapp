@@ -42,9 +42,11 @@ import {
   createInvoiceDraft,
   deleteInvoiceDraft,
   issueInvoice,
+  updateInvoiceDraft,
   voidInvoice,
   loadInvoiceLines,
 } from "../src/modules/accounting/invoicing/invoices";
+import { upsertDimensionMember } from "../src/modules/accounting/core";
 import { recordPayment, unapplyPayment } from "../src/modules/accounting/invoicing/payments";
 import { listRecordHistory } from "../src/modules/accounting/history/list";
 import { logAuditInTx } from "../src/lib/audit";
@@ -817,6 +819,155 @@ d("invoicing (DB)", () => {
     );
     expect(gone).toHaveLength(0);
   });
+
+  // ---- dimensions on an invoice line --------------------------------------
+
+  describe("a line says which part of the business earned it", () => {
+    /**
+     * **THE READ AND THE WRITE BOTH EXISTED FOR MONTHS AND NOTHING JOINED
+     * THEM.** `invoiceLineSchema` has taken `dimensionMemberIds` and
+     * `loadInvoiceLines` has returned them since long before any dimension had
+     * a member; `issueInvoice` copies them onto the income journal line. The
+     * gap was a form that could send one.
+     */
+    const memberId = async (name: string) => {
+      const m = await withTenant(tenantId, (tx) =>
+        upsertDimensionMember(tx, owner, {
+          dimensionType: "enterprise",
+          packEntityId: crypto.randomUUID(),
+          displayName: name,
+        }),
+      );
+      return m.id;
+    };
+
+    it("SURVIVES A DRAFT EDIT, which is the whole reason this is a test", async () => {
+      /**
+       * **`updateInvoiceDraft` DELETES EVERY LINE AND RE-INSERTS IT** — its own
+       * comment says "whole-replace lines (dims cascade with them)". So a tag
+       * is only as durable as the round trip through the form: read it back,
+       * carry it, send it again. The builder's `LineRow` did not carry it and
+       * the edit page's `lines.map` dropped it, so the first save of a tagged
+       * draft would have wiped every tag on it. Both are fixed; this is what
+       * stops them regressing.
+       */
+      const sales = await accountId("4000");
+      const broilers = await memberId("Broilers");
+      const draft = await withTenant(tenantId, (tx) =>
+        createInvoiceDraft(tx, owner, {
+          customerId,
+          issueDate: "2026-07-20",
+          lines: [{ ...line(5_000, sales), dimensionMemberIds: [broilers] }],
+        }),
+      );
+      expect(
+        (await withTenant(tenantId, (tx) => loadInvoiceLines(tx, tenantId, draft.id)))[0]
+          .dimensionMemberIds,
+      ).toEqual([broilers]);
+
+      // An edit that changes something ELSE must not disturb the tag — this is
+      // the form saving a description change on a tagged line.
+      const read = await withTenant(tenantId, (tx) =>
+        loadInvoiceLines(tx, tenantId, draft.id),
+      );
+      await withTenant(tenantId, (tx) =>
+        updateInvoiceDraft(tx, owner, {
+          invoiceId: draft.id,
+          expectedVersion: draft.version,
+          patch: {
+            customerId,
+            issueDate: "2026-07-20",
+            lines: read.map((l) => ({
+              description: "Renamed",
+              quantity: l.quantity,
+              unitPriceCents: l.unitPriceCents,
+              incomeAccountId: l.incomeAccountId,
+              dimensionMemberIds: l.dimensionMemberIds,
+            })),
+          },
+        }),
+      );
+      const after = await withTenant(tenantId, (tx) =>
+        loadInvoiceLines(tx, tenantId, draft.id),
+      );
+      expect(after[0].description).toBe("Renamed");
+      expect(after[0].dimensionMemberIds).toEqual([broilers]);
+    });
+
+    it("drops the tag when the edit genuinely says none", async () => {
+      // The other direction: untagging has to work too, and the whole-replace
+      // is what makes it free.
+      const sales = await accountId("4000");
+      const beef = await memberId("Beef");
+      const draft = await withTenant(tenantId, (tx) =>
+        createInvoiceDraft(tx, owner, {
+          customerId,
+          issueDate: "2026-07-21",
+          lines: [{ ...line(2_500, sales), dimensionMemberIds: [beef] }],
+        }),
+      );
+      await withTenant(tenantId, (tx) =>
+        updateInvoiceDraft(tx, owner, {
+          invoiceId: draft.id,
+          expectedVersion: draft.version,
+          patch: {
+            customerId,
+            issueDate: "2026-07-21",
+            lines: [line(2_500, sales)],
+          },
+        }),
+      );
+      const after = await withTenant(tenantId, (tx) =>
+        loadInvoiceLines(tx, tenantId, draft.id),
+      );
+      expect(after[0].dimensionMemberIds).toEqual([]);
+    });
+
+    it("CARRIES THE TAG ONTO THE INCOME LINE AT ISSUE, and leaves tax untagged", async () => {
+      /**
+       * The payoff, and the reason the tax line is asserted too: a dimension
+       * answers *which part of the business earned this*, and sales tax
+       * collected is money held for somebody else. `issueInvoice` already knew
+       * that; this pins it now that a person can actually set a tag.
+       */
+      const sales = await accountId("4000");
+      const pigs = await memberId("Pigs");
+      const draft = await withTenant(tenantId, (tx) =>
+        createInvoiceDraft(tx, owner, {
+          customerId,
+          issueDate: "2026-07-22",
+          lines: [{ ...line(9_000, sales), dimensionMemberIds: [pigs] }],
+        }),
+      );
+      const issued = await withTenant(tenantId, (tx) =>
+        issueInvoice(tx, owner, {
+          invoiceId: draft.id,
+          expectedVersion: draft.version,
+        }),
+      );
+      const tagged = await withTenant(tenantId, (tx) =>
+        tx
+          .select({
+            accountId: schema.journalLines.accountId,
+            memberId: schema.lineDimensions.memberId,
+          })
+          .from(schema.journalLines)
+          .leftJoin(
+            schema.lineDimensions,
+            eq(schema.lineDimensions.journalLineId, schema.journalLines.id),
+          )
+          .where(eq(schema.journalLines.entryId, issued.journalEntryId!)),
+      );
+      const income = tagged.filter((r) => r.accountId === sales);
+      expect(income).toHaveLength(1);
+      expect(income[0].memberId).toBe(pigs);
+      // Every other line on the entry — the receivable — carries none.
+      expect(
+        tagged.filter((r) => r.accountId !== sales).every((r) => r.memberId === null),
+      ).toBe(true);
+    });
+  });
+
 
   /**
    * THE REASON `listRecordHistory` TAKES SEVERAL TARGETS.

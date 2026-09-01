@@ -4,6 +4,10 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  DimensionTags,
+  type DimensionTypeOption,
+} from "@/components/app/dimension-tags";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -69,6 +73,14 @@ interface LineRow {
   discount: boolean;
   taxable: boolean;
   incomeAccountId: string;
+  /**
+   * **REQUIRED, NOT OPTIONAL, AND THAT IS THE POINT.** `updateInvoiceDraft`
+   * whole-replaces the lines and their dimensions cascade with them, so a row
+   * shape that could omit this would silently wipe a tag on the first edit of a
+   * tagged draft. Making it required puts every construction site — three of
+   * them, including the saved-item picker — in front of the compiler.
+   */
+  dimensionMemberIds: string[];
 }
 
 export interface BuilderInvoice {
@@ -88,6 +100,8 @@ export interface BuilderInvoice {
     unitPriceCents: number;
     isTaxable: boolean;
     incomeAccountId: string;
+    /** `loadInvoiceLines` already returns these; the page passes them through. */
+    dimensionMemberIds: string[];
   }>;
 }
 
@@ -108,6 +122,7 @@ function emptyRow(defaultAccount: string, taxable: boolean): LineRow {
     discount: false,
     taxable,
     incomeAccountId: defaultAccount,
+    dimensionMemberIds: [],
   };
 }
 
@@ -124,8 +139,14 @@ export function InvoiceBuilder({
   defaultTermId = null,
   taxRates = [],
   defaultTaxRateId = null,
+  dimensionTypes = [],
 }: {
   customers: BuilderCustomer[];
+  /**
+   * Active members, grouped by type, from `dimensionTypesFrom`. Empty renders
+   * no tag control at all, which is most businesses.
+   */
+  dimensionTypes?: DimensionTypeOption[];
   /**
    * The tenant's companies (ADR 0010). Shown only at TWO or more — one company
    * and the client never learns the concept.
@@ -202,6 +223,10 @@ export function InvoiceBuilder({
           discount: l.unitPriceCents < 0,
           taxable: l.isTaxable,
           incomeAccountId: l.incomeAccountId,
+          // THE ROUND TRIP. Read back by `loadInvoiceLines`, carried through
+          // the form, and sent again on save — because the update deletes every
+          // line and re-inserts it, so anything not carried is deleted.
+          dimensionMemberIds: l.dimensionMemberIds,
         }))
       : [emptyRow(defaultAccount, initialRate !== null)],
   );
@@ -276,6 +301,12 @@ export function InvoiceBuilder({
         // every row from scratch.
         isTaxable: p.row.taxable,
         incomeAccountId: p.row.incomeAccountId,
+        // Undefined rather than an empty array: the schema's field is optional
+        // and an absent one writes no `line_dimensions` rows, which is what
+        // untagged means.
+        dimensionMemberIds: p.row.dimensionMemberIds.length
+          ? p.row.dimensionMemberIds
+          : undefined,
       };
     });
     startTransition(async () => {
@@ -454,8 +485,8 @@ export function InvoiceBuilder({
             {rows.map((row) => {
               const p = parsed.find((x) => x.row.key === row.key)!;
               return (
+                <div key={row.key} className="space-y-1">
                 <div
-                  key={row.key}
                   className={`${gridCols} items-center gap-2`}
                 >
                   <Input
@@ -529,6 +560,33 @@ export function InvoiceBuilder({
                     <Trash2 className="size-4" />
                   </Button>
                 </div>
+                {/*
+                  **A SUB-ROW, NOT A NINTH COLUMN.** The grid's two class
+                  strings are written out in full because Tailwind scans for
+                  literals, so making the column conditional on having any
+                  dimensions would mean FOUR of them — tax × tags. And the grid
+                  already scrolls at `min-w-[700px]`; widening it is a cost paid
+                  on every invoice by every tenant, including the ones with no
+                  dimensions at all.
+
+                  `DimensionTags` renders nothing when there is nothing to pick,
+                  so a business without dimensions sees exactly what it sees
+                  today. Same placement as bank categorisation, under the field
+                  it qualifies rather than beside it.
+                */}
+                {dimensionTypes.length > 0 && (
+                  <div className="pl-1">
+                    <DimensionTags
+                      types={dimensionTypes}
+                      value={row.dimensionMemberIds}
+                      onValue={(v) =>
+                        setRow(row.key, { dimensionMemberIds: v })
+                      }
+                      triggerClassName="h-7 px-2 text-xs font-normal text-muted-foreground"
+                    />
+                  </div>
+                )}
+                </div>
               );
             })}
           </div>
@@ -567,6 +625,11 @@ export function InvoiceBuilder({
                     // property of the thing. It follows the invoice's rate.
                     taxable: showTax,
                     incomeAccountId: product.incomeAccountId ?? defaultAccount,
+                    // A saved item carries no dimension of its own, for the same
+                    // reason it carries no taxability: which part of the
+                    // business earned this is a per-invoice fact, not a property
+                    // of the thing sold.
+                    dimensionMemberIds: [],
                   },
                 ]);
               }}

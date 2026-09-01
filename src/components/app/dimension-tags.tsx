@@ -116,6 +116,24 @@ export function DimensionTags({
   }
 
   /**
+   * **IDS THIS CONTROL CANNOT SEE ARE CARRIED, NOT DROPPED.**
+   *
+   * `chosen` is built only from ids that appear in `types`, so rebuilding the
+   * array from it alone would DELETE anything the caller passed in that has no
+   * option behind it — a member of a dimension type this surface was not given,
+   * or one retired without `keepIds`. Editing any other type would then quietly
+   * strip it.
+   *
+   * Unreachable for a caller whose state starts empty, which is what the two
+   * banking surfaces do; reachable the moment a caller round-trips STORED ids,
+   * which the invoice builder is the first to do. It is the `splitLot` shape
+   * one level up: rebuilding a record from a filtered view of it and losing
+   * what the view did not show.
+   */
+  const known = new Set(usable.flatMap((t) => t.members.map((m) => m.id)));
+  const carried = value.filter((id) => !known.has(id));
+
+  /**
    * Replacing one type's member leaves every OTHER type's alone. Rebuilding the
    * whole array from the map is what keeps that true without the caller having
    * to know which id belonged to which type.
@@ -129,7 +147,7 @@ export function DimensionTags({
         ?.members.find((m) => m.id === memberId);
       if (member) next.set(type, member);
     }
-    onValue([...next.values()].map((m) => m.id));
+    onValue([...carried, ...[...next.values()].map((m) => m.id)]);
   }
 
   const summary = [...chosen.values()].map((m) => m.name).join(", ");

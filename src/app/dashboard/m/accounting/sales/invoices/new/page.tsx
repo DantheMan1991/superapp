@@ -9,7 +9,12 @@ import {
   listProducts,
   listSalesTaxRates,
 } from "@/modules/accounting/invoicing/catalogue";
-import { getDefaultEntityId, listEntities } from "@/modules/accounting/core";
+import {
+  getDefaultEntityId,
+  listDimensionMembers,
+  listEntities,
+} from "@/modules/accounting/core";
+import { dimensionTypesFrom } from "@/lib/dimension-options";
 import { suggestInvoiceNumber } from "@/modules/accounting/invoicing/numbering";
 import { todayInTimezone } from "@/modules/accounting/lib/money";
 import { SalesNav } from "../../sales-nav";
@@ -75,6 +80,8 @@ export default async function NewInvoicePage() {
       defaultTermId,
       taxRates,
       defaultTaxRateId,
+      // Unfiltered: `dimensionTypesFrom` owns the active-only rule.
+      dimensionMembers: await listDimensionMembers(tx, ctx.tenant.id),
       today: todayInTimezone(ctx.tenant.timezone),
     };
   });
@@ -108,6 +115,7 @@ export default async function NewInvoicePage() {
           defaultTermId={data.defaultTermId}
           taxRates={data.taxRates}
           defaultTaxRateId={data.defaultTaxRateId}
+          dimensionTypes={dimensionTypesFrom(data.dimensionMembers)}
         />
       )}
     </div>

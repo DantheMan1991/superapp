@@ -34,10 +34,28 @@ export interface DimensionMemberRow {
  */
 export function dimensionTypesFrom(
   members: readonly DimensionMemberRow[],
+  opts: {
+    /**
+     * Ids a record ALREADY carries. A retired member among them is offered
+     * anyway, marked, so the record can be seen and changed.
+     *
+     * **THE EXACT SHAPE `[id]/page.tsx` USES FOR TAX RATES**, and its comment
+     * is the argument: *"The editor offers active rates, plus whichever this
+     * draft already holds — otherwise opening a draft would silently drop its
+     * rate."* Without it, a draft tagged with a line of business that was later
+     * retired shows "None" in every picker while still holding the id — so
+     * saving is refused by `validateLineDimensions` with a uuid in a toast, and
+     * there is nothing on screen to change. Issuing would refuse it too, since
+     * `postEntry` declines an inactive member: the tag has to come off, and the
+     * only way somebody can take it off is if they can see it.
+     */
+    keepIds?: readonly string[];
+  } = {},
 ): DimensionTypeOption[] {
+  const keep = new Set(opts.keepIds ?? []);
   const byType = new Map<string, DimensionTypeOption>();
   for (const m of members) {
-    if (!m.isActive) continue;
+    if (!m.isActive && !keep.has(m.id)) continue;
     let group = byType.get(m.dimensionType);
     if (!group) {
       const words = m.dimensionType.replaceAll("_", " ");
@@ -48,7 +66,12 @@ export function dimensionTypesFrom(
       };
       byType.set(m.dimensionType, group);
     }
-    group.members.push({ id: m.id, name: m.displayName });
+    group.members.push({
+      id: m.id,
+      // Marked rather than silently mixed in with the live ones: it is offered
+      // only so it can be removed.
+      name: m.isActive ? m.displayName : `${m.displayName} (retired)`,
+    });
   }
   // Stable order for both axes: a picker whose options move between renders is
   // one people mis-click.

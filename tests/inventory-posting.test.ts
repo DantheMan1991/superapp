@@ -3,8 +3,15 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../src/db";
-import { getBalances, getDefaultEntityId } from "../src/modules/accounting/core";
-import { approveBill } from "../src/modules/accounting/payables/bills";
+import {
+  getBalances,
+  getDefaultEntityId,
+  upsertDimensionMember,
+} from "../src/modules/accounting/core";
+import {
+  approveBill,
+  loadBillLines,
+} from "../src/modules/accounting/payables/bills";
 import { recordBillPayment } from "../src/modules/accounting/payables/payments";
 import { createBankAccount } from "../src/modules/accounting/banking/accounts";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
@@ -994,6 +1001,86 @@ it("CLEARS GRNI TO ZERO when the bill is matched and approved", async () => {
       // The line was split: GRNI takes exactly what the receipt credited, and
       // the extra 500 went to the variance account instead of parking here.
       expect((await netOf(grniAccountId)) - grniBefore).toBe(6_000);
+    });
+
+    it("GIVES THE VARIANCE LINE THE TAG OF THE LINE IT VARIES FROM", async () => {
+      /**
+       * **A ROW A PERSON CAN NOW TAG, AND WHOSE TAG WOULD BE EATEN.** The
+       * matcher REPLACES this sibling on every re-match — deliberately, so a
+       * double submit cannot append two — so a tag set on it by hand would
+       * disappear the next time another delivery joined the bill. And it is a
+       * real P&L line: `varianceAccountId` defaults to the consumption account,
+       * so losing the tag moves money out of an enterprise column into
+       * Unassigned.
+       *
+       * Inheriting the matched line's is both the right answer — a delivery
+       * that cost more than the ticket said is that line of business's cost —
+       * and the only durable one. Same rule `splitLot` had to learn.
+       */
+      const member = await asOwner((tx) =>
+        upsertDimensionMember(tx, ledgerOwner(), {
+          dimensionType: "enterprise",
+          packEntityId: randomUUID(),
+          displayName: "Broilers",
+        }),
+      );
+      const item = await newItem("Variance tag");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: `VART-${Date.now()}`,
+          source: "purchased",
+        }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 10,
+          costCents: 6_000,
+          occurredOn: "2026-10-01",
+          locationAssetId: freezerId,
+        }),
+      );
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      const { billId, billLineId } = await makeBill(6_500);
+      // Tag the matched line, the way the builder now lets somebody do.
+      await asOwner((tx) =>
+        tx.insert(schema.lineDimensions).values({
+          tenantId,
+          billLineId,
+          dimensionType: "enterprise",
+          memberId: member.id,
+        }),
+      );
+
+      const result = await asOwner((tx) =>
+        allocateBillLineToStock(tx, ownerCtx(), {
+          billLineId,
+          matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
+        }),
+      );
+      expect(result.varianceCents).toBe(500);
+
+      const lines = await asOwner((tx) => loadBillLines(tx, tenantId, billId));
+      const variance = lines.find((l) => /difference/i.test(l.description))!;
+      expect(variance).toBeDefined();
+      expect(variance.dimensionMemberIds).toEqual([member.id]);
+
+      // AND IT SURVIVES A RE-MATCH, which is the case that made this necessary:
+      // the sibling is deleted and rebuilt, so an inherited tag is re-derived
+      // while a hand-set one would be gone.
+      await asOwner((tx) =>
+        allocateBillLineToStock(tx, ownerCtx(), {
+          billLineId,
+          matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
+        }),
+      );
+      const after = await asOwner((tx) => loadBillLines(tx, tenantId, billId));
+      const variance2 = after.find((l) => /difference/i.test(l.description))!;
+      expect(variance2.dimensionMemberIds).toEqual([member.id]);
     });
 
     it("SPLITS ONE INVOICE ACROSS TWO DELIVERIES by what each was worth", async () => {

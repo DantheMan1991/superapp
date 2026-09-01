@@ -504,14 +504,24 @@ the same transaction as every write.
   can now tag it before issuing; **an `autoPost` JOURNAL template posts
   unattended and can never carry one.** There is no update action for a
   template at all, so an existing one cannot be fixed in place either.
+- **SAVING A MATCHED DRAFT BILL DESTROYS ITS MATCH AND KEEPS THE CODING**, and
+  it is **not** a dimension bug — it is on `main` today and predates all of this.
+  `updateBillDraft` deletes every line, `bill_line_stock_allocations` and
+  `production_run_bill_allocations` cascade with them (deliberately, and
+  documented in four places), but the builder round-trips `accountId` and
+  `amountCents` — so the re-inserted line keeps its `2050` coding at the matched
+  amount while the allocation is gone. The receipts return to the unmatched list
+  and can clear GRNI a **second** time, with `grniPosition` wrong by the whole
+  amount and no entry to explain it. `unmatchBillLine` cannot repair it because
+  the allocations it would drop no longer exist. **Its own PR, and worth one.**
 - **THE COSTS THAT ARRIVE AS BILLS AND BANK ROWS ARE WHERE THE VOLUME IS**, and
   the bank half of that landed 2026-08-31 — see
   [accounting.md](accounting.md). Bill lines, invoice lines, the manual journal
   and recurring templates all still accept `dimensionMemberIds` server-side with
-  no form able to send one. **A bill line has a round-trip trap waiting**:
-  `BuilderBill.lines` does not carry the field and `updateBillDraft` deletes and
-  re-inserts every line, so a picker added without widening that type would wipe
-  the tag on the first edit.
+  no form able to send one. ~~A bill line has a round-trip trap waiting.~~ **Closed
+  2026-09-01** — bill lines carry a tag now, and the trap was caught by making
+  the row field required. Remaining: the manual journal and recurring
+  templates.
 - **A MIXED MARKET STALL'S COSTS HAVE NOWHERE TO GO, by design for now.** A
   stall selling beef and chicken cannot attribute its $35 fee to one enterprise,
   and doing it anyway would be a confident wrong number. Splitting pro rata by

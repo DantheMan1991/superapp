@@ -43,6 +43,20 @@ describe("isCodableAccount", () => {
     ).toBe(false);
   });
 
+  it("REFUSES SERVICES RECEIVED NOT INVOICED, which is GRNI one account along", () => {
+    /**
+     * `2060` is credited when a processing run accrues its fee and debited when
+     * the plant's bill is matched to that run. Coding a line straight to it
+     * clears an accrual no run ever made — the same defect as GRNI, in the
+     * account nobody had been bitten by yet, which is exactly why it was
+     * missing from the list until a bill line's coding could survive a save
+     * that destroyed its match.
+     */
+    expect(
+      isCodableAccount(account({ subtype: "services_received" }), noRegisters),
+    ).toBe(false);
+  });
+
   it("refuses a bank register, opening balance and the affiliate accounts", () => {
     expect(isCodableAccount(account({ id: "reg" }), new Set(["reg"]))).toBe(false);
     for (const subtype of [

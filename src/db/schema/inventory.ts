@@ -743,11 +743,18 @@ export const billLineStockAllocations = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     /**
-     * CASCADE, and it is load-bearing rather than tidiness: `updateBillDraft`
-     * DELETES AND RE-INSERTS every line of a draft, so a bill line's id does not
-     * survive an edit. Without the cascade this table would accumulate rows
-     * pointing at lines that no longer exist. `line_dimensions` carries the same
-     * cascade for the same reason.
+     * CASCADE, and it means what it says: when the LINE goes, the settlement
+     * goes with it, because a deleted line no longer debits GRNI and the
+     * delivery is genuinely un-invoiced again.
+     *
+     * It used to fire on every ordinary edit as well — `updateBillDraft` deleted
+     * and re-inserted every line of a draft, so an id did not survive a saved
+     * memo change. The form carried the GRNI coding and the matched amount
+     * faithfully back, so the match died and its ledger effect lived: the bill
+     * still cleared the accrual and the receipts were offered for matching a
+     * second time. `updateBillDraft` now updates surviving lines in place, and
+     * `assertLineAccounts` refuses to let a line coded here be re-priced or
+     * re-coded, so the two halves can only move together.
      */
     billLineId: uuid("bill_line_id").notNull(),
     /** The `receipt` movement being settled. No cascade — see below. */

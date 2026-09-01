@@ -504,16 +504,14 @@ the same transaction as every write.
   can now tag it before issuing; **an `autoPost` JOURNAL template posts
   unattended and can never carry one.** There is no update action for a
   template at all, so an existing one cannot be fixed in place either.
-- **SAVING A MATCHED DRAFT BILL DESTROYS ITS MATCH AND KEEPS THE CODING**, and
-  it is **not** a dimension bug — it is on `main` today and predates all of this.
-  `updateBillDraft` deletes every line, `bill_line_stock_allocations` and
-  `production_run_bill_allocations` cascade with them (deliberately, and
-  documented in four places), but the builder round-trips `accountId` and
-  `amountCents` — so the re-inserted line keeps its `2050` coding at the matched
-  amount while the allocation is gone. The receipts return to the unmatched list
-  and can clear GRNI a **second** time, with `grniPosition` wrong by the whole
-  amount and no entry to explain it. `unmatchBillLine` cannot repair it because
-  the allocations it would drop no longer exist. **Its own PR, and worth one.**
+- ~~**SAVING A MATCHED DRAFT BILL DESTROYS ITS MATCH AND KEEPS THE CODING.**~~
+  **Closed 2026-09-01**, in its own PR as it deserved. It was never a dimension
+  bug — it was on `main` and predated all of this. `updateBillDraft` now keeps a
+  line's identity across an edit, so the cascade fires only when the line is
+  genuinely deleted, and `assertLineAccounts` refuses to re-code or re-price a
+  line sitting on an account nobody may pick. See
+  [accounting.md](accounting.md), [inventory.md](inventory.md) and
+  [production.md](production.md).
 - **THE COSTS THAT ARRIVE AS BILLS AND BANK ROWS ARE WHERE THE VOLUME IS**, and
   the bank half of that landed 2026-08-31 — see
   [accounting.md](accounting.md). Bill lines, invoice lines, the manual journal

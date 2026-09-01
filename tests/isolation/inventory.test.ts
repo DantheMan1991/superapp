@@ -752,12 +752,16 @@ d("inventory tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
-  it("DIES WITH ITS BILL LINE, because a draft edit re-creates every line", async () => {
+  it("DIES WITH ITS BILL LINE, because a deleted line clears nothing", async () => {
     /**
-     * `updateBillDraft` deletes and re-inserts every line of a draft, so a bill
-     * line id does not survive an edit. Without the cascade this table would
-     * accumulate rows pointing at lines that no longer exist — and each one
-     * would still be clearing GRNI.
+     * A bill line that no longer exists debits no GRNI, so a settlement hanging
+     * off it would be claiming a delivery was invoiced by a line that is gone —
+     * and would keep it off the reconciliation forever.
+     *
+     * This used to fire on every ordinary EDIT as well, because
+     * `updateBillDraft` deleted and re-inserted every line of a draft. That was
+     * the GRNI double-clear; `updateBillDraft` now keeps a line's identity, and
+     * the cascade means only what it says here.
      */
     await withSystem(async (tx) => {
       const line = await tx

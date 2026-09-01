@@ -77,6 +77,22 @@ becomes 1d, unchanged.
 
 ## Build log
 
+### 2026-09-01 — The plant's bill had the same hole, one account along (`claude/a-match-survives-an-edit`)
+
+`production_run_bill_allocations` cascades off a bill line's id exactly as
+`bill_line_stock_allocations` does, so the whole-replace in `updateBillDraft`
+unmatched every run on a bill the moment somebody saved a memo — while the line
+came back still coded to `2060` and still carrying what was accrued. The plant's
+bill cleared the accrual and the run went back on `openProcessingAccruals` to be
+billed again. The fix is in accounting core; see [accounting.md](accounting.md).
+
+**`2060` WAS NOT EVEN ON THE UNPICKABLE LIST.** `isCodableAccount` excluded GRNI
+and Inventory and stopped there, so a person could hand-code a bill line to
+Services Received Not Invoiced from the ordinary picker and clear an accrual no
+run ever made — the same state, reachable without a match at all. It is on the
+list now. One test in `inventory-posting`, where this pack's matching tests live
+because the production test tenant keeps no books. **No migration.**
+
 ### 2026-08-31 — The boxes belong to the run, not to the item (`claude/the-cost-side`)
 
 Folded into the same PR as the entry below, after an adversarial review of it.
@@ -1166,7 +1182,7 @@ AI feature. Recorded as an open item.
 
 | `production_orders` | **The cut sheet** — what this farm asked one plant to do with one lot of animals | `tenant_id`, FORCE RLS. Composite FKs to the processor, the booking and the run, **all CASCADE**; `booking_id` is where it began and `run_id` is what it became, and the CHECK asks for at least one — a sheet attached to nothing is a sheet for a day that does not exist. **No unique index**: the design's *one animal, two cut sheets* is the ordinary case, and `title` tells them apart until `retail`'s commitments can name the customer. **`printed_at`** is the nearest honest thing to a handed-over state — a DATE rather than a status, written by the print button and by nothing else, so null is *nobody pressed Print here* rather than *they never got one* |
 | `production_order_lines` | **One line of a sheet — an option chosen, or an instruction given** | Composite FK to the order (CASCADE) and to the price item (**`SET NULL (price_item_id)`**, PG 15's column-list form — a line is a SNAPSHOT and must survive the rate sheet being tidied). `unit_price_cents`, `unit` and `minimum_cents` are **stamped and never re-read**. A line with no `price_item_id` is an INSTRUCTION and carries no money. CHECK: a price must say what it is per; a unit with no price is allowed. `quantity` NULL means *work it out* on a computable unit and *nobody has counted* on the rest |
-| `production_run_bill_allocations` | **The plant's bill, matched to the processing day it pays for** — slice 2d | `tenant_id`, FORCE RLS. Composite FKs to `bill_lines` (**CASCADE**, load-bearing: `updateBillDraft` deletes and re-inserts every line of a draft, so a line's id does not survive an edit) and to the run (**no cascade** — erasing the record that a bill settled one would hide the money). UNIQUE per `(bill line, run)`: a second match is a CORRECTION, not a second settlement. **`accrued_cents` is STAMPED at match time and never re-read** — it is what the ledger credited, and a later cost correction must not restate a variance that has posted. **`corrected_cents`** is how much of the difference has been pushed onto the meat, and is what makes that second act idempotent |
+| `production_run_bill_allocations` | **The plant's bill, matched to the processing day it pays for** — slice 2d | `tenant_id`, FORCE RLS. Composite FKs to `bill_lines` (**CASCADE** — when the LINE goes the settlement goes with it, because a deleted line no longer debits `2060`; `updateBillDraft` used to fire it on every ordinary edit, which silently unmatched every run on a bill while leaving the accrual cleared) and to the run (**no cascade** — erasing the record that a bill settled one would hide the money). UNIQUE per `(bill line, run)`: a second match is a CORRECTION, not a second settlement. **`accrued_cents` is STAMPED at match time and never re-read** — it is what the ledger credited, and a later cost correction must not restate a variance that has posted. **`corrected_cents`** is how much of the difference has been pushed onto the meat, and is what makes that second act idempotent |
 | `production_bookings` | **A date held with a processor — the scarce resource** | `tenant_id`, FORCE RLS. Composite FKs to the processor and to the run, **both CASCADE**; `run_id` is what the booking BECAME and is null until the day happens. `status` in `held\|confirmed\|cancelled` — three, and there is deliberately **no "it happened"**, because `run_id` answers that and a status somebody must advance would disagree with it. CHECK: a cancelled date cannot claim a run. Deposit in cents, and null is not zero — a date held on a phone call is ordinary |
 
 **Everything else lives in `inventory`:**

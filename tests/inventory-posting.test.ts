@@ -10,7 +10,9 @@ import {
 } from "../src/modules/accounting/core";
 import {
   approveBill,
+  loadBill,
   loadBillLines,
+  updateBillDraft,
 } from "../src/modules/accounting/payables/bills";
 import { recordBillPayment } from "../src/modules/accounting/payables/payments";
 import { createBankAccount } from "../src/modules/accounting/banking/accounts";
@@ -155,7 +157,10 @@ d("inventory posting", () => {
           accountId: cogsAccountId,
         })
         .returning();
-      return { billId: bill[0].id, billLineId: line[0].id };
+      // `vendorId` too: editing the draft through `updateBillDraft` has to
+      // send one, and the whole point of those tests is that the edit is
+      // ordinary.
+      return { billId: bill[0].id, billLineId: line[0].id, vendorId };
     });
   };
 
@@ -959,6 +964,224 @@ it("CLEARS GRNI TO ZERO when the bill is matched and approved", async () => {
 
       // The receipt credited 6,000; the bill debited it back.
       expect((await netOf(grniAccountId)) - grniBefore).toBe(0);
+    });
+
+    describe("EDITING THE BILL AFTERWARDS", () => {
+      /**
+       * **THE GRNI DOUBLE-CLEAR.**
+       *
+       * `updateBillDraft` deleted every line of a draft and re-inserted it, and
+       * `bill_line_stock_allocations` cascades off a bill line's id. So saving
+       * an edit to a MATCHED bill — a memo, a typo in another line, anything —
+       * threw the match away. Every ledger consequence of it stayed: the line
+       * came back from the form still coded to `2050` and still carrying the
+       * receipts' total, so approving still debited GRNI, while the deliveries
+       * were back on the reconciliation to be matched to a second bill and
+       * clear the same credit again.
+       *
+       * `grniPosition` then disagreed with its own account by the full amount
+       * and nothing in the ledger explained the gap, which is the one thing
+       * that card exists to make impossible.
+       */
+      const editBill = async (
+        billId: string,
+        vendorId: string,
+        lines: Array<{
+          id?: string;
+          description: string;
+          amountCents: number;
+          accountId: string | null;
+          dimensionMemberIds?: string[];
+        }>,
+        memo = "edited",
+      ) =>
+        asOwner(async (tx) => {
+          const bill = await loadBill(tx, tenantId, billId);
+          return updateBillDraft(tx, ledgerOwner(), {
+            billId,
+            expectedVersion: bill.version,
+            patch: { vendorId, billDate: bill.billDate, memo, lines },
+          });
+        });
+
+      it("KEEPS THE MATCH, so GRNI is cleared once and not twice", async () => {
+        const item = await newItem("Edited after matching");
+        const grniBefore = await netOf(grniAccountId);
+        await asOwner((tx) =>
+          receiveStock(tx, ownerCtx(), {
+            itemId: item.id,
+            quantity: 10,
+            costCents: 6_000,
+            occurredOn: "2026-09-20",
+          }),
+        );
+        const open = await asOwner((tx) =>
+          unbilledReceipts(tx, tenantId, { itemId: item.id }),
+        );
+        const { billId, billLineId, vendorId } = await makeBill(6_000);
+        await asOwner((tx) =>
+          allocateBillLineToStock(tx, ownerCtx(), {
+            billLineId,
+            matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
+          }),
+        );
+
+        // The ordinary edit: read the lines back exactly as the form does and
+        // send them again, with a new memo.
+        const read = await asOwner((tx) => loadBillLines(tx, tenantId, billId));
+        await editBill(
+          billId,
+          vendorId,
+          read.map((l) => ({
+            id: l.id,
+            description: l.description,
+            amountCents: l.amountCents,
+            accountId: l.accountId,
+          })),
+          "invoice arrived by post",
+        );
+
+        // The match is still there. This is the whole test.
+        expect(
+          await asOwner((tx) => unbilledReceipts(tx, tenantId, { itemId: item.id })),
+        ).toHaveLength(0);
+        expect(
+          (await asOwner((tx) => loadBillLines(tx, tenantId, billId)))[0].id,
+        ).toBe(billLineId);
+
+        await asOwner(async (tx) => {
+          const bill = await loadBill(tx, tenantId, billId);
+          return approveBill(tx, ledgerOwner(), {
+            billId,
+            expectedVersion: bill.version,
+          });
+        });
+        // Credited 6,000 by the receipt, debited 6,000 by the bill. Once.
+        expect((await netOf(grniAccountId)) - grniBefore).toBe(0);
+
+        // And there is nothing left to match to a second bill, which is the
+        // half that actually doubled the clearing.
+        const second = await makeBill(6_000);
+        await expect(
+          asOwner((tx) =>
+            allocateBillLineToStock(tx, ownerCtx(), {
+              billLineId: second.billLineId,
+              matches: [
+                { movementId: open[0].movementId, quantityMatched: 10 },
+              ],
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "NOT_FOUND" });
+      });
+
+      it("REFUSES TO RE-PRICE a matched line, because the amount is the match's", async () => {
+        /**
+         * Keeping the row is not enough on its own: a line whose amount no
+         * longer equals what the allocations settle debits GRNI for one figure
+         * against a credit of another, and the difference sits in the account
+         * meaning nothing. The account, the amount and the description are all
+         * the match's — the description included, because that is the string
+         * `allocateBillLineToStock` finds its variance sibling by.
+         */
+        const item = await newItem("Re-priced after matching");
+        await asOwner((tx) =>
+          receiveStock(tx, ownerCtx(), {
+            itemId: item.id,
+            quantity: 10,
+            costCents: 6_000,
+            occurredOn: "2026-09-21",
+          }),
+        );
+        const open = await asOwner((tx) =>
+          unbilledReceipts(tx, tenantId, { itemId: item.id }),
+        );
+        const { billId, vendorId } = await makeBill(6_000);
+        const firstLine = (
+          await asOwner((tx) => loadBillLines(tx, tenantId, billId))
+        )[0];
+        await asOwner((tx) =>
+          allocateBillLineToStock(tx, ownerCtx(), {
+            billLineId: firstLine.id,
+            matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
+          }),
+        );
+        const read = await asOwner((tx) => loadBillLines(tx, tenantId, billId));
+
+        await expect(
+          editBill(billId, vendorId, [
+            {
+              id: read[0].id,
+              description: read[0].description,
+              amountCents: 9_000,
+              accountId: read[0].accountId,
+            },
+          ]),
+        ).rejects.toMatchObject({ code: "ACCOUNT_NOT_CODABLE" });
+
+        // ...but a TAG on that line is not the match's business, and goes on.
+        const member = await asOwner((tx) =>
+          upsertDimensionMember(tx, ledgerOwner(), {
+            dimensionType: "enterprise",
+            packEntityId: randomUUID(),
+            displayName: "Broilers (edit test)",
+          }),
+        );
+        await editBill(billId, vendorId, [
+          {
+            id: read[0].id,
+            description: read[0].description,
+            amountCents: read[0].amountCents,
+            accountId: read[0].accountId,
+            dimensionMemberIds: [member.id],
+          },
+        ]);
+        const tagged = await asOwner((tx) => loadBillLines(tx, tenantId, billId));
+        expect(tagged[0].dimensionMemberIds).toEqual([member.id]);
+        expect(
+          await asOwner((tx) => unbilledReceipts(tx, tenantId, { itemId: item.id })),
+        ).toHaveLength(0);
+      });
+
+      it("PUTS THE DELIVERY BACK when the matched line is deleted", async () => {
+        /**
+         * The cascade is right when the line genuinely goes: no line, no GRNI
+         * debit, so the delivery is honestly un-invoiced again. It was only
+         * ever wrong as a side effect of an edit.
+         */
+        const item = await newItem("Line deleted after matching");
+        await asOwner((tx) =>
+          receiveStock(tx, ownerCtx(), {
+            itemId: item.id,
+            quantity: 10,
+            costCents: 6_000,
+            occurredOn: "2026-09-22",
+          }),
+        );
+        const open = await asOwner((tx) =>
+          unbilledReceipts(tx, tenantId, { itemId: item.id }),
+        );
+        const { billId, billLineId, vendorId } = await makeBill(6_000);
+        await asOwner((tx) =>
+          allocateBillLineToStock(tx, ownerCtx(), {
+            billLineId,
+            matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
+          }),
+        );
+
+        await editBill(billId, vendorId, [
+          {
+            description: "Something else entirely",
+            amountCents: 6_000,
+            accountId: cogsAccountId,
+          },
+        ]);
+
+        const back = await asOwner((tx) =>
+          unbilledReceipts(tx, tenantId, { itemId: item.id }),
+        );
+        expect(back).toHaveLength(1);
+        expect(back[0].openCostCents).toBe(6_000);
+      });
     });
 
     it("reports the variance when the invoice disagrees with the ticket", async () => {
@@ -2704,6 +2927,66 @@ it("NOBODY INVOICES YOU FOR WHAT YOU MADE", async () => {
         openProcessingAccruals(tx, tenantId, { runIds: [run.id] }),
       );
       expect(after).toHaveLength(0);
+    });
+
+    it("SURVIVES AN EDIT TO THE BILL, so the accrual is cleared once", async () => {
+      /**
+       * **THE SAME DEFECT, ONE ACCOUNT ALONG.**
+       * `production_run_bill_allocations` cascades off a bill line's id exactly
+       * as the stock allocations do, so the whole-replace in `updateBillDraft`
+       * unmatched every run on a bill the moment somebody saved a memo — while
+       * the line came back still coded to `2060` and still carrying what was
+       * accrued. The plant's bill cleared the accrual and the run went back on
+       * `openProcessingAccruals` to be billed again.
+       *
+       * `2060` was not even on the unpickable list when this was found, which
+       * is why the guard covers it now: a person could type their way into the
+       * same state without a match at all.
+       */
+      const accrued = await asOwner((tx) =>
+        resolveServicesAccruedAccount(tx, tenantId),
+      );
+      const before = await netOf(accrued);
+      const run = await accruedRun(22_370, "EDITED");
+      const { billId, billLineId, vendorId } = await makeBill(22_370);
+      await asOwner((tx) =>
+        matchBillLineToRuns(tx, prodOwner(), { billLineId, runIds: [run.id] }),
+      );
+
+      const read = await asOwner((tx) => loadBillLines(tx, tenantId, billId));
+      await asOwner(async (tx) => {
+        const bill = await loadBill(tx, tenantId, billId);
+        return updateBillDraft(tx, ledgerOwner(), {
+          billId,
+          expectedVersion: bill.version,
+          patch: {
+            vendorId,
+            billDate: bill.billDate,
+            memo: "plant emailed the invoice",
+            lines: read.map((l) => ({
+              id: l.id,
+              description: l.description,
+              amountCents: l.amountCents,
+              accountId: l.accountId,
+            })),
+          },
+        });
+      });
+
+      expect(
+        await asOwner((tx) =>
+          openProcessingAccruals(tx, tenantId, { runIds: [run.id] }),
+        ),
+      ).toHaveLength(0);
+
+      await asOwner(async (tx) => {
+        const bill = await loadBill(tx, tenantId, billId);
+        return approveBill(tx, ledgerOwner(), {
+          billId,
+          expectedVersion: bill.version,
+        });
+      });
+      expect((await netOf(accrued)) - before).toBe(0);
     });
 
     it("PUTS THE DIFFERENCE ON A SIBLING LINE so 2060 still clears exactly", async () => {

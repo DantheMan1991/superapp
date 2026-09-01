@@ -1601,10 +1601,12 @@ export const productionRunBillAllocations = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     /**
-     * CASCADE, and load-bearing rather than tidy: `updateBillDraft` DELETES AND
-     * RE-INSERTS every line of a draft, so a bill line's id does not survive an
-     * edit. `bill_line_stock_allocations` carries the same cascade for the same
-     * reason.
+     * CASCADE: when the LINE goes, the settlement goes with it, because a
+     * deleted line no longer debits `2060`. It is NOT a way of surviving an
+     * ordinary edit — `updateBillDraft` used to delete and re-insert every line
+     * of a draft, which silently unmatched every run on it while leaving the
+     * accrual cleared. `bill_line_stock_allocations` carries the same cascade
+     * and was bitten by the same thing.
      */
     billLineId: uuid("bill_line_id").notNull(),
     /** The processing day being settled. */

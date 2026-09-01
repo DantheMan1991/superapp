@@ -13,6 +13,59 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-01 — A bill line keeps its identity across an edit (`claude/a-match-survives-an-edit`)
+
+**`updateBillDraft` DELETED EVERY LINE OF A DRAFT AND RE-INSERTED IT.** Simple,
+and the reason a matched bill could clear the same liability twice. Two pack
+tables hang a settlement off a bill line's id with `ON DELETE CASCADE` —
+`bill_line_stock_allocations` (a delivery) and `production_run_bill_allocations`
+(a kill day's fee) — so saving *any* edit to a matched bill threw the match away
+while the form carried every ledger consequence of it faithfully back: the line
+returned still coded to `2050`, still carrying the receipts' total. Approving
+still cleared the accrual, and the deliveries were back on the reconciliation to
+be matched to a second bill and clear it again. `grniPosition` then disagreed
+with its own account by the full amount with no entry anywhere explaining the
+gap, which is the one thing that card exists to make impossible.
+
+Lines the patch still names are now **UPDATED in place**; lines it drops are
+deleted; lines it adds are inserted. Nothing about the accounting needed the
+delete — it needed the tags replaced, which `writeLineDimensions` does per line,
+and a stable ordering, which a two-phase renumber gives it.
+`bill_lines_bill_line_no_idx` is a plain unique index and so is enforced row by
+row rather than at the end of the statement, so survivors park on **negative**
+line numbers before taking their final ones. An id the bill does not own, or one
+sent twice, is treated as a new line: that is what a stale form sends, and
+inventing a line is the harmless reading where hijacking another bill's row is
+not.
+
+**AND THE RULE THAT ONLY FILTERED THE PICKERS NOW VALIDATES ON SAVE.**
+`isCodableAccount`'s own comment admitted it — *"This filters the PICKERS;
+nothing validates it on save"* — and the edit page adds back whatever accounts a
+bill's lines already use so the select can render them, which made the one
+coding a person could never choose the one thing that round-tripped freely.
+`assertLineAccounts` now enforces it, and it has to be a rule about CHANGE
+rather than a flat ban, because those lines have to stay saveable at all:
+
+> A line coded to an unpickable account may be **carried through unchanged** or
+> **deleted**. It may not be re-coded, re-priced, re-described, or created.
+
+Deleting is allowed on purpose — the allocations cascade with the line, so the
+match and the GRNI debit disappear together. The description is frozen with the
+amount because it is the string `allocateBillLineToStock` finds its variance
+sibling by. **Tags are deliberately not frozen**: saying which enterprise a
+delivery was for changes nothing the match depends on.
+
+`2060 Services Received Not Invoiced` joined the unpickable list, having been
+missed for the same reason `1300 Inventory` was — the rule got written about the
+account somebody had just been bitten by.
+
+The form greys those rows out with a *"Set by a match"* note rather than letting
+somebody type into a box that will fail on save, and it computes which rows
+those are by **subtracting the codable list** from the accounts the lines hold —
+so the accounting screen never has to know what a delivery is. New error code
+`ACCOUNT_NOT_CODABLE`. **No migration.** Four new tests in `payables` (identity,
+mid-list renumbering, a foreign line id, the guard), one in `coa-codable`.
+
 ### 2026-09-01 — A bill line says what it was for (`claude/a-bill-line-says-what-it-was-for`)
 
 The third and highest-volume surface: a farm's feed, vet, fuel, hatchery and

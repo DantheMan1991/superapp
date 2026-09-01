@@ -6,6 +6,7 @@ export type LedgerErrorCode =
   | "AMOUNT_TOO_LARGE"
   | "ACCOUNT_NOT_FOUND"
   | "ACCOUNT_INACTIVE"
+  | "ACCOUNT_NOT_CODABLE"
   | "PERIOD_CLOSED"
   | "ENTRY_NOT_FOUND"
   | "ENTRY_NOT_DRAFT"
@@ -124,6 +125,8 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   AMOUNT_TOO_LARGE: "That amount is larger than the ledger accepts.",
   ACCOUNT_NOT_FOUND: "One of the selected accounts no longer exists.",
   ACCOUNT_INACTIVE: "One of the selected accounts is inactive.",
+  ACCOUNT_NOT_CODABLE:
+    "A line is coded to an account that only a match can set. Undo the match on that line, or code it to an ordinary account.",
   PERIOD_CLOSED:
     "That date falls in a closed period. Use a reversal, or reopen the period first.",
   ENTRY_NOT_FOUND: "That entry no longer exists.",

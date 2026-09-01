@@ -312,6 +312,185 @@ d("payables (DB)", () => {
   }
 
 
+  // ---- a line keeps its identity across an edit ---------------------------
+
+  /**
+   * **`updateBillDraft` USED TO DELETE EVERY LINE AND RE-INSERT IT**, which was
+   * simple and cost five hours of somebody's GRNI reconciliation: two tables
+   * hang a settlement off a bill line's id with `ON DELETE CASCADE`, so saving
+   * a memo change unmatched every delivery on the bill while the form carried
+   * the coding that clears them straight back.
+   *
+   * The pack-level consequence is proved in `inventory-posting`. What is proved
+   * here is the accounting half — that a line the patch still names is the SAME
+   * ROW afterwards, and that the renumbering survives inserting into the middle.
+   */
+  describe("editing a draft's lines", () => {
+    it("KEEPS THE ROW when the patch names it, and only then", async () => {
+      const feed = await accountId("5000");
+      const bill = await makeBill(
+        [line(1_000, feed, "One"), line(2_000, feed, "Two")],
+        { billNumber: "ID-1" },
+      );
+      const before = await withTenant(tenantId, (tx) =>
+        loadBillLines(tx, tenantId, bill.id),
+      );
+
+      await withTenant(tenantId, (tx) =>
+        updateBillDraft(tx, owner, {
+          billId: bill.id,
+          expectedVersion: bill.version,
+          patch: {
+            vendorId,
+            billDate: "2026-06-15",
+            memo: "changed my mind about the memo",
+            lines: [
+              { ...line(1_000, feed, "One"), id: before[0].id },
+              { ...line(2_000, feed, "Two"), id: before[1].id },
+            ],
+          },
+        }),
+      );
+
+      const after = await withTenant(tenantId, (tx) =>
+        loadBillLines(tx, tenantId, bill.id),
+      );
+      expect(after.map((l) => l.id)).toEqual([before[0].id, before[1].id]);
+    });
+
+    it("re-numbers correctly when a line is inserted between two that stay", async () => {
+      /**
+       * `bill_lines_bill_line_no_idx` is a plain unique index, enforced row by
+       * row rather than at the end of the statement — so moving line 2 to line
+       * 3 while a new line takes 2 collides unless the survivors park somewhere
+       * out of the way first. This is that.
+       */
+      const feed = await accountId("5000");
+      const bill = await makeBill(
+        [line(1_000, feed, "First"), line(3_000, feed, "Third")],
+        { billNumber: "ID-2" },
+      );
+      const before = await withTenant(tenantId, (tx) =>
+        loadBillLines(tx, tenantId, bill.id),
+      );
+
+      await withTenant(tenantId, (tx) =>
+        updateBillDraft(tx, owner, {
+          billId: bill.id,
+          expectedVersion: bill.version,
+          patch: {
+            vendorId,
+            billDate: "2026-06-15",
+            lines: [
+              { ...line(1_000, feed, "First"), id: before[0].id },
+              line(2_000, feed, "Second"),
+              { ...line(3_000, feed, "Third"), id: before[1].id },
+            ],
+          },
+        }),
+      );
+
+      const after = await withTenant(tenantId, (tx) =>
+        loadBillLines(tx, tenantId, bill.id),
+      );
+      expect(after.map((l) => l.description)).toEqual([
+        "First",
+        "Second",
+        "Third",
+      ]);
+      expect(after.map((l) => l.lineNo)).toEqual([1, 2, 3]);
+      // The two that stayed are the same rows; only the middle one is new.
+      expect(after[0].id).toBe(before[0].id);
+      expect(after[2].id).toBe(before[1].id);
+      const bill2 = await withTenant(tenantId, (tx) =>
+        loadBill(tx, tenantId, bill.id),
+      );
+      expect(bill2.totalCents).toBe(6_000);
+    });
+
+    it("drops a line the patch stops naming, and an id from another bill", async () => {
+      const feed = await accountId("5000");
+      const other = await makeBill([line(500, feed, "Elsewhere")], {
+        billNumber: "ID-3a",
+      });
+      const otherLines = await withTenant(tenantId, (tx) =>
+        loadBillLines(tx, tenantId, other.id),
+      );
+      const bill = await makeBill(
+        [line(1_000, feed, "Keep"), line(2_000, feed, "Drop")],
+        { billNumber: "ID-3b" },
+      );
+      const before = await withTenant(tenantId, (tx) =>
+        loadBillLines(tx, tenantId, bill.id),
+      );
+
+      await withTenant(tenantId, (tx) =>
+        updateBillDraft(tx, owner, {
+          billId: bill.id,
+          expectedVersion: bill.version,
+          patch: {
+            vendorId,
+            billDate: "2026-06-15",
+            lines: [
+              { ...line(1_000, feed, "Keep"), id: before[0].id },
+              // Another bill's line id. Honouring it would let one bill
+              // hijack another's row; treating it as new is the harmless read.
+              { ...line(7_000, feed, "Stale form"), id: otherLines[0].id },
+            ],
+          },
+        }),
+      );
+
+      const after = await withTenant(tenantId, (tx) =>
+        loadBillLines(tx, tenantId, bill.id),
+      );
+      expect(after.map((l) => l.description)).toEqual(["Keep", "Stale form"]);
+      expect(after[1].id).not.toBe(otherLines[0].id);
+      // ...and the other bill still has its line.
+      const otherAfter = await withTenant(tenantId, (tx) =>
+        loadBillLines(tx, tenantId, other.id),
+      );
+      expect(otherAfter).toHaveLength(1);
+    });
+
+    it("REFUSES A LINE CODED TO AN ACCOUNT NOBODY MAY PICK", async () => {
+      /**
+       * `isCodableAccount` kept GRNI out of every picker and its own comment
+       * admitted the hole: it filtered the pickers and nothing validated it on
+       * save. The edit page adds back whatever accounts a bill's lines already
+       * use so the select can render them — which made the one coding a person
+       * could never choose the one thing that round-tripped freely.
+       */
+      const feed = await accountId("5000");
+      const grni = await accountId("2050");
+      await expect(
+        makeBill([line(1_000, grni, "Hand-coded to GRNI")], {
+          billNumber: "ID-4a",
+        }),
+      ).rejects.toMatchObject({ code: "ACCOUNT_NOT_CODABLE" });
+
+      const bill = await makeBill([line(1_000, feed, "Feed")], {
+        billNumber: "ID-4b",
+      });
+      const before = await withTenant(tenantId, (tx) =>
+        loadBillLines(tx, tenantId, bill.id),
+      );
+      await expect(
+        withTenant(tenantId, (tx) =>
+          updateBillDraft(tx, owner, {
+            billId: bill.id,
+            expectedVersion: bill.version,
+            patch: {
+              vendorId,
+              billDate: "2026-06-15",
+              lines: [{ ...line(1_000, grni, "Feed"), id: before[0].id }],
+            },
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "ACCOUNT_NOT_CODABLE" });
+    });
+  });
+
   // ---- dimensions on a bill line ------------------------------------------
 
   describe("a bill line says what it was for", () => {
@@ -333,12 +512,16 @@ d("payables (DB)", () => {
       return m.id;
     };
 
-    it("SURVIVES A DRAFT EDIT, because the update deletes every line", async () => {
+    it("SURVIVES A DRAFT EDIT, tags being whole-replaced from the patch", async () => {
       /**
-       * `updateBillDraft` whole-replaces the lines, so a tag is only as durable
-       * as read → carry → send. `BuilderBill.lines` did not carry it and the
-       * edit page's `lines.map` narrowed the shape and dropped it — the first
-       * save of a tagged draft would have wiped every tag on it.
+       * `updateBillDraft` whole-replaces a line's tags from what the patch
+       * sends, so a tag is only as durable as read → carry → send.
+       * `BuilderBill.lines` did not carry it and the edit page's `lines.map`
+       * narrowed the shape and dropped it — the first save of a tagged draft
+       * would have wiped every tag on it.
+       *
+       * The patch here sends no line ids, so these lines are replaced outright
+       * — which is still a case the form produces, and the harsher one.
        */
       const feed = await accountId("5000");
       const broilers = await memberId("Broilers");

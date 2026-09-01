@@ -15,6 +15,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DimensionTags,
+  type DimensionTypeOption,
+} from "@/components/app/dimension-tags";
 import { createEntry, updateEntry } from "@/modules/accounting/actions";
 import {
   formatCents,
@@ -42,7 +46,13 @@ export interface EditorEntry {
   entityId?: string;
   entryDate: string;
   memo: string;
-  lines: Array<{ accountId: string; amountCents: number; memo: string }>;
+  lines: Array<{
+    accountId: string;
+    amountCents: number;
+    memo: string;
+    /** `loadEntryLines` returns these; the page passes them through. */
+    dimensionMemberIds: string[];
+  }>;
 }
 
 interface LineRow {
@@ -51,10 +61,26 @@ interface LineRow {
   debit: string;
   credit: string;
   memo: string;
+  /**
+   * **REQUIRED, NOT OPTIONAL**, and it is the third time this has been written
+   * down. `editEntry` deletes every line of the entry and re-inserts it, so
+   * `line_dimensions` cascades away — a row shape that could omit this would
+   * wipe every tag on the first edit. Required puts each construction site in
+   * front of the compiler, which is what caught the narrowing `lines.map` on
+   * the invoice page and again on the bill page.
+   */
+  dimensionMemberIds: string[];
 }
 
 function emptyRow(): LineRow {
-  return { key: crypto.randomUUID(), accountId: "", debit: "", credit: "", memo: "" };
+  return {
+    key: crypto.randomUUID(),
+    accountId: "",
+    debit: "",
+    credit: "",
+    memo: "",
+    dimensionMemberIds: [],
+  };
 }
 
 function rowFromLine(l: EditorEntry["lines"][number]): LineRow {
@@ -64,6 +90,10 @@ function rowFromLine(l: EditorEntry["lines"][number]): LineRow {
     debit: l.amountCents > 0 ? formatCents(l.amountCents).replaceAll(",", "") : "",
     credit: l.amountCents < 0 ? formatCents(-l.amountCents).replaceAll(",", "") : "",
     memo: l.memo,
+    // THE ROUND TRIP. Read back by the page, carried through the form, sent
+    // again on save — because the update replaces every line, so anything not
+    // carried is deleted.
+    dimensionMemberIds: l.dimensionMemberIds,
   };
 }
 
@@ -85,6 +115,7 @@ export function EntryEditor({
   entry,
   canPost,
   today,
+  dimensionTypes = [],
 }: {
   accounts: EditorAccount[];
   /**
@@ -104,6 +135,18 @@ export function EntryEditor({
   canPost: boolean;
   /** Today in the tenant's bookkeeping timezone (server-computed). */
   today: string;
+  /**
+   * Active members grouped by type, from `dimensionTypesFrom` — plus any
+   * retired one these lines already hold, so it can be seen and taken off.
+   * Empty renders no tag control at all, which is every tenant that has
+   * installed no pack.
+   *
+   * **THE JOURNAL IS THE LAST WRITE SURFACE TO GET ONE.** Bank rows, invoice
+   * lines and bill lines cover where the money usually moves; a hand-written
+   * entry is where the corrections, the accruals and the openings go, and an
+   * untaggable one is a hole in exactly the numbers somebody is correcting.
+   */
+  dimensionTypes?: DimensionTypeOption[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -192,6 +235,11 @@ export function EntryEditor({
       accountId: p.row.accountId,
       amountCents: p.cents!,
       memo: p.row.memo.trim() || undefined,
+      // Undefined rather than an empty array: the schema's field is optional
+      // and an absent one writes no `line_dimensions` rows.
+      dimensionMemberIds: p.row.dimensionMemberIds.length
+        ? p.row.dimensionMemberIds
+        : undefined,
     }));
     startTransition(async () => {
       const result = entry
@@ -340,8 +388,27 @@ export function EntryEditor({
                     <span className="sr-only">Remove line</span>
                   </Button>
                 </div>
-                {refused && (
-                  <p className="text-xs text-destructive">{rejected!.message}</p>
+                {/*
+                  A SUB-ROW RATHER THAN A SIXTH COLUMN. The grid is already
+                  `min-w-[560px]` and scrolls on a phone; a farm with batches,
+                  paddocks and lines of business would need three more columns.
+                  The refused-account message already lives down here, so the
+                  tag joins it.
+                */}
+                {(dimensionTypes.length > 0 || refused) && (
+                  <div className="flex flex-wrap items-center gap-2 pl-1">
+                    <DimensionTags
+                      types={dimensionTypes}
+                      value={row.dimensionMemberIds}
+                      onValue={(v) => setRow(row.key, { dimensionMemberIds: v })}
+                      triggerClassName="h-7 px-2 text-xs font-normal text-muted-foreground"
+                    />
+                    {refused && (
+                      <p className="text-xs text-destructive">
+                        {rejected!.message}
+                      </p>
+                    )}
+                  </div>
                 )}
                 </div>
               );

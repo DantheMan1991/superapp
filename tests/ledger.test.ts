@@ -1044,6 +1044,32 @@ d("core ledger platform", () => {
 
   // ------------------------------------------------------------ dimensions
 
+  /** Every member id tagged on an entry's lines, in line order. */
+  const tagsOn = async (entryId: string): Promise<string[]> =>
+    withTenant(tenantId, async (tx) => {
+      const lines = await tx
+        .select({ id: schema.journalLines.id })
+        .from(schema.journalLines)
+        .where(
+          and(
+            eq(schema.journalLines.tenantId, tenantId),
+            eq(schema.journalLines.entryId, entryId),
+          ),
+        )
+        .orderBy(schema.journalLines.lineNo);
+      const ids = new Set(lines.map((l) => l.id));
+      const dims = await tx
+        .select({
+          journalLineId: schema.lineDimensions.journalLineId,
+          memberId: schema.lineDimensions.memberId,
+        })
+        .from(schema.lineDimensions)
+        .where(eq(schema.lineDimensions.tenantId, tenantId));
+      return dims
+        .filter((d) => d.journalLineId && ids.has(d.journalLineId))
+        .map((d) => d.memberId);
+    });
+
   describe("dimensions", () => {
     it("tags flow through to grouped balances; inactive members are refused", async () => {
       const cash = await accountId("1000");
@@ -1102,6 +1128,111 @@ d("core ledger platform", () => {
           }),
         ),
       ).rejects.toMatchObject({ code: "DIMENSION_INVALID" });
+    });
+
+    /**
+     * **THE ROUND TRIP, ON THE LAST WRITE SURFACE TO GET A PICKER.**
+     *
+     * `editEntry` deletes every line of the entry and re-inserts it, and
+     * `line_dimensions` cascades off `journal_line_id` — so a tag is only as
+     * durable as read → carry → send. The invoice builder and the bill builder
+     * each shipped a `lines.map` that narrowed the row shape and dropped it,
+     * and both were caught by making the field REQUIRED rather than optional.
+     * The journal editor's shape is required for the same reason; this is the
+     * server half of that claim.
+     */
+    it("KEEPS A TAG THROUGH AN EDIT THAT CARRIES IT, and drops one that does not", async () => {
+      const cash = await accountId("1000");
+      const exp = await accountId("6700");
+      const member = await withTenant(tenantId, (tx) =>
+        upsertDimensionMember(tx, owner, {
+          dimensionType: "property",
+          packEntityId: crypto.randomUUID(),
+          displayName: "45 Elm Row",
+        }),
+      );
+      const { entry } = await withTenant(tenantId, (tx) =>
+        postEntry(tx, owner, {
+          entityId,
+          status: "posted",
+          entryDate: "2026-04-05",
+          lines: [
+            { accountId: exp, amountCents: 4_000, dimensionMemberIds: [member.id] },
+            { accountId: cash, amountCents: -4_000 },
+          ],
+        }),
+      );
+      expect(await tagsOn(entry.id)).toEqual([member.id]);
+
+      // The form's own path: read the tags back and send them again with an
+      // otherwise unrelated change.
+      const carried = await withTenant(tenantId, (tx) =>
+        editEntry(tx, owner, {
+          entryId: entry.id,
+          expectedVersion: entry.version,
+          patch: {
+            memo: "corrected the memo",
+            lines: [
+              { accountId: exp, amountCents: 4_000, dimensionMemberIds: [member.id] },
+              { accountId: cash, amountCents: -4_000 },
+            ],
+          },
+        }),
+      );
+      expect(await tagsOn(entry.id)).toEqual([member.id]);
+
+      // And the other direction: untagging has to work, which is the same
+      // whole-replace seen from the useful end.
+      await withTenant(tenantId, (tx) =>
+        editEntry(tx, owner, {
+          entryId: entry.id,
+          expectedVersion: carried.after.entry.version,
+          patch: {
+            lines: [
+              { accountId: exp, amountCents: 4_000 },
+              { accountId: cash, amountCents: -4_000 },
+            ],
+          },
+        }),
+      );
+      expect(await tagsOn(entry.id)).toEqual([]);
+    });
+
+    it("keeps a draft's tags when it is posted", async () => {
+      /**
+       * `postDraft` does not rewrite the lines — it flips the status — so the
+       * tags a staff member put on a draft are what an owner posts. Worth
+       * asserting rather than assuming: the one path that DOES rebuild lines
+       * from a snapshot (`reverseEntry`) had to be given the tags explicitly,
+       * and nothing but a test says which of the two this is.
+       */
+      const cash = await accountId("1000");
+      const exp = await accountId("6700");
+      const member = await withTenant(tenantId, (tx) =>
+        upsertDimensionMember(tx, owner, {
+          dimensionType: "property",
+          packEntityId: crypto.randomUUID(),
+          displayName: "9 Drover Lane",
+        }),
+      );
+      const { entry } = await withTenant(tenantId, (tx) =>
+        postEntry(tx, owner, {
+          entityId,
+          status: "draft",
+          entryDate: "2026-04-06",
+          lines: [
+            { accountId: exp, amountCents: 900, dimensionMemberIds: [member.id] },
+            { accountId: cash, amountCents: -900 },
+          ],
+        }),
+      );
+      await withTenant(tenantId, (tx) =>
+        postDraft(tx, owner, {
+          entryId: entry.id,
+          expectedVersion: entry.version,
+        }),
+      );
+      expect(await tagsOn(entry.id)).toEqual([member.id]);
     });
   });
 

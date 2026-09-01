@@ -514,12 +514,14 @@ the same transaction as every write.
   [production.md](production.md).
 - **THE COSTS THAT ARRIVE AS BILLS AND BANK ROWS ARE WHERE THE VOLUME IS**, and
   the bank half of that landed 2026-08-31 — see
-  [accounting.md](accounting.md). Bill lines, invoice lines, the manual journal
+  [accounting.md](accounting.md). ~~Bill lines, invoice lines, the manual journal
   and recurring templates all still accept `dimensionMemberIds` server-side with
-  no form able to send one. ~~A bill line has a round-trip trap waiting.~~ **Closed
-  2026-09-01** — bill lines carry a tag now, and the trap was caught by making
-  the row field required. Remaining: the manual journal and recurring
-  templates.
+  no form able to send one.~~ **Closed 2026-09-01** for everything a person
+  writes by hand: bank rows, invoice lines, bill lines and now the manual
+  journal all carry a tag, and the round-trip trap was caught the same way each
+  time by making the row field required rather than optional. **Remaining:
+  recurring templates**, and see the item above for why the `autoPost` journal
+  case is a decision rather than a form.
 - **A MIXED MARKET STALL'S COSTS HAVE NOWHERE TO GO, by design for now.** A
   stall selling beef and chicken cannot attribute its $35 fee to one enterprise,
   and doing it anyway would be a confident wrong number. Splitting pro rata by

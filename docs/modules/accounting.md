@@ -13,6 +13,46 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-01 — The journal can say what it was for (`claude/the-journal-can-say-what-it-was-for`)
+
+The last write surface without a tag picker, and the one where it matters most
+for the reason it was left till last: **a hand-written entry is where the
+corrections, the accruals and the openings go.** Bank rows, invoice lines and
+bill lines cover where the money usually moves; an untaggable journal is a hole
+in exactly the figures somebody is sitting down to correct.
+
+`lineSchema` has accepted `dimensionMemberIds` since dimensions existed,
+`postEntry` validates and writes them, and `reverseEntry` already carries them
+onto the reversal. Nothing but the form was missing. **No posting path, no
+migration.**
+
+**THE ROUND TRIP, FOR THE THIRD TIME, AND THE RULE HELD.** `editEntry` deletes
+every line of the entry and re-inserts it, so `line_dimensions` cascades off
+`journal_line_id` and a tag is only as durable as read → carry → send. Making
+`LineRow.dimensionMemberIds` **required rather than optional** put both call
+sites in front of the compiler again — `new/page.tsx` and `[id]/page.tsx` — which
+is exactly how the invoice and bill versions found the page that was narrowing
+the shape. Three surfaces, three times the same trap, three times caught by the
+same one-word decision: it is a convention now, not a knack.
+
+The tag control is a SUB-ROW rather than a sixth column: the line grid is
+already `min-w-[560px]` and scrolls on a phone, and a farm with batches,
+paddocks and lines of business would want three more columns. The
+refused-account message already lived down there, so the tag joins it.
+
+**AND THE READ-ONLY TABLE SHOWS THEM.** An entry that can be tagged but cannot
+be seen to be tagged is half a feature, and that table is how anybody checks
+what a correction actually did. Retired members render under their own names —
+an entry posted under a line of business since wound up still has to read as
+what it was.
+
+Two tests in `ledger`: a tag survives an edit that carries it and is dropped by
+one that does not, and a draft's tags survive being posted. The second is worth
+asserting rather than assuming — `postDraft` flips the status without rewriting
+lines, while `reverseEntry` rebuilds them from a snapshot and had to be handed
+the tags explicitly, and nothing but a test says which of the two a given path
+is.
+
 ### 2026-09-01 — A bill line keeps its identity across an edit (`claude/a-match-survives-an-edit`)
 
 **`updateBillDraft` DELETED EVERY LINE OF A DRAFT AND RE-INSERTED IT.** Simple,

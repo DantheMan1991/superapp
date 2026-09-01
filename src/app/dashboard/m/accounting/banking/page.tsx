@@ -14,8 +14,10 @@ import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import {
   getBalances,
   getDefaultEntityId,
+  listDimensionMembers,
   listEntities,
 } from "@/modules/accounting/core";
+import { dimensionTypesFrom } from "@/lib/dimension-options";
 import {
   formatCentsSigned,
   todayInTimezone,
@@ -80,6 +82,8 @@ export default async function BankingPage() {
       unreviewed,
       items,
       categories,
+      // Unfiltered: `dimensionTypesFrom` owns the active-only rule.
+      dimensionMembers: await listDimensionMembers(tx, tenantId),
       entities: await listEntities(tx, tenantId),
       defaultEntityId: await getDefaultEntityId(tx, tenantId),
     };
@@ -122,6 +126,7 @@ export default async function BankingPage() {
                 categories={categoryOptions}
                 entities={data.entities.map((e) => ({ id: e.id, name: e.name }))}
                 defaultEntityId={data.defaultEntityId}
+                dimensionTypes={dimensionTypesFrom(data.dimensionMembers)}
               />
             )}
           </>

@@ -5,6 +5,10 @@ import { useRouter } from "next/navigation";
 import { usePlaidLink } from "react-plaid-link";
 import { Landmark, Plus, RefreshCw, Unplug, Zap } from "lucide-react";
 import { toast } from "sonner";
+import {
+  DimensionTags,
+  type DimensionTypeOption,
+} from "@/components/app/dimension-tags";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -193,6 +197,7 @@ export function BankingHeaderButtons({
   categories,
   entities = [],
   defaultEntityId = null,
+  dimensionTypes,
 }: {
   plaidReady: boolean;
   bankAccounts: BankAccountOption[];
@@ -200,6 +205,8 @@ export function BankingHeaderButtons({
   /** The tenant's companies (ADR 0010) — the picker shows at two or more. */
   entities?: Array<{ id: string; name: string }>;
   defaultEntityId?: string | null;
+  /** Active members, grouped by type. Passed straight through to quick add. */
+  dimensionTypes?: DimensionTypeOption[];
 }) {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -228,7 +235,11 @@ export function BankingHeaderButtons({
         defaultEntityId={defaultEntityId}
       />
       {bankAccounts.length > 0 && (
-        <QuickAddButton bankAccounts={bankAccounts} categories={categories} />
+        <QuickAddButton
+          bankAccounts={bankAccounts}
+          categories={categories}
+          dimensionTypes={dimensionTypes ?? []}
+        />
       )}
       {linkToken && (
         <PlaidLauncher linkToken={linkToken} onDone={() => setLinkToken(null)} />
@@ -422,13 +433,17 @@ function CreateBankAccountButton({
 export function QuickAddButton({
   bankAccounts,
   categories,
+  dimensionTypes,
 }: {
   bankAccounts: BankAccountOption[];
   categories: CategoryOption[];
+  /** Active members, grouped by type. Empty renders no tag fields at all. */
+  dimensionTypes: DimensionTypeOption[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  const [tags, setTags] = useState<string[]>([]);
   const [form, setForm] = useState({
     bankAccountId: bankAccounts[0]?.id ?? "",
     direction: "expense" as "expense" | "income",
@@ -458,12 +473,17 @@ export function QuickAddButton({
         categoryAccountId: form.categoryAccountId,
         amountCents: cents,
         memo: form.memo.trim() || undefined,
+        dimensionMemberIds: tags.length ? tags : undefined,
       });
       if ("error" in result) toast.error(result.error);
       else {
         toast.success("Transaction added");
         setOpen(false);
         setForm((f) => ({ ...f, amount: "", memo: "" }));
+        // Cleared with the amount and memo, not kept: the next transaction is
+        // a different one, and a sticky tag is how a whole afternoon of
+        // spending ends up under one line of business.
+        setTags([]);
         router.refresh();
       }
     });
@@ -571,6 +591,25 @@ export function QuickAddButton({
                 onChange={(e) => setForm({ ...form, memo: e.target.value })}
               />
             </div>
+            {/*
+              **BEHIND A TRIGGER EVEN THOUGH THIS DIALOG HAS THE ROOM.** The
+              first version rendered the selects inline and driving it settled
+              it: a farm has five dimension types, so five stacked pickers
+              visually outweighed the six fields that make up the transaction
+              itself. The tags are the optional part and must not look like the
+              main event.
+            */}
+            {dimensionTypes.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Tags (optional)</Label>
+                <DimensionTags
+                  types={dimensionTypes}
+                  value={tags}
+                  onValue={setTags}
+                  triggerClassName="w-full justify-start font-normal"
+                />
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button

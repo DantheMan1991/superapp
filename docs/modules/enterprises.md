@@ -488,9 +488,20 @@ the same transaction as every write.
 ## Open items
 
 - ~~**Nothing is tagged with an enterprise yet.**~~ Closed by slice 2, and the
-  ledger end by slice 3. **What remains: only the COST side is tagged.** Until
-  slice 4 the P&L by enterprise is expenditure with no income beside it, so it
-  answers *what has Broilers cost me* and not *what has Broilers made me*.
+  ledger end by slice 3. **What remains: only the COST side is tagged.** The P&L
+  by enterprise is expenditure with no income beside it, so it answers *what has
+  Broilers cost me* and not *what has Broilers made me*. **Invoice lines are the
+  cheapest way to change that** — `invoicing/invoices.ts` already copies a line's
+  dimensions onto the income journal line, so the revenue half needs a picker
+  rather than a posting path. Retail's till is a separate and much larger job.
+- **THE COSTS THAT ARRIVE AS BILLS AND BANK ROWS ARE WHERE THE VOLUME IS**, and
+  the bank half of that landed 2026-08-31 — see
+  [accounting.md](accounting.md). Bill lines, invoice lines, the manual journal
+  and recurring templates all still accept `dimensionMemberIds` server-side with
+  no form able to send one. **A bill line has a round-trip trap waiting**:
+  `BuilderBill.lines` does not carry the field and `updateBillDraft` deletes and
+  re-inserts every line, so a picker added without widening that type would wipe
+  the tag on the first edit.
 - **A MIXED MARKET STALL'S COSTS HAVE NOWHERE TO GO, by design for now.** A
   stall selling beef and chicken cannot attribute its $35 fee to one enterprise,
   and doing it anyway would be a confident wrong number. Splitting pro rata by

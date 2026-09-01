@@ -13,6 +13,68 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-31 — A picker for the money that actually arrives (`claude/a-picker-for-the-money-that-arrives`)
+
+**Six posting paths have validated `dimensionMemberIds` since before the
+dimension had a single member, and not one form could send it.**
+`git grep dimensionMemberIds -- src/app src/components` returned nothing: bill
+lines, invoice lines, the manual journal, bank categorise, bank quick add and
+recurring templates all accepted it server-side, and every one of them was
+unreachable. The enterprise dimension's cost side shipped through `inventory` in
+slice 3 while a farm's feed, vet, fuel and insurance — which arrive as bills and
+bank rows, in far greater numbers — kept landing in Unassigned.
+
+This is the bank half. **The whole change is UI**: `categorizeTransaction`
+already put the members on the category leg and never the bank leg, which is the
+two-sided rule the enterprise work proved necessary, implemented here long
+before it had a name.
+
+**GENERIC OVER DIMENSION TYPE, AND THAT IS THE LOAD-BEARING DECISION.**
+`accounting` must not learn the word "enterprise" — `core/dimensions.ts` states
+it and the P&L already honours it, deriving its "Split by" options from the
+distinct types present in `dimension_members` and handing core a plain
+`string[]`. `DimensionTags` is the write end of that arrangement: the caller
+supplies types, words and members, and the control knows what none of them mean.
+A tenant with paddocks and no lines of business gets a paddock picker from the
+same code.
+
+**A POPOVER, BECAUSE THE SURFACES THAT NEEDED IT WERE THE NARROW ONES.** These
+were expected to be stacked-field dialogs where the existing `EnterprisePicker`
+would drop in; they are not. Categorise is an `h-8` select inside a table cell
+and a bill line is a five-column grid at `min-w-[640px]`. One trigger that opens
+N selects fits where five dropdowns never could.
+
+**AND THE INLINE VARIANT WAS BUILT, DRIVEN, AND DELETED.** Quick add has room,
+so its first version rendered the selects inline — and on screen a farm's five
+dimension types visually outweighed the six fields that make up the transaction
+itself. The tags are the optional part and must not look like the main event, so
+quick add uses the same trigger, with a `Tags (optional)` label. Nesting the
+popover inside a dialog was the risk that argued for inline in the first place;
+it works, including a Select inside a Popover inside a Dialog.
+
+**THE ACTIVE FILTER LIVES IN `dimensionTypesFrom`, NOT AT EACH CALL SITE.**
+`listDimensionMembers` does not apply it and `postEntry` refuses an inactive
+member outright, so a screen that forgot would offer a retired line of business
+and then fail the whole save when somebody picked it. **The fix for a per-caller
+trap is to leave the caller no way to get it wrong** — the conclusion
+`enterpriseMemberIds` reached on the posting side, arrived at again from the
+read side.
+
+`src/components/ui/popover.tsx` is new: stock shadcn over `radix-ui`, which is
+what that directory is for. See [design-system.md](design-system.md) — it stays
+upgradeable and `src/components/app/` composes it.
+
+Driven on Hilltop Farm, both surfaces, through to the report. A quick-added
+insurance payment and a CSV-imported feed-mill row, each tagged Broilers:
+
+```
+Dr 6100 Insurance           420.00  [Broilers]     Cr 1020 Farm Checking  (untagged)
+Dr 5000 Cost of Goods Sold  318.40  [Broilers]     Cr 1020 Farm Checking  (untagged)
+```
+
+P&L → Split by → Enterprise reads **Broilers 738.40**. The expense leg carries
+the tag and the bank leg does not, on both paths.
+
 ### 2026-08-22 — The bug that was not there (`claude/the-bug-that-was-not-there`)
 
 **A claim this repo repeated three times does not survive being derived.**

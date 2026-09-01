@@ -7,20 +7,6 @@
       "runtimeArgs": ["run", "dev"],
       "port": 3000,
       "autoPort": true
-    },
-    {
-      "name": "worktree-dev",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": [
-        "--prefix",
-        "C:/Users/kubot/AppData/Local/Temp/claude/C--Users-kubot-Documents-Superapp/0c37af9a-4ed5-444e-bd03-edd1bbd8123c/scratchpad/wt-cost-side",
-        "run",
-        "dev",
-        "--",
-        "-p",
-        "3100"
-      ],
-      "port": 3100
     }
   ]
 }

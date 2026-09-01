@@ -591,14 +591,25 @@ export function QuickAddButton({
                 onChange={(e) => setForm({ ...form, memo: e.target.value })}
               />
             </div>
-            {/* Inline rather than behind a trigger: this dialog has the room,
-                and the popover exists for the table cell that does not. */}
-            <DimensionTags
-              types={dimensionTypes}
-              value={tags}
-              onValue={setTags}
-              layout="inline"
-            />
+            {/*
+              **BEHIND A TRIGGER EVEN THOUGH THIS DIALOG HAS THE ROOM.** The
+              first version rendered the selects inline and driving it settled
+              it: a farm has five dimension types, so five stacked pickers
+              visually outweighed the six fields that make up the transaction
+              itself. The tags are the optional part and must not look like the
+              main event.
+            */}
+            {dimensionTypes.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Tags (optional)</Label>
+                <DimensionTags
+                  types={dimensionTypes}
+                  value={tags}
+                  onValue={setTags}
+                  triggerClassName="w-full justify-start font-normal"
+                />
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button

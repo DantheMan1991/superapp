@@ -4,6 +4,7 @@ import { schema, type Tx } from "@/db";
 import type { Invoice, InvoiceLine } from "@/db/schema";
 import {
   LedgerError,
+  assertCodableAccounts,
   getDefaultEntityId,
   postEntry,
   requireOwnerRole,
@@ -146,6 +147,27 @@ async function insertInvoiceLines(
   invoiceId: string,
   lines: InvoiceLineInput[],
 ): Promise<Array<{ amountCents: number; isTaxable: boolean }>> {
+  /**
+   * **NOTHING CHECKED THE INCOME ACCOUNT AT ALL UNTIL 2026-09-01.** Not that it
+   * existed — the composite FK caught that as a raw constraint error and a
+   * "Something went wrong" toast — not that it was active, and not that it was
+   * an account anybody may pick. The invoice picker offers income accounts and
+   * that was the entire rule, so any client that sent Checking's id got an
+   * invoice whose issue would credit the bank register.
+   *
+   * The bill path closed the same hole the same day and needed an exception
+   * for the one thing that legitimately codes a bill line to an unpickable
+   * account: a stock match. **There is no invoice analogue.** No machine path
+   * codes an invoice line to GRNI or a register — the recurring generator and
+   * the thread drafter both pass codable income accounts — so this is the flat
+   * rule with no carve-out, and a draft that somehow holds one must be re-coded
+   * before it can be saved again, which is correct.
+   */
+  await assertCodableAccounts(
+    tx,
+    tenantId,
+    lines.map((l) => l.incomeAccountId),
+  );
   const typeOf = await validateLineDimensions(tx, tenantId, lines);
   const computed = computeLineAmounts(lines);
   const inserted = await tx

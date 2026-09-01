@@ -18,7 +18,10 @@ import {
   journalTemplateBalances,
   recurringEntryTemplateSchema,
 } from "./template";
-import { generateRecurringEntries } from "./generate";
+import {
+  assertTemplateReferences,
+  generateRecurringEntries,
+} from "./generate";
 
 /**
  * Owner actions for recurring journals and bills.
@@ -99,6 +102,11 @@ export async function createRecurringEntryAction(
   try {
     requireOwnerRole(ctx);
     const row = await withTenant(ctx.tenantId, async (tx) => {
+      // The accounts, checked where somebody is looking. Zod above proved the
+      // SHAPE; this proves the ids name accounts a line may actually be coded
+      // to, so a bad template is refused here with a sentence rather than
+      // failing at 6am with nothing to show for it.
+      await assertTemplateReferences(tx, ctx.tenantId, parsed.data.template);
       const [created] = await tx
         .insert(schema.recurringEntries)
         .values({

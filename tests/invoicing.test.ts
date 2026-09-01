@@ -28,7 +28,10 @@ import {
   parseInvoiceNumberSuffix,
 } from "../src/modules/accounting/invoicing/numbering";
 import { agingBucketIndex, buildArAging } from "../src/modules/accounting/invoicing/aging";
-import { generateRecurringEntries } from "../src/modules/accounting/recurring/generate";
+import {
+  assertTemplateReferences,
+  generateRecurringEntries,
+} from "../src/modules/accounting/recurring/generate";
 import {
   createCustomer,
   updateCustomer,
@@ -523,6 +526,132 @@ d("invoicing (DB)", () => {
         checked: false,
       }),
     );
+  });
+
+  describe("an invoice line's account is checked on the server", () => {
+    /**
+     * **NOTHING CHECKED IT UNTIL 2026-09-01.** Not existence — the composite
+     * FK caught that as a raw constraint error — not activity, and not whether
+     * it was an account anybody may pick. The picker offered income accounts
+     * and that was the entire rule, so a client sending Checking's id got an
+     * invoice whose issue would credit the bank register.
+     *
+     * The bill path got the same guard the same day and needed an exception
+     * for a stock match. There is no invoice analogue, so this is the flat
+     * rule.
+     */
+    it("REFUSES A BANK REGISTER, GRNI, and a control account", async () => {
+      const bank = await withTenant(tenantId, (tx) =>
+        createBankAccount(tx, owner, { name: "Guard Checking", kind: "checking" }),
+      );
+      for (const bad of [
+        bank.ledgerAccount.id,
+        await accountId("2050"),
+        await accountId("1200"),
+      ]) {
+        await expect(
+          withTenant(tenantId, (tx) =>
+            createInvoiceDraft(tx, owner, {
+              customerId,
+              issueDate: "2026-06-20",
+              lines: [line(5_000, bad)],
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "ACCOUNT_NOT_CODABLE" });
+      }
+    });
+
+    it("refuses a missing account and an inactive one, by name", async () => {
+      await expect(
+        withTenant(tenantId, (tx) =>
+          createInvoiceDraft(tx, owner, {
+            customerId,
+            issueDate: "2026-06-20",
+            lines: [line(5_000, crypto.randomUUID())],
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "ACCOUNT_NOT_FOUND" });
+
+      const other = await accountId("4900");
+      await withTenant(tenantId, (tx) =>
+        tx
+          .update(schema.accounts)
+          .set({ isActive: false })
+          .where(eq(schema.accounts.id, other)),
+      );
+      try {
+        await expect(
+          withTenant(tenantId, (tx) =>
+            createInvoiceDraft(tx, owner, {
+              customerId,
+              issueDate: "2026-06-20",
+              lines: [line(5_000, other)],
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "ACCOUNT_INACTIVE" });
+      } finally {
+        await withTenant(tenantId, (tx) =>
+          tx
+            .update(schema.accounts)
+            .set({ isActive: true })
+            .where(eq(schema.accounts.id, other)),
+        );
+      }
+    });
+
+    it("ALLOWS A LIABILITY — the floor is codable, not income-typed", async () => {
+      /**
+       * Invoicing a customer deposit credits Unearned Revenue. The picker
+       * offers income accounts as a convenience; a server rule that insisted
+       * on the type would refuse a correct entry. This is the assertion that
+       * says which rule the server holds.
+       */
+      const deposits = await accountId("2400");
+      const invoice = await withTenant(tenantId, (tx) =>
+        createInvoiceDraft(tx, owner, {
+          customerId,
+          issueDate: "2026-06-20",
+          lines: [line(5_000, deposits)],
+        }),
+      );
+      expect(invoice.totalCents).toBe(5_000);
+      await withTenant(tenantId, (tx) =>
+        deleteInvoiceDraft(tx, owner, {
+          invoiceId: invoice.id,
+          expectedVersion: invoice.version,
+        }),
+      );
+    });
+
+    it("guards the edit path too, since it re-inserts every line", async () => {
+      const sales = await accountId("4000");
+      const invoice = await withTenant(tenantId, (tx) =>
+        createInvoiceDraft(tx, owner, {
+          customerId,
+          issueDate: "2026-06-20",
+          lines: [line(5_000, sales)],
+        }),
+      );
+      await expect(
+        withTenant(tenantId, async (tx) =>
+          updateInvoiceDraft(tx, owner, {
+            invoiceId: invoice.id,
+            expectedVersion: invoice.version,
+            patch: {
+              customerId,
+              issueDate: "2026-06-20",
+              lines: [line(5_000, await accountId("2050"))],
+            },
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "ACCOUNT_NOT_CODABLE" });
+      await withTenant(tenantId, (tx) =>
+        deleteInvoiceDraft(tx, owner, {
+          invoiceId: invoice.id,
+          expectedVersion: invoice.version,
+        }),
+      );
+    });
   });
 
   it("closed period blocks issuing (T-D7)", async () => {
@@ -1055,6 +1184,142 @@ d("invoicing (DB)", () => {
       for (const e of entries) {
         expect(await entryTags(e.id)).toEqual([live]);
       }
+    });
+
+    describe("a template's accounts are checked where somebody is looking", () => {
+      /**
+       * **`createRecurringEntryAction` VALIDATED THE SHAPE AND NOTHING ELSE**
+       * until 2026-09-01. Any uuid passed as an account, and the first anybody
+       * heard of it was an error row in a 6am sweep that no screen shows and
+       * no column keeps — the exact failure `journalTemplateBalances` was
+       * written to avoid. The action now calls `assertTemplateReferences`
+       * before the insert; this proves what that function refuses and, just
+       * as much, what it lets through.
+       */
+      it("REFUSES an invoice template on a register and a bill template on GRNI", async () => {
+        const bank = await withTenant(tenantId, (tx) =>
+          createBankAccount(tx, owner, { name: "Template Checking", kind: "checking" }),
+        );
+        await expect(
+          withTenant(tenantId, (tx) =>
+            assertTemplateReferences(tx, tenantId, {
+              kind: "invoice",
+              dueInDays: 30,
+              lines: [
+                {
+                  description: "Rent",
+                  quantity: "1",
+                  unitPriceCents: 10_000,
+                  incomeAccountId: bank.ledgerAccount.id,
+                },
+              ],
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "ACCOUNT_NOT_CODABLE" });
+
+        await expect(
+          withTenant(tenantId, async (tx) =>
+            assertTemplateReferences(tx, tenantId, {
+              kind: "bill",
+              dueInDays: 30,
+              lines: [
+                {
+                  description: "Feed",
+                  amountCents: 10_000,
+                  accountId: await accountId("2050"),
+                },
+              ],
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "ACCOUNT_NOT_CODABLE" });
+      });
+
+      it("LETS A JOURNAL TEMPLATE NAME A REGISTER, as the hand-written journal may", async () => {
+        /**
+         * `isCodableAccount` is "NOT applied to the JOURNAL, deliberately" —
+         * a journal has to be able to name any account. A recurring journal is
+         * a journal. The only thing it may not name is an account that does
+         * not exist or is switched off.
+         */
+        const bank = await withTenant(tenantId, (tx) =>
+          createBankAccount(tx, owner, { name: "Journal Checking", kind: "checking" }),
+        );
+        const exp = await accountId("6700");
+        await expect(
+          withTenant(tenantId, (tx) =>
+            assertTemplateReferences(tx, tenantId, {
+              kind: "journal",
+              lines: [
+                { accountId: exp, amountCents: 500 },
+                { accountId: bank.ledgerAccount.id, amountCents: -500 },
+              ],
+            }),
+          ),
+        ).resolves.toBeUndefined();
+
+        await expect(
+          withTenant(tenantId, (tx) =>
+            assertTemplateReferences(tx, tenantId, {
+              kind: "journal",
+              lines: [
+                { accountId: exp, amountCents: 500 },
+                { accountId: crypto.randomUUID(), amountCents: -500 },
+              ],
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "ACCOUNT_NOT_FOUND" });
+      });
+
+      it("still fails CLOSED at generation for a template that went bad after it was saved", async () => {
+        /**
+         * The save-time check cannot see the future: an account can be turned
+         * into a register after the template names it. Generation re-checks
+         * and reports the template rather than posting revenue to Checking —
+         * and, as with an inactive account, produces nothing for that month.
+         */
+        const bank = await withTenant(tenantId, (tx) =>
+          createBankAccount(tx, owner, { name: "Late Checking", kind: "checking" }),
+        );
+        // Inserted directly, bypassing the action — which is exactly the
+        // shape of a template that was valid when saved.
+        const template = await addTemplate({
+          kind: "invoice",
+          name: "Went bad",
+          customerId,
+          nextRunDate: "2026-06-04",
+          template: {
+            kind: "invoice",
+            dueInDays: 30,
+            lines: [
+              {
+                description: "Rent",
+                quantity: "1",
+                unitPriceCents: 10_000,
+                incomeAccountId: bank.ledgerAccount.id,
+              },
+            ],
+          },
+        });
+        const result = await generateRecurringEntries(owner);
+        const failed = result.errors.find((e) => e.recurringEntryId === template.id);
+        expect(failed?.error).toBe("ACCOUNT_NOT_CODABLE");
+        const drafts = await withTenant(tenantId, (tx) =>
+          tx.query.invoices.findMany({
+            where: and(
+              eq(schema.invoices.tenantId, tenantId),
+              eq(schema.invoices.recurringEntryId, template.id),
+            ),
+          }),
+        );
+        expect(drafts).toHaveLength(0);
+        // Leave nothing due behind for the counter test that follows.
+        await withTenant(tenantId, (tx) =>
+          tx
+            .update(schema.recurringEntries)
+            .set({ isActive: false })
+            .where(eq(schema.recurringEntries.id, template.id)),
+        );
+      });
     });
 
     it("COUNTS WHAT IT WROTE, not the months it walked", async () => {

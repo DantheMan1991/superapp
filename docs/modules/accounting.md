@@ -13,6 +13,70 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-01 — An account nobody may pick, on every path (`claude/an-account-nobody-may-pick-on-every-path`)
+
+**The other half of the bill-line guard, promised in that PR's own build log.**
+`assertLineAccounts` closed the bill path on 2026-09-01 and the entry said
+plainly that `createInvoiceDraft` and the recurring create action still
+accepted whatever account id they were handed — so nothing but a dropdown
+stood between a recurring invoice template and posting revenue to Checking,
+every month, unattended.
+
+**What was actually there before, on each path:**
+
+- **Invoice lines: nothing at all.** Not existence — the composite FK caught
+  that as a raw constraint error and a "Something went wrong" toast — not
+  activity, and not codability. The picker offered income accounts and that was
+  the entire rule.
+- **Recurring templates: the shape, and nothing else.** Zod proved the fields
+  were uuids. Any uuid passed, and the first anybody heard of it was an error
+  row in a 6am sweep that no screen shows and no column keeps — the exact
+  failure `journalTemplateBalances` was written to avoid, *"the same rule
+  enforced where somebody is looking at it."*
+
+**One function in core now, `assertCodableAccounts`, not three copies.** Three
+call sites each carrying their own account-and-register load is how one of
+them drifts. It checks the three things in order — exists, active, may be
+picked — and throws the first one wrong. Invoice lines call it from
+`insertInvoiceLines`, which both create and update go through. Recurring
+templates call it from `assertTemplateReferences`, which the create action now
+runs BEFORE the insert and generation still runs before each sweep. The bill
+path keeps its own `assertLineAccounts`, because the one exception a stock
+match needs — an existing line arriving back unchanged — is the reason that
+function exists, and there is no invoice analogue.
+
+**Two boundaries had to be stated, and each has a test that says which side it
+is on:**
+
+- **A journal template may name any account**, exactly as the hand-written
+  journal may. `isCodableAccount`'s own comment says it is *"NOT applied to the
+  JOURNAL, deliberately."* A recurring journal is a journal; it gets the
+  exists-and-active check and nothing more. The test names a bank register on
+  a journal template and expects it to pass.
+- **The floor is codable, not income-typed.** The invoice picker offers income
+  accounts as a convenience. Invoicing a customer deposit legitimately credits
+  `2400 Unearned Revenue`, and a server rule stricter than the accounting would
+  refuse a right entry. The test invoices a liability and expects it to save.
+
+**Generation still fails closed for a template that went bad after it was
+saved.** The save-time check cannot see the future — an account can be turned
+into a register in July after the template named it in March. That is the
+same class as an account deactivated in June, which already failed the
+template with a reported error rather than posting to a dead account; a
+register gets the same treatment rather than posting revenue to it. This is
+the opposite decision to the one made for a retired TAG a day earlier, and on
+purpose: a dropped tag is a report that is slightly less useful, and a credit
+to Checking is a wrong balance sheet.
+
+**The message changed with the callers.** `ACCOUNT_NOT_CODABLE` used to say
+"only a match can set", because the bill path was its only caller. It now says
+what is true on all three.
+
+**Checked, not assumed:** removing the invoice guard turns every one of its
+four tests red — the register, GRNI and AR refusals, the missing and inactive
+refusals, and the edit-path refusal — while the liability case stays green,
+which is what proves it was asserting the floor and not the guard.
+
 ### 2026-09-01 — The count is what was written (`claude/the-count-is-what-was-written`)
 
 **A latent counter defect, fixed on its own rather than as a rider**, which is
@@ -2802,7 +2866,7 @@ compiled-and-tested, not seen.
 - **Drafting from an email thread is DONE** (2026-08-12) — both directions, with verified citations, and **proven against the real API** (see the build log; `RUN_LIVE_THREAD_DRAFT=1`). Now worth doing: the drafter sets no due date because it does not know `payment_terms` exists — resolving the customer's default term in the accept path would close that. What is NOT built: auto-linking the accepted draft back to the thread (deliberate, see the build log), and drafting from a thread the *reader does not own*, which RLS forbids by design
 - **The per-record History panel is DONE** (2026-08-12) on invoices and bills; journal entries, customers and vendors are a one-line addition each
 - **Products & Services, Terms and Payment Methods are DONE** (2026-08-12) — see the build log for the two deliberate gaps (customer-level default terms have a column and resolution but no control; saved items are invoice-only so far)
-- ~~**Line account pickers are filtered in the UI ONLY.**~~ **Half closed 2026-09-01.** `assertLineAccounts` now refuses a BILL line coded to an account nobody may pick, on create and on update, and that was not tidiness — the client round-tripping a matched line's GRNI coding is what let the same receipts clear GRNI twice (see the build log). **Still open on the other two paths:** `createInvoiceDraft` and the recurring create action accept whatever account id they are given, so nothing but the dropdown stops a recurring invoice template posting revenue to Checking. The bill version is the model to copy
+- ~~**Line account pickers are filtered in the UI ONLY.**~~ **Closed 2026-09-01, in two halves the same day.** The bill half came first, because a matched line's GRNI coding round-tripping through the form is what let the same receipts clear GRNI twice. The invoice and recurring halves followed once that PR's own build log admitted they were still open: `assertCodableAccounts` in core is now the one server-side rule, called by invoice lines, by every recurring template at the moment it is saved, and by the bill path through its own `assertLineAccounts`. See the build log for the two boundaries that had to be stated — a journal template may still name any account, and an invoice line may credit a liability
 - **Recurring entries GENERATE ON THEIR OWN** since 2026-08-13 (`/api/cron/recurring`, 6am in the tenant's zone). What is not built: any way to see the sweep's history in the UI — the counts come back to the cron caller and nowhere else. **This is what made the retired-tag decision what it was** (2026-09-01): a template that fails inside the sweep is unnamed on every surface and has no last-error column, so failing closed there is failing silently
 - ~~**`generateRecurringEntries` counts a record it may not have written.**~~ **Closed 2026-09-01**, in its own PR as it deserved. `created`, `posted` and the deferral now all hang off `PostResult.deduped`, and `periodsWalked` carries the months the loop walked so a gap between the two is visible in the sweep's JSON. It was never reachable through the schedule; it is fixed because a count whose correctness rests on an unreachability argument goes wrong the first time somebody makes it reachable
 - **Recurring journals and bills are DONE** (2026-08-12), and so is **folding `recurring_invoices` into them** (2026-08-12) — the module has ONE recurrence mechanism, one list and one engine. **DONE**: `drizzle/0147` dropped `recurring_invoices` and `invoices.recurring_invoice_id`. **Templates can be born with a dimension tag since 2026-09-01**, on all three kinds, and the list shows what each one carries. What is not built for any kind: **editing a template** — which is why a tag, like an amount and an account, is fixed at creation — and any cadence other than monthly

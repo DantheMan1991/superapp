@@ -32,6 +32,7 @@ import {
   assertTemplateReferences,
   createRecurringEntry,
   generateRecurringEntries,
+  noteTemplateFailure,
 } from "../src/modules/accounting/recurring/generate";
 import {
   createCustomer,
@@ -1430,6 +1431,172 @@ d("invoicing (DB)", () => {
             .set({ isActive: false })
             .where(eq(schema.recurringEntries.id, ok.id)),
         );
+      });
+    });
+
+    describe("the sweep leaves a note on the row", () => {
+      /**
+       * **A TEMPLATE THAT FAILED AT 6AM USED TO BE UNNAMED ON EVERY SURFACE.**
+       * The loop reduced the error to a code, pushed it to an array the cron
+       * caller serialised and nobody read, and the list rendered the row
+       * exactly as it had the day before. That is what forced the retired-tag
+       * decision and what made save-time account validation matter.
+       *
+       * `last_error` holds the CODE and `last_error_at` the moment; a clean run
+       * clears both in the same UPDATE that advances the schedule. Nothing
+       * else clears them.
+       */
+      const rowOf = (id: string) =>
+        withTenant(tenantId, (tx) =>
+          tx.query.recurringEntries.findFirst({
+            where: eq(schema.recurringEntries.id, id),
+          }),
+        );
+      const pause = (id: string) =>
+        withTenant(tenantId, (tx) =>
+          tx
+            .update(schema.recurringEntries)
+            .set({ isActive: false })
+            .where(eq(schema.recurringEntries.id, id)),
+        );
+
+      it("WRITES THE CODE when a template fails, and nothing when one succeeds", async () => {
+        const bank = await withTenant(tenantId, (tx) =>
+          createBankAccount(tx, owner, { name: "Noted Checking", kind: "checking" }),
+        );
+        const bad = await addTemplate({
+          kind: "invoice",
+          name: "Noted — bad",
+          customerId,
+          nextRunDate: "2026-06-04",
+          template: {
+            kind: "invoice",
+            dueInDays: 30,
+            lines: [
+              {
+                description: "Rent",
+                quantity: "1",
+                unitPriceCents: 10_000,
+                incomeAccountId: bank.ledgerAccount.id,
+              },
+            ],
+          },
+        });
+        const cash = await accountId("1000");
+        const exp = await accountId("6700");
+        const good = await addTemplate({
+          kind: "journal",
+          name: "Noted — good",
+          nextRunDate: "2026-06-04",
+          autoPost: true,
+          template: {
+            kind: "journal",
+            lines: [
+              { accountId: exp, amountCents: 700 },
+              { accountId: cash, amountCents: -700 },
+            ],
+          },
+        });
+
+        const result = await generateRecurringEntries(owner);
+        // Pause both BEFORE any assertion can throw past it, so a failure here
+        // is blamed here and not on the tenant-wide counter test below.
+        await pause(bad.id);
+        await pause(good.id);
+
+        const badRow = (await rowOf(bad.id))!;
+        const goodRow = (await rowOf(good.id))!;
+        // The relation, per template: named in errors ⇔ carries a note.
+        const named = new Set(result.errors.map((e) => e.recurringEntryId));
+        expect(named.has(bad.id)).toBe(true);
+        expect(badRow.lastError).toBe("ACCOUNT_NOT_CODABLE");
+        expect(badRow.lastErrorAt).not.toBeNull();
+        // And the failure did NOT move the schedule or bump the version — the
+        // note is the sweep's, and a Pause pressed on a stale page still lands.
+        expect(badRow.nextRunDate).toBe("2026-06-04");
+        expect(badRow.version).toBe(bad.version);
+
+        expect(named.has(good.id)).toBe(false);
+        expect(goodRow.lastError).toBe("");
+        expect(goodRow.lastErrorAt).toBeNull();
+        expect(goodRow.lastGeneratedAt).not.toBeNull();
+      });
+
+      it("A CLEAN RUN CLEARS IT, in the same update that advances the schedule", async () => {
+        const cash = await accountId("1000");
+        const exp = await accountId("6700");
+        const template = await addTemplate({
+          kind: "journal",
+          name: "Noted — recovers",
+          nextRunDate: "2026-06-04",
+          autoPost: true,
+          // A note left by an earlier morning, before somebody fixed the cause.
+          lastError: "ACCOUNT_INACTIVE",
+          lastErrorAt: new Date("2026-08-01T11:00:00Z"),
+          template: {
+            kind: "journal",
+            lines: [
+              { accountId: exp, amountCents: 800 },
+              { accountId: cash, amountCents: -800 },
+            ],
+          },
+        });
+        expect((await rowOf(template.id))!.lastError).toBe("ACCOUNT_INACTIVE");
+
+        const result = await generateRecurringEntries(owner);
+        await pause(template.id);
+        expect(result.errors.find((e) => e.recurringEntryId === template.id)).toBeUndefined();
+
+        const row = (await rowOf(template.id))!;
+        expect(row.lastError).toBe("");
+        expect(row.lastErrorAt).toBeNull();
+        expect(row.lastGeneratedAt).not.toBeNull();
+        expect(row.nextRunDate > "2026-06-04").toBe(true);
+      });
+
+      it("NEVER OVERWRITES A ROW SOMEBODY ELSE MOVED — the CAS on the loaded version", async () => {
+        /**
+         * The note is written after the template's own transaction rolled
+         * back, against the version the sweep LOADED. If the row moved in
+         * between — a concurrent success, or once editing exists a save — the
+         * note is stale and must not land. Driven directly, because the
+         * interleaving cannot be produced from outside the loop.
+         */
+        const cash = await accountId("1000");
+        const exp = await accountId("6700");
+        const template = await addTemplate({
+          kind: "journal",
+          name: "Noted — moved",
+          nextRunDate: "2027-06-04",
+          isActive: false,
+          template: {
+            kind: "journal",
+            lines: [
+              { accountId: exp, amountCents: 900 },
+              { accountId: cash, amountCents: -900 },
+            ],
+          },
+        });
+
+        const stale = await noteTemplateFailure(
+          tenantId,
+          { id: template.id, version: template.version + 1 },
+          "UNKNOWN",
+        );
+        expect(stale).toBe(false);
+        expect((await rowOf(template.id))!.lastError).toBe("");
+
+        const fresh = await noteTemplateFailure(
+          tenantId,
+          { id: template.id, version: template.version },
+          "UNKNOWN",
+        );
+        expect(fresh).toBe(true);
+        const row = (await rowOf(template.id))!;
+        expect(row.lastError).toBe("UNKNOWN");
+        expect(row.lastErrorAt).not.toBeNull();
+        // Still the same version: the note does not count as an edit.
+        expect(row.version).toBe(template.version);
       });
     });
 

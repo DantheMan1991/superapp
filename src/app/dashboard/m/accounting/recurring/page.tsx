@@ -9,6 +9,7 @@ import { Panel } from "@/components/app/panel";
 import { EmptyState } from "@/components/app/empty-state";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import {
+  failureSentence,
   isCodableAccount,
   listDimensionMembers,
 } from "@/modules/accounting/core";
@@ -229,6 +230,18 @@ export default async function RecurringEntriesPage() {
                     {broken && (
                       <Badge variant="destructive">template needs fixing</Badge>
                     )}
+                    {/*
+                      **THE NOTE THE SWEEP LEFT.** Until this column existed a
+                      template that failed at 6am rendered exactly as it had the
+                      day before; the only badge was a SHAPE check that a dead
+                      account, a closed period or a bad rate never tripped. It
+                      clears itself on the template's next clean run and on
+                      nothing else — so it survives an edit, which is right,
+                      because "edited" is not "fixed".
+                    */}
+                    {e.lastError !== "" && (
+                      <Badge variant="destructive">failing</Badge>
+                    )}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {party ? `${party} · ` : ""}
@@ -241,6 +254,14 @@ export default async function RecurringEntriesPage() {
                       ? ` · last generated ${e.lastGeneratedAt.toISOString().slice(0, 10)}`
                       : ""}
                   </p>
+                  {e.lastError !== "" && (
+                    <p className="mt-0.5 text-xs text-destructive">
+                      {failureSentence(e.lastError)}
+                      {e.lastErrorAt
+                        ? ` — ${e.lastErrorAt.toISOString().slice(0, 10)}`
+                        : ""}
+                    </p>
+                  )}
                   {tags.length > 0 && (
                     <p className="mt-1 flex flex-wrap gap-1">
                       {tags.map((name) => (

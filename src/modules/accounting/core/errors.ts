@@ -216,7 +216,7 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   PAYMENT_NOT_FOUND: "That payment no longer exists.",
   RECURRING_NOT_FOUND: "That recurring template no longer exists.",
   RECURRING_TEMPLATE_INVALID:
-    "The template references an inactive account or tag — edit it first.",
+    "The template can no longer be read — pause it and write a new one.",
   TXN_MATCH_INVALID: "That entry can no longer be matched — refresh and try again.",
   DOCUMENT_NOT_FOUND: "That file no longer exists.",
   DOCUMENT_TRASHED: "That file is in the trash — restore it first.",
@@ -252,6 +252,21 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   CLOSE_ALREADY_SIGNED: "This close is already signed off.",
   EXPORT_COOLDOWN: "An export just ran — try again in a minute.",
 };
+
+/**
+ * A sentence for a stored error CODE.
+ *
+ * `recurring_entries.last_error` holds the code and never the message, and
+ * `friendlyMessage` takes an error rather than a code — so the list page had no
+ * way to say what a note meant. Unknown strings, including the sweep's own
+ * `"UNKNOWN"`, get a plain fallback rather than `undefined` in a badge.
+ */
+export function failureSentence(code: string): string {
+  return (
+    (FRIENDLY as Record<string, string | undefined>)[code] ??
+    "Failed for a reason the sweep could not name."
+  );
+}
 
 export function friendlyMessage(err: unknown): string {
   if (err instanceof LedgerError) return FRIENDLY[err.code];

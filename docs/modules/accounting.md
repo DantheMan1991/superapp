@@ -13,6 +13,68 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-01 — The sweep leaves a note on the row (`claude/the-sweep-leaves-a-note-on-the-row`)
+
+**Migration `0239`, additive: `recurring_entries.last_error text NOT NULL
+DEFAULT ''` and `last_error_at timestamptz NULL`.** Applied to the dev branch
+and to production before the merge, `db:verify-rls` run on both (154 tables,
+every one enabled, forced and policied), and the two columns checked directly
+in `information_schema.columns` on both — `verify-rls` reads `pg_class` and
+`pg_policies` only and cannot prove a column exists. No `--custom` migration:
+`0119`'s policies are row predicates on `tenant_id`, column-agnostic.
+
+**THE PROBLEM.** A template that failed at 6am was unnamed on every surface. The
+loop reduced the error to a code, pushed it to an array the cron caller
+serialised and nobody read, and the list rendered the row exactly as it had the
+day before — the only badge was a SHAPE check that a dead account, a closed
+period or a retired tax rate never tripped. That is what forced the retired-tag
+decision (drop, so generation succeeds, because failing in the sweep was failing
+silently) and what made save-time account validation matter as much as it did.
+
+**COLUMNS, NOT A `recurring_runs` TABLE.** The precedent whose justification
+transfers is the autofile rule row — *"surfaced in the editor, so a rule that is
+quietly failing is visible"*. CRM's side table exists for hot-path write cost;
+this row is already written once per success. The only screen a template has is
+the list, and a run table has nowhere to land on it. `NOT NULL DEFAULT ''` is the
+shape the four other `last_error` columns in the schema use.
+
+**A CODE, NEVER A MESSAGE.** The catch already reduces to `LedgerError.code` or
+`"UNKNOWN"`; the row is member-readable; a raw Postgres message can carry row
+values. `failureSentence(code)` is the new export that turns a stored code into
+the sentence the list shows — `friendlyMessage` takes an error, not a code, and
+`"UNKNOWN"` is not a key, so a fallback was forced.
+
+**WRITTEN OUTSIDE THE TEMPLATE'S TRANSACTION, CAS'D ON THE LOADED VERSION, AND
+THE VERSION IS NOT BUMPED.** The per-template transaction has rolled back by
+the time there is anything to write, so `noteTemplateFailure` opens its own —
+the autofile sweep's `recordRun` shape. Zero rows on the CAS means somebody
+else moved the row between the due load and now, and a stale note must not
+overwrite what they did. Not bumping is what lets a Pause pressed on a page
+opened before 6am still land. Its own failure is caught and logged, never
+thrown: a hiccup writing a note about one template must not become a
+whole-tenant failure that hides every other template's outcome.
+
+**`STALE_VERSION` IS THE ONE CODE THAT LEAVES NO NOTE.** It means another run —
+or, once editing exists, a save — won the row; the template's own work did not
+fail and will be retried tomorrow from wherever the winner left `next_run_date`.
+
+**CLEARED ONLY BY THAT TEMPLATE'S NEXT CLEAN RUN**, in the same UPDATE that
+advances the schedule. Not by an edit, a pause or a resume: a save-time check
+cannot see a closed period, a re-typed account or a retired tax rate, so
+"edited" is not "fixed", and Generate now is the honest way to find out.
+
+**`RECURRING_TEMPLATE_INVALID`'s sentence said "edit it first"** about a row
+that cannot be parsed — which editing, when it arrives, will not be able to
+open either. It now says pause and write a new one.
+
+**Tests, each mutation-proved:** a failing template carries its code and its
+schedule and version are untouched, while a clean one beside it carries
+nothing; a pre-set note is cleared by a clean run in the same row write; and
+`noteTemplateFailure` driven directly with a stale version writes nothing and
+with the loaded version writes the note without bumping. The interleaving that
+produces `STALE_VERSION` inside the sweep cannot be produced from a test, so
+that branch is covered by the CAS test and the comment, and said so here.
+
 ### 2026-09-01 — An account nobody may pick, on every path (`claude/an-account-nobody-may-pick-on-every-path`)
 
 **The other half of the bill-line guard, promised in that PR's own build log.**
@@ -192,8 +254,10 @@ the PR turns on. `loadDimensionMembers` and `validateLineDimensions` both refuse
 an inactive member, so a picker alone would have made archiving a line of
 business enough to kill a monthly rent bill: `DIMENSION_INVALID` inside the 6am
 sweep rolls back every catch-up month, `next_run_date` never advances, and the
-template fails identically every morning after — unnamed on every surface, with
-no update action to repair it.
+template fails identically every morning after — at the time unnamed on every
+surface, with no update action to repair it. (Since later the same day the sweep
+leaves a note on the row; the drop decision stands regardless, because a
+dropped tag is a success and never lands in `last_error`.)
 
 `assertTemplateReferences` is not the model to follow here. Its rule —
 *"failing the template with a reported error is right; silently posting to a
@@ -2878,7 +2942,7 @@ compiled-and-tested, not seen.
 - **The per-record History panel is DONE** (2026-08-12) on invoices and bills; journal entries, customers and vendors are a one-line addition each
 - **Products & Services, Terms and Payment Methods are DONE** (2026-08-12) — see the build log for the two deliberate gaps (customer-level default terms have a column and resolution but no control; saved items are invoice-only so far)
 - ~~**Line account pickers are filtered in the UI ONLY.**~~ **Closed 2026-09-01, in two halves the same day.** The bill half came first, because a matched line's GRNI coding round-tripping through the form is what let the same receipts clear GRNI twice. The invoice and recurring halves followed once that PR's own build log admitted they were still open: `assertCodableAccounts` in core is the shared server-side rule, called by invoice lines and by recurring **bill and invoice** templates at the moment they are saved. Bill lines enforce the same rule in their own `assertLineAccounts`, which does not call it because it needs the one exception a stock match requires; a journal template, like the hand-written journal, is checked for existence and activity only. See the build log for the two boundaries that had to be stated — a journal may still name any account, and an invoice line may credit a liability
-- **Recurring entries GENERATE ON THEIR OWN** since 2026-08-13 (`/api/cron/recurring`, 6am in the tenant's zone). What is not built: any way to see the sweep's history in the UI — the counts come back to the cron caller and nowhere else. **This is what made the retired-tag decision what it was** (2026-09-01): a template that fails inside the sweep is unnamed on every surface and has no last-error column, so failing closed there is failing silently
+- **Recurring entries GENERATE ON THEIR OWN** since 2026-08-13 (`/api/cron/recurring`, 6am in the tenant's zone). ~~What is not built: any way to see the sweep's history in the UI — the counts come back to the cron caller and nowhere else.~~ **Closed 2026-09-01, as two columns rather than a history table:** a template that fails carries the error's CODE in `last_error` and the moment in `last_error_at`, the list shows a `failing` badge with the sentence, and only that template's next clean run clears it. The sweep's aggregate counts still go to the cron caller alone; the per-template note is the surface anybody actually needs. ~~This is what made the retired-tag decision what it was~~ — that decision stands: a dropped tag is a SUCCESS and never lands in `last_error`
 - ~~**`generateRecurringEntries` counts a record it may not have written.**~~ **Closed 2026-09-01**, in its own PR as it deserved. `created`, `posted` and the deferral now all hang off `PostResult.deduped`, and `periodsWalked` carries the months the loop walked so a gap between the two is visible in the sweep's JSON. It was never reachable through the schedule; it is fixed because a count whose correctness rests on an unreachability argument goes wrong the first time somebody makes it reachable
 - **Recurring journals and bills are DONE** (2026-08-12), and so is **folding `recurring_invoices` into them** (2026-08-12) — the module has ONE recurrence mechanism, one list and one engine. **DONE**: `drizzle/0147` dropped `recurring_invoices` and `invoices.recurring_invoice_id`. **Templates can be born with a dimension tag since 2026-09-01**, on all three kinds, and the list shows what each one carries. What is not built for any kind: **editing a template** — which is why a tag, like an amount and an account, is fixed at creation — and any cadence other than monthly
 - **Obligation statuses and the MoneyBar are DONE** (2026-08-12) on the invoice and bill LISTS. What is not built: the same language on the detail pages, and a deposits screen for the two money buckets to link into. **That closes the 2026-08-10 QuickBooks review list.**

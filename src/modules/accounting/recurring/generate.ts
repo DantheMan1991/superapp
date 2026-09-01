@@ -210,6 +210,51 @@ export async function createRecurringEntry(
 }
 
 /**
+ * **LEAVE THE NOTE ON THE ROW.**
+ *
+ * Called after a template's own transaction has rolled back — which is why it
+ * cannot ride inside it, and why it opens a transaction of its own, the way
+ * the autofile sweep's `recordRun` does.
+ *
+ * **CAS'D ON THE VERSION THE SWEEP LOADED, AND THE VERSION IS NOT BUMPED.**
+ * Zero rows means somebody else moved the row between the due load and now —
+ * a concurrent success, or after editing exists, a save — and a stale note
+ * must not overwrite what they did. Not bumping is what lets a Pause pressed
+ * on a page opened before 6am still land: the row's version is unchanged by a
+ * failure, so a stale-version refusal only ever means real work happened.
+ *
+ * ITS OWN FAILURE IS CAUGHT AND LOGGED, never thrown. A database hiccup while
+ * writing a note about one template must not become a whole-tenant failure in
+ * `runRecurringEntries`, which would hide every other template's outcome
+ * behind the one this was trying to record.
+ */
+export async function noteTemplateFailure(
+  tenantId: string,
+  entry: { id: string; version: number },
+  code: string,
+): Promise<boolean> {
+  try {
+    const rows = await withTenant(tenantId, (tx) =>
+      tx
+        .update(schema.recurringEntries)
+        .set({ lastError: code, lastErrorAt: new Date() })
+        .where(
+          and(
+            eq(schema.recurringEntries.tenantId, tenantId),
+            eq(schema.recurringEntries.id, entry.id),
+            eq(schema.recurringEntries.version, entry.version),
+          ),
+        )
+        .returning({ id: schema.recurringEntries.id }),
+    );
+    return rows.length > 0;
+  } catch (err) {
+    console.error("recurring: could not record a template failure", err);
+    return false;
+  }
+}
+
+/**
  * **A RETIRED TAG IS DROPPED, NOT A REASON TO REFUSE THE ENTRY.**
  *
  * Every write path refuses an inactive dimension member outright —
@@ -487,6 +532,10 @@ export async function generateRecurringEntries(
           .set({
             nextRunDate: next,
             lastGeneratedAt: new Date(),
+            // A clean run is the ONLY thing that clears the note — not an
+            // edit, a pause or a resume. See the column's own comment.
+            lastError: "",
+            lastErrorAt: null,
             version: entry.version + 1,
             updatedAt: new Date(),
           })
@@ -513,11 +562,18 @@ export async function generateRecurringEntries(
       result.tagsDropped += outcome.tagsDropped;
       result.templatesRun += 1;
     } catch (err) {
-      result.errors.push({
-        recurringEntryId: entry.id,
-        name: entry.name,
-        error: err instanceof LedgerError ? err.code : "UNKNOWN",
-      });
+      const code = err instanceof LedgerError ? err.code : "UNKNOWN";
+      result.errors.push({ recurringEntryId: entry.id, name: entry.name, error: code });
+      /**
+       * STALE_VERSION is the one code that is not this template's failure: it
+       * means another run — or, once editing exists, a save — won the row
+       * between the due load and this template's transaction. The work will
+       * be retried tomorrow from wherever the winner left `next_run_date`;
+       * nothing about the template is wrong, so there is nothing to note.
+       */
+      if (code !== "STALE_VERSION") {
+        await noteTemplateFailure(ctx.tenantId, entry, code);
+      }
     }
   }
 

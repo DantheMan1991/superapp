@@ -1109,12 +1109,24 @@ d("invoicing (DB)", () => {
 
       const result = await generateRecurringEntries(owner);
       expect(result.errors).toHaveLength(0);
-      // July and August are due; June is already there.
-      expect(result.periodsWalked).toBe(3);
-      expect(result.created).toBe(2);
-      expect(result.posted).toBe(2);
 
-      // One entry per period, not two for June.
+      /**
+       * **ASSERTED AS A RELATION, NOT AS THREE NUMBERS.** How many periods fall
+       * between the template's first run and today depends on when the suite is
+       * run, so `periodsWalked` is 3 this month and 4 the next — the neighbouring
+       * catch-up test uses `toBeGreaterThanOrEqual` for the same reason.
+       *
+       * The invariant does not move: exactly one of those periods was already
+       * there, so exactly one fewer record was written than periods walked. That
+       * is the whole bug, stated in a form the calendar cannot break.
+       */
+      expect(result.periodsWalked).toBeGreaterThanOrEqual(3);
+      expect(result.created).toBe(result.periodsWalked - 1);
+      // Nothing is in a closed period here, so every record written also posted.
+      expect(result.posted).toBe(result.created);
+      expect(result.deferredToDraft).toBe(0);
+
+      // One entry per period, not two for the month that was already there.
       const entries = await withTenant(tenantId, (tx) =>
         tx.query.journalEntries.findMany({
           where: and(
@@ -1123,10 +1135,12 @@ d("invoicing (DB)", () => {
           ),
         }),
       );
-      expect(entries).toHaveLength(3);
-      expect(new Set(entries.map((e) => e.entryDate)).size).toBe(3);
+      expect(entries).toHaveLength(result.periodsWalked);
+      expect(new Set(entries.map((e) => e.entryDate)).size).toBe(
+        result.periodsWalked,
+      );
 
-      // And the schedule moved past all three regardless.
+      // And the schedule moved past every period regardless.
       const after = await withTenant(tenantId, (tx) =>
         tx.query.recurringEntries.findFirst({
           where: eq(schema.recurringEntries.id, template.id),

@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { Repeat } from "lucide-react";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -17,6 +17,7 @@ import { dimensionTypesFrom } from "@/lib/dimension-options";
 import { listRecurringEntries } from "@/modules/accounting/recurring/generate";
 import { parseRecurringEntryTemplate } from "@/modules/accounting/recurring/template";
 import { formatCentsSigned, todayInTimezone } from "@/modules/accounting/lib/money";
+import { accountOptions, partyOptions } from "@/modules/accounting/lib/pick-options";
 import {
   computeLineAmounts,
   invoiceSubtotalCents,
@@ -29,12 +30,6 @@ import {
 
 export const dynamic = "force-dynamic";
 
-const accountOption = (a: { id: string; code: string; name: string }) => ({
-  id: a.id,
-  code: a.code,
-  name: a.name,
-});
-
 export default async function RecurringEntriesPage() {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
@@ -43,28 +38,23 @@ export default async function RecurringEntriesPage() {
     const [entries, accounts, registers, vendors, customers, dimensionMembers] =
       await Promise.all([
         listRecurringEntries(tx, ctx.tenant.id),
+        // UNFILTERED, all three, like the members below: `accountOptions` and
+        // `partyOptions` own the active-only rule, and need the inactive rows
+        // to offer a template's own dead value back, marked. Active-only
+        // here is what made the edit dialog render a blank trigger.
         tx.query.accounts.findMany({
-          where: and(
-            eq(schema.accounts.tenantId, ctx.tenant.id),
-            eq(schema.accounts.isActive, true),
-          ),
+          where: eq(schema.accounts.tenantId, ctx.tenant.id),
           orderBy: asc(schema.accounts.code),
         }),
         tx.query.bankAccounts.findMany({
           where: eq(schema.bankAccounts.tenantId, ctx.tenant.id),
         }),
         tx.query.vendors.findMany({
-          where: and(
-            eq(schema.vendors.tenantId, ctx.tenant.id),
-            eq(schema.vendors.isActive, true),
-          ),
+          where: eq(schema.vendors.tenantId, ctx.tenant.id),
           orderBy: asc(schema.vendors.name),
         }),
         tx.query.customers.findMany({
-          where: and(
-            eq(schema.customers.tenantId, ctx.tenant.id),
-            eq(schema.customers.isActive, true),
-          ),
+          where: eq(schema.customers.tenantId, ctx.tenant.id),
           orderBy: asc(schema.customers.name),
         }),
         // Unfiltered: `dimensionTypesFrom` owns the active-only rule.
@@ -72,7 +62,7 @@ export default async function RecurringEntriesPage() {
       ]);
 
     /**
-     * THREE lists, because the three kinds may not post to the same places and
+     * THREE rules, because the three kinds may not post to the same places and
      * the one-list version let a rent invoice be coded to Checking.
      *
      * Each mirrors the one-off builder for that kind, so a template and a
@@ -81,22 +71,43 @@ export default async function RecurringEntriesPage() {
      *   - bill lines    → codable: no bank register, no opening balance, no
      *                     system AR/AP (`purchases/bills/new`)
      *   - journal lines → everything, which is what a journal is for
+     *
+     * Rules rather than pre-filtered lists, because `accountOptions` applies
+     * them per template: the active-and-offered set is the same for every
+     * dialog, and the one dead account a given template still names is added
+     * back for that dialog alone.
+     *
+     * **FOR INVOICE LINES, WHAT IS OFFERED AND WHAT IS ACCEPTED DIFFER.** The
+     * picker offers income only; the server's floor is codable — a deposit to
+     * Unearned Revenue is a valid invoice line (`assertCodableAccounts`, "the
+     * floor, not the picker"). A template that already names such an account
+     * is offered it back plain, because marking it would block a save the
+     * server would take. Journal and bill rules coincide with the server's.
      */
     const registerIds = new Set(registers.map((r) => r.accountId));
+    type AccountRow = (typeof accounts)[number];
+    const codable = (a: AccountRow) => isCodableAccount(a, registerIds);
     return {
       entries,
       dimensionMembers,
       vendors,
       customers,
-      journalAccounts: accounts,
-      incomeAccounts: accounts.filter((a) => a.accountType === "income"),
-      codableAccounts: accounts.filter((a) => isCodableAccount(a, registerIds)),
+      accounts,
+      rules: {
+        journal: { offer: (): boolean => true },
+        invoice: { offer: (a: AccountRow) => a.accountType === "income", accept: codable },
+        bill: { offer: codable },
+      },
     };
   });
 
   const isOwner = ctx.role === "owner";
-  const vendorName = new Map(data.vendors.map((v) => [v.id, v.name]));
-  const customerName = new Map(data.customers.map((c) => [c.id, c.name]));
+  // Marked like a retired tag is, and for the same reason: the row is the
+  // only place a template's dead party is visible at all.
+  const mark = (p: { name: string; isActive: boolean }) =>
+    p.isActive ? p.name : `${p.name} (inactive)`;
+  const vendorName = new Map(data.vendors.map((v) => [v.id, mark(v)]));
+  const customerName = new Map(data.customers.map((c) => [c.id, mark(c)]));
   const today = todayInTimezone(ctx.tenant.timezone);
 
   /**
@@ -180,11 +191,11 @@ export default async function RecurringEntriesPage() {
             <>
               <GenerateRecurringEntriesButton />
               <RecurringEntryDialogButton
-                journalAccounts={data.journalAccounts.map(accountOption)}
-                incomeAccounts={data.incomeAccounts.map(accountOption)}
-                codableAccounts={data.codableAccounts.map(accountOption)}
-                vendors={data.vendors.map((v) => ({ id: v.id, name: v.name }))}
-                customers={data.customers.map((c) => ({ id: c.id, name: c.name }))}
+                journalAccounts={accountOptions(data.accounts, data.rules.journal)}
+                incomeAccounts={accountOptions(data.accounts, data.rules.invoice)}
+                codableAccounts={accountOptions(data.accounts, data.rules.bill)}
+                vendors={partyOptions(data.vendors)}
+                customers={partyOptions(data.customers)}
                 today={today}
                 dimensionTypes={dimensionTypesFrom(data.dimensionMembers)}
               />
@@ -239,6 +250,19 @@ export default async function RecurringEntriesPage() {
                   (l) => l.dimensionMemberIds ?? [],
                 )
               : [];
+            /**
+             * The accounts this template's lines already name, as keep ids for
+             * `accountOptions` — the same shape as `ownIds` for tags. A dead
+             * one is offered back to THIS dialog, marked, so it can be seen and
+             * re-picked; every other dialog never sees it.
+             */
+            const ownAccountIds = !parsed
+              ? []
+              : parsed.kind === "journal"
+                ? parsed.lines.map((l) => l.accountId)
+                : parsed.kind === "invoice"
+                  ? parsed.lines.map((l) => l.incomeAccountId)
+                  : parsed.lines.flatMap((l) => (l.accountId ? [l.accountId] : []));
             const party =
               e.kind === "bill"
                 ? e.vendorId && (vendorName.get(e.vendorId) ?? "Supplier")
@@ -326,11 +350,14 @@ export default async function RecurringEntriesPage() {
                           `LotForm` fell into, in the one field the guard reads.
                         */
                         key={`${e.id}:${e.version}`}
-                        journalAccounts={data.journalAccounts.map(accountOption)}
-                        incomeAccounts={data.incomeAccounts.map(accountOption)}
-                        codableAccounts={data.codableAccounts.map(accountOption)}
-                        vendors={data.vendors.map((v) => ({ id: v.id, name: v.name }))}
-                        customers={data.customers.map((c) => ({ id: c.id, name: c.name }))}
+                        journalAccounts={accountOptions(data.accounts, data.rules.journal, ownAccountIds)}
+                        incomeAccounts={accountOptions(data.accounts, data.rules.invoice, ownAccountIds)}
+                        codableAccounts={accountOptions(data.accounts, data.rules.bill, ownAccountIds)}
+                        /* This template's own party as keepId, so a deactivated
+                           supplier or customer it already names is offered
+                           back, marked — never to a new template. */
+                        vendors={partyOptions(data.vendors, e.vendorId)}
+                        customers={partyOptions(data.customers, e.customerId)}
                         today={today}
                         /* This template's own ids as keepIds, so a retired
                            member it already holds is offered back, marked. */

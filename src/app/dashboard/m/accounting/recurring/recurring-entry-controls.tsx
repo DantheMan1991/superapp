@@ -42,17 +42,16 @@ import {
   formatCentsSigned,
   parseMoneyToCents,
 } from "@/modules/accounting/lib/money";
+import {
+  saveBlocker,
+  type AccountPickOption as AccountOption,
+  type PartyPickOption as PartyOption,
+  type Unpickable,
+} from "@/modules/accounting/lib/pick-options";
 
-interface AccountOption {
-  id: string;
-  code: string;
-  name: string;
-}
-
-interface PartyOption {
-  id: string;
-  name: string;
-}
+/** The first option somebody may actually pick — a kept, marked one is never a default. */
+const firstPickable = (options: ReadonlyArray<{ id: string; unpickable?: Unpickable }>) =>
+  options.find((o) => !o.unpickable)?.id ?? "";
 
 /** One row of an invoice template — its own shape, because an invoice line
  *  carries a quantity and a unit price where a bill line carries a total. */
@@ -315,7 +314,7 @@ export function RecurringEntryDialogButton({
   const [rows, setRows] = useState<JournalRow[]>(
     stored?.kind === "journal"
       ? stored.lines.map(journalRowFrom)
-      : [emptyRow(journalAccounts[0]?.id ?? ""), emptyRow(journalAccounts[0]?.id ?? "")],
+      : [emptyRow(firstPickable(journalAccounts)), emptyRow(firstPickable(journalAccounts))],
   );
   const [billDesc, setBillDesc] = useState(storedBill?.description ?? "");
   const [billAmount, setBillAmount] = useState(
@@ -431,7 +430,48 @@ export function RecurringEntryDialogButton({
     });
   }
 
+  /**
+   * **A VALUE THAT MAY NO LONGER BE PICKED BLOCKS THE SAVE, AND SAYS SO.**
+   *
+   * The page offers a template's own dead party or account back, marked
+   * (`partyOptions` / `accountOptions` with keep ids), so the trigger shows the
+   * old name instead of nothing. The item is disabled — visible, not
+   * re-choosable — and while it is still the selection the save is blocked
+   * with a sentence about the facts the server would otherwise send back
+   * after the click. `saveBlocker` is pure and tested for all three kinds;
+   * this only hands it what will actually be SUBMITTED — a journal row with
+   * no amount is discarded by `submit()` and must not block over an account
+   * that is about to be dropped, so it is left out, its number kept.
+   */
+  const blocker: string | null =
+    kind === "bill"
+      ? saveBlocker({
+          kind,
+          vendors,
+          vendorId,
+          accounts: codableAccounts,
+          accountId: billAccountId,
+        })
+      : kind === "invoice"
+        ? saveBlocker({
+            kind,
+            customers,
+            customerId,
+            accounts: incomeAccounts,
+            lines: invoiceRows.map((r, i) => ({ line: i + 1, accountId: r.incomeAccountId })),
+          })
+        : saveBlocker({
+            kind,
+            accounts: journalAccounts,
+            lines: parsedRows.flatMap((p, i) =>
+              p.cents !== null && p.cents !== 0
+                ? [{ line: i + 1, accountId: p.row.accountId }]
+                : [],
+            ),
+          });
+
   const canSubmit =
+    blocker === null &&
     name.trim() !== "" &&
     (kind === "journal"
       ? usable.length >= 2 && imbalance === 0
@@ -484,7 +524,7 @@ export function RecurringEntryDialogButton({
                       setKind(v as "invoice" | "bill" | "journal")
                     }
                   >
-                    <SelectTrigger id="rec-kind">
+                    <SelectTrigger className="w-full" id="rec-kind">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -575,12 +615,12 @@ export function RecurringEntryDialogButton({
                           setRows(next);
                         }}
                       >
-                        <SelectTrigger aria-label={`Account for line ${i + 1}`}>
+                        <SelectTrigger className="w-full" aria-label={`Account for line ${i + 1}`}>
                           <SelectValue placeholder="Account" />
                         </SelectTrigger>
                         <SelectContent>
                           {journalAccounts.map((a) => (
-                            <SelectItem key={a.id} value={a.id}>
+                            <SelectItem key={a.id} value={a.id} disabled={!!a.unpickable}>
                               {a.code} · {a.name}
                             </SelectItem>
                           ))}
@@ -651,7 +691,7 @@ export function RecurringEntryDialogButton({
                   variant="outline"
                   size="sm"
                   onClick={() =>
-                    setRows([...rows, emptyRow(journalAccounts[0]?.id ?? "")])
+                    setRows([...rows, emptyRow(firstPickable(journalAccounts))])
                   }
                 >
                   <Plus className="mr-1.5 size-4" /> Add line
@@ -680,12 +720,12 @@ export function RecurringEntryDialogButton({
                 <div className="space-y-1.5">
                   <Label htmlFor="rec-customer">Customer</Label>
                   <Select value={customerId} onValueChange={setCustomerId}>
-                    <SelectTrigger id="rec-customer">
+                    <SelectTrigger className="w-full" id="rec-customer">
                       <SelectValue placeholder="Pick a customer" />
                     </SelectTrigger>
                     <SelectContent>
                       {customers.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
+                        <SelectItem key={c.id} value={c.id} disabled={!!c.unpickable}>
                           {c.name}
                         </SelectItem>
                       ))}
@@ -731,7 +771,9 @@ export function RecurringEntryDialogButton({
                         placeholder="0.00"
                         aria-label={`Unit price for line ${i + 1}`}
                       />
-                      <div className="sm:col-span-4">
+                      {/* min-w-0 so a long (marked) account name truncates
+                          in the trigger instead of widening the dialog. */}
+                      <div className="min-w-0 sm:col-span-4">
                         <Select
                           value={row.incomeAccountId}
                           onValueChange={(v) => {
@@ -740,12 +782,12 @@ export function RecurringEntryDialogButton({
                             setInvoiceRows(next);
                           }}
                         >
-                          <SelectTrigger aria-label={`Income account for line ${i + 1}`}>
+                          <SelectTrigger className="w-full" aria-label={`Income account for line ${i + 1}`}>
                             <SelectValue placeholder="Income account" />
                           </SelectTrigger>
                           <SelectContent>
                             {incomeAccounts.map((a) => (
-                              <SelectItem key={a.id} value={a.id}>
+                              <SelectItem key={a.id} value={a.id} disabled={!!a.unpickable}>
                                 {a.code} · {a.name}
                               </SelectItem>
                             ))}
@@ -803,12 +845,12 @@ export function RecurringEntryDialogButton({
                 <div className="space-y-1.5">
                   <Label htmlFor="rec-vendor">Supplier</Label>
                   <Select value={vendorId} onValueChange={setVendorId}>
-                    <SelectTrigger id="rec-vendor">
+                    <SelectTrigger className="w-full" id="rec-vendor">
                       <SelectValue placeholder="Pick a supplier" />
                     </SelectTrigger>
                     <SelectContent>
                       {vendors.map((v) => (
-                        <SelectItem key={v.id} value={v.id}>
+                        <SelectItem key={v.id} value={v.id} disabled={!!v.unpickable}>
                           {v.name}
                         </SelectItem>
                       ))}
@@ -838,12 +880,12 @@ export function RecurringEntryDialogButton({
                 <div className="space-y-1.5">
                   <Label htmlFor="rec-bill-account">Category (optional)</Label>
                   <Select value={billAccountId} onValueChange={setBillAccountId}>
-                    <SelectTrigger id="rec-bill-account">
+                    <SelectTrigger className="w-full" id="rec-bill-account">
                       <SelectValue placeholder="Leave uncoded — AI can code it later" />
                     </SelectTrigger>
                     <SelectContent>
                       {codableAccounts.map((a) => (
-                        <SelectItem key={a.id} value={a.id}>
+                        <SelectItem key={a.id} value={a.id} disabled={!!a.unpickable}>
                           {a.code} · {a.name}
                         </SelectItem>
                       ))}
@@ -868,6 +910,12 @@ export function RecurringEntryDialogButton({
               </div>
             )}
           </div>
+
+          {blocker && (
+            <p role="alert" className="text-xs text-destructive">
+              {blocker}
+            </p>
+          )}
 
           <DialogFooter>
             <Button onClick={submit} disabled={pending || !canSubmit}>

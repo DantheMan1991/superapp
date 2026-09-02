@@ -13,6 +13,60 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-02 — A select that cannot show its value (`claude/a-select-that-cannot-show-its-value`)
+
+**The edit dialog offers a template's own dead party or account back, marked,
+and blocks the save with a sentence instead of a blank trigger.** The recurring
+page loaded active parties and active accounts only, so a template naming a
+deactivated supplier, or a line coded to an account nobody may pick (the #340
+case: an invoice line on a bank register), opened its dialog on an empty Radix
+trigger — the old name gone, nothing saying why, Save enabled, and the server
+refusing with a sentence about a supplier the screen never named. The list row
+had the same hole and fell back to the word "Supplier".
+
+The rule applied is `dimensionTypesFrom`'s `keepIds` rule, lifted into a pure
+helper, `lib/pick-options.ts`: **`partyOptions(parties, keepId)` and
+`accountOptions(accounts, pickable, keepIds)` never offer a dead value to
+anyone who does not already hold it, and offer it back — marked `(inactive)` or
+`(cannot be chosen)` — to the one record that does.** The page now loads all
+three lists unfiltered (like members) and passes the three account rules as
+predicates, so the active-and-pickable set is the same for every dialog and the
+one dead value a template still names is added for that dialog alone. The kept
+option carries `unpickable`, and the dialog turns it into a disabled item (seen
+in the trigger, not re-choosable — the listbox was opened on Hilltop Farm and
+the kept item read `data-disabled`), a blocked Save, and one sentence above the
+footer from the pure `saveBlocker`: "That supplier is inactive. Pick another,
+or reactivate them first." / "Line 2's account is inactive. Pick another, or
+reactivate it first." / "Line 1's account can no longer be chosen by hand.
+Pick another." The two marks are different asks — an inactive account may be
+reactivated from the chart of accounts, a bank register may only be re-picked —
+and the sentences say so. A new journal row defaults to the first PICKABLE
+account, never a kept one; a journal row with no amount is discarded at save
+and does not block. The list row names an inactive party, marked. The server's
+refusals (`VENDOR_INACTIVE`, `ACCOUNT_NOT_CODABLE`, …) are untouched; this is
+the screen catching up — and **catching up exactly**: the adversarial pass
+found the first cut STRICTER than the server for invoice lines, whose picker
+offers income only while the server's floor is codable (a deposit to Unearned
+Revenue is a valid invoice line). So `accountOptions` takes two rules, `offer`
+and `accept`, and a held account the picker would not offer but the server
+accepts is offered back plain rather than marked; marking it would have
+blocked a save the server takes.
+
+Tests: `tests/pick-options.test.ts`, pure — the keep rule for parties and for
+accounts, both marks, offer-versus-accept, an inactive-and-unpickable account
+marked inactive first, input order kept, the sentences, and `saveBlocker` for
+all three kinds including a discarded journal row's number. Drop either keep
+branch and it goes red. +17 tests. Driven by hand on Hilltop Farm with the demo customer deactivated: the
+dialog opened on `Millbrook Restaurant (inactive)` and
+`1000 · Checking (cannot be chosen)`, Save disabled, the customer sentence
+shown; picking an active customer moved the sentence to the line's account;
+picking an income account enabled Save.
+
+**Not done, and now an open item below:** the bill and invoice builders' party
+selects have the same blank trigger for a deactivated party on an existing
+draft — the bill `[id]` page loads its own vendor unfiltered for the header and
+active vendors only for the select. `partyOptions` is the fix, unapplied there.
+
 ### 2026-09-02 — A failing template is somebody's obligation (`claude/a-failing-template-is-somebodys-obligation`)
 
 **The sweep's note reaches `/dashboard/today` and the morning digest.** #341
@@ -3227,7 +3281,8 @@ compiled-and-tested, not seen.
 - **Recurring entries GENERATE ON THEIR OWN** since 2026-08-13 (`/api/cron/recurring`, 6am in the tenant's zone). ~~What is not built: any way to see the sweep's history in the UI — the counts come back to the cron caller and nowhere else.~~ **Closed 2026-09-01, as two columns rather than a history table:** a template that fails carries the error's CODE in `last_error` and the moment in `last_error_at`, the list shows a `failing` badge with the sentence, and only that template's next clean run clears it. The sweep's aggregate counts still go to the cron caller alone; the per-template note is the surface anybody actually needs. ~~This is what made the retired-tag decision what it was~~ — that decision stands: a dropped tag is a SUCCESS and never lands in `last_error`
 - ~~**THE RECURRING FRONTIER NEEDS ITS OWN COLUMN.**~~ **Closed 2026-09-02** (migration `0240`): `recurring_entries.generated_through` is the last period the sweep reached, written only by the success UPDATE and backfilled from `next_run_date - 1 month`; `updateRecurringEntry` compares against it by month. A forward edit no longer ratchets — the month after the last generated one is always reachable again
 - ~~**A FAILING TEMPLATE IS NOT ON `/dashboard/today` OR IN THE DIGEST.**~~ **Closed 2026-09-02**: `attention/source.ts` derives it as the third accounting obligation, bounded on the sweep's own predicate (active AND due) so it self-clears on the fix, the pause, and a forward edit past today. The note is the fact; the feed is a consumer of it, exactly as this item said
-- **EDIT MODE RENDERS A BLANK SELECT FOR A PARTY OR ACCOUNT THAT MAY NO LONGER BE PICKED.** A deactivated supplier/customer, or an income account nobody may choose, is not in the option list, so Radix shows an empty trigger rather than the old name; Save stays enabled and the server refuses correctly. Parity with the bill `[id]` page would offer the stored value back, marked, the way `keepIds` marks a retired tag — for the party; for the account, blank may be right (a re-pick is the point) but the Save button should say so (2026-09-01)
+- ~~**EDIT MODE RENDERS A BLANK SELECT FOR A PARTY OR ACCOUNT THAT MAY NO LONGER BE PICKED.**~~ **Closed 2026-09-02**: `lib/pick-options.ts` offers the template's own dead party or account back, marked, to that dialog alone; the item is disabled, Save is blocked, and a sentence says what to do. For the account the answer was not "blank" after all — the stored value shown and marked `(cannot be chosen)` is what tells somebody WHICH account to re-pick
+- **THE BILL AND INVOICE BUILDERS' PARTY SELECTS HAVE THE SAME BLANK TRIGGER** for a deactivated party on an existing draft: the bill `[id]` page loads its own vendor unfiltered for the header and active vendors only for the select. `partyOptions` (2026-09-02) is the fix and is unapplied there; nobody has hit it yet
 - ~~**`generateRecurringEntries` counts a record it may not have written.**~~ **Closed 2026-09-01**, in its own PR as it deserved. `created`, `posted` and the deferral now all hang off `PostResult.deduped`, and `periodsWalked` carries the months the loop walked so a gap between the two is visible in the sweep's JSON. It was never reachable through the schedule; it is fixed because a count whose correctness rests on an unreachability argument goes wrong the first time somebody makes it reachable
 - **Recurring journals and bills are DONE** (2026-08-12), and so is **folding `recurring_invoices` into them** (2026-08-12) — the module has ONE recurrence mechanism, one list and one engine. **DONE**: `drizzle/0147` dropped `recurring_invoices` and `invoices.recurring_invoice_id`. **Templates can be born with a dimension tag since 2026-09-01**, on all three kinds, and the list shows what each one carries. ~~What is not built for any kind: **editing a template** — which is why a tag, like an amount and an account, is fixed at creation~~ **Editing landed 2026-09-01** — every field but `kind`, under a version CAS, with the one guard that matters (the next run cannot move back over months already generated). What is not built: any cadence other than monthly
 - **Obligation statuses and the MoneyBar are DONE** (2026-08-12) on the invoice and bill LISTS. What is not built: the same language on the detail pages, and a deposits screen for the two money buckets to link into. **That closes the 2026-08-10 QuickBooks review list.**

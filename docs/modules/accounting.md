@@ -59,6 +59,22 @@ stood as written. **The next backfill of a column like this should derive
 where it can and fall back to arithmetic only where it must**; the query is
 in this entry so it does not have to be rediscovered.
 
+**THE MIGRATE-THEN-DEPLOY WINDOW IS NOT NEUTRAL FOR THIS COLUMN, and that is
+the one case ADR 0014's order does not name.** The code running between the
+production migration and the deploy is the previous sweep, which advances
+`next_run_date` and does not write `generated_through` — so a row generated in
+the window is left with a frontier one month LOW, and the new guard would then
+accept an edit back into the month just generated (the unsafe direction; an
+edit never writes the column, and the backfill's `IS NULL` guard means it
+cannot be re-run to heal it). The cron acts only at 6am in each tenant's
+zone; the residual path is a Generate now pressed inside a minutes-long
+window. Handled procedurally: the migration was applied to production
+immediately before the merge, at an hour no tenant was near 6am, and the
+post-deploy check in the migration's own header — `generated_through <>
+next_run_date - 1 month` — was run afterwards. A row it lists is either
+forward-edited (safe, expected) or window-generated (fix by hand); the
+`ledger.recurring_updated` audit row tells them apart.
+
 **Tests:** the sweep writes the frontier as the month before `next_run_date`
 on the template's day; a forward edit leaves it untouched; a move back to the
 month right after it is accepted (red before this PR — the ratchet); the last

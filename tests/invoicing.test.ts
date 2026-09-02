@@ -1746,6 +1746,76 @@ d("invoicing (DB)", () => {
         ).rejects.toMatchObject({ code: "RECURRING_SCHEDULE_BACKWARD" });
       });
 
+      it("THE FRONTIER IS THE SWEEP'S ALONE: a forward edit does not ratchet", async () => {
+        /**
+         * The judge's D2(b). The first guard compared against `next_run_date`,
+         * which stopped being the frontier the moment an edit could move it:
+         * after a forward edit to next year, a move back to the month after
+         * the last generated one was refused, and the only exit was
+         * pause-and-recreate. `generated_through` is written by the sweep and
+         * never by an edit; the guard reads that. Point the guard back at
+         * `next_run_date` and this goes red.
+         */
+        const cash = await accountId("1000");
+        const exp = await accountId("6700");
+        const row = await addTemplate({
+          kind: "journal",
+          name: "Edited — no ratchet",
+          nextRunDate: "2026-06-04",
+          template: journalTemplate(cash, exp, 600),
+        });
+        await generateRecurringEntries(owner);
+        const walked = (await rowOf(row.id))!;
+        await pause(row.id);
+        const month = walked.nextRunDate.slice(0, 7);
+        const [y, m] = month.split("-").map(Number);
+        const priorMonth = `${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, "0")}`;
+        // The sweep recorded the last period it reached: the month before
+        // next_run_date, on the template's day.
+        expect(walked.generatedThrough).toBe(`${priorMonth}-04`);
+
+        // A forward edit — a typo of the year, or a deliberate pause.
+        const forward = await withTenant(tenantId, (tx) =>
+          updateRecurringEntry(tx, owner, {
+            id: row.id,
+            expectedVersion: walked.version,
+            name: walked.name,
+            dayOfMonth: 4,
+            nextRunDate: `${y + 1}-${String(m).padStart(2, "0")}-04`,
+            template: journalTemplate(cash, exp, 600),
+          }),
+        );
+        // ...which does NOT move the frontier.
+        expect(forward.after.generatedThrough).toBe(walked.generatedThrough);
+
+        // Back to the month right after the last generated one: accepted.
+        const back = await withTenant(tenantId, (tx) =>
+          updateRecurringEntry(tx, owner, {
+            id: row.id,
+            expectedVersion: forward.after.version,
+            name: walked.name,
+            dayOfMonth: 1,
+            nextRunDate: `${month}-01`,
+            template: journalTemplate(cash, exp, 600),
+          }),
+        );
+        expect(back.after.nextRunDate).toBe(`${month}-01`);
+
+        // The last generated month itself, on any day, is still refused.
+        await expect(
+          withTenant(tenantId, (tx) =>
+            updateRecurringEntry(tx, owner, {
+              id: row.id,
+              expectedVersion: back.after.version,
+              name: walked.name,
+              dayOfMonth: 28,
+              nextRunDate: `${priorMonth}-28`,
+              template: journalTemplate(cash, exp, 600),
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "RECURRING_SCHEDULE_BACKWARD" });
+      });
+
       it("a template that has never run may be re-dated freely", async () => {
         const cash = await accountId("1000");
         const exp = await accountId("6700");

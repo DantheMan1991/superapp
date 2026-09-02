@@ -55,8 +55,8 @@ export interface RecurringEntryResult {
    *
    * It is not reachable through the schedule today: `advanceMonthly` only ever
    * moves forward, the one backward writer of `next_run_date`
-   * (`updateRecurringEntry`) refuses a move over months already generated, and
-   * nothing else emits that key prefix. It is fixed anyway, because a count whose
+   * (`updateRecurringEntry`) refuses a month at or before `generated_through`,
+   * and nothing else emits that key prefix. It is fixed anyway, because a count whose
    * correctness rests on an unreachability argument is one that goes wrong the
    * first time somebody makes it reachable — and this is the figure an operator
    * reasons from when a sweep looks wrong.
@@ -313,17 +313,14 @@ export interface UpdateRecurringEntryInput extends NewRecurringEntryInput {
  * and a pause does NOT do the same thing, because a resume catches up rather
  * than skips; a forward edit is precisely how a month is skipped on purpose.
  *
- * **THE FRONTIER THIS COMPARES AGAINST IS `next_run_date`, AND THAT IS ONLY
- * THE WALKED FRONTIER WHILE THE SWEEP IS ITS SOLE WRITER — which this op ends.**
- * After a FORWARD edit the stored date is a person's choice, and a later move
- * back toward the months that really were generated is refused with a message
- * that is false ("they would be created again" — nothing between the true
- * frontier and the typed date ever was). The safe direction is preserved: no
- * double generation is possible. The correction path is a one-way ratchet
- * until the sweep records its own frontier in a column of its own
- * (`generated_through`, written only by the success UPDATE) — an additive
- * migration, and the named follow-up in the dossier. Bills carry no back-link,
- * so it cannot be derived from generated rows.
+ * **THE FRONTIER IS `generated_through`, WHICH ONLY THE SWEEP WRITES.** The
+ * first version of this guard compared against `next_run_date`, which was
+ * the walked frontier only while the sweep was its sole writer — and this
+ * op ended that: after a forward edit the stored date was a person's choice,
+ * and a later move back toward the months that really were generated was
+ * refused with a false message. Safe, but a one-way ratchet whose only exit
+ * was pause-and-recreate. The sweep now records the last period it reached
+ * in a column an edit never touches, and the guard reads that.
  *
  * **A FAILURE NOTE SURVIVES AN EDIT** — deliberately. A save-time check cannot
  * see a closed period, a re-typed account or a retired tax rate, so "edited"
@@ -360,20 +357,27 @@ export async function updateRecurringEntry(
   await assertTemplateReferences(tx, ctx.tenantId, input.template);
   await assertTemplateSaveable(tx, ctx.tenantId, input);
   /**
-   * **BY MONTH, NOT BY DAY.** `advanceMonthly` steps exactly one calendar
-   * month, so the last generated period is always the month BEFORE the stored
-   * `next_run_date`'s month, and every day of that month is ungenerated.
-   * Comparing whole dates refused the most ordinary edit there is — "move the
-   * rent from the 4th to the 1st" — with a sentence claiming September would
-   * be created again when it never had been. Found by the adversarial pass.
+   * **AGAINST `generated_through`, WHICH ONLY THE SWEEP WRITES — by month,
+   * not by day.** A month at or before the last generated one would be
+   * generated again (a journal's key is per date, so a different day in the
+   * same month is not deduped; invoices and bills have no key at all). Any
+   * later month is free — including one EARLIER than a `next_run_date` a
+   * previous edit had moved forward, which is the ratchet the first version
+   * of this guard had: it compared against `next_run_date`, which stopped
+   * being the frontier the moment an edit could move it.
+   *
+   * By month because `advanceMonthly` steps exactly one calendar month, so
+   * every day of the month after `generated_through` is ungenerated —
+   * "move the rent from the 4th to the 1st" is the ordinary edit the
+   * whole-date comparison used to refuse. NULL means never generated: free.
    */
   if (
-    before.lastGeneratedAt !== null &&
-    input.nextRunDate.slice(0, 7) < before.nextRunDate.slice(0, 7)
+    before.generatedThrough !== null &&
+    input.nextRunDate.slice(0, 7) <= before.generatedThrough.slice(0, 7)
   ) {
     throw new LedgerError(
       "RECURRING_SCHEDULE_BACKWARD",
-      `next run ${input.nextRunDate} is before the walked frontier ${before.nextRunDate}`,
+      `next run ${input.nextRunDate} is not after the last generated period ${before.generatedThrough}`,
     );
   }
 
@@ -631,8 +635,13 @@ export async function generateRecurringEntries(
         let created = 0;
         let posted = 0;
         let deferred = 0;
+        // The last period this walk reached — written to `generated_through`
+        // below, which the sweep alone may write. A deduped month counts: it
+        // is there, whoever wrote it.
+        let generatedThrough: string | null = null;
 
         while (next <= today && runs < CATCH_UP_CAP) {
+          generatedThrough = next;
           if (template.kind === "journal") {
             /**
              * A RULE NEVER OVERRIDES THE PERIOD LOCK. An auto-posting template
@@ -732,6 +741,10 @@ export async function generateRecurringEntries(
           .set({
             nextRunDate: next,
             lastGeneratedAt: new Date(),
+            // THE FRONTIER, and this is the one place it is written. An edit
+            // may move `next_run_date` forward past it; it may never move
+            // this, so the backward guard always has the truth to compare to.
+            generatedThrough: generatedThrough ?? entry.generatedThrough,
             // A clean run is the ONLY thing that clears the note — not an
             // edit, a pause or a resume. See the column's own comment.
             lastError: "",

@@ -42,6 +42,7 @@ const OVERRIDES: Record<string, string> = {
   "ledger.entry_edited": "Edited after posting",
   "ledger.draft_deleted": "Draft deleted",
   "ledger.recurring_created": "Recurring schedule created",
+  "ledger.recurring_updated": "Recurring schedule edited",
   "documents.attached": "File attached",
   "documents.detached": "File detached",
   "mail.thread_drafted": "Drafted from an email thread",

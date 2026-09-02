@@ -17,10 +17,12 @@ import { isValidIsoDate } from "../lib/money";
 import {
   journalTemplateBalances,
   recurringEntryTemplateSchema,
+  type RecurringEntryTemplate,
 } from "./template";
 import {
   createRecurringEntry,
   generateRecurringEntries,
+  updateRecurringEntry,
 } from "./generate";
 
 /**
@@ -57,39 +59,70 @@ function revalidateRecurring(): void {
   revalidatePath(`${BASE}/trial-balance`);
 }
 
-const createSchema = z
-  .object({
-    name: z.string().trim().min(1).max(200),
-    vendorId: z.string().uuid().nullable().optional(),
-    customerId: z.string().uuid().nullable().optional(),
-    dayOfMonth: z.number().int().min(1).max(28),
-    nextRunDate: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/)
-      .refine(isValidIsoDate, "Not a real calendar date"),
-    autoPost: z.boolean().optional(),
-    template: recurringEntryTemplateSchema,
-  })
-  // The shape rules the database also carries (`recurring_entries_party_shape`),
-  // checked here so the message is a sentence rather than a
-  // constraint-violation string.
-  .refine(
+const templateFields = z.object({
+  name: z.string().trim().min(1).max(200),
+  vendorId: z.string().uuid().nullable().optional(),
+  customerId: z.string().uuid().nullable().optional(),
+  dayOfMonth: z.number().int().min(1).max(28),
+  nextRunDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .refine(isValidIsoDate, "Not a real calendar date"),
+  autoPost: z.boolean().optional(),
+  template: recurringEntryTemplateSchema,
+});
+
+/** What the four shape rules read. Create and update both satisfy it. */
+interface ShapeInput {
+  vendorId?: string | null;
+  customerId?: string | null;
+  autoPost?: boolean;
+  template: RecurringEntryTemplate;
+}
+
+/**
+ * The shape rules the database also carries (`recurring_entries_party_shape`,
+ * `recurring_entries_auto_post_shape`), checked here so the message is a
+ * sentence rather than a constraint-violation string.
+ *
+ * ONE list applied to both schemas. A refined schema cannot be `.extend`ed, so
+ * the day an update schema arrived the choice was to copy four refines or to
+ * name them once — and a copied rule is one that drifts.
+ */
+const SHAPE_RULES: ReadonlyArray<[(v: ShapeInput) => boolean, string]> = [
+  [
     (v) => (v.template.kind === "bill" ? !!v.vendorId : !v.vendorId),
     "A bill needs a supplier; nothing else may have one",
-  )
-  .refine(
+  ],
+  [
     (v) => (v.template.kind === "invoice" ? !!v.customerId : !v.customerId),
     "An invoice needs a customer; nothing else may have one",
-  )
-  .refine(
+  ],
+  [
     (v) => !v.autoPost || v.template.kind === "journal",
     "Only a journal can post automatically",
-  )
-  .refine(
+  ],
+  [
     (v) =>
       v.template.kind !== "journal" || journalTemplateBalances(v.template.lines),
     "The journal's debits and credits must be equal",
-  );
+  ],
+];
+
+const shapeRules = (v: ShapeInput, ctx: z.RefinementCtx) => {
+  for (const [ok, message] of SHAPE_RULES) {
+    if (!ok(v)) ctx.addIssue({ code: "custom", message });
+  }
+};
+
+const createSchema = templateFields.superRefine(shapeRules);
+
+const updateSchema = templateFields
+  .extend({
+    id: z.string().uuid(),
+    expectedVersion: z.number().int().min(1),
+  })
+  .superRefine(shapeRules);
 
 export async function createRecurringEntryAction(
   input: z.infer<typeof createSchema>,
@@ -117,6 +150,65 @@ export async function createRecurringEntryAction(
     });
     revalidateRecurring();
     return { ok: true, data: { id: row.id } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * A snapshot the audit row can carry. The template jsonb is overwritten in
+ * place with no history table, so this is the only before-state that will
+ * ever exist — the `ledger.entry_edited` shape, and S9's "moved from and to".
+ * Template cents are an instruction, not a balance.
+ */
+const auditSnapshot = (row: {
+  name: string;
+  dayOfMonth: number;
+  nextRunDate: string;
+  autoPost: boolean;
+  vendorId: string | null;
+  customerId: string | null;
+  template: unknown;
+}) => ({
+  name: row.name,
+  dayOfMonth: row.dayOfMonth,
+  nextRunDate: row.nextRunDate,
+  autoPost: row.autoPost,
+  vendorId: row.vendorId,
+  customerId: row.customerId,
+  template: row.template,
+});
+
+export async function updateRecurringEntryAction(
+  input: z.infer<typeof updateSchema>,
+): Promise<ActionResult> {
+  const ctx = await gate();
+  const parsed = updateSchema.safeParse(input);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  }
+  try {
+    requireOwnerRole(ctx);
+    await withTenant(ctx.tenantId, async (tx) => {
+      const { before, after } = await updateRecurringEntry(tx, ctx, parsed.data);
+      await logAuditInTx(tx, {
+        action: "ledger.recurring_updated",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "recurring_entry",
+        targetId: after.id,
+        // `kind` and `autoPost` stay top-level so the `recurring_created`
+        // lookup shape holds; the before/after is what an edit is.
+        meta: {
+          kind: after.kind,
+          autoPost: after.autoPost,
+          before: auditSnapshot(before),
+          after: auditSnapshot(after),
+        },
+      });
+    });
+    revalidateRecurring();
+    return { ok: true };
   } catch (err) {
     return fail(err);
   }

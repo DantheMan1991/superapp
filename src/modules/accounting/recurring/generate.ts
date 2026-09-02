@@ -6,9 +6,12 @@ import { getTenantTimezone } from "@/lib/tenant-timezone";
 import {
   LedgerError,
   assertCodableAccounts,
+  loadDimensionMembers,
   requireOwnerRole,
   type LedgerCtx,
 } from "../core";
+import { loadCustomer } from "../invoicing/customers";
+import { loadVendor } from "../payables/vendors";
 import { getDefaultEntityId, listEntities } from "../core/entities";
 import { postEntry } from "../core/posting";
 import { createBillDraft } from "../payables/bills";
@@ -51,8 +54,9 @@ export interface RecurringEntryResult {
    * as posted too.
    *
    * It is not reachable through the schedule today: `advanceMonthly` only ever
-   * moves forward, `next_run_date` has no backward writer, and nothing else
-   * emits that key prefix. It is fixed anyway, because a count whose
+   * moves forward, the one backward writer of `next_run_date`
+   * (`updateRecurringEntry`) refuses a move over months already generated, and
+   * nothing else emits that key prefix. It is fixed anyway, because a count whose
    * correctness rests on an unreachability argument is one that goes wrong the
    * first time somebody makes it reachable — and this is the figure an operator
    * reasons from when a sweep looks wrong.
@@ -191,6 +195,7 @@ export async function createRecurringEntry(
   // actually be coded to, so a bad template is refused here with a sentence
   // rather than failing at 6am with nothing to show for it.
   await assertTemplateReferences(tx, ctx.tenantId, input.template);
+  await assertTemplateSaveable(tx, ctx.tenantId, input);
   const [created] = await tx
     .insert(schema.recurringEntries)
     .values({
@@ -207,6 +212,196 @@ export async function createRecurringEntry(
     })
     .returning();
   return created;
+}
+
+/**
+ * **WHAT ONLY A SAVE CAN CHECK, checked at save.** Everything here is
+ * something a person is choosing in the dialog right now, and each one used
+ * to surface only at 6am:
+ *
+ * - the party is active for the kind (`VENDOR_INACTIVE` / `CUSTOMER_INACTIVE`
+ *   were sweep-only errors — the composite FK proves existence, not activity);
+ * - every tag names an active member. **Deliberately NOT in
+ *   `assertTemplateReferences`**, which runs at generation, where #338 chose
+ *   to DROP a retired tag rather than fail the template. A save is the one
+ *   moment somebody can see the tag and take it off, so a save that still
+ *   names it is refused, exactly as the invoice and bill edit pages refuse;
+ * - a tax rate the template names is still active;
+ * - a company the template names still exists and is active.
+ */
+export async function assertTemplateSaveable(
+  tx: Tx,
+  tenantId: string,
+  input: {
+    vendorId?: string | null;
+    customerId?: string | null;
+    template: RecurringEntryTemplate;
+  },
+): Promise<void> {
+  const { template } = input;
+  if (template.kind === "bill" && input.vendorId) {
+    const vendor = await loadVendor(tx, tenantId, input.vendorId);
+    if (!vendor.isActive) {
+      throw new LedgerError("VENDOR_INACTIVE", `vendor ${vendor.id} inactive`);
+    }
+  }
+  if (template.kind === "invoice" && input.customerId) {
+    const customer = await loadCustomer(tx, tenantId, input.customerId);
+    if (!customer.isActive) {
+      throw new LedgerError("CUSTOMER_INACTIVE", `customer ${customer.id} inactive`);
+    }
+  }
+  await loadDimensionMembers(
+    tx,
+    tenantId,
+    template.lines as ReadonlyArray<{ dimensionMemberIds?: string[] }>,
+  );
+  if (template.kind === "invoice" && template.taxRateId) {
+    const rate = await tx.query.salesTaxRates.findFirst({
+      where: and(
+        eq(schema.salesTaxRates.tenantId, tenantId),
+        eq(schema.salesTaxRates.id, template.taxRateId),
+      ),
+      columns: { isActive: true },
+    });
+    if (!rate || !rate.isActive) {
+      throw new LedgerError("TAX_RATE_INVALID", `tax rate ${template.taxRateId}`);
+    }
+  }
+  if (template.entityId) {
+    const entity = await tx.query.entities.findFirst({
+      where: and(
+        eq(schema.entities.tenantId, tenantId),
+        eq(schema.entities.id, template.entityId),
+      ),
+      columns: { isActive: true },
+    });
+    if (!entity) throw new LedgerError("ENTITY_NOT_FOUND", `entity ${template.entityId}`);
+    if (!entity.isActive) {
+      throw new LedgerError("ENTITY_INACTIVE", `entity ${template.entityId}`);
+    }
+  }
+}
+
+export interface UpdateRecurringEntryInput extends NewRecurringEntryInput {
+  id: string;
+  expectedVersion: number;
+}
+
+/**
+ * **CORRECT A STANDING INSTRUCTION.** Full replace of what the dialog holds,
+ * under a compare-and-swap on `version`.
+ *
+ * Until 2026-09-01 there was no update path of any kind: a wrong amount, a
+ * retired tag, a mis-coded account or a typo in the name meant pause it and
+ * write a new one — and after a failure note landed on the row (the same
+ * day's earlier PR) there was, for the first time, something visible to
+ * correct and no way to correct it.
+ *
+ * **`kind` IS FROZEN.** The database ties party to kind and `invoices` points
+ * back at an invoice template; changing what a schedule produces is a new
+ * schedule. Party is editable WITHIN the kind. `isActive` is not in the SET —
+ * `setActive` stays its one writer. `createdByClerkUserId` is unchanged; the
+ * audit row names the editor.
+ *
+ * **THE NEXT RUN CANNOT MOVE BACK OVER MONTHS ALREADY GENERATED.** Invoice and
+ * bill generation carry no idempotency key — they always insert — and a
+ * journal's key is per (template, date), which a changed day-of-month defeats.
+ * So a `next_run_date` moved from October back to June would make the next
+ * sweep create four more invoices for months already invoiced. A template
+ * that has never run may be re-dated freely. Forward moves stay allowed —
+ * and a pause does NOT do the same thing, because a resume catches up rather
+ * than skips; a forward edit is precisely how a month is skipped on purpose.
+ *
+ * **THE FRONTIER THIS COMPARES AGAINST IS `next_run_date`, AND THAT IS ONLY
+ * THE WALKED FRONTIER WHILE THE SWEEP IS ITS SOLE WRITER — which this op ends.**
+ * After a FORWARD edit the stored date is a person's choice, and a later move
+ * back toward the months that really were generated is refused with a message
+ * that is false ("they would be created again" — nothing between the true
+ * frontier and the typed date ever was). The safe direction is preserved: no
+ * double generation is possible. The correction path is a one-way ratchet
+ * until the sweep records its own frontier in a column of its own
+ * (`generated_through`, written only by the success UPDATE) — an additive
+ * migration, and the named follow-up in the dossier. Bills carry no back-link,
+ * so it cannot be derived from generated rows.
+ *
+ * **A FAILURE NOTE SURVIVES AN EDIT** — deliberately. A save-time check cannot
+ * see a closed period, a re-typed account or a retired tax rate, so "edited"
+ * is not "fixed". Only the template's next clean run clears it.
+ */
+export async function updateRecurringEntry(
+  tx: Tx,
+  ctx: LedgerCtx,
+  input: UpdateRecurringEntryInput,
+): Promise<{ before: RecurringEntry; after: RecurringEntry }> {
+  const before = await tx.query.recurringEntries.findFirst({
+    where: and(
+      eq(schema.recurringEntries.tenantId, ctx.tenantId),
+      eq(schema.recurringEntries.id, input.id),
+    ),
+  });
+  if (!before) {
+    throw new LedgerError("RECURRING_NOT_FOUND", `recurring entry ${input.id}`);
+  }
+  if (input.template.kind !== before.kind) {
+    throw new LedgerError(
+      "RECURRING_TEMPLATE_INVALID",
+      "a schedule's kind is fixed — write a new one to change what it produces",
+    );
+  }
+  // The same parse the sweep does, so save and sweep agree on what a valid
+  // template is — a journal that no longer balances is refused here, not at 6am.
+  if (!parseRecurringEntryTemplate(input.template)) {
+    throw new LedgerError(
+      "RECURRING_TEMPLATE_INVALID",
+      "template shape invalid, or a journal that does not balance",
+    );
+  }
+  await assertTemplateReferences(tx, ctx.tenantId, input.template);
+  await assertTemplateSaveable(tx, ctx.tenantId, input);
+  /**
+   * **BY MONTH, NOT BY DAY.** `advanceMonthly` steps exactly one calendar
+   * month, so the last generated period is always the month BEFORE the stored
+   * `next_run_date`'s month, and every day of that month is ungenerated.
+   * Comparing whole dates refused the most ordinary edit there is — "move the
+   * rent from the 4th to the 1st" — with a sentence claiming September would
+   * be created again when it never had been. Found by the adversarial pass.
+   */
+  if (
+    before.lastGeneratedAt !== null &&
+    input.nextRunDate.slice(0, 7) < before.nextRunDate.slice(0, 7)
+  ) {
+    throw new LedgerError(
+      "RECURRING_SCHEDULE_BACKWARD",
+      `next run ${input.nextRunDate} is before the walked frontier ${before.nextRunDate}`,
+    );
+  }
+
+  const rows = await tx
+    .update(schema.recurringEntries)
+    .set({
+      name: input.name,
+      vendorId: input.vendorId ?? null,
+      customerId: input.customerId ?? null,
+      template: input.template,
+      dayOfMonth: input.dayOfMonth,
+      nextRunDate: input.nextRunDate,
+      autoPost: input.autoPost === true,
+      version: input.expectedVersion + 1,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(schema.recurringEntries.tenantId, ctx.tenantId),
+        eq(schema.recurringEntries.id, input.id),
+        eq(schema.recurringEntries.version, input.expectedVersion),
+      ),
+    )
+    .returning();
+  if (rows.length === 0) {
+    throw new LedgerError("STALE_VERSION", "recurring entry changed since loaded");
+  }
+  return { before, after: rows[0] };
 }
 
 /**
@@ -366,6 +561,10 @@ export async function generateRecurringEntries(
      * NOT NULL on all three targets, so it needs a real id rather than a
      * sentinel; using the template's author also means the History panel names
      * a person who can explain the row, instead of "A teammate".
+     *
+     * An EDIT does not change the author. Whoever corrected the amount is on
+     * the audit row (`ledger.recurring_updated`, before and after); the
+     * schedule is still the decision of the person who wrote it down.
      */
     const actor: LedgerCtx = options.unattended
       ? { ...ctx, userId: entry.createdByClerkUserId }

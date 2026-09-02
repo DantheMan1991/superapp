@@ -381,6 +381,35 @@ export const recurringEntries = pgTable(
     autoPost: boolean("auto_post").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
     lastGeneratedAt: timestamp("last_generated_at", { withTimezone: true }),
+    /**
+     * **THE SWEEP LEAVES A NOTE ON THE ROW.**
+     *
+     * A template that failed at 6am used to be unnamed on every surface: the
+     * loop reduced the error to a code, pushed it to an array the cron caller
+     * serialised and nobody read, and the list rendered the row exactly as it
+     * had the day before. That is what forced the retired-tag decision (a tag
+     * is DROPPED so generation succeeds, because failing inside the sweep was
+     * failing silently) and what made save-time account validation matter as
+     * much as it did.
+     *
+     * A CODE, never a message. The catch already reduces to `LedgerError.code`
+     * or `"UNKNOWN"`; a raw Postgres message can carry row values, and this
+     * row is member-readable. `NOT NULL DEFAULT ''` is the shape the five other
+     * `last_error` columns in this schema use.
+     *
+     * CLEARED ONLY BY THIS TEMPLATE'S NEXT SUCCESSFUL RUN, in the same UPDATE
+     * that advances `next_run_date`. Not by an edit, a pause or a resume — a
+     * save-time check cannot see a closed period, a re-typed account or a
+     * retired tax rate, so "edited" is not "fixed", and the Generate button is
+     * the honest way to find out.
+     *
+     * Written OUTSIDE the template's own transaction, which has rolled back by
+     * the time there is anything to write, and CAS'd on the version the sweep
+     * loaded so a concurrent success is never overwritten. The version is not
+     * bumped: a Pause pressed on a page opened before 6am must still land.
+     */
+    lastError: text("last_error").notNull().default(""),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
     createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true })

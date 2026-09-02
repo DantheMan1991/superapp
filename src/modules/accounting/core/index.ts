@@ -1,4 +1,9 @@
-export { LedgerError, friendlyMessage, type LedgerErrorCode } from "./errors";
+export {
+  LedgerError,
+  failureSentence,
+  friendlyMessage,
+  type LedgerErrorCode,
+} from "./errors";
 export type { EntryLineInput, LedgerCtx, NewEntryInput, PostResult } from "./types";
 export {
   assertEntryNotSourceManaged,

@@ -266,7 +266,8 @@ export async function noteTemplateFailure(
  *
  * Nobody would find out. The sweep reports counts only and never a template
  * name (S9, `run.ts`); the button's toast says "1 template failed" with no
- * reason; `recurring_entries` has no last-error column; and the list's
+ * reason; `recurring_entries` HAD no last-error column until later the same
+ * day (`noteTemplateFailure` above now leaves one); and the list's
  * "template needs fixing" badge is a SHAPE check, so it never lights for this.
  * There is no update action either, so an owner who somehow diagnosed it could
  * not repair the template in place.

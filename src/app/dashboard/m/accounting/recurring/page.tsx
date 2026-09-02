@@ -22,8 +22,8 @@ import {
   invoiceSubtotalCents,
 } from "@/modules/accounting/invoicing/lines";
 import {
-  AddRecurringEntryButton,
   GenerateRecurringEntriesButton,
+  RecurringEntryDialogButton,
   RecurringEntryToggle,
 } from "./recurring-entry-controls";
 
@@ -125,12 +125,12 @@ export default async function RecurringEntriesPage() {
   /**
    * **WHAT A TEMPLATE IS TAGGED WITH, so somebody can check it.**
    *
-   * This list is the only screen a template has — there is no detail route and
-   * no update action — so a tag that does not appear here is one nobody can
-   * ever verify. The same test the journal entry page had to pass: an entry
-   * that can be tagged and cannot be SEEN to be tagged is half a feature, and
-   * here it is worse, because the only way to correct a mis-tagged template is
-   * to pause it and write a new one.
+   * This list is the only screen a template has — there is no detail route —
+   * so a tag that does not appear here is one nobody can ever verify. The same
+   * test the journal entry page had to pass: an entry that can be tagged and
+   * cannot be SEEN to be tagged is half a feature. (Until 2026-09-01 there was
+   * no update action either, and the only correction was pause-and-rewrite;
+   * the Edit button beside each row is what changed that.)
    *
    * DISTINCT names across the template's lines, not per line: this row is one
    * line of muted text and the question it answers is "what will next month's
@@ -139,9 +139,9 @@ export default async function RecurringEntriesPage() {
    * Retired members are named too, and MARKED — `listDimensionMembers` is
    * unfiltered, and `dimensionTypesFrom` uses the same `(retired)` suffix for
    * the same reason. A tag pointing at a retired member is the one worth
-   * seeing: generation will drop it and count it, and pausing the template to
-   * write a replacement is the only way to act on that. This is the sole
-   * screen where it is visible at all.
+   * seeing: generation will drop it and count it, and Edit offers it back
+   * (marked) so it can be taken off — a save that still names it is refused.
+   * This is the sole screen where it is visible at all.
    */
   const memberName = new Map(
     data.dimensionMembers.map((m) => [
@@ -179,7 +179,7 @@ export default async function RecurringEntriesPage() {
           isOwner && (
             <>
               <GenerateRecurringEntriesButton />
-              <AddRecurringEntryButton
+              <RecurringEntryDialogButton
                 journalAccounts={data.journalAccounts.map(accountOption)}
                 incomeAccounts={data.incomeAccounts.map(accountOption)}
                 codableAccounts={data.codableAccounts.map(accountOption)}
@@ -207,9 +207,27 @@ export default async function RecurringEntriesPage() {
       >
         <ul className="divide-y divide-divider">
           {data.entries.map((e) => {
-            const broken = parseRecurringEntryTemplate(e.template) === null;
+            const parsed = parseRecurringEntryTemplate(e.template);
+            const broken = parsed === null;
             const size = templateSize(e.template);
             const tags = templateTags(e.template);
+            /**
+             * **WHICH ROWS MAY BE EDITED.** A row that no longer parses has
+             * nothing to load into the dialog, and its badge already says
+             * pause-and-rewrite. A bill template with other than exactly one
+             * line cannot be shown by a dialog that holds one — nothing this
+             * app writes makes such a template, but the schema allows it, and
+             * an Edit that silently dropped lines would be worse than none.
+             */
+            const editable =
+              isOwner &&
+              parsed !== null &&
+              (parsed.kind !== "bill" || parsed.lines.length === 1);
+            const ownIds = parsed
+              ? (parsed.lines as ReadonlyArray<{ dimensionMemberIds?: string[] }>).flatMap(
+                  (l) => l.dimensionMemberIds ?? [],
+                )
+              : [];
             const party =
               e.kind === "bill"
                 ? e.vendorId && (vendorName.get(e.vendorId) ?? "Supplier")
@@ -276,11 +294,40 @@ export default async function RecurringEntriesPage() {
                   )}
                 </div>
                 {isOwner && (
-                  <RecurringEntryToggle
-                    id={e.id}
-                    version={e.version}
-                    active={e.isActive}
-                  />
+                  <div className="flex shrink-0 items-center gap-1">
+                    {editable && parsed && (
+                      <RecurringEntryDialogButton
+                        journalAccounts={data.journalAccounts.map(accountOption)}
+                        incomeAccounts={data.incomeAccounts.map(accountOption)}
+                        codableAccounts={data.codableAccounts.map(accountOption)}
+                        vendors={data.vendors.map((v) => ({ id: v.id, name: v.name }))}
+                        customers={data.customers.map((c) => ({ id: c.id, name: c.name }))}
+                        today={today}
+                        /* This template's own ids as keepIds, so a retired
+                           member it already holds is offered back, marked. */
+                        dimensionTypes={dimensionTypesFrom(data.dimensionMembers, {
+                          keepIds: ownIds,
+                        })}
+                        existing={{
+                          id: e.id,
+                          version: e.version,
+                          kind: e.kind,
+                          name: e.name,
+                          dayOfMonth: e.dayOfMonth,
+                          nextRunDate: e.nextRunDate,
+                          autoPost: e.autoPost,
+                          vendorId: e.vendorId,
+                          customerId: e.customerId,
+                          template: parsed,
+                        }}
+                      />
+                    )}
+                    <RecurringEntryToggle
+                      id={e.id}
+                      version={e.version}
+                      active={e.isActive}
+                    />
+                  </div>
                 )}
               </li>
             );

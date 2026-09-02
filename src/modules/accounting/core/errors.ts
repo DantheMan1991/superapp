@@ -72,6 +72,7 @@ export type LedgerErrorCode =
   | "PAYMENT_NOT_FOUND"
   | "RECURRING_NOT_FOUND"
   | "RECURRING_TEMPLATE_INVALID"
+  | "RECURRING_SCHEDULE_BACKWARD"
   | "TXN_MATCH_INVALID"
   | "DOCUMENT_NOT_FOUND"
   | "DOCUMENT_TRASHED"
@@ -217,6 +218,8 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   RECURRING_NOT_FOUND: "That recurring template no longer exists.",
   RECURRING_TEMPLATE_INVALID:
     "The template can no longer be read — pause it and write a new one.",
+  RECURRING_SCHEDULE_BACKWARD:
+    "The next run cannot move back over months already generated — they would be created again.",
   TXN_MATCH_INVALID: "That entry can no longer be matched — refresh and try again.",
   DOCUMENT_NOT_FOUND: "That file no longer exists.",
   DOCUMENT_TRASHED: "That file is in the trash — restore it first.",

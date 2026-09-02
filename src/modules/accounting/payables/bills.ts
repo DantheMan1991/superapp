@@ -6,6 +6,7 @@ import {
   LedgerError,
   getDefaultEntityId,
   isCodableAccount,
+  loadDimensionMembers,
   postEntry,
   requireOwnerRole,
   voidEntry,
@@ -67,38 +68,14 @@ export async function loadBillLines(
   }));
 }
 
-/** Validate member ids (active, one per type per line) and return the type map. */
+/** The type map for writing `line_dimensions`. The rule itself is core's. */
 async function validateLineDimensions(
   tx: Tx,
   tenantId: string,
   lines: BillLineInput[],
 ): Promise<Map<string, string>> {
-  const allIds = [...new Set(lines.flatMap((l) => l.dimensionMemberIds ?? []))];
-  if (allIds.length === 0) return new Map();
-  const members = await tx.query.dimensionMembers.findMany({
-    where: and(
-      eq(schema.dimensionMembers.tenantId, tenantId),
-      inArray(schema.dimensionMembers.id, allIds),
-    ),
-  });
-  const typeOf = new Map(members.map((m) => [m.id, m.dimensionType]));
-  for (const id of allIds) {
-    const member = members.find((m) => m.id === id);
-    if (!member || !member.isActive) {
-      throw new LedgerError("DIMENSION_INVALID", `dimension member ${id} invalid`);
-    }
-  }
-  for (const line of lines) {
-    const seen = new Set<string>();
-    for (const id of line.dimensionMemberIds ?? []) {
-      const t = typeOf.get(id)!;
-      if (seen.has(t)) {
-        throw new LedgerError("DIMENSION_INVALID", `two members of type ${t} on one line`);
-      }
-      seen.add(t);
-    }
-  }
-  return typeOf;
+  const members = await loadDimensionMembers(tx, tenantId, lines);
+  return new Map([...members].map(([id, m]) => [id, m.dimensionType]));
 }
 
 /** What a line already says, for deciding whether a save is changing it. */

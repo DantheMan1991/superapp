@@ -13,6 +13,98 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-01 — A standing instruction can be corrected (`claude/a-standing-instruction-can-be-corrected`)
+
+**The second of the two open items, and the pair of the first.** The sweep's
+note says a template is broken; this is how it gets fixed. Until now there was
+no update path of any kind — a wrong amount, a retired tag, a mis-coded
+account or a typo in the name meant pause it and write a new one.
+
+**ONE OP, ONE ACTION, ONE DIALOG, NO MIGRATION.** `updateRecurringEntry` is a
+full replace of what the dialog holds under a compare-and-swap on `version`,
+returning before and after. `updateRecurringEntryAction` wraps it with the
+gate, the owner check, the shared Zod, and an audit row carrying both
+snapshots — the `ledger.entry_edited` shape, because the jsonb is overwritten
+in place with no history table and this is the only before-state that will
+ever exist. The dialog is the create dialog with an `existing` prop, one per
+row when editing (the `VendorDialogButton` shape).
+
+**THE NEXT RUN CANNOT MOVE BACK OVER MONTHS ALREADY GENERATED.** This is the
+guard the whole change turns on. Invoice and bill generation carry no
+idempotency key — they always insert — and a journal's key is per (template,
+date), which a changed day-of-month defeats. So a `next_run_date` moved from
+October back to June would make the next sweep create four more invoices for
+months already invoiced. The stored `next_run_date` IS the walked frontier,
+written atomically with `last_generated_at` under the version CAS, so the
+comparison inside the op's transaction is sound: refused when
+`last_generated_at` is set and the new date is earlier than the stored one.
+A template that has never run may be re-dated freely; forward moves stay
+allowed, which is what pause-and-resume already does. `RECURRING_SCHEDULE_BACKWARD`
+is the new code. Making invoice and bill generation idempotent instead was
+considered and not done — a unique index, a numbering-arbiter rework and a
+bill back-link column, for a hazard one comparison removes.
+
+**`kind` IS FROZEN; PARTY IS EDITABLE WITHIN IT.** The database ties party to
+kind and `invoices` points back at an invoice template, so changing what a
+schedule produces is a new schedule. `isActive` is not in the SET — Pause and
+Resume stay its one writer. `createdByClerkUserId` is unchanged; the audit row
+names the editor, and the schedule is still the decision of the person who
+wrote it down.
+
+**EDIT IS AN OVERLAY, NOT A REBUILD.** Every dialog row keeps the line as
+stored and the template keeps its stored top level; submit spreads those first
+and the edited fields over them. So `memo`, `entityId`, `taxRateId`, a line's
+`isTaxable` — none of which the dialog has a control for — survive a save that
+changed only an amount, without a rule resting on "no writer exists for it".
+The tag key is set explicitly AFTER the overlay, undefined when empty, so a tag
+somebody just took off does not come back from the stored line. A bill
+template with other than exactly one line gets no Edit: the dialog holds one,
+nothing this app writes makes such a template, and an Edit that silently
+dropped lines would be worse than none.
+
+**WHAT ONLY A SAVE CAN CHECK IS CHECKED AT SAVE.** `assertTemplateSaveable`
+runs on create and on update, after the account check: the party is active
+for its kind (`VENDOR_INACTIVE` / `CUSTOMER_INACTIVE` were sweep-only errors —
+the composite FK proves existence, not activity); every tag names an active
+member; a tax rate the template names is still active; a company it names
+still exists and is active. **A retired tag is refused at save, and that is
+deliberately the opposite of what generation does.** #338 chose to DROP a
+retired tag at 6am because failing inside the sweep was failing silently; a
+save is the one moment somebody can see the tag and take it off, so a save
+that still names it is refused, exactly as the invoice and bill edit pages
+refuse. The dialog passes the template's own ids as `keepIds` so the retired
+member is offered back, marked, and can be removed. This check is NOT in
+`assertTemplateReferences`, which runs at generation and must not reverse
+#338.
+
+**THE MEMBER VALIDATOR IS ONE FUNCTION NOW.** `loadDimensionMembers` lived
+privately in the posting engine and as `validateLineDimensions` in each of the
+invoice and bill modules — three copies of one rule. The fourth caller
+(the template check) is what moved it to `core/dimensions.ts`; the three
+callers delegate. Same lesson as `assertCodableAccounts` the day before.
+
+**A FAILURE NOTE SURVIVES AN EDIT.** "Edited" is not "fixed": a save-time check
+cannot see a closed period, a re-typed account or a retired tax rate. Only the
+template's next clean run clears it, and that is the acceptance test — a
+register-as-income template fails and carries the code; edited to a real
+income account, the next run writes the drafts and clears the note in the same
+UPDATE that advances the schedule.
+
+**`STALE_VERSION` in the sweep now also means "an edit landed between the due
+load and the template's transaction"** — one morning lost, retried tomorrow
+from wherever the edit left `next_run_date`. Still no note, still not a
+failure of the template.
+
+**Tests, each as the invariant it holds:** the backward move over walked months
+is refused and the row untouched, and a forward move lands (mutation-proved —
+delete the guard and it goes red on "resolved instead of rejecting"); a
+never-run template re-dates freely; a
+retired tag is refused on update AND on create through the op, and saves once
+removed (mutation-proved — delete the saveable call); a kind change, an
+unbalanced journal, a stale version and a wrong id are each refused with their
+own code and the row untouched; an inactive supplier is refused at save; and
+the acceptance test above.
+
 ### 2026-09-01 — The sweep leaves a note on the row (`claude/the-sweep-leaves-a-note-on-the-row`)
 
 **Migration `0239`, additive: `recurring_entries.last_error text NOT NULL
@@ -209,7 +301,7 @@ reader that still meant periods was left behind. The emptiness test now asks
 deciding not to return it**, which is the general form of the mistake.
 
 **NOT REACHABLE THROUGH THE SCHEDULE, and fixed anyway.** `advanceMonthly` only
-ever moves forward, `next_run_date` has no backward writer, and nothing else in
+ever moves forward, the one backward writer of `next_run_date` refuses a move over months already generated, and nothing else in
 the repo emits that key prefix. The argument for fixing it is that a count
 whose correctness rests on an unreachability argument is one that goes wrong
 the first time somebody makes it reachable — and this is the figure an operator
@@ -2954,7 +3046,7 @@ compiled-and-tested, not seen.
 - **Recurring entries GENERATE ON THEIR OWN** since 2026-08-13 (`/api/cron/recurring`, 6am in the tenant's zone). ~~What is not built: any way to see the sweep's history in the UI — the counts come back to the cron caller and nowhere else.~~ **Closed 2026-09-01, as two columns rather than a history table:** a template that fails carries the error's CODE in `last_error` and the moment in `last_error_at`, the list shows a `failing` badge with the sentence, and only that template's next clean run clears it. The sweep's aggregate counts still go to the cron caller alone; the per-template note is the surface anybody actually needs. ~~This is what made the retired-tag decision what it was~~ — that decision stands: a dropped tag is a SUCCESS and never lands in `last_error`
 - **A FAILING TEMPLATE IS NOT ON `/dashboard/today` OR IN THE DIGEST.** `attention/source.ts` derives exactly two accounting obligations — overdue invoices and bills awaiting approval. A template carrying `last_error` is the same live-query shape (`recurring_entries WHERE last_error <> ''`) and the surface an owner actually sees at 7am; the list page is only seen by navigating to it. Left open 2026-09-01 on purpose: the note is the fact, the feed is a consumer of it, and the feed's rule (one line per obligation, derived never stored) is its own dossier's to apply
 - ~~**`generateRecurringEntries` counts a record it may not have written.**~~ **Closed 2026-09-01**, in its own PR as it deserved. `created`, `posted` and the deferral now all hang off `PostResult.deduped`, and `periodsWalked` carries the months the loop walked so a gap between the two is visible in the sweep's JSON. It was never reachable through the schedule; it is fixed because a count whose correctness rests on an unreachability argument goes wrong the first time somebody makes it reachable
-- **Recurring journals and bills are DONE** (2026-08-12), and so is **folding `recurring_invoices` into them** (2026-08-12) — the module has ONE recurrence mechanism, one list and one engine. **DONE**: `drizzle/0147` dropped `recurring_invoices` and `invoices.recurring_invoice_id`. **Templates can be born with a dimension tag since 2026-09-01**, on all three kinds, and the list shows what each one carries. What is not built for any kind: **editing a template** — which is why a tag, like an amount and an account, is fixed at creation — and any cadence other than monthly
+- **Recurring journals and bills are DONE** (2026-08-12), and so is **folding `recurring_invoices` into them** (2026-08-12) — the module has ONE recurrence mechanism, one list and one engine. **DONE**: `drizzle/0147` dropped `recurring_invoices` and `invoices.recurring_invoice_id`. **Templates can be born with a dimension tag since 2026-09-01**, on all three kinds, and the list shows what each one carries. ~~What is not built for any kind: **editing a template** — which is why a tag, like an amount and an account, is fixed at creation~~ **Editing landed 2026-09-01** — every field but `kind`, under a version CAS, with the one guard that matters (the next run cannot move back over months already generated). What is not built: any cadence other than monthly
 - **Obligation statuses and the MoneyBar are DONE** (2026-08-12) on the invoice and bill LISTS. What is not built: the same language on the detail pages, and a deposits screen for the two money buckets to link into. **That closes the 2026-08-10 QuickBooks review list.**
 - **Sales tax is DONE** (2026-08-13) — a tenant-owned rate list, per-line taxability, one frozen tax block on the invoice, one Cr to the `sales_tax` account at issue, and a per-rate summary that reconciles against the ledger. Deliberately NOT built, each for a reason in the build log: **tax on bills** (US purchase tax is part of the expense; the regime where it matters is VAT/GST, a different posting model), a **customer-level default rate and tax-exempt flag** (the invoice-level control is live; this is the `resolveTaxRate` signature's obvious next argument, ~30 lines), a **one-click remittance** debiting the tax account (a journal or a bill does it today, and the summary shows the balance to remit), **cash-basis tax**, and **splitting a combined rate into components** for a return that wants state and county separately
 - **`drizzle/0147` closed the last two owed contract migrations** (2026-08-16): the `recurring_invoices` DROP and the `total_cents = subtotal_cents + tax_cents` CHECK. They ran together because both must follow this deploy — the DROP because a live build still selecting a dropped column 500s, the CHECK because it could not precede the deploy that started writing `subtotal_cents`. Nothing is owed in that lane now

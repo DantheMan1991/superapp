@@ -89,6 +89,7 @@ export {
 export {
   archiveDimensionMember,
   listDimensionMembers,
+  loadDimensionMembers,
   upsertDimensionMember,
 } from "./dimensions";
 export { getLedgerIntegrity, type LedgerIntegrity } from "./integrity";

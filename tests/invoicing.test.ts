@@ -30,9 +30,11 @@ import {
 import { agingBucketIndex, buildArAging } from "../src/modules/accounting/invoicing/aging";
 import {
   assertTemplateReferences,
+  assertTemplateSaveable,
   createRecurringEntry,
   generateRecurringEntries,
   noteTemplateFailure,
+  updateRecurringEntry,
 } from "../src/modules/accounting/recurring/generate";
 import {
   createCustomer,
@@ -1602,6 +1604,400 @@ d("invoicing (DB)", () => {
         expect(row.lastErrorAt).not.toBeNull();
         // Still the same version: the note does not count as an edit.
         expect(row.version).toBe(template.version);
+      });
+    });
+
+    describe("a standing instruction can be corrected", () => {
+      /**
+       * **NO UPDATE PATH OF ANY KIND EXISTED UNTIL 2026-09-01.** A wrong
+       * amount, a retired tag, a mis-coded account or a typo in the name meant
+       * pause it and write a new one — and after the failure note landed on the
+       * row (the same day's earlier PR) there was, for the first time,
+       * something visible to correct and no way to correct it.
+       *
+       * The op is a full replace under a version CAS. `kind` is frozen; party
+       * is editable within the kind; `isActive` is not in the SET.
+       */
+      const rowOf = (id: string) =>
+        withTenant(tenantId, (tx) =>
+          tx.query.recurringEntries.findFirst({
+            where: eq(schema.recurringEntries.id, id),
+          }),
+        );
+      const pause = (id: string) =>
+        withTenant(tenantId, (tx) =>
+          tx
+            .update(schema.recurringEntries)
+            .set({ isActive: false })
+            .where(eq(schema.recurringEntries.id, id)),
+        );
+      const journalTemplate = (cash: string, exp: string, cents: number) => ({
+        kind: "journal" as const,
+        lines: [
+          { accountId: exp, amountCents: cents },
+          { accountId: cash, amountCents: -cents },
+        ],
+      });
+
+      it("THE NEXT RUN CANNOT MOVE BACK OVER MONTHS ALREADY GENERATED", async () => {
+        /**
+         * Invoice and bill generation carry no idempotency key — they always
+         * insert — so a next-run moved from October back to June would make
+         * the next sweep create four more invoices for months already
+         * invoiced. The stored `next_run_date` IS the walked frontier, written
+         * with `last_generated_at` under the version CAS. Delete the guard in
+         * the op and this goes red.
+         */
+        const cash = await accountId("1000");
+        const exp = await accountId("6700");
+        const row = await addTemplate({
+          kind: "journal",
+          name: "Edited — walked",
+          nextRunDate: "2026-06-04",
+          template: journalTemplate(cash, exp, 1_300),
+        });
+        await generateRecurringEntries(owner);
+        const walked = (await rowOf(row.id))!;
+        await pause(row.id);
+        expect(walked.lastGeneratedAt).not.toBeNull();
+        expect(walked.nextRunDate > "2026-06-04").toBe(true);
+
+        await expect(
+          withTenant(tenantId, (tx) =>
+            updateRecurringEntry(tx, owner, {
+              id: row.id,
+              expectedVersion: walked.version,
+              name: walked.name,
+              dayOfMonth: 4,
+              nextRunDate: "2026-06-04",
+              template: journalTemplate(cash, exp, 1_300),
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "RECURRING_SCHEDULE_BACKWARD" });
+        // Refused means untouched — same version, same frontier.
+        const after = (await rowOf(row.id))!;
+        expect(after.version).toBe(walked.version);
+        expect(after.nextRunDate).toBe(walked.nextRunDate);
+
+        // Forward is fine — pause-and-resume already does that.
+        const moved = await withTenant(tenantId, (tx) =>
+          updateRecurringEntry(tx, owner, {
+            id: row.id,
+            expectedVersion: walked.version,
+            name: walked.name,
+            dayOfMonth: 4,
+            nextRunDate: "2027-01-04",
+            template: journalTemplate(cash, exp, 1_300),
+          }),
+        );
+        expect(moved.after.nextRunDate).toBe("2027-01-04");
+        expect(moved.after.version).toBe(walked.version + 1);
+      });
+
+      it("a template that has never run may be re-dated freely", async () => {
+        const cash = await accountId("1000");
+        const exp = await accountId("6700");
+        const row = await addTemplate({
+          kind: "journal",
+          name: "Edited — never ran",
+          nextRunDate: "2027-06-04",
+          isActive: false,
+          template: journalTemplate(cash, exp, 100),
+        });
+        expect(row.lastGeneratedAt).toBeNull();
+        const { after } = await withTenant(tenantId, (tx) =>
+          updateRecurringEntry(tx, owner, {
+            id: row.id,
+            expectedVersion: row.version,
+            name: row.name,
+            dayOfMonth: 4,
+            nextRunDate: "2026-01-04",
+            template: journalTemplate(cash, exp, 100),
+          }),
+        );
+        expect(after.nextRunDate).toBe("2026-01-04");
+      });
+
+      it("A RETIRED TAG IS REFUSED AT SAVE — on update, and on create through the op", async () => {
+        /**
+         * Generation DROPS a retired tag (#338) because failing inside the
+         * sweep is failing silently. A save is the one moment somebody can
+         * see the tag and take it off, so a save that still names it is
+         * refused, exactly as the invoice and bill edit pages refuse. This is
+         * `assertTemplateSaveable`, and deliberately NOT
+         * `assertTemplateReferences`, which runs at 6am. Delete the saveable
+         * call from either op and its half goes red.
+         */
+        const cash = await accountId("1000");
+        const exp = await accountId("6700");
+        const gone = await withTenant(tenantId, (tx) =>
+          upsertDimensionMember(tx, owner, {
+            dimensionType: "enterprise",
+            packEntityId: crypto.randomUUID(),
+            displayName: "Wound up (edit)",
+          }),
+        );
+        const row = await addTemplate({
+          kind: "journal",
+          name: "Edited — retired tag",
+          nextRunDate: "2027-06-04",
+          isActive: false,
+          template: {
+            kind: "journal",
+            lines: [
+              { accountId: exp, amountCents: 500, dimensionMemberIds: [gone.id] },
+              { accountId: cash, amountCents: -500 },
+            ],
+          },
+        });
+        await withTenant(tenantId, (tx) =>
+          archiveDimensionMember(tx, owner, { memberId: gone.id }),
+        );
+
+        const stillTagged = {
+          kind: "journal" as const,
+          lines: [
+            { accountId: exp, amountCents: 500, dimensionMemberIds: [gone.id] },
+            { accountId: cash, amountCents: -500 },
+          ],
+        };
+        await expect(
+          withTenant(tenantId, (tx) =>
+            updateRecurringEntry(tx, owner, {
+              id: row.id,
+              expectedVersion: row.version,
+              name: row.name,
+              dayOfMonth: 4,
+              nextRunDate: "2027-06-04",
+              template: stillTagged,
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "DIMENSION_INVALID" });
+        await expect(
+          withTenant(tenantId, (tx) =>
+            createRecurringEntry(tx, owner, {
+              name: "Created — retired tag",
+              dayOfMonth: 4,
+              nextRunDate: "2027-06-04",
+              template: stillTagged,
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "DIMENSION_INVALID" });
+
+        // Taken off, it saves — and the sweep would have dropped it anyway.
+        const { after } = await withTenant(tenantId, (tx) =>
+          updateRecurringEntry(tx, owner, {
+            id: row.id,
+            expectedVersion: row.version,
+            name: row.name,
+            dayOfMonth: 4,
+            nextRunDate: "2027-06-04",
+            template: journalTemplate(cash, exp, 500),
+          }),
+        );
+        expect(after.version).toBe(row.version + 1);
+      });
+
+      it("refuses a kind change, an inactive party, an unbalanced journal, a stale version and a wrong id", async () => {
+        const cash = await accountId("1000");
+        const exp = await accountId("6700");
+        const row = await addTemplate({
+          kind: "journal",
+          name: "Edited — refusals",
+          nextRunDate: "2027-06-04",
+          isActive: false,
+          template: journalTemplate(cash, exp, 250),
+        });
+        const base = {
+          id: row.id,
+          expectedVersion: row.version,
+          name: row.name,
+          dayOfMonth: 4,
+          nextRunDate: "2027-06-04",
+        };
+
+        // kind is fixed
+        const kindVendor = await newVendor("Kind change");
+        await expect(
+          withTenant(tenantId, (tx) =>
+            updateRecurringEntry(tx, owner, {
+              ...base,
+              vendorId: kindVendor,
+              template: {
+                kind: "bill",
+                dueInDays: 30,
+                lines: [{ description: "x", amountCents: 250, accountId: exp }],
+              },
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "RECURRING_TEMPLATE_INVALID" });
+
+        // the same parse the sweep does: a journal that does not balance
+        await expect(
+          withTenant(tenantId, (tx) =>
+            updateRecurringEntry(tx, owner, {
+              ...base,
+              template: {
+                kind: "journal",
+                lines: [
+                  { accountId: exp, amountCents: 250 },
+                  { accountId: cash, amountCents: -240 },
+                ],
+              },
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "RECURRING_TEMPLATE_INVALID" });
+
+        // stale version: refused and untouched
+        await expect(
+          withTenant(tenantId, (tx) =>
+            updateRecurringEntry(tx, owner, {
+              ...base,
+              expectedVersion: row.version + 5,
+              name: "Should not land",
+              template: journalTemplate(cash, exp, 250),
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "STALE_VERSION" });
+        expect((await rowOf(row.id))!.name).toBe("Edited — refusals");
+
+        // wrong id
+        await expect(
+          withTenant(tenantId, (tx) =>
+            updateRecurringEntry(tx, owner, {
+              ...base,
+              id: crypto.randomUUID(),
+              template: journalTemplate(cash, exp, 250),
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "RECURRING_NOT_FOUND" });
+
+        // an inactive party, which used to surface only at 6am
+        const vendorId = await newVendor("Retired supplier");
+        const bill = await addTemplate({
+          kind: "bill",
+          name: "Edited — dead supplier",
+          vendorId,
+          nextRunDate: "2027-06-04",
+          isActive: false,
+          template: {
+            kind: "bill",
+            dueInDays: 30,
+            lines: [{ description: "Feed", amountCents: 900, accountId: exp }],
+          },
+        });
+        await withTenant(tenantId, (tx) =>
+          tx
+            .update(schema.vendors)
+            .set({ isActive: false })
+            .where(eq(schema.vendors.id, vendorId)),
+        );
+        await expect(
+          withTenant(tenantId, (tx) =>
+            updateRecurringEntry(tx, owner, {
+              id: bill.id,
+              expectedVersion: bill.version,
+              name: bill.name,
+              vendorId,
+              dayOfMonth: 4,
+              nextRunDate: "2027-06-04",
+              template: {
+                kind: "bill",
+                dueInDays: 30,
+                lines: [{ description: "Feed", amountCents: 950, accountId: exp }],
+              },
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "VENDOR_INACTIVE" });
+        await expect(
+          withTenant(tenantId, (tx) =>
+            assertTemplateSaveable(tx, tenantId, {
+              vendorId,
+              template: {
+                kind: "bill",
+                dueInDays: 30,
+                lines: [{ description: "Feed", amountCents: 950, accountId: exp }],
+              },
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "VENDOR_INACTIVE" });
+      });
+
+      it("THE ACCEPTANCE TEST: a failing template is edited, generates clean, and the note clears", async () => {
+        /**
+         * The two open items were one problem seen from both ends: the note
+         * says a template is broken, the edit is how it gets fixed. A
+         * register-as-income template fails and carries the code; edited to a
+         * real income account, the next run writes the draft and clears the
+         * note in the same UPDATE that advances the schedule.
+         */
+        const bank = await withTenant(tenantId, (tx) =>
+          createBankAccount(tx, owner, { name: "Fixed Checking", kind: "checking" }),
+        );
+        const sales = await accountId("4000");
+        const row = await addTemplate({
+          kind: "invoice",
+          name: "Edited — fixed",
+          customerId,
+          nextRunDate: "2026-06-04",
+          template: {
+            kind: "invoice",
+            dueInDays: 30,
+            lines: [
+              {
+                description: "Rent",
+                quantity: "1",
+                unitPriceCents: 10_000,
+                incomeAccountId: bank.ledgerAccount.id,
+              },
+            ],
+          },
+        });
+        await generateRecurringEntries(owner);
+        const failed = (await rowOf(row.id))!;
+        expect(failed.lastError).toBe("ACCOUNT_NOT_CODABLE");
+        expect(failed.nextRunDate).toBe("2026-06-04");
+
+        const { after } = await withTenant(tenantId, (tx) =>
+          updateRecurringEntry(tx, owner, {
+            id: row.id,
+            expectedVersion: failed.version,
+            name: failed.name,
+            customerId,
+            dayOfMonth: 4,
+            nextRunDate: failed.nextRunDate,
+            template: {
+              kind: "invoice",
+              dueInDays: 30,
+              lines: [
+                {
+                  description: "Rent",
+                  quantity: "1",
+                  unitPriceCents: 10_000,
+                  incomeAccountId: sales,
+                },
+              ],
+            },
+          }),
+        );
+        // An edit does NOT clear the note — "edited" is not "fixed".
+        expect(after.lastError).toBe("ACCOUNT_NOT_CODABLE");
+
+        await generateRecurringEntries(owner);
+        await pause(row.id);
+        const fixed = (await rowOf(row.id))!;
+        expect(fixed.lastError).toBe("");
+        expect(fixed.lastErrorAt).toBeNull();
+        expect(fixed.nextRunDate > "2026-06-04").toBe(true);
+        const drafts = await withTenant(tenantId, (tx) =>
+          tx.query.invoices.findMany({
+            where: and(
+              eq(schema.invoices.tenantId, tenantId),
+              eq(schema.invoices.recurringEntryId, row.id),
+            ),
+          }),
+        );
+        expect(drafts.length).toBeGreaterThanOrEqual(3);
       });
     });
 

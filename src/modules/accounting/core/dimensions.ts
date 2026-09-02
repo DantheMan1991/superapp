@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { DimensionMember } from "@/db/schema";
 import { LedgerError } from "./errors";
@@ -11,6 +11,56 @@ import type { LedgerCtx } from "./types";
  * cost codes…) into dimension_members in the SAME transaction as their own
  * entity CRUD — the core never imports pack tables.
  */
+
+/**
+ * **THE ONE MEMBER VALIDATOR.** Every id must name a member that exists and is
+ * active, and no line may carry two members of one dimension type. Returns the
+ * members by id so a caller can read each one's type.
+ *
+ * Lifted here on 2026-09-01 from three private copies — the posting engine's
+ * `loadDimensionMembers`, and a `validateLineDimensions` in each of the invoice
+ * and bill modules — on the day a fourth caller arrived (a recurring template
+ * checked at save). Three copies of one rule is how one of them drifts; the
+ * codable-account check learnt the same lesson the same day.
+ */
+export async function loadDimensionMembers(
+  tx: Tx,
+  tenantId: string,
+  lines: ReadonlyArray<{ dimensionMemberIds?: string[] }>,
+): Promise<Map<string, DimensionMember>> {
+  const allIds = [...new Set(lines.flatMap((l) => l.dimensionMemberIds ?? []))];
+  if (allIds.length === 0) return new Map();
+  const rows = await tx
+    .select()
+    .from(schema.dimensionMembers)
+    .where(
+      and(
+        eq(schema.dimensionMembers.tenantId, tenantId),
+        inArray(schema.dimensionMembers.id, allIds),
+      ),
+    );
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  for (const id of allIds) {
+    const member = byId.get(id);
+    if (!member || !member.isActive) {
+      throw new LedgerError("DIMENSION_INVALID", `dimension member ${id} invalid`);
+    }
+  }
+  for (const line of lines) {
+    const types = new Set<string>();
+    for (const id of line.dimensionMemberIds ?? []) {
+      const t = byId.get(id)!.dimensionType;
+      if (types.has(t)) {
+        throw new LedgerError(
+          "DIMENSION_INVALID",
+          `line tags two members of dimension type ${t}`,
+        );
+      }
+      types.add(t);
+    }
+  }
+  return byId;
+}
 
 /** Read helper for report selectors and column labels. */
 export async function listDimensionMembers(

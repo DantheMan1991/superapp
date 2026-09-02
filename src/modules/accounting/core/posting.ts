@@ -13,6 +13,7 @@ import {
   requireOwnerRole,
   requirePostingRight,
 } from "./guards";
+import { loadDimensionMembers } from "./dimensions";
 import type { EntryLineInput, LedgerCtx, NewEntryInput, PostResult } from "./types";
 
 /**
@@ -161,51 +162,9 @@ async function assertNoForeignRegisters(
   }
 }
 
-/**
- * Validate dimension member ids and return a map id -> member. Also
- * enforces at most one member per dimension type per line (the DB unique
- * is the backstop; this gives a friendly error first).
- */
-async function loadDimensionMembers(
-  tx: Tx,
-  tenantId: string,
-  lines: EntryLineInput[],
-): Promise<Map<string, DimensionMember>> {
-  const allIds = [
-    ...new Set(lines.flatMap((l) => l.dimensionMemberIds ?? [])),
-  ];
-  if (allIds.length === 0) return new Map();
-  const rows = await tx
-    .select()
-    .from(schema.dimensionMembers)
-    .where(
-      and(
-        eq(schema.dimensionMembers.tenantId, tenantId),
-        inArray(schema.dimensionMembers.id, allIds),
-      ),
-    );
-  const byId = new Map(rows.map((r) => [r.id, r]));
-  for (const id of allIds) {
-    const member = byId.get(id);
-    if (!member || !member.isActive) {
-      throw new LedgerError("DIMENSION_INVALID", `dimension member ${id} invalid`);
-    }
-  }
-  for (const line of lines) {
-    const types = new Set<string>();
-    for (const id of line.dimensionMemberIds ?? []) {
-      const t = byId.get(id)!.dimensionType;
-      if (types.has(t)) {
-        throw new LedgerError(
-          "DIMENSION_INVALID",
-          `line tags two members of dimension type ${t}`,
-        );
-      }
-      types.add(t);
-    }
-  }
-  return byId;
-}
+// `loadDimensionMembers` lives in ./dimensions since 2026-09-01 — one
+// validator for the posting engine, the invoice and bill lines, and a
+// recurring template checked at save.
 
 async function insertLines(
   tx: Tx,

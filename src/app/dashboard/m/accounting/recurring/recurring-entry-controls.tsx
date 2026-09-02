@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Play, Trash2 } from "lucide-react";
+import { Pencil, Plus, Play, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,13 +27,18 @@ import {
   createRecurringEntryAction,
   generateRecurringEntriesAction,
   setRecurringEntryActiveAction,
+  updateRecurringEntryAction,
 } from "@/modules/accounting/recurring/actions";
-import { journalTemplateImbalanceCents } from "@/modules/accounting/recurring/template";
+import {
+  journalTemplateImbalanceCents,
+  type RecurringEntryTemplate,
+} from "@/modules/accounting/recurring/template";
 import {
   DimensionTags,
   type DimensionTypeOption,
 } from "@/components/app/dimension-tags";
 import {
+  formatCents,
   formatCentsSigned,
   parseMoneyToCents,
 } from "@/modules/accounting/lib/money";
@@ -51,6 +56,10 @@ interface PartyOption {
 
 /** One row of an invoice template — its own shape, because an invoice line
  *  carries a quantity and a unit price where a bill line carries a total. */
+type InvoiceTemplateLine = Extract<RecurringEntryTemplate, { kind: "invoice" }>["lines"][number];
+type JournalTemplateLine = Extract<RecurringEntryTemplate, { kind: "journal" }>["lines"][number];
+type BillTemplateLine = Extract<RecurringEntryTemplate, { kind: "bill" }>["lines"][number];
+
 interface InvoiceRow {
   key: string;
   description: string;
@@ -58,16 +67,20 @@ interface InvoiceRow {
   unitPrice: string;
   incomeAccountId: string;
   /**
-   * **REQUIRED, NOT OPTIONAL** — as compiler pressure, not as protection.
-   *
-   * The round-trip rule that made this required on the invoice, bill and
-   * journal builders has NO TARGET here: nothing ever reads a template back
-   * into this form, because there is no update action. What the required field
-   * still buys is that `submit()` cannot construct a line without answering
-   * the question, on all three kinds, which is how the previous three PRs
-   * found the construction sites they had missed.
+   * **REQUIRED, NOT OPTIONAL.** The round-trip rule that made this required on
+   * the invoice, bill and journal builders has a target here now: an existing
+   * template is read back into this form, carried, and sent again — so a row
+   * shape that could omit it would wipe every tag on the first edit. Required
+   * puts every construction site in front of the compiler.
    */
   dimensionMemberIds: string[];
+  /**
+   * **THE LINE AS STORED, when editing.** Edits are OVERLAID on it at submit
+   * rather than rebuilding the line from what this form renders — so a field
+   * the dialog has no control for (`isTaxable`, a line `memo`) survives a save
+   * without a rule resting on "no writer exists for it".
+   */
+  loaded?: InvoiceTemplateLine;
 }
 
 const emptyInvoiceRow = (): InvoiceRow => ({
@@ -79,6 +92,16 @@ const emptyInvoiceRow = (): InvoiceRow => ({
   dimensionMemberIds: [],
 });
 
+const invoiceRowFrom = (l: InvoiceTemplateLine): InvoiceRow => ({
+  key: crypto.randomUUID(),
+  description: l.description,
+  quantity: l.quantity,
+  unitPrice: formatCents(l.unitPriceCents).replaceAll(",", ""),
+  incomeAccountId: l.incomeAccountId,
+  dimensionMemberIds: l.dimensionMemberIds ?? [],
+  loaded: l,
+});
+
 interface JournalRow {
   key: string;
   accountId: string;
@@ -86,6 +109,8 @@ interface JournalRow {
   credit: boolean;
   /** See `InvoiceRow.dimensionMemberIds`. */
   dimensionMemberIds: string[];
+  /** See `InvoiceRow.loaded`. */
+  loaded?: JournalTemplateLine;
 }
 
 const emptyRow = (accountId: string): JournalRow => ({
@@ -95,6 +120,29 @@ const emptyRow = (accountId: string): JournalRow => ({
   credit: false,
   dimensionMemberIds: [],
 });
+
+const journalRowFrom = (l: JournalTemplateLine): JournalRow => ({
+  key: crypto.randomUUID(),
+  accountId: l.accountId,
+  amount: formatCents(Math.abs(l.amountCents)).replaceAll(",", ""),
+  credit: l.amountCents < 0,
+  dimensionMemberIds: l.dimensionMemberIds ?? [],
+  loaded: l,
+});
+
+/** What the list hands the dialog to edit. Parsed by the page; a broken row gets no Edit. */
+export interface ExistingRecurringEntry {
+  id: string;
+  version: number;
+  kind: "invoice" | "bill" | "journal";
+  name: string;
+  dayOfMonth: number;
+  nextRunDate: string;
+  autoPost: boolean;
+  vendorId: string | null;
+  customerId: string | null;
+  template: RecurringEntryTemplate;
+}
 
 export function GenerateRecurringEntriesButton() {
   const router = useRouter();
@@ -195,14 +243,21 @@ export function RecurringEntryToggle({
 }
 
 /**
- * Creating a recurring invoice, bill or journal.
+ * Creating — or, since 2026-09-01, editing — a recurring invoice, bill or
+ * journal. One dialog per row when editing, the `VendorDialogButton` shape.
  *
  * The journal side shows a running imbalance as you type, because an entry
  * that does not balance is refused at save — and finding that out after
  * filling in six lines, from a red toast, is a worse way to learn it than a
  * number that is visibly not zero.
+ *
+ * **EDIT IS AN OVERLAY, NOT A REBUILD.** Every row keeps the line as stored
+ * (`loaded`) and the template keeps its stored top level, and submit spreads
+ * those first and the edited fields over them. So `memo`, `entityId`,
+ * `taxRateId`, a line's `isTaxable` — none of which this dialog has a control
+ * for — survive a save that changed only an amount.
  */
-export function AddRecurringEntryButton({
+export function RecurringEntryDialogButton({
   journalAccounts,
   incomeAccounts,
   codableAccounts,
@@ -210,6 +265,7 @@ export function AddRecurringEntryButton({
   customers,
   today,
   dimensionTypes = [],
+  existing,
 }: {
   /** A journal may touch anything. */
   journalAccounts: AccountOption[];
@@ -224,32 +280,48 @@ export function AddRecurringEntryButton({
    * Active members grouped by type, from `dimensionTypesFrom`. Empty renders no
    * tag control at all.
    *
-   * **NO `keepIds`, unlike every other surface that passes this.** The three
-   * that do are re-opening a stored record and have to offer a retired member
-   * the record already holds, so it can be taken off. This dialog only ever
-   * CREATES — so every member it offers is one somebody is choosing today, and
-   * a retired one has no business being among them.
+   * When CREATING, no `keepIds`: every member offered is one somebody is
+   * choosing today. When EDITING, the page passes that template's own ids as
+   * `keepIds`, so a retired member the template already holds is offered,
+   * marked, and can be taken off — the same reason the invoice and bill edit
+   * pages do it. A save that still names a retired member is refused, so the
+   * only way to save is to see the tag and remove it.
    */
   dimensionTypes?: DimensionTypeOption[];
+  /** When set, the dialog edits this template instead of creating one. */
+  existing?: ExistingRecurringEntry;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [kind, setKind] = useState<"invoice" | "bill" | "journal">("invoice");
-  const [name, setName] = useState("");
-  const [dayOfMonth, setDayOfMonth] = useState("1");
-  const [nextRunDate, setNextRunDate] = useState(today);
-  const [autoPost, setAutoPost] = useState(false);
-  const [vendorId, setVendorId] = useState(vendors[0]?.id ?? "");
-  const [customerId, setCustomerId] = useState(customers[0]?.id ?? "");
-  const [dueInDays, setDueInDays] = useState("30");
-  const [rows, setRows] = useState<JournalRow[]>([
-    emptyRow(journalAccounts[0]?.id ?? ""),
-    emptyRow(journalAccounts[0]?.id ?? ""),
-  ]);
-  const [billDesc, setBillDesc] = useState("");
-  const [billAmount, setBillAmount] = useState("");
-  const [billAccountId, setBillAccountId] = useState("");
+  const stored = existing?.template;
+  const storedBill = stored?.kind === "bill" ? stored.lines[0] : undefined;
+  // `kind` is FIXED once a template exists — the database ties party to kind
+  // and invoices point back at an invoice template. The select is hidden.
+  const [kind, setKind] = useState<"invoice" | "bill" | "journal">(
+    existing?.kind ?? "invoice",
+  );
+  const [name, setName] = useState(existing?.name ?? "");
+  const [dayOfMonth, setDayOfMonth] = useState(String(existing?.dayOfMonth ?? 1));
+  const [nextRunDate, setNextRunDate] = useState(existing?.nextRunDate ?? today);
+  const [autoPost, setAutoPost] = useState(existing?.autoPost ?? false);
+  const [vendorId, setVendorId] = useState(existing?.vendorId ?? vendors[0]?.id ?? "");
+  const [customerId, setCustomerId] = useState(
+    existing?.customerId ?? customers[0]?.id ?? "",
+  );
+  const [dueInDays, setDueInDays] = useState(
+    String(stored && stored.kind !== "journal" ? stored.dueInDays : 30),
+  );
+  const [rows, setRows] = useState<JournalRow[]>(
+    stored?.kind === "journal"
+      ? stored.lines.map(journalRowFrom)
+      : [emptyRow(journalAccounts[0]?.id ?? ""), emptyRow(journalAccounts[0]?.id ?? "")],
+  );
+  const [billDesc, setBillDesc] = useState(storedBill?.description ?? "");
+  const [billAmount, setBillAmount] = useState(
+    storedBill ? formatCents(storedBill.amountCents).replaceAll(",", "") : "",
+  );
+  const [billAccountId, setBillAccountId] = useState(storedBill?.accountId ?? "");
   /**
    * **ONE TAG FOR THE WHOLE BILL TEMPLATE, and that is the shape, not a
    * shortcut.** This dialog builds a bill template of exactly one line
@@ -259,10 +331,12 @@ export function AddRecurringEntryButton({
    * a tagging change, and it would land a new row grid inside a dialog that has
    * no horizontal overflow to give it.
    */
-  const [billTags, setBillTags] = useState<string[]>([]);
-  const [invoiceRows, setInvoiceRows] = useState<InvoiceRow[]>([
-    emptyInvoiceRow(),
-  ]);
+  const [billTags, setBillTags] = useState<string[]>(
+    storedBill?.dimensionMemberIds ?? [],
+  );
+  const [invoiceRows, setInvoiceRows] = useState<InvoiceRow[]>(
+    stored?.kind === "invoice" ? stored.lines.map(invoiceRowFrom) : [emptyInvoiceRow()],
+  );
 
   const parsedRows = rows.map((r) => {
     const cents = parseMoneyToCents(r.amount);
@@ -283,64 +357,75 @@ export function AddRecurringEntryButton({
       return;
     }
 
-    const template =
+    // Undefined rather than an empty array, and set AFTER the overlay: the
+    // field is optional in the schema, an absent one stores nothing, and a
+    // tag the person just took off must not come back from the stored line.
+    const tags = (ids: string[]) => (ids.length ? ids : undefined);
+
+    const template: RecurringEntryTemplate =
       kind === "journal"
         ? {
+            ...(stored?.kind === "journal" ? stored : {}),
             kind: "journal" as const,
             lines: usable.map((p) => ({
+              ...(p.row.loaded ?? {}),
               accountId: p.row.accountId,
               amountCents: p.cents!,
-              // Undefined rather than an empty array: the field is optional in
-              // the template schema, and an absent one stores nothing.
-              ...(p.row.dimensionMemberIds.length
-                ? { dimensionMemberIds: p.row.dimensionMemberIds }
-                : {}),
+              dimensionMemberIds: tags(p.row.dimensionMemberIds),
             })),
           }
         : kind === "invoice"
           ? {
+              ...(stored?.kind === "invoice" ? stored : {}),
               kind: "invoice" as const,
               dueInDays: Number(dueInDays) || 0,
               lines: invoiceRows.map((r) => ({
+                ...(r.loaded ?? {}),
                 description: r.description.trim(),
                 quantity: r.quantity.trim(),
                 unitPriceCents: parseMoneyToCents(r.unitPrice) ?? 0,
                 incomeAccountId: r.incomeAccountId,
-                ...(r.dimensionMemberIds.length
-                  ? { dimensionMemberIds: r.dimensionMemberIds }
-                  : {}),
+                dimensionMemberIds: tags(r.dimensionMemberIds),
               })),
             }
           : {
+              ...(stored?.kind === "bill" ? stored : {}),
               kind: "bill" as const,
               dueInDays: Number(dueInDays) || 0,
               lines: [
                 {
+                  ...((storedBill ?? {}) as Partial<BillTemplateLine>),
                   description: billDesc.trim(),
                   amountCents: parseMoneyToCents(billAmount) ?? 0,
                   accountId: billAccountId || null,
-                  ...(billTags.length
-                    ? { dimensionMemberIds: billTags }
-                    : {}),
+                  dimensionMemberIds: tags(billTags),
                 },
               ],
             };
 
+    const payload = {
+      name: name.trim(),
+      vendorId: kind === "bill" ? vendorId : null,
+      customerId: kind === "invoice" ? customerId : null,
+      dayOfMonth: day,
+      nextRunDate,
+      autoPost: kind === "journal" ? autoPost : false,
+      template,
+    };
+
     startTransition(async () => {
-      const result = await createRecurringEntryAction({
-        name: name.trim(),
-        vendorId: kind === "bill" ? vendorId : null,
-        customerId: kind === "invoice" ? customerId : null,
-        dayOfMonth: day,
-        nextRunDate,
-        autoPost: kind === "journal" ? autoPost : false,
-        template,
-      });
+      const result = existing
+        ? await updateRecurringEntryAction({
+            ...payload,
+            id: existing.id,
+            expectedVersion: existing.version,
+          })
+        : await createRecurringEntryAction(payload);
       if ("error" in result) {
         toast.error(result.error);
         return;
       }
-      toast.success(`Recurring ${kind} added`);
+      toast.success(existing ? `Recurring ${kind} updated` : `Recurring ${kind} added`);
       setOpen(false);
       router.refresh();
     });
@@ -366,40 +451,51 @@ export function AddRecurringEntryButton({
 
   return (
     <>
-      <Button size="sm" onClick={() => setOpen(true)}>
-        <Plus className="mr-1.5 size-4" /> Add recurring
-      </Button>
+      {existing ? (
+        <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
+          <Pencil className="mr-1.5 size-4" /> Edit
+        </Button>
+      ) : (
+        <Button size="sm" onClick={() => setOpen(true)}>
+          <Plus className="mr-1.5 size-4" /> Add recurring
+        </Button>
+      )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Add a recurring entry</DialogTitle>
+            <DialogTitle>
+              {existing ? "Edit recurring entry" : "Add a recurring entry"}
+            </DialogTitle>
             <DialogDescription>
-              Runs once a month. Catch-up creates one entry per missed month,
-              dated to that month rather than to today.
+              {existing
+                ? "Changes apply from the next run. The next run cannot move back over months already generated."
+                : "Runs once a month. Catch-up creates one entry per missed month, dated to that month rather than to today."}
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-3 py-1">
             <div className="grid gap-3 sm:grid-cols-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="rec-kind">Type</Label>
-                <Select
-                  value={kind}
-                  onValueChange={(v) =>
-                    setKind(v as "invoice" | "bill" | "journal")
-                  }
-                >
-                  <SelectTrigger id="rec-kind">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="invoice">Invoice</SelectItem>
-                    <SelectItem value="bill">Bill</SelectItem>
-                    <SelectItem value="journal">Journal entry</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5 sm:col-span-2">
+              {!existing && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="rec-kind">Type</Label>
+                  <Select
+                    value={kind}
+                    onValueChange={(v) =>
+                      setKind(v as "invoice" | "bill" | "journal")
+                    }
+                  >
+                    <SelectTrigger id="rec-kind">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="invoice">Invoice</SelectItem>
+                      <SelectItem value="bill">Bill</SelectItem>
+                      <SelectItem value="journal">Journal entry</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <div className={existing ? "space-y-1.5 sm:col-span-3" : "space-y-1.5 sm:col-span-2"}>
                 <Label htmlFor="rec-name">Name</Label>
                 <Input
                   id="rec-name"
@@ -430,7 +526,7 @@ export function AddRecurringEntryButton({
                 </p>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="rec-next">First run</Label>
+                <Label htmlFor="rec-next">{existing ? "Next run" : "First run"}</Label>
                 <Input
                   id="rec-next"
                   type="date"
@@ -775,7 +871,13 @@ export function AddRecurringEntryButton({
 
           <DialogFooter>
             <Button onClick={submit} disabled={pending || !canSubmit}>
-              {pending ? "Adding…" : "Add recurring"}
+              {pending
+                ? existing
+                  ? "Saving…"
+                  : "Adding…"
+                : existing
+                  ? "Save changes"
+                  : "Add recurring"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -236,7 +236,7 @@ dd("the real sources, against Postgres", () => {
       "../src/modules/accounting/attention/source"
     );
 
-    // Owner: both queries actually run against Postgres. Zero rows is a pass —
+    // Owner: all three queries actually run against Postgres. Zero rows is a pass —
     // an invalid query would reject here rather than return empty.
     const owner = await withTenant(
       tenantId,
@@ -271,10 +271,14 @@ dd("the real sources, against Postgres", () => {
      * list — a page nobody opens unless they already suspect something. This
      * is the same fact on the surface an owner actually reads at 7am.
      *
-     * Three rows, one item. The paused one carries a note too (pausing does
+     * Five rows, two items. The paused one carries a note too (pausing does
      * not clear it, by design) but is not asked to run, so nothing is owed on
      * it — drop the `is_active` filter from the query and this goes red. The
-     * clean one proves the note is the trigger, not the table.
+     * re-dated one carries a note AND a future date — the ordinary recovery,
+     * fix the cause and skip the month — and is parked, not owed: drop the
+     * `next_run_date <= today` bound and this goes red. The clean one proves
+     * the note is the trigger, not the table. The one dated today is "today",
+     * as an invoice due today is not yet late.
      */
     const { withTenant, schema } = await import("../src/db");
     const { accountingAttentionSource } = await import(
@@ -304,7 +308,11 @@ dd("the real sources, against Postgres", () => {
       name: "Monthly depreciation",
       nextRunDate: "2026-08-04",
       lastError: "ACCOUNT_INACTIVE",
-      lastErrorAt: new Date("2026-08-04T11:00:00Z"),
+      // Deliberately NOT the same day as next_run_date, so the `dueOn`
+      // assertion below can tell the two columns apart. Also the realistic
+      // state: the sweep retries a due template every morning and re-stamps
+      // this each time.
+      lastErrorAt: new Date("2026-08-06T11:00:00Z"),
     });
     await seed({
       name: "Paused, and failing",
@@ -314,6 +322,18 @@ dd("the real sources, against Postgres", () => {
       isActive: false,
     });
     await seed({ name: "Clean", nextRunDate: "2026-09-04" });
+    await seed({
+      name: "Re-dated after the fix",
+      nextRunDate: "2026-09-04",
+      lastError: "ACCOUNT_INACTIVE",
+      lastErrorAt: new Date("2026-08-04T11:00:00Z"),
+    });
+    const thisMorning = await seed({
+      name: "Fails this morning",
+      nextRunDate: "2026-08-06",
+      lastError: "ACCOUNT_INACTIVE",
+      lastErrorAt: new Date("2026-08-06T11:00:00Z"),
+    });
 
     const ctx = { tenantId, userId: "user_1", today: "2026-08-06" } as const;
     const owner = await withTenant(
@@ -324,22 +344,29 @@ dd("the real sources, against Postgres", () => {
     );
     expect(owner.complete).toBe(true);
     const recurring = owner.items.filter((i) => i.key.startsWith("recurring:"));
-    expect(recurring).toEqual([
-      {
-        key: `recurring:${failing.id}`,
-        title: 'Recurring journal "Monthly depreciation" could not run',
-        // The same sentence the list page shows for the code — the two
-        // surfaces cannot disagree about why.
-        detail: failureSentence("ACCOUNT_INACTIVE"),
-        urgency: "overdue",
-        // The sweep does not move the date on a failure, so this is the
-        // period that was due and was not written.
-        dueOn: "2026-08-04",
-        href: `/dashboard/m/accounting/recurring#${failing.id}`,
-      },
-    ]);
+    expect(recurring.map((i) => i.key).sort()).toEqual(
+      [`recurring:${failing.id}`, `recurring:${thisMorning.id}`].sort(),
+    );
+    const overdue = recurring.find((i) => i.key === `recurring:${failing.id}`);
+    expect(overdue).toEqual({
+      key: `recurring:${failing.id}`,
+      title: 'Recurring journal "Monthly depreciation" could not run, 2 days behind',
+      // The same sentence the list page shows for the code — the two
+      // surfaces cannot disagree about why.
+      detail: failureSentence("ACCOUNT_INACTIVE"),
+      urgency: "overdue",
+      // The sweep does not move the date on a failure, so this is the
+      // period that was due and was not written.
+      dueOn: "2026-08-04",
+      href: `/dashboard/m/accounting/recurring#${failing.id}`,
+    });
     // A real sentence, not the fallback for a code nobody mapped.
-    expect(recurring[0].detail).not.toMatch(/could not name/);
+    expect(overdue!.detail).not.toMatch(/could not name/);
+    expect(recurring.find((i) => i.key === `recurring:${thisMorning.id}`)).toMatchObject({
+      title: 'Recurring journal "Fails this morning" could not run today',
+      urgency: "today",
+      dueOn: "2026-08-06",
+    });
 
     // Owners only, like the two obligations beside it: no assignee column.
     const staff = await withTenant(

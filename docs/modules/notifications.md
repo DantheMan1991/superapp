@@ -14,10 +14,11 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 
 ### 2026-09-02 — Accounting's third item: a failing recurring template (branch `claude/a-failing-template-is-somebodys-obligation`)
 
-Accounting now contributes a third obligation, still owners only: an ACTIVE
-recurring template whose 6am run failed (`recurring_entries.last_error <> ''`),
-as an overdue item dated the period that was due and was not written, linking
-to the row on the recurring list by fragment. Nothing in this module changed —
+Accounting now contributes a third obligation, still owners only: an ACTIVE,
+DUE recurring template whose run failed (`recurring_entries.last_error <> ''`
+and `next_run_date <= today`, the sweep's own predicate), dated the period
+that was due and was not written — overdue once that day has passed, "today"
+on the day — linking to the row on the recurring list by fragment. Nothing in this module changed —
 the source is the module's, and the digest and `/dashboard/today` read the same
 `collectAttention` — which is the seam doing its job: a module adds a line to
 the morning email by answering the question, not by touching the mailer. The

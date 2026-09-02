@@ -43,7 +43,7 @@ import {
   parseMoneyToCents,
 } from "@/modules/accounting/lib/money";
 import {
-  unpickableSentence,
+  saveBlocker,
   type AccountPickOption as AccountOption,
   type PartyPickOption as PartyOption,
   type Unpickable,
@@ -437,35 +437,38 @@ export function RecurringEntryDialogButton({
    * (`partyOptions` / `accountOptions` with keep ids), so the trigger shows the
    * old name instead of nothing. The item is disabled — visible, not
    * re-choosable — and while it is still the selection the save is blocked
-   * with the sentence the server would otherwise send back after the click.
-   * First blocker wins; there is one line of text for it.
+   * with a sentence about the facts the server would otherwise send back
+   * after the click. `saveBlocker` is pure and tested for all three kinds;
+   * this only hands it what will actually be SUBMITTED — a journal row with
+   * no amount is discarded by `submit()` and must not block over an account
+   * that is about to be dropped, so it is left out, its number kept.
    */
-  const unpickable = (
-    options: ReadonlyArray<{ id: string; unpickable?: Unpickable }>,
-    id: string,
-  ) => options.find((o) => o.id === id)?.unpickable;
-  const blocker: string | null = (() => {
-    if (kind === "bill") {
-      const v = unpickable(vendors, vendorId);
-      if (v) return unpickableSentence("supplier", v);
-      const a = unpickable(codableAccounts, billAccountId);
-      return a ? unpickableSentence("account", a) : null;
-    }
-    if (kind === "invoice") {
-      const c = unpickable(customers, customerId);
-      if (c) return unpickableSentence("customer", c);
-      for (const [i, r] of invoiceRows.entries()) {
-        const a = unpickable(incomeAccounts, r.incomeAccountId);
-        if (a) return unpickableSentence("account", a, i + 1);
-      }
-      return null;
-    }
-    for (const [i, r] of rows.entries()) {
-      const a = unpickable(journalAccounts, r.accountId);
-      if (a) return unpickableSentence("account", a, i + 1);
-    }
-    return null;
-  })();
+  const blocker: string | null =
+    kind === "bill"
+      ? saveBlocker({
+          kind,
+          vendors,
+          vendorId,
+          accounts: codableAccounts,
+          accountId: billAccountId,
+        })
+      : kind === "invoice"
+        ? saveBlocker({
+            kind,
+            customers,
+            customerId,
+            accounts: incomeAccounts,
+            lines: invoiceRows.map((r, i) => ({ line: i + 1, accountId: r.incomeAccountId })),
+          })
+        : saveBlocker({
+            kind,
+            accounts: journalAccounts,
+            lines: parsedRows.flatMap((p, i) =>
+              p.cents !== null && p.cents !== 0
+                ? [{ line: i + 1, accountId: p.row.accountId }]
+                : [],
+            ),
+          });
 
   const canSubmit =
     blocker === null &&
@@ -521,7 +524,7 @@ export function RecurringEntryDialogButton({
                       setKind(v as "invoice" | "bill" | "journal")
                     }
                   >
-                    <SelectTrigger id="rec-kind">
+                    <SelectTrigger className="w-full" id="rec-kind">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>

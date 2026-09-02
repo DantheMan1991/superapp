@@ -72,23 +72,31 @@ export default async function RecurringEntriesPage() {
      *                     system AR/AP (`purchases/bills/new`)
      *   - journal lines → everything, which is what a journal is for
      *
-     * Predicates rather than pre-filtered lists, because `accountOptions`
-     * applies them per template: the active-and-pickable set is the same for
-     * every dialog, and the one dead account a given template still names is
-     * added back for that dialog alone.
+     * Rules rather than pre-filtered lists, because `accountOptions` applies
+     * them per template: the active-and-offered set is the same for every
+     * dialog, and the one dead account a given template still names is added
+     * back for that dialog alone.
+     *
+     * **FOR INVOICE LINES, WHAT IS OFFERED AND WHAT IS ACCEPTED DIFFER.** The
+     * picker offers income only; the server's floor is codable — a deposit to
+     * Unearned Revenue is a valid invoice line (`assertCodableAccounts`, "the
+     * floor, not the picker"). A template that already names such an account
+     * is offered it back plain, because marking it would block a save the
+     * server would take. Journal and bill rules coincide with the server's.
      */
     const registerIds = new Set(registers.map((r) => r.accountId));
     type AccountRow = (typeof accounts)[number];
+    const codable = (a: AccountRow) => isCodableAccount(a, registerIds);
     return {
       entries,
       dimensionMembers,
       vendors,
       customers,
       accounts,
-      pickable: {
-        journal: (): boolean => true,
-        income: (a: AccountRow) => a.accountType === "income",
-        codable: (a: AccountRow) => isCodableAccount(a, registerIds),
+      rules: {
+        journal: { offer: (): boolean => true },
+        invoice: { offer: (a: AccountRow) => a.accountType === "income", accept: codable },
+        bill: { offer: codable },
       },
     };
   });
@@ -183,9 +191,9 @@ export default async function RecurringEntriesPage() {
             <>
               <GenerateRecurringEntriesButton />
               <RecurringEntryDialogButton
-                journalAccounts={accountOptions(data.accounts, data.pickable.journal)}
-                incomeAccounts={accountOptions(data.accounts, data.pickable.income)}
-                codableAccounts={accountOptions(data.accounts, data.pickable.codable)}
+                journalAccounts={accountOptions(data.accounts, data.rules.journal)}
+                incomeAccounts={accountOptions(data.accounts, data.rules.invoice)}
+                codableAccounts={accountOptions(data.accounts, data.rules.bill)}
                 vendors={partyOptions(data.vendors)}
                 customers={partyOptions(data.customers)}
                 today={today}
@@ -342,9 +350,9 @@ export default async function RecurringEntriesPage() {
                           `LotForm` fell into, in the one field the guard reads.
                         */
                         key={`${e.id}:${e.version}`}
-                        journalAccounts={accountOptions(data.accounts, data.pickable.journal, ownAccountIds)}
-                        incomeAccounts={accountOptions(data.accounts, data.pickable.income, ownAccountIds)}
-                        codableAccounts={accountOptions(data.accounts, data.pickable.codable, ownAccountIds)}
+                        journalAccounts={accountOptions(data.accounts, data.rules.journal, ownAccountIds)}
+                        incomeAccounts={accountOptions(data.accounts, data.rules.invoice, ownAccountIds)}
+                        codableAccounts={accountOptions(data.accounts, data.rules.bill, ownAccountIds)}
                         /* This template's own party as keepId, so a deactivated
                            supplier or customer it already names is offered
                            back, marked — never to a new template. */

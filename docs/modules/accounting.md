@@ -33,19 +33,30 @@ three lists unfiltered (like members) and passes the three account rules as
 predicates, so the active-and-pickable set is the same for every dialog and the
 one dead value a template still names is added for that dialog alone. The kept
 option carries `unpickable`, and the dialog turns it into a disabled item (seen
-in the trigger, not re-choosable), a blocked Save, and `unpickableSentence`
-above the footer: "That supplier is inactive. Pick another, or reactivate them
-first." / "Line 2's account can no longer be chosen by hand. Pick another." The
-two marks are different asks — an inactive account may be reactivated, a bank
-register may only be re-picked — and the sentences say so. A new journal row
-defaults to the first PICKABLE account, never a kept one. The list row names an
-inactive party, marked. The server's refusals (`VENDOR_INACTIVE`,
-`ACCOUNT_NOT_CODABLE`, …) are untouched; this is the screen catching up.
+in the trigger, not re-choosable — the listbox was opened on Hilltop Farm and
+the kept item read `data-disabled`), a blocked Save, and one sentence above the
+footer from the pure `saveBlocker`: "That supplier is inactive. Pick another,
+or reactivate them first." / "Line 2's account is inactive. Pick another, or
+reactivate it first." / "Line 1's account can no longer be chosen by hand.
+Pick another." The two marks are different asks — an inactive account may be
+reactivated from the chart of accounts, a bank register may only be re-picked —
+and the sentences say so. A new journal row defaults to the first PICKABLE
+account, never a kept one; a journal row with no amount is discarded at save
+and does not block. The list row names an inactive party, marked. The server's
+refusals (`VENDOR_INACTIVE`, `ACCOUNT_NOT_CODABLE`, …) are untouched; this is
+the screen catching up — and **catching up exactly**: the adversarial pass
+found the first cut STRICTER than the server for invoice lines, whose picker
+offers income only while the server's floor is codable (a deposit to Unearned
+Revenue is a valid invoice line). So `accountOptions` takes two rules, `offer`
+and `accept`, and a held account the picker would not offer but the server
+accepts is offered back plain rather than marked; marking it would have
+blocked a save the server takes.
 
 Tests: `tests/pick-options.test.ts`, pure — the keep rule for parties and for
-accounts, both marks, an inactive-and-unpickable account marked inactive first,
-input order kept, the sentences. Drop either keep branch and it goes red. +12
-tests. Driven by hand on Hilltop Farm with the demo customer deactivated: the
+accounts, both marks, offer-versus-accept, an inactive-and-unpickable account
+marked inactive first, input order kept, the sentences, and `saveBlocker` for
+all three kinds including a discarded journal row's number. Drop either keep
+branch and it goes red. +17 tests. Driven by hand on Hilltop Farm with the demo customer deactivated: the
 dialog opened on `Millbrook Restaurant (inactive)` and
 `1000 · Checking (cannot be chosen)`, Save disabled, the customer sentence
 shown; picking an active customer moved the sentence to the line's account;

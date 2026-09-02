@@ -32,11 +32,13 @@ row itself (`/recurring#<id>`; the `<li>` now carries `id`), per the feed's
 rule that an item is one click from its record. The row is tinted via
 `target:` on a full navigation — the digest email's link — and only scrolled
 into view on an in-app click, because the router's pushState does not update
-`:target`; verified both ways in Chrome on Hilltop Farm, where the item read
-`Recurring invoice "DEMO — renamed after refresh" could not run`, sat first as
-Overdue above a Soon booking, was absent while the template was paused and
-present the moment it was resumed — the resume, like the pause, left the note
-alone.
+`:target`; verified both ways in Chrome on Hilltop Farm. All three exits were driven by
+hand there after the bound went in: the item was absent while the template was
+paused (noted and due); present the moment it was resumed — `Recurring invoice
+"DEMO — renamed after refresh" could not run, 1 day behind`, first as Overdue
+above a Soon booking, the resume having left the note alone; and absent again
+the moment its Next run was moved past today through the Edit dialog, the
+`failing` badge still on the row.
 
 **Active and due, and that is what makes it self-clear.** The note is
 cleared by the template's next clean run and by nothing else — not an edit,

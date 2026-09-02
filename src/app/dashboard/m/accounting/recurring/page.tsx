@@ -249,7 +249,10 @@ export default async function RecurringEntriesPage() {
               <li
                 key={e.id}
                 // The feed on /dashboard/today links a failing template here
-                // by fragment; the row is the record, and `target:` lights it.
+                // by fragment; the row is the record. `target:` tints it on a
+                // full navigation (the digest email's link); an in-app click
+                // scrolls here without the tint, because the router's
+                // pushState does not update `:target` — verified in Chrome.
                 id={e.id}
                 className="flex scroll-mt-24 items-center justify-between gap-3 px-4 py-3 target:bg-warning/5"
               >

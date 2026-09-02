@@ -13,6 +13,77 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-02 — The frontier is the sweep's alone (`claude/the-frontier-is-the-sweeps-alone`)
+
+**Migration `0240`, additive: `recurring_entries.generated_through date NULL`,
+backfilled in the same file.** Applied to the dev branch and to production
+before the merge, `db:verify-rls` run on both, and the column checked directly
+in `information_schema.columns` on both.
+
+**THE FOLLOW-UP THE JUDGE NAMED ON #342.** `updateRecurringEntry`'s backward
+guard compared against `next_run_date`, which was the walked frontier only
+while the sweep was its sole writer — and editing ended that. After a forward
+edit (a `2027` typo, a deliberate year's pause) the stored date was a person's
+choice, and a later move back toward the months that really were generated
+was refused with a false message. Safe — no double generation was ever
+reachable — but a one-way ratchet whose only exit was pause-and-recreate, the
+path editing exists to retire.
+
+**THE SWEEP RECORDS THE LAST PERIOD IT REACHED, AND NOTHING ELSE MAY WRITE IT.**
+The catch-up loop notes each period it walks — a deduped month counts, it is
+there whoever wrote it — and the success UPDATE stores the last one beside
+`next_run_date`. `updateRecurringEntry` never sets it. The guard now refuses a
+month at or before `generated_through` and accepts any later one, including a
+month earlier than a `next_run_date` a previous edit had moved forward. Still
+by month: a journal's key is per date, so a different day in the same month
+would not be deduped, and invoices and bills have no key at all.
+
+**BACKFILLED AS `next_run_date - 1 month`**, for rows with `last_generated_at`.
+`advanceMonthly` steps exactly one calendar month and `day_of_month` is 1–28,
+so the subtraction is exact wherever only the sweep had moved the date — which
+was every row until editing shipped minutes earlier. A row edited forward in
+that window would be backfilled with the edit's choice rather than the truth;
+the window on production was a few hours and the table a handful of rows.
+`NULL` means never generated, and the guard treats it as free — there is no
+fallback to `next_run_date`, because that fallback would be the ratchet again.
+
+**THE BACKFILL WAS PRE-FLIGHTED ON PRODUCTION, READ-ONLY, BEFORE IT RAN** —
+because the adversarial pass pointed out that for two of the three kinds the
+frontier is exactly derivable from the records themselves, and the arithmetic
+is not: journals as `max(entry_date)` over `journal_entries.idempotency_key
+LIKE 'recurring:<id>:%'`, invoices as `max(issue_date)` over
+`invoices.recurring_entry_id`. Only bills lack a back-link. Production held
+two rows, both last written by the 6am sweep on 2026-09-01 before editing went
+live, and on both the arithmetic equalled the derived frontier — so `0240`
+stood as written. **The next backfill of a column like this should derive
+where it can and fall back to arithmetic only where it must**; the query is
+in this entry so it does not have to be rediscovered.
+
+**THE MIGRATE-THEN-DEPLOY WINDOW IS NOT NEUTRAL FOR THIS COLUMN, and that is
+the one case ADR 0014's order does not name.** The code running between the
+production migration and the deploy is the previous sweep, which advances
+`next_run_date` and does not write `generated_through` — so a row generated in
+the window is left with a frontier one month LOW, and the new guard would then
+accept an edit back into the month just generated (the unsafe direction; an
+edit never writes the column, and the backfill's `IS NULL` guard means it
+cannot be re-run to heal it). The cron acts only at 6am in each tenant's
+zone; the residual path is a Generate now pressed inside a minutes-long
+window. Handled procedurally: the migration was applied to production
+immediately before the merge, at an hour no tenant was near 6am, and the
+post-deploy check in the migration's own header — `generated_through` NULL or
+`<> next_run_date - 1 month`, for rows that have generated — was run
+afterwards. The NULL arm is the judge's widening: a row whose FIRST-ever
+generation lands in the window had nothing to backfill and the guard treats
+NULL as free. A row the check lists is either forward-edited (safe, expected)
+or window-generated (fix by hand); the `ledger.recurring_updated` audit row
+tells them apart.
+
+**Tests:** the sweep writes the frontier as the month before `next_run_date`
+on the template's day; a forward edit leaves it untouched; a move back to the
+month right after it is accepted (red before this PR — the ratchet); the last
+generated month itself is refused on any day. Mutation-proved by pointing the
+guard back at `next_run_date`. The two guard tests from #342 hold unchanged.
+
 ### 2026-09-01 — A standing instruction can be corrected (`claude/a-standing-instruction-can-be-corrected`)
 
 **The second of the two open items, and the pair of the first.** The sweep's
@@ -51,6 +122,7 @@ bill back-link column, for a hazard one comparison removes.
 
 **THE FRONTIER IS THE WRONG COLUMN THE MOMENT THIS OP WRITES FORWARD — found by
 the adversarial pass, and left as a named follow-up rather than fixed here.**
+*(Closed the same night by `0240`; see the entry above.)*
 `next_run_date` is the walked frontier only while the sweep is its sole
 writer, and this op ends that. After a forward edit (a typo of `2027` for
 `2026`, or a deliberate year's pause) the stored date is a person's choice, and
@@ -3080,7 +3152,7 @@ compiled-and-tested, not seen.
 - **Products & Services, Terms and Payment Methods are DONE** (2026-08-12) — see the build log for the two deliberate gaps (customer-level default terms have a column and resolution but no control; saved items are invoice-only so far)
 - ~~**Line account pickers are filtered in the UI ONLY.**~~ **Closed 2026-09-01, in two halves the same day.** The bill half came first, because a matched line's GRNI coding round-tripping through the form is what let the same receipts clear GRNI twice. The invoice and recurring halves followed once that PR's own build log admitted they were still open: `assertCodableAccounts` in core is the shared server-side rule, called by invoice lines and by recurring **bill and invoice** templates at the moment they are saved. Bill lines enforce the same rule in their own `assertLineAccounts`, which does not call it because it needs the one exception a stock match requires; a journal template, like the hand-written journal, is checked for existence and activity only. See the build log for the two boundaries that had to be stated — a journal may still name any account, and an invoice line may credit a liability
 - **Recurring entries GENERATE ON THEIR OWN** since 2026-08-13 (`/api/cron/recurring`, 6am in the tenant's zone). ~~What is not built: any way to see the sweep's history in the UI — the counts come back to the cron caller and nowhere else.~~ **Closed 2026-09-01, as two columns rather than a history table:** a template that fails carries the error's CODE in `last_error` and the moment in `last_error_at`, the list shows a `failing` badge with the sentence, and only that template's next clean run clears it. The sweep's aggregate counts still go to the cron caller alone; the per-template note is the surface anybody actually needs. ~~This is what made the retired-tag decision what it was~~ — that decision stands: a dropped tag is a SUCCESS and never lands in `last_error`
-- **THE RECURRING FRONTIER NEEDS ITS OWN COLUMN.** `updateRecurringEntry`'s backward guard compares against `next_run_date`, which stops being the walked frontier the moment an edit moves it forward; a later move back toward the truly generated months is then refused with a false message, and the only exit is pause-and-recreate. Safe (no double generation), but a one-way ratchet. Fix: a sweep-only `generated_through` date written by the success UPDATE alone, compared against instead — an additive migration, its own PR (2026-09-01)
+- ~~**THE RECURRING FRONTIER NEEDS ITS OWN COLUMN.**~~ **Closed 2026-09-02** (migration `0240`): `recurring_entries.generated_through` is the last period the sweep reached, written only by the success UPDATE and backfilled from `next_run_date - 1 month`; `updateRecurringEntry` compares against it by month. A forward edit no longer ratchets — the month after the last generated one is always reachable again
 - **EDIT MODE RENDERS A BLANK SELECT FOR A PARTY OR ACCOUNT THAT MAY NO LONGER BE PICKED.** A deactivated supplier/customer, or an income account nobody may choose, is not in the option list, so Radix shows an empty trigger rather than the old name; Save stays enabled and the server refuses correctly. Parity with the bill `[id]` page would offer the stored value back, marked, the way `keepIds` marks a retired tag — for the party; for the account, blank may be right (a re-pick is the point) but the Save button should say so (2026-09-01)
 - **A FAILING TEMPLATE IS NOT ON `/dashboard/today` OR IN THE DIGEST.** `attention/source.ts` derives exactly two accounting obligations — overdue invoices and bills awaiting approval. A template carrying `last_error` is the same live-query shape (`recurring_entries WHERE last_error <> ''`) and the surface an owner actually sees at 7am; the list page is only seen by navigating to it. Left open 2026-09-01 on purpose: the note is the fact, the feed is a consumer of it, and the feed's rule (one line per obligation, derived never stored) is its own dossier's to apply
 - ~~**`generateRecurringEntries` counts a record it may not have written.**~~ **Closed 2026-09-01**, in its own PR as it deserved. `created`, `posted` and the deferral now all hang off `PostResult.deduped`, and `periodsWalked` carries the months the loop walked so a gap between the two is visible in the sweep's JSON. It was never reachable through the schedule; it is fixed because a count whose correctness rests on an unreachability argument goes wrong the first time somebody makes it reachable

@@ -410,6 +410,24 @@ export const recurringEntries = pgTable(
      */
     lastError: text("last_error").notNull().default(""),
     lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+    /**
+     * **THE LAST PERIOD THE SWEEP GENERATED — AND THE SWEEP IS ITS ONLY
+     * WRITER.** The date of the last record the catch-up loop wrote (or found
+     * already there), set in the same UPDATE that advances `next_run_date`.
+     *
+     * `next_run_date` was the walked frontier only while the sweep was its sole
+     * writer, and editing (2026-09-01) ended that: after a forward edit the
+     * stored date is a person's choice, and a guard comparing against it
+     * refused any move back toward the months that really were generated —
+     * safe, but a one-way ratchet whose only exit was pause-and-recreate.
+     * `updateRecurringEntry` compares against THIS, by month, and never sets
+     * it. NULL means the template has never generated.
+     *
+     * Backfilled at migration as `next_run_date - 1 month` for rows with
+     * `last_generated_at`: exact wherever only the sweep had moved the date,
+     * which was every row until editing shipped hours before.
+     */
+    generatedThrough: date("generated_through", { mode: "string" }),
     createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true })

@@ -1694,6 +1694,58 @@ d("invoicing (DB)", () => {
         expect(moved.after.version).toBe(walked.version + 1);
       });
 
+      it("MOVING TO AN EARLIER DAY OF A MONTH NOT YET GENERATED IS ACCEPTED", async () => {
+        /**
+         * The most ordinary edit there is — the rent moves from the 4th to
+         * the 1st. `advanceMonthly` steps one calendar month, so every day of
+         * the stored next run's month is ungenerated; a whole-date comparison
+         * refused this with a false sentence. Compare the guard's months and
+         * it passes; put the days back and this goes red.
+         */
+        const cash = await accountId("1000");
+        const exp = await accountId("6700");
+        const row = await addTemplate({
+          kind: "journal",
+          name: "Edited — earlier day",
+          nextRunDate: "2026-06-04",
+          template: journalTemplate(cash, exp, 400),
+        });
+        await generateRecurringEntries(owner);
+        const walked = (await rowOf(row.id))!;
+        await pause(row.id);
+        expect(walked.lastGeneratedAt).not.toBeNull();
+        const month = walked.nextRunDate.slice(0, 7);
+        const [y, m] = month.split("-").map(Number);
+        const priorMonth = `${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, "0")}`;
+
+        const { after } = await withTenant(tenantId, (tx) =>
+          updateRecurringEntry(tx, owner, {
+            id: row.id,
+            expectedVersion: walked.version,
+            name: walked.name,
+            dayOfMonth: 1,
+            nextRunDate: `${month}-01`,
+            template: journalTemplate(cash, exp, 400),
+          }),
+        );
+        expect(after.nextRunDate).toBe(`${month}-01`);
+        expect(after.dayOfMonth).toBe(1);
+
+        // An earlier MONTH is still refused: that one really was generated.
+        await expect(
+          withTenant(tenantId, (tx) =>
+            updateRecurringEntry(tx, owner, {
+              id: row.id,
+              expectedVersion: after.version,
+              name: walked.name,
+              dayOfMonth: 4,
+              nextRunDate: `${priorMonth}-04`,
+              template: journalTemplate(cash, exp, 400),
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "RECURRING_SCHEDULE_BACKWARD" });
+      });
+
       it("a template that has never run may be re-dated freely", async () => {
         const cash = await accountId("1000");
         const exp = await accountId("6700");

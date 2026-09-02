@@ -309,8 +309,9 @@ export interface UpdateRecurringEntryInput extends NewRecurringEntryInput {
  * journal's key is per (template, date), which a changed day-of-month defeats.
  * So a `next_run_date` moved from October back to June would make the next
  * sweep create four more invoices for months already invoiced. A template
- * that has never run may be re-dated freely; forward moves stay allowed,
- * which is what pause-and-resume already does.
+ * that has never run may be re-dated freely. Forward moves stay allowed —
+ * and a pause does NOT do the same thing, because a resume catches up rather
+ * than skips; a forward edit is precisely how a month is skipped on purpose.
  *
  * **THE FRONTIER THIS COMPARES AGAINST IS `next_run_date`, AND THAT IS ONLY
  * THE WALKED FRONTIER WHILE THE SWEEP IS ITS SOLE WRITER — which this op ends.**
@@ -358,7 +359,18 @@ export async function updateRecurringEntry(
   }
   await assertTemplateReferences(tx, ctx.tenantId, input.template);
   await assertTemplateSaveable(tx, ctx.tenantId, input);
-  if (before.lastGeneratedAt !== null && input.nextRunDate < before.nextRunDate) {
+  /**
+   * **BY MONTH, NOT BY DAY.** `advanceMonthly` steps exactly one calendar
+   * month, so the last generated period is always the month BEFORE the stored
+   * `next_run_date`'s month, and every day of that month is ungenerated.
+   * Comparing whole dates refused the most ordinary edit there is — "move the
+   * rent from the 4th to the 1st" — with a sentence claiming September would
+   * be created again when it never had been. Found by the adversarial pass.
+   */
+  if (
+    before.lastGeneratedAt !== null &&
+    input.nextRunDate.slice(0, 7) < before.nextRunDate.slice(0, 7)
+  ) {
     throw new LedgerError(
       "RECURRING_SCHEDULE_BACKWARD",
       `next run ${input.nextRunDate} is before the walked frontier ${before.nextRunDate}`,

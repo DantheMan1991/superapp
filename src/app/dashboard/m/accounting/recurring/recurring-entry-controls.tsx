@@ -468,7 +468,7 @@ export function RecurringEntryDialogButton({
             </DialogTitle>
             <DialogDescription>
               {existing
-                ? "Changes apply from the next run. The next run cannot move back over months already generated."
+                ? "Changes apply from the next run. It cannot move to an earlier month than the schedule has reached."
                 : "Runs once a month. Catch-up creates one entry per missed month, dated to that month rather than to today."}
             </DialogDescription>
           </DialogHeader>

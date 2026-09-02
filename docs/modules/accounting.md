@@ -34,12 +34,18 @@ guard the whole change turns on. Invoice and bill generation carry no
 idempotency key — they always insert — and a journal's key is per (template,
 date), which a changed day-of-month defeats. So a `next_run_date` moved from
 October back to June would make the next sweep create four more invoices for
-months already invoiced. The stored `next_run_date` IS the walked frontier,
-written atomically with `last_generated_at` under the version CAS: refused
-when `last_generated_at` is set and the new date is earlier than the stored
-one. A template that has never run may be re-dated freely; forward moves stay
-allowed, which is what pause-and-resume already does. `RECURRING_SCHEDULE_BACKWARD`
-is the new code. Making invoice and bill generation idempotent instead was
+months already invoiced. The stored `next_run_date` is the walked frontier
+while the sweep is its only writer (see the follow-up below for when it is
+not): refused when `last_generated_at` is set and the new date's MONTH is
+earlier than the stored one's. **By month, not by day** — `advanceMonthly`
+steps one calendar month, so every day of the stored month is ungenerated,
+and the whole-date version of this guard refused "move the rent from the 4th
+to the 1st" with a sentence claiming the month would be created again. A
+template that has never run may be re-dated freely. Forward moves stay
+allowed — and a pause is not the same thing, because a resume catches up
+rather than skips; a forward edit is how a month is skipped on purpose.
+`RECURRING_SCHEDULE_BACKWARD` is the new code, and its sentence describes the
+rule rather than a reason that can be false. Making invoice and bill generation idempotent instead was
 considered and not done — a unique index, a numbering-arbiter rework and a
 bill back-link column, for a hazard one comparison removes.
 
@@ -57,12 +63,16 @@ against instead; it is an additive migration, so its own PR. Bills carry no
 back-link, so the frontier cannot be derived from generated rows.
 
 **THE DIALOG IS KEYED ON THE ROW'S VERSION, so a changed row remounts** — also
-from the pass, and fixed here. `useState(existing.x)` seeds once per mount, and
-`router.refresh()` after Generate now or Pause keeps the instance. Without the
-key, a row that had just generated opened its dialog on the OLD next run, and a
-name-only save was refused as a backward move nobody made — the stale-picker
-trap `LotForm` fell into, in the one field the guard reads. Reproduced in the
-browser before the fix, on the same row that had just been generated.
+from the pass, and fixed here. **This was a lost update, not a false toast.**
+`useState(existing.x)` seeds once per mount; `router.refresh()` after Generate
+now, Pause, or any save keeps the instance and merges the new props in. At
+submit, `expectedVersion` was read FRESH from props while every field value
+came from stale state — so the CAS passed on the current version with the old
+amount, account and date, and another person's edit made in between was
+silently reverted. The backward guard happened to catch the one field it
+reads (a name-only save after Generate was refused as a move nobody made,
+reproduced in the browser before the fix); the other nine fields would have
+gone through. The stale-picker trap `LotForm` fell into, with a CAS behind it.
 
 **A shape the dialog cannot show is not offered for editing.** A bill amount or
 an invoice unit price below zero would round-trip through the money helpers as

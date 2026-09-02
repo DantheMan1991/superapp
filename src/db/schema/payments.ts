@@ -23,7 +23,17 @@
  * `details_submitted` — there is a capability STATUS, and a list of
  * REQUIREMENTS that each say who is holding them up and what they restrict.
  *
- * See docs/decisions/0015-a-connected-account-belongs-to-a-company.md.
+ * **AND SINCE 2026-09-02 THERE ARE TWO PROVIDERS ON THIS TABLE.** `provider`
+ * says which: `stripe` (a Connect account the platform created and acts on
+ * with its own key) or `square` (the Square account the farm ALREADY HAD,
+ * which authorised this application through OAuth). The pilot pays with Square
+ * today; Square is what farmers markets run on; so Square is the provider on
+ * offer and Stripe Connect is parked, its rows and code intact. The Square
+ * token lives in `payment_credentials` below — a table with NO member policy —
+ * never on this row. See ADR 0017.
+ *
+ * See docs/decisions/0015-a-connected-account-belongs-to-a-company.md and
+ * docs/decisions/0017-the-square-account-the-farm-already-has.md.
  */
 import { sql } from "drizzle-orm";
 import {
@@ -41,24 +51,29 @@ import { tenants } from "./platform";
 import { entities } from "./ledger";
 
 /**
- * **ONE COMPANY'S ABILITY TO TAKE A CARD.** A Stripe Connect connected account,
- * created and owned by the client, acted on by us with `stripeAccount`.
+ * **ONE COMPANY'S ABILITY TO TAKE A CARD, THROUGH ONE PROVIDER.** Either a
+ * Stripe Connect connected account, created and owned by the client and acted
+ * on by us with `stripeAccount`; or the client's own Square account, acting for
+ * which requires the OAuth token held in `payment_credentials`.
  *
- * **NOTHING HERE IS A CREDENTIAL.** `stripe_account_id` is an identifier —
- * `acct_…` — and the authority to act on it comes from the PLATFORM key plus
- * Stripe's own record that we created it. The tenant's secret key is never
- * stored, never asked for and never seen; a column holding one would be a C5
- * secret per client granting unlimited authority over their money, which is a
- * posture `docs/security.md` would have to be rewritten to allow.
+ * **NOTHING ON THIS ROW IS A CREDENTIAL.** `stripe_account_id` and
+ * `square_merchant_id` are identifiers. For Stripe the authority to act comes
+ * from the PLATFORM key plus Stripe's own record that we created the account;
+ * for Square it comes from a scoped, revocable OAuth token that lives in a
+ * separate table no member policy can read. The tenant's own Stripe secret key
+ * is never stored, never asked for and never seen — a column holding one would
+ * be a C5 secret per client granting UNLIMITED authority over their money,
+ * which is the shortcut ADR 0015 refuses; a Square token is bounded by its
+ * scopes and the seller can revoke it from Square, which is why ADR 0017 accepts
+ * holding one, encrypted (S8), off this row.
  *
- * **EVERY OTHER COLUMN IS STRIPE'S VERDICT, NOT THE APP'S.** A capability
- * status is the outcome of a KYC review we do not perform and cannot
- * second-guess. These are written only from a signature-verified Connect event
- * or a server→Stripe read (S7) — and the RLS policies give that rule teeth
- * rather than leaving it to care: **members hold SELECT only.** No tenant
- * transaction can write this table at all, so a forgotten `withTenant` or a
- * careless future action cannot make the app believe a farm can take money when
- * Stripe says it cannot.
+ * **EVERY OTHER COLUMN IS THE PROVIDER'S VERDICT, NOT THE APP'S.** A capability
+ * status is the outcome of a review we do not perform and cannot second-guess.
+ * These are written only from a signature-verified event or a server→provider
+ * read (S7) — and the RLS policies give that rule teeth rather than leaving it
+ * to care: **members hold SELECT only.** No tenant transaction can write this
+ * table at all, so a forgotten `withTenant` or a careless future action cannot
+ * make the app believe a farm can take money when the provider says it cannot.
  *
  * **THE COMPANY, NOT THE CLIENT.** A connected account is a bank account with a
  * KYC wrapper — an EIN, a legal name, a representative — and ADR 0010 puts
@@ -74,14 +89,21 @@ import { entities } from "./ledger";
  * this table refuses tenant writes), so adoption is lazy and lives in
  * `src/lib/payments/connect.ts`.
  *
+ * **ONE ROW PER COMPANY PER PROVIDER.** ADR 0015 rejected a `provider` column
+ * while there was one provider ("a column with one value documents nothing")
+ * and said the second provider would be a new column rather than a new table.
+ * That is what happened: `provider` arrived with Square, the Stripe-only columns
+ * are null on a Square row and vice versa, and the CHECKs below make a row that
+ * lies about its provider unrepresentable. The columns the till reads —
+ * `card_payments_status`, `closed_at` — mean the same thing for both.
+ *
  * Deliberately NOT here, each because nothing would read it yet:
  *
- *   - **A `provider` column.** Every field below is Stripe's own vocabulary. A
- *     column with one value and no second implementation documents nothing.
- *   - **Terminal locations and readers** (next slice). They will hang off
- *     `(tenant_id, id)`, which is why the composite target index exists now.
- *   - **Settlements, payouts and fees** (the slice after). Those post to the
- *     books, and the company they post into is the `entity_id` on this row.
+ *   - **Settlements, payouts and fees.** Those post to the books, and the
+ *     company they post into is the `entity_id` on this row.
+ *   - **Square devices.** `payment_readers` is Stripe-shaped (its CHECKs insist
+ *     on `tmr_`/`tml_` ids); a paired Square Terminal gets its own columns when
+ *     the Terminal slice knows the shape rather than guesses it.
  */
 export const paymentAccounts = pgTable(
   "payment_accounts",
@@ -96,11 +118,44 @@ export const paymentAccounts = pgTable(
      */
     entityId: uuid("entity_id"),
     /**
+     * `stripe` | `square`. Decides which of the two id columns is set and which
+     * lib may write the row.
+     *
+     * **THE DATABASE DEFAULT STAYS, against the convention that discriminators
+     * get none.** The column was added to a table with live Stripe rows and
+     * running code that inserts without naming a provider. Migrations go out
+     * BEFORE the deploy, so for the minutes between the two a default is the
+     * only thing keeping that insert working; dropping it would be a second
+     * migration after the deploy, for a column every insert site now names
+     * anyway. Recorded so nobody "tidies" it into an outage.
+     */
+    provider: text("provider").notNull().default("stripe"),
+    /**
      * `acct_…`. An identifier, never a secret. **Confirmed against a real v2
      * account** — v2 kept v1's id prefix, which is what lets the CHECK below
-     * stay as written.
+     * stay as written. Null on a Square row, and only there (CHECK).
      */
-    stripeAccountId: text("stripe_account_id").notNull(),
+    stripeAccountId: text("stripe_account_id"),
+    /**
+     * Square's merchant id — the account the farm signed up for itself. An
+     * identifier: the authority to act on it is the token in
+     * `payment_credentials`. Null on a Stripe row, and only there (CHECK). How
+     * the Square webhook finds the row: a notification carries `merchant_id`
+     * and nothing else about us.
+     */
+    squareMerchantId: text("square_merchant_id"),
+    /**
+     * Where a charge from the till is made until a later slice lets a channel
+     * pick its own. Square's `main_location_id`, or the first active location
+     * when Square leaves that unset.
+     */
+    squareMainLocationId: text("square_main_location_id"),
+    /**
+     * `[{ id, name, status, type, canTakeCards }]` — the account's locations,
+     * trimmed to what a screen and a till need. **A projection, not the raw
+     * object**, for the same reason `requirements` is. Empty on a Stripe row.
+     */
+    squareLocations: jsonb("square_locations").notNull().default([]),
     /**
      * **THE ONE FACT THE TILL WILL ASK FOR:** can this company take a card.
      * `configuration.merchant.capabilities.card_payments.status` — one of
@@ -181,17 +236,22 @@ export const paymentAccounts = pgTable(
      */
     uniqueIndex("payment_accounts_tenant_id_id_idx").on(t.tenantId, t.id),
     /**
-     * **ONE ACCOUNT PER COMPANY.** Postgres treats NULLs as distinct, so this
-     * says nothing about the unadopted case — hence the partial index below.
+     * **ONE ACCOUNT PER COMPANY PER PROVIDER.** Postgres treats NULLs as
+     * distinct, so this says nothing about the unadopted case — hence the
+     * partial index below.
      */
-    uniqueIndex("payment_accounts_tenant_entity_idx").on(t.tenantId, t.entityId),
+    uniqueIndex("payment_accounts_tenant_entity_idx").on(
+      t.tenantId,
+      t.entityId,
+      t.provider,
+    ),
     /**
-     * **AND AT MOST ONE UNADOPTED ACCOUNT PER TENANT.** Without it a books-less
-     * tenant could mint connected accounts without limit, each one a real
-     * Stripe object asking a real person for a tax ID.
+     * **AND AT MOST ONE UNADOPTED ACCOUNT PER TENANT PER PROVIDER.** Without it
+     * a books-less tenant could mint connected accounts without limit, each one
+     * a real Stripe object asking a real person for a tax ID.
      */
     uniqueIndex("payment_accounts_tenant_unassigned_idx")
-      .on(t.tenantId)
+      .on(t.tenantId, t.provider)
       .where(sql`${t.entityId} is null`),
     /** Tenant-leading, per the security.md §4 checklist. */
     uniqueIndex("payment_accounts_tenant_account_idx").on(
@@ -200,6 +260,17 @@ export const paymentAccounts = pgTable(
     ),
     /** How the Connect event finds the row: it knows `acct_…` and nothing else. */
     index("payment_accounts_account_idx").on(t.stripeAccountId),
+    /**
+     * One Square account connects to one company per tenant. The same merchant
+     * on two companies would put one bank account's takings in two sets of
+     * books, which is the mistake ADR 0015 exists to make impossible.
+     */
+    uniqueIndex("payment_accounts_tenant_square_merchant_idx").on(
+      t.tenantId,
+      t.squareMerchantId,
+    ),
+    /** How the Square webhook finds the row: it knows the merchant id and nothing else. */
+    index("payment_accounts_square_merchant_idx").on(t.squareMerchantId),
     /**
      * Composite, so a row can never name another tenant's company — the pattern
      * every entity reference in this schema uses. RESTRICT rather than CASCADE:
@@ -217,7 +288,25 @@ export const paymentAccounts = pgTable(
      */
     check(
       "payment_accounts_stripe_account_id_shape",
-      sql`${t.stripeAccountId} ~ '^acct_[A-Za-z0-9]+$'`,
+      sql`${t.stripeAccountId} is null or ${t.stripeAccountId} ~ '^acct_[A-Za-z0-9]+$'`,
+    ),
+    check(
+      "payment_accounts_provider_known",
+      sql`${t.provider} in ('stripe', 'square')`,
+    ),
+    /**
+     * **A ROW CANNOT LIE ABOUT ITS PROVIDER.** A Stripe row has a Stripe id and
+     * no merchant id; a Square row the reverse. Two libs write this table now,
+     * and the one thing worse than a row with no id is a row with the wrong
+     * one, which the Terminal lib would then hand to Stripe as an account.
+     */
+    check(
+      "payment_accounts_stripe_id_matches_provider",
+      sql`(${t.provider} = 'stripe') = (${t.stripeAccountId} is not null)`,
+    ),
+    check(
+      "payment_accounts_square_id_matches_provider",
+      sql`(${t.provider} = 'square') = (${t.squareMerchantId} is not null)`,
     ),
   ],
 );
@@ -314,7 +403,87 @@ export const paymentReaders = pgTable(
   ],
 );
 
+/**
+ * **THE ONE SECRET IN THIS DOMAIN, IN A TABLE OF ITS OWN.** A Square OAuth
+ * access token and its refresh token, encrypted with `encryptSecret()` (S8),
+ * for one `payment_accounts` row whose provider is `square`.
+ *
+ * **WHY NOT COLUMNS ON `payment_accounts`.** That table gives members a SELECT
+ * policy, because the till has to read "can this company take a card". A token
+ * column there would put ciphertext in front of every member. `mail_accounts`
+ * accepts that for a mailbox token ("the encryption is what makes the residual
+ * exposure uninteresting"); this token authorises charges and refunds on the
+ * farm's money, and the cheaper answer is to keep it out of member reach
+ * entirely. So: **NO MEMBER POLICY AT ALL.** Superadmin and `withSystem` only.
+ * The lib decrypts in exactly one function, and a tenant transaction that
+ * selects from this table gets zero rows — its own tenant's included.
+ *
+ * **WHY A TOKEN AT ALL, when ADR 0015 refused to store a Stripe secret key.**
+ * A Stripe secret key is unlimited authority over the account. A Square OAuth
+ * token is bounded by the scopes the seller consented to, expires in thirty
+ * days unless renewed, and the seller can revoke it from Square's own dashboard
+ * — at which point Square tells us (`oauth.authorization.revoked`) and the row
+ * below is wiped. Square offers no Connect-style alternative: there is no way
+ * to act for a Square seller without holding their token. ADR 0017 weighs it.
+ *
+ * Marked `revoked_at` and wiped rather than deleted, so "when did this stop"
+ * has an answer; the `payment_accounts` row it hangs off survives for the same
+ * reason its Stripe cousin does.
+ */
+export const paymentCredentials = pgTable(
+  "payment_credentials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    paymentAccountId: uuid("payment_account_id").notNull(),
+    /** AES-256-GCM via `src/lib/crypto.ts`. Never plaintext, never logged. */
+    accessTokenEnc: text("access_token_enc").notNull(),
+    /** Empty when the provider sent none. Kept, not overwritten, on a refresh that returns none. */
+    refreshTokenEnc: text("refresh_token_enc").notNull().default(""),
+    /** Square: thirty days from issue; renewed inside the last week (`needsSquareRefresh`). */
+    accessTokenExpiresAt: timestamp("access_token_expires_at", {
+      withTimezone: true,
+    }),
+    /** The permissions the seller actually granted — `["PAYMENTS_WRITE", …]`. */
+    scopes: jsonb("scopes").notNull().default([]),
+    obtainedAt: timestamp("obtained_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** Set — and the ciphertext blanked — when the seller or we revoke the grant. */
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("payment_credentials_tenant_id_id_idx").on(t.tenantId, t.id),
+    /** One credential per account. Reconnecting replaces it rather than adding a second. */
+    uniqueIndex("payment_credentials_tenant_account_idx").on(
+      t.tenantId,
+      t.paymentAccountId,
+    ),
+    /**
+     * Composite, so a token can never be filed against another tenant's
+     * account. CASCADE: a token for an account that no longer exists is
+     * meaningless, and deleting the account is the one time deleting a token
+     * is right.
+     */
+    foreignKey({
+      name: "payment_credentials_account_fk",
+      columns: [t.tenantId, t.paymentAccountId],
+      foreignColumns: [paymentAccounts.tenantId, paymentAccounts.id],
+    }).onDelete("cascade"),
+  ],
+);
+
 export type PaymentAccount = typeof paymentAccounts.$inferSelect;
 export type NewPaymentAccount = typeof paymentAccounts.$inferInsert;
 export type PaymentReader = typeof paymentReaders.$inferSelect;
 export type NewPaymentReader = typeof paymentReaders.$inferInsert;
+export type PaymentCredential = typeof paymentCredentials.$inferSelect;
+export type NewPaymentCredential = typeof paymentCredentials.$inferInsert;

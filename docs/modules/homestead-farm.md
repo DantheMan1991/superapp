@@ -2038,6 +2038,13 @@ integrations.** Stripe is the cheapest second provider — this codebase already
 has a Stripe client, signature-verified webhooks and a server→Stripe reconcile
 in `billing-sync.ts`, and Stripe has a Terminal product.
 
+> **What actually happened (2026-09-02):** Stripe Connect was built first
+> (ADR 0015, 2026-08-25) without this section being weighed; the founder asked
+> about Square eight days later and this recommendation was followed from then
+> on — Square is the provider on offer, Stripe Connect is parked, and the read
+> stage is next. See [payments.md](payments.md) and
+> [ADR 0017](../decisions/0017-the-square-account-the-farm-already-has.md).
+
 | Stage | What | Value |
 | --- | --- | --- |
 | **1. Read** | Pull transactions and settlements in, match to market days, post to books | High, low risk, **no hardware dependency** |

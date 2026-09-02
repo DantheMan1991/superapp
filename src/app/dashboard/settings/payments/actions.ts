@@ -1,11 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { schema, withTenant } from "@/db";
 import { requireTenantOwner } from "@/lib/auth";
 import { ConnectError, startOnboarding } from "@/lib/payments/connect";
+import { disconnectSquare, SquareError } from "@/lib/payments/square/accounts";
 
 /**
  * **OWNER ONLY, AND NOT AS A MATTER OF TASTE.** This decides which bank account
@@ -74,9 +75,64 @@ export async function startPaymentOnboardingAction(
 }
 
 /**
+ * Withdraw Yosher's access to a company's Square account.
+ *
+ * **SQUARE FIRST, THEN THE ROW.** This action never writes `payment_accounts`
+ * itself — members hold SELECT only. It proves the company is this tenant's
+ * inside its own `withTenant` scope, then hands the row id to the lib, which
+ * calls Square's revoke endpoint and marks the row closed only once Square has
+ * confirmed (S7: the provider's word, not the app's).
+ *
+ * Connecting has no action here: it is a redirect to Square, so it is a route
+ * (`/api/payments/square/start`).
+ */
+export async function disconnectSquareAction(
+  input: unknown,
+): Promise<{ ok?: true; error?: string }> {
+  const ctx = await requireTenantOwner();
+  const parsed = inputSchema.safeParse(input);
+  if (!parsed.success) return { error: "Pick a company and try again." };
+  const { entityId } = parsed.data;
+
+  const row = await withTenant(
+    ctx.tenant.id,
+    (tx) =>
+      tx.query.paymentAccounts.findFirst({
+        where: and(
+          eq(schema.paymentAccounts.tenantId, ctx.tenant.id),
+          eq(schema.paymentAccounts.provider, "square"),
+          entityId
+            ? eq(schema.paymentAccounts.entityId, entityId)
+            : isNull(schema.paymentAccounts.entityId),
+          isNull(schema.paymentAccounts.closedAt),
+        ),
+        columns: { id: true },
+      }),
+    { role: ctx.role },
+  );
+  // 404-shaped: a company that is not ours reads the same as one that is not
+  // connected (security.md §4).
+  if (!row) return { error: "Square isn't connected for that company." };
+
+  try {
+    await disconnectSquare({
+      tenantId: ctx.tenant.id,
+      paymentAccountId: row.id,
+      actorClerkUserId: ctx.userId,
+    });
+    revalidatePath("/dashboard/settings/payments");
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof SquareError) return { error: err.message };
+    console.error("disconnectSquareAction failed", err);
+    return { error: "Something went wrong. Please try again." };
+  }
+}
+
+/**
  * Composite FK targets and validation aside, there is deliberately NO action
- * here that writes `payment_accounts`. Every column on that table is Stripe's
- * verdict (S7), members hold SELECT only, and the write path is
- * `syncConnectedAccount` under `withSystem`. If a future slice wants a
- * "disconnect" button, it calls Stripe and lets the webhook write the row.
+ * here that writes `payment_accounts`. Every column on that table is the
+ * provider's verdict (S7), members hold SELECT only, and the write paths are
+ * `syncConnectedAccount` (Stripe) and the Square lib, both under `withSystem`
+ * and both only after the provider has spoken.
  */

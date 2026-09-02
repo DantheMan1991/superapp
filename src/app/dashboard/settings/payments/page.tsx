@@ -19,6 +19,7 @@ import { listReaders, refreshReaders, type ReaderView } from "@/lib/payments/ter
 import { dateInTimezone } from "@/lib/timezone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/app/page-header";
 import {
   Card,
   CardContent,
@@ -192,20 +193,11 @@ export default async function PaymentsSettingsPage({
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="flex size-10 items-center justify-center rounded-lg bg-brand/15 text-brand-foreground">
-          <CreditCard className="size-5" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Taking payments
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Card payments go straight to your own bank account, in your own
-            name.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Taking payments"
+        description="Card payments go straight to your own bank account, in your own name."
+        icon={<CreditCard />}
+      />
 
       {squareStatus === "connected" && (
         <div className="flex items-start gap-2 rounded-md border border-emerald-300/50 bg-success/10 p-3 text-sm text-emerald-800 dark:text-emerald-200">

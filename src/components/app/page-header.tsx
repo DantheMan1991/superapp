@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { HelpButton } from "@/components/app/help-button";
 
 interface PageHeaderProps {
   title: string;
@@ -9,7 +10,11 @@ interface PageHeaderProps {
    * overdue half needs its own colour.
    */
   description?: ReactNode;
-  /** Right-aligned. Primary action last, so it sits nearest the content. */
+  /**
+   * Right-aligned. Primary action last, so it sits nearest the content — which
+   * is why the help button renders FIRST in the same row: a "?" must never
+   * take the corner the primary action owns.
+   */
   actions?: ReactNode;
   /**
    * A glyph on an accent chip, left of the title. Reads as the module's mark:
@@ -64,9 +69,15 @@ export function PageHeader({
           )}
         </div>
       </div>
-      {actions && (
-        <div className="flex shrink-0 items-center gap-2">{actions}</div>
-      )}
+      {/* Always rendered, because the help button is on every dashboard
+          page whether or not the page has actions. The button gates itself
+          by pathname — nothing outside /dashboard — so this component still
+          never learns which page it is on, and on an admin page the row is
+          simply empty. */}
+      <div className="flex shrink-0 items-center gap-2">
+        <HelpButton />
+        {actions}
+      </div>
     </div>
   );
 }

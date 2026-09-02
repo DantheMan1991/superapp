@@ -337,5 +337,6 @@ computes `canDelete` per row and sends a boolean.
 - [ ] New tables covered in the isolation suite
 - [ ] Migration applied to dev branch **and** production
 - [ ] Module dossier build-log entry added ([docs/modules/](modules/))
+- [ ] Guide updated for any screen that changed, or written from `_TEMPLATE.md` for a new one ([docs/help/](help/))
 - [ ] Security checklist for the surface you touched ([security.md §4](security.md))
 - [ ] No industry vocabulary added to Layer 1

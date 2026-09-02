@@ -1,5 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
+import { parseHeader, stripComments, stripInline } from "./markdown-meta";
+import { walkMarkdown, type MarkdownEntry } from "./markdown-tree";
 
 // Build docs: everything under `docs/` is the source of truth (checked into
 // git, updated by the PR that changes the thing it describes — rule in
@@ -15,8 +17,14 @@ import path from "path";
 // `docs/modules/`, so four platform docs and every ADR were invisible in
 // the app no matter how carefully they were written. Anything added under
 // `docs/` now shows up without a code change; that is the point.
+//
+// The one exception is `docs/help/`: the tenant guides, written for the
+// client and rendered inside the product by `guides.ts`. They are not the
+// build record, and on this page they would show their `{{vocabulary}}`
+// unresolved, so the walker skips that folder.
 
 const DOCS_DIR = path.join(process.cwd(), "docs");
+const NOT_BUILD_DOCS = ["help"];
 
 /** Section = the top-level folder under `docs/` (`""` is `docs/*.md`). */
 export interface DocSection {
@@ -82,22 +90,6 @@ const SECTIONS: Omit<DocSection, "docs">[] = [
   },
 ];
 
-function isHidden(name: string) {
-  // `_TEMPLATE.md` and friends are scaffolding, not build docs.
-  return name.startsWith("_") || name.startsWith(".");
-}
-
-/** `[text](url)` → `text`, and drop bold/code marks. For card summaries. */
-function stripInline(text: string) {
-  return text
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/\*\*/g, "")
-    .replace(/`/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 /**
  * Newest build-log date in the file. Max, not first: a long dossier is not
  * reliably ordered newest-first end to end (email.md carries a dated
@@ -119,111 +111,29 @@ interface Parsed {
   lastLogged: string | null;
 }
 
+// The header parser lives in markdown-meta.ts, shared with the tenant guides;
+// this only adds what a build doc has and a guide does not.
 function parseMeta(slug: string, raw: string): Parsed {
-  const lines = raw.split("\n");
-  const title = /^# (.+)$/m.exec(raw)?.[1]?.trim() ?? slug;
-
-  // The leading blockquote is the doc's header. Two shapes exist in the
-  // tree: a dossier's purpose paragraph (plus a `Status:` line), and a
-  // platform doc's `**Read before:** / **Update when:**` fields. Parse both
-  // — a `**Field:**` marker opens a field and continues over wrapped lines.
-  const summaryLines: string[] = [];
-  const fields = new Map<string, string[]>();
-  let statusLine: string | null = null;
-  let current: string[] | null = null;
-  let inQuote = false;
-  let quoteEnd = 0;
-
-  for (const [i, line] of lines.entries()) {
-    if (line.startsWith(">")) {
-      inQuote = true;
-      quoteEnd = i + 1;
-      const text = line.replace(/^>\s?/, "").trim();
-      if (!text) continue;
-
-      const field = /^\*\*(.+?):\*\*\s*(.*)$/.exec(text);
-      if (field) {
-        current = [field[2]];
-        fields.set(field[1].toLowerCase(), current);
-      } else if (/^status:/i.test(text)) {
-        statusLine = stripInline(text);
-        current = null;
-      } else if (current) {
-        current.push(text);
-      } else {
-        summaryLines.push(text);
-      }
-    } else if (inQuote) {
-      break;
-    }
-  }
-
+  const header = parseHeader(raw);
   return {
-    title,
-    summary: summaryLines.length
-      ? stripInline(summaryLines.join(" "))
-      : firstProse(lines.slice(quoteEnd)),
-    statusLine,
-    readBefore: fields.has("read before")
-      ? stripInline(fields.get("read before")!.join(" "))
+    title: header.title ?? slug,
+    summary: header.summary,
+    statusLine: header.statusLine,
+    readBefore: header.fields.has("read before")
+      ? stripInline(header.fields.get("read before") ?? "")
       : null,
     lastLogged: newestLogDate(raw),
   };
 }
 
-/**
- * First real paragraph of body prose — the fallback summary for docs whose
- * header is all `**Read before:**` fields and no purpose line.
- */
-function firstProse(lines: string[]) {
-  const para: string[] = [];
-  for (const line of lines) {
-    const text = line.trim();
-    if (!para.length) {
-      // Skip headings, rules, quotes, tables, lists and blanks.
-      if (!text || /^([#>|]|---|\*|-\s|\d+\.\s)/.test(text)) continue;
-      para.push(text);
-    } else {
-      if (!text) break;
-      para.push(text);
-    }
-  }
-  return stripInline(para.join(" "));
-}
-
-/** Every `.md` under `docs/`, keyed by slug. */
-async function index(): Promise<Map<string, { file: string; rel: string }>> {
-  const found = new Map<string, { file: string; rel: string }>();
-
-  async function walk(dir: string, rel: string) {
-    let entries;
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (isHidden(entry.name)) continue;
-      const relPath = rel ? `${rel}/${entry.name}` : entry.name;
-      // isDirectory() is false for symlinks, so a link loop can't recurse.
-      if (entry.isDirectory()) {
-        await walk(path.join(dir, entry.name), relPath);
-      } else if (entry.isFile() && entry.name.endsWith(".md")) {
-        const slug = relPath.slice(0, -".md".length).toLowerCase();
-        if (!found.has(slug)) {
-          found.set(slug, { file: path.join(dir, entry.name), rel: relPath });
-        }
-      }
-    }
-  }
-
-  await walk(DOCS_DIR, "");
-  return found;
+/** Every build doc under `docs/`, keyed by slug. */
+function index(): Promise<Map<string, MarkdownEntry>> {
+  return walkMarkdown(DOCS_DIR, { skipTopLevel: NOT_BUILD_DOCS });
 }
 
 async function readMeta(
   slug: string,
-  entry: { file: string; rel: string },
+  entry: MarkdownEntry,
 ): Promise<{ meta: BuildDocMeta; raw: string }> {
   const raw = await fs.readFile(entry.file, "utf8");
   const cut = slug.lastIndexOf("/");
@@ -304,7 +214,7 @@ export async function getBuildDoc(slug: string): Promise<BuildDoc | null> {
    * handed to somebody outside the company, where a stray authoring note is not
    * a wart but a credibility problem.
    */
-  return { ...meta, content: raw.replace(/<!--[\s\S]*?-->/g, "") };
+  return { ...meta, content: stripComments(raw) };
 }
 
 /** Section label for a key, for breadcrumbs. */

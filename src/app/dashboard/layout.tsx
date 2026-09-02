@@ -89,6 +89,10 @@ export default async function DashboardLayout({
         // their own work. It sits directly under Overview because it is the page
         // the morning email links to.
         { href: "/dashboard/today", label: "What needs you", icon: "checks" },
+        // Every screen carries a "?" for its own guide; this is the whole shelf,
+        // filtered to what this business has switched on. Listing it here also
+        // puts it in the command palette, which flattens these groups.
+        { href: "/dashboard/guides", label: "Guides", icon: "book" },
       ],
     },
     // A tenant with nothing switched on should not see an empty caption.

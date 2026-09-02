@@ -3,6 +3,7 @@ import { AlertTriangle, Mail, PenSquare, Search } from "lucide-react";
 import type { MailAccount } from "@/db/schema";
 import type { TenantContext } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
+import { HelpButton } from "@/components/app/help-button";
 import { withTenant } from "@/db";
 import { loadMailView, visibleFolders } from "./read";
 import { FolderRail, mailHref } from "./components/mail-panes";
@@ -386,6 +387,10 @@ export async function MailView({
         </Link>
         <MailSearch initial={params.q ?? ""} params={params} />
         <SearchBuilder query={viewQuery} params={params} folders={folders} />
+        {/* This bar is Mail's own header — the connected view never renders
+            `PageHeader` — so the help button every other screen gets for free
+            is placed by hand. */}
+        <HelpButton className="shrink-0" />
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[13rem_22rem_minmax(0,1fr)]">

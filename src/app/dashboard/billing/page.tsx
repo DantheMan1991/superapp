@@ -16,6 +16,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { SubscriptionStatusBadge } from "@/components/status-badge";
 import { ManageBillingButton, SubscribeButton } from "./billing-buttons";
+import { PageHeader } from "@/components/app/page-header";
 
 export const dynamic = "force-dynamic";
 
@@ -44,12 +45,10 @@ export default async function BillingPage({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Billing</h1>
-        <p className="text-sm text-muted-foreground">
-          Subscription and payment for {ctx.tenant.name}.
-        </p>
-      </div>
+      <PageHeader
+        title="Billing"
+        description={`Subscription and payment for ${ctx.tenant.name}.`}
+      />
 
       {status === "success" && (
         <div className="flex items-center gap-2 rounded-md border border-emerald-300/50 bg-emerald-50 p-3 text-sm text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">

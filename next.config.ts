@@ -14,11 +14,23 @@ const SHARP_NATIVE = [
 ];
 
 const nextConfig: NextConfig = {
-  // Module dossiers are read from disk at request time by /admin/docs;
-  // make sure they're traced into the serverless bundle on deploy.
+  // Markdown read from disk at request time — the build record behind
+  // /admin/docs, and the tenant guides behind /dashboard/guides and the help
+  // panel's /api/help — has to be traced into the serverless bundle by hand,
+  // or it is simply absent in production while present on every laptop.
+  //
+  // Keys are matched with picomatch in `contains` mode (collect-build-traces),
+  // so a key is a substring glob: "/admin/docs" also covers
+  // /admin/docs/[...slug], and "/dashboard/guides" covers the guide pages
+  // beneath it. Never write a bracketed key — `[slug]` is a character class to
+  // picomatch, and the "/admin/docs/[slug]" entry that used to sit here
+  // matched nothing at all. The whole tree is traced for the admin page: the
+  // walker reads every folder under docs/, and tracing only docs/modules had
+  // left the platform docs, ADRs, briefs and runbooks missing when deployed.
   outputFileTracingIncludes: {
-    "/admin/docs": ["./docs/modules/**/*"],
-    "/admin/docs/[slug]": ["./docs/modules/**/*"],
+    "/admin/docs": ["./docs/**/*"],
+    "/dashboard/guides": ["./docs/help/**/*"],
+    "/api/help": ["./docs/help/**/*"],
     // Document generation reads the Noto Sans TTFs off disk and registers them
     // with @react-pdf/renderer as buffers. Without this the fonts are absent in
     // the serverless bundle and generation fails at request time — a failure

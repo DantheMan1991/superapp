@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AccountantToggle } from "./team-roles";
+import { PageHeader } from "@/components/app/page-header";
 
 export const dynamic = "force-dynamic";
 
@@ -65,12 +66,10 @@ export default async function TeamPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Team</h1>
-        <p className="text-sm text-muted-foreground">
-          Invite your staff and manage who has access to your workspace.
-        </p>
-      </div>
+      <PageHeader
+        title="Team"
+        description="Invite your staff and manage who has access to your workspace."
+      />
       <OrganizationProfile
         routing="hash"
         appearance={{

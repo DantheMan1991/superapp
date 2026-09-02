@@ -1,6 +1,7 @@
 import { CheckCircle2, Clock, Inbox, Mail, XCircle } from "lucide-react";
 import { requireTenantOwner } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/app/page-header";
 import {
   Card,
   CardContent,
@@ -75,17 +76,11 @@ export default async function EmailSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="flex size-10 items-center justify-center rounded-lg bg-brand/15 text-brand-foreground">
-          <Mail className="size-5" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Email</h1>
-          <p className="text-sm text-muted-foreground">
-            What your customers see when the system emails them on your behalf.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Email"
+        description="What your customers see when the system emails them on your behalf."
+        icon={<Mail />}
+      />
 
       <Card>
         <CardHeader>

@@ -264,4 +264,90 @@ dd("the real sources, against Postgres", () => {
     expect(staff.items).toEqual([]);
     expect(staff.complete).toBe(true);
   });
+
+  it("A FAILING TEMPLATE reaches the owner as an overdue item; a paused or clean one does not", async () => {
+    /**
+     * The sweep's note (`last_error`) used to be visible only on the recurring
+     * list — a page nobody opens unless they already suspect something. This
+     * is the same fact on the surface an owner actually reads at 7am.
+     *
+     * Three rows, one item. The paused one carries a note too (pausing does
+     * not clear it, by design) but is not asked to run, so nothing is owed on
+     * it — drop the `is_active` filter from the query and this goes red. The
+     * clean one proves the note is the trigger, not the table.
+     */
+    const { withTenant, schema } = await import("../src/db");
+    const { accountingAttentionSource } = await import(
+      "../src/modules/accounting/attention/source"
+    );
+    const { failureSentence } = await import(
+      "../src/modules/accounting/core/errors"
+    );
+
+    const seed = (values: Record<string, unknown>) =>
+      withTenant(tenantId, async (tx) => {
+        const [row] = await tx
+          .insert(schema.recurringEntries)
+          .values({
+            tenantId,
+            kind: "journal",
+            template: { kind: "journal", lines: [] },
+            dayOfMonth: 4,
+            createdByClerkUserId: "user_1",
+            ...values,
+          } as never)
+          .returning();
+        return row;
+      });
+
+    const failing = await seed({
+      name: "Monthly depreciation",
+      nextRunDate: "2026-08-04",
+      lastError: "ACCOUNT_INACTIVE",
+      lastErrorAt: new Date("2026-08-04T11:00:00Z"),
+    });
+    await seed({
+      name: "Paused, and failing",
+      nextRunDate: "2026-08-04",
+      lastError: "ACCOUNT_INACTIVE",
+      lastErrorAt: new Date("2026-08-04T11:00:00Z"),
+      isActive: false,
+    });
+    await seed({ name: "Clean", nextRunDate: "2026-09-04" });
+
+    const ctx = { tenantId, userId: "user_1", today: "2026-08-06" } as const;
+    const owner = await withTenant(
+      tenantId,
+      (tx) =>
+        collectAttention(tx, { ...ctx, role: "owner" }, [accountingAttentionSource]),
+      { role: "owner", userId: "user_1" },
+    );
+    expect(owner.complete).toBe(true);
+    const recurring = owner.items.filter((i) => i.key.startsWith("recurring:"));
+    expect(recurring).toEqual([
+      {
+        key: `recurring:${failing.id}`,
+        title: 'Recurring journal "Monthly depreciation" could not run',
+        // The same sentence the list page shows for the code — the two
+        // surfaces cannot disagree about why.
+        detail: failureSentence("ACCOUNT_INACTIVE"),
+        urgency: "overdue",
+        // The sweep does not move the date on a failure, so this is the
+        // period that was due and was not written.
+        dueOn: "2026-08-04",
+        href: `/dashboard/m/accounting/recurring#${failing.id}`,
+      },
+    ]);
+    // A real sentence, not the fallback for a code nobody mapped.
+    expect(recurring[0].detail).not.toMatch(/could not name/);
+
+    // Owners only, like the two obligations beside it: no assignee column.
+    const staff = await withTenant(
+      tenantId,
+      (tx) =>
+        collectAttention(tx, { ...ctx, role: "staff" }, [accountingAttentionSource]),
+      { role: "staff", userId: "user_1" },
+    );
+    expect(staff.items).toEqual([]);
+  });
 });

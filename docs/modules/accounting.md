@@ -13,6 +13,36 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-02 — A failing template is somebody's obligation (`claude/a-failing-template-is-somebodys-obligation`)
+
+**The sweep's note reaches `/dashboard/today` and the morning digest.** #341
+made a failed template say so on the recurring list, and left open that the
+list is a page nobody opens unless they already suspect something. Now
+`attention/source.ts` derives a third accounting obligation beside overdue
+invoices and bills awaiting approval: every ACTIVE template whose `last_error`
+is set, as an **overdue** item titled `Recurring bill "Unit 4 rent" could not
+run`, with `failureSentence(code)` as its detail — the same sentence the list
+shows, so the two surfaces cannot disagree about why — and `next_run_date` as
+its date, which on a failed template is the period that was due and was not
+written (the sweep does not move the date on a failure). The link lands on the
+row itself (`/recurring#<id>`; the `<li>` now carries `id` and lights on
+`target:`), per the feed's rule that an item is one click from its record.
+
+**Active templates only, and that is what makes it self-clear.** The note is
+cleared by the template's next clean run and by nothing else — not an edit,
+not a pause — because "edited" is not "fixed". But a paused template is not
+asked to run, so nothing is owed on it; filtering on `is_active` means the item
+disappears on the fix AND on the pause, which are the two honest ways out. A
+feed that nagged about a template somebody deliberately took out of service
+would be the noise the whole design is written against. Owners only, like the
+two obligations beside it: no assignee column. The digest inherits the item
+with no change of its own — it reads the same `collectAttention`.
+
+Test: three seeded rows (failing, paused-and-failing, clean) yield exactly one
+item with the expected key, title, sentence, urgency, date and link; staff see
+none. Drop the `is_active` filter and it goes red. +1 test. Closes the open
+item below.
+
 ### 2026-09-02 — The window was the founder's (`claude/the-window-was-the-founders`)
 
 **Doc-only. The entry below said the migration was applied "immediately before
@@ -3175,7 +3205,6 @@ compiled-and-tested, not seen.
 - **Recurring entries GENERATE ON THEIR OWN** since 2026-08-13 (`/api/cron/recurring`, 6am in the tenant's zone). ~~What is not built: any way to see the sweep's history in the UI — the counts come back to the cron caller and nowhere else.~~ **Closed 2026-09-01, as two columns rather than a history table:** a template that fails carries the error's CODE in `last_error` and the moment in `last_error_at`, the list shows a `failing` badge with the sentence, and only that template's next clean run clears it. The sweep's aggregate counts still go to the cron caller alone; the per-template note is the surface anybody actually needs. ~~This is what made the retired-tag decision what it was~~ — that decision stands: a dropped tag is a SUCCESS and never lands in `last_error`
 - ~~**THE RECURRING FRONTIER NEEDS ITS OWN COLUMN.**~~ **Closed 2026-09-02** (migration `0240`): `recurring_entries.generated_through` is the last period the sweep reached, written only by the success UPDATE and backfilled from `next_run_date - 1 month`; `updateRecurringEntry` compares against it by month. A forward edit no longer ratchets — the month after the last generated one is always reachable again
 - **EDIT MODE RENDERS A BLANK SELECT FOR A PARTY OR ACCOUNT THAT MAY NO LONGER BE PICKED.** A deactivated supplier/customer, or an income account nobody may choose, is not in the option list, so Radix shows an empty trigger rather than the old name; Save stays enabled and the server refuses correctly. Parity with the bill `[id]` page would offer the stored value back, marked, the way `keepIds` marks a retired tag — for the party; for the account, blank may be right (a re-pick is the point) but the Save button should say so (2026-09-01)
-- **A FAILING TEMPLATE IS NOT ON `/dashboard/today` OR IN THE DIGEST.** `attention/source.ts` derives exactly two accounting obligations — overdue invoices and bills awaiting approval. A template carrying `last_error` is the same live-query shape (`recurring_entries WHERE last_error <> ''`) and the surface an owner actually sees at 7am; the list page is only seen by navigating to it. Left open 2026-09-01 on purpose: the note is the fact, the feed is a consumer of it, and the feed's rule (one line per obligation, derived never stored) is its own dossier's to apply
 - ~~**`generateRecurringEntries` counts a record it may not have written.**~~ **Closed 2026-09-01**, in its own PR as it deserved. `created`, `posted` and the deferral now all hang off `PostResult.deduped`, and `periodsWalked` carries the months the loop walked so a gap between the two is visible in the sweep's JSON. It was never reachable through the schedule; it is fixed because a count whose correctness rests on an unreachability argument goes wrong the first time somebody makes it reachable
 - **Recurring journals and bills are DONE** (2026-08-12), and so is **folding `recurring_invoices` into them** (2026-08-12) — the module has ONE recurrence mechanism, one list and one engine. **DONE**: `drizzle/0147` dropped `recurring_invoices` and `invoices.recurring_invoice_id`. **Templates can be born with a dimension tag since 2026-09-01**, on all three kinds, and the list shows what each one carries. ~~What is not built for any kind: **editing a template** — which is why a tag, like an amount and an account, is fixed at creation~~ **Editing landed 2026-09-01** — every field but `kind`, under a version CAS, with the one guard that matters (the next run cannot move back over months already generated). What is not built: any cadence other than monthly
 - **Obligation statuses and the MoneyBar are DONE** (2026-08-12) on the invoice and bill LISTS. What is not built: the same language on the detail pages, and a deposits screen for the two money buckets to link into. **That closes the 2026-08-10 QuickBooks review list.**

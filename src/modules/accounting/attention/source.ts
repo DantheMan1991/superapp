@@ -1,6 +1,7 @@
 import "server-only";
-import { and, eq, inArray, isNotNull, lt } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt, ne } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
+import { failureSentence } from "../core/errors";
 import { formatCents } from "../lib/money";
 import type {
   AttentionCtx,
@@ -10,7 +11,24 @@ import type {
 
 /**
  * What the books say you still owe: money owed TO the business that is late,
- * and bills waiting on somebody to approve them.
+ * bills waiting on somebody to approve them, and a standing instruction the
+ * 6am sweep could not carry out.
+ *
+ * ── THE THIRD ONE IS A FAILURE, NOT A DATE ───────────────────────────────────
+ *
+ * A recurring template that fails leaves its code in `last_error` (the sweep's
+ * note, cleared only by that template's next clean run) and does NOT advance
+ * `next_run_date` — so the stored date is the period that was due and was not
+ * written. That is an obligation in exactly this contract's sense: derived from
+ * the row, gone the morning the template runs clean, and pointing at the record
+ * that needs the fixing. Before this the note was visible only on the recurring
+ * list, a page nobody opens unless they already suspect something.
+ *
+ * ACTIVE TEMPLATES ONLY. Pausing does not clear the note (the dossier explains
+ * why — "edited" is not "fixed", and neither is "paused"), but a paused template
+ * is not asked to run, so nothing is owed on it. Filtering on `is_active` is what
+ * lets this item self-clear on the pause as well as on the fix; without it the
+ * feed would nag about a template somebody deliberately took out of service.
  *
  * ── WHO GETS THESE, AND THE HONEST LIMITATION ────────────────────────────────
  *
@@ -39,7 +57,7 @@ async function collect(tx: Tx, ctx: AttentionCtx): Promise<AttentionItem[]> {
   // See the header: no assignee column means role is the only honest scope.
   if (ctx.role !== "owner") return [];
 
-  const [overdueInvoices, billsToApprove] = await Promise.all([
+  const [overdueInvoices, billsToApprove, failingTemplates] = await Promise.all([
     tx
       .select({
         id: schema.invoices.id,
@@ -70,6 +88,23 @@ async function collect(tx: Tx, ctx: AttentionCtx): Promise<AttentionItem[]> {
         and(
           eq(schema.bills.tenantId, ctx.tenantId),
           eq(schema.bills.status, "awaiting_approval"),
+        ),
+      )
+      .limit(50),
+    tx
+      .select({
+        id: schema.recurringEntries.id,
+        kind: schema.recurringEntries.kind,
+        name: schema.recurringEntries.name,
+        nextRunDate: schema.recurringEntries.nextRunDate,
+        lastError: schema.recurringEntries.lastError,
+      })
+      .from(schema.recurringEntries)
+      .where(
+        and(
+          eq(schema.recurringEntries.tenantId, ctx.tenantId),
+          eq(schema.recurringEntries.isActive, true),
+          ne(schema.recurringEntries.lastError, ""),
         ),
       )
       .limit(50),
@@ -106,8 +141,30 @@ async function collect(tx: Tx, ctx: AttentionCtx): Promise<AttentionItem[]> {
     });
   }
 
+  for (const t of failingTemplates) {
+    // Overdue by construction: the sweep does not move the date on a failure,
+    // so `next_run_date` is the period that was due and was not written. The
+    // code becomes the same sentence the list page shows, so the two surfaces
+    // cannot disagree about why.
+    items.push({
+      key: `recurring:${t.id}`,
+      title: `Recurring ${RECURRING_NOUN[t.kind]} "${t.name}" could not run`,
+      detail: failureSentence(t.lastError),
+      urgency: "overdue",
+      dueOn: t.nextRunDate,
+      href: `/dashboard/m/accounting/recurring#${t.id}`,
+    });
+  }
+
   return items;
 }
+
+/** The noun in "Recurring bill" — lower case, mid-sentence. */
+const RECURRING_NOUN: Record<"journal" | "invoice" | "bill", string> = {
+  journal: "journal",
+  invoice: "invoice",
+  bill: "bill",
+};
 
 /** Whole days between two `yyyy-mm-dd` strings, both treated as midnight UTC. */
 function daysBetween(from: string, to: string): number {

@@ -248,7 +248,10 @@ export default async function RecurringEntriesPage() {
             return (
               <li
                 key={e.id}
-                className="flex items-center justify-between gap-3 px-4 py-3"
+                // The feed on /dashboard/today links a failing template here
+                // by fragment; the row is the record, and `target:` lights it.
+                id={e.id}
+                className="flex scroll-mt-24 items-center justify-between gap-3 px-4 py-3 target:bg-warning/5"
               >
                 <div className="min-w-0">
                   <p className="flex flex-wrap items-center gap-2 text-sm font-medium">

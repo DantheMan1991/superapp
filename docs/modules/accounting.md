@@ -35,14 +35,40 @@ idempotency key — they always insert — and a journal's key is per (template,
 date), which a changed day-of-month defeats. So a `next_run_date` moved from
 October back to June would make the next sweep create four more invoices for
 months already invoiced. The stored `next_run_date` IS the walked frontier,
-written atomically with `last_generated_at` under the version CAS, so the
-comparison inside the op's transaction is sound: refused when
-`last_generated_at` is set and the new date is earlier than the stored one.
-A template that has never run may be re-dated freely; forward moves stay
+written atomically with `last_generated_at` under the version CAS: refused
+when `last_generated_at` is set and the new date is earlier than the stored
+one. A template that has never run may be re-dated freely; forward moves stay
 allowed, which is what pause-and-resume already does. `RECURRING_SCHEDULE_BACKWARD`
 is the new code. Making invoice and bill generation idempotent instead was
 considered and not done — a unique index, a numbering-arbiter rework and a
 bill back-link column, for a hazard one comparison removes.
+
+**THE FRONTIER IS THE WRONG COLUMN THE MOMENT THIS OP WRITES FORWARD — found by
+the adversarial pass, and left as a named follow-up rather than fixed here.**
+`next_run_date` is the walked frontier only while the sweep is its sole
+writer, and this op ends that. After a forward edit (a typo of `2027` for
+`2026`, or a deliberate year's pause) the stored date is a person's choice, and
+a later move back toward the months that really were generated is refused with
+a message that is false. The safe direction holds — no double generation is
+possible — but the correction path is a one-way ratchet whose only exit is
+pause-and-recreate, the path this PR exists to retire. The fix is a sweep-only
+`generated_through` column written by the success UPDATE alone, compared
+against instead; it is an additive migration, so its own PR. Bills carry no
+back-link, so the frontier cannot be derived from generated rows.
+
+**THE DIALOG IS KEYED ON THE ROW'S VERSION, so a changed row remounts** — also
+from the pass, and fixed here. `useState(existing.x)` seeds once per mount, and
+`router.refresh()` after Generate now or Pause keeps the instance. Without the
+key, a row that had just generated opened its dialog on the OLD next run, and a
+name-only save was refused as a backward move nobody made — the stale-picker
+trap `LotForm` fell into, in the one field the guard reads. Reproduced in the
+browser before the fix, on the same row that had just been generated.
+
+**A shape the dialog cannot show is not offered for editing.** A bill amount or
+an invoice unit price below zero would round-trip through the money helpers as
+positive with no warning; nothing this app writes makes one, the schema allows
+it, and the guard now covers it beside the one-line-bill rule. Journal lines
+are signed by design and exempt.
 
 **`kind` IS FROZEN; PARTY IS EDITABLE WITHIN IT.** The database ties party to
 kind and `invoices` points back at an invoice template, so changing what a
@@ -3044,6 +3070,8 @@ compiled-and-tested, not seen.
 - **Products & Services, Terms and Payment Methods are DONE** (2026-08-12) — see the build log for the two deliberate gaps (customer-level default terms have a column and resolution but no control; saved items are invoice-only so far)
 - ~~**Line account pickers are filtered in the UI ONLY.**~~ **Closed 2026-09-01, in two halves the same day.** The bill half came first, because a matched line's GRNI coding round-tripping through the form is what let the same receipts clear GRNI twice. The invoice and recurring halves followed once that PR's own build log admitted they were still open: `assertCodableAccounts` in core is the shared server-side rule, called by invoice lines and by recurring **bill and invoice** templates at the moment they are saved. Bill lines enforce the same rule in their own `assertLineAccounts`, which does not call it because it needs the one exception a stock match requires; a journal template, like the hand-written journal, is checked for existence and activity only. See the build log for the two boundaries that had to be stated — a journal may still name any account, and an invoice line may credit a liability
 - **Recurring entries GENERATE ON THEIR OWN** since 2026-08-13 (`/api/cron/recurring`, 6am in the tenant's zone). ~~What is not built: any way to see the sweep's history in the UI — the counts come back to the cron caller and nowhere else.~~ **Closed 2026-09-01, as two columns rather than a history table:** a template that fails carries the error's CODE in `last_error` and the moment in `last_error_at`, the list shows a `failing` badge with the sentence, and only that template's next clean run clears it. The sweep's aggregate counts still go to the cron caller alone; the per-template note is the surface anybody actually needs. ~~This is what made the retired-tag decision what it was~~ — that decision stands: a dropped tag is a SUCCESS and never lands in `last_error`
+- **THE RECURRING FRONTIER NEEDS ITS OWN COLUMN.** `updateRecurringEntry`'s backward guard compares against `next_run_date`, which stops being the walked frontier the moment an edit moves it forward; a later move back toward the truly generated months is then refused with a false message, and the only exit is pause-and-recreate. Safe (no double generation), but a one-way ratchet. Fix: a sweep-only `generated_through` date written by the success UPDATE alone, compared against instead — an additive migration, its own PR (2026-09-01)
+- **EDIT MODE RENDERS A BLANK SELECT FOR A PARTY OR ACCOUNT THAT MAY NO LONGER BE PICKED.** A deactivated supplier/customer, or an income account nobody may choose, is not in the option list, so Radix shows an empty trigger rather than the old name; Save stays enabled and the server refuses correctly. Parity with the bill `[id]` page would offer the stored value back, marked, the way `keepIds` marks a retired tag — for the party; for the account, blank may be right (a re-pick is the point) but the Save button should say so (2026-09-01)
 - **A FAILING TEMPLATE IS NOT ON `/dashboard/today` OR IN THE DIGEST.** `attention/source.ts` derives exactly two accounting obligations — overdue invoices and bills awaiting approval. A template carrying `last_error` is the same live-query shape (`recurring_entries WHERE last_error <> ''`) and the surface an owner actually sees at 7am; the list page is only seen by navigating to it. Left open 2026-09-01 on purpose: the note is the fact, the feed is a consumer of it, and the feed's rule (one line per obligation, derived never stored) is its own dossier's to apply
 - ~~**`generateRecurringEntries` counts a record it may not have written.**~~ **Closed 2026-09-01**, in its own PR as it deserved. `created`, `posted` and the deferral now all hang off `PostResult.deduped`, and `periodsWalked` carries the months the loop walked so a gap between the two is visible in the sweep's JSON. It was never reachable through the schedule; it is fixed because a count whose correctness rests on an unreachability argument goes wrong the first time somebody makes it reachable
 - **Recurring journals and bills are DONE** (2026-08-12), and so is **folding `recurring_invoices` into them** (2026-08-12) — the module has ONE recurrence mechanism, one list and one engine. **DONE**: `drizzle/0147` dropped `recurring_invoices` and `invoices.recurring_invoice_id`. **Templates can be born with a dimension tag since 2026-09-01**, on all three kinds, and the list shows what each one carries. ~~What is not built for any kind: **editing a template** — which is why a tag, like an amount and an account, is fixed at creation~~ **Editing landed 2026-09-01** — every field but `kind`, under a version CAS, with the one guard that matters (the next run cannot move back over months already generated). What is not built: any cadence other than monthly

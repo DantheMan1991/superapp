@@ -219,10 +219,21 @@ export default async function RecurringEntriesPage() {
              * app writes makes such a template, but the schema allows it, and
              * an Edit that silently dropped lines would be worse than none.
              */
-            const editable =
-              isOwner &&
+            /**
+             * And a schema shape the dialog cannot SHOW is not offered for
+             * editing: a bill amount or an invoice unit price below zero would
+             * round-trip through `formatCents`/`parseMoneyToCents` as positive
+             * with no warning. Nothing this app writes makes one; the schema
+             * allows it. Journal lines are signed by design and the dialog
+             * carries that with its Debit/Credit toggle, so they are exempt.
+             */
+            const showable =
               parsed !== null &&
-              (parsed.kind !== "bill" || parsed.lines.length === 1);
+              (parsed.kind === "journal" ||
+                (parsed.kind === "bill"
+                  ? parsed.lines.length === 1 && parsed.lines[0].amountCents >= 0
+                  : parsed.lines.every((l) => l.unitPriceCents >= 0)));
+            const editable = isOwner && showable;
             const ownIds = parsed
               ? (parsed.lines as ReadonlyArray<{ dimensionMemberIds?: string[] }>).flatMap(
                   (l) => l.dimensionMemberIds ?? [],
@@ -297,6 +308,18 @@ export default async function RecurringEntriesPage() {
                   <div className="flex shrink-0 items-center gap-1">
                     {editable && parsed && (
                       <RecurringEntryDialogButton
+                        /*
+                          **KEYED ON THE VERSION, so a changed row REMOUNTS.**
+                          The dialog seeds its form with `useState(existing.x)`,
+                          which runs once per mount — and `router.refresh()`
+                          after Generate now or Pause keeps the instance and
+                          merges the new props in. Without this key, a row that
+                          just generated would open its dialog on the OLD next
+                          run, and a name-only save would be refused as a
+                          backward move that nobody made. The stale-picker trap
+                          `LotForm` fell into, in the one field the guard reads.
+                        */
+                        key={`${e.id}:${e.version}`}
                         journalAccounts={data.journalAccounts.map(accountOption)}
                         incomeAccounts={data.incomeAccounts.map(accountOption)}
                         codableAccounts={data.codableAccounts.map(accountOption)}

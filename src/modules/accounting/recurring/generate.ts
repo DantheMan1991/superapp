@@ -308,11 +308,21 @@ export interface UpdateRecurringEntryInput extends NewRecurringEntryInput {
  * bill generation carry no idempotency key — they always insert — and a
  * journal's key is per (template, date), which a changed day-of-month defeats.
  * So a `next_run_date` moved from October back to June would make the next
- * sweep create four more invoices for months already invoiced. The stored
- * `next_run_date` IS the walked frontier, written atomically with
- * `last_generated_at` under the version CAS, so the comparison here is sound.
- * A template that has never run may be re-dated freely; forward moves stay
- * allowed, which is what pause-and-resume already does.
+ * sweep create four more invoices for months already invoiced. A template
+ * that has never run may be re-dated freely; forward moves stay allowed,
+ * which is what pause-and-resume already does.
+ *
+ * **THE FRONTIER THIS COMPARES AGAINST IS `next_run_date`, AND THAT IS ONLY
+ * THE WALKED FRONTIER WHILE THE SWEEP IS ITS SOLE WRITER — which this op ends.**
+ * After a FORWARD edit the stored date is a person's choice, and a later move
+ * back toward the months that really were generated is refused with a message
+ * that is false ("they would be created again" — nothing between the true
+ * frontier and the typed date ever was). The safe direction is preserved: no
+ * double generation is possible. The correction path is a one-way ratchet
+ * until the sweep records its own frontier in a column of its own
+ * (`generated_through`, written only by the success UPDATE) — an additive
+ * migration, and the named follow-up in the dossier. Bills carry no back-link,
+ * so it cannot be derived from generated rows.
  *
  * **A FAILURE NOTE SURVIVES AN EDIT** — deliberately. A save-time check cannot
  * see a closed period, a re-typed account or a retired tax rate, so "edited"

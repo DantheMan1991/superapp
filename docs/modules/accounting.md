@@ -41,7 +41,7 @@ would not be deduped, and invoices and bills have no key at all.
 **BACKFILLED AS `next_run_date - 1 month`**, for rows with `last_generated_at`.
 `advanceMonthly` steps exactly one calendar month and `day_of_month` is 1–28,
 so the subtraction is exact wherever only the sweep had moved the date — which
-was every row until editing shipped hours earlier. A row edited forward in
+was every row until editing shipped minutes earlier. A row edited forward in
 that window would be backfilled with the edit's choice rather than the truth;
 the window on production was a few hours and the table a handful of rows.
 `NULL` means never generated, and the guard treats it as free — there is no
@@ -70,10 +70,13 @@ cannot be re-run to heal it). The cron acts only at 6am in each tenant's
 zone; the residual path is a Generate now pressed inside a minutes-long
 window. Handled procedurally: the migration was applied to production
 immediately before the merge, at an hour no tenant was near 6am, and the
-post-deploy check in the migration's own header — `generated_through <>
-next_run_date - 1 month` — was run afterwards. A row it lists is either
-forward-edited (safe, expected) or window-generated (fix by hand); the
-`ledger.recurring_updated` audit row tells them apart.
+post-deploy check in the migration's own header — `generated_through` NULL or
+`<> next_run_date - 1 month`, for rows that have generated — was run
+afterwards. The NULL arm is the judge's widening: a row whose FIRST-ever
+generation lands in the window had nothing to backfill and the guard treats
+NULL as free. A row the check lists is either forward-edited (safe, expected)
+or window-generated (fix by hand); the `ledger.recurring_updated` audit row
+tells them apart.
 
 **Tests:** the sweep writes the frontier as the month before `next_run_date`
 on the template's day; a forward edit leaves it untouched; a move back to the

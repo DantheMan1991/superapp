@@ -1680,18 +1680,20 @@ d("invoicing (DB)", () => {
         expect(after.version).toBe(walked.version);
         expect(after.nextRunDate).toBe(walked.nextRunDate);
 
-        // Forward is fine — pause-and-resume already does that.
+        // Forward is fine. Derived from the walk, not hard-coded: January of
+        // the year after the walked frontier is forward on every calendar day.
+        const forwardDate = `${Number(walked.nextRunDate.slice(0, 4)) + 1}-01-04`;
         const moved = await withTenant(tenantId, (tx) =>
           updateRecurringEntry(tx, owner, {
             id: row.id,
             expectedVersion: walked.version,
             name: walked.name,
             dayOfMonth: 4,
-            nextRunDate: "2027-01-04",
+            nextRunDate: forwardDate,
             template: journalTemplate(cash, exp, 1_300),
           }),
         );
-        expect(moved.after.nextRunDate).toBe("2027-01-04");
+        expect(moved.after.nextRunDate).toBe(forwardDate);
         expect(moved.after.version).toBe(walked.version + 1);
       });
 
@@ -2112,6 +2114,18 @@ d("invoicing (DB)", () => {
         expect(fixed.lastError).toBe("");
         expect(fixed.lastErrorAt).toBeNull();
         expect(fixed.nextRunDate > "2026-06-04").toBe(true);
+        /**
+         * **A SWEEP THAT FOLLOWS AN EDIT WRITES THE FRONTIER.** The edit above
+         * left `generated_through` NULL (nothing had generated); this sweep is
+         * the first to write it, and it must be the last period walked — the
+         * month before `next_run_date`, on the template's day. Proved here
+         * rather than after a back-dated edit because this template is due on
+         * every calendar day; a back-dated one is due only until the 4th.
+         */
+        const fm = fixed.nextRunDate.slice(0, 7);
+        const [fy, fmo] = fm.split("-").map(Number);
+        const frontierMonth = `${fmo === 1 ? fy - 1 : fy}-${String(fmo === 1 ? 12 : fmo - 1).padStart(2, "0")}`;
+        expect(fixed.generatedThrough).toBe(`${frontierMonth}-04`);
         const drafts = await withTenant(tenantId, (tx) =>
           tx.query.invoices.findMany({
             where: and(

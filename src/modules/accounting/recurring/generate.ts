@@ -408,6 +408,14 @@ export async function updateRecurringEntry(
   return { before, after: rows[0] };
 }
 
+/** The loop walked at least one period, or the row was never due. */
+function walkedThrough(value: string | null): string {
+  if (value === null) {
+    throw new LedgerError("RECURRING_TEMPLATE_INVALID", "a due template walked no period");
+  }
+  return value;
+}
+
 /**
  * **LEAVE THE NOTE ON THE ROW.**
  *
@@ -744,7 +752,12 @@ export async function generateRecurringEntries(
             // THE FRONTIER, and this is the one place it is written. An edit
             // may move `next_run_date` forward past it; it may never move
             // this, so the backward guard always has the truth to compare to.
-            generatedThrough: generatedThrough ?? entry.generatedThrough,
+            // Never null here: `due` requires `next_run_date <= today` against
+            // the same `today` the loop reads, so it walked at least once. Said
+            // as a throw rather than a `??` fallback, because a fallback that
+            // rests on an unreachability argument is the thing `created`'s own
+            // comment above distrusts.
+            generatedThrough: walkedThrough(generatedThrough),
             // A clean run is the ONLY thing that clears the note — not an
             // edit, a pause or a resume. See the column's own comment.
             lastError: "",

@@ -47,6 +47,18 @@ the window on production was a few hours and the table a handful of rows.
 `NULL` means never generated, and the guard treats it as free — there is no
 fallback to `next_run_date`, because that fallback would be the ratchet again.
 
+**THE BACKFILL WAS PRE-FLIGHTED ON PRODUCTION, READ-ONLY, BEFORE IT RAN** —
+because the adversarial pass pointed out that for two of the three kinds the
+frontier is exactly derivable from the records themselves, and the arithmetic
+is not: journals as `max(entry_date)` over `journal_entries.idempotency_key
+LIKE 'recurring:<id>:%'`, invoices as `max(issue_date)` over
+`invoices.recurring_entry_id`. Only bills lack a back-link. Production held
+two rows, both last written by the 6am sweep on 2026-09-01 before editing went
+live, and on both the arithmetic equalled the derived frontier — so `0240`
+stood as written. **The next backfill of a column like this should derive
+where it can and fall back to arithmetic only where it must**; the query is
+in this entry so it does not have to be rediscovered.
+
 **Tests:** the sweep writes the frontier as the month before `next_run_date`
 on the template's day; a forward edit leaves it untouched; a move back to the
 month right after it is accepted (red before this PR — the ratchet); the last

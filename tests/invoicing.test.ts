@@ -1644,9 +1644,10 @@ d("invoicing (DB)", () => {
          * Invoice and bill generation carry no idempotency key — they always
          * insert — so a next-run moved from October back to June would make
          * the next sweep create four more invoices for months already
-         * invoiced. The stored `next_run_date` IS the walked frontier, written
-         * with `last_generated_at` under the version CAS. Delete the guard in
-         * the op and this goes red.
+         * invoiced. The frontier is `generated_through`, which only the sweep
+         * writes (since 0240 — it was `next_run_date` for one evening, and
+         * that ratcheted after a forward edit). Delete the guard in the op and
+         * this goes red.
          */
         const cash = await accountId("1000");
         const exp = await accountId("6700");

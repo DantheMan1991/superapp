@@ -1541,7 +1541,12 @@ d("invoicing (DB)", () => {
             ],
           },
         });
-        expect((await rowOf(template.id))!.lastError).toBe("ACCOUNT_INACTIVE");
+        const seeded = (await rowOf(template.id))!;
+        expect(seeded.lastError).toBe("ACCOUNT_INACTIVE");
+        // The precondition the clear is proved against. A raw insert drops an
+        // unknown key silently, and a column that defaulted NULL would make the
+        // `toBeNull()` below pass with the clear removed from the success SET.
+        expect(seeded.lastErrorAt).not.toBeNull();
 
         const result = await generateRecurringEntries(owner);
         await pause(template.id);

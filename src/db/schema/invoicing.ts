@@ -394,7 +394,7 @@ export const recurringEntries = pgTable(
      *
      * A CODE, never a message. The catch already reduces to `LedgerError.code`
      * or `"UNKNOWN"`; a raw Postgres message can carry row values, and this
-     * row is member-readable. `NOT NULL DEFAULT ''` is the shape the four other
+     * row is member-readable. `NOT NULL DEFAULT ''` is the shape the five other
      * `last_error` columns in this schema use.
      *
      * CLEARED ONLY BY THIS TEMPLATE'S NEXT SUCCESSFUL RUN, in the same UPDATE

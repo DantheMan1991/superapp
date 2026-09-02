@@ -576,4 +576,216 @@ d("payment_accounts (RLS)", () => {
       ),
     ).toHaveLength(0);
   });
+
+  // ---- Square: a second provider on the same table, and the one table with
+  // ---- NO member policy at all (ADR 0017) ---------------------------------
+
+  const MERCHANT_A = `ML${STAMP.replace(/-/g, "").toUpperCase()}A`;
+  let squareAccountA: string;
+
+  it("a Square account hangs off a company like a Stripe one, and members can READ it", async () => {
+    // Tenant A's SECOND company takes Square — the first already has Stripe.
+    // One row per company PER PROVIDER, so a company may hold one of each.
+    const [row] = await withSystem((tx) =>
+      tx
+        .insert(schema.paymentAccounts)
+        .values({
+          tenantId: tenantA,
+          entityId: entityA2,
+          provider: "square",
+          squareMerchantId: MERCHANT_A,
+          cardPaymentsStatus: "active",
+        })
+        .returning(),
+    );
+    squareAccountA = row.id;
+    expect(row.stripeAccountId).toBeNull();
+
+    // The till reads "can this company take a card" as staff, whichever
+    // provider answers it — so the account row is member-readable.
+    const seen = await asStaff((tx) =>
+      tx
+        .select()
+        .from(schema.paymentAccounts)
+        .where(eq(schema.paymentAccounts.provider, "square")),
+    );
+    expect(seen.map((r) => r.id)).toEqual([squareAccountA]);
+    expect(
+      await asOtherTenant((tx) =>
+        tx
+          .select()
+          .from(schema.paymentAccounts)
+          .where(eq(schema.paymentAccounts.provider, "square")),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("payment_credentials has NO member policy: a tenant cannot read even its own token row", async () => {
+    await withSystem((tx) =>
+      tx.insert(schema.paymentCredentials).values({
+        tenantId: tenantA,
+        paymentAccountId: squareAccountA,
+        accessTokenEnc: "iv.tag.ciphertext",
+        refreshTokenEnc: "iv.tag.ciphertext",
+        scopes: ["PAYMENTS_WRITE"],
+      }),
+    );
+    // Superadmin / system sees it; that is the only way it is ever read.
+    expect(
+      await withSystem((tx) => tx.select().from(schema.paymentCredentials)),
+    ).toHaveLength(1);
+    // The OWNER of the tenant that holds the token sees nothing. Not a
+    // filtered view — nothing. The lib decrypts under withSystem in one place.
+    expect(await asOwner((tx) => tx.select().from(schema.paymentCredentials))).toHaveLength(0);
+    expect(await asStaff((tx) => tx.select().from(schema.paymentCredentials))).toHaveLength(0);
+    expect(
+      await asOtherTenant((tx) => tx.select().from(schema.paymentCredentials)),
+    ).toHaveLength(0);
+  });
+
+  it("members cannot write payment_credentials — the insert is loud, the update and delete are silent", async () => {
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.paymentCredentials).values({
+          tenantId: tenantA,
+          paymentAccountId: squareAccountA,
+          accessTokenEnc: "forged",
+        }),
+      ),
+    ).rejects.toThrow();
+
+    // No member UPDATE/DELETE policy means no USING clause to satisfy: zero rows
+    // rather than an error. The guarantee holds either way (see drizzle/0207).
+    const updated = await asOwner((tx) =>
+      tx
+        .update(schema.paymentCredentials)
+        .set({ accessTokenEnc: "swapped" })
+        .where(eq(schema.paymentCredentials.paymentAccountId, squareAccountA))
+        .returning(),
+    );
+    expect(updated).toHaveLength(0);
+    const deleted = await asOwner((tx) =>
+      tx
+        .delete(schema.paymentCredentials)
+        .where(eq(schema.paymentCredentials.paymentAccountId, squareAccountA))
+        .returning(),
+    );
+    expect(deleted).toHaveLength(0);
+
+    const still = await withSystem((tx) =>
+      tx.query.paymentCredentials.findFirst({
+        where: eq(schema.paymentCredentials.paymentAccountId, squareAccountA),
+      }),
+    );
+    expect(still?.accessTokenEnc).toBe("iv.tag.ciphertext");
+  });
+
+  it("a token cannot be filed against another tenant's account, even under withSystem", async () => {
+    // Composite FK: (tenant_id, payment_account_id) → payment_accounts. Tenant A
+    // naming tenant B's account is unrepresentable, not merely refused.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.paymentCredentials).values({
+          tenantId: tenantA,
+          paymentAccountId: accountB,
+          accessTokenEnc: "x",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a row cannot lie about its provider", async () => {
+    const bad = [
+      // Square row carrying a Stripe id and no merchant id.
+      { provider: "square", stripeAccountId: "acct_wrong", squareMerchantId: null },
+      // Stripe row with no Stripe id.
+      { provider: "stripe", stripeAccountId: null, squareMerchantId: null },
+      // Both ids at once.
+      { provider: "square", stripeAccountId: "acct_both", squareMerchantId: "MLBOTH" },
+      // A provider nobody has written.
+      { provider: "paypal", stripeAccountId: null, squareMerchantId: "MLPP" },
+    ];
+    for (const values of bad) {
+      await expect(
+        withSystem((tx) =>
+          tx.insert(schema.paymentAccounts).values({
+            tenantId: tenantB,
+            ...values,
+          }),
+        ),
+      ).rejects.toThrow();
+    }
+  });
+
+  it("one account per company per provider, and the same Square merchant on one company only", async () => {
+    // A second Square row for the company that already has one.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.paymentAccounts).values({
+          tenantId: tenantA,
+          entityId: entityA2,
+          provider: "square",
+          squareMerchantId: `${MERCHANT_A}2`,
+        }),
+      ),
+    ).rejects.toThrow();
+    // The same merchant on the OTHER company of the same tenant: one bank
+    // account's takings would land in two sets of books.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.paymentAccounts).values({
+          tenantId: tenantA,
+          entityId: entityA1,
+          provider: "square",
+          squareMerchantId: MERCHANT_A,
+        }),
+      ),
+    ).rejects.toThrow();
+    // But a Stripe row beside the Square one on the same company is fine.
+    const [stripeToo] = await withSystem((tx) =>
+      tx
+        .insert(schema.paymentAccounts)
+        .values({
+          tenantId: tenantA,
+          entityId: entityA2,
+          provider: "stripe",
+          stripeAccountId: `acct_${STAMP.replace(/-/g, "")}A2`,
+        })
+        .returning(),
+    );
+    expect(stripeToo.provider).toBe("stripe");
+  });
+
+  it("closing the account takes its credential with it", async () => {
+    // CASCADE: a token for an account that no longer exists is meaningless, and
+    // deleting the account is the one time deleting a token is right.
+    const [account] = await withSystem((tx) =>
+      tx
+        .insert(schema.paymentAccounts)
+        .values({
+          tenantId: tenantB,
+          provider: "square",
+          squareMerchantId: `${MERCHANT_A}B`,
+        })
+        .returning(),
+    );
+    await withSystem((tx) =>
+      tx.insert(schema.paymentCredentials).values({
+        tenantId: tenantB,
+        paymentAccountId: account.id,
+        accessTokenEnc: "doomed",
+      }),
+    );
+    await withSystem((tx) =>
+      tx.delete(schema.paymentAccounts).where(eq(schema.paymentAccounts.id, account.id)),
+    );
+    expect(
+      await withSystem((tx) =>
+        tx
+          .select()
+          .from(schema.paymentCredentials)
+          .where(eq(schema.paymentCredentials.paymentAccountId, account.id)),
+      ),
+    ).toHaveLength(0);
+  });
 });

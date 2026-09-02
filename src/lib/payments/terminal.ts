@@ -118,6 +118,9 @@ async function accountForCompany(
       tx.query.paymentAccounts.findFirst({
         where: and(
           eq(schema.paymentAccounts.tenantId, tenantId),
+          // THIS FILE IS STRIPE TERMINAL. A company's Square row is another
+          // provider's business and must never be handed to Stripe as an account.
+          eq(schema.paymentAccounts.provider, "stripe"),
           entityId
             ? eq(schema.paymentAccounts.entityId, entityId)
             : isNull(schema.paymentAccounts.entityId),
@@ -132,7 +135,26 @@ async function accountForCompany(
       "Set up card payments for this company before adding a reader.",
     );
   }
-  return row;
+  return { ...row, stripeAccountId: requireStripeAccountId(row) };
+}
+
+/**
+ * `stripe_account_id` is nullable since Square arrived, and the CHECK
+ * constraint guarantees it is set on every `stripe` row — so this can only
+ * fail on a row this file should never have been given. Loud rather than a
+ * `stripeAccount: null` sent to Stripe, which would act on the PLATFORM account.
+ */
+function requireStripeAccountId(row: {
+  provider: string;
+  stripeAccountId: string | null;
+}): string {
+  if (row.provider !== "stripe" || !row.stripeAccountId) {
+    throw new TerminalError(
+      "NO_ACCOUNT",
+      "This company takes cards through Square, not Stripe.",
+    );
+  }
+  return row.stripeAccountId;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -399,7 +421,13 @@ async function loadReader(
   if (!found) {
     throw new TerminalError("NOT_FOUND", "That reader no longer exists.");
   }
-  return found;
+  return {
+    row: found.row,
+    account: {
+      ...found.account,
+      stripeAccountId: requireStripeAccountId(found.account),
+    },
+  };
 }
 
 /**
@@ -425,10 +453,13 @@ export async function refreshReaders(tenantId: string, paymentAccountId: string)
   const account = await withSystem((tx) =>
     tx.query.paymentAccounts.findFirst({
       where: eq(schema.paymentAccounts.id, paymentAccountId),
-      columns: { stripeAccountId: true },
+      columns: { stripeAccountId: true, provider: true },
     }),
   );
-  if (!account) return;
+  // A Square account has no Stripe readers to refresh; the FK means the rows
+  // above can only exist on a Stripe account, so this is belt and braces.
+  if (!account?.stripeAccountId || account.provider !== "stripe") return;
+  const stripeAccountId = account.stripeAccountId;
 
   await Promise.all(
     rows.map(async (row) => {
@@ -436,7 +467,7 @@ export async function refreshReaders(tenantId: string, paymentAccountId: string)
         const reader = await getStripe().terminal.readers.retrieve(
           row.stripeReaderId,
           {},
-          { stripeAccount: account.stripeAccountId },
+          { stripeAccount: stripeAccountId },
         );
         // Stripe returns a DeletedReader for a device removed on their side.
         // Treat it as offline rather than crashing: the row stays, because a

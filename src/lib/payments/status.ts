@@ -40,6 +40,12 @@ export type PaymentAccountState =
   | "ready"
   /** Stripe will never enable this one — wrong country, wrong entity type. */
   | "unsupported"
+  /**
+   * Square only: the provider stopped accepting our token and the owner has to
+   * authorise again. Distinct from `closed` because nothing was revoked on
+   * purpose, and from `needs_information` because there is no form to finish.
+   */
+  | "needs_reconnect"
   /** Closed, or the farm revoked us from its own dashboard. */
   | "closed";
 
@@ -103,8 +109,12 @@ export type PaymentAccountView = {
    * past-due first. Empty is meaningful: Stripe is working rather than waiting.
    */
   outstanding: string[];
-  /** What the button on the card should offer, if anything. */
-  action: "connect" | "continue" | "manage" | null;
+  /**
+   * What the button on the card should offer, if anything. `reconnect` is
+   * Square's: the same OAuth trip as `connect`, offered with different words
+   * because the farm did nothing wrong.
+   */
+  action: "connect" | "continue" | "reconnect" | "manage" | null;
 };
 
 const PAYOUTS_CAPABILITY = "stripe_balance.payouts";

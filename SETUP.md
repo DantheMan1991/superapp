@@ -418,6 +418,51 @@ somebody looks at it and stale when nobody does.
    **Ready**; that is the honest state and the one most real clients sit in for
    a day or two.
 
+### 4.7 Square: letting CLIENTS take card payments with the account they already have
+
+**Since 2026-09-02 Square is the provider on offer and Stripe Connect (§4.5,
+§4.6) is parked** — see [ADR 0017](docs/decisions/0017-the-square-account-the-farm-already-has.md).
+The pilot pays with Square; farmers markets run on Square; a client that already
+has the account, the bank link and the reader connects in one consent click.
+Square has no Connect equivalent: the client authorises Yosher through OAuth and
+the app holds a scoped, revocable token per company, encrypted, in a table no
+member can read.
+
+**Do this once, for the platform, in the [Square Developer Console](https://developer.squareup.com/apps):**
+
+1. **Create an application.** It comes with a **Sandbox** and a **Production**
+   pair of credentials. Start with Sandbox.
+2. **Credentials → Application ID and Application secret** → `.env` as
+   `SQUARE_APPLICATION_ID` and `SQUARE_APPLICATION_SECRET`. Leave
+   `SQUARE_ENVIRONMENT=sandbox` — the app refuses to reach production Square
+   unless that variable literally says `production`, because Square credentials
+   carry no `sk_test_`-style marker of their own.
+3. **OAuth → Redirect URL**: `<NEXT_PUBLIC_APP_URL>/api/payments/square/callback`,
+   character for character. Square rejects a mismatch with one of the least
+   helpful errors in the protocol. Locally that is
+   `http://localhost:3000/api/payments/square/callback`.
+4. **Webhooks → Add subscription**: URL `<NEXT_PUBLIC_APP_URL>/api/webhooks/square`,
+   subscribe to `oauth.authorization.revoked` (more events arrive with later
+   slices), and copy the **Signature key** into `.env` as
+   `SQUARE_WEBHOOK_SIGNATURE_KEY`. **The notification URL is part of the
+   signature**, so `NEXT_PUBLIC_APP_URL` must match what you typed here exactly
+   — a trailing slash or http/https mismatch fails every event, silently.
+   Locally there is no public URL; skipping the subscription is survivable, as
+   §4.4 says of Stripe: the page reconciles from Square on every load, and a
+   revoked token surfaces there as **Needs reconnecting**.
+
+**Try it in the sandbox.** The Developer Console's **Sandbox test accounts**
+panel opens a sandbox Seller Dashboard; with that open in the same browser, go
+to **/dashboard/settings/payments → Connect Square**. Square's permission form
+lists every scope the till will ever need (asked for once, deliberately — see
+the ADR); accept it and you land back on the page with **Connected**, the
+sandbox business's name, and its locations. The badge is what Square said just
+now, never what the redirect claimed.
+
+**Disconnecting** is the button on the card: it calls Square's revoke endpoint
+and marks the row closed only once Square confirms. A client can also revoke
+from their own Square dashboard, in which case the webhook does the marking.
+
 ---
 
 ## Part 4.5 — Anthropic: the Discovery copilot (5 min)

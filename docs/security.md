@@ -185,10 +185,24 @@ act on it comes from the platform key plus `stripeAccount`. A per-client secret
 key would be a C5 secret granting unlimited authority over that client's money,
 and it is the shortcut ADR 0015 exists to refuse.
 
+**Since 2026-09-02 the same table carries a second provider, Square, and S7
+reads "trusted PROVIDER data".** `payment_accounts.provider` says which;
+CHECK constraints stop a row lying about it. Square has no Connect: the client
+authorises Yosher through OAuth and the app holds a **per-company access token
+in `payment_credentials`** — encrypted (S8), and in a table with **NO member
+policy at all**, so a tenant transaction cannot read even its own ciphertext.
+That token is not the secret key above: it is scoped to what the seller
+consented to, expires in thirty days unless renewed, and the seller revokes it
+from Square, which tells us (`oauth.authorization.revoked`). The lib decrypts
+it in exactly one function. [ADR 0017](decisions/0017-the-square-account-the-farm-already-has.md)
+weighs the trade.
+
 **S8 — Secrets at rest are encrypted with `encryptSecret()`.**
 AES-256-GCM, random IV, auth tag stored alongside — tampering fails loudly.
-One key, `APP_ENCRYPTION_KEY`. Plaid access tokens and mailbox OAuth tokens use
-it. Do not introduce a second key; do not hand-roll crypto.
+One key, `APP_ENCRYPTION_KEY`. Plaid access tokens, mailbox OAuth tokens and
+Square OAuth tokens (`payment_credentials`) use it. Do not introduce a second
+key; do not hand-roll crypto. Note that since the Square tokens, a rotation of
+this key touches a client's money, not only its mail and bank feed.
 
 **S9 — Audit identifiers, never contents.**
 `logAudit()` takes actions, ids and coarse metadata. Never a message body, an
@@ -291,6 +305,8 @@ Paste these into the PR. They are the actual gate.
 | `CLERK_SECRET_KEY`, webhook secret | Identity | Clerk dashboard |
 | `STRIPE_SECRET_KEY`, webhook secret | Billing — the platform charging the tenant | Stripe dashboard |
 | `STRIPE_CONNECT_WEBHOOK_SECRET` | Connect events — the tenant's own connected accounts. A SEPARATE endpoint with a separate secret, because Stripe only delivers `account.updated` to a Connect-enabled one | Stripe dashboard |
+| `SQUARE_APPLICATION_ID`, `SQUARE_APPLICATION_SECRET` | The tenant's own Square account, via OAuth (ADR 0017). The secret is sent to Square at code exchange and on revoke, and never anywhere else. `SQUARE_ENVIRONMENT` picks sandbox (the default) or production | Square Developer Console |
+| `SQUARE_WEBHOOK_SIGNATURE_KEY` | Square events. HMAC-SHA256 over the notification URL plus the raw body, so `NEXT_PUBLIC_APP_URL` must match the URL registered in the console exactly | Square Developer Console |
 | `ANTHROPIC_API_KEY` | Copilot, extraction | Anthropic console |
 | `PLAID_*` | Bank feed | Plaid dashboard |
 | Stalwart / JMAP creds | Mailbox access | Per-deployment |
@@ -327,6 +343,8 @@ Every path into the system, and what makes it trustworthy.
 | Clerk webhook | Svix signature | Trusted sync → `withSystem()` legal. Deliveries are **not ordered**: when an event's prerequisite hasn't arrived, answer 5xx so svix retries. A 200 that wrote nothing loses the row for good |
 | Stripe webhook | Stripe signature | Only trusted source of billing state (S7). The PLATFORM charging the TENANT |
 | Stripe **Connect** webhook | Stripe signature, own secret | `/api/webhooks/stripe/connect`. The TENANT charging THEIR customer, over Accounts v2. A v2 notification carries only a REFERENCE, so the handler re-reads the account from the API — the event is a nudge and the data is always a server→Stripe read. The tenant is resolved from our own row by account id, never from the event or from Stripe metadata |
+| Square webhook | Square signature (`x-square-hmacsha256-signature`), own key | `/api/webhooks/square`. The TENANT charging THEIR customer through their own Square account. HMAC-SHA256 over notification URL + raw body, verified in a pure function with a known-vector test. Today only `oauth.authorization.revoked` does anything — it closes the rows for that merchant and blanks their tokens. The tenant is resolved from our own row by merchant id, never from the payload |
+| Square OAuth callback | State cookie (encrypted, httpOnly, single-use) + signed-in OWNER matches the tenant that started it + code exchanged with the application secret | `/api/payments/square/callback`. Nothing is stored until the new token has read the merchant back from Square's API, which is also the only trusted answer to WHICH account was authorised |
 | Resend inbound mail | Signature + address token | Token is the tenant claim; validate before use |
 | `/s/[token]` share links | Unguessable token + expiry + limits | **Unauthenticated by design.** Scope tightly, log access |
 | `/health-check` | Public | Prospect funnel. No tenant data. Treat all input as hostile |

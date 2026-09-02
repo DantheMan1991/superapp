@@ -25,9 +25,10 @@ Rows are listed in build order; the numbers are left alone because the build log
 | --- | --- | --- |
 | **0** | **Channels + per-item-per-channel price lists + the market day record** | **shipped 2026-08-20** |
 | **1** | **The till: sales, the truck, sold-out capture, day-end reconciliation** | **shipped 2026-08-21** |
-| **1p** | **Stripe Connect: the farm's own connected account, per company** | **shipped 2026-08-25** — Layer 0, [ADR 0015](../decisions/0015-a-connected-account-belongs-to-a-company.md), dossier in [payments.md](payments.md) |
-| 5 | **Payment adapter — write: the till takes a card** | next — the reader and the charge are BUILT ([payments.md](payments.md) slice 1); what is left is wiring `collectPayment` into `recordSale` so the till's own `client_ref` becomes the idempotency key |
-| 2 | Payment adapter — read (settlements, fees → books) | after 5 — needs a payment to have happened |
+| **1p** | **Stripe Connect: the farm's own connected account, per company** | **shipped 2026-08-25** — Layer 0, [ADR 0015](../decisions/0015-a-connected-account-belongs-to-a-company.md), dossier in [payments.md](payments.md). **Parked 2026-09-02**: the provider on offer is now Square |
+| **1q** | **Square: the account the farm ALREADY takes cards with, per company** | **shipped 2026-09-02** — Layer 0, [ADR 0017](../decisions/0017-the-square-account-the-farm-already-has.md), dossier in [payments.md](payments.md). The homestead brief's own recommendation, Square-first and read-before-write, finally followed |
+| 2 | Payment adapter — read (Square payments and payouts, with fees → books) | **next** — no hardware, no till change; the pilot's Square payments already exist to match against |
+| 5 | **Payment adapter — write: the till takes a card** | after 2 — two paths, both wanted: the Square app-switch (the $59 reader or the phone) and the Square Terminal API; `collectPayment` on Stripe stays as the parked third |
 | 1b | Offline: service worker, durable queue, flush on reconnect | deferred — robustness, not a blocker. See Open items |
 | 3 | Commitments: reservations, deposits, hanging-weight final invoice, fulfilment point — needs `production` | |
 | **8** | **Selling by the pound** — `retail_prices.price_basis`, `weight_lb` and `line_total_cents` on the sale line, a weigh box on the till. [ADR 0016](../decisions/0016-a-catch-weight-item-is-stocked-in-packages.md) | **shipped 2026-08-25** |

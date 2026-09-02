@@ -1,7 +1,9 @@
 # Payments (taking money)
 
-> **The client charging THEIR customer.** A Stripe Connect connected account per
-> legal entity, so card takings land in the client's own bank, under the
+> **The client charging THEIR customer.** One connection per legal entity to the
+> provider the client takes cards with — **Square, the account the client
+> already has**, on offer since 2026-09-02; or Stripe Connect, built first and
+> now parked — so card takings land in the client's own bank, under the
 > client's own KYC, liability and tax form. Platform machinery (Layer 0) rather
 > than a module: any pack could sell through it, and `retail`'s market till is
 > simply the first to want to.
@@ -13,8 +15,9 @@ Stripe API**:
 
 | | Direction | API | Table | Lib | Webhook |
 | --- | --- | --- | --- | --- | --- |
-| **Billing** | The PLATFORM charges the TENANT | v1 | `subscriptions` | `src/lib/billing-sync.ts` | `/api/webhooks/stripe` |
-| **Payments** (here) | The TENANT charges THEIR customer | **Accounts v2** | `payment_accounts` | `src/lib/payments/connect.ts` | `/api/webhooks/stripe/connect` |
+| **Billing** | The PLATFORM charges the TENANT | Stripe v1 | `subscriptions` | `src/lib/billing-sync.ts` | `/api/webhooks/stripe` |
+| **Payments** (here), Stripe — parked | The TENANT charges THEIR customer | **Stripe Accounts v2** | `payment_accounts` where `provider = 'stripe'` | `src/lib/payments/connect.ts` | `/api/webhooks/stripe/connect` |
+| **Payments** (here), Square — on offer | The TENANT charges THEIR customer | **Square OAuth + REST**, plain `fetch` | `payment_accounts` where `provider = 'square'` **+ `payment_credentials`** | `src/lib/payments/square/` | `/api/webhooks/square` |
 
 Same SDK object, same platform secret key, everything else opposite. The next
 person will assume there is only one — that assumption is why the table lives in
@@ -22,197 +25,124 @@ its own schema domain, why the webhook is a second route rather than a branch,
 and why the nav row beside "Billing" is labelled "Taking payments" instead of
 something shorter.
 
+**AND SINCE 2026-09-02 THE PAYMENTS SIDE HAS TWO PROVIDERS, pointing the same
+way but built on opposite models.** Stripe Connect: the platform CREATES an
+account for the farm and acts on it with the platform key — an identifier
+stored, never a credential. Square: the farm ALREADY HAS an account, authorises
+Yosher through OAuth, and Yosher holds a scoped, revocable, encrypted token in
+`payment_credentials`, a table with no member policy. Square has no Connect and
+no KYC surface for us; the API reports the verdict, not the homework.
+`payment_accounts.provider` says which row is which and CHECKs stop a row lying.
+
 **`stripe.accounts.create` is the WRONG call here and it autocompletes.** This
 integration uses `stripe.v2.core.*`. Reaching for the v1 surface fails at
 runtime and only at runtime.
 
-The decision is [ADR 0015](../decisions/0015-a-connected-account-belongs-to-a-company.md).
-Read it before changing where the account hangs, or which API this talks to.
+The decisions are [ADR 0015](../decisions/0015-a-connected-account-belongs-to-a-company.md)
+(where the account hangs — unchanged for both providers) and
+[ADR 0017](../decisions/0017-the-square-account-the-farm-already-has.md) (why
+Square, why a token is not the secret key 0015 refused, why one table). Read
+both before changing where the account hangs, which provider is offered, or
+what is stored.
 
 ## Slice order
 
+**REORDERED 2026-09-02.** The Stripe slices are numbered as they were; the
+Square slices are `S0`–`S3`. Read the State column, not the digits. The order
+is the homestead brief's: read before write, and both write paths are wanted.
+
 | # | Slice | State |
 | --- | --- | --- |
-| **0** | **Connect: the connected account per company, hosted onboarding, the settings screen** | **shipped 2026-08-25** — onboarding form not yet completed by a human, see Open items |
-| **1** | **Terminal: register a location and a reader, PaymentIntent on the connected account, push it to the reader** | **shipped 2026-08-25** — driven end to end, a real card-present charge settled on the connected account |
-| 1b | The TILL takes a card: wire `collectPayment` into `recordSale` with the `client_ref` story | next — `retail` slice 5's other half |
-| 2 | Settlements and fees reaching the books | after 1b — `retail` slice 2 |
+| **S0** | **Square: connect the account the farm already has, per company — OAuth, encrypted token, the settings screen, revocation webhook, disconnect** | **shipped 2026-09-02** — built and tested; **never driven against Square**, because no Square developer application exists yet (Open items) |
+| S1 | **Read: Square payments and payouts, with fees, into the books** (`retail` slice 2) | **next** — no hardware, no till change, and the pilot's existing Square payments are the data |
+| S2 | **Write, path one: the app-switch.** The till in the phone's browser opens the Square Point of Sale app with the total; the customer taps the $59 reader or the phone; Square redirects back with the transaction id | after S1. Writes a payment row on the sale at charge time |
+| S3 | **Write, path two: the Terminal API.** Pair a Square Terminal by device code; push a checkout with the itemised cart; webhook reports it | after S2 |
+| **0** | Stripe Connect: the connected account per company, hosted onboarding, the settings screen | **shipped 2026-08-25, parked 2026-09-02** — rows stay visible; a fresh Stripe connection is offered only where Square is not configured |
+| **1** | Stripe Terminal: register a location and a reader, PaymentIntent on the connected account, push it to the reader | **shipped 2026-08-25, parked** — a real card-present charge settled on the connected account |
+| 1b | The TILL takes a card through Stripe: wire `collectPayment` into `recordSale` | parked behind S2/S3 |
 | 3 | Refunds from the till | |
 | 4 | Online / card-not-present, for `retail` slice 6's orders | |
 
 ## Build log
 
-### 2026-08-25 — Slice 1: the reader at the stall (`claude/the-reader-at-the-stall`)
+Older entries — the two Stripe slices of 2026-08-25 — are in
+[payments-build-log.md](payments-build-log.md), swept there on 2026-09-02 so this
+file stays a few screens long.
 
-**A REAL CARD-PRESENT CHARGE SETTLED ON THE CONNECTED ACCOUNT**: $12.50, visa
-`4242`, captured, on `acct_1U8Bof…` and **not visible on the platform account**.
-That last clause is ADR 0015's whole claim and this is the first time anything
-has proved it with money rather than with an argument.
+### 2026-09-02 — Slice S0: the Square account the farm already has (`claude/the-square-account-the-farm-already-has`)
 
-**THE BLOCKER SLICE 0 RECORDED TURNED OUT NOT TO EXIST.** Slice 0's open items
-said the reader work needed a connected account at `Ready`, and therefore needed
-a human to finish Stripe's KYC form. It does not: **Stripe test mode does not
-gate card-present charges on the capability status**, so the whole flow —
-location, reader, PaymentIntent, tap, `succeeded` — runs on a `restricted`
-account. Live mode does gate it, which is why the guard below still exists.
+**THE FOUNDER ASKED WHETHER TO SWITCH TO SQUARE, AND THE BRIEF HAD ALREADY
+ANSWERED.** [homestead-farm.md](homestead-farm.md) records that the pilot pays
+with "Square plus cash today" and recommends *"an adapter seam with Square as
+the first implementation"*, read stage before write stage. ADR 0015 went
+Stripe-first eight days earlier and never weighed Square. So this is less a
+reversal than a return to the plan, made at the cheapest possible moment:
+nothing live, no live key, no hardware bought, no farm onboarded.
+[ADR 0017](../decisions/0017-the-square-account-the-farm-already-has.md) has the
+argument and the honest cost.
 
-- **`ensureLocation` asks Stripe rather than keeping a column.** A Terminal
-  location is an address that groups readers and Stripe already stores it; a
-  copy here would be a second thing to keep in step for no reader of it. The
-  location id is denormalised onto the reader, so a farm with two market
-  addresses is already representable without a migration.
-- **The address comes from a form on the FIRST reader**, because Stripe requires
-  one and this app holds an address nowhere. Not stored afterwards.
-- **`payment_readers` takes the same SELECT-only policy as `payment_accounts`**,
-  and the reason is adjacent rather than identical: a row here that Stripe has
-  never heard of is a device the till would offer, at a stall, and pushing a
-  payment to it fails with a customer holding a card. Every write happens after
-  Stripe has already accepted the device.
-- **THE IDEMPOTENCY KEY IS THE WHOLE SAFETY STORY, and it is `retail`'s lesson
-  reused.** A till with bad signal retries; a retry whose request arrived and
-  whose reply did not would charge the customer twice. The caller's `clientRef`
-  — minted before it touches the network, exactly as `retail_sales.client_ref`
-  is — becomes the Stripe idempotency key, so the second attempt returns the
-  FIRST PaymentIntent.
-- **`collectPayment` pushes and returns; it does not wait.** A customer takes as
-  long as a customer takes. Blocking would tie up a handler for a minute and
-  give the stall a spinner it cannot cancel.
-- **Taking a payment is MEMBER, registering a reader is OWNER** — the same split
-  `retail` draws between recording what the pitch cost and setting a price. A
-  till only the owner could operate is a till nobody uses.
-- 27 pure tests, 22 isolation tests. Migration `0210`, `0211` is RLS. **No
-  hand-reordering** — the composite FK targets `payment_accounts`, which already
-  existed.
+**SQUARE HAS NO CONNECT, AND THAT DECIDES THE SHAPE.** There is no way to
+create an account for a seller or act on one with a platform key. The seller
+authorises the application through OAuth and the application holds a token.
+So:
 
-**DRIVEN THROUGH THE REAL UI**, not the probe: the address form, the pairing
-code, the reader appearing `online`, the guard refusing, then the charge, the
-tap and `Paid`. Two defects, both found by doing it rather than by reading it:
+- **`payment_accounts` gains `provider`** (`stripe` | `square`), the Square
+  identifiers, and CHECKs that make a row that lies about its provider
+  unrepresentable. `stripe_account_id` is nullable now — and only on a Square
+  row. One row per company PER PROVIDER; a company may hold one of each. ADR
+  0015 said the second provider would be a new column; it was.
+- **The token lives in `payment_credentials`, encrypted (S8), in a table with
+  NO member policy at all** — stricter than `mail_accounts`, which lets members
+  see a mailbox token's ciphertext. This token can charge and refund the farm's
+  customers, and nothing in a tenant transaction ever needs it. The lib decrypts
+  in exactly one function. A tenant's own OWNER selects zero rows.
+- **The code flow with the client secret, no PKCE.** Square's PKCE refresh
+  tokens are single-use and expire in 90 days; code-flow ones do not expire. A
+  farm that connects once should never be asked again.
+- **Every scope the four slices need, requested once**, because adding one later
+  sends every connected farm back through the consent form. `session=false`:
+  this screen decides whose bank the money lands in, so Square asks who you are.
+- **The status maps onto Stripe's vocabulary** so the till reads ONE column:
+  merchant `ACTIVE` plus an `ACTIVE` location carrying `CREDIT_CARD_PROCESSING`
+  is `active`; anything else is `restricted` with a `status_details` code saying
+  why. A rejected token is `restricted` + `token_rejected`, rendered "Needs
+  reconnecting" — a definite answer from Square, distinct from `closed`.
+- **The environment defaults to sandbox.** Square credentials carry no
+  `sk_test_` marker, so only `SQUARE_ENVIRONMENT=production` reaches real money.
+- **Plain `fetch` with Zod at the boundary**, not Square's SDK: two reads and
+  three OAuth calls do not need a dependency whose money type is `bigint`.
+- **Disconnect exists here**, unlike the Stripe card: it calls Square's revoke
+  endpoint and marks the row only once Square confirms — the provider's word,
+  not the app's. If Square says the grant is already gone, the row is marked
+  anyway rather than left stuck.
+- **Stripe is parked, not removed.** Its rows stay visible and manageable; a
+  fresh Stripe connection is offered only where Square is not configured.
+  `connect.ts` and `terminal.ts` now filter `provider = 'stripe'`, and the
+  Terminal lib narrows the nullable Stripe id in one place and throws if handed
+  a Square row — `stripeAccount: null` would act on the PLATFORM account.
+- Migrations `0241` (columns + `payment_credentials`) and `0242` (its RLS). The
+  `provider` default STAYS on the column, against the discriminator convention,
+  because the migration lands before the deploy and running code inserts
+  without naming a provider — see the schema comment.
+- 22 pure tests (signature with a known vector, the authorize URL, token
+  parsing, both error shapes, the refresh window, the projection, every screen
+  state) and 7 isolation tests (the no-policy table from four directions, the
+  composite FK under `withSystem`, the four ways a row can lie, one-per-provider,
+  the cascade). Two 2026-08-25 build-log entries swept to the archive file.
 
-1. **`readers.del(id, options)` PUT THE ACCOUNT IN THE QUERY STRING.** The
-   signature is `del(id, params, options)`, so passing `{ stripeAccount }`
-   second sends it as a parameter and Stripe rejects the call — and
-   `archiveReader` catches and logs delete failures, so **the reader would have
-   stayed registered while the app said it was retired**, silently, forever.
-   `tsc` did not catch it; a cleanup script that actually ran did.
-2. **A THIRD REQUIREMENT-KEY FAMILY, and the table could not keep up.** The same
-   account returned `representative.given_name` when it was created and
-   `identity.individual.given_name` a few hours later, once Stripe had decided
-   its entity type — so eleven readable lines became "Individual given name",
-   "Individual date of birth day", "Individual date of birth month"… undeduped.
-   Enumerating prefixes was the wrong shape. Keys are now **normalised** to a
-   canonical form before lookup, which collapsed three tables into one and
-   handles a family nobody had seen.
-
-### 2026-08-25 — Slice 0: the account that belongs to the farm (`claude/the-account-that-belongs-to-the-farm`)
-
-Retail's dossier said offline (1b) was next. The founder corrected it on
-2026-08-25: **he has signal almost all of the time, and what he cannot do is
-take a credit card.** So the payment slices went to the front, and this is the
-half that has to exist before any of the rest can: whose Stripe account, whose
-liability, whose bank.
-
-**THE DECISION IS WHERE THE ACCOUNT HANGS, AND THE CHEAP ANSWER IS WRONG.** ADR
-0015 argues it in full; the short form is that a connected account is a bank
-account with a KYC wrapper — an EIN, a legal name, a representative — and ADR
-0010 puts anything with a balance on exactly one entity. Two LLCs are two tax
-IDs and two 1099-Ks. One row per tenant would put one company's card revenue on
-another company's tax form, and **nothing in the app could detect it.**
-
-The sentence that will be cited against it is ADR 0010's own *"billing is per
-tenant, so ten LLCs is one subscription"* — which is about the OTHER Stripe.
-
-- **The tenant's own secret key is never stored, never asked for, never seen.**
-  The obvious shortcut is a form that takes `sk_live_…`; it would put a C5
-  secret per client in a column, granting unlimited charge, refund and payout
-  authority over their money. We store `acct_…`, an identifier, and act with the
-  platform key.
-- **Members hold a SELECT policy and nothing else** (`drizzle/0207`). Every
-  column is Stripe's verdict about a KYC review this platform does not perform,
-  and S7 already says such state comes only from a signature-verified event or a
-  server→Stripe read. Here that rule is a policy rather than a habit. The
-  failure it forecloses is a farm told it can take a card and a customer's card
-  declined at a stall with a queue behind it.
-- **`entity_id` is nullable**, because `retail` requires `inventory` and not
-  `accounting` — a farm can sell at a market with no books at all. Adopted when
-  the books open, to the tenant's DEFAULT company, guarded to nulls. Same
-  treatment `provisionAccounting` gives an asset bought before there were books,
-  except it cannot live there: that function runs inside a tenant transaction
-  and this table refuses tenant writes. So adoption is lazy, on page load.
-- **Onboarding is Stripe-hosted Account Links.** No tax ID, bank account or ID
-  document ever reaches this server. `collection_options.fields:
-  "eventually_due"` asks for everything in one sitting rather than sending a
-  farmer back a month later for a document.
-- **The return URL does not mean success.** Stripe sends them back whether they
-  finished or abandoned, so the page reconciles from the API rather than
-  believing the redirect. This is the trap that makes onboarding screens claim
-  a business is ready when it is not.
-
-**THEN STRIPE CHANGED THE GROUND MID-SLICE.** The whole thing was built, tested
-and migrated on Accounts **v1** — and the first real `accounts.create` returned
-*"Stripe no longer recommends Accounts v1 for new Connect integrations."* There
-was a dashboard toggle that would have made the finished code work. It was
-declined: this integration had created zero accounts, so moving cost a migration
-on an empty table, and the same move a year later happens with real farms' live
-accounts on it. ADR 0015 has the argument and the honest cost.
-
-**What v2 changed, beyond the call site.** Its account object is shaped nothing
-like v1's — no `charges_enabled`, no `payouts_enabled`, no `details_submitted`.
-There is a capability STATUS and a list of REQUIREMENTS that each say who is
-holding them up and what they restrict. That is a better model for this screen
-and it rewrote the schema (`0208` drops v1's vocabulary, `0209` adds v2's).
-
-- **`describePaymentAccount` is pure and tested**, because the state that
-  matters is the middle one. A farm that has filled the form in sits at
-  `restricted` with every remaining requirement `awaiting_action_from: stripe`,
-  and a screen that listed those as a to-do would invent homework for somebody
-  who has none. v1 made you infer that; v2 states it.
-- **26 pure tests, 15 isolation tests.** Migrations `0206` (table), `0207` (RLS),
-  `0208`/`0209` (the v2 reshape). **No hand-reordering needed** — the composite
-  FK targets `entities`, which already exists.
-- **`scripts/stripe-connect-probe.ts`** talks to Stripe with no browser, tenant
-  or database in the way. Every requirement key in `status.ts` was read off a
-  real account with it rather than guessed, and it refuses a non-test key.
-
-**DRIVEN ON THE `Test` TENANT, WHICH HOLDS TWO COMPANIES ON PURPOSE**, because a
-one-company tenant cannot see the difference this whole slice turns on. The page
-rendered a card each for `Test` and `Oak Row LLC`; the button on the
-**non-default** company created a real v2 connected account and the row landed
-against **Oak Row LLC's** id — confirmed against the database, not inferred from
-the screen. Stripe's hosted onboarding opened. The form itself is a KYC flow
-that has to be completed by the business owner, so it is **still outstanding**
-(Open items).
-
-It found three defects, and only clicking could have:
-
-1. **The error told the farm to try again in a moment, forever.** Every farm's
-   first click on a fresh deployment hits the not-signed-up-for-Connect error,
-   which is permanent and ours, so "try again" means they retry and then ring
-   us. Now a distinct message that says it is ours to fix. Stripe gives no error
-   `code` for it — `code`, `param` and `doc_url` are all undefined against the
-   live test-mode account — so the message text is the only signal there is,
-   matched narrowly with the old wording left as the fallback.
-2. **A THIRTY-SECOND-OLD ACCOUNT RENDERED AMBER.** The badge warned when any
-   requirement was `past_due`, which in v2 is *every* requirement on a new
-   account, because nothing has been provided yet. The alarm colour fired
-   immediately and then never changed, so by the time a farm was genuinely late
-   the badge said what it had always said. **A tone that is always on carries no
-   information.** Amber now means Stripe has put a real DATE on it — which is
-   exactly why the deadline status and the deadline time are two columns.
-3. **Two lines of the to-do list read as the same line.** `business_url` and
-   `product_description` rendered as "A website, or a description of what you
-   sell" and "A description of what you sell", one above the other. Now "A
-   website for the business".
-
-Also fixed while here: `/dashboard/settings` needed `exact: true` in the nav, or
-the new row at `/dashboard/settings/payments` lit up two sidebar items at once.
-
-## Data model
+**WHAT IS NOT PROVEN, PLAINLY.** No Square developer application exists yet, so
+`SQUARE_APPLICATION_ID` is unset everywhere and **the OAuth round trip has never
+run against Square** — not in the sandbox, not in production. The start route,
+the callback, the merchant read, the webhook signature and the disconnect are
+built, typed, linted and tested against known shapes, and the settings page
+renders. Driving them needs the founder to create the application (SETUP.md
+§4.7), which is a one-time platform step exactly as Connect's signup was.
 
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
-| `payment_accounts` | **One company's ability to take a card.** The connected account id plus Stripe's verdicts on it | `tenant_id`, FORCE RLS, and **members hold SELECT ONLY** — every write is `withSystem`, from the Connect event or the reconcile. Composite FK to `entities` (RESTRICT), nullable. UNIQUE per `(tenant_id, entity_id)` **plus** a partial unique on `(tenant_id) WHERE entity_id IS NULL`, because Postgres treats NULLs as distinct and a books-less tenant could otherwise mint accounts without limit. CHECK that the id looks like `acct_…` — v2 kept v1's prefix, confirmed against a real account — so the two Stripes crossing fails at the database. `(tenant_id, id)` unique, as the target the reader and settlement slices will point at |
+| `payment_accounts` | **One company's ability to take a card, through one provider.** `provider` = `stripe` (the connected account id plus Stripe's verdicts) or `square` (the merchant id, its locations, and the verdict derived from them) | `tenant_id`, FORCE RLS, and **members hold SELECT ONLY** — every write is `withSystem`, from a provider event, the OAuth callback or the reconcile. Composite FK to `entities` (RESTRICT), nullable. UNIQUE per `(tenant_id, entity_id, provider)` **plus** a partial unique on `(tenant_id, provider) WHERE entity_id IS NULL`, because Postgres treats NULLs as distinct and a books-less tenant could otherwise mint accounts without limit. UNIQUE `(tenant_id, square_merchant_id)`: one Square account on one company per tenant. CHECKs: `provider IN ('stripe','square')`; a `stripe` row has a Stripe id and no merchant id, a `square` row the reverse; a Stripe id looks like `acct_…`. `(tenant_id, id)` unique, as the target the reader, credential and settlement slices point at |
 
-The columns worth knowing, all of them v2's vocabulary:
+The Stripe columns, all of them v2's vocabulary:
 
 - **`card_payments_status`** — `active` \| `pending` \| `restricted` \|
   `unsupported`. **NULL means Stripe has not said**, which is not the same as
@@ -228,14 +158,33 @@ The columns worth knowing, all of them v2's vocabulary:
   cannot be inferred from the date, and the date cannot be inferred from the
   status.
 
+The Square columns — and the two shared ones the till reads:
+
+- **`card_payments_status`** is SHARED and keeps Stripe's words for both
+  providers: `active` is the only yes. For Square it is derived — merchant
+  `ACTIVE` and at least one `ACTIVE` location with `CREDIT_CARD_PROCESSING`.
+- **`status_details`** is shared too. Square rows carry OUR codes:
+  `card_processing_not_activated`, `merchant_inactive`, `token_rejected`.
+- **`square_merchant_id`** — how the webhook finds the row; it knows nothing else
+  about us. **`square_main_location_id`** — where a till charge is made until a
+  channel can pick its own. **`square_locations`** — `[{ id, name, status, type,
+  canTakeCards }]`, a trimmed projection for the screen and the till.
+- **`requirements` is always `[]` on a Square row.** Square has no requirements
+  list to give us.
+
+| `payment_credentials` | **The one secret in this domain.** A Square OAuth access token and refresh token for ONE `payment_accounts` row, AES-256-GCM via `encryptSecret()` (S8), plus the granted scopes and the expiry | `tenant_id`, FORCE RLS, and **NO MEMBER POLICY AT ALL** — superadmin and `withSystem` only; a tenant transaction selects zero rows, its own tenant's included, and INSERT is refused. Composite FK to `(tenant_id, payment_account_id)` — CASCADE, because a token for an account that no longer exists is meaningless. UNIQUE per `(tenant_id, payment_account_id)`: reconnecting replaces. `revoked_at` set and the ciphertext blanked on revocation, never deleted |
+
 | `payment_readers` | **A card reader at a stall.** One row per physical (or simulated) device, registered on ONE connected account | `tenant_id`, FORCE RLS, **members hold SELECT ONLY** for the same reason the account does. Composite FK to `(tenant_id, payment_account_id)` — CASCADE, because a reader is meaningless without the account it pays into — which makes "a device pointed at another business's bank" unrepresentable. UNIQUE per `(tenant_id, stripe_reader_id)`: re-registering a known device is an update. CHECKs that the ids look like `tmr_…` and `tml_…`, because swapping them would register a payment against an address instead of a device. Archived, never deleted |
 
-**Never a column here:** the tenant's Stripe secret key, any bank detail, any
-card number, any KYC document.
+**Never a column on `payment_accounts`:** the tenant's Stripe secret key, a
+Square token, any bank detail, any card number, any KYC document. The Square
+token is in `payment_credentials` and nowhere else.
 
 **No `payment_locations` table, and no charge table yet.** A Terminal location
-lives in Stripe; a PaymentIntent gets a row when `retail` slice 5 links one to a
-sale and the shape is known rather than guessed.
+lives in Stripe, and Square's locations live in Square with a projection here;
+a payment gets a row when a sale needs to reference one (S2, S3) — and with
+Square that is not optional, because Square deletes completed Terminal checkouts
+after 30 days.
 
 ## Key files & seams
 
@@ -255,8 +204,26 @@ sale and the shape is known rather than guessed.
 - `scripts/stripe-connect-probe.ts` — Stripe with nothing else in the way.
   `create` prints the requirement keys a real account returns
 - `src/db/schema/payments.ts` · `drizzle/0206` (table) · `0207` (RLS) ·
-  `0208`/`0209` (the v1→v2 reshape)
-- `tests/payments-status.test.ts` · `tests/isolation/payments.test.ts`
+  `0208`/`0209` (the v1→v2 reshape) · `0241` (provider + Square columns +
+  `payment_credentials`) · `0242` (its RLS — the no-member-policy one)
+- `tests/payments-status.test.ts` · `tests/payments-square.test.ts` ·
+  `tests/isolation/payments.test.ts`
+- **Square**, all under `src/lib/payments/square/`:
+  - `config.ts` — env, hosts, the sandbox default, the redirect and webhook URLs
+  - `oauth.ts` — **pure apart from `fetch`**: the authorize URL, code exchange,
+    refresh, revoke, the refresh window, both error shapes, the English
+  - `api.ts` — the two reads (`/v2/merchants/me`, `/v2/locations`), Zod at the
+    boundary, and which error codes mean "the token is dead"
+  - `status.ts` — **pure**: merchant + locations → the shared status columns,
+    and the screen's sentences
+  - `signature.ts` — **pure**: the webhook HMAC, tested with a known vector
+  - `pending.ts` — the encrypted single-use state cookie
+  - `accounts.ts` — server. Connect, reconcile, refresh, revoke, disconnect;
+    **the ONE place a Square token is decrypted**
+- `src/app/api/payments/square/start/route.ts` · `…/callback/route.ts` — the
+  OAuth trip out and back
+- `src/app/api/webhooks/square/route.ts` — Square events, its own signing key
+- `src/app/dashboard/settings/payments/square-controls.tsx` — disconnect, refresh
 - The OTHER direction, so you can tell them apart: `src/lib/stripe.ts` (shared
   lazy client), `src/lib/billing-sync.ts`, `src/app/api/webhooks/stripe/route.ts`
 
@@ -348,7 +315,80 @@ sale and the shape is known rather than guessed.
   `account` is not a valid value and the API is what caught it, not `tsc` —
   `tsx` strips types, so a probe script does not typecheck itself.
 
+Square, since 2026-09-02:
+
+- **FILTER BY PROVIDER, ALWAYS.** `payment_accounts` holds both. `connect.ts`
+  and `terminal.ts` read `provider = 'stripe'`; everything under `square/` reads
+  `provider = 'square'`. A Map keyed by company with no filter lets one
+  provider's row silently replace the other's — which is exactly what the
+  Stripe loader used to do.
+- **`stripe_account_id` IS NULLABLE NOW, AND `stripeAccount: null` ACTS ON THE
+  PLATFORM ACCOUNT.** The Terminal lib narrows it in one helper and throws if
+  handed a Square row. Do not `?? ""` your way past the type.
+- **THE TOKEN IS DECRYPTED IN ONE FUNCTION** (`accessTokenFor`). A second call
+  site is a review finding, not a convenience.
+- **A REJECTED TOKEN IS NOT A DISCONNECTION EITHER — BUT IT IS A DEFINITE
+  ANSWER.** A network failure is logged and left (ADR 0015's rule). A 401 with
+  the token is Square speaking: the row goes to `restricted` + `token_rejected`
+  and the screen says "Needs reconnecting". `closed_at` is only ever set by the
+  revocation webhook or the owner's disconnect.
+- **THE NOTIFICATION URL IS PART OF THE WEBHOOK SIGNATURE.** A trailing slash or
+  an http/https mismatch between `NEXT_PUBLIC_APP_URL` and the Developer Console
+  fails every event, silently. Compare the two strings before anything else.
+- **THE REFRESH TOKEN COMES BACK UNCHANGED.** Code-flow refreshes return the same
+  refresh token; a null in the response means KEEP what is stored. Overwriting
+  with empty breaks the connection a month later, far from the cause.
+- **SQUARE'S CONSENT IS ALL-OR-NOTHING**, so the scopes requested are the scopes
+  granted, and `payment_credentials.scopes` stores the requested list.
+- **`session=false` HAS NO EFFECT IN THE SANDBOX.** Do not conclude from a
+  sandbox run that Square skipped the login.
+- **THE SANDBOX IS A DIFFERENT APPLICATION**, with its own credentials and host
+  (`connect.squareupsandbox.com`). `SQUARE_ENVIRONMENT` picks the host; the
+  credentials have to match it or every call is a 401 that looks like a dead
+  token.
+- **THE PROVIDER DEFAULT STAYS ON THE COLUMN.** Against the discriminator
+  convention, for the migrate-then-deploy window. The schema comment says why;
+  do not "fix" it.
+- **NO `Square-Version` HEADER.** Square honours the application's console
+  version when the header is absent; a hard-coded date would fail the day it
+  stopped being a released version.
+
 ## Open items
+
+Square first, because it is the provider on offer:
+
+- **NO SQUARE DEVELOPER APPLICATION EXISTS, so the OAuth trip has never run.**
+  `SQUARE_APPLICATION_ID` is unset in every environment. Creating it is a
+  one-time platform step for the founder (SETUP.md §4.7: application, redirect
+  URL, webhook subscription, then the sandbox test account). Until then every
+  Square card on the settings page renders "Not connected" and the connect
+  route answers 503. **Everything in slice S0 past the page is built and
+  unproven.**
+- **THE TOKEN IS REFRESHED ON PAGE LOAD ONLY.** Square access tokens live thirty
+  days; the reconcile renews inside the last week, but only when somebody opens
+  the payments page. A farm that does not for a month ends with an expired
+  token that is renewed on the next load — harmless while nothing acts without
+  a person present, **not acceptable once the till reads this connection**. A
+  scheduled refresh (the notifications cron is the obvious home) has to land
+  with or before S2.
+- **`oauth.authorization.revoked` HAS NEVER BEEN RECEIVED.** Handler written,
+  signature verified against a known vector; no subscription exists. Until then
+  a revocation surfaces as "Needs reconnecting" on the next page load rather
+  than as a closed row.
+- **WHETHER SQUARE REQUIRES APP MARKETPLACE REVIEW before sellers other than the
+  developer can authorise the application is not settled by the docs as read.**
+  Confirm before the second client connects.
+- **ONE MERCHANT, ONE COMPANY.** A client running one Square account across
+  several LLCs is refused by the unique index — the same many-to-one question
+  ADR 0015 deferred, deferred again in ADR 0017.
+- **THE LOCATION THE TILL CHARGES AT IS THE MAIN ONE.** A stall and a farm store
+  on one Square account are two locations; S2/S3 should let a channel name its
+  location rather than inherit the merchant's default.
+- **The Stripe rows in production are test-mode rows** (`sk_test_`), and the
+  parked Stripe card still shows them. Harmless; worth remembering when the
+  screen looks busier than a one-provider farm expects.
+
+Stripe, parked:
 
 - **NOBODY HAS COMPLETED THE HOSTED ONBOARDING, so nothing has ever reached
   `Ready` — but slice 1 proved this blocks less than it looked like it would.** What IS proven end to end: the screen renders one card per company
@@ -368,10 +408,11 @@ sale and the shape is known rather than guessed.
 - **Nothing reads the capability status yet.** The till records a payment method
   and does not ask whether a card could be taken. It should, and when it does
   the webhook stops being optional.
-- **There is no disconnect button.** A farm revokes from its own Stripe
-  dashboard and the event records it. Deliberate — a button here would be a
-  write to a table that refuses writes, so it would have to call Stripe and wait
-  for the event anyway.
+- **There is no disconnect button for Stripe.** A farm revokes from its own
+  Stripe dashboard and the event records it. Deliberate — a button here would be
+  a write to a table that refuses writes, so it would have to call Stripe and
+  wait for the event anyway. (Square has one, because Square has a revoke
+  endpoint that answers synchronously.)
 - **"Manage" is a plain link to `dashboard.stripe.com`**, not a login link.
   Login links are an Express-account feature and these have the full dashboard,
   so the farm signs in to its own Stripe account normally.

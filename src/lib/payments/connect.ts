@@ -130,7 +130,13 @@ export async function loadPaymentCompanies(
         columns: { id: true, name: true, isDefault: true, isActive: true },
       }),
       accounts: await tx.query.paymentAccounts.findMany({
-        where: eq(schema.paymentAccounts.tenantId, tenantId),
+        where: and(
+          eq(schema.paymentAccounts.tenantId, tenantId),
+          // THIS FILE IS STRIPE CONNECT. The same table holds Square rows since
+          // ADR 0017; keyed by company below, a Square row would silently
+          // replace the Stripe one for the same company.
+          eq(schema.paymentAccounts.provider, "stripe"),
+        ),
       }),
     }),
     { role },
@@ -348,6 +354,7 @@ export async function reconcileConnectedAccounts(tenantId: string) {
     tx.query.paymentAccounts.findMany({
       where: and(
         eq(schema.paymentAccounts.tenantId, tenantId),
+        eq(schema.paymentAccounts.provider, "stripe"),
         isNull(schema.paymentAccounts.closedAt),
       ),
       columns: { stripeAccountId: true },
@@ -357,6 +364,9 @@ export async function reconcileConnectedAccounts(tenantId: string) {
 
   await Promise.all(
     rows.map(async ({ stripeAccountId }) => {
+      // The CHECK constraint guarantees a `stripe` row carries its id; the
+      // column is nullable only because Square rows share the table.
+      if (!stripeAccountId) return;
       try {
         await refreshConnectedAccount(stripeAccountId);
       } catch (err) {
@@ -391,14 +401,17 @@ export async function reconcileConnectedAccounts(tenantId: string) {
  */
 export async function adoptUnassignedAccount(tenantId: string) {
   await withSystem(async (tx) => {
-    const orphan = await tx.query.paymentAccounts.findFirst({
+    // One per PROVIDER since ADR 0017 — a books-less farm may have connected
+    // Square and Stripe both — so every orphan joins the default company, not
+    // just the first one found.
+    const orphans = await tx.query.paymentAccounts.findMany({
       where: and(
         eq(schema.paymentAccounts.tenantId, tenantId),
         isNull(schema.paymentAccounts.entityId),
       ),
       columns: { id: true },
     });
-    if (!orphan) return;
+    if (orphans.length === 0) return;
 
     const entity = await tx.query.entities.findFirst({
       where: and(
@@ -409,10 +422,12 @@ export async function adoptUnassignedAccount(tenantId: string) {
     });
     if (!entity) return;
 
-    await tx
-      .update(schema.paymentAccounts)
-      .set({ entityId: entity.id, updatedAt: new Date() })
-      .where(eq(schema.paymentAccounts.id, orphan.id));
+    for (const orphan of orphans) {
+      await tx
+        .update(schema.paymentAccounts)
+        .set({ entityId: entity.id, updatedAt: new Date() })
+        .where(eq(schema.paymentAccounts.id, orphan.id));
+    }
   });
 }
 
@@ -456,6 +471,7 @@ export async function startOnboarding(input: {
     tx.query.paymentAccounts.findFirst({
       where: and(
         eq(schema.paymentAccounts.tenantId, input.tenantId),
+        eq(schema.paymentAccounts.provider, "stripe"),
         input.entityId
           ? eq(schema.paymentAccounts.entityId, input.entityId)
           : isNull(schema.paymentAccounts.entityId),
@@ -532,6 +548,7 @@ export async function startOnboarding(input: {
         .values({
           tenantId: input.tenantId,
           entityId: input.entityId,
+          provider: "stripe",
           stripeAccountId: account.id,
           ...projectAccount(account),
           syncedAt: new Date(),

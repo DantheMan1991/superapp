@@ -13,6 +13,24 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-02 — The window was the founder's (`claude/the-window-was-the-founders`)
+
+**Doc-only. The entry below said the migration was applied "immediately before
+the merge, at an hour no tenant was near 6am". Neither was true.** `0240` went
+on production at 01:46 UTC, the moment CI turned green; the merge came at
+14:57 UTC and deployed at 14:58. Thirteen hours, with every tenant's 6am sweep
+inside it under the previous code — the exact case the migration's header names
+as not neutral. Harmless in fact: both production rows had generated on
+2026-09-01 and were next due 2026-10-01, so the sweep walked nothing, and the
+post-deploy check found every row consistent with no NULL arm (result on #343).
+
+**The rule that follows: the length of the migrate-then-deploy window is the
+founder's, not the PR's.** He merges when he merges, sometimes the next
+afternoon. A migration whose window is not neutral therefore goes on production
+only when the merge is minutes away — or is written so the old code cannot leave
+it wrong. ADR 0014's order stands; this is a constraint on WHEN within it, and
+"CI is green" is not that moment.
+
 ### 2026-09-02 — The frontier is the sweep's alone (`claude/the-frontier-is-the-sweeps-alone`)
 
 **Migration `0240`, additive: `recurring_entries.generated_through date NULL`,
@@ -43,7 +61,8 @@ would not be deduped, and invoices and bills have no key at all.
 so the subtraction is exact wherever only the sweep had moved the date — which
 was every row until editing shipped minutes earlier. A row edited forward in
 that window would be backfilled with the edit's choice rather than the truth;
-the window on production was a few hours and the table a handful of rows.
+the window on production turned out to be thirteen hours (see the entry
+above) and the table two rows, both found consistent afterwards.
 `NULL` means never generated, and the guard treats it as free — there is no
 fallback to `next_run_date`, because that fallback would be the ratchet again.
 
@@ -68,11 +87,13 @@ accept an edit back into the month just generated (the unsafe direction; an
 edit never writes the column, and the backfill's `IS NULL` guard means it
 cannot be re-run to heal it). The cron acts only at 6am in each tenant's
 zone; the residual path is a Generate now pressed inside a minutes-long
-window. Handled procedurally: the migration was applied to production
-immediately before the merge, at an hour no tenant was near 6am, and the
-post-deploy check in the migration's own header — `generated_through` NULL or
-`<> next_run_date - 1 month`, for rows that have generated — was run
-afterwards. The NULL arm is the judge's widening: a row whose FIRST-ever
+window. Intended to be handled procedurally — migrate production immediately
+before the merge, at an hour no tenant was near 6am — and that is NOT what
+happened: the migration went out at 01:46 UTC, the merge came at 14:57 UTC, and
+every tenant's 6am sweep ran inside the window under the previous code (the
+entry above says what followed). The post-deploy check in the migration's own
+header — `generated_through` NULL or `<> next_run_date - 1 month`, for rows
+that have generated — was run after the deploy and found every row consistent. The NULL arm is the judge's widening: a row whose FIRST-ever
 generation lands in the window had nothing to backfill and the guard treats
 NULL as free. A row the check lists is either forward-edited (safe, expected)
 or window-generated (fix by hand); the `ledger.recurring_updated` audit row

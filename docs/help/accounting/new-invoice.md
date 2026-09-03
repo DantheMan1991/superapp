@@ -2,7 +2,8 @@
 
 > The invoice form: every field, the lines, terms and tax, saved items, and what Save draft does. The same form appears when you edit a draft.
 > **Route:** /dashboard/m/accounting/sales/invoices/new
-> **Order:** 80
+> **Order:** 90
+> **Area:** Sales
 
 Open **Sales** in the accounting menu and click {button:New invoice|primary}. The line under the title reads `Saved as a draft — nothing posts to the books until you issue it.` Issuing happens on the invoice's page afterwards. The customer has to exist first: with none yet, the form does not appear and the page says `Add a customer first (Sales → Customers).`
 

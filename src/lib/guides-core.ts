@@ -213,6 +213,13 @@ export interface GuideMeta {
   summary: string;
   order: number;
   routes: RoutePattern[];
+  /**
+   * `**Area:**` — where a feature has many guides, the caption they are
+   * grouped under on the Guides page: the feature's own menu words
+   * (`Banking`, `Sales`, `Reports`), so the page reads like the screen.
+   * Null for a guide that declares none.
+   */
+  area: string | null;
 }
 
 export interface Guide extends GuideMeta {
@@ -263,8 +270,37 @@ export function parseGuide(slug: string, raw: string): Guide {
     summary: header.summary,
     order: orderText && /^\d+$/.test(orderText) ? Number(orderText) : DEFAULT_ORDER,
     routes: parseRoutes(header.fields.get("route")),
+    area: header.fields.get("area")?.trim() || null,
     content: bodyAfterHeader(raw),
   };
+}
+
+export interface GuideArea<T extends GuideMeta = GuideMeta> {
+  /** Null for the guides that declare no area; they come first, uncaptioned. */
+  area: string | null;
+  guides: T[];
+}
+
+/**
+ * A feature's guides in their captioned groups, for the Guides page. The
+ * guides that declare no area lead, uncaptioned (a feature's overview, or a
+ * small feature that needs no grouping); the areas follow in the order they
+ * first appear, which is the guides' own `Order`. Sort first; this keeps
+ * what it is given.
+ */
+export function guideAreas<T extends GuideMeta>(guides: readonly T[]): GuideArea<T>[] {
+  const groups: GuideArea<T>[] = [];
+  for (const guide of guides) {
+    const area = guide.area;
+    let group = groups.find((candidate) => candidate.area === area);
+    if (!group) {
+      group = { area, guides: [] };
+      if (area === null) groups.unshift(group);
+      else groups.push(group);
+    }
+    group.guides.push(guide);
+  }
+  return groups;
 }
 
 /** Overview first, then `Order`, then title — within a feature; features in slug order. */

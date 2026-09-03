@@ -3,6 +3,7 @@
 > The categories every dollar flows through: how the chart is laid out, adding and editing an account, what deactivating does, and the accounts Yosher keeps for itself.
 > **Route:** /dashboard/m/accounting/accounts
 > **Order:** 180
+> **Area:** Chart of Accounts
 
 Open **Chart of Accounts** in the accounting menu. The line under the title reads `The categories every dollar in [your business] flows through.` Your books start with a standard chart: bank and cash accounts, receivables and payables, inventory, equipment, owner's equity, sales and other income, cost of goods sold, and the usual expense accounts from advertising to utilities. To add one, owners click {button:Add account|primary|plus}.
 

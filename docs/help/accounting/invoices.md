@@ -2,7 +2,8 @@
 
 > What customers owe you: the four money tiles, the status filter, the list, and what each status badge means. Write a new invoice from here.
 > **Route:** /dashboard/m/accounting/sales/invoices, /dashboard/m/accounting/sales
-> **Order:** 70
+> **Order:** 80
+> **Area:** Sales
 
 Open **Sales** in the accounting menu. This page lists every invoice, with what is owed at the top. To write a new one, click {button:New invoice|primary} at the top right. See [Write an invoice](new-invoice.md).
 

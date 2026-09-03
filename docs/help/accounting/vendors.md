@@ -2,7 +2,8 @@
 
 > Who you buy from: the list, adding and editing a vendor, the default expense account, and what deactivating one does.
 > **Route:** /dashboard/m/accounting/purchases/vendors
-> **Order:** 40
+> **Order:** 170
+> **Area:** Purchases
 
 Open **Purchases** in the accounting menu and click the `Vendors` pill. The line under the title reads `Who [your business] buys from. A default expense account prefills new bill lines.` To add one, click {button:New vendor|primary|plus}.
 

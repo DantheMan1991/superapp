@@ -2,7 +2,8 @@
 
 > One bill from draft to paid: the buttons and who sees them, approving, recording and undoing payments, voiding, the history, and the attachments.
 > **Route:** /dashboard/m/accounting/purchases/bills/*
-> **Order:** 30
+> **Order:** 160
+> **Area:** Purchases
 
 Open **Purchases** in the accounting menu and click a vendor's name in the list. Everything that happens to one bill happens here: a staff member submits it, an owner approves it with {button:Approve|primary}, records payments against it, and voids it if it was wrong.
 

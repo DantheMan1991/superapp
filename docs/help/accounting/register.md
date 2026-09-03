@@ -2,7 +2,8 @@
 
 > One bank or card account: the transactions waiting for review, the suggested categories, posting, matching to something already in the books, excluding, and closing the account.
 > **Route:** /dashboard/m/accounting/banking/*
-> **Order:** 140
+> **Order:** 20
+> **Area:** Banking
 
 Open **Banking** in the accounting menu and click an account's card. This is where the bank feed is worked: each transaction waits under `To review` until an owner posts it, matches it to something already in the books, or excludes it.
 

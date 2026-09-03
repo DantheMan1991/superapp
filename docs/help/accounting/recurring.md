@@ -2,7 +2,8 @@
 
 > Invoices, bills and journal entries the books make every month on their own: the list, adding and editing a template, pausing, the morning run and catch-up, and what each badge means.
 > **Route:** /dashboard/m/accounting/recurring
-> **Order:** 340
+> **Order:** 220
+> **Area:** Recurring
 
 Open **Recurring** in the accounting menu. The line under the title reads `Everything the books produce every month — invoices, bills and journals. Catch-up dates each one to the month it was for, never to today.` Every morning at 6am, your local time, Yosher makes whatever is due. To add a template, owners click {button:Add recurring|primary|plus}. The old Sales link for recurring invoices lands here too.
 

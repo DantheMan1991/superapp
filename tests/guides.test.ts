@@ -18,6 +18,7 @@ import {
   type RoutePattern,
   controlMarkerProblem,
   controlMarkers,
+  guideAreas,
 } from "../src/lib/guides-core";
 import { resolveDocLink } from "../src/lib/markdown-meta";
 import {
@@ -64,6 +65,7 @@ const guide = (slug: string, ...routes: string[]): GuideMeta => {
     summary: "",
     order: 100,
     routes: routes.map(pattern),
+    area: null,
   };
 };
 
@@ -194,6 +196,28 @@ describe("openHref", () => {
 });
 
 describe("parseGuide", () => {
+  it("reads the area a guide is grouped under, and null without one", () => {
+    const withArea = parseGuide(
+      "accounting/banking",
+      [
+        "# Banking",
+        "",
+        "> Cards.",
+        "> **Route:** /dashboard/m/accounting/banking",
+        "> **Order:** 10",
+        "> **Area:** Banking",
+        "",
+        "Body.",
+      ].join("\n"),
+    );
+    expect(withArea.area).toBe("Banking");
+    const without = parseGuide(
+      "land/overview",
+      ["# Land", "", "> Ground.", "> **Route:** /dashboard/m/land/**", "", "Body."].join("\n"),
+    );
+    expect(without.area).toBeNull();
+  });
+
   const raw = [
     "# Recording a delivery",
     "",
@@ -273,6 +297,39 @@ describe("vocabulary", () => {
       { key: "paddock", modifiers: [] },
       { key: "zone", modifiers: ["upper"] },
     ]);
+  });
+});
+
+describe("guideAreas", () => {
+  const meta = (topic: string, order: number, area: string | null) => ({
+    slug: `accounting/${topic}`,
+    feature: "accounting",
+    topic,
+    title: topic,
+    summary: "",
+    order,
+    routes: [],
+    area,
+  });
+
+  it("captions a feature's guides by area in the order they appear, uncaptioned ones first", () => {
+    const groups = guideAreas([
+      meta("overview", 0, null),
+      meta("banking", 10, "Banking"),
+      meta("register", 20, "Banking"),
+      meta("inbox", 30, "Inbox"),
+      meta("rules", 40, "Banking"),
+    ]);
+    expect(groups.map((group) => [group.area, group.guides.map((guide) => guide.topic)])).toEqual([
+      [null, ["overview"]],
+      ["Banking", ["banking", "register", "rules"]],
+      ["Inbox", ["inbox"]],
+    ]);
+  });
+
+  it("puts the uncaptioned group first even when it comes late", () => {
+    const groups = guideAreas([meta("a", 10, "Sales"), meta("b", 20, null)]);
+    expect(groups.map((group) => group.area)).toEqual([null, "Sales"]);
   });
 });
 
@@ -420,6 +477,15 @@ describe("docs/help on disk", () => {
       for (const marker of controlMarkers(text)) {
         expect(controlMarkerProblem(marker, icons), file).toBeNull();
       }
+    }
+  });
+
+  it("every accounting guide but the overview names the area it is grouped under", async () => {
+    const guides = (await listGuides()).filter((guide) => guide.feature === "accounting");
+    expect(guides.length).toBeGreaterThan(1);
+    for (const guide of guides) {
+      if (guide.topic === "overview") expect(guide.area).toBeNull();
+      else expect(guide.area, `${guide.slug} has no **Area:**`).not.toBeNull();
     }
   });
 

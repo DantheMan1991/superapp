@@ -2,7 +2,8 @@
 
 > Matching your books to a bank statement: starting from the statement's closing figures, checking off what cleared, getting the difference to zero, and what a completed reconciliation locks.
 > **Route:** /dashboard/m/accounting/banking/*/reconcile
-> **Order:** 160
+> **Order:** 40
+> **Area:** Banking
 
 Open an account from **Banking** and click {button:Reconcile|outline}. Owners only. A reconciliation proves that your books and the bank agree up to a statement date. The title reads `Reconcile — [account]` and the line under it `Match the books to the bank statement. Cleared entries are locked — uncheck a transaction to edit its entry.`
 

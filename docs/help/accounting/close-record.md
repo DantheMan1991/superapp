@@ -2,7 +2,8 @@
 
 > One close: the checklist as it stood on the day, sign-off and review notes between the owner and the accountant, and the AI-written narrative of the month.
 > **Route:** /dashboard/m/accounting/close/*
-> **Order:** 320
+> **Order:** 330
+> **Area:** Close
 
 Open **Close** in the accounting menu and click a period end in the history. This page is the record of one close, and where the owner and the accountant agree the month is done. An owner or accountant signs it off with {button:Sign off this close|primary|pen-line}.
 

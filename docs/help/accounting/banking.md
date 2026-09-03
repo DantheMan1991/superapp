@@ -2,7 +2,8 @@
 
 > Your bank and card accounts: the cards and their balances, connecting a feed, adding an account by hand, and recording money in or out without waiting for the feed.
 > **Route:** /dashboard/m/accounting/banking
-> **Order:** 130
+> **Order:** 10
+> **Area:** Banking
 
 Open **Banking** in the accounting menu. The line under the title reads `Bank feeds, imports, and reconciliation for [your business].` Each bank or card account is a card. Click one to open its transactions. To add an account, click {button:Add manually|outline}, or {button:Connect a bank|primary} when a live feed is switched on for your deployment.
 

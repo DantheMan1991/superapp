@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { CSSProperties } from "react";
+import { createElement, type CSSProperties } from "react";
 import { BookOpen } from "lucide-react";
 import { requireTenant } from "@/lib/auth";
 import { getActiveModules } from "@/lib/modules";
@@ -8,16 +8,17 @@ import { getIndustryProfile } from "@/industries";
 import { guideVocabulary, listGuides } from "@/lib/guides";
 import {
   applyLabels,
+  guideAreas,
   guideIndexFor,
   GUIDES_HREF,
+  type GuideMeta,
   type IndexFeature,
+  type Vocabulary,
 } from "@/lib/guides-core";
 import { PageHeader } from "@/components/app/page-header";
 import { SectionRow } from "@/components/app/section-row";
-import { Panel } from "@/components/app/panel";
 import { EmptyState } from "@/components/app/empty-state";
 import { getIcon } from "@/components/app/icon-registry";
-import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,13 @@ export const dynamic = "force-dynamic";
  * sidebar is. The feature list is built exactly as the rail builds it — enabled
  * AND renderable — so the two can never disagree about what exists. A feature
  * with no guide yet is listed anyway: the gap is the information.
+ *
+ * Cards, not a list. The first version stacked a module's guides in one
+ * divided list, and Accounting's thirty-five read as a wall (founder,
+ * 2026-09-03: "one long list with no separation per guide item"). Each guide
+ * is now a tile in a grid, the same tile the Overview uses for modules, and a
+ * feature with many guides captions them by `Area` — the feature's own menu
+ * words, in its menu's order — so the page reads like the screen it describes.
  */
 export default async function GuidesPage() {
   const ctx = await requireTenant();
@@ -51,7 +59,7 @@ export default async function GuidesPage() {
     .reduce((count, group) => count + group.guides.length, 0);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       <PageHeader
         title="Guides"
         description="How to use each part of Yosher, screen by screen."
@@ -68,57 +76,89 @@ export default async function GuidesPage() {
       ) : (
         sections.map((section) => (
           <SectionRow key={section.key} title={section.label}>
-            <Panel>
-              <ul className="divide-y divide-divider">
-                {section.groups.map((group) => {
-                  const Icon = getIcon(group.icon);
-                  // A fixed section is its own single group; naming it twice is noise.
-                  const named = group.slug !== section.key;
-                  return (
-                    <li
-                      key={group.slug}
-                      className="flex gap-3 px-4 py-3"
-                      style={
-                        {
-                          "--module-accent": `var(--accent-${group.slug}, var(--accent-brand))`,
-                        } as CSSProperties
-                      }
-                    >
-                      <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-module-accent/10 text-module-accent">
-                        <Icon className="size-4" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        {named && <p className="text-sm font-medium">{group.name}</p>}
-                        {group.guides.length === 0 ? (
-                          <p className="text-sm text-muted-foreground">No guide yet.</p>
-                        ) : (
-                          <ul className={cn("space-y-2", named && "mt-1")}>
-                            {group.guides.map((guide) => (
-                              <li key={guide.slug}>
-                                <Link
-                                  href={`${GUIDES_HREF}/${guide.slug}`}
-                                  className="text-sm font-medium hover:underline"
-                                >
-                                  {applyLabels(guide.title, vocabulary)}
-                                </Link>
-                                {guide.summary && (
-                                  <p className="text-sm text-muted-foreground">
-                                    {applyLabels(guide.summary, vocabulary)}
-                                  </p>
-                                )}
-                              </li>
-                            ))}
-                          </ul>
+            <div className="space-y-8">
+              {section.groups.map((group) => {
+                // A fixed section is its own single group; naming it twice is noise.
+                const named = group.slug !== section.key;
+                return (
+                  <div
+                    key={group.slug}
+                    style={
+                      {
+                        "--module-accent": `var(--accent-${group.slug}, var(--accent-brand))`,
+                      } as CSSProperties
+                    }
+                  >
+                    {named && (
+                      <div className="mb-3 flex items-center gap-3">
+                        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-module-accent/10 text-module-accent">
+                          {createElement(getIcon(group.icon), { className: "size-4" })}
+                        </div>
+                        <p className="font-heading font-medium tracking-heading">
+                          {group.name}
+                        </p>
+                        {group.guides.length > 0 && (
+                          <p className="text-sm text-muted-foreground">
+                            {group.guides.length === 1
+                              ? "1 guide"
+                              : `${group.guides.length} guides`}
+                          </p>
                         )}
                       </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </Panel>
+                    )}
+                    {group.guides.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No guide yet.</p>
+                    ) : (
+                      <div className="space-y-5">
+                        {guideAreas(group.guides).map(({ area, guides: inArea }) => (
+                          <div key={area ?? ""}>
+                            {area && (
+                              <p className="mb-2 text-xs font-medium tracking-wider text-muted-foreground uppercase">
+                                {applyLabels(area, vocabulary)}
+                              </p>
+                            )}
+                            <GuideGrid guides={inArea} vocabulary={vocabulary} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </SectionRow>
         ))
       )}
+    </div>
+  );
+}
+
+/** The Overview's module tile, with a guide's title and summary on it. */
+function GuideGrid({
+  guides,
+  vocabulary,
+}: {
+  guides: readonly GuideMeta[];
+  vocabulary: Vocabulary;
+}) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {guides.map((guide) => (
+        <Link
+          key={guide.slug}
+          href={`${GUIDES_HREF}/${guide.slug}`}
+          className="group/tile block rounded-2xl bg-card p-4 shadow-elevation-1 transition-shadow hover:shadow-elevation-3 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+        >
+          <p className="font-heading font-medium tracking-heading">
+            {applyLabels(guide.title, vocabulary)}
+          </p>
+          {guide.summary && (
+            <p className="mt-1 line-clamp-3 text-sm text-muted-foreground">
+              {applyLabels(guide.summary, vocabulary)}
+            </p>
+          )}
+        </Link>
+      ))}
     </div>
   );
 }

@@ -3,6 +3,7 @@
 > Who owes you and how overdue it is: every open invoice balance on a date, bucketed by days past due, customer by customer.
 > **Route:** /dashboard/m/accounting/reports/ar-aging
 > **Order:** 280
+> **Area:** Reports
 
 Open **Reports** in the accounting menu and click `A/R Aging`. Set the date and click {button:Run|outline}. The line under the title reads, for example, `Hilltop Farm · open balances as of 2026-08-31 by days past due. Voided invoices are excluded.`, naming the company instead when you keep more than one.
 

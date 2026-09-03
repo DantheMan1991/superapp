@@ -3,6 +3,7 @@
 > Taxable and non-taxable sales by tax rate for a period, the tax you charged, and how it compares with what the ledger says you owe.
 > **Route:** /dashboard/m/accounting/reports/sales-tax
 > **Order:** 300
+> **Area:** Reports
 
 Open **Reports** in the accounting menu and click `Sales Tax Summary`. Set the dates of the return you are filing and click {button:Run|outline}. The line under the title reads, for example, `Hilltop Farm · 2026-07-01 to 2026-09-30 · accrual basis (invoice date)`, naming the company instead when you keep more than one.
 

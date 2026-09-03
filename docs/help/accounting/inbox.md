@@ -2,7 +2,8 @@
 
 > Where bills and receipts arrive: uploading, the email-in address, what Yosher reads off each document, and the buttons that turn a document into a bill, an expense or an attachment.
 > **Route:** /dashboard/m/accounting/receipts
-> **Order:** 50
+> **Order:** 60
+> **Area:** Inbox
 
 Open **Inbox** in the accounting menu. The line under the title reads `Everything arrives here — bills and receipts, uploaded or emailed, read automatically and routed to your books.` Two ways in: click {button:Upload|primary|upload}, or forward an email to your business's email-in address. Either way the document is read as soon as it lands, so it usually appears with its vendor, date and total already filled in.
 

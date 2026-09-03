@@ -2,7 +2,8 @@
 
 > Every account's balance on one page as of a date, the company and basis controls, and the check that the two columns agree.
 > **Route:** /dashboard/m/accounting/trial-balance
-> **Order:** 220
+> **Order:** 310
+> **Area:** Trial Balance
 
 Open **Trial Balance** in the accounting menu. The line under the title reads `Every account's balance as of [date] — the two columns must agree. Accrual basis.`, with the company scope after it when you keep more than one. Set the controls and click {button:Run|outline}.
 

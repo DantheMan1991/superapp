@@ -2,7 +2,8 @@
 
 > One invoice from draft to paid: issuing, the PDF, emailing it, recording and undoing payments, voiding, reminders, attachments and history, and who sees which buttons.
 > **Route:** /dashboard/m/accounting/sales/invoices/*
-> **Order:** 90
+> **Order:** 100
+> **Area:** Sales
 
 Open **Sales** in the accounting menu and click an invoice's number. Everything that happens to one invoice happens here: an owner issues it with {button:Issue|outline}, sends it, records payments against it, and voids it if it was wrong.
 

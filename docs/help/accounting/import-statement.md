@@ -2,7 +2,8 @@
 
 > Bringing transactions in from the CSV your bank exports: choosing the file, mapping its columns, the preview, what happens to duplicates, and the summary afterwards.
 > **Route:** /dashboard/m/accounting/banking/*/import
-> **Order:** 150
+> **Order:** 30
+> **Area:** Banking
 
 Open an account from **Banking** and click {button:Import CSV|outline}. Owners only. The title reads `Import statement — [account]` and the line under it `Upload the CSV your bank exports. Re-importing an overlapping file is safe — duplicates are skipped automatically.` Export the statement from your bank's website first. Any date range is fine.
 

@@ -2,7 +2,8 @@
 
 > Month-end: the pre-close checklist, closing the books through a date, the close history, reopening a close, and the export of your whole books for your accountant.
 > **Route:** /dashboard/m/accounting/close
-> **Order:** 310
+> **Order:** 320
+> **Area:** Close
 
 Open **Close** in the accounting menu. The line under the title reads `Month-end review, period lock, and the close history.` Closing the books through a date locks every entry dated on or before it. A locked entry cannot be edited or voided; a correction goes in as a reversal, or as a new entry dated after the close. To close, work through the checklist and click {button:Close the books|primary|lock}.
 

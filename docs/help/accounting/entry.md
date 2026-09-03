@@ -3,6 +3,7 @@
 > One entry in the ledger: posting a draft, editing, voiding, reversing, deleting, and the entries that must be undone from the invoice or bill they belong to.
 > **Route:** /dashboard/m/accounting/journal/*
 > **Order:** 210
+> **Area:** Journal
 
 Open **Journal** in the accounting menu and click an entry's date or memo. This page shows the entry's lines and, for owners, the buttons for its stage: {button:Post|primary} on a draft, {button:Void|outline} and {button:Reverse|outline} on a posted entry.
 

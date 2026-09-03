@@ -3,6 +3,7 @@
 > What the business owns and owes on a date, with Retained Earnings and Net Income worked out for you, a check that it balances, and a comparison with a year earlier.
 > **Route:** /dashboard/m/accounting/reports/balance-sheet
 > **Order:** 250
+> **Area:** Reports
 
 Open **Reports** in the accounting menu and click `Balance Sheet`. Set the controls and click {button:Run|outline}. The line under the title reads, for example, `Hilltop Farm · as of 2026-08-31 · fiscal year begins 2026-01-01 · Accrual basis`, naming the company instead when you keep more than one.
 

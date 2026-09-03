@@ -18,6 +18,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { BuyHourBlockButton } from "./hours-buttons";
+import { PageHeader } from "@/components/app/page-header";
 
 export const dynamic = "force-dynamic";
 
@@ -108,12 +109,10 @@ export default async function HoursPage({
   if (!view.hasAnyData) {
     return (
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Hours</h1>
-          <p className="text-sm text-muted-foreground">
-            Retainer hours and the work log.
-          </p>
-        </div>
+        <PageHeader
+          title="Hours"
+          description="Retainer hours and the work log."
+        />
         <Card>
           <CardContent className="py-12 text-center text-sm text-muted-foreground">
             Your plan doesn&apos;t include retainer hours yet — get in touch
@@ -126,12 +125,10 @@ export default async function HoursPage({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Hours</h1>
-        <p className="text-sm text-muted-foreground">
-          Your monthly retainer, and exactly what we did with it.
-        </p>
-      </div>
+      <PageHeader
+        title="Hours"
+        description="Your monthly retainer, and exactly what we did with it."
+      />
 
       {status === "success" && (
         <div className="rounded-md border border-emerald-600/40 bg-emerald-600/10 px-4 py-3 text-sm">

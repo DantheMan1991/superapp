@@ -53,9 +53,17 @@ name: CI
 # The dossiers are updated by nearly every PR (AGENTS.md requires it), and #78
 # — two markdown files — spent twenty minutes running the database suite while
 # holding the repo-wide `db-tests` slot, so the next real push queued behind a
-# docs edit. Nothing under docs/ can change behaviour: no test reads that tree
-# (checked — the one suite that walks the filesystem inspects .ts/.tsx only),
-# and build-docs.ts reads it at request time, not at build or test time.
+# docs edit. The build record cannot change behaviour, so its subtrees are
+# listed below one by one.
+#
+# `docs/help/` IS DELIBERATELY NOT IN THE LIST. Those are the tenant guides —
+# product content that tests/guides.test.ts checks (every `{{placeholder}}`
+# declared, every `**Route:**` valid, every folder a real feature) — so a
+# guide-only PR must run CI, or a typo ships straight into the help panel on
+# every screen. Listing the build-record subtrees explicitly, rather than
+# `docs/**` with a `!docs/help/**` exception, because negation in
+# `paths-ignore` is not something to bet CI on. (The older claim that no test
+# reads docs/ was already untrue of tests/build-docs.test.ts.)
 #
 # `paths-ignore` skips a run only when EVERY changed file matches, so a PR that
 # touches code and its dossier still runs in full. That is the common case and
@@ -80,7 +88,11 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - "docs/**"
+      - "docs/*.md"
+      - "docs/modules/**"
+      - "docs/decisions/**"
+      - "docs/briefs/**"
+      - "docs/runbooks/**"
       - "AGENTS.md"
       - "CLAUDE.md"
       - "README.md"
@@ -94,7 +106,11 @@ on:
     # Listing types overrides the defaults, so all four are named.
     types: [opened, synchronize, reopened, labeled]
     paths-ignore:
-      - "docs/**"
+      - "docs/*.md"
+      - "docs/modules/**"
+      - "docs/decisions/**"
+      - "docs/briefs/**"
+      - "docs/runbooks/**"
       - "AGENTS.md"
       - "CLAUDE.md"
       - "README.md"

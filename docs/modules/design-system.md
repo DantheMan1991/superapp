@@ -21,6 +21,30 @@ tokens and gets its own pass later.
 
 ## Build log
 
+### 2026-09-02 — A "?" on every page, and six headings that were never swept (`claude/guides-plumbing`)
+
+The tenant guides ([guides.md](guides.md)) put a help button on every
+dashboard screen, and the cheapest place to put it was inside `PageHeader`'s
+actions row — first, not last, because the component's own rule is that the
+primary action sits nearest the content. `HelpButton` gates itself by
+pathname, so the header still never learns where it is, and an admin page or
+the public share page renders the row empty.
+
+Doing that exposed that the Coverage paragraph below was wrong: six pages
+under `dashboard/` — hours (twice), team, billing, email, settings and taking
+payments — still hand-wrote `text-2xl font-semibold tracking-tight`, so a
+button placed in `PageHeader` reached none of them. They use it now. Email
+and taking payments lose their `bg-brand/15` chip for the header's
+`bg-module-accent/10` one, which resolves to the brand accent outside a
+module route, so nothing visibly moved. Mail's connected view has its own
+bar and got the button by hand.
+
+Two primitives join the table: `Markdown`, the one renderer for prose that
+arrives as text (the admin doc page and the guides use it; five inline
+`ReactMarkdown`s remain), and `HelpButton`. `Markdown` is the first place the
+`prose prose-sm dark:prose-invert` classes are written once instead of
+copied; nothing in this dossier had legislated them.
+
 ### 2026-08-29 — The org switcher was unclickable on a phone (`claude/the-switcher-behind-the-menu`)
 
 **Reported from a phone**, with a screenshot: the organisation switcher's popover
@@ -342,6 +366,8 @@ directory is stock shadcn and stays upgradeable. These compose it.
 | `CommandPalette` | **yes** | — (new: ⌘K, in the rail) |
 | `ui/checkbox` | **yes** | `Switch` used for row selection (2026-08-23) |
 | `icon-registry.ts` | no | The shell's private `ICONS` map |
+| `Markdown` | no | Inline `ReactMarkdown` + hand-copied prose classes (two of seven adopted, 2026-09-02) |
+| `HelpButton` | **yes** | — (new: the "?" in `PageHeader`'s actions row and Mail's bar, and the guide sheet it opens) |
 
 ### `DataTable` is a container, not a table
 
@@ -410,6 +436,16 @@ sub-nav and a filter row stacked above the first invoice.
 - **`npm run build`, not just `tsc`.** `CategoryStrip` and `CommandPalette` are
   client components; a server component importing a *helper* (not a component)
   from one throws only at render, and the build is the only thing that catches it.
+- **`PageHeader` always renders its actions row, with the help button first.**
+  The button decides for itself whether it belongs (pathname under
+  `/dashboard`, not the Guides pages), so a page passes nothing. Anything a
+  page puts in `actions` still lands to the right of it, primary action last.
+  The sheet the button opens is a modal Radix `Sheet`: the no-portalled-popover
+  rule on the mobile drawer applies to it too.
+- **`Markdown` loads lazily in the help sheet.** `next/dynamic` with
+  `ssr: false` — the first in the codebase — because the button is on every
+  page and a markdown parser in every page's bundle is the wrong price for a
+  panel most visits never open. The pages import `Markdown` directly.
 
 ## Where `PageHeader` does NOT belong
 
@@ -427,9 +463,13 @@ heading, and they are not oversights:
 
 ## Coverage
 
-`text-2xl font-semibold tracking-tight` — the string this replaced — is now at
-**zero** under `dashboard/`, `admin/`, every `src/modules/*`, and `s/[token]`.
-What remains is the three centred states above and `(marketing)`.
+`text-2xl font-semibold tracking-tight` — the string this replaced — is at
+**zero** under `dashboard/`, `admin/`, every `src/modules/*`, and `s/[token]`
+as of 2026-09-02. This paragraph had claimed that since 2026-08-10 while six
+pages under `dashboard/` (hours, team, billing, email, settings, taking
+payments) still carried the hand-written heading; a grep, not this text, is
+the evidence. What remains is the three centred states above and
+`(marketing)`.
 
 ## Open items
 

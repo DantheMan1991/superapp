@@ -70,4 +70,15 @@ describe("build docs", () => {
     expect(doc!.summary).not.toBe("");
     expect(doc!.statusLine).toContain("brief");
   });
+
+  it("never lists the tenant guides as build docs", async () => {
+    // `docs/help/` is written for the client and rendered inside the product
+    // by guides.ts, with its `{{vocabulary}}` resolved per tenant. On this
+    // page it would appear as an unexplained "Help" section full of
+    // placeholders — so the walker skips the folder, and this is the check
+    // that it keeps doing so.
+    const sections = await listBuildDocs();
+    expect(sections.map((s) => s.key)).not.toContain("help");
+    expect(await getBuildDoc("help/workspace/getting-around")).toBeNull();
+  });
 });

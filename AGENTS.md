@@ -55,6 +55,9 @@ that matter for code:
 5. Extend the certification suite — `tests/isolation/<area>.test.ts`, one file
    per area — to cover the new tables.
 6. Dossier: create `docs/modules/<slug>.md` from `_TEMPLATE.md`.
+7. Guide: create `docs/help/<slug>/overview.md` from `docs/help/_TEMPLATE.md`
+   with `**Route:** /dashboard/m/<slug>/**`, so every screen in the module has
+   a help panel from its first day.
 
 Modules stay "coming_soon" empty slots until a paying client pulls them in —
 that discipline is the whole point of the build brief.
@@ -63,7 +66,10 @@ that discipline is the whole point of the build brief.
 
 Everything under `docs/` is the build record, rendered read-only in the
 superadmin UI at `/admin/docs` (`src/lib/build-docs.ts` walks the whole
-tree — a new file appears on the page with no code change):
+tree — a new file appears on the page with no code change) — **except
+`docs/help/`, which is written for the client**: the tenant guides, rendered
+inside the product at `/dashboard/guides` and in every page's help panel,
+and skipped by the build-docs walker:
 
 | Where | What | When it changes |
 | --- | --- | --- |
@@ -71,6 +77,7 @@ tree — a new file appears on the page with no code change):
 | `docs/*.md` | `architecture`, `security`, `conventions`, `extension-model` — the invariants every module inherits | When a boundary moves or a statement stops being true |
 | `docs/decisions/` | ADRs. Immutable once accepted — reverse one by writing a new ADR that supersedes it | When a decision closes off a credible alternative |
 | `docs/runbooks/` | Operational procedures | When a step turns out to be wrong |
+| `docs/help/<feature>/<topic>.md` | Tenant-facing how-to guides, in the client's voice (`docs/help/_TEMPLATE.md` explains the header, the `**Route:**` grammar and `{{vocabulary}}`), rendered at `/dashboard/guides` and in the page help panel | Every PR that changes a screen the guide describes |
 
 - **Every PR MUST update the doc for what it changed** — a build-log entry
   (date, short title, what/why) in the dossier, plus the other sections if
@@ -81,6 +88,10 @@ tree — a new file appears on the page with no code change):
   uncommitted for a week while the module dossiers stayed current — a doc
   that is not committed does not exist, and one the page cannot read may as
   well not be.
+- **A PR that changes a screen updates its guide.** The guide is what the
+  client reads with the screen open beside it; a button it names that is no
+  longer there is worse than no guide. A new screen in a module that has a
+  guide gets a section; a new module gets an `overview.md` (step 7 above).
 - **Keep a dossier readable.** It is read at the START of every session that
   touches the area, so its length is a tax on every future change to it. When a
   build log outgrows a few screens, sweep the older entries into

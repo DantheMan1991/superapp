@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { ArrowLeft } from "lucide-react";
 import { getBuildDoc, sectionLabel } from "@/lib/build-docs";
+import { Markdown } from "@/components/app/markdown";
 
 export const dynamic = "force-dynamic";
 
@@ -46,9 +45,13 @@ export default async function BuildDocPage({
         </span>
       </div>
 
-      <div className="prose prose-sm dark:prose-invert max-w-3xl [&_table]:text-sm">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{doc.content}</ReactMarkdown>
-      </div>
+      {/* `linkBase` is what makes `[ADR 0013](../decisions/0013-….md)` in a
+          brief navigate instead of requesting a .md file that 404s. */}
+      <Markdown
+        source={doc.content}
+        linkBase={{ root: "/admin/docs", slug: doc.slug }}
+        className="max-w-3xl"
+      />
     </div>
   );
 }

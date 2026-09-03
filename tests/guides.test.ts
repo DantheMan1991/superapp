@@ -397,6 +397,18 @@ describe("docs/help on disk", () => {
     }
   });
 
+  it("resolves the accounting sales screens to their own guides", async () => {
+    const guides = await listGuides();
+    const at = (pathname: string) => matchGuide(guides, pathname, "")?.slug ?? null;
+    expect(at("/dashboard/m/accounting/sales")).toBe("accounting/invoices");
+    expect(at("/dashboard/m/accounting/sales/invoices")).toBe("accounting/invoices");
+    expect(at("/dashboard/m/accounting/sales/invoices/new")).toBe("accounting/new-invoice");
+    expect(at("/dashboard/m/accounting/sales/invoices/abc")).toBe("accounting/invoice");
+    expect(at("/dashboard/m/accounting/sales/customers")).toBe("accounting/customers");
+    expect(at("/dashboard/m/accounting/sales/catalogue")).toBe("accounting/catalogue");
+    expect(at("/dashboard/m/accounting/sales/reminders")).toBe("accounting/reminders");
+  });
+
   it("the template is not a guide", async () => {
     expect((await listGuides()).some((entry) => entry.slug.includes("template"))).toBe(false);
     expect(await getGuide("_TEMPLATE")).toBeNull();

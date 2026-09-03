@@ -13,6 +13,17 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-03 — The Purchases, Inbox and Sales guides rewritten to the new voice (`claude/sweep-accounting-purchases-and-sales`)
+
+No code change. The twelve guides for these screens now follow the CONTROLS,
+VOICE and SHAPE rules in `docs/help/_TEMPLATE.md` (see [guides.md](guides.md)):
+the reader is told what to do, every button and status badge is drawn by the
+real component with the look this module's pages use, and every guide has the
+same sections. The facts are unchanged from the first drafts. **A PR that
+changes one of these screens still updates its guide**, and now also the look
+named in its markers: a button that turns from outline to primary is a wrong
+picture in the guide until the marker follows.
+
 ### 2026-09-02 — Tenant guides for Reports, Close, Companies and Recurring (`claude/accounting-guides-reports`)
 
 The fourth and last accounting area of the in-app guides ([guides.md](guides.md)):

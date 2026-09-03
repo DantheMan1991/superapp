@@ -4,52 +4,47 @@
 > **Route:** /dashboard/m/accounting/purchases/vendors
 > **Order:** 40
 
-## The list
+Open **Purchases** in the accounting menu and click the `Vendors` pill. The line under the title reads `Who [your business] buys from. A default expense account prefills new bill lines.` To add one, click {button:New vendor|primary|plus}.
 
-**Purchases** in the strip, then the **Vendors** pill. The title is **Vendors** and the line under it reads `Who [your business] buys from. A default expense account prefills new bill lines.`
+## What you see
 
-Every vendor is listed, active or not, in name order:
+- **The list.** Every vendor, active or not, in name order. `Name`. `Contact`, the email and phone, or a dash. `Default account`, the account new bill lines for this vendor start on, or a dash. `Status`, `active` or `inactive`. A {icon:pencil} at the end of the row opens the vendor for editing.
+- **No vendor page.** A vendor's name is not a link. Everything about a vendor is in the edit dialog, and their bills are in the Bills list.
 
-- **Name.**
-- **Contact.** Email and phone, or a dash.
-- **Default account.** The account new bill lines for this vendor start on, or a dash.
-- **Status.** `active` or `inactive`.
-- A pencil at the end of the row opens the vendor for editing.
+## How to add a vendor
 
-A vendor's name is not a link. There is no vendor page; everything about a vendor is in the edit dialog, and their bills are in the Bills list.
+1. Click {button:New vendor|primary|plus}.
+2. Fill in `Name`. Required. Add `Email`, the address their invoices come from, `Phone`, and `Address`, one line, if you have them.
+3. Pick `Default expense account (optional)`: `None`, or one of your expense or asset accounts. When a bill is created from a document for this vendor, every line starts on this account. Set it for any vendor you buy the same kind of thing from every time.
+4. Click {button:Save|primary}. You see `Vendor created.`
 
-Before any exist, the page says **No vendors yet** and `They are created for you when a bill comes in from an emailed document, or you can add one now.`
+Two vendors may have the same name. Nothing stops it, so check the list first. A vendor is also created on the spot when you type a new name on a bill, or when {button:Create bill|primary} in the Inbox finds no match. Those get a name only. Come here to add the rest.
 
-## Adding a vendor
+## How to edit a vendor
 
-Click **New vendor**.
+1. Click the {icon:pencil} on the row. The dialog is `Edit vendor`.
+2. Change the fields. Every field is saved as it stands, so clearing the email box removes the email.
+3. Click {button:Save|primary}. You see `Vendor updated.`
 
-- **Name.** Required.
-- **Email.** The address their invoices come from.
-- **Phone.**
-- **Address.** One line.
-- **Default expense account (optional).** `None`, or one of your expense or asset accounts. When a bill is created from a document for this vendor, every line starts on this account. Set it for any vendor you buy the same kind of thing from every time.
+## How to deactivate a vendor
 
-Click **Save**. You see `Vendor created.` Two vendors may have the same name; nothing stops it, so check the list first.
+1. Click the {icon:pencil} on the row.
+2. Click {button:Deactivate|ghost} at the bottom left of the dialog. It takes effect at once, with no confirmation. You see `Vendor deactivated.` {button:Reactivate|ghost} switches them back on: `Vendor reactivated.`
 
-A vendor is also created on the spot when you type a new name on a bill, or when **Create bill** in the Inbox finds no match. Those get a name only. Come here to add the rest.
+A deactivated vendor disappears from the vendor list on the bill form and from the vendor match in {button:Create bill|primary}, cannot have a new bill recorded, an existing draft saved, or a draft approved, and stays on this list marked `inactive` and on every bill they already have. Vendors are never deleted. Deactivating says you no longer buy from them. It does not touch a customer record for the same business.
 
-## Editing
+## Messages
 
-Click the pencil. The same dialog opens with **Edit vendor** as its title. Every field is saved as it stands, so clearing the email box removes the email. Click **Save**. You see `Vendor updated.` If someone else saved the vendor while you had it open: `This entry changed since you opened it — reload and try again.`
+| Message | What it means |
+| --- | --- |
+| `No vendors yet` and `They are created for you when a bill comes in from an emailed document, or you can add one now.` | The list is empty. |
+| `That vendor is inactive — reactivate them first.` | A bill names a deactivated vendor. Reactivate them here. |
+| `This entry changed since you opened it — reload and try again.` | Someone else saved the vendor while you had it open. |
 
-## Deactivating
+## Not on this page
 
-In the edit dialog, **Deactivate** at the bottom left switches the vendor off at once, with no confirmation, and **Reactivate** switches them back on. You see `Vendor deactivated.` or `Vendor reactivated.`
+There is no vendor page and no search. A vendor cannot be deleted, only deactivated.
 
-A deactivated vendor:
+## Who can do what
 
-- Disappears from the vendor list on the bill form and from the vendor match in **Create bill**.
-- Cannot have a new bill recorded, an existing draft saved, or a draft approved. Each of those answers `That vendor is inactive — reactivate them first.` A draft bill that names them cannot be posted until they are reactivated.
-- Stays on this list marked `inactive`, and on every bill they already have.
-
-Vendors are never deleted. Deactivating says you no longer buy from them; it does not touch a customer record for the same business.
-
-## Who can do this
-
-Owners and staff both add, edit and deactivate vendors. Accountant access can read the list, and any change answers `Accountant access is read-only — reviews, sign-offs and exports only.`
+Owners and staff add, edit and deactivate vendors. Accountants can read the list, and any change answers `Accountant access is read-only — reviews, sign-offs and exports only.`

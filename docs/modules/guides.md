@@ -7,6 +7,29 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-02 — Accounting, first area: the Overview, Purchases and the Inbox (`claude/accounting-guides-purchases`)
+
+Founder, after merging #349: *"go ahead with accounting."* Accounting has 37
+routed screens, so it ships in four review-sized PRs by area. This is the
+first: seven guides in `docs/help/accounting/` — `overview` (the module root and
+the strip, `/dashboard/m/accounting/**`), `bills`, `new-bill`, `bill`,
+`vendors`, `inbox` and `document`.
+
+- **Written from four exhaustive screen inventories** taken up front (purchases
+  and receipts, sales, banking and ledger, reports/close/companies/recurring —
+  about 2,500 lines of notes), so the remaining three PRs write from the same
+  source without re-reading the module.
+- **The overview names the guides written so far** and says the rest are
+  coming. It is edited as each area lands.
+- **Role gating is stated per button**, because on these screens nothing is
+  hidden from the accountant role — the buttons render and the refusal comes
+  on press — and staff see `Submit for approval` where an owner sees `Approve`.
+- **Things the inventory found and the guides state as fact rather than
+  promise:** a draft bill cannot be deleted and an approved one cannot be
+  edited (the actions exist with no UI caller); there is no tax on a bill by
+  design; the Inbox has no company picker on purpose; the `Read` button only
+  offers itself for an unread or failed document.
+
 ### 2026-09-02 — The manual, not the summary (`claude/the-manual-not-the-summary`)
 
 Founder, having read the two guides that shipped with the plumbing: *"they are

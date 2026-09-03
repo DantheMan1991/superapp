@@ -13,6 +13,18 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-02 — Tenant guides for the Overview, Purchases and the Inbox (`claude/accounting-guides-purchases`)
+
+No code change. The first seven tenant-facing guides for this module landed in
+`docs/help/accounting/` — `overview`, `bills`, `new-bill`, `bill`, `vendors`,
+`inbox`, `document` — written to the founder's bar (every control on every
+screen; see [guides.md](guides.md)) from an exhaustive inventory of these
+screens. **A PR that changes one of these screens updates its guide** (the
+AGENTS.md rule); the guide names buttons, fields, statuses and messages
+verbatim, so a renamed button is a wrong sentence a client reads with the
+screen open. Sales, Banking and the ledger, and Reports/Close/Recurring follow
+in their own PRs.
+
 ### 2026-09-02 — A select that cannot show its value (`claude/a-select-that-cannot-show-its-value`)
 
 **The edit dialog offers a template's own dead party or account back, marked,

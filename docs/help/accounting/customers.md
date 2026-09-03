@@ -4,44 +4,50 @@
 > **Route:** /dashboard/m/accounting/sales/customers
 > **Order:** 100
 
-## The list
+Open **Sales** in the accounting menu and click the `Customers` pill. The line under the title reads `Who [your business] bills.` To add one, click {button:Add customer|primary}. You need a customer before you can write an invoice.
 
-**Sales** in the strip, then the **Customers** pill. The title is **Customers** and the line under it reads `Who [your business] bills.` **Add customer** sits at the right.
+## What you see
 
-Every customer is listed in name order, active or not. Each row shows the name, an `inactive` badge where it applies, the email and phone underneath, and at the right how much they currently owe, `1,240.00 open`, when anything is outstanding.
+- **The list.** Every customer, active or not, in name order. Each row shows the name, {badge:inactive|outline} where it applies, the email and phone under it, and at the right how much they currently owe, `1,240.00 open`, when anything is outstanding. There is no search box.
+- **The menu on each row.** The dots at the end open `Edit`, `Never send reminders` or `Resume reminders`, and `Deactivate` or `Reactivate`.
 
-The dots at the end of a row open a menu:
+## How to add a customer
 
-- **Edit.**
-- **Never send reminders** or **Resume reminders.** Whether automatic reminders may ever chase this customer. You see `This customer will not be chased automatically` or `Reminders resumed for this customer`.
-- **Deactivate** or **Reactivate.** Takes effect at once, with no confirmation.
-
-Before any exist, the page says **Add your first customer** and `You need somebody to bill before you can raise an invoice.`
-
-There is no search box; the list is alphabetical.
-
-## Adding a customer
-
-Click **Add customer**. The dialog is `Someone you'll invoice.`
-
-- **Name.** Required.
-- **Email.** Where invoices and reminders are sent.
-- **Phone.**
-- **Address.** Printed in the invoice's **BILL TO** block.
-- **Notes.**
-
-Click **Add customer**. You see `Customer added`.
+1. Click {button:Add customer|primary}. The dialog reads `Someone you'll invoice.`
+2. Fill in `Name`. Required. Add `Email`, where invoices and reminders are sent, `Phone`, `Address`, printed in the invoice's `BILL TO` block, and `Notes` if you want them.
+3. Click {button:Add customer|primary}. You see `Customer added`.
 
 Payment terms and tax are set on each invoice, not on the customer.
 
-## Editing
+## How to edit a customer
 
-Choose **Edit** from the row's menu. The same fields open. Every field is saved as it stands, so clearing the email box removes the email. Click **Save changes**. You see `Customer updated`. Renaming a customer renames them in CRM as well. If someone else saved the customer while you had it open: `This entry changed since you opened it — reload and try again.`
+1. Open the row's menu and choose `Edit`. The same fields open.
+2. Change them. Every field is saved as it stands, so clearing the email box removes the email.
+3. Click {button:Save changes|primary}. You see `Customer updated`. Renaming a customer renames them in CRM as well.
 
-## Deactivating
+## How to stop reminders for a customer
 
-A deactivated customer stays on this list marked `inactive`, keeps every invoice and all their history, but cannot be picked on a new invoice, and a draft that names them cannot be saved: `That customer is inactive — reactivate them first.` Customers are never deleted.
+1. Open the row's menu and choose `Never send reminders`. You see `This customer will not be chased automatically`. No invoice of theirs is chased while this is set.
+2. Choose `Resume reminders` to start again. You see `Reminders resumed for this customer`.
 
-## Who can do this
+## How to deactivate a customer
 
-Owners and staff both add, edit and deactivate customers. Accountant access sees the same buttons, and any change answers `Accountant access is read-only — reviews, sign-offs and exports only.`
+1. Open the row's menu and choose `Deactivate`. It takes effect at once, with no confirmation, and the row shows {badge:inactive|outline}. Choose `Reactivate` to bring them back.
+
+A deactivated customer keeps every invoice and all their history, but cannot be picked on a new invoice, and a draft that names them cannot be saved. Customers are never deleted.
+
+## Messages
+
+| Message | What it means |
+| --- | --- |
+| `Add your first customer` and `You need somebody to bill before you can raise an invoice.` | The list is empty. Click {button:Add customer|primary}. |
+| `That customer is inactive — reactivate them first.` | An invoice names a deactivated customer. Reactivate them here. |
+| `This entry changed since you opened it — reload and try again.` | Someone else saved the customer while you had it open. |
+
+## Not on this page
+
+There is no search box and no customer page. A customer cannot be deleted, only deactivated. Terms and tax live on each invoice.
+
+## Who can do what
+
+Owners and staff add, edit, mute and deactivate customers. Accountants see the same buttons, and any change answers `Accountant access is read-only — reviews, sign-offs and exports only.`

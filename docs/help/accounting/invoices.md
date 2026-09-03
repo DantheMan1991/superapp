@@ -1,63 +1,63 @@
 # Invoices
 
-> What customers owe you: the four money tiles, the status filter, the list, and what each status word means.
+> What customers owe you: the four money tiles, the status filter, the list, and what each status badge means. Write a new invoice from here.
 > **Route:** /dashboard/m/accounting/sales/invoices, /dashboard/m/accounting/sales
 > **Order:** 70
 
-## The title line
+Open **Sales** in the accounting menu. This page lists every invoice, with what is owed at the top. To write a new one, click {button:New invoice|primary} at the top right. See [Write an invoice](new-invoice.md).
 
-**Sales** in the strip brings you here. The title is **Invoices** and the line under it reads, for example, `12,480.00 outstanding`, adding `· 2,140.00 overdue` in red when anything is late. Figures on accounting pages carry no currency symbol, and a negative one is shown in brackets.
+## What you see
 
-**New invoice** at the right opens the invoice form. See the guide **Write an invoice**.
+- **The total you are owed.** Under the title, for example `12,480.00 outstanding`, with `· 2,140.00 overdue` in red when anything is late. Accounting pages show no currency symbol. A negative amount is in brackets.
+- **`Invoices`, `Customers`, `Reminders` and `Catalogue`.** Four pills under the accounting menu that switch between the Sales pages.
+- **Four money tiles.** Always shown, even at zero. Each shows an amount and a count, such as `3 invoices`. Click a tile to show only those invoices. `Filtered to Overdue · show all` appears under the tiles, and `show all` clears it.
+  - `Overdue`. Invoices still owed whose due date has passed. The amount turns red when it is above zero.
+  - `Not due yet`. Invoices still owed that are due today or later, or have no due date.
+  - `Not deposited`. Payments you have recorded into Undeposited Funds and not yet banked, from any time.
+  - `Deposited`. Payments recorded into a bank account in the last 30 days.
+  The first two count what is still owed; the last two count what has arrived. One invoice can sit in two tiles, so the counts do not add up to the number of invoices.
+- **Status pills.** Above the list, at the right: `Open`, `Drafts`, `Paid` and `All`. `Open` is the starting view: issued invoices, paid or not, that still have a balance. Clicking a tile sets the pills to `All`, and clicking a pill clears the tile.
+- **`Company`.** Only when you keep more than one company. Pick one company or `All companies`. Your tile and pill stay as they are.
+- **The list.** Newest first, up to 200. `Number`, which opens the invoice. `Customer`. `Company`, only when you keep more than one. `Issued` and `Due`, with the due date in red once it has passed. `Status`, a badge, explained next. `Total` and `Balance`. A void invoice's balance is zero.
 
-Under the strip, four pills switch between **Invoices**, **Customers**, **Reminders** and **Catalogue**.
+## What the status badges mean
 
-## The four money tiles
+The badge is worked out from the money and the dates, so it changes as days pass.
 
-All four tiles are always there, even at zero.
+- {badge:Draft|secondary} Written but not issued. It is not in your books yet.
+- {badge:Open|secondary} Issued and still owed, with no due date.
+- {badge:Due in 5 days|primary} Still owed and due within a week. Beyond a week the badge is gray, such as {badge:Due in 12 days|secondary}. `Due today` and `Due tomorrow` are spelled out.
+- {badge:Overdue 12 days|destructive} Still owed and past its due date.
+- {badge:Paid|outline} Nothing left owing.
+- {badge:Void|outline} Canceled. It has no effect on the books.
 
-- **Overdue.** Invoices with money still owed whose due date has passed. The figure turns red only when it is above zero.
-- **Not due yet.** Invoices with money still owed that are due today or later, or have no due date.
-- **Not deposited.** Payments you have recorded into Undeposited Funds and not yet banked, from any time.
-- **Deposited.** Payments recorded into a bank account in the last 30 days.
+The invoice's own page shows its stage instead: `draft`, `issued`, `partial`, `paid` or `void`. See [An invoice's page](invoice.md).
 
-The first two count what is still owed; the last two count what has arrived. One invoice can sit in two tiles, so the counts do not add up to the number of invoices. Each tile shows an amount and a count, `3 invoices`. Click a tile and the list shows only those invoices, with `Filtered to Overdue · show all` underneath. The tiles count every invoice, not only the ones the list can show.
+## How to find an invoice
 
-## The status filter
+1. Click a status pill, or `All` to see everything.
+2. If you keep more than one company, pick it in `Company`.
+3. Click the number in the `Number` column. The invoice opens.
 
-Four pills at the right, above the list: **Open**, **Drafts**, **Paid** and **All**. **Open** is the starting view: issued invoices, paid or not, that still have a balance. Choosing a tile switches this to **All**; choosing a pill clears the tile.
+There is no search box on this page. If you have the customer's name but not the invoice, open `Customers` and look at what they owe.
 
-If your books hold more than one company, a **Company** picker sits beside the pills: `All companies`, or one company. It keeps the tile and pill you have chosen.
+## How to see what is overdue
 
-## The list
+1. Click the `Overdue` tile. The list shows only invoices past their due date, and `Filtered to Overdue · show all` appears under the tiles.
+2. Click an invoice to open it and record a payment, or send it again.
+3. Click `show all` to see every invoice again.
 
-Newest first, up to 200. The columns:
+## Messages
 
-- **Number.** The invoice number. Click it to open the invoice.
-- **Customer.**
-- **Company.** Only when you keep more than one.
-- **Issued** and **Due.** The due date is shown in red once it has passed.
-- **Status.** A badge, explained below.
-- **Total** and **Balance.** A void invoice's balance is zero.
+| Message | What it means |
+| --- | --- |
+| `Bill your first customer` and `Raise an invoice and the receivable posts to the ledger for you.` | You have no invoices yet. Click {button:New invoice|primary}. An empty tile shows this too, because a tile sets the filter to `All`. |
+| `Nothing under Open` (or `Drafts`, or `Paid`) and `The other filters may have what you are looking for.` | No invoice matches the pill you chose. Click `All`. |
 
-## What the status words mean
+## Not on this page
 
-The badge is worked out from the money and the dates, and it changes as the days pass.
+There is no search box, no date filter, no sorting by column, and nothing you can do to several invoices at once. Open an invoice to act on it. Ask us if you need one of these.
 
-- **Void.** Cancelled.
-- **Draft.** Written but not issued. It is not in your books yet.
-- **Paid.** Nothing left owing.
-- **Open.** Still owed, with no due date.
-- **Overdue 1 day**, **Overdue 60 days.** Still owed and past due.
-- **Due today.**
-- **Due tomorrow**, **Due in 5 days.** Still owed and not yet due. Within a week it is highlighted; further out it is muted.
+## Who can do what
 
-On the invoice's own page you see its stage instead: `draft`, `issued`, `partial`, `paid` or `void`.
-
-## When the list is empty
-
-With no filter, the page says **Bill your first customer** and `Raise an invoice and the receivable posts to the ledger for you.`, with a **New invoice** button. With a pill that matches nothing, it says **Nothing under Open**, or Drafts, or Paid, and `The other filters may have what you are looking for.` An empty tile shows the first message too, because a tile sets the filter to All.
-
-## What this page does not have
-
-There is no search box and no date filter, no sorting by column, and nothing to do to several invoices at once. Open an invoice to act on it.
+Owners, staff and accountants all see the same page, tiles and list. What each person can do with an invoice is on the invoice's own page.

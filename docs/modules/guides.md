@@ -7,6 +7,22 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-03 — The sweep, second area: Purchases, the Inbox and Sales (`claude/sweep-accounting-purchases-and-sales`)
+
+Twelve accounting guides rewritten to CONTROLS, VOICE and SHAPE —
+`overview`, `new-bill`, `bill`, `vendors`, `inbox`, `document`,
+`invoices`, `new-invoice`, `invoice`, `customers`, `catalogue`,
+`reminders`. Facts carried over from the verified first drafts; the looks
+come from the purchases and sales inventories (bill stages: draft outline,
+awaiting approval secondary, approved and partial primary, paid secondary,
+void outline; invoice stages: draft secondary, issued and partial primary,
+paid and void outline; Inbox rows: the total secondary, the date outline,
+`Not read yet` outline, `Couldn't read` destructive). An icon-only control
+is drawn as its icon in the prose — the {icon:undo} that unapplies a bill
+payment, the {icon:pencil} that edits a vendor — because a drawn button with
+a label the screen never shows could not be pointed at. Not clicked through
+live; the pane's session is still expired.
+
 ### 2026-09-03 — The sweep, first area: Workspace, Business, Settings, Land (`claude/sweep-workspace-and-land`)
 
 Founder, on the two exemplars: *"the exemplars are good, sweep the rest."*

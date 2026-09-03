@@ -7,6 +7,22 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-02 — Accounting, third area: Banking and the ledger (`claude/accounting-guides-banking`)
+
+Ten guides in `docs/help/accounting/` — `banking`, `register`,
+`import-statement`, `reconcile`, `bank-rules`, `chart-of-accounts`, `journal`,
+`new-entry`, `entry`, `trial-balance` — from the banking-and-ledger inventory.
+Same bar, same method. Things the inventory found that the guides state as
+fact: the live bank feed's button only renders when the deployment carries
+Plaid keys, so the guide leads with CSV import; balances on the Banking page
+are combined across companies on purpose; the only statuses a transaction can
+show are `unreviewed`, `posted` and `excluded`; a rule beats the assistant and
+only the rule's chip is shown; ticking a line in a reconciliation locks its
+entry at once; the trial balance has no export of its own. On banking and
+journal actions the accountant role's refusal never reaches the screen (the
+gate sits outside the try), so those guides say "a save does not go through"
+rather than quoting the sentence.
+
 ### 2026-09-02 — Accounting, second area: Sales (`claude/accounting-guides-sales`)
 
 Six guides in `docs/help/accounting/` — `invoices`, `new-invoice`, `invoice`,

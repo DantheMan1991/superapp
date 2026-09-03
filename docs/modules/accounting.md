@@ -13,6 +13,17 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-02 — Tenant guides for Banking and the ledger (`claude/accounting-guides-banking`)
+
+No code change. Ten tenant-facing guides for Banking, the chart, the journal
+and the trial balance landed in `docs/help/accounting/` (see
+[guides.md](guides.md)). **A PR that changes one of these screens updates its
+guide.** One thing worth a fix of its own, found while writing them: in
+`banking/actions.ts` and `actions.ts` the `gate()` call sits outside the `try`,
+so an accountant pressing a banking or journal button gets an unhandled
+rejection and no toast — the `FORBIDDEN_EXPERT` sentence every other module
+surface shows never appears there.
+
 ### 2026-09-02 — Tenant guides for Sales (`claude/accounting-guides-sales`)
 
 No code change. Six tenant-facing guides for the Sales screens landed in

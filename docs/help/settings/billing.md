@@ -4,37 +4,38 @@
 > **Route:** /dashboard/billing
 > **Order:** 20
 
-This page is about what your business pays Yosher. Card payments from your own customers are a different page, **Taking payments**.
+Open **Billing** under `Settings` in the sidebar. Owners only. This page is about what your business pays Yosher. Card payments from your own customers are on **Taking payments**.
 
-## Current subscription
+## What you see
 
-The card **Current subscription** shows a status badge, your plan name beside it, and a line of text.
+- **`Current subscription`.** A status badge, your plan name beside it, and a line of text. The badge is {badge:None|secondary}, {badge:Active|success}, {badge:Trialing|secondary}, {badge:Past due|destructive}, {badge:Canceled|destructive} or {badge:Incomplete|warning}. The plan is `Operations` or `Business Office`. A second badge, {badge:cancels at period end|outline}, appears when the subscription has been set to stop at the end of the current period. With a subscription the text reads `Renews [date]. Payment methods, invoices, and cancellation are handled securely by Stripe.` and the card carries {button:Manage in Stripe portal|secondary}. Without one it reads `No active subscription yet. Pick a plan below to get started.` The status is read fresh from Stripe every time you open the page.
+- **The two plans.** Shown while you have no subscription. `Operations`: `Platform access, your active modules, maintenance, on-call.` `Business Office`: `Everything in Operations plus the expert layer — books reviewed, contracts checked, marketing running.` Each card ends in {button:Subscribe to Operations|primary} or {button:Subscribe to Business Office|primary}.
+- **The line about extra hours.** `Need extra hands-on hours this month? Buy hour blocks on the Hours page.` Hour blocks are bought on Hours, not here.
+- **The foot of the page.** `Payments are processed by Stripe. Card details never touch our servers.`
 
-The badge is one of **None**, **Active**, **Trialing**, **Past due**, **Canceled** or **Incomplete**. The plan name is **Operations** or **Business Office**. A second badge, `cancels at period end`, appears when the subscription has been set to stop at the end of the current period.
+## How to subscribe
 
-With a subscription the text reads `Renews [date]. Payment methods, invoices, and cancellation are handled securely by Stripe.` and the card has a **Manage in Stripe portal** button. Without one it reads `No active subscription yet. Pick a plan below to get started.`
+1. Click {button:Subscribe to Operations|primary} or {button:Subscribe to Business Office|primary}. The button reads `Redirecting…`.
+2. You land on a secure checkout page run by Stripe. The price is shown there, there is a box for a promotion code, and your card is taken there. If your business is still being onboarded, a one-time onboarding fee appears as a second line.
+3. Pay. You come back here with a green banner: `Payment set up — your subscription is active (it can take a few seconds to reflect here).` If the status has not changed yet, reload the page. Closing the checkout without paying brings you back here with nothing changed.
 
-The status is read fresh from Stripe every time you open this page.
+## How to change your card, download an invoice, or cancel
 
-## Choosing a plan
+1. Click {button:Manage in Stripe portal|secondary}. It reads `Opening…` and takes you to Stripe's billing portal for your business.
+2. Change the card on file, download invoices and receipts, or cancel there. When you are done, the portal brings you back here.
 
-When you have no subscription, two cards appear:
+## Messages
 
-- **Operations.** `Platform access, your active modules, maintenance, on-call.`
-- **Business Office.** `Everything in Operations plus the expert layer — books reviewed, contracts checked, marketing running.`
+| Message | What it means |
+| --- | --- |
+| `No active subscription yet. Pick a plan below to get started.` | Your business has not subscribed. Choose a plan. |
+| `No billing account yet — subscribe first.` | The portal button was pressed before any subscription exists. Subscribe first. |
+| `Payment set up — your subscription is active (it can take a few seconds to reflect here).` | The checkout went through. Reload if the badge has not changed yet. |
 
-Click **Subscribe to Operations** or **Subscribe to Business Office**. The button reads `Redirecting…` and takes you to a secure checkout page run by Stripe. The price is shown there, there is a box for a promotion code, and your card is taken there. If your business is still being onboarded, a one-time onboarding fee appears on that page as a second line.
+## Not on this page
 
-When the payment goes through you come back here with a green banner: `Payment set up — your subscription is active (it can take a few seconds to reflect here).` If the status has not changed yet, reload the page. Closing the checkout without paying simply brings you back to this page.
+Extra retainer hours are bought on the Hours page. Card payments from your customers are set up on Taking payments.
 
-## Managing the subscription
+## Who can do what
 
-Click **Manage in Stripe portal**. It reads `Opening…` and takes you to Stripe's billing portal for your business. That is where you change the card on file, download invoices and receipts, and cancel. When you are done, the portal brings you back here.
-
-If you have not subscribed yet, the button says `No billing account yet — subscribe first.`
-
-## Extra hours
-
-A line under the card reads `Need extra hands-on hours this month? Buy hour blocks on the Hours page.` Hour blocks are bought there, not here.
-
-The foot of the page reminds you: `Payments are processed by Stripe. Card details never touch our servers.`
+Only owners see this page.

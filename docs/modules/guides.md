@@ -7,6 +7,24 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-03 — The sweep, first area: Workspace, Business, Settings, Land (`claude/sweep-workspace-and-land`)
+
+Founder, on the two exemplars: *"the exemplars are good, sweep the rest."*
+Fourteen guides rewritten to CONTROLS, VOICE and SHAPE — `workspace/what-needs-you`,
+`business/hours` and `team`, the five `settings/` guides, and the six
+`land/` guides. Every fact is carried over from the verified first drafts;
+what changed is the voice (second person, imperative, American English), the
+shape (What you see, How to <task>, Messages, Not on this page, Who can do
+what) and the controls (drawn buttons and badges with the look the inventory
+recorded, chips for everything else the reader looks for). A badge whose
+tint the inventory did not record is quoted as a chip rather than drawn in a
+guessed color — the payments statuses, for one. A marker whose label carries
+a placeholder (`{button:Add {{zone|lower}}|outline}`, eight of them, all in
+Land) is resolved before the renderer sees it, and the on-disk marker test
+now resolves placeholders before it scans, so the braces inside cannot hide
+a bad look from it. Not clicked through live: the browser pane's session is
+still expired. The remaining 34 accounting guides follow in three PRs.
+
 ### 2026-09-03 — Every chip points (`claude/every-chip-points`)
 
 Founder, ten minutes after #354 deployed, with the Bills guide's status pills
@@ -305,10 +323,10 @@ stored in the database, and a tenant's vocabulary is read from the row
 
 ## Open items
 
-- **48 guides are still in the first voice and shape.** Only
-  `workspace/getting-around` and `accounting/bills` follow the CONTROLS,
-  VOICE and SHAPE rules in `_TEMPLATE.md`; the sweep of the rest waits on the
-  founder's verdict on those two.
+- **34 accounting guides are still in the first voice and shape.** The
+  workspace, business, settings and land guides and `accounting/bills` follow
+  the CONTROLS, VOICE and SHAPE rules in `_TEMPLATE.md`; the sweep continues
+  area by area.
 - **Screenshots.** Deliberately none yet. Manual captures rot within weeks at
   the current rate of UI change (the design sweep of 2026-08-11 would have
   invalidated every one), and dark mode doubles the set. The plan is Playwright

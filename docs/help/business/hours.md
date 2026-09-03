@@ -4,47 +4,43 @@
 > **Route:** /dashboard/hours
 > **Order:** 0
 
-## Before your plan includes hours
+Open **Hours** under `Business` in the sidebar. The meter at the top shows how much of this month's retainer you have used. Owners can buy extra hours under it. The work log at the bottom is the record of what Yosher's team has done for you.
 
-If your plan has no retainer hours yet, the page shows one message: `Your plan doesn't include retainer hours yet — get in touch and we'll set it up.` Owners and staff see the same thing.
+## What you see
 
-## This month
+- **Before your plan includes hours.** One message: `Your plan doesn't include retainer hours yet — get in touch and we'll set it up.` Owners and staff see the same thing.
+- **`This month`.** The meter. It reads, for example, `7.5 h of 10.0 h this month`. The bar under it fills as the month goes on and turns red once you have gone past your included hours. One badge can sit beside the figure: {badge:Over by 1.5 h|destructive} when you have used more than your included hours and have no purchased hours left to cover it, {badge:Using purchased hours|outline} when purchased hours are covering the difference, or {badge:Near limit|outline} when you have used four fifths or more of your included hours. The line under the bar reads `2.5 h purchased hours remaining. Included hours reset on the 1st; purchased hours never expire.`
+- **`5-hour block`** and **`10-hour block`.** Owners only. Two cards under the meter: `Five extra hours of hands-on work. Never expires.` and `Ten extra hours at a better rate. Never expires.` Each has a {button:Buy block|secondary}. When you are near or over your limit, the cards get a colored border and the button turns {button:Buy block|primary}.
+- **`Work log`.** `Every entry we log lands here — your record of the work.` Entries are grouped by month, newest first, under a heading written as the year and month, such as `2026-09`. Each entry has the date of the work, its length in hours, and a note saying what was done. Everyone in the business can read it.
 
-The card titled **This month** is the meter. It reads, for example, `7.5 h of 10.0 h this month`. The bar under it fills as the month goes on and turns red once you have gone past your included hours.
-
-One badge can sit beside the figure:
-
-- **Over by 1.5 h.** You have used more than your included hours and have no purchased hours left to cover the difference. This is the figure that turns the meter red.
-- **Using purchased hours.** You are past your included hours and purchased hours are covering it.
-- **Near limit.** You have used four fifths or more of your included hours.
-
-The line under the bar reads `2.5 h purchased hours remaining. Included hours reset on the 1st; purchased hours never expire.`
-
-How the arithmetic works:
+## How to read the meter
 
 - Included hours start again on the 1st of each month. Hours you did not use in one month do not carry over.
 - Purchased hours are only touched once a month's included hours are used up. What is left of them carries forward until it is used.
 - Going over is soft. Work does not stop and nothing is blocked. The meter goes red and the badge says by how much.
+- Months run on US Eastern time, so work logged late on the last night of the month may fall into the month it was worked in.
 
-Months run on US Eastern time, so a piece of work logged late on the last night of the month may fall into the month it was worked in.
+## How to buy more hours
 
-## Buying more hours
-
-Owners see two cards under the meter:
-
-- **5-hour block.** `Five extra hours of hands-on work. Never expires.`
-- **10-hour block.** `Ten extra hours at a better rate. Never expires.`
-
-Click **Buy block** on either. The button reads `Redirecting…` and takes you to a secure checkout page run by Stripe, where the price is shown and your card is taken. Yosher never sees your card details.
-
-When the payment goes through you come back here with a green banner: `Payment received — your extra hours are on the meter below.` If you close the checkout instead, you come back to `Checkout canceled — no charge was made.`
+1. Click {button:Buy block|secondary} on the `5-hour block` or the `10-hour block`. The button reads `Redirecting…`.
+2. You land on a secure checkout page run by Stripe. The price is shown there, and your card is taken there. Yosher never sees your card details.
+3. Pay. You come back here with a green banner: `Payment received — your extra hours are on the meter below.`
 
 Hours are added by the payment itself, never by clicking. If the banner shows and the meter has not moved yet, reload the page.
 
-## Work log
+## Messages
 
-The card titled **Work log** is described as `Every entry we log lands here — your record of the work.` Everyone in the business can read it.
+| Message | What it means |
+| --- | --- |
+| `Your plan doesn't include retainer hours yet — get in touch and we'll set it up.` | Your plan has no retainer hours. Ask us to add them. |
+| `Payment received — your extra hours are on the meter below.` | The purchase went through. Reload if the meter has not moved yet. |
+| `Checkout canceled — no charge was made.` | You closed the checkout page. Nothing was charged. |
+| `No work logged yet.` | Yosher's team has not logged any work for you yet. |
 
-Entries are grouped by month, newest month first, under a heading written as the year and month, for example `2026-09`. Each entry has the date of the work, its length in hours, and a note saying what was done.
+## Not on this page
 
-This is a record of work Yosher's team has done for you. It is written by them, not by you. If nothing has been logged yet, the card says `No work logged yet.`
+The work log is written by Yosher's team, not by you. There is nothing to add or edit here.
+
+## Who can do what
+
+Everyone sees the meter and the work log. Only owners see the two blocks and can buy hours.

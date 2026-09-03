@@ -448,8 +448,9 @@ describe("docs/help on disk", () => {
     expect(at("/dashboard/m/accounting/purchases/bills/new")).toBe("accounting/new-bill");
     expect(at("/dashboard/m/accounting/purchases/bills/abc")).toBe("accounting/bill");
     expect(at("/dashboard/m/accounting/receipts/abc")).toBe("accounting/document");
-    // A screen with no guide of its own falls back to the module overview…
-    expect(at("/dashboard/m/accounting/journal/new")).toBe("accounting/overview");
+    // A screen with no guide of its own falls back to the module overview (a
+    // made-up path, so the line survives every area getting its own guides)…
+    expect(at("/dashboard/m/accounting/no-such-screen")).toBe("accounting/overview");
     // …and a module with no guides at all gets nothing.
     expect(at("/dashboard/m/crm")).toBeNull();
   });

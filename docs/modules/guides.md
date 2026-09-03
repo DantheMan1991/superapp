@@ -7,6 +7,25 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-02 — Accounting, fourth area: Reports, Close, Companies, Recurring (`claude/accounting-guides-reports`)
+
+Twelve guides in `docs/help/accounting/` — `reports`, `profit-and-loss`,
+`balance-sheet`, `general-ledger`, `cash-activity`, `ar-aging`, `ap-aging`,
+`sales-tax`, `close`, `close-record`, `companies`, `recurring` — from the
+reports-and-close inventory. Same bar, same method. Things the inventory found
+that the guides state as fact: the report controls are a GET form, so a run is
+a bookmarkable address; the consolidated scope is offered on three reports and
+answered with a 404 on the other four, so each guide says which; the General
+Ledger is accrual-only and stops at 5,000 lines with a notice on screen and an
+`INCOMPLETE` first row in the file; the two aging reports and the sales-tax
+summary have no export, and the books export lives on the Close page; a close
+never blocks on its checklist; Reopen is offered only on the latest completed
+close of the selected company; a company can be deactivated but never deleted;
+a recurring template has no delete and no cadence but monthly. The General
+Ledger page, which the accounting dossier had carried since 2026-08-12 as
+never rendered by a signed-in person, was opened by hand as part of this
+area's check and showed Hilltop Farm's September lines with running balances.
+
 ### 2026-09-02 — Accounting, third area: Banking and the ledger (`claude/accounting-guides-banking`)
 
 Ten guides in `docs/help/accounting/` — `banking`, `register`,

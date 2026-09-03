@@ -13,6 +13,21 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-02 — Tenant guides for Reports, Close, Companies and Recurring (`claude/accounting-guides-reports`)
+
+The fourth and last accounting area of the in-app guides ([guides.md](guides.md)):
+twelve pages under `docs/help/accounting/` covering the reports hub and all
+seven reports, Close and a single close, Companies, and Recurring. Written from
+an exhaustive inventory of every component those screens render, then checked
+against the running screens on the dev branch. One thing the guides say that
+the screen does not: a company showing `closed through` a date with no close
+row to reopen (the inherited tenant-wide lock) is described as "ask us",
+because the page has no words for it. And a gap the inventory found:
+`reverseIntercompanyTransferAction` is exported from `intercompany-actions.ts`
+with no caller, so a transfer between companies has no undo on any screen,
+while the journal entry page tells the reader to "undo it from the transfer".
+The Companies guide says "record one the other way, or ask us".
+
 ### 2026-09-02 — Tenant guides for Banking and the ledger (`claude/accounting-guides-banking`)
 
 No code change. Ten tenant-facing guides for Banking, the chart, the journal

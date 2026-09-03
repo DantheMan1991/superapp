@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import { resolveDocLink } from "@/lib/markdown-meta";
 import { remarkGuideControls } from "@/lib/remark-guide-controls";
 import { cn } from "@/lib/utils";
-import { GuideControl } from "./guide-control";
+import { GuideChip, GuideControl } from "./guide-control";
 
 interface MarkdownProps {
   source: string;
@@ -48,6 +48,9 @@ export function Markdown({ source, className, linkBase, flavor = "doc" }: Markdo
     // A custom element name is outside the `Components` type, which is keyed
     // by HTML tag; the renderer looks components up by tag name at runtime.
     ...(guide ? ({ "guide-control": GuideControl } as unknown as Components) : {}),
+    // A guide has no code blocks, so every `code` in one is a quoted label:
+    // a chip, and in the help panel a live one that points at the screen.
+    ...(guide ? { code: ({ children }) => <GuideChip>{children}</GuideChip> } : {}),
     a: ({ href, children }) => {
       const url = href ?? "";
       const doc = linkBase ? resolveDocLink(linkBase.slug, url) : null;

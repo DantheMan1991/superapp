@@ -409,6 +409,21 @@ describe("docs/help on disk", () => {
     expect(at("/dashboard/m/accounting/sales/reminders")).toBe("accounting/reminders");
   });
 
+  it("resolves the accounting banking and ledger screens to their own guides", async () => {
+    const guides = await listGuides();
+    const at = (pathname: string) => matchGuide(guides, pathname, "")?.slug ?? null;
+    expect(at("/dashboard/m/accounting/banking")).toBe("accounting/banking");
+    expect(at("/dashboard/m/accounting/banking/abc")).toBe("accounting/register");
+    expect(at("/dashboard/m/accounting/banking/abc/import")).toBe("accounting/import-statement");
+    expect(at("/dashboard/m/accounting/banking/abc/reconcile")).toBe("accounting/reconcile");
+    expect(at("/dashboard/m/accounting/banking/rules")).toBe("accounting/bank-rules");
+    expect(at("/dashboard/m/accounting/accounts")).toBe("accounting/chart-of-accounts");
+    expect(at("/dashboard/m/accounting/journal")).toBe("accounting/journal");
+    expect(at("/dashboard/m/accounting/journal/new")).toBe("accounting/new-entry");
+    expect(at("/dashboard/m/accounting/journal/abc")).toBe("accounting/entry");
+    expect(at("/dashboard/m/accounting/trial-balance")).toBe("accounting/trial-balance");
+  });
+
   it("the template is not a guide", async () => {
     expect((await listGuides()).some((entry) => entry.slug.includes("template"))).toBe(false);
     expect(await getGuide("_TEMPLATE")).toBeNull();

@@ -10,6 +10,54 @@
 
 ## Build log
 
+### 2026-09-03 — Tenant guides for every Documents screen (`claude/documents-guides`)
+
+No code change beyond `guide-icons.ts`. Ten guides under `docs/help/documents/`
+cover the Overview, Browse and the file viewer, the Inbox, Search, Tags,
+Templates and a template, Shared links (with what a recipient sees), and Trash,
+to the guide rules in `docs/help/_TEMPLATE.md` (see [guides.md](guides.md)).
+**A PR that changes one of these screens updates its guide**, markers
+included. Writing them meant reading every component these screens render,
+and that turned up gaps between what the screens say, what the dossier says
+and what the code does. The guides describe the code. Worth fixes of their own:
+
+- **The Inbox has no paging.** `inbox/page.tsx` reads `cursor` and never
+  renders `nextCursor`; only the newest 50 unfiled files are reachable, while
+  the Browse root, which lists the same rows, has `Load more`.
+- **Search's copy says tags are text-matched.** `search_tsv` (`0027`) has no
+  tags term; tags are a facet via `?tag=`. The page description and the
+  unsearchable note both say "and tags".
+- **Shared links shows `Active` for a dead file link.** `shares/page.tsx`
+  hard-codes `currentRootVisibility = "members"` for document shares, so a
+  trashed or owners-only-moved shared file is gone publicly and `Active` here;
+  the page's own comment claims the opposite.
+- **`max_uses` has no control.** Schema, action and status support a view
+  limit; `ShareDialog` never sends one, so `Used up` is unreachable.
+- **`Email link…` reports `Sent from your address` with zero sends** when
+  every recipient was skipped as invalid.
+- **The viewer's fallback sentence is wrong for `.txt`, `.md`, TIFF, ZIP and
+  `.eml`**: "Text files open in the app on your computer — there is no way to
+  show one accurately in a browser." A plain-text preview does not exist.
+- **`canRestore` is hard-coded `true`** in `DocumentRowMenu`, so the
+  accountant sees Restore in the version history and is refused on press.
+- **`Email files here…` renders without `INBOUND_EMAIL_DOMAIN`**; the owner
+  reaches the SETUP.md refusal on `Create address`.
+- **The file menu offers `Share link…` inside an owners-only folder** and
+  refuses on submit; the folder menu hides it.
+- **Generation:** the "documents made so far" count reads `limit(50)`; a
+  generated PDF is inserted `pending` for text and is not content-searchable
+  until the backfill; the editor preview is GFM but `render-pdf.tsx` parses
+  without it, so a table previews as a table and prints as pipe text; an
+  unlabelled field saves with its raw name; `doc_kind` and
+  `default_folder_id` on templates are dead; a template's name and description
+  cannot be edited after creation; Key files still says the fonts live in
+  `doc-templates/fonts/` (they are in `src/lib/pdf/fonts/`).
+- **The share dialog's default expiry is `30`** whatever the business
+  ceiling; a ceiling under 30 leaves the select blank and refuses.
+- Emailed folder attachments, like accounting receipts, stay `pending` for
+  text until the backfill; the open item below names only receipts.
+
+
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 

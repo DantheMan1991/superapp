@@ -38,6 +38,84 @@ Rows are listed in build order; the numbers are left alone because the build log
 
 ## Build log
 
+### 2026-09-03 — Four tenant guides, and what writing them found (`claude/retail-guides`)
+
+Guides in `docs/help/retail/`: `overview` (the `**` fallback, 0), `channels`
+(the hub, 10), `channel` (20), `market-day` (the till, 30). Two agents read the
+three screens and the action layer first.
+
+**Vocabulary: `{{channel}}` and `{{marketDay}}` are used where the code resolves
+them, and nowhere else.** `labelFor` is called five times in three files; the day
+page resolves `marketDay` for its title and never resolves `channel` at all. What
+the guides therefore say literally, because the screens do: **truck** — which is
+not a declared label anywhere and appears in about fifteen visible strings — plus
+`day`, `market`, `stall`, both status words, and every column heading. A shop
+that renames `marketDay` to *Trading day* is still told to load a truck. Neither
+declared word is overridden by the homestead profile today, so both render as the
+fallback for every tenant. Plurals are made by appending `s`.
+
+**A real money bug, and the guides warn readers off the figure.**
+`takingsByDay` (`ops.ts:1046-1084`) is the THIRD place in this pack that totals a
+sale, and the only one that does not read the stamped `lineTotalCents` or use the
+shared `asTotalled`. It re-derives from `quantity × unitPriceCents`, so a weighed
+line is priced per package at a per-pound rate: three packages against an $8.00/lb
+rate read **$24.00** on the hub and **$29.60** on the day page, for the same sale.
+This is precisely the mistake `core/till.ts:35-46` says that file exists to
+prevent, and the hub and the day page now disagree about the same day.
+
+**And the hub drops the minus sign on `Margin`.** `RetailModule.tsx:244` uses
+`formatMoney`, which is sign-blind; a day that took $100 and cost $150 renders as
+`$50.00`, reading as fifty earned. The day page gets it right with
+`formatMoneySign` and colours it destructive — and the comment at
+`days/[id]/page.tsx:275-279` names this exact failure, which the hub then commits.
+The `channels` guide tells the reader to open the day for the true figure.
+
+**Other findings.**
+
+- **`Ran out` is unreachable for the thing that ran out.** The chips come from the
+  truck's stock, and `stockAtLocation` drops every line that nets to zero — so the
+  moment the last package sells, the item leaves the panel and takes its `Ran out`
+  button with it. The one route by which a lost sale is ever recorded closes
+  exactly when it is needed. The guide tells readers to tap it *before* selling
+  out, which is advice a working screen would not need.
+- **There is no truck picker.** `?truck=` is read and nothing emits it, so with
+  more than one storage location the page silently sells out of the
+  alphabetically first, and nothing on screen names which.
+- **`removeStockoutAction` is dead** — defined with a matching op and imported by
+  no component, so a mis-tapped `Ran out` cannot be undone from anywhere.
+- **`Remove` on a market day is unconfirmed, ungated, and fails loudly on a day
+  that has sales.** `retail_sales_market_day_fk` has no `onDelete`, so the FK
+  violation falls through to `Something went wrong saving that.`
+- **`removePrice` still has the hole its own comment describes.** `ops.ts:325-333`
+  says removal stops being right the day a sale references the row and that slice 1
+  had to make it refuse. Slice 1 shipped the till; it still deletes any row.
+- **A closed channel still accepts a new day.** The picker passes active channels
+  only while defaulting to *this* channel, so on a closed one the Select shows its
+  placeholder while the state holds the closed id, the client guard passes, and
+  `recordMarketDay` never checks status.
+- **`INVALID_PRICE` is flattened to `A price cannot be negative.`** — including for
+  the long, deliberate sentence refusing per-pound pricing on a mass-stocked item.
+  An owner is told their price is negative. The `channel` guide says so.
+- **Clearing a basket quantity deletes the line**, because `Number("")` is 0, so
+  backspacing to retype makes the line vanish mid-edit.
+- **`Paid by` renders the raw slug** (`cash`, `card`, `other`) while the till's own
+  picker calls the third `Something else`.
+- **`Load the truck` offers everything held**, not the price list of this channel —
+  the fix for that was applied to the unload side only.
+- **Blanking any box in `Close the day` erases the stored value**, unmentioned.
+- **`spreadAcrossChannels` has no caller**, so the "$9 at a stall, $7 at the gate"
+  comparison the pricing core argues for is on no screen.
+- **`RetailModule.tsx:48-53` is stale**: it states in bold that revenue is
+  deliberately not on the page, which has carried `Took` and `Margin` since slice 1.
+
+**No role mismatch here, unlike the three sibling packs.** Selling, the truck, the
+tin, `Ran out` and voiding are all member-level in both the ops layer and the UI;
+only the four decisions (add or close a channel, set or remove a price) are owner.
+The one sharp edge is that a staff member at a stall cannot price an unpriced item
+and the screen does not say why — the guides state it plainly in Who can do what.
+
+**Not clicked through live:** the pane's Clerk session is expired.
+
 ### 2026-08-26 — The pack puts on the design system (`claude/the-last-three-packs`)
 
 No behaviour changed. PR 4 of the five that bring the packs onto the primitive
@@ -688,6 +766,23 @@ guard with nothing to read.
 
 ## Open items
 
+- **The hub's `Took` and `Margin` are wrong for any weighed sale.**
+  `takingsByDay` never reads the stamped line total, so the hub and the day page
+  disagree: $24.00 against $29.60 on the same sale. Found 2026-09-03.
+- **The hub's `Margin` drops the minus sign**, so a loss reads as a gain.
+- **`Ran out` disappears the moment the last one sells**, closing the only route
+  by which a lost sale is recorded.
+- **No truck picker.** With two storage locations the till silently uses the
+  alphabetically first and never names it.
+- **`removeStockoutAction` is dead**, so a mis-tap is permanent.
+- **Removing a market day with sales on it fails with the generic message**, is
+  unconfirmed, and is open to every role.
+- **`removePrice` still deletes a row a sale references.**
+- **A closed channel still accepts a new day.**
+- **`INVALID_PRICE` is flattened**, so the per-pound refusal reads as "negative".
+- **`spreadAcrossChannels` has no caller.**
+- **Neither declared label is honoured on the day page, and `truck` is not a
+  declared label at all.** Fixing either sweeps `docs/help/retail/*.md`.
 - **The checklist does not cover stock on the truck**, because loading happens on
   the day page. So a farm can tick all three, open a day and still find an empty
   till. The day page says so, which is the right place — but it is the one step

@@ -7,6 +7,33 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-03 — Retail, in four guides (`claude/retail-guides`)
+
+`overview`, `channels`, `channel`, `market-day`. No `**Area:**` at four guides.
+
+**The first pack whose guides had to warn a reader off a figure on the screen.**
+`takingsByDay` is the third place in the pack that totals a sale and the only one
+that re-derives instead of reading the stamped line total, so the hub reads $24.00
+where the day page reads $29.60 for the same weighed sale — and the hub also drops
+the minus sign on `Margin`, so a loss reads as a gain. The `channels` guide sends
+the reader to the day's own page for the true number, and `docs/modules/retail.md`
+carries both as open items.
+
+**Vocabulary, third variation on the same theme.** `channel` and `marketDay` are
+used where the code resolves them and nowhere else — the day page resolves only
+`marketDay`, for its title. The word the guides use most is **truck**, which is
+not a declared label at all and appears in about fifteen visible strings, so a
+shop that renames `marketDay` is still told to load a truck.
+
+**Retail is the one pack with no role mismatch**, which is worth recording because
+the other three all had one. Selling, the truck, the tin, `Ran out` and voiding are
+member-level in both the ops layer and the UI; only adding or closing a channel and
+setting or removing a price are owner. The single sharp edge is a staff member at a
+stall who cannot price an unpriced item and is not told why, which the guides state
+plainly rather than leaving to be discovered.
+
+Not clicked through live: the pane's Clerk session is still expired.
+
 ### 2026-09-03 — Inventory, in eight guides (`claude/inventory-guides`)
 
 Second pack of the run, after `assets`. All seven screens plus an overview:

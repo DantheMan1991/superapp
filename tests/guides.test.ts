@@ -686,6 +686,17 @@ describe("docs/help on disk", () => {
     expect(at("/dashboard/m/inventory/abc/anything")).toBe("inventory/overview");
   });
 
+  it("resolves every Retail screen to its own guide", async () => {
+    const guides = await listGuides();
+    const at = (pathname: string) => matchGuide(guides, pathname, "")?.slug ?? null;
+    expect(at("/dashboard/m/retail")).toBe("retail/channels");
+    expect(at("/dashboard/m/retail/abc")).toBe("retail/channel");
+    // A day sits one level deeper than a channel, so the channel guide's `*`
+    // cannot swallow it — `*` is exactly one segment.
+    expect(at("/dashboard/m/retail/days/abc")).toBe("retail/market-day");
+    expect(at("/dashboard/m/retail/abc/anything")).toBe("retail/overview");
+  });
+
   it("resolves every Assets screen to its own guide", async () => {
     const guides = await listGuides();
     const at = (pathname: string) => matchGuide(guides, pathname, "")?.slug ?? null;

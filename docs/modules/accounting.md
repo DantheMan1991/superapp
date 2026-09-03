@@ -3302,12 +3302,12 @@ the category Select went into the condition-value box instead of the dropdown.
 Both may be artefacts of browser automation rather than defects. Check them by
 hand before building on either screen.
 
-A third, of a different kind: **the General Ledger page has never been
-rendered by a signed-in person** (2026-08-12). `getGeneralLedger` is proven
-against a real database, reconciliation included, and the route compiles and
-resolves — but the page body only executes behind a Clerk session, which
-agent sessions cannot open. Treat every screen shipped this way as
-compiled-and-tested, not seen.
+A third, now closed: **the General Ledger page was rendered by a signed-in
+person on 2026-09-02**, while its tenant guide was being checked — Hilltop
+Farm's September lines with opening, running and closing balances, on the
+dev branch. It had carried the note since 2026-08-12 because the page body
+only executes behind a Clerk session. The standing rule stays: treat every
+screen shipped without such a session as compiled-and-tested, not seen.
 
 
 - **Fixed assets carry a company** (2026-08-17, `0154`) — the last item on ADR 0010's list. `entityForDocument`/`entityOfDocument` are DELETED with it: nothing infers a company from where an entry happened to land any more. **Nothing is owed in the migration lane** — `assets.entity_id` stays NULLABLE, unlike every other one, because the assets pack `requires: []` and a tenant can register equipment with no books at all

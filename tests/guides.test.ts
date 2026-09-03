@@ -415,7 +415,16 @@ describe("docs/help on disk", () => {
     expect(at("/dashboard/m/land/abc")).toBe("land/parcel");
     expect(at("/dashboard/m/land/abc/zones/def")).toBe("land/zone");
     expect(at("/dashboard/m/land/find")).toBe("land/find-my-parcels");
-    expect(at("/dashboard/m/accounting")).toBeNull();
+    expect(at("/dashboard/m/accounting")).toBe("accounting/overview");
+    expect(at("/dashboard/m/accounting/purchases")).toBe("accounting/bills");
+    expect(at("/dashboard/m/accounting/purchases/bills")).toBe("accounting/bills");
+    expect(at("/dashboard/m/accounting/purchases/bills/new")).toBe("accounting/new-bill");
+    expect(at("/dashboard/m/accounting/purchases/bills/abc")).toBe("accounting/bill");
+    expect(at("/dashboard/m/accounting/receipts/abc")).toBe("accounting/document");
+    // A screen with no guide of its own falls back to the module overview…
+    expect(at("/dashboard/m/accounting/journal/new")).toBe("accounting/overview");
+    // …and a module with no guides at all gets nothing.
+    expect(at("/dashboard/m/crm")).toBeNull();
   });
 
   it("reads a Land guide as paddocks for a homestead farm and zones for nobody in particular", async () => {

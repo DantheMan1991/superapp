@@ -29,7 +29,9 @@ second checked every quoted string, control variant, icon name and number
 against the source. The checkers applied 116 corrections. This session settled
 what they would not: link text is each target guide's own title, the reports
 list stopped drawing the report screen's buttons, and four guides now say that
-a custom number field cannot be filled in at all.
+a custom number field cannot be filled in at all. **Stale within the day**:
+the field was fixed and those four guides now describe what it takes. See
+[crm.md](crm.md).
 
 Six icon names joined `guide-icons.ts` — `archive`, `archive-restore`,
 `calendar-days`, `unlink`, `user-round` — so the facsimiles stop approximating

@@ -975,12 +975,6 @@ values stay readable and the discontinuity is visible.
 
 ## Open items
 
-- **A custom number field cannot be filled in.** `custom-field-inputs.tsx`
-  renders the number input with `value={typeof raw === "number" ? String(raw) : ""}`
-  while its `onChange` hands back the raw string, so every keystroke
-  re-renders the box empty. Found while writing the tenant guides on
-  2026-09-03, which now say so on the record, the add-a-record form, the
-  deal form and the Fields page. One-line fix, and it wants a test.
 - **Paging drops every filter condition but the first.** `pageHref` in
   `CrmModule.tsx` collapses the repeated `f` params, so `Next` on a
   two-condition filter silently asks a different question.

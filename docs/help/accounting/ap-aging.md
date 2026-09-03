@@ -3,6 +3,7 @@
 > What you owe your vendors and how overdue it is: every open bill balance on a date, bucketed by days past due, vendor by vendor.
 > **Route:** /dashboard/m/accounting/reports/ap-aging
 > **Order:** 290
+> **Area:** Reports
 
 Open **Reports** in the accounting menu and click `A/P Aging`. Set the date and click {button:Run|outline}. The line under the title reads, for example, `Hilltop Farm · open bills as of 2026-08-31 by days past due. Voided bills are excluded.`, naming the company instead when you keep more than one.
 

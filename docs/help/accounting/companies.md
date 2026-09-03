@@ -2,7 +2,8 @@
 
 > Keeping more than one set of books: adding a company, the default company, deactivating one, and recording money moving between two of your companies.
 > **Route:** /dashboard/m/accounting/companies
-> **Order:** 330
+> **Order:** 340
+> **Area:** Companies
 
 Companies is not in the accounting menu. Open it from the `Companies` card on the accounting Overview, which reads `One set of books. Add another for a second LLC.` while you keep one company, and `Each keeps its own books — reports can scope to one` once you keep more. The line under the title reads `Each company keeps its own books — its own trial balance, profit & loss and balance sheet. The chart of accounts, customers, vendors and contacts are shared across all of them.` To add one, click {button:Add a company|primary}.
 

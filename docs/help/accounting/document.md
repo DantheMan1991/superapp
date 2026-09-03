@@ -2,7 +2,8 @@
 
 > One bill or receipt: the preview, what Yosher read off it and how sure it is, what it is attached to, and the same buttons as its row in the Inbox.
 > **Route:** /dashboard/m/accounting/receipts/*
-> **Order:** 60
+> **Order:** 70
+> **Area:** Inbox
 
 Open **Inbox** in the accounting menu and click a document's name. This page shows the document itself, what Yosher read off it, and what it is attached to. The buttons at the right are the same as on its row in the Inbox. See [The Inbox](inbox.md) for what each does.
 

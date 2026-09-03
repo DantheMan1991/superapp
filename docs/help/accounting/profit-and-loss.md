@@ -3,6 +3,7 @@
 > Income, cost of goods sold and expenses over a period, on accrual or cash basis, with a comparison period, monthly columns, or a column per tag.
 > **Route:** /dashboard/m/accounting/reports/pnl
 > **Order:** 240
+> **Area:** Reports
 
 Open **Reports** in the accounting menu and click `Profit & Loss`. Set the controls and click {button:Run|outline}. The line under the title says what the report covers, for example `Hilltop Farm · 2026-08-01 to 2026-08-31 · Accrual basis`. It names the company instead when you keep more than one, adds ` · vs 2026-07-01 to 2026-07-31` when you compare, and ` · by month` when the columns are months.
 

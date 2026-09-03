@@ -3,6 +3,7 @@
 > A hand-written entry: the date and memo, the lines with their debits and credits, keeping it balanced, and saving it as a draft or posting it.
 > **Route:** /dashboard/m/accounting/journal/new
 > **Order:** 200
+> **Area:** Journal
 
 Open **Journal** in the accounting menu and click {button:New entry|primary}. Most of the books write themselves from invoices, bills and the bank feed. A journal entry is for the rest: a correction, a transfer, depreciation you record by hand, a loan drawdown. The line under the title reads `Debits on the left, credits on the right — they must match to post.`
 

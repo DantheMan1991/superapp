@@ -2,7 +2,8 @@
 
 > The bill form: every field, the lines and their accounts, the assistant's suggestions, and what Save draft does. The same form appears on a draft bill's own page.
 > **Route:** /dashboard/m/accounting/purchases/bills/new
-> **Order:** 20
+> **Order:** 150
+> **Area:** Purchases
 
 Open **Purchases** in the accounting menu and click {button:New bill|primary}. Use this form for a bill you are keying in by hand. If the bill arrived as a document, start from the Inbox instead: {button:Create bill|primary} there fills this form in for you and attaches the document. The line under the title reads `Record what a vendor billed [your business]. Approval posts it to the ledger.` Saving here never touches the ledger. Approval does, on the bill's page afterwards.
 

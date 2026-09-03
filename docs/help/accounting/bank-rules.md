@@ -2,7 +2,8 @@
 
 > Telling the books how to categorize a transaction once so it happens every time: writing a rule, its conditions, what it sets, posting automatically, the order rules run in, and the rules Yosher suggests from what you do.
 > **Route:** /dashboard/m/accounting/banking/rules
-> **Order:** 170
+> **Order:** 50
+> **Area:** Banking
 
 Open **Banking** in the accounting menu and click {button:Rules|outline|filter}. The line under the title reads `Tell the books how to categorize a transaction once, and it happens every time. Rules run before the AI suggestion and win where both have an opinion.` To write one, click {button:New rule|primary|plus}.
 

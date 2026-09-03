@@ -2,7 +2,8 @@
 
 > Every bill your vendors have sent you, what you still owe, and what is overdue. Record a new bill from here.
 > **Route:** /dashboard/m/accounting/purchases/bills, /dashboard/m/accounting/purchases
-> **Order:** 10
+> **Order:** 140
+> **Area:** Purchases
 
 Open **Purchases** in the accounting menu. This page lists every bill, with the money you owe at the top. To record a new one, click {button:New bill|primary} at the top right. See [Record a bill](new-bill.md).
 

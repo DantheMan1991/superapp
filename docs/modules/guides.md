@@ -7,6 +7,30 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-03 — The Guides page in cards (`claude/the-guides-page-in-cards`)
+
+Founder, with a screenshot of the Guides page after the sweep: *"It is not
+laid out very well. just kind of one long list with no seperation per guide
+item."* The page had stacked every guide of a feature in one divided list,
+and Accounting's thirty-five read as a wall.
+
+- **Each guide is a tile** — the Overview's module tile, with the guide's
+  title and a three-line summary — in a grid of three on a wide screen. A
+  feature is a heading row (its icon in its own colour, its name, its count)
+  over its grid; a fixed section is just its grid.
+- **A feature with many guides captions them by `Area`.** A new optional
+  header field, `**Area:**`, read by `parseGuide` and grouped by
+  `guideAreas` (uncaptioned guides first, then areas in the order their
+  guides appear). The thirty-four accounting guides carry the accounting
+  menu's own words — Banking, Inbox, Sales, Purchases, Chart of Accounts,
+  Journal, Recurring, Reports, Trial Balance, Close, then Companies — and
+  were renumbered to the menu's order, so the page reads like the screen. The
+  overview leads uncaptioned. A test requires an area on every accounting
+  guide but the overview, so a new one cannot land ungrouped.
+- Not seen live: the pane's session is still expired. The tile is the one
+  the Overview already draws, so its look is not in question; the grid and
+  the captions are.
+
 ### 2026-09-03 — The sweep, fourth area: Reports, Close, Companies, Recurring (`claude/sweep-accounting-reports-and-close`)
 
 Twelve accounting guides rewritten to CONTROLS, VOICE and SHAPE — `reports`,
@@ -332,6 +356,11 @@ stored in the database, and a tenant's vocabulary is read from the row
   guides (`flavor="guide"`); the build record keeps monospace, because there a
   backticked word usually is code. In the help panel the chip is a button that
   rings what it names, ranked clickable-first so a pill beats a heading.
+- **The index is tiles under captions, not a list.** A list of fifty summaries
+  is a wall; a grid of tiles with the feature's own menu words as captions is a
+  map. The caption comes from the guide (`**Area:**`), not from code, so a
+  feature's authors decide its grouping and a guide can move areas with a
+  one-line edit.
 - **A GET route, not a server action.** `PageHeader` is imported by five
   client files; a `"use server"` module reached through it would put an action
   reference into every page's client manifest, and this repo has already had a

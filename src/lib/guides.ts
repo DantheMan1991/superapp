@@ -120,6 +120,7 @@ export function localiseGuide(guide: Guide, vocabulary: Vocabulary): Guide {
     ...guide,
     title: applyLabels(guide.title, vocabulary),
     summary: applyLabels(guide.summary, vocabulary),
+    area: guide.area === null ? null : applyLabels(guide.area, vocabulary),
     content: applyLabels(guide.content, vocabulary),
   };
 }

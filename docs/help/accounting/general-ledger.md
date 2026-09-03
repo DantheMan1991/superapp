@@ -3,6 +3,7 @@
 > Every posted line in a period, account by account, with opening and running balances, or one account on its own as a transaction detail.
 > **Route:** /dashboard/m/accounting/reports/general-ledger
 > **Order:** 260
+> **Area:** Reports
 
 Open **Reports** in the accounting menu and click `General Ledger`. Set the controls and click {button:Run|outline}. The line under the title reads, for example, `Hilltop Farm · 2026-08-01 to 2026-08-31 · accrual basis`, with the account's code and name in the middle when you picked one, and the company's name first when you keep more than one. This report is accrual only. Cash basis changes the totals of accounts, not the dates of lines, so a cash-basis ledger would show lines nothing in the books backs.
 

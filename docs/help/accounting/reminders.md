@@ -2,7 +2,8 @@
 
 > Chasing unpaid invoices on a schedule: the switch, the schedule, the list of what goes out next, the test button, and what the customer receives.
 > **Route:** /dashboard/m/accounting/sales/reminders
-> **Order:** 120
+> **Order:** 130
+> **Area:** Sales
 
 Open **Sales** in the accounting menu and click the `Reminders` pill. The line under the title reads `Chase unpaid invoices on a schedule you set. Reminders go out around 8am in your business's timezone.` A reminder emails the customer a copy of the invoice, as a PDF, on the days you choose around its due date. Only owners can change the settings.
 

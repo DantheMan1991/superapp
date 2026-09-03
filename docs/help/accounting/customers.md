@@ -2,7 +2,8 @@
 
 > Who you bill: the list, adding and editing a customer, muting reminders for one, and what deactivating does.
 > **Route:** /dashboard/m/accounting/sales/customers
-> **Order:** 100
+> **Order:** 110
+> **Area:** Sales
 
 Open **Sales** in the accounting menu and click the `Customers` pill. The line under the title reads `Who [your business] bills.` To add one, click {button:Add customer|primary}. You need a customer before you can write an invoice.
 

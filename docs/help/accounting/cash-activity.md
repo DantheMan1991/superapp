@@ -3,6 +3,7 @@
 > Money in and out of every bank, cash and credit card account over a period: opening balance, movement and closing balance, account by account.
 > **Route:** /dashboard/m/accounting/reports/cash
 > **Order:** 270
+> **Area:** Reports
 
 Open **Reports** in the accounting menu and click `Cash Activity`. Set the dates and click {button:Run|outline}. The line under the title reads, for example, `Hilltop Farm · 2026-08-01 to 2026-08-31`, naming the company instead when you keep more than one. There is no `Basis` control. Cash is cash on either basis, so the report reads the same.
 

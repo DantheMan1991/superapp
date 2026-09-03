@@ -2,7 +2,8 @@
 
 > What you sell, your payment terms, your payment methods and your sales tax rates, all on one page, and how each one reaches an invoice or a payment.
 > **Route:** /dashboard/m/accounting/sales/catalogue
-> **Order:** 110
+> **Order:** 120
+> **Area:** Sales
 
 Open **Sales** in the accounting menu and click the `Catalogue` pill. The line under the title reads `What you sell, when you expect to be paid, how the money arrives, and what tax you charge. Deactivating keeps history intact — nothing here is ever deleted.` Four lists, each with its own add button. Owners change them; staff and accountants read them.
 

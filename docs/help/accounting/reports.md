@@ -3,6 +3,7 @@
 > The seven financial reports, the controls they share, and how exporting, printing and the accrual or cash basis work.
 > **Route:** /dashboard/m/accounting/reports
 > **Order:** 230
+> **Area:** Reports
 
 Open **Reports** in the accounting menu. The line under the title reads `Financial statements for [your business], computed live from the ledger.` Every report is worked out from the posted entries at the moment you run it. Nothing is stored, so a report always agrees with the journal. Click a tile to open a report.
 

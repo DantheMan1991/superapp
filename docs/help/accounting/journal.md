@@ -3,6 +3,7 @@
 > Every entry in the ledger, where each one came from, and its status.
 > **Route:** /dashboard/m/accounting/journal
 > **Order:** 190
+> **Area:** Journal
 
 Open **Journal** in the accounting menu. The line under the title reads `Every entry in [your business]'s books.`, or `Every entry across all 2 companies.` when you keep more than one. Most entries are not written here. They arrive on their own when an invoice is issued, a bill is approved, a payment is recorded, a bank transaction is posted, or a recurring template runs. To write one by hand, click {button:New entry|primary}. See [Write a journal entry](new-entry.md).
 

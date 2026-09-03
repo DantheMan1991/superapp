@@ -28,6 +28,17 @@ Give every feature an overview.md with /dashboard/m/<feature>/** so each screen
 in it has a fallback, then add one guide per screen with an exact route.
 
 ORDER. Lower numbers list first on the Guides page. overview.md always leads.
+Number a feature's guides in the order of its own menu, so the page reads like
+the screen.
+
+AREA. Optional. Where a feature has many guides, the caption a guide is
+grouped under on the Guides page:
+  > **Area:** Banking
+Use the feature's own menu words (Banking, Sales, Reports), so a reader finds
+the guide where they found the screen. Areas appear in the order their guides
+do; a guide with no area, such as the overview, leads uncaptioned. A feature
+with a handful of guides needs none. tests/guides.test.ts requires one on
+every accounting guide but the overview.
 
 VOCABULARY. A pack's words are renamed per business — a grazier's "Paddock" is
 the pack's "Zone" — so in a pack guide never write such a word by hand. Write

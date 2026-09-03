@@ -17,13 +17,13 @@ Open **Inventory** in the sidebar. This is where what you hold is recorded: how 
 - **`What it is worth`.** The cost standing in stock on a chosen day, batch by batch. See [What it is worth](what-it-is-worth.md).
 - **`Deliveries & invoices`.** What has arrived, what you have been billed for, and the gap. See [Deliveries and invoices](deliveries-and-invoices.md).
 - **`When it is deducted`.** Your accountant's decision about when each category's cost is deducted. Owners only. See [When stock is deducted](when-it-is-deducted.md).
-- **Places.** Stock sits in an asset: a freezer, a barn, a garage. You make one by turning on `Things are kept here` when you add it under [Assets](/dashboard/m/assets).
+- **Places.** Stock sits in an asset: a freezer, a barn, a garage. You make one by turning on `Things are kept here` when you add it under [Assets](../assets/overview.md).
 - **Blanks.** A dash means nothing was ever recorded. That is not the same as zero, and the screens keep them apart everywhere.
 
 ## How to get started
 
 1. Add each {{item|lower}} you hold under `Items`. Give it a name, a kind, and the unit you count it in.
-2. Add somewhere to keep it under [Assets](/dashboard/m/assets), with `Things are kept here` turned on.
+2. Add somewhere to keep it under [Assets](../assets/overview.md), with `Things are kept here` turned on.
 3. Open an {{item|lower}} and start a batch for the first delivery.
 4. Record the delivery with {button:Record stock|primary}, including what it cost if you know it.
 5. Record stock going out the same way, and say what it was fed to if it went to another batch.

@@ -684,6 +684,7 @@ describe("docs/help on disk", () => {
     expect(at("/dashboard/m/inventory/counts/abc")).toBe("inventory/count");
     // Anything deeper falls back to the overview rather than to nothing.
     expect(at("/dashboard/m/inventory/abc/anything")).toBe("inventory/overview");
+  });
 
   it("resolves every Assets screen to its own guide", async () => {
     const guides = await listGuides();

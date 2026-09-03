@@ -7,6 +7,32 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-03 — Documents, in ten guides (`claude/documents-guides`)
+
+Founder: *"start on documents."* Ten guides in `docs/help/documents/` —
+`overview` (the module root and the `**` fallback), `browse`, `file`,
+`inbox`, `search`, `tags`, `templates`, `template`, `shares`, `trash`
+— written straight to CONTROLS, VOICE and SHAPE from three exhaustive screen
+inventories (about 2,000 lines, taken by three agents in parallel before a word
+was written) and the dossier's decisions and open items. `browse` and `file`
+share `/browse` and `/browse/*` on purpose: the viewer is a dialog, not a
+route, so the "?" shows the Browse guide, which links to the file one. The
+public share page has no guide (it is outside `/dashboard`); what a recipient
+sees is described in `shares`. Twenty-three icon names joined
+`guide-icons.ts` for the controls these screens draw. Not clicked through
+live: the pane's session is still expired.
+
+Things the inventories found that the guides state as fact rather than
+promise, and which [documents.md](documents.md) now records: the Inbox shows
+only the newest fifty unfiled files and has no paging; typing a tag's name into
+Search finds nothing (tags are a facet, though the page's own description says
+"and tags"); the Shared links page shows `Active` for a link whose file was
+trashed or made owners-only; a view limit on a link exists in the schema and
+has no control; the viewer's fallback sentence calls a `.txt` a file that
+"opens in the app on your computer"; a generated PDF's contents are not
+searchable until the backfill runs; the templates count stops at fifty; the
+editor's preview renders tables that the PDF prints as text.
+
 ### 2026-09-03 — The Guides page in cards (`claude/the-guides-page-in-cards`)
 
 Founder, with a screenshot of the Guides page after the sweep: *"It is not

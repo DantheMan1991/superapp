@@ -451,10 +451,18 @@ describe("docs/help on disk", () => {
       return entry.name.endsWith(".md") ? [full] : [];
     });
 
+  /**
+   * A guide may quote the placeholder syntax itself — the Templates guide
+   * shows `{{field_name}}` in backticks to teach it — so code spans are not
+   * scanned. A known key inside backticks still resolves at render time
+   * (`{{zone}} 7` on the site plan), which is why only the checks skip them.
+   */
+  const withoutCodeSpans = (text: string) => text.replace(/`[^`\n]*`/g, " ");
+
   it("every placeholder is a declared label key with a known modifier", () => {
     const declared = new Set(guideDefinitions().map((definition) => definition.key));
     for (const file of files()) {
-      for (const placeholder of placeholders(readFileSync(file, "utf8"))) {
+      for (const placeholder of placeholders(withoutCodeSpans(readFileSync(file, "utf8")))) {
         expect(
           declared.has(placeholder.key),
           `${file} uses {{${placeholder.key}}}, which no feature declares`,
@@ -557,8 +565,30 @@ describe("docs/help on disk", () => {
     expect(at("/dashboard/m/accounting/recurring")).toBe("accounting/recurring");
   });
 
+  it("resolves every Documents screen to its own guide", async () => {
+    const guides = await listGuides();
+    const at = (pathname: string) => matchGuide(guides, pathname, "")?.slug ?? null;
+    expect(at("/dashboard/m/documents")).toBe("documents/overview");
+    expect(at("/dashboard/m/documents/browse")).toBe("documents/browse");
+    // `documents/browse` and `documents/file` share the route; the earlier
+    // slug wins and links onward, as Land's parcel and site-plan do.
+    expect(at("/dashboard/m/documents/browse/abc")).toBe("documents/browse");
+    expect(at("/dashboard/m/documents/inbox")).toBe("documents/inbox");
+    expect(at("/dashboard/m/documents/search")).toBe("documents/search");
+    expect(at("/dashboard/m/documents/tags")).toBe("documents/tags");
+    expect(at("/dashboard/m/documents/templates")).toBe("documents/templates");
+    expect(at("/dashboard/m/documents/templates/abc")).toBe("documents/template");
+    expect(at("/dashboard/m/documents/shares")).toBe("documents/shares");
+    expect(at("/dashboard/m/documents/trash")).toBe("documents/trash");
+  });
+
   it("the template is not a guide", async () => {
-    expect((await listGuides()).some((entry) => entry.slug.includes("template"))).toBe(false);
+    // Hidden files start with "_" or "."; a guide about templates is a guide.
+    expect(
+      (await listGuides()).some((entry) =>
+        entry.slug.split("/").some((part) => part.startsWith("_") || part.startsWith(".")),
+      ),
+    ).toBe(false);
     expect(await getGuide("_TEMPLATE")).toBeNull();
   });
 
@@ -598,7 +628,12 @@ describe("docs/help on disk", () => {
     expect(general.title).toContain("zone");
     // Every guide in the tree resolves fully for both vocabularies.
     for (const guide of await listGuides()) {
-      expect(localiseGuide(guide, guideVocabulary({ industry: "homestead-farm", labels: {} })).content, guide.slug).not.toContain("{{");
+      expect(
+        withoutCodeSpans(
+          localiseGuide(guide, guideVocabulary({ industry: "homestead-farm", labels: {} })).content,
+        ),
+        guide.slug,
+      ).not.toContain("{{");
     }
   });
 });

@@ -697,6 +697,19 @@ describe("docs/help on disk", () => {
     expect(at("/dashboard/m/retail/abc/anything")).toBe("retail/overview");
   });
 
+  it("resolves every Livestock screen to its own guide", async () => {
+    const guides = await listGuides();
+    const at = (pathname: string) => matchGuide(guides, pathname, "")?.slug ?? null;
+    expect(at("/dashboard/m/livestock")).toBe("livestock/lots");
+    expect(at("/dashboard/m/livestock/abc")).toBe("livestock/lot");
+    // The three named tabs sit at the same depth as the lot wildcard, so the
+    // exact-beats-`*` rule is what keeps each of them its own guide.
+    expect(at("/dashboard/m/livestock/log")).toBe("livestock/daily-round");
+    expect(at("/dashboard/m/livestock/feed")).toBe("livestock/feed");
+    expect(at("/dashboard/m/livestock/ask")).toBe("livestock/ask");
+    expect(at("/dashboard/m/livestock/abc/anything")).toBe("livestock/overview");
+  });
+
   it("resolves every Assets screen to its own guide", async () => {
     const guides = await listGuides();
     const at = (pathname: string) => matchGuide(guides, pathname, "")?.slug ?? null;

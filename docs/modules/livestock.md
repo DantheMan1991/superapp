@@ -133,6 +133,91 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-09-03 — Six tenant guides, and what writing them found (`claude/livestock-guides`)
+
+Guides in `docs/help/livestock/` for all five screens plus an overview:
+`overview` (the `**` fallback, 0), `lots` (10), `lot` (20), `daily-round` (30),
+`feed` (40), `ask` (50) — numbered in the pack's own tab order. Four agents read
+the two lot screens, the four lot panels, the three tab screens and the action
+layer before a word was written. The lot page is the largest screen in the
+product: eleven sections, nineteen dialogs, roughly ninety-five visible strings.
+
+**Vocabulary: the worst of the five packs.** `livestockLot` is resolved in three
+files, about 22 visible strings honour it, and about **24 hardcode it** — four of
+those as `pen` rather than `lot`. `structure` is resolved exactly once, and
+reaches the reader in a single select label that renders as `In a pen or barn`,
+which reads as a typo rather than a label. The hub never resolves `structure` at
+all. The guides therefore use `{{livestockLot}}` in prose and quote hardcoded
+strings literally, the same rule as `inventory` and `retail`.
+
+Two further vocabulary faults worth their own line. **Article agreement breaks
+on any renamed word** — `A {lower}`, `Start a {lower}`, `Find a {lower}` all
+assume a consonant, so a tenant word like *Enclosure* yields `A enclosure`. And
+`New lot code` / `Lot code` on the split and birth dialogs contradict this pack's
+own recorded decision to rename that field to `Name`, because *Lot code* told a
+farmer to invent a barcode.
+
+**Head is counted two different ways, and it hides controls.** The hub folds
+every member's balance into `Head` (`LivestockModule.tsx:483-505`); the lot page's
+`Head` panel is the lot's own balance only (`page.tsx:596`). A pen of 100 with
+four named cows reads `100 (4 in)` on the hub and `96` on its own page. **The
+consequence is not cosmetic:** `Treat`, `Weigh` and the daily check are gated on
+`balance > 0`, so a lot whose head are entirely held by named members can be
+neither treated, weighed nor checked from its own page, while the hub says it
+holds animals. `Lost` on the hub then excludes members while `Head` includes
+them, so the two figures in one row are over different populations.
+
+**The Feed screen cannot record feed on a farm with no shared feeder.**
+`feed/page.tsx:274-285` renders the draw form only when `groups.length > 0`.
+`RecordDrawForm` fully supports the no-feeder case — it defaults to `named` and
+hides the toggle — but is never mounted in it. So the by-name path is unreachable
+from this screen until somebody creates a feeder they do not need, and the
+screen's own empty prose tells them not to. **For staff the whole screen is inert**,
+because `New feeder` is owner-only. The guide sends readers to the lot page's
+`Feed` button instead.
+
+**`Sold live` on the daily round is invisible.** The round writes the movement
+with the real kind, but `LOSS_KINDS` (`core/daily.ts:152`) omits `sold_live`, so
+recording a live sale drops the head count, flags the lot `Noted`, and leaves both
+the `Lost today` column and the stat card reading `—`. The field is labelled
+`Head lost` with `Sold live` sitting in the picker beside it.
+
+**Two dead actions, callers checked across `src/` and `tests/`.**
+`moveLotsToZoneAction` and `retireIdentifierAction` have none. The second is
+user-visible: the Tags table renders a `Removed` column and a `current` badge for
+a state no screen can produce.
+
+**`ITEM_REQUIRED` is thrown and has no case in the mapper** (`ops.ts:270`), so
+starting a lot with no `Counted as` reports `Something went wrong saving that.`
+Six other codes throw a specific sentence and are replaced by a generic one; two
+genuinely useful ones are lost — `that one is not in a lot` and `that feeder does
+not exist`.
+
+**Four UI-stricter-than-server mismatches**, the pattern now found in four of the
+five packs: Add-to-lot and Take-out are owner-gated in the UI while the ops layer
+calls them chores; Photos hide from `expert` though the server allows it; Treat
+and Weigh are gated on `head > 0` with no server rule. And `actions.ts:196` says
+the accountant role is read-only everywhere, while `allowsWrite` lets `expert`
+through at member level — so an expert can place head, treat, weigh, feed, tag and
+daily-check. Either the comment or the gate is wrong.
+
+**Smaller findings**, all in the guides where a reader would be misled: three
+silent truncations (head events 25, fed-in 10, checks 14) in a pack whose own
+comment forbids them; `?species=` is read and unreachable; `Record loss` is
+offered on an emptied or closed lot and then refused; the trigger says `Record
+loss` and the dialog says `Head leaving`; `The whole lot` multiplies a historical
+average by today's head count; `Who ate it` offers emptied lots where the feeder
+list filters them; `Mark normal` is the only write on these screens that toasts
+nothing; `Add a lot` disables itself with no explanation; closing a feeder has no
+confirmation and no way back; and the Ask thread is lost on refresh with no clear,
+copy or cancel control.
+
+**Ask is read-only by construction**, which the guide states plainly: it writes no
+record, and the only thing persisted is an audit row carrying the lot and turn
+counts, never the question or the answer.
+
+**Not clicked through live:** the pane's Clerk session is expired.
+
 ### 2026-08-31 — The split dropped one more thing (`claude/the-cost-side`)
 
 No change in this pack; the fix is one line in `inventory`'s `splitLot`, which
@@ -2240,6 +2325,21 @@ This pack is the one that forced the change; the full reasoning is in
 
 ## Open items
 
+- **Head is counted two ways, and it hides controls.** The hub folds in members;
+  the lot page does not. A lot whose head are all named members reads 0 on its own
+  page, which hides `Treat`, `Weigh` and the daily check. `Lost` excludes members
+  while `Head` includes them.
+- **The Feed screen cannot record feed without a shared feeder**, and is entirely
+  inert for staff on a farm that has none.
+- **`Sold live` never appears under `Lost today`**, though it moves the head count.
+- **`moveLotsToZoneAction` and `retireIdentifierAction` are dead**; the second
+  leaves a `Removed` column and a `current` badge no screen can produce.
+- **`ITEM_REQUIRED` has no case in the error mapper.**
+- **The accountant is read-only in a comment and a member everywhere else.**
+- **Three silent truncations** (head events 25, fed-in 10, checks 14).
+- **`livestockLot` is hardcoded in about 24 strings, four of them as `pen`**, and
+  `structure` reaches the reader once, as `In a pen or barn`. Article agreement
+  breaks on any renamed word. Fixing any of it sweeps `docs/help/livestock/*.md`.
 Everything from here to the next bullet group was found by **driving Hilltop Farm
 on the dev branch, 2026-08-27** — the terminology review that produced
 [The model, settled](#the-model-settled-2026-08-27).

@@ -58,4 +58,4 @@ Most businesses keep one set of books. A business that runs more than one compan
 
 ## The guides
 
-Written so far: **Bills**, **Record a bill**, **A bill's page**, **Vendors**, **The Inbox** and **A document in the Inbox**. The other areas are being written, and the question mark on each of their screens will say so until then.
+Each area's screens have their own guides, listed under Accounting on the Guides page. On a screen whose guide is not written yet, the question mark opens this page instead.

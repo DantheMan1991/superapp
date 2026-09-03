@@ -133,6 +133,18 @@ describe("matchGuide", () => {
     expect(matchGuide(guides, "/dashboard/m/land/abc", "")?.slug).toBe("land/parcel");
   });
 
+  it("an exact route beats a subtree route at the same depth", () => {
+    // `overview.md` covers the whole module with `**`; the list screen's own
+    // guide declares the bare route. Same three literals — the exact one wins,
+    // whatever the slugs happen to sort as.
+    const guides = [
+      guide("land/overview", "/dashboard/m/land/**"),
+      guide("land/parcels", "/dashboard/m/land"),
+    ];
+    expect(matchGuide(guides, "/dashboard/m/land", "")?.slug).toBe("land/parcels");
+    expect(matchGuide(guides, "/dashboard/m/land/abc", "")?.slug).toBe("land/overview");
+  });
+
   it("one wildcard beats a subtree", () => {
     const guides = [
       guide("land/overview", "/dashboard/m/land/**"),
@@ -390,20 +402,33 @@ describe("docs/help on disk", () => {
     expect(await getGuide("_TEMPLATE")).toBeNull();
   });
 
-  it("resolves the two shipped screens, and nothing for a screen with no guide", async () => {
+  it("resolves every Land screen to its own guide, and nothing for a screen with no guide", async () => {
     const guides = await listGuides();
-    expect(matchGuide(guides, "/dashboard", "")?.slug).toBe("workspace/getting-around");
-    expect(matchGuide(guides, "/dashboard/m/land/abc", "")?.slug).toBe("land/overview");
-    expect(matchGuide(guides, "/dashboard/m/accounting", "")).toBeNull();
+    const at = (pathname: string) => matchGuide(guides, pathname, "")?.slug ?? null;
+    expect(at("/dashboard")).toBe("workspace/getting-around");
+    expect(at("/dashboard/today")).toBe("workspace/what-needs-you");
+    expect(at("/dashboard/settings")).toBe("settings/business-settings");
+    expect(at("/dashboard/settings/payments")).toBe("settings/taking-payments");
+    expect(at("/dashboard/m/land")).toBe("land/parcels");
+    // `land/parcel` and `land/site-plan` both declare `/dashboard/m/land/*`;
+    // the tie goes to the earlier slug, and the parcel guide links onward.
+    expect(at("/dashboard/m/land/abc")).toBe("land/parcel");
+    expect(at("/dashboard/m/land/abc/zones/def")).toBe("land/zone");
+    expect(at("/dashboard/m/land/find")).toBe("land/find-my-parcels");
+    expect(at("/dashboard/m/accounting")).toBeNull();
   });
 
-  it("reads the land guide as Paddocks for a homestead farm and Zones for nobody in particular", async () => {
-    const land = await getGuide("land/overview");
-    expect(land).not.toBeNull();
-    const farm = localiseGuide(land!, guideVocabulary({ industry: "homestead-farm", labels: {} }));
-    expect(farm.title).toContain("Paddock");
+  it("reads a Land guide as paddocks for a homestead farm and zones for nobody in particular", async () => {
+    const zone = await getGuide("land/zone");
+    expect(zone).not.toBeNull();
+    const farm = localiseGuide(zone!, guideVocabulary({ industry: "homestead-farm", labels: {} }));
+    expect(farm.title).toContain("paddock");
     expect(farm.content).not.toContain("{{");
-    const general = localiseGuide(land!, guideVocabulary({ industry: "general", labels: {} }));
-    expect(general.title).toContain("Zone");
+    const general = localiseGuide(zone!, guideVocabulary({ industry: "general", labels: {} }));
+    expect(general.title).toContain("zone");
+    // Every guide in the tree resolves fully for both vocabularies.
+    for (const guide of await listGuides()) {
+      expect(localiseGuide(guide, guideVocabulary({ industry: "homestead-farm", labels: {} })).content, guide.slug).not.toContain("{{");
+    }
   });
 });

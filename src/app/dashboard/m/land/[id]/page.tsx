@@ -334,7 +334,12 @@ export default async function ParcelDetailPage({
       <Panel className="p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="font-heading text-base font-semibold tracking-heading">
+            {/* The boundary summary above (and the zone page's) link to
+                `#site-plan`; this heading is what that anchor lands on. */}
+            <h2
+              id="site-plan"
+              className="scroll-mt-6 font-heading text-base font-semibold tracking-heading"
+            >
               Site plan
             </h2>
             <p className="text-xs text-muted-foreground">

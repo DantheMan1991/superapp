@@ -7,6 +7,23 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-03 — The sweep, fourth area: Reports, Close, Companies, Recurring (`claude/sweep-accounting-reports-and-close`)
+
+Twelve accounting guides rewritten to CONTROLS, VOICE and SHAPE — `reports`,
+`profit-and-loss`, `balance-sheet`, `general-ledger`, `cash-activity`,
+`ar-aging`, `ap-aging`, `sales-tax`, `close`, `close-record`,
+`companies`, `recurring` — the last of the 48. Facts carried over from the
+verified first drafts; the looks from the reports-and-close inventory (the
+verdict badges `In balance` success and `Out of balance` destructive, an
+aging report's `overdue` destructive and `Nothing overdue` success, a close
+`Completed` success and `Reopened` secondary, `Closed through` secondary
+and `Books open` outline, a company's `Default` secondary and `Inactive`
+outline, a template's kind outline, `posts automatically` primary, `paused`
+outline, `template needs fixing` and `failing` destructive). With this PR
+every guide in `docs/help/` follows the same rules. Not clicked through
+live; the pane's session is still expired.
+
+
 ### 2026-09-03 — The sweep, third area: Banking and the ledger (`claude/sweep-accounting-banking-and-ledger`)
 
 Ten accounting guides rewritten to CONTROLS, VOICE and SHAPE — `banking`,
@@ -354,10 +371,9 @@ stored in the database, and a tenant's vocabulary is read from the row
 
 ## Open items
 
-- **34 accounting guides are still in the first voice and shape.** The
-  workspace, business, settings and land guides and `accounting/bills` follow
-  the CONTROLS, VOICE and SHAPE rules in `_TEMPLATE.md`; the sweep continues
-  area by area.
+- **The sweep is complete once #356, #357, #358 and this PR are all merged.**
+  Every guide then follows CONTROLS, VOICE and SHAPE. A guide written after
+  that starts from `_TEMPLATE.md` and never from an older guide's shape.
 - **Screenshots.** Deliberately none yet. Manual captures rot within weeks at
   the current rate of UI change (the design sweep of 2026-08-11 would have
   invalidated every one), and dark mode doubles the set. The plan is Playwright

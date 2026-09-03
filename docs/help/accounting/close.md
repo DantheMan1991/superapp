@@ -4,79 +4,52 @@
 > **Route:** /dashboard/m/accounting/close
 > **Order:** 310
 
-## What a close does
+Open **Close** in the accounting menu. The line under the title reads `Month-end review, period lock, and the close history.` Closing the books through a date locks every entry dated on or before it. A locked entry cannot be edited or voided; a correction goes in as a reversal, or as a new entry dated after the close. To close, work through the checklist and click {button:Close the books|primary|lock}.
 
-Closing the books through a date locks every entry dated on or before it. A locked entry cannot be edited or voided. A correction goes in as a reversal, or as a new entry dated after the close. Anything you try to post into a closed month answers `That date falls in a closed period. Use a reversal, or reopen the period first.` A bank rule leaves a transaction dated inside a closed period for review instead of posting it, and a recurring journal that would post into a closed month is made as a draft instead.
+## What you see
 
-## The page
+- **The top right.** {button:Export books|outline} for owners and accountants, then a badge: {badge:Closed through 2026-07-31|secondary}, or {badge:Books open|outline}. When you keep more than one company, the badge starts with the company's name, and a row of pills under the accounting menu shows every company with `closed through 2026-07-31` or `open` beside its name. Click a pill to work on that company's books. Each company closes on its own.
+- **`Pre-close checklist — through 2026-08-31`.** With the company's name in it when you keep more than one. It reads `Outstanding items warn but never block a close; they get snapshotted with it.` and is shown while the chosen period is later than the date the books are closed through. Owners see a period select at the top right listing month ends as `Through 2026-08-31`, from the month after the last close up to this month, and {button:Close the books|primary|lock} beside it.
+- **The eight items.** Each with a green check or an amber alert, a count in brackets when something is outstanding, and {button:Review|ghost}, which opens the page where you sort it out. `Unreviewed bank transactions` in this company's accounts, dated on or before the period end, opens Banking. `Draft journal entries` opens the Journal. `Draft invoices` opens Sales. `Draft bills` and `Bills awaiting approval` open Bills. `Unfiled inbox documents`, counted across the whole business because a document nobody has filed does not belong to a company yet, opens the Inbox. `Bank accounts not reconciled through period end`, with the account names listed under it, opens Banking. `Ledger out of balance`, posted entries in this company's books whose debits and credits do not agree, opens the Trial Balance. None of these stops a close.
+- **`Close history`.** `Every close, who completed it, and its review state.` Every close for every company, newest period first. `Period end`, which opens the close's page. `Company`, only when you keep more than one. `Status`: {badge:Completed|success} or {badge:Reopened|secondary}. `Completed`, who closed it and the date, such as `Dan · 2026-09-01`. `Review`: {badge:Signed off · Dan|outline} once an owner or accountant has signed off, or {badge:Awaiting sign-off|outline}, and {badge:Narrative|outline} when the summary has been written. Owners see {button:Reopen|outline|lock-open} on the latest completed close of the company selected above.
 
-**Close** in the strip. The line under the title reads `Month-end review, period lock, and the close history.` At the top right, owners and accountants see **Export books**, then a badge: `Closed through 2026-07-31`, or `Books open`.
+## How to close the books
 
-When you keep more than one company, the badge starts with the company's name, and a row of pills under the strip shows every company with `closed through 2026-07-31` or `open` beside its name. Click a pill to work on that company's books. Each company closes on its own. There is no close for all companies at once.
+1. Pick the period in the select. The page reloads with that period's checklist.
+2. Work through the outstanding items with {button:Review|ghost}. They warn but never block.
+3. Click {button:Close the books|primary|lock}. The dialog is `Close the books through 2026-08-31?`, or `Close Maple Street LLC's books through 2026-08-31?`, and reads `Entries dated on or before this day become locked — corrections go through reversals. You can reopen the latest close if needed.` With more than one company it adds `Your other companies are unaffected; each one closes on its own.` If anything is outstanding, an amber box lists it under `Still outstanding — you can close anyway; these will be recorded in the close snapshot:`.
+4. Click {button:Close books|primary}. It reads `Closing…`, you see `Books closed through 2026-08-31.`, and the close's own page opens. Yosher also starts writing a plain-English summary of the month in the background; if it is not on the close's page, click {button:Generate narrative|outline|sparkles} there. See [A close](close-record.md).
 
-## The pre-close checklist
+A close only moves forward. Anything you then try to post into a closed month answers `That date falls in a closed period. Use a reversal, or reopen the period first.` A bank rule leaves a transaction dated inside a closed period for review, and a recurring journal that would post into a closed month is made as a draft instead.
 
-The card is titled `Pre-close checklist — through 2026-08-31`, with the company's name in it when you keep more than one, and reads `Outstanding items warn but never block a close; they get snapshotted with it.` It is shown while the chosen period is later than the date the books are closed through.
+## How to reopen a close
 
-Owners see a period select at the top right listing month ends as `Through 2026-08-31`, from the month after the last close up to this month. With no close yet, it starts about a year back. Pick one and the page reloads with that period's checklist. Beside it is **Close the books**.
+1. Click {button:Reopen|outline|lock-open} on the latest completed close of the selected company. The dialog is `Reopen the close through 2026-08-31?` and reads `The period lock rolls back to where it stood before this close. The close stays in the history as reopened, and its sign-off and narrative are kept for the record.`
+2. Click {button:Reopen close|destructive}. It reads `Reopening…`, then you see `Close reopened.` The books are open again from the day after the previous close, and the row shows {badge:Reopened|secondary}. Close them again when the corrections are in.
 
-Eight items, each with a green tick or an amber alert, a count in brackets when something is outstanding, and a **Review** link that opens the page where you sort it out:
+## How to export your books
 
-- **Unreviewed bank transactions**, dated on or before the period end, in this company's accounts. Review opens Banking.
-- **Draft journal entries**, dated on or before the period end. Review opens the Journal.
-- **Draft invoices**, dated on or before the period end. Review opens Sales.
-- **Draft bills**, dated on or before the period end. Review opens Bills.
-- **Bills awaiting approval**, dated on or before the period end. Review opens Bills.
-- **Unfiled inbox documents.** Documents still in the Inbox, counted across the whole business, because a document nobody has filed does not belong to a company yet. Review opens the Inbox.
-- **Bank accounts not reconciled through period end.** Accounts whose last completed reconciliation stops short of the period end, or that were never reconciled. Their names are listed under the item. Review opens Banking.
-- **Ledger out of balance.** Posted entries in this company's books whose debits and credits do not agree. Review opens the Trial Balance.
+1. Click {button:Export books|outline}. The dialog is `Export your books` and reads `A complete copy of your accounting records — chart of accounts, every journal entry, sales, purchases, banking, the audit trail, and current statements — as CSV files in one zip. Your books belong to you.`
+2. Leave `Include document files` checked for `Every uploaded or emailed receipt and bill, as the original files. Can make the download large.`, or uncheck it for a smaller file with the records only.
+3. Click {button:Download zip|primary}. The file is `yosher-books-[your business]-[today].zip`.
 
-None of these stops a close. They are recorded with it, so the close's page shows what was still open on the day.
+Inside: `README`, explaining the layout, and `manifest.csv`, listing every file; `ledger/`, the chart of accounts, every journal entry and line, tags, settings, the close history and notes, the recurring templates, and the full audit trail; `reports/`, a profit and loss for the fiscal year to today, a balance sheet and a trial balance as of today, with a set for each company, a combined set and a consolidated set when you keep more than one; `sales/`, customers, invoices, invoice lines, tax rates and payments received; `purchases/`, vendors, bills, bill lines and payments made; `banking/`, accounts, imported transactions, reconciliations and the lines cleared in each; and `documents/`, the list of stored documents and where each is attached, plus the files themselves when the box was checked. Documents in the trash are included, because the export is your record. Amounts are in dollars and cents, and dates are written year-month-day, so any spreadsheet program opens the files.
 
-## Closing the books
+## Messages
 
-Click **Close the books**. The dialog is titled `Close the books through 2026-08-31?`, or `Close Maple Street LLC's books through 2026-08-31?`, and reads `Entries dated on or before this day become locked — corrections go through reversals. You can reopen the latest close if needed.` With more than one company it adds `Your other companies are unaffected; each one closes on its own.`
+| Message | What it means |
+| --- | --- |
+| `No closes yet. The first close locks the books through the period you pick above.` | The history is empty. |
+| `The close date must be after the current closed-through date.` | You picked a date on or before the current close. |
+| `Only the most recent close can be reopened.` | Reopen works on the latest close of that company only. |
+| `That close was reopened — complete a new close first.` | The close was already reopened. |
+| `This entry changed since you opened it — reload and try again.` | Somebody else changed the close while your page was open. |
+| `An export just ran — try again in a minute.` | One export a minute. Wait. |
 
-If anything on the checklist is outstanding, an amber box lists it under `Still outstanding — you can close anyway; these will be recorded in the close snapshot:`.
+## Not on this page
 
-Click **Close books**. The button reads `Closing…`, you see `Books closed through 2026-08-31.`, and the close's own page opens. Yosher also starts writing a plain-English summary of the month in the background. It appears on the close's page when it is ready. If it is not there, click **Generate narrative** on that page. See [A close](close-record.md).
+There is no close for all companies at once. A company that shows `closed through` a date but has no close in the history was locked before closes were kept per company. It can be closed forward, but that lock cannot be reopened from this page. Ask us if you need it moved.
 
-A close only moves forward. Picking a date on or before the current closed-through date answers `The close date must be after the current closed-through date.`
+## Who can do what
 
-Only an owner can close the books. Staff and accountants see the checklist without the period select or the button.
-
-## Close history
-
-The card reads `Every close, who completed it, and its review state.` and lists every close for every company, newest period first, so you can see at a glance that one company has not been closed since March. Before the first close it reads `No closes yet. The first close locks the books through the period you pick above.`
-
-- **Period end** opens the close's page.
-- **Company.** Only when you keep more than one.
-- **Status.** `Completed`, or `Reopened`.
-- **Completed.** Who closed it and the date, for example `Dan · 2026-09-01`.
-- **Review.** `Signed off · Dan` once an owner or accountant has signed off, or `Awaiting sign-off`. A `Narrative` badge shows when the summary has been written.
-
-## Reopening a close
-
-An owner sees **Reopen** on the latest completed close of the company selected above, and on no other row. The dialog is titled `Reopen the close through 2026-08-31?` and reads `The period lock rolls back to where it stood before this close. The close stays in the history as reopened, and its sign-off and narrative are kept for the record.` Click **Reopen close**. The button reads `Reopening…`, then you see `Close reopened.` The books are open again from the day after the previous close, and the row shows `Reopened`. Close them again when the corrections are in.
-
-An older close answers `Only the most recent close can be reopened.` A close that was already reopened answers `That close was reopened — complete a new close first.` If somebody else changed the close while your page was open, you see `This entry changed since you opened it — reload and try again.`
-
-A company that shows `closed through` a date but has no close in the history was locked before closes were kept per company. It can be closed forward, but that lock cannot be reopened from this page. Ask us if you need it moved.
-
-## Export books
-
-**Export books** gives you a complete copy of your accounting records. The dialog is titled `Export your books` and reads `A complete copy of your accounting records — chart of accounts, every journal entry, sales, purchases, banking, the audit trail, and current statements — as CSV files in one zip. Your books belong to you.`
-
-One box, **Include document files**, is ticked to begin with: `Every uploaded or emailed receipt and bill, as the original files. Can make the download large.` Untick it for a smaller file with the records only.
-
-Click **Download zip**. The file is named `yosher-books-[your business]-[today].zip`. Inside:
-
-- `README`, explaining the layout, and `manifest.csv`, listing every file.
-- `ledger/`: the chart of accounts, every journal entry and line, tags, settings, the close history and notes, the recurring templates, and the full audit trail.
-- `reports/`: a profit and loss for the fiscal year to today, a balance sheet and a trial balance as of today. With more than one company there is a set for each company, a combined set and a consolidated set.
-- `sales/`: customers, invoices, invoice lines, tax rates and payments received.
-- `purchases/`: vendors, bills, bill lines and payments made.
-- `banking/`: accounts, imported transactions, reconciliations and the lines cleared in each.
-- `documents/`: the list of stored documents and where each is attached, plus the files themselves when the box was ticked. Documents in the trash are included, because the export is your record.
-
-Amounts are in dollars and cents, and dates are written year-month-day, so any spreadsheet program opens the files. One export a minute: a second request answers `An export just ran — try again in a minute.` Owners and accountants can export. Staff do not see the button.
+Only an owner closes and reopens. Owners and accountants export. Staff see the checklist and the history, without the period select, the buttons or the export.

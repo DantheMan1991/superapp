@@ -13,6 +13,15 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-03 — The Reports, Close, Companies and Recurring guides rewritten to the new voice (`claude/sweep-accounting-reports-and-close`)
+
+No code change. The twelve guides for the reports hub and the seven reports,
+Close and a single close, Companies and Recurring now follow the CONTROLS,
+VOICE and SHAPE rules in `docs/help/_TEMPLATE.md` (see [guides.md](guides.md)).
+With the three sibling PRs, every accounting guide is in the new voice. Facts
+unchanged. **A PR that changes one of these screens still updates its guide**,
+markers included.
+
 ### 2026-09-03 — The Banking and ledger guides rewritten to the new voice (`claude/sweep-accounting-banking-and-ledger`)
 
 No code change. The ten guides for Banking, an account's transactions,

@@ -424,6 +424,23 @@ describe("docs/help on disk", () => {
     expect(at("/dashboard/m/accounting/trial-balance")).toBe("accounting/trial-balance");
   });
 
+  it("resolves the accounting reports, close, companies and recurring screens to their own guides", async () => {
+    const guides = await listGuides();
+    const at = (path: string) => matchGuide(guides, path, "")?.slug;
+    expect(at("/dashboard/m/accounting/reports")).toBe("accounting/reports");
+    expect(at("/dashboard/m/accounting/reports/pnl")).toBe("accounting/profit-and-loss");
+    expect(at("/dashboard/m/accounting/reports/balance-sheet")).toBe("accounting/balance-sheet");
+    expect(at("/dashboard/m/accounting/reports/general-ledger")).toBe("accounting/general-ledger");
+    expect(at("/dashboard/m/accounting/reports/cash")).toBe("accounting/cash-activity");
+    expect(at("/dashboard/m/accounting/reports/ar-aging")).toBe("accounting/ar-aging");
+    expect(at("/dashboard/m/accounting/reports/ap-aging")).toBe("accounting/ap-aging");
+    expect(at("/dashboard/m/accounting/reports/sales-tax")).toBe("accounting/sales-tax");
+    expect(at("/dashboard/m/accounting/close")).toBe("accounting/close");
+    expect(at("/dashboard/m/accounting/close/abc")).toBe("accounting/close-record");
+    expect(at("/dashboard/m/accounting/companies")).toBe("accounting/companies");
+    expect(at("/dashboard/m/accounting/recurring")).toBe("accounting/recurring");
+  });
+
   it("the template is not a guide", async () => {
     expect((await listGuides()).some((entry) => entry.slug.includes("template"))).toBe(false);
     expect(await getGuide("_TEMPLATE")).toBeNull();

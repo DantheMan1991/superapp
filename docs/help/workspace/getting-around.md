@@ -51,7 +51,7 @@ The same menu offers a way to manage the business. It opens the same panel you f
 
 1. Click {icon:circle-question-mark} at the right of the page's title, on the same line as its buttons.
 2. A panel opens at the right with the guide for that page. The page moves over to make room, so you can keep working with it open.
-3. A button drawn in the guide, such as {button:New bill|primary}, is live in the panel. Click it and the real button on the page is ringed for a moment, so you can see where it is. If it is not on the page right now, the panel tells you.
+3. Anything in the guide that names a control, such as {button:New bill|primary} or the `Overview` row, is live in the panel. Click it and the real one on the page is ringed for a moment, so you can see where it is. If it is not on the page right now, the panel tells you.
 4. Click {button:Open full guide|outline} at the bottom of the panel to read the guide on its own page, or `All guides` for the list of every guide. The panel closes when you go to another page.
 
 ## On a phone

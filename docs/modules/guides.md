@@ -7,6 +7,21 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-03 — Every chip points (`claude/every-chip-points`)
+
+Founder, ten minutes after #354 deployed, with the Bills guide's status pills
+in a screenshot: *"all of these pills are buttons on the screen but the guide
+doesn't point to them."* The first cut made only a drawn `{button:…}` live;
+a quoted label in backticks was an inert chip, and the pills, tabs, tiles and
+column headers a reader most wants located are quoted labels. Now every chip in
+the panel is a button (`GuideChip`, rendered by `Markdown` for inline code
+in guide prose) that calls the same pointer. The match is ranked so the
+`Bills` pill beats the `Bills` page title: an exact match on something
+clickable, then on a label, heading or badge, then a prefix match on each,
+reading `innerText` so a tile's "Overdue 0.00 3 bills" is found from
+`Overdue`; hidden elements never match. Authors change nothing: backticks
+were already the rule for a control the reader looks for by its text.
+
 ### 2026-09-03 — Real buttons in the guides (`claude/real-buttons-in-the-guides`)
 
 Founder, with a screenshot of the rendered "Getting around" page: *"They are
@@ -247,9 +262,10 @@ stored in the database, and a tenant's vocabulary is read from the row
   alone) and `.help-docked` pads `<main>` by the panel's width, so the page
   reflows beside the guide and stays clickable. Escape and the X close it;
   navigating away always did.
-- **A quoted label is a chip, not code.** Only for guides (`flavor="guide"`);
-  the build record keeps monospace, because there a backticked word usually is
-  code.
+- **A quoted label is a chip, not code, and in the panel it points.** Only for
+  guides (`flavor="guide"`); the build record keeps monospace, because there a
+  backticked word usually is code. In the help panel the chip is a button that
+  rings what it names, ranked clickable-first so a pill beats a heading.
 - **A GET route, not a server action.** `PageHeader` is imported by five
   client files; a `"use server"` module reached through it would put an action
   reference into every page's client manifest, and this repo has already had a

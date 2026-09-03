@@ -57,14 +57,16 @@ screenshot does:
   {icon:calculator}                    an icon on its own: a sidebar row's icon,
                                        the "?" (circle-question-mark).
   {kbd:Ctrl+K}                         a key.
-  `Statement end date`                 a field, tab, column, menu item or status
-                                       word the reader looks for: a chip in the
-                                       app's face, never code.
+  `Statement end date`                 a pill, tab, tile, column header, field,
+                                       menu item or status word the reader looks
+                                       for: a chip in the app's face, never code.
+                                       In the panel a chip is live too.
 Icon names: src/components/app/guide-icons.ts, plus the module icons in
 icon-registry.ts. Write the look the screen actually uses, not the one that
-reads best. In the help panel a drawn button is live: the reader clicks it and
-the real one on the screen is ringed, matched by its text, so spell the label
-exactly as rendered. tests/guides.test.ts fails on a modifier it cannot place
+reads best. In the help panel a drawn button and every chip are live: the reader clicks
+one and the real thing on the screen is ringed, matched by its text (something
+clickable first, then a label or heading), so spell the label exactly as
+rendered. tests/guides.test.ts fails on a modifier it cannot place
 or an icon nobody registered.
 
 VOICE. Talk to the reader, and tell them what to do:

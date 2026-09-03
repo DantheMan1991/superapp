@@ -134,32 +134,77 @@ export function GuideControl({ kind, label, variant, icon }: GuideControlProps) 
   return <span>{label}</span>;
 }
 
-const CONTROL_SELECTOR = 'button, a, [role="tab"], [role="menuitem"], summary';
-const BADGE_SELECTOR = '[data-slot="badge"]';
+/**
+ * A quoted label in a guide — `Drafts`, `Vendor`, `Statement end date` — as a
+ * chip, and in the help panel a live one: the founder's first test of the
+ * pointer was to click the status pills quoted in the Bills guide, which are
+ * buttons on the screen, and nothing happened. So every chip points, not only
+ * a drawn button. Rendered by `Markdown` for inline code in guide prose.
+ */
+export function GuideChip({ children }: { children?: React.ReactNode }) {
+  const pointer = useContext(GuidePointerContext);
+  const label = typeof children === "string" ? children : String(children ?? "");
+  if (!pointer) return <code>{children}</code>;
+  return (
+    <button
+      type="button"
+      className="guide-chip"
+      title="Show me where this is"
+      onClick={() => pointTo(label, "any")}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Things the reader clicks or types into. */
+const INTERACTIVE = 'button, a, [role="tab"], [role="menuitem"], [role="option"], summary';
+/** Things the reader reads: labels, column headers, headings, status words. */
+const LABELS =
+  'label, th, legend, dt, h1, h2, h3, h4, [data-slot="badge"], [data-slot="card-title"]';
+const BADGES = '[data-slot="badge"]';
 
 function plain(text: string | null | undefined): string {
   return (text ?? "").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-function pointTo(label: string, kind: "control" | "badge") {
+/**
+ * Finds the thing on the screen that a guide names, and rings it.
+ *
+ * The match is by the text the reader sees, ranked: an exact match on
+ * something clickable first (the `Bills` pill beats the `Bills` page title),
+ * then an exact match on a label or heading, then a prefix match on each (the
+ * `Overdue` tile reads "Overdue 0.00 3 bills", the `Mail` row carries its
+ * unread count). `innerText` rather than `textContent`, because a tile's
+ * label, amount and count are separate elements with no whitespace between
+ * them in the DOM. Hidden elements never match, so the phone drawer's copy of
+ * the sidebar cannot be ringed off-screen.
+ */
+function pointTo(label: string, kind: "control" | "badge" | "any") {
   // The guide's own drawn controls are buttons with the same text, so the
   // prose is excluded; the panel's footer is not, so "Open full guide" is
   // found where it is.
   const prose = [...document.querySelectorAll(".guide-prose")];
   const wanted = plain(label);
-  const candidates = [
-    ...document.querySelectorAll<HTMLElement>(kind === "badge" ? BADGE_SELECTOR : CONTROL_SELECTOR),
-  ].filter((element) => !prose.some((block) => block.contains(element)));
+  const groups = kind === "badge" ? [BADGES] : kind === "control" ? [INTERACTIVE] : [INTERACTIVE, LABELS];
+  const pool = (selector: string) =>
+    [...document.querySelectorAll<HTMLElement>(selector)].filter(
+      (element) =>
+        element.getClientRects().length > 0 && !prose.some((block) => block.contains(element)),
+    );
   const reads = (element: HTMLElement) => [
-    plain(element.textContent),
+    plain(element.innerText || element.textContent),
     plain(element.getAttribute("aria-label")),
     plain(element.getAttribute("title")),
   ];
-  // The Mail row carries its unread count in its text, so an exact match is
-  // tried first and a prefix second, never a substring.
+  const pools = groups.map(pool);
   const hit =
-    candidates.find((element) => reads(element).includes(wanted)) ??
-    candidates.find((element) => reads(element).some((read) => read.startsWith(wanted + " ")));
+    pools.map((group) => group.find((element) => reads(element).includes(wanted))).find(Boolean) ??
+    pools
+      .map((group) =>
+        group.find((element) => reads(element).some((read) => read.startsWith(wanted + " "))),
+      )
+      .find(Boolean);
   if (!hit) {
     toast.message(`“${label}” is not on the screen right now.`, {
       description: "It may be inside a dialog, or shown only to owners.",

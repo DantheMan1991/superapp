@@ -710,6 +710,25 @@ describe("docs/help on disk", () => {
     expect(at("/dashboard/m/livestock/abc/anything")).toBe("livestock/overview");
   });
 
+  it("resolves every Production screen to its own guide", async () => {
+    const guides = await listGuides();
+    const at = (pathname: string) => matchGuide(guides, pathname, "")?.slug ?? null;
+    expect(at("/dashboard/m/production")).toBe("production/runs");
+    expect(at("/dashboard/m/production/abc")).toBe("production/run");
+    // Four named tabs at the same depth as the run wildcard, and `orders` also
+    // has a child — so this is the widest test of exact-beats-`*` in the tree.
+    expect(at("/dashboard/m/production/orders")).toBe("production/orders");
+    expect(at("/dashboard/m/production/orders/abc")).toBe("production/order");
+    expect(at("/dashboard/m/production/bookings")).toBe("production/bookings");
+    expect(at("/dashboard/m/production/billing")).toBe("production/billing");
+    expect(at("/dashboard/m/production/processors")).toBe(
+      "production/processors",
+    );
+    expect(at("/dashboard/m/production/abc/anything")).toBe(
+      "production/overview",
+    );
+  });
+
   it("resolves every Assets screen to its own guide", async () => {
     const guides = await listGuides();
     const at = (pathname: string) => matchGuide(guides, pathname, "")?.slug ?? null;

@@ -7,6 +7,40 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-03 — Production, in eight guides (`claude/production-guides`)
+
+`overview`, `runs`, `run`, `orders`, `order`, `bookings`, `billing`,
+`processors`. **This completes the packs run**: assets, inventory, livestock,
+retail and production, 29 guides over five PRs, each branched from main and never
+stacked.
+
+**The one pack where a declared word is cleanly resolved everywhere.**
+`processor` is never hardcoded, on any screen, so the guides use it freely. The
+other three are not, and `cutSheet` is the awkward one: its fallback is `Order`,
+which produces `Start a order`, collides with the app's own `orders` route, and
+resolves on the homestead profile to `Cut sheet`, putting two "sheet" panels on
+one page. The guides lead by saying what a cut sheet IS — the instruction you
+print and hand to the plant, not a customer order — because confusing the two
+would be worse than no guide.
+
+**The route test is widest here**: four named tabs at the same depth as the run
+wildcard, and `orders` has a child of its own, so exact-beats-`*` is asserted
+seven ways.
+
+Two findings worth carrying out of the run: `updateOrderAction` is dead, so a cut
+sheet's head count can never be edited even though it is what the price band is
+checked against; and `ReadKillSheetDialog` is ungated while the action behind it
+is owner-only, so a staff member uploads a photo and is then refused.
+
+**The tally across five packs.** Four of five had a UI gate stricter than the ops
+layer beneath it, each contradicting a comment or a build-log entry — assets'
+maintenance panel, inventory's movement form, livestock's add-to-lot, and
+production's cut-sheet dialog, which also has one in the other direction. Retail
+is the only pack without. Every pack but production hardcodes a word it declares
+renameable. That is a sweep of its own, and the dossiers now carry the list.
+
+Not clicked through live: the pane's Clerk session is still expired.
+
 ### 2026-09-03 — Livestock, in six guides (`claude/livestock-guides`)
 
 `overview`, `lots`, `lot`, `daily-round`, `feed`, `ask`, numbered in the pack's

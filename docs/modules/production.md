@@ -77,6 +77,93 @@ becomes 1d, unchanged.
 
 ## Build log
 
+### 2026-09-03 — Eight tenant guides, and what writing them found (`claude/production-guides`)
+
+Guides in `docs/help/production/` for all seven screens plus an overview:
+`overview` (0), `runs` (10), `run` (20), `orders` (30), `order` (40),
+`bookings` (50), `billing` (60), `processors` (70), numbered in the pack's own
+strip order. Four agents read the hub and the run page, the two order screens,
+the three admin screens and the action layer across six `"use server"` files.
+**This completes the packs run**: assets, inventory, livestock, retail and
+production, 29 guides over five PRs.
+
+**The vocabulary result is the best of the five, and the worst.** `processor` is
+cleanly resolved everywhere on every screen — the only declared word in any pack
+that is never hardcoded, and the guides use `{{processor}}` freely because of it.
+The other three are not: `productionRun` is hardcoded in about fifteen strings
+including the panel label `Held by this run`; `killSheet` is resolved for its own
+panel and then hardcoded inside the four `STAGE_REFUSALS` that render directly
+beneath it; `cutSheet` is hardcoded in two places.
+
+**`cutSheet`'s fallback is `Order`, and that is a problem of its own.** It
+produces `Start a order` and `A order for X` (`order-controls:172/177/337/343`),
+it collides with the app's own `orders` route and entity, and on the homestead
+profile it resolves to `Cut sheet`, putting two panels ending in "sheet" on one
+page. The guides lead with what it IS — the instruction you print and hand over,
+not a customer order — because a manual that confused the two would be worse than
+none.
+
+**`updateOrderAction` is dead, and it is the biggest hole in the pack.** No caller
+anywhere in `src/`, so **a cut sheet's head count can never be edited** — and that
+count is exactly what the price-band lookup is checked against. The app's own copy
+tells the reader to put the count on the sheet. `updateRunOutputAction` is dead
+too, so an output cannot be corrected before it lands.
+
+**Two permission mismatches, in opposite directions.** `StartSheetDialog` is
+behind `isOwner` on `/orders` while `createOrder` is member-level — and the same
+action is ungated on the run page, so the same act is owner-only on one screen and
+open on another. Worse, `ReadKillSheetDialog` is **ungated** on the run page while
+`readKillSheetAction` is **owner-only**, so a staff member uploads a photo, waits
+for it to be read, and is then refused. The guides say the sheet is open to
+everyone, because that is what the pack's own reasoning says it should be; this
+one is worth fixing rather than documenting.
+
+**The vendor prerequisite is confirmed and has no message.**
+`matchableProcessorBillLines` joins processors to vendors through the party and
+returns `[]` when none match, so a plant that is not a vendor is **silently
+absent** from the billing screen. The only surfacing is section 2's empty state,
+which vanishes as soon as any other plant has a draft bill. And the dossier
+already records that adding the vendor the ordinary way mints a second party and
+makes it worse. The `billing` guide states both plainly and tells the reader to
+ask rather than add them again.
+
+**Flattening is worse here than in any sibling pack.** Eleven distinct "gone"
+sentences — `that run no longer exists`, `that sheet is gone`, `that price is
+gone`, `that bill line is gone` and seven more — all collapse to `That no longer
+exists.` at `action-errors.ts:22`.
+
+**Other findings.**
+
+- **No unique index on a run `code`**, though `booking-ops.ts:287` claims
+  `startRun` refuses duplicates.
+- **`completedOn < startedOn` is CHECK-only**, so it surfaces as `Something went
+  wrong saving that.`
+- **`attachOrdersToRun` has no `requireWrite`.**
+- **`removeBooking` deletes a booking `updateBooking` refuses to cancel.**
+- **The `Not in use` badge on a processor has no writer**, and a processor can
+  never be removed.
+- **The bookings `Standing` column can never print `missed`, `today`, `soon` or
+  `upcoming`.**
+- **`{money} more on its own line` and the billing `Difference` column both drop
+  the sign**, so an under-charge reads as an over-charge. The guide tells readers
+  to compare the two figures instead.
+- **Booking `reference`, `notes` and `depositPaidOn` are write-only.**
+- **Four one-click ghost `Remove` buttons with no confirmation.**
+- **`?status=` and `listKindsInUse` are unreachable** — nothing emits the param.
+- **A stale comment claims the cut-sheet card is print-visible**; it has no
+  `print:` class and printing lives on the orders route.
+- **`Cost in` disagrees between the hub and the run page once a processing fee
+  exists** (`ops:1586` against `ops:1793`).
+- **The kill-sheet reader's Head, Live and Hanging boxes are untyped** and coerce
+  a bad head count to 1.
+
+**What the guides lead with, because the pack earns it:** a ratio is measured or
+it is refused. Ten distinct refusal sentences across yield, dressing percentage
+and cutting yield, each naming what is missing, and the guides quote them rather
+than paraphrase — a reader who sees a dash should be able to find the sentence.
+
+**Not clicked through live:** the pane's Clerk session is expired.
+
 ### 2026-09-01 — The plant's bill had the same hole, one account along (`claude/a-match-survives-an-edit`)
 
 `production_run_bill_allocations` cascades off a bill line's id exactly as
@@ -1541,6 +1628,24 @@ run model, separate templates), and the processing path and eligibility flag
 
 ## Open items
 
+- **`updateOrderAction` is dead, so a cut sheet's head count can never be
+  edited** — the value the price band is checked against, on a screen whose own
+  copy tells the reader to set it. `updateRunOutputAction` is dead too.
+- **`ReadKillSheetDialog` is ungated while `readKillSheetAction` is owner-only**,
+  so staff upload a photo and are then refused. `StartSheetDialog` is gated on one
+  screen and ungated on another for the same member-level action.
+- **A processor that is not a vendor is silently absent from billing**, and the
+  one empty state that explains it disappears once any other plant has a bill.
+- **Eleven distinct "gone" sentences flatten to `That no longer exists.`**
+- **No unique index on run `code`**, contradicting a comment that says otherwise.
+- **`attachOrdersToRun` has no `requireWrite`.**
+- **`removeBooking` deletes what `updateBooking` refuses to cancel.**
+- **A processor can never be removed**, and the `Not in use` badge has no writer.
+- **Billing differences render unsigned**, so an under-charge reads as an over.
+- **`productionRun`, `killSheet` and `cutSheet` are hardcoded in places**, and
+  `cutSheet`'s `Order` fallback yields `Start a order` and collides with the
+  `orders` route. `processor` is the one clean word in the pack. Fixing any of it
+  sweeps `docs/help/production/*.md`.
 - **"plant" IS HARDCODED IN ABOUT FIFTEEN STRINGS ACROSS THIS PACK**, where the
   word is the tenant's — the homestead profile calls it *Butcher*. Driving 2f
   fixed the one it introduced and left the rest: `cut-sheet.tsx`'s "the plant

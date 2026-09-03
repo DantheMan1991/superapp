@@ -7,6 +7,20 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-02 — Accounting, second area: Sales (`claude/accounting-guides-sales`)
+
+Six guides in `docs/help/accounting/` — `invoices`, `new-invoice`, `invoice`,
+`customers`, `catalogue`, `reminders` — from the sales inventory taken with the
+other three. Same bar, same method. Things the inventory found that the guides
+state as fact: the invoice page hides its write buttons from staff and
+accountants (only PDF and Print remain), where the bill page shows them and
+refuses on press; the Send dialog has one field, the address, and the wording
+is fixed; a saved item and a payment term cannot be edited, only deactivated
+and re-added, while a tax rate can; the customer form has no default terms and
+no tax-exempt flag, so the guide says terms and tax are set per invoice. The
+`/sales` and `/sales/recurring` routes are redirects and get no guide of their
+own.
+
 ### 2026-09-02 — Accounting, first area: the Overview, Purchases and the Inbox (`claude/accounting-guides-purchases`)
 
 Founder, after merging #349: *"go ahead with accounting."* Accounting has 37
@@ -19,8 +33,9 @@ the strip, `/dashboard/m/accounting/**`), `bills`, `new-bill`, `bill`,
   and receipts, sales, banking and ledger, reports/close/companies/recurring —
   about 2,500 lines of notes), so the remaining three PRs write from the same
   source without re-reading the module.
-- **The overview names the guides written so far** and says the rest are
-  coming. It is edited as each area lands.
+- **The overview stays generic about which guides exist.** An earlier draft
+  listed them, which made the file a merge conflict for every later area; it
+  points at the Guides page instead.
 - **Role gating is stated per button**, because on these screens nothing is
   hidden from the accountant role — the buttons render and the refusal comes
   on press — and staff see `Submit for approval` where an owner sees `Approve`.

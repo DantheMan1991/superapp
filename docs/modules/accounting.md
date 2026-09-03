@@ -13,6 +13,17 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-02 — Tenant guides for Sales (`claude/accounting-guides-sales`)
+
+No code change. Six tenant-facing guides for the Sales screens landed in
+`docs/help/accounting/` — `invoices`, `new-invoice`, `invoice`, `customers`,
+`catalogue`, `reminders` — to the founder's bar (every control on every
+screen; see [guides.md](guides.md)). **A PR that changes one of these screens
+updates its guide.** Two things the guide could not say because the screen does
+not, both already in Open items: the customer form has no default-terms
+control, and the invoice page shows the raw lifecycle status rather than the
+list's obligation language.
+
 ### 2026-09-02 — Tenant guides for the Overview, Purchases and the Inbox (`claude/accounting-guides-purchases`)
 
 No code change. The first seven tenant-facing guides for this module landed in

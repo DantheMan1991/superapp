@@ -7,6 +7,42 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-03 — Mail, in thirteen guides (`claude/mail-guides`)
+
+Founder, straight after Documents merged: *"keep going."* Thirteen guides in
+`docs/help/email/` — `overview` (the `**` fallback), `mailbox`, `sorting`,
+`message`, `search`, `compose`, `templates`, `signature`, `rules`, `filing`,
+`away`, `records`, `connect` — grouped on the Guides page under Reading,
+Writing, Rules and replies, Records and Setting up.
+
+Mail is the module the route grammar's query conditions were written for: one
+path, `/dashboard/m/email`, and every view a parameter on it. So the routes are
+`?message`, `?q`, `?compose`, `?templates=1`, `?signature=1`, `?rules=1`,
+`?autofile=1`, `?away=1` and `?setup=1`, and `tests/guides.test.ts` resolves
+all of them. Two pairs share a route on purpose, as Documents' `browse` and
+`file` do: `mailbox` and `sorting` both answer the bare route, and `message`
+and `records` both answer `?message`. The earlier slug wins the "?" and links
+to its partner.
+
+Method, since the module is about seven thousand lines of UI: seven agents in
+parallel inventoried it screen by screen (5,074 lines of notes in the
+scratchpad), then one agent wrote each guide and a second checked every quoted
+string, control variant, icon name and number against the source and fixed what
+it found. The checkers applied 103 corrections and reported what they judged
+wrong but would not fix alone, which is where this session's editing went:
+link text is now each target guide's own title, the Write button draws the pen
+the screen really uses, and the claims about the poller, the accountant and the
+filing sweep say what the code does rather than what reads well.
+
+Five icon names joined `guide-icons.ts`: `arrow-down`, `arrow-up`,
+`image-plus`, `pen-square`, and with them the mail toolbar's icon-only buttons
+can be drawn as themselves. `pointTo` already matches `aria-label` and `title`,
+so a facsimile of an icon-only button still rings the real control.
+
+Not clicked through live: the pane's Clerk session is still expired, and only
+the founder can sign in. What the inventories found and the guides state as
+fact is recorded in [email.md](email.md).
+
 ### 2026-09-03 — Documents, in ten guides (`claude/documents-guides`)
 
 Founder: *"start on documents."* Ten guides in `docs/help/documents/` —

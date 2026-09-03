@@ -10,6 +10,140 @@
 
 ## Build log
 
+### 2026-09-03 — Thirteen tenant guides, and what writing them found (`claude/mail-guides`)
+
+Mail now has a guide per screen in `docs/help/email/` (see
+[guides.md](guides.md) for the set and the method). Seven agents inventoried
+every pane control by control before a word was written, and a second agent
+checked each guide against the source. The guides describe what the code does,
+so everything below is written down here rather than smoothed over there.
+
+**Reading**
+
+- Opening a message never marks it read: nothing writes `$seen` on open
+  (`reading-pane.tsx`), so a message stays bold until `Read` or {kbd:Shift+I}.
+- Only `To` is rendered. Cc, Bcc and Reply-To are fetched and dropped, while
+  `Reply all` silently uses Cc — the reader cannot see who else was copied.
+- The pane renders exactly one message, never the thread the list collapsed.
+- The header date is `toLocaleString()` inside a server component, so it shows
+  the server's zone (UTC in production), not the reader's.
+- Attachment size is always printed in kilobytes with a floor of 1, so 42 MB
+  reads `41984 KB` and 200 bytes reads `1 KB`.
+- No print, no view original (the type comment claims one exists), no
+  per-attachment save into Documents, and no junk action beside a Junk folder.
+- An inline SVG is excluded from the cid map AND filtered out of the attachment
+  chips, so it is unreachable: not shown, not named, not downloadable.
+- Unblocking images is per view. There is no re-block, no per-sender memory,
+  and `blockedRemoteCount` is computed and never used.
+- The body is an iframe, so `j`, `k`, `e`, `#` and `r` stop working the moment
+  the reader clicks into the message text. `o`, ArrowUp and ArrowDown are bound
+  and missing from the shortcuts sheet.
+
+**Writing**
+
+- Switching plain text back to rich text discards everything typed:
+  `togglePlainText` remounts the editor on the original server-built draft. The
+  file's own comment claims the words survive both ways.
+- No draft editing and no auto-save. `?compose=` takes `new|reply|reply_all|
+  forward` only, so a message in Drafts can never be reopened, and closing the
+  pane discards unsent text.
+- A scheduled send is listed nowhere and cannot be canceled once the pane
+  closes; `mail_scheduled_sends` has no reader outside the sweep, and a failed
+  release notifies nobody.
+- Every non-address Zod failure maps to `SEND_FAILED`, so going over 25
+  attachments, 20 inline images, a 998-character subject or a 500,000-character
+  body reports a mail-server refusal that never happened. The scheduling
+  sentences (`Pick a time at least 1 minute away.` and the rest) are dead code
+  for the same reason. Over 100 recipients reports
+  `That doesn't look like an email address.`
+- `?compose=reply` with no readable parent opens a blank message still titled
+  `Reply`.
+- Nothing ever writes the address book, and suggestions come from
+  `mail_thread_index.participants`, which records no direction — so a newsletter
+  sender is offered as a recipient.
+
+**Finding and sorting**
+
+- A saved view stores the whole query, but `savedSearchHref` writes only
+  mailbox/q/unread/flagged/attach, so a saved advanced search reopens
+  unfiltered under a name that describes filters it no longer applies.
+- Submitting the quick search rebuilds the URL from mailbox and q alone, so it
+  silently drops the filter chips and every builder field. The banner's `clear`
+  link keeps them.
+- Clicking a folder keeps the builder's fields, and only `?q=` gets a banner,
+  so an advanced search follows the reader around the rail unannounced.
+- `renameFolderAction` is written, validated and has no caller. There is no
+  folder rename, no folder delete and no delete action at all, and new folders
+  are hard-coded to `parentId: null`.
+- No bulk unflag, though `bulkAction` accepts it. A label removal that would
+  orphan a message throws `SEND_FAILED`, so the reader is told the mail server
+  would not send a message that was never sent.
+- The rail's unread pill counts messages (`unreadEmails`) while the sidebar
+  badge counts conversations (`unreadThreads`), so the same inbox shows two
+  numbers.
+
+**Rules, filing, signature, away**
+
+- The rules destination select is handed the unfiltered readable-folder list, so
+  a rule can file arriving mail into Trash, Junk, Drafts or Sent with no
+  warning. The auto-filing picker excludes exactly those roles.
+- The filing folder select's first option reads `Inbox` and carries the value
+  `""`, so with a blank sender it is refused with `Choose a folder or a
+  sender.…` while a folder is visibly chosen.
+- `lastRunAt` is loaded, passed to the filing editor and never rendered, and
+  nothing anywhere reports what filing has done beyond a per-rule counter.
+- The Documents destination list is capped at twenty folders, with no search
+  and nothing saying it was cut.
+- Deleting a filing rule is one unconfirmed click, unlike the rules editor
+  where a delete is local until Save.
+- The auto-reply action never writes or clears `htmlBody`, so an HTML vacation
+  reply set from another client survives editing here and a server preferring
+  HTML keeps sending the old words, while the form says `Plain text.`
+- A signature cannot hold an image: `prepareSignature` passes no `allowedCids`,
+  so a pasted `<img>` is dropped on save with no message. One signature per
+  mailbox, and `signature/load.ts` picks the identity by `session.username`
+  while `read.ts` deliberately switched to `actingAddress` — on a shared
+  mailbox the two can disagree about whose signature is being edited.
+
+**Templates and records**
+
+- Only the first required namespace is ever asked about, so a template mixing
+  two kinds of record inserts the second unfilled and the send is then refused.
+- A placeholder below the quote in a reply slips past the send guard, because
+  every quoted region is stripped before the check.
+- A mistyped placeholder in `Subject (optional)` is never validated:
+  `saveTemplateAction` checks the body only, and the send guard does not read
+  the subject, so it reaches the customer verbatim.
+- Deleting a template is one unconfirmed click on an object the whole business
+  shares.
+- The Attach dialog's placeholder is the fixed `Search invoices, bills,
+  customers, files…` whatever is switched on, and never names what CRM
+  contributes. CRM's `handshake` and `building-2` are missing from
+  `link-icons.ts`, so Deal and Company chips fall back to a generic link.
+- The reverse `Email` card is mounted on invoice and bill pages only; a
+  customer, vendor, contact, company, deal, file or folder attached to a thread
+  shows nothing on its own page.
+- The drafted record's party input is disabled with no picker, so an unmatched
+  customer or vendor means leaving, creating it, and drafting again. Accounting's
+  own errors are flattened to `Something went wrong. Please try again.`
+
+**Connecting, and the phone**
+
+- The OAuth callback sets `?mailError=<sentence>` on eleven failures and
+  `?mailConnected=1` on success, and nothing in `src/` reads either — so
+  connecting a mailbox reports nothing, whether it worked or not.
+- Only `connected[0]` is ever read and there is no mailbox switcher, so a second
+  connected address is unreachable. A `revoked` connection gets no badge and
+  still offers `Reconnect`, which cannot mend it.
+- Nothing writes `mailboxes.clerk_user_id`, so every mailbox is shared with the
+  whole tenant and the `No mailbox for you yet` state is unreachable.
+- `?setup=1` is linked from nowhere once a mailbox is connected, and the card
+  under the list still reads `Reading mail inside Yosher arrives in the next
+  update.`
+- Below the `sm` breakpoint the `Rules`, `Signature`, `Templates` and `Filing`
+  links, the `Shared` pill and the off-state auto-reply link are all
+  `hidden … sm:block`, so five features cannot be reached on a phone at all.
+
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
@@ -1170,14 +1304,36 @@ every morning now produces failed rows until the domain is verified. See
 - **Verification is manual** — the owner presses "Check DNS". No background
   poller, so a domain that verifies overnight shows as pending until someone
   looks. Applies to hosted domains too.
+- **Connecting a mailbox reports nothing, either way.** The OAuth callback
+  writes `?mailError=<sentence>` or `?mailConnected=1` and nothing in `src/`
+  reads either, so a failed connect lands the person on an unchanged screen
+  with no explanation and a successful one gives no confirmation.
+- **Only the first connected mailbox is readable.** `connected[0]` wins,
+  `?mailbox=` is a folder id rather than a mailbox selector, and there is no
+  switcher, so a second connected address is unreachable. `?setup=1` is linked
+  from nowhere once anything is connected.
+- **The plain-text toggle discards the draft.** Switching back to rich text
+  remounts the editor on the server-built draft, losing everything typed.
+- **A saved advanced search reopens unfiltered**, because `savedSearchHref`
+  writes only mailbox/q/unread/flagged/attach while the view stored the whole
+  query. Submitting the quick search drops the chips and builder fields too.
+- **A rule can file arriving mail into Trash or Junk**: the rules destination
+  select gets the unfiltered folder list, unlike auto-filing's, and nothing
+  warns.
+- **Nothing reports what auto-filing has done** beyond a per-rule counter.
+  `lastRunAt` is loaded, passed to the editor and never rendered.
+- **Five settings are unreachable on a phone.** `Rules`, `Signature`,
+  `Templates`, `Filing` and the off-state auto-reply link are all
+  `hidden … sm:block`, and so is the `Shared` pill that says the mailbox is
+  not yours alone.
 
 ### Hosted mailboxes
 
-- **No inbox.** The next build: sync, threading, read and reply. Until then a
-  hosted mailbox is used over IMAP from a phone or Outlook, and Yosher only
-  administers it. This is also where the module earns its keep — an inbox that
-  is just a worse Gmail is not worth a tab switch; one where the thread sits
-  next to the job, the customer and the invoice is.
+- **The inbox shipped**: three panes, compose, rules, auto-filing, templates,
+  signature, auto-reply, and attaching a thread to an invoice, a bill or a
+  contact. Writing the tenant guides on 2026-09-03 turned up what it still does
+  not do — the list is in that build-log entry above, and the sharpest of them
+  are in this section.
 - **Migadu keys are not configured**, so nothing provisions yet.
 - **No aliases or identities.** `info@` forwarding to three people, and
   send-as for a shared address, both need the alias and identity endpoints —

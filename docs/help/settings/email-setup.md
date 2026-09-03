@@ -61,6 +61,8 @@ Once mail is arriving, {button:Check DNS|outline|refresh} becomes {button:Re-che
 
 The log does not show why a message failed. Ask us and we can look it up.
 
+Reading the mail that arrives at these addresses is a different screen. Connect an address to yourself in [Connecting your mailbox](../email/connect.md), then read it in [Your mailbox](../email/mailbox.md).
+
 ## Who can do what
 
 Only owners see this page.

@@ -582,6 +582,32 @@ describe("docs/help on disk", () => {
     expect(at("/dashboard/m/documents/trash")).toBe("documents/trash");
   });
 
+  it("resolves every Mail view to its own guide", async () => {
+    const guides = await listGuides();
+    const at = (search: string) =>
+      matchGuide(guides, "/dashboard/m/email", search)?.slug ?? null;
+    // Mail is one route with a view per query parameter, which is what the
+    // conditions in the route grammar were written for.
+    expect(at("")).toBe("email/mailbox");
+    expect(at("mailbox=abc&unread=1")).toBe("email/mailbox");
+    // `email/mailbox` and `email/sorting` share the bare route; the earlier
+    // slug wins the "?" and links onward, as Documents' browse and file do.
+    expect(at("message=abc")).toBe("email/message");
+    expect(at("q=invoice")).toBe("email/search");
+    expect(at("compose=new")).toBe("email/compose");
+    expect(at("compose=reply&message=abc")).toBe("email/compose");
+    expect(at("templates=1")).toBe("email/templates");
+    expect(at("signature=1")).toBe("email/signature");
+    expect(at("rules=1")).toBe("email/rules");
+    expect(at("autofile=1")).toBe("email/filing");
+    expect(at("away=1")).toBe("email/away");
+    expect(at("setup=1")).toBe("email/connect");
+    // Anything below the module falls back to the overview.
+    expect(matchGuide(guides, "/dashboard/m/email/anything", "")?.slug).toBe(
+      "email/overview",
+    );
+  });
+
   it("the template is not a guide", async () => {
     // Hidden files start with "_" or "."; a guide about templates is a guide.
     expect(

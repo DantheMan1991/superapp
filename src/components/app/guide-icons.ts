@@ -1,5 +1,7 @@
 import {
+  ArrowDown,
   ArrowLeft,
+  ArrowUp,
   Banknote,
   Bookmark,
   Building2,
@@ -22,6 +24,7 @@ import {
   FolderPlus,
   History,
   Image as ImageIcon,
+  ImagePlus,
   Inbox,
   LayoutGrid,
   Link as LinkIcon,
@@ -43,6 +46,7 @@ import {
   Search,
   Send,
   Share2,
+  SquarePen,
   Star,
   Table2,
   Tag,
@@ -66,7 +70,9 @@ import { ICONS } from "./icon-registry";
  * which is how a typo is caught before a client reads it.
  */
 export const CONTROL_ICONS: Record<string, LucideIcon> = {
+  "arrow-down": ArrowDown,
   "arrow-left": ArrowLeft,
+  "arrow-up": ArrowUp,
   banknote: Banknote,
   bookmark: Bookmark,
   building: Building2,
@@ -89,6 +95,7 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   "folder-plus": FolderPlus,
   history: History,
   image: ImageIcon,
+  "image-plus": ImagePlus,
   inbox: Inbox,
   "layout-grid": LayoutGrid,
   link: LinkIcon,
@@ -102,6 +109,7 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   paperclip: Paperclip,
   pencil: Pencil,
   "pen-line": PenLine,
+  "pen-square": SquarePen,
   plus: Plus,
   printer: Printer,
   refresh: RefreshCw,

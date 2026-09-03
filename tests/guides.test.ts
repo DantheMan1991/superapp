@@ -582,6 +582,29 @@ describe("docs/help on disk", () => {
     expect(at("/dashboard/m/documents/trash")).toBe("documents/trash");
   });
 
+  it("resolves every CRM screen to its own guide", async () => {
+    const guides = await listGuides();
+    const at = (pathname: string) => matchGuide(guides, pathname, "")?.slug ?? null;
+    // The module's home page IS the records list, so the bare route is a
+    // screen rather than a hub. `crm/records` and `crm/views` share it, and
+    // `crm/record` and `crm/timeline` share one record, earlier slug first.
+    expect(at("/dashboard/m/crm")).toBe("crm/records");
+    expect(at("/dashboard/m/crm/records/abc")).toBe("crm/record");
+    expect(at("/dashboard/m/crm/records/new")).toBe("crm/new-record");
+    expect(at("/dashboard/m/crm/records/abc/deals/new")).toBe("crm/new-deal");
+    expect(at("/dashboard/m/crm/tasks")).toBe("crm/tasks");
+    expect(at("/dashboard/m/crm/deals")).toBe("crm/board");
+    expect(at("/dashboard/m/crm/deals/abc")).toBe("crm/deal");
+    expect(at("/dashboard/m/crm/pipelines")).toBe("crm/pipelines");
+    expect(at("/dashboard/m/crm/fields")).toBe("crm/fields");
+    expect(at("/dashboard/m/crm/reports")).toBe("crm/reports");
+    expect(at("/dashboard/m/crm/reports/abc")).toBe("crm/report");
+    expect(at("/dashboard/m/crm/automations")).toBe("crm/automations");
+    expect(at("/dashboard/m/crm/duplicates")).toBe("crm/duplicates");
+    // Anything else below the module falls back to the overview.
+    expect(at("/dashboard/m/crm/no-such-screen")).toBe("crm/overview");
+  });
+
   it("resolves every Mail view to its own guide", async () => {
     const guides = await listGuides();
     const at = (search: string) =>
@@ -640,8 +663,9 @@ describe("docs/help on disk", () => {
     // A screen with no guide of its own falls back to the module overview (a
     // made-up path, so the line survives every area getting its own guides)…
     expect(at("/dashboard/m/accounting/no-such-screen")).toBe("accounting/overview");
-    // …and a module with no guides at all gets nothing.
-    expect(at("/dashboard/m/crm")).toBeNull();
+    // …and a module with no guides at all gets nothing. A made-up slug, so
+    // the line survives every module getting its own guides too.
+    expect(at("/dashboard/m/no-such-module")).toBeNull();
   });
 
   it("reads a Land guide as paddocks for a homestead farm and zones for nobody in particular", async () => {

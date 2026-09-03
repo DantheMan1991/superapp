@@ -14,6 +14,136 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-09-03 — Sixteen tenant guides, and what writing them found (`claude/crm-guides`)
+
+CRM now has a guide per screen in `docs/help/crm/` (see [guides.md](guides.md)
+for the set and the method). Six agents inventoried the module control by
+control first — 4,685 lines of notes, 131 recorded gaps — and a second agent
+checked each guide against the source. The guides describe what the code does,
+so what follows is written down here rather than smoothed over there.
+
+**The records list and views**
+
+- Paging drops every filter condition but the first. `pageHref` collapses the
+  repeated `f` params with `Array.isArray(value) ? value[0] : value`, so
+  `Next` on a two-condition filter silently asks a different question.
+- The search box and the four toggles keep the page number, so searching from
+  page 4 can land on an empty page. The filter panel's own apply drops it.
+- A filtered-to-zero saved view shows `Add your first record`, because
+  `isFiltered` counts only q/kind/worked/archived, not view conditions.
+- Nothing in the UI sorts the list. `ViewSort`, `SORT_FIELDS` and `compileSort`
+  all work and nothing renders them, so a sort can only arrive from a built-in
+  view.
+- The `Assigned to` filter takes a raw Clerk user id typed by hand, and
+  `Assigned to me` prints that id in the filter sentence.
+- A view cannot be renamed, shared or unshared after it is made:
+  `updateViewAction` accepts both and nothing sends them. Deleting one is a
+  single menu click with no confirmation, and an owner cannot delete a
+  leaver's shared view although the policy allows it.
+- `Active is No` can never match, because the list always adds
+  `is_active = true` unless the separate `Archived` toggle is on.
+- `Visibility is Restricted` is offered to everybody and answers only for an
+  owner.
+- Custom fields are filterable by nothing, sortable by nothing and searched by
+  nothing. The search box is name-only.
+- `Not worked in CRM yet` shows for records that have been worked, because
+  `lifecycle_stage` defaults to the empty string.
+
+**One record**
+
+- A contact point cannot be edited: `updateContactPointAction` has no caller.
+  Removing one is a single unconfirmed click, and re-adding a value the record
+  already has toasts `Added` while adding nothing.
+- An unusable email or phone reports `Something went wrong. Please try again.`
+  because `PartyError` escapes untranslated, while the written refusal
+  `That does not look like a usable email, phone or website.` is never shown.
+- Switching a restricted record back to everyone hides the access panel and
+  keeps the grant rows, so restricting it again silently lets the same people
+  back in.
+- Nobody owns a record. `owner_clerk_user_id` exists, the action accepts it,
+  and only an automation can set it.
+- Nothing from the rest of the product appears on a record: no mail threads, no
+  documents, no invoices, no payments, though the mail extension links
+  conversations to records from the other end.
+- Deal amounts on the record and on the board hard-code `# CRM
+
+> The people and organizations a business deals with, the work in front of them,
+> and every touch in between: contacts, companies, pipelines, deals, activity and
+> follow-ups. Layer 1 — industry-blind. The trade-specific vocabulary a plumbing
+> contractor or a dental practice sees comes from a Layer 2b profile, never from
+> this module.
+> Status: `coming_soon` · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
+
+The module is `coming_soon` while its foundation ships. Slice 0 is a **platform**
+change that adds no CRM surface at all — read "The party spine" below before
+anything else, because it is the decision the whole module rests on and it
+touches accounting's live AR/AP tables.
+
+ and ignore
+  `tenants.currency_symbol`, which `formatMoney` exists to honour. Deal and
+  stage-history dates print in UTC, ignoring `tenants.timezone`.
+- `Cancel` on an existing record navigates to the page already open, so
+  unsaved edits stay on screen and the button looks broken.
+- Any value over its length cap fails the whole save with a bare
+  `Invalid input`, naming no field. No input carries `maxLength`.
+
+**Deals**
+
+- A deal can never be deleted or archived. A mistyped one can only be parked in
+  a Lost stage.
+- `Also involved` is read-only: both stakeholder actions have no caller. The
+  primary contact prints in the header with no control to choose it.
+- A second pipeline cannot be created from the UI, so the pipeline picker can
+  never render, and stages cannot be reordered despite the heading
+  `Stages, in order`.
+- Changing a stage's outcome does not restamp `closed_at` on the deals already
+  in it, so a card can sit in a Won column with no badge and no closed date.
+- Nothing provisions the default pipeline except an owner opening Board or
+  Pipelines, so a tenant whose first act is `Add a deal` gets
+  `That pipeline could not be found.` with no guidance.
+- The Likelihood help text claims it weights the pipeline total; the weighted
+  total is computed and never rendered.
+- The board has no filter, search or sort, is capped at 1,000 deals, and says
+  so in one line.
+
+**The timeline and follow-ups**
+
+- A logged activity cannot be edited from any screen. `updateActivityAction`
+  is complete, versioned and unreachable; the only control on the row is
+  delete.
+- A follow-up cannot be deleted or reworded in CRM, and the
+  `A follow-up is completed` automation trigger never fires from the UI,
+  because the Done button goes through the shared work action instead.
+- The Follow-ups page names no record: every row links with the literal words
+  `On this record`, and `resolveTaskParties`, written to supply the labels, has
+  no caller. It has no urgency grouping and no overdue badge, contrary to this
+  dossier — `groupTasks`, `dueBucket` and `DueBadge` are used only by tests.
+- A deal has no timeline at all: `loadDealTimeline`, `listActivitiesForDeal`
+  and `listTasksForDeal` are built and unused, and nothing in the UI can file
+  an activity or a follow-up against a deal.
+
+**Fields, automations, duplicates and reports**
+
+- Only party fields can be created. The page and the schema hard-code `party`,
+  so the deal form's own `listFieldDefs(tx, tenantId, "deal")` can never
+  return anything, while the page's copy says `Fields on every record` and
+  `This appears on every record in the CRM.`
+- A field cannot be deleted or reordered, the Reference help says
+  `Used for imports.` and no CRM import exists, and the archive control is an
+  icon button with no label, no aria-label and no tooltip.
+- The reports list promises `You can group and filter it once it opens.` and
+  no report screen filters anything.
+- An ungrouped report prints its own total a second time as a row labelled
+  `Not set`, and the save dialog reports a money total as a record count.
+- The built-in `Who is carrying what?` counts every work item in the tenant,
+  not only what CRM raised, and counts an item twice when it is linked to both
+  a contact and a company.
+- The `none` chart option is unreachable, and the detail list has no empty
+  state.
+- Across the module the outside accountant sees every control live and is
+  refused only on submit, and `/dashboard/m/crm/records/new` has no role check
+  at all.
+
 ### 2026-08-15 — Follow-ups is a CRM page again (`claude/crm-followups-tab`)
 - **`/dashboard/m/crm/tasks` was a redirect into Work; it is a page again**, and
   the tab is back in the CRM strip.
@@ -809,6 +939,30 @@ start failing on records nobody had touched. Archive and re-add instead: the old
 values stay readable and the discontinuity is visible.
 
 ## Open items
+
+- **A custom number field cannot be filled in.** `custom-field-inputs.tsx`
+  renders the number input with `value={typeof raw === "number" ? String(raw) : ""}`
+  while its `onChange` hands back the raw string, so every keystroke
+  re-renders the box empty. Found while writing the tenant guides on
+  2026-09-03, which now say so on the record, the add-a-record form, the
+  deal form and the Fields page. One-line fix, and it wants a test.
+- **Paging drops every filter condition but the first.** `pageHref` in
+  `CrmModule.tsx` collapses the repeated `f` params, so `Next` on a
+  two-condition filter silently asks a different question.
+- **Nothing sorts the records list.** `ViewSort`, `SORT_FIELDS` and
+  `compileSort` all work and nothing renders them.
+- **A deal cannot be deleted, owned, or talked about.** No delete path
+  exists, no form sets `owner_clerk_user_id`, `Also involved` is
+  read-only, and the deal page has no timeline although
+  `loadDealTimeline` is built.
+- **A logged activity cannot be edited and a follow-up cannot be deleted**
+  from any screen: `updateActivityAction`, `deleteTaskAction` and
+  `updateTaskAction` have no callers.
+- **Only party custom fields can be created**, so the deal form's own
+  `listFieldDefs(tx, tenantId, "deal")` can never return anything, while
+  the Fields page says `This appears on every record in the CRM.`
+- **The outside accountant is refused only on submit** across the module,
+  and `/dashboard/m/crm/records/new` has no role check at all.
 
 - **`party_addresses` is still deferred, and now deliberately rather than by
   omission.** Contact points landed because two features needed them; nothing

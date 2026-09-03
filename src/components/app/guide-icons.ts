@@ -1,10 +1,13 @@
 import {
+  Archive,
+  ArchiveRestore,
   ArrowDown,
   ArrowLeft,
   ArrowUp,
   Banknote,
   Bookmark,
   Building2,
+  CalendarDays,
   Camera,
   Check,
   ChevronDown,
@@ -52,7 +55,9 @@ import {
   Tag,
   Trash2,
   Undo2,
+  Unlink,
   Upload,
+  UserRound,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -70,12 +75,15 @@ import { ICONS } from "./icon-registry";
  * which is how a typo is caught before a client reads it.
  */
 export const CONTROL_ICONS: Record<string, LucideIcon> = {
+  archive: Archive,
+  "archive-restore": ArchiveRestore,
   "arrow-down": ArrowDown,
   "arrow-left": ArrowLeft,
   "arrow-up": ArrowUp,
   banknote: Banknote,
   bookmark: Bookmark,
   building: Building2,
+  "calendar-days": CalendarDays,
   camera: Camera,
   check: Check,
   "chevron-down": ChevronDown,
@@ -123,7 +131,9 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   tag: Tag,
   trash: Trash2,
   undo: Undo2,
+  unlink: Unlink,
   upload: Upload,
+  "user-round": UserRound,
   x: X,
 };
 

@@ -7,6 +7,37 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-03 — CRM, in sixteen guides (`claude/crm-guides`)
+
+Founder, after Mail merged: *"keep going."* Sixteen guides in `docs/help/crm/`
+— `overview`, `records`, `views`, `new-record`, `record`, `timeline`, `tasks`,
+`board`, `deal`, `new-deal`, `pipelines`, `fields`, `reports`, `report`,
+`automations`, `duplicates` — captioned on the Guides page by the module's own
+tab strip: Records, Follow-ups, Board, Pipelines, Fields, Reports, Automations,
+Duplicates.
+
+Two pairs share a route, the pattern Documents' `browse`/`file` set: `records`
+and `views` both answer `/dashboard/m/crm`, and `record` and `timeline` both
+answer `/dashboard/m/crm/records/*`. The earlier slug wins the "?" and links to
+its partner. `tests/guides.test.ts` resolves all thirteen CRM screens, and the
+Land test's old line asserting that `/dashboard/m/crm` has no guide now points
+at a made-up module slug, so it survives every module getting guides.
+
+Method as for Mail: six agents inventoried the module screen by screen (4,685
+lines of notes, 131 recorded gaps), then one agent wrote each guide and a
+second checked every quoted string, control variant, icon name and number
+against the source. The checkers applied 116 corrections. This session settled
+what they would not: link text is each target guide's own title, the reports
+list stopped drawing the report screen's buttons, and four guides now say that
+a custom number field cannot be filled in at all.
+
+Six icon names joined `guide-icons.ts` — `archive`, `archive-restore`,
+`calendar-days`, `unlink`, `user-round` — so the facsimiles stop approximating
+the glyph the screen draws.
+
+Not clicked through live: the pane's Clerk session is still expired. What the
+inventories found is recorded in [crm.md](crm.md).
+
 ### 2026-09-03 — Mail, in thirteen guides (`claude/mail-guides`)
 
 Founder, straight after Documents merged: *"keep going."* Thirteen guides in

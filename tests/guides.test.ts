@@ -411,8 +411,13 @@ describe("docs/help on disk", () => {
 
   it("every control marker names a known kind, variant and icon", () => {
     const icons = controlIconNames();
+    // Placeholders resolve before the renderer sees a marker, so a label like
+    // `{button:Add {{zone|lower}}|outline}` is scanned as the reader gets it;
+    // unresolved, the braces inside would hide the marker from the grammar.
+    const vocabulary = buildVocabulary(guideDefinitions(), {});
     for (const file of files()) {
-      for (const marker of controlMarkers(readFileSync(file, "utf8"))) {
+      const text = applyLabels(readFileSync(file, "utf8"), vocabulary);
+      for (const marker of controlMarkers(text)) {
         expect(controlMarkerProblem(marker, icons), file).toBeNull();
       }
     }

@@ -22,7 +22,8 @@ wrong guide is worse than none:
   /dashboard/m/email?rules=1   a view inside a screen (Mail's views are query params)
   /dashboard/m/email?message   the parameter is present, whatever its value
 Several routes go on one line, separated by commas. The most specific match
-wins: literal segments first, then single wildcards, then query conditions.
+wins: more literal segments first; then an exact route over a "**" subtree at
+the same depth; then single wildcards; then query conditions.
 Give every feature an overview.md with /dashboard/m/<feature>/** so each screen
 in it has a fallback, then add one guide per screen with an exact route.
 
@@ -46,6 +47,18 @@ VOICE. Written for the client, not for us. Say what to do, in the order they do
 it, naming buttons and fields exactly as the screen does. Short sentences. No
 internal shorthand, no module jargon, no dashes for asides. A PR that changes a
 screen updates its guide (AGENTS.md).
+
+DEPTH. A guide is the manual for its screen, not a summary. One guide per
+screen. Cover every control on it: every field in every dialog (what it accepts
+and what it is for), every table column, every filter and status word, every
+owner-only control, every message the screen can show, and what happens after
+each action. Say why a control exists where a reader would wonder. Read every
+component the screen renders before writing, not just the page file, and check
+it against the running screen. Each feature also gets an overview guide that
+maps its screens. This is the founder's bar (2026-09-02): the first two guides
+were "not near detailed enough" and were rewritten to it. Two guides may share a
+route when one screen needs two pages (the tie goes to the earlier slug, which
+is the one the "?" shows; link to the other from it).
 -->
 
 ## Before you start

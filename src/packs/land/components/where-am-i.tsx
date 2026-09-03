@@ -125,8 +125,15 @@ export function WhereAmIShortcut({ basePath }: { basePath: string }) {
        *
        * The caller still owns the URL, which was the point of the original
        * prop; it just hands over the prefix rather than the builder.
+       *
+       * The zone page lives UNDER ITS PARCEL — `/land/<parcelId>/zones/<zoneId>`
+       * — and for a while this pushed `/land/zones/<zoneId>`, a route that does
+       * not exist, so the one button the design ranked above the map ended on
+       * "Page not found". Found while writing the tenant guide for this screen.
        */
-      onFound={(zone) => router.push(`${basePath}/zones/${zone.zoneId}`)}
+      onFound={(zone) =>
+        router.push(`${basePath}/${zone.parcelId}/zones/${zone.zoneId}`)
+      }
     />
   );
 }

@@ -123,21 +123,36 @@ export function matchRoute(
   );
 }
 
-type Specificity = [literals: number, wildcards: number, conditions: number];
+type Specificity = [
+  literals: number,
+  exact: number,
+  wildcards: number,
+  conditions: number,
+];
 
-/** Compared lexicographically: literals first, then single wildcards, then query conditions. */
+/**
+ * Compared lexicographically: literal segments first; then whether the pattern
+ * is exact rather than a `**` subtree; then single wildcards; then query
+ * conditions. The exactness term is what lets a module's `overview.md`
+ * (`/dashboard/m/land/**`) sit beside a guide for the list screen itself
+ * (`/dashboard/m/land`) — without it the two tie on three literals and the
+ * alphabetically earlier slug wins, which is how `/dashboard/m/land` once
+ * opened the overview instead of the list's own guide.
+ */
 export function specificity(pattern: RoutePattern): Specificity {
   let literals = 0;
   let wildcards = 0;
+  let subtree = 0;
   for (const segment of pattern.segments) {
     if (segment === "*") wildcards += 1;
-    else if (segment !== "**") literals += 1;
+    else if (segment === "**") subtree = 1;
+    else literals += 1;
   }
-  return [literals, wildcards, pattern.conditions.length];
+  return [literals, 1 - subtree, wildcards, pattern.conditions.length];
 }
 
 function compareSpecificity(a: Specificity, b: Specificity): number {
-  return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+  return a[0] - b[0] || a[1] - b[1] || a[2] - b[2] || a[3] - b[3];
 }
 
 /**

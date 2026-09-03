@@ -92,6 +92,11 @@ and skipped by the build-docs walker:
   client reads with the screen open beside it; a button it names that is no
   longer there is worse than no guide. A new screen in a module that has a
   guide gets a section; a new module gets an `overview.md` (step 7 above).
+  **A guide is the manual for its screen, not a summary**: one per screen,
+  every control, every field, every message, and what happens next, written
+  from every component the screen renders — `docs/help/_TEMPLATE.md` spells
+  the bar out. The founder rejected the first two guides for being "not near
+  detailed enough"; do not write a third like them.
 - **Keep a dossier readable.** It is read at the START of every session that
   touches the area, so its length is a tax on every future change to it. When a
   build log outgrows a few screens, sweep the older entries into

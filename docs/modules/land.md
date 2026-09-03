@@ -578,6 +578,29 @@ grounds, which were never about optimisation as such.
 
 ## Build log
 
+### 2026-09-02 — Two dead ends the guides found (`claude/the-manual-not-the-summary`)
+
+Writing the tenant guides for Land to the founder's bar — every control on
+every screen, see [guides.md](guides.md) — meant reading every component, and
+two sentences a guide would naturally write turned out to be false:
+
+- **`Which paddock am I in?` ended on "Page not found".** `WhereAmIShortcut`
+  pushed `${basePath}/zones/${zoneId}`; the zone page lives under its parcel at
+  `/land/<parcelId>/zones/<zoneId>`, and `zoneAtPointAction` had been returning
+  `parcelId` all along. Fixed to use it. The one button the design ranked above
+  the map had never opened a page.
+- **The boundary summary's "the site plan" link pointed at `#site-plan`, and
+  nothing carried that id.** On the parcel page it did nothing; from the zone
+  page it navigated and then could not land. The `Site plan` heading on the
+  parcel page carries `id="site-plan"` now (with `scroll-mt-6` so it clears the
+  top of the viewport).
+
+Still open, and written into the guides as generic errors rather than promised
+wording: `NOT_A_PROPOSAL` and `ALREADY_THERE` are not mapped in `toResult`
+(`actions.ts`), so "…is not a proposal — retire it instead" and "…is already on
+this one, since {date}" never reach the screen; the user sees `Something went
+wrong saving that.` The six guides live in `docs/help/land/`.
+
 ### 2026-08-31 — The centre lane was never in the centre (`claude/paddocks-off-by-one`)
 
 **`main` went red and stayed red for two hours, and it auto-deploys.** PR #328

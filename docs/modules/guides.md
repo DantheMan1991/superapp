@@ -7,6 +7,44 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-02 — The manual, not the summary (`claude/the-manual-not-the-summary`)
+
+Founder, having read the two guides that shipped with the plumbing: *"they are
+not near detailed enough."* They had been written as proof that the pipeline
+worked, from the few files read to build it. The bar he set, and agreed: **one
+guide per screen, covering every control on it — every field, column, filter,
+status word and message, and what happens next — written from every component
+the screen renders.** The two areas were rewritten to it first, as the
+exemplar, before accounting.
+
+- **Fifteen guides replace two:** `workspace/` (getting-around,
+  what-needs-you), `business/` (hours, team), `settings/` (business-settings,
+  email-setup, billing, taking-payments, lines-of-business), `land/` (overview,
+  parcels, parcel, site-plan, zone, find-my-parcels). Every quoted string was
+  read from the component that renders it, via three exhaustive inventories of
+  the screens (about 2,000 lines of notes) taken before a word was written.
+- **The bar is written down** in `docs/help/_TEMPLATE.md` (DEPTH) and in
+  AGENTS.md, so it binds every guide from here.
+- **Two guides share a route on purpose.** `land/parcel` and `land/site-plan`
+  both declare `/dashboard/m/land/*`; the tie goes to slug order, so the "?"
+  shows the parcel guide, which links to the site-plan one. The site plan is a
+  screen's worth of controls on its own and deserved its own page; a tie broken
+  deterministically is the mechanism that lets a page be split.
+- **An exact route now beats a `**` subtree at the same depth.** The first
+  real tree exposed it: `land/overview` (`/dashboard/m/land/**`) and
+  `land/parcels` (`/dashboard/m/land`) tied on three literals, and the tie went
+  to the earlier slug, so the list screen opened the overview. `specificity`
+  carries an exactness term second, after literals — pinned by a unit test.
+- **Two Land defects fixed,** because the guide could not truthfully describe
+  the screen otherwise — see [land.md](land.md): `Which paddock am I in?`
+  navigated to a route that does not exist, and the boundary summary's "the
+  site plan" link pointed at an anchor nothing carried.
+- **What the inventories said a guide must not promise** — features never
+  driven on real hardware, provider states never reached, the vocabulary and
+  unit settings a tenant cannot change themselves, the morning email's
+  delivery — is written as "ask us", stated as what the system does, or left
+  out. Never described as observed.
+
 ### 2026-09-02 — The plumbing: reader, routes, panel, vocabulary (`claude/guides-plumbing`)
 
 Founder, 2026-09-02: *"I think we need a how to page on how to use all of the
@@ -78,6 +116,12 @@ stored in the database, and a tenant's vocabulary is read from the row
 
 ## Decisions & gotchas
 
+- **A guide is the manual for its screen, not a summary.** One per screen,
+  every control, every message, what happens next, written from every component
+  the screen renders and checked against the running screen. The founder set
+  this bar on reading the first two guides; `_TEMPLATE.md` (DEPTH) carries it.
+  Writing to it is also a bug-finding pass — the first two areas turned up two
+  dead ends in Land.
 - **A GET route, not a server action.** `PageHeader` is imported by five
   client files; a `"use server"` module reached through it would put an action
   reference into every page's client manifest, and this repo has already had a

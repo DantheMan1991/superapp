@@ -37,7 +37,7 @@ Open **Fields** in the CRM menu. This is where you add the questions a plain rec
 | `Type` | What people get on the record |
 | --- | --- |
 | `Text` | One line to type in, up to 2000 characters. Spaces at each end are trimmed off. |
-| `Number` | A number box. It cannot be filled in today, because the box empties as you type. Leave this type alone until we have fixed it. |
+| `Number` | A number box with small up and down arrows to step the figure. It takes whole numbers, decimals and negative numbers. Zero is an answer, not a blank. Letters cannot be typed into it. A trailing zero is dropped, so `42.50` comes back as `42.5`. |
 | `Date` | A date picker. A day that does not exist, such as the 31st of February, is refused. |
 | `Yes / no` | A switch. Turning it off is an answer, not a blank. |
 | `One choice` | A dropdown holding `Not set` and then your choices. `Not set` is how somebody clears a wrong answer. |

@@ -51,7 +51,7 @@ Staff see `Nothing to show here` instead, reading `You can see who this is, but 
 Your own fields sit in the `Your fields` box, in the order set on the Fields tab. Each one shows its label, its control, and the help text you gave it. A field marked required carries {badge:needed to change stage|outline} beside its label.
 
 1. A text field takes up to 2000 characters. Clearing the box removes the answer.
-2. A number field cannot be filled in today. The box empties as you type, so nothing can be entered into it. Tell us if you need one. A date field takes a real calendar date.
+2. A number field takes whole numbers, decimals and negative numbers, and has small up and down arrows to step the figure. Zero is an answer, not a blank, so it satisfies a field marked needed to change stage. A trailing zero is dropped, so `42.50` comes back as `42.5`. A date field takes a real calendar date.
 3. A yes or no field is a switch. Turn it on and then off again to answer no, which counts as an answer rather than a blank. A switch you have never touched is still blank.
 4. A one-choice field is a list whose first item is `Not set`. Pick `Not set` to clear the answer.
 5. A several-choice field is a row of round chips. Click one to turn it on, click it again to turn it off.

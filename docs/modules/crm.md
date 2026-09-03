@@ -14,6 +14,41 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-09-03 — A custom number field can be typed into (`claude/crm-number-field`)
+- **The number control could not be filled in on any screen that renders it**:
+  the record page, `/dashboard/m/crm/records/new` and the deal form.
+  `FieldControl` stored the raw string its `onChange` was handed (deliberately,
+  so the client holds no second opinion about what a number is) but read it
+  back with `value={typeof raw === "number" ? String(raw) : ""}`. The two
+  expressions did not agree, so the first keystroke rendered the box empty and
+  React reset the DOM input on every keystroke after it. Reported 2026-09-03,
+  after the tenant guides were written against the real screens and the writer
+  could not fill the field in.
+- **Fixed by making the pair agree, NOT by parsing on the client.**
+  `fieldInputValue` in `core/custom-fields.ts` hands back whatever is held;
+  `parseFieldValue` is still the only thing that decides what a number is, and
+  it still runs server-side on the write. A client-side parse would also have
+  destroyed the half-finished states a number is typed through — `-`, `0.` and
+  `1e` survive no round trip through `Number`, so the control has to hold the
+  string, which is what it was already doing.
+- **It renders blank for anything that is neither a string nor a finite
+  number.** `custom` is jsonb, so a value of the wrong shape for its definition
+  can be read back, and `String(["north", "south"])` sitting in a box somebody
+  is about to type over would be worse than an empty one. It also stops a
+  stored `NaN` from rendering as the word `NaN`.
+- **The regression test is the pair of expressions, not a React tree.**
+  `tests/crm-custom-fields.test.ts` drives the control's loop a keystroke at a
+  time and hands what it holds to the real validator. Rendering the component
+  would have cost a jsdom and testing-library stack this repo does not have, to
+  cover two expressions; the two expressions are what disagreed. Confirmed red
+  against the old `value` before it was confirmed green against the new one.
+- **The four tenant guides that warned readers off the type now describe what
+  it takes.** `docs/help/crm/fields.md`, `new-record.md`, `record.md` and
+  `new-deal.md` all carried `A number field cannot be filled in today`, which
+  the guides PR above added on the same day. It merged while this fix was in
+  review, so the correction lands here with the fix rather than trailing it,
+  and the `Open items` bullet it opened is closed in the same commit.
+
 ### 2026-09-03 — Sixteen tenant guides, and what writing them found (`claude/crm-guides`)
 
 CRM now has a guide per screen in `docs/help/crm/` (see [guides.md](guides.md)
@@ -940,12 +975,6 @@ values stay readable and the discontinuity is visible.
 
 ## Open items
 
-- **A custom number field cannot be filled in.** `custom-field-inputs.tsx`
-  renders the number input with `value={typeof raw === "number" ? String(raw) : ""}`
-  while its `onChange` hands back the raw string, so every keystroke
-  re-renders the box empty. Found while writing the tenant guides on
-  2026-09-03, which now say so on the record, the add-a-record form, the
-  deal form and the Fields page. One-line fix, and it wants a test.
 - **Paging drops every filter condition but the first.** `pageHref` in
   `CrmModule.tsx` collapses the repeated `f` params, so `Next` on a
   two-condition filter silently asks a different question.

@@ -288,6 +288,31 @@ export function mergeCustomValues(
   return base;
 }
 
+/**
+ * What a TYPED-IN control shows for the value it is currently holding.
+ *
+ * Every control in `CustomFieldInputs` is controlled, so its `value` has to
+ * render back whatever the last keystroke stored, or React resets the box on
+ * the next one. That costs text, date and url nothing, because their stored
+ * form and their typed form are the same string. A NUMBER field is the odd one
+ * out: it holds a number once it has been saved and a string while somebody is
+ * typing into it, and "1.", "-" and "1e" are all legitimate states on the way
+ * to a number that no round trip through `Number` survives.
+ *
+ * So the control holds exactly what was typed and this hands it straight back.
+ * It has no opinion about what a number is — `parseFieldValue` is still the
+ * only thing that decides that, server-side, on the write.
+ *
+ * Anything that is neither a string nor a finite number renders blank rather
+ * than through `String()`, so a stray array cannot show up as "north,south" in
+ * a box somebody is about to type over.
+ */
+export function fieldInputValue(raw: unknown): string {
+  if (typeof raw === "string") return raw;
+  if (typeof raw === "number") return Number.isFinite(raw) ? String(raw) : "";
+  return "";
+}
+
 /** Display form for a stored value. Never throws; unknown shapes render blank. */
 export function formatFieldValue(def: CrmFieldDef, value: unknown): string {
   if (value === undefined || value === null) return "";

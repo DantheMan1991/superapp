@@ -55,7 +55,7 @@ Everyone you have invoiced or paid through Accounting is a record already, wheth
 ## How to fill in your own fields
 
 1. Look at the `Your fields` block. Fields sit two to a row in the order set on the Fields page, and a field that takes several choices takes a whole row.
-2. Fill in what you know. A text field takes up to 2,000 characters. A number field cannot be filled in today. The box empties as you type, so nothing can be entered into it. Tell us if you need one. A date field takes a real day. A yes or no field is a switch, and one you never touch stores nothing at all. Turn it on and back off to store a real no.
+2. Fill in what you know. A text field takes up to 2,000 characters. A number field takes whole numbers, decimals and negative numbers, and has small up and down arrows to step the figure. Zero is an answer, not a blank. Letters cannot be typed into it. A date field takes a real day. A yes or no field is a switch, and one you never touch stores nothing at all. Turn it on and back off to store a real no.
 3. A one-choice field is a menu that starts on `Not set`. Pick `Not set` again to clear it.
 4. A several-choice field is a row of pills. Click one to turn it on, click it again to turn it off. Turn them all off and nothing is stored.
 5. A link field takes a full web address. The box reads `https://` and takes up to 2,000 characters.

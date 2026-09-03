@@ -44,7 +44,7 @@ Nothing you type here posts to the accounts. The amount is a figure for your pip
 The `Your fields` block only appears when somebody has set up deal fields for your business. Setting them up is in [Your own fields](fields.md). Each one carries the label the owner gave it, and the owner's help text sits in small gray type underneath.
 
 1. A plain box takes text, up to 2000 characters.
-2. A number field cannot be filled in today. The box empties as you type, so nothing can be entered into it. Tell us if you need one.
+2. A number field takes whole numbers, decimals and negative numbers, with small up and down arrows to step the figure. Letters cannot be typed into it. This is your own field and has nothing to do with `Amount` above.
 3. A date box gives you the same picker as `Expected close`.
 4. A link box shows the gray suggestion `https://`. Type the whole address, starting `http://` or `https://`.
 5. A switch is a yes or no. It sits off until you turn it on.

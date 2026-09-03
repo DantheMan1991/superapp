@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CrmFieldDef, CrmFieldType } from "../src/db/schema";
 import {
+  fieldInputValue,
   fieldOptions,
   formatFieldValue,
   isBlank,
@@ -319,5 +320,97 @@ describe("formatFieldValue", () => {
     expect(formatFieldValue(def("multi_select"), "not-an-array")).toBe("");
     expect(formatFieldValue(def("number"), "not-a-number")).toBe("");
     expect(formatFieldValue(def("boolean"), null)).toBe("");
+  });
+});
+
+/**
+ * THE NUMBER BOX, WHICH FOR A WHILE COULD NOT BE TYPED INTO.
+ *
+ * `FieldControl` renders a controlled input, so two expressions have to agree:
+ * what a keystroke STORES and what the box then SHOWS. They did not. The store
+ * kept the raw string (deliberately — the server is the only thing that decides
+ * what a number is), while the show read `typeof raw === "number"` and so
+ * rendered `""` from the first keystroke onwards, resetting the DOM input every
+ * time. A number field could not be filled in on any screen that renders one.
+ *
+ * Rendering React is not worth a jsdom stack for two expressions. What follows
+ * is the pair itself, wired the way the control wires them, driven a keystroke
+ * at a time and handed to the real validator at the end.
+ */
+function numberBox(initial?: unknown) {
+  let held: unknown = initial;
+  return {
+    /** The control's `value={fieldInputValue(raw)}`. */
+    shows: () => fieldInputValue(held),
+    /** The control's `onChange`: the raw string, or nothing when emptied. */
+    type(keystrokes: string) {
+      held = keystrokes === "" ? undefined : keystrokes;
+      return fieldInputValue(held);
+    },
+    held: () => held,
+  };
+}
+
+describe("fieldInputValue — typing into a number field", () => {
+  it("shows back every keystroke instead of emptying the box", () => {
+    const box = numberBox();
+    expect(box.shows()).toBe("");
+    expect(box.type("4")).toBe("4");
+    expect(box.type("42")).toBe("42");
+    expect(box.type("42.")).toBe("42.");
+    expect(box.type("42.5")).toBe("42.5");
+  });
+
+  it("keeps the half-finished states a number is typed through", () => {
+    // None of these survive a round trip through Number, which is exactly why
+    // the box holds the typed string rather than a parsed value.
+    for (const partial of ["-", "0.", "1e", "-.", "1e-"]) {
+      expect(numberBox().type(partial), partial).toBe(partial);
+    }
+  });
+
+  it("shows a stored number when a saved record is opened, zero included", () => {
+    expect(numberBox(42).shows()).toBe("42");
+    expect(numberBox(42.5).shows()).toBe("42.5");
+    // Zero is an answer, not an absence — a `raw ? ... : ""` shortcut would
+    // blank it and lose the value on the next save.
+    expect(numberBox(0).shows()).toBe("0");
+    expect(numberBox(-3).shows()).toBe("-3");
+  });
+
+  it("empties, and stores nothing, when the box is cleared", () => {
+    const box = numberBox(42);
+    expect(box.type("")).toBe("");
+    expect(box.held()).toBeUndefined();
+    // Which the server reads as unanswered rather than as a bad number.
+    expect(parseFieldValue(def("number"), box.held())).toEqual({ ok: true });
+  });
+
+  it("hands the server something it accepts", () => {
+    const box = numberBox();
+    box.type("4");
+    box.type("42");
+    box.type("42.5");
+    expect(parseFieldValue(def("number"), box.held())).toEqual({
+      ok: true,
+      value: 42.5,
+    });
+
+    // And a half-finished one is still refused there, not here.
+    const abandoned = numberBox();
+    abandoned.type("1e");
+    expect(parseFieldValue(def("number"), abandoned.held()).ok).toBe(false);
+  });
+
+  it("renders blank for anything that is not a string or a real number", () => {
+    // Defensive: `custom` is jsonb, so a value of the wrong shape for its
+    // definition can be read back. `String(["north","south"])` in a box
+    // somebody is about to type over would be worse than an empty one.
+    expect(fieldInputValue(["north", "south"])).toBe("");
+    expect(fieldInputValue(true)).toBe("");
+    expect(fieldInputValue(undefined)).toBe("");
+    expect(fieldInputValue(null)).toBe("");
+    expect(fieldInputValue(Number.NaN)).toBe("");
+    expect(fieldInputValue(Number.POSITIVE_INFINITY)).toBe("");
   });
 });

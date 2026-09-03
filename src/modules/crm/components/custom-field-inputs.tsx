@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { fieldOptions } from "../core/custom-fields";
+import { fieldInputValue, fieldOptions } from "../core/custom-fields";
 import type { CustomValue } from "../core/custom-fields";
 
 /**
@@ -185,7 +185,11 @@ function FieldControl({
           id={id}
           type="number"
           disabled={disabled}
-          value={typeof raw === "number" ? String(raw) : ""}
+          // Renders back the STRING that was last typed, not only a number.
+          // Reading the held value as `typeof raw === "number"` emptied the box
+          // on every keystroke, because what onChange stores is the raw string,
+          // so the field could not be filled in at all.
+          value={fieldInputValue(raw)}
           onChange={(e) =>
             // Sent through as the raw string; the server coerces. Parsing here
             // too would be a second opinion about what a number is.

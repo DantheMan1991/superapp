@@ -15,6 +15,122 @@ to be listed by a trades profile unchanged.
 
 ## Build log
 
+### 2026-09-03 — Three tenant guides, and what writing them found (`claude/assets-guides`)
+
+Assets now has a guide per screen in `docs/help/assets/` — `overview` (the
+`**` fallback, Order 0), `assets` (the list, 10), `asset` (one asset, 20).
+First pack in the guides run after the core tools; the order is dependency
+order, so `inventory`, `livestock`, `production` and `retail` follow and can
+link back here. Three agents inventoried the two screens and the action layer
+before a word was written.
+
+**The guides do NOT use `{{asset}}`, and that is a finding rather than a
+shortcut.** `_TEMPLATE.md` says a pack guide must never hardcode a renameable
+word. This pack declares `asset`/`Asset` (`src/packs/index.ts:79-86`) and then
+**never calls `labelFor` for it anywhere in `src/`** — `AssetsModule.tsx`,
+`asset-controls.tsx` and the detail page spell it out in about a dozen visible
+strings. Land does it properly (`LandModule.tsx:92-93`); this pack does not.
+Writing `{{asset}}` would render *Add machine* beside a button that still says
+`Add asset`, and the help panel rings controls by matching their text, so the
+chip would stop pointing at anything. The guides therefore say what the screen
+says. **When the pack is fixed to read its own label, the three guides have to
+be swept in the same PR.**
+
+**Bugs the inventory found. None of these were known here.**
+
+- **A disposal roughly doubles `Posted to date`, and book value collapses with
+  it.** `postedToDateCents` (`depreciation-ops.ts:232-259`) sums posted journal
+  lines on `source = 'depreciation'` + `sourceId = assetId` + `amountCents > 0`.
+  `postDisposal` (`:537-546`) posts its own entry under **the same source and
+  the same sourceId**, and all three of its debit legs match that filter. This
+  contradicts the file's own header rule at `:56-62` and the 2026-08-15 entry
+  below. `listPostedPeriods` is unaffected — a `disposal:<uuid>` key expands to
+  `[]` — so only the two displayed figures are wrong, not the schedule.
+  The guide warns the reader off both figures after a disposal until this is
+  fixed.
+- **A depreciable asset with no company 500s BOTH screens.** `entityOf` throws
+  `ASSET_NO_COMPANY` (`depreciation-ops.ts:26-34`) and `getDepreciationStatus`
+  calls it unguarded at `:293`; the list calls that for every row
+  (`AssetsModule.tsx:79-84`) and the detail page at `page.tsx:99`. The pack
+  declares `requires: []` and `createAsset` stores `entityId = null` when the
+  tenant has no books (`ops.ts:275`), so this is reachable, and it takes out
+  `/dashboard/m/assets` entirely rather than one row.
+- **`ASSET_NO_COMPANY` is not in `toResult`'s switch** (`actions.ts:76-93`), so
+  the message written for a person — *belongs to no company, open the books for
+  this tenant first* — is replaced by `Something went wrong saving that.`
+- **The maintenance UI locks out the people it was built for.**
+  `recordMeterReading` and `recordService` are `member`-level on purpose
+  (`maintenance-ops.ts:144, 210`, rationale at `:379-385`), and the 2026-08-15
+  entry below is headed *"Whoever changed the oil can log the oil change"*. But
+  `page.tsx:415` passes `canEdit={isOwner}` and both controls sit inside it
+  (`maintenance-panel.tsx:232, 258`). **No staff member can record a service or
+  a meter reading.** The Photos panel two blocks down makes the opposite choice
+  deliberately (`page.tsx:424-432`). That entry describes behaviour that is not
+  shipped.
+- **Completing a raised job does not advance its schedule, and staff can only
+  reach the job.** `recordService` has exactly one caller, `Mark done today`,
+  which is owner-only. Pressing `Done` on the work item clears the `raised`
+  badge and leaves the schedule overdue, so it raises again. Already noted at
+  the bottom of Open items as "two acts today"; what is new is that the half a
+  staff member can reach is the half that does nothing.
+- **Renaming a disposed asset un-archives its cost object.** `disposeAsset`
+  archives the dimension member (`ops.ts:402-406`); Edit stays available after
+  disposal (`asset-controls.tsx:334` hides only Dispose); a rename runs
+  `upsertDimensionMember`, whose `onConflictDoUpdate` sets `isActive: true`
+  (`dimensions.ts:105`). The disposed asset becomes taggable again.
+- **`expert` is refused for attaching a photo and not for the other two.**
+  `registerAttachedPhoto` throws `FORBIDDEN_EXPERT` (`attachments.ts:440-442`);
+  `setPrimaryAttachment` and `detachDocumentFromRecord` take a ctx with no role
+  and check nothing, and `document_attachments` RLS is member-wide. Only the
+  hidden control stops an accountant. `actions.ts:150` says the accountant role
+  is read-only everywhere; for two of the three photo actions it is not.
+- **`recordService` hardcodes `unit: "hours"`** for the meter reading it mirrors
+  (`maintenance-ops.ts:232`), whatever the schedule's `meterUnit` says. That
+  reading then becomes `latestMeter`, which drives the panel's label and the
+  `dueSummary` unit — so a schedule in `miles` reads `Current hours` and can
+  never accumulate miles. `recordMeterReadingAction` passes the unit correctly;
+  the `Mark done today` path does not.
+- **`Acquired` can be set and never cleared.** The form sends `""`,
+  `optionalDate` turns that into `undefined`, and `updateAsset` treats undefined
+  as leave-alone (`ops.ts:325`). Cost clears correctly because the form sends an
+  explicit `null`. Nothing tells the reader the date stayed.
+- **`INVALID_KIND` is reused for a maintenance schedule kind**
+  (`maintenance-ops.ts:74-76`), so a bad schedule kind would be reported as
+  *a kind must be lowercase letters, numbers and underscores* — a sentence about
+  asset kinds. Unreachable through the UI (the Zod enum catches it first). The
+  same message also understates the real rule: `ASSET_KIND_FORMAT` requires the
+  first character to be a letter, so `4wd_tractor` is refused by a message that
+  appears to permit it.
+
+**List-screen gaps.**
+
+- **`Post depreciation (N assets, $X)` posts more than its label says.** The
+  count and total are scoped to the rows on screen, and the comment at
+  `AssetsModule.tsx:74-76` says that is deliberate; `postAllDepreciation`
+  (`depreciation-ops.ts:584-590`) ignores `kind` and posts every active asset in
+  the tenant. Latent today because no filter control exists — it becomes real
+  the moment one is added.
+- **The `kind` and `disposed` filters are read and have no UI.**
+  `AssetsModule.tsx:49-51` reads both, `listKindsInUse` is queried at `:66` and
+  its own comment says "for the filter bar", and no bar is rendered. Both are
+  reachable only by editing the URL, which also makes the `disposed` badge at
+  `:195-197` unreachable in normal use.
+- **`Kept in` prints `—` for an asset whose parent is disposed.** The parent is
+  resolved from a map built only from displayed rows (`:218-220`), and the
+  default view excludes disposed ones. The detail page still names the parent.
+- **The empty state says `Nothing on the books yet` under a filter** that
+  matched nothing, even when the register is full (`:160`).
+
+**Dead code:** `setScheduleActive` (`maintenance-ops.ts:96-112`) and
+`listEvents` (`:174-188`) have no caller anywhere, not even a test — which is
+why a schedule cannot be paused or renamed and the service log is written and
+never read. Both were already in Open items; this confirms them by grep. All
+twelve server actions have exactly one caller each, so the 2026-08-15 note about
+`updateAssetAction` and `disposeAssetAction` being unreachable is now stale.
+
+**Not clicked through live:** the browser pane's Clerk session is expired and
+only the founder can sign in. Everything above is read from source.
+
 ### 2026-08-26 — The pack puts on the design system (`claude/the-last-three-packs`)
 
 No behaviour changed. PR 4 of the five that bring the packs onto the primitive
@@ -467,6 +583,25 @@ shape with livestock lot occupancy, so it waits for the pack that needs it.
 
 ## Open items
 
+- **A disposal double-counts accumulated depreciation on both screens.**
+  `postDisposal` writes under the same `source`/`sourceId` that
+  `postedToDateCents` sums. Found 2026-09-03; see the build log for the
+  mechanism. The three guides warn readers off the two figures meanwhile.
+- **A depreciable asset with no company takes `/dashboard/m/assets` down.**
+  `entityOf` throws out of an unguarded `getDepreciationStatus`. Reachable
+  whenever the pack is on without accounting.
+- **Staff cannot record a service or a meter reading**, although the ops layer
+  is `member`-level for exactly that reason and a build-log entry says so. One
+  prop: `page.tsx:415`.
+- **A disposed asset's cost object comes back on a rename.**
+- **`expert` is not refused server-side for setting or removing a photo.**
+- **A meter schedule cannot count anything but hours**, whatever unit it names.
+- **`Acquired` cannot be cleared once set.**
+- **The list has no filter, sort or search controls**, though `kind` and
+  `disposed` are already honoured server-side.
+- **The pack ignores its own `asset` label.** Declared renameable, hardcoded in
+  about a dozen visible strings. Fixing it means sweeping
+  `docs/help/assets/*.md` to `{{asset}}` in the same PR.
 - **Tax methods: MACRS, Section 179, bonus depreciation.** What shipped is
   **book** depreciation — straight-line, no convention. That is deliberately a
   line rather than an omission: half-year, mid-quarter and mid-month

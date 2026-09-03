@@ -7,6 +7,21 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-03 — The sweep, third area: Banking and the ledger (`claude/sweep-accounting-banking-and-ledger`)
+
+Ten accounting guides rewritten to CONTROLS, VOICE and SHAPE — `banking`,
+`register`, `import-statement`, `reconcile`, `bank-rules`,
+`chart-of-accounts`, `journal`, `new-entry`, `entry`, `trial-balance`.
+Facts carried over from the verified first drafts; the looks from the
+banking-and-ledger inventory (a connected feed's `connected` is the success
+tint and `reconnect needed` destructive; `closed`, `Off` and `Suggested`
+outline; `Active`, `in progress`, `completed` and `system` secondary;
+an entry's `posted` primary, `draft` secondary, `void` outline; the trial
+balance's `In balance` success and `Out of balance` destructive). A register
+row's `unreviewed` and `excluded` status words stay chips, because the
+inventory did not record their tint. Not clicked through live; the pane's
+session is still expired.
+
 ### 2026-09-03 — The sweep, second area: Purchases, the Inbox and Sales (`claude/sweep-accounting-purchases-and-sales`)
 
 Twelve accounting guides rewritten to CONTROLS, VOICE and SHAPE —

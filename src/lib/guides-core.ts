@@ -422,3 +422,91 @@ export function guideIndexFor<T extends GuideMeta>(
   if (options.isOwner) sections.push(fixed("settings"));
   return sections;
 }
+
+// ---------------------------------------------------------------------------
+// CONTROL MARKERS. `{button:Approve|primary|check}` draws the real Button,
+// `{badge:Past due|destructive}` the real Badge, `{icon:calculator}` an icon,
+// `{kbd:Ctrl+K}` a key. The founder's call after reading the first rendered
+// guides (2026-09-02): a guide should show a control the way the screen does,
+// and a screenshot of a button rots while the Button component cannot. The
+// grammar is deliberately small — one kind, one label, then modifiers — so an
+// author can write it from memory, and a test over the real tree refuses a
+// modifier it cannot place or an icon nobody registered.
+// ---------------------------------------------------------------------------
+
+export const CONTROL_KINDS = ["button", "badge", "icon", "kbd"] as const;
+export type ControlKind = (typeof CONTROL_KINDS)[number];
+
+/** `primary` is the Button's `default`; the rest are the Button's own names. */
+export const BUTTON_VARIANTS = [
+  "primary",
+  "outline",
+  "ghost",
+  "destructive",
+  "secondary",
+  "link",
+] as const;
+
+/** `success` and `warning` are the app's class-tinted badges, named for authors. */
+export const BADGE_VARIANTS = [
+  "primary",
+  "secondary",
+  "outline",
+  "destructive",
+  "success",
+  "warning",
+] as const;
+
+export interface ControlMarker {
+  kind: ControlKind;
+  /** The text on the control; for `icon`, the icon's name. */
+  label: string;
+  variant: string | null;
+  icon: string | null;
+  /** Modifiers the grammar could not place, kept so a test can name them. */
+  extra: string[];
+  raw: string;
+  index: number;
+}
+
+const CONTROL = /\{(button|badge|icon|kbd):([^{}|\n]+?)((?:\|[^{}|\n]+)*)\}/g;
+
+/** Every marker in `text`, in order. A `{{placeholder}}` is not one. */
+export function controlMarkers(text: string): ControlMarker[] {
+  return [...text.matchAll(CONTROL)].map((match) => {
+    const kind = match[1] as ControlKind;
+    const label = match[2].trim();
+    const modifiers = match[3]
+      .split("|")
+      .map((modifier) => modifier.trim())
+      .filter(Boolean);
+    let variant: string | null = null;
+    let icon: string | null = null;
+    const extra: string[] = [];
+    for (const modifier of modifiers) {
+      const variants: readonly string[] =
+        kind === "button" ? BUTTON_VARIANTS : kind === "badge" ? BADGE_VARIANTS : [];
+      if (variant === null && variants.includes(modifier)) variant = modifier;
+      else if (kind === "button" && icon === null) icon = modifier;
+      else extra.push(modifier);
+    }
+    return { kind, label, variant, icon, extra, raw: match[0], index: match.index ?? 0 };
+  });
+}
+
+/** Why a marker would draw wrong, or null when it is sound. */
+export function controlMarkerProblem(
+  marker: ControlMarker,
+  knownIcons: ReadonlySet<string>,
+): string | null {
+  if (marker.extra.length > 0) {
+    return `${marker.raw} has a modifier the grammar cannot place: ${marker.extra.join(", ")}`;
+  }
+  if (marker.kind === "icon" && !knownIcons.has(marker.label)) {
+    return `${marker.raw} names an icon nobody registered`;
+  }
+  if (marker.icon && !knownIcons.has(marker.icon)) {
+    return `${marker.raw} names an icon nobody registered`;
+  }
+  return null;
+}

@@ -76,6 +76,7 @@ export default async function GuidePage({
 
         <Markdown
           source={view.content}
+          flavor="guide"
           linkBase={{ root: GUIDES_HREF, slug: guide.slug }}
           className="max-w-3xl"
         />

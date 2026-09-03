@@ -16,6 +16,8 @@ import {
   sortGuides,
   type GuideMeta,
   type RoutePattern,
+  controlMarkerProblem,
+  controlMarkers,
 } from "../src/lib/guides-core";
 import { resolveDocLink } from "../src/lib/markdown-meta";
 import {
@@ -26,6 +28,7 @@ import {
   localiseGuide,
 } from "../src/lib/guides";
 import { featureRegistry } from "../src/lib/features";
+import { controlIconNames } from "../src/components/app/guide-icons";
 
 /**
  * The tenant guides: the route grammar that puts a guide on a screen, the
@@ -273,6 +276,39 @@ describe("vocabulary", () => {
   });
 });
 
+describe("control markers", () => {
+  it("reads a button with its variant and icon, wherever the two sit", () => {
+    const [marker] = controlMarkers("Click {button:New bill|primary|plus} to start.");
+    expect(marker).toMatchObject({ kind: "button", label: "New bill", variant: "primary", icon: "plus", extra: [] });
+    expect(marker.index).toBe(6);
+    expect(marker.raw).toBe("{button:New bill|primary|plus}");
+    expect(controlMarkers("{button:Save|plus|primary}")[0]).toMatchObject({ variant: "primary", icon: "plus" });
+  });
+
+  it("reads a badge, an icon and a key", () => {
+    const seen = controlMarkers("{badge:Past due|destructive} {icon:calculator} {kbd:Ctrl+K}");
+    expect(seen.map((m) => [m.kind, m.label, m.variant, m.icon])).toEqual([
+      ["badge", "Past due", "destructive", null],
+      ["icon", "calculator", null, null],
+      ["kbd", "Ctrl+K", null, null],
+    ]);
+  });
+
+  it("leaves a placeholder, an unknown kind and a bare word alone", () => {
+    expect(controlMarkers("{{zone}} {field:Name} {button} {button:}")).toEqual([]);
+  });
+
+  it("names a modifier it cannot place and an icon nobody registered", () => {
+    const icons = new Set(["plus"]);
+    expect(controlMarkerProblem(controlMarkers("{badge:Paid|outline|big}")[0], icons)).toMatch(/cannot place/);
+    expect(controlMarkerProblem(controlMarkers("{kbd:Ctrl+K|bold}")[0], icons)).toMatch(/cannot place/);
+    expect(controlMarkerProblem(controlMarkers("{button:Save|rocket}")[0], icons)).toMatch(/icon/);
+    expect(controlMarkerProblem(controlMarkers("{icon:rocket}")[0], icons)).toMatch(/icon/);
+    expect(controlMarkerProblem(controlMarkers("{button:Save|primary|plus}")[0], icons)).toBeNull();
+    expect(controlMarkerProblem(controlMarkers("{badge:Paid|success}")[0], icons)).toBeNull();
+  });
+});
+
 describe("guideIndexFor", () => {
   const features = [
     { slug: "accounting", name: "Accounting", category: "core", icon: "calculator" },
@@ -369,6 +405,15 @@ describe("docs/help on disk", () => {
         for (const modifier of placeholder.modifiers) {
           expect(MODIFIERS.includes(modifier), `${file} uses |${modifier}`).toBe(true);
         }
+      }
+    }
+  });
+
+  it("every control marker names a known kind, variant and icon", () => {
+    const icons = controlIconNames();
+    for (const file of files()) {
+      for (const marker of controlMarkers(readFileSync(file, "utf8"))) {
+        expect(controlMarkerProblem(marker, icons), file).toBeNull();
       }
     }
   });

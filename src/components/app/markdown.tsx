@@ -2,7 +2,9 @@ import Link from "next/link";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { resolveDocLink } from "@/lib/markdown-meta";
+import { remarkGuideControls } from "@/lib/remark-guide-controls";
 import { cn } from "@/lib/utils";
+import { GuideControl } from "./guide-control";
 
 interface MarkdownProps {
   source: string;
@@ -13,6 +15,13 @@ interface MarkdownProps {
    * folder). Without it a relative link is left as written.
    */
   linkBase?: { root: string; slug: string };
+  /**
+   * `guide` is prose a client reads: inline code is a label chip in the app's
+   * own face (see `.guide-prose` in globals.css), and `{button:…}` markers draw
+   * the real controls. `doc`, the default, is the build record, where inline
+   * code is code.
+   */
+  flavor?: "doc" | "guide";
 }
 
 /**
@@ -33,8 +42,12 @@ interface MarkdownProps {
  * No directive: it renders on the server for the pages and is loaded lazily
  * by the client-side help panel, so it must import nothing from `node:`.
  */
-export function Markdown({ source, className, linkBase }: MarkdownProps) {
+export function Markdown({ source, className, linkBase, flavor = "doc" }: MarkdownProps) {
+  const guide = flavor === "guide";
   const components: Components = {
+    // A custom element name is outside the `Components` type, which is keyed
+    // by HTML tag; the renderer looks components up by tag name at runtime.
+    ...(guide ? ({ "guide-control": GuideControl } as unknown as Components) : {}),
     a: ({ href, children }) => {
       const url = href ?? "";
       const doc = linkBase ? resolveDocLink(linkBase.slug, url) : null;
@@ -57,10 +70,14 @@ export function Markdown({ source, className, linkBase }: MarkdownProps) {
     <div
       className={cn(
         "prose prose-sm dark:prose-invert max-w-none [&_table]:text-sm",
+        guide && "guide-prose",
         className,
       )}
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown
+        remarkPlugins={guide ? [remarkGfm, remarkGuideControls] : [remarkGfm]}
+        components={components}
+      >
         {source}
       </ReactMarkdown>
     </div>

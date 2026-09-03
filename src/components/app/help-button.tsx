@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CircleQuestionMark } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/app/empty-state";
+import { GuidePointerContext } from "@/components/app/guide-control";
 import { GUIDES_HREF, type HelpPayload } from "@/lib/guides-core";
 import { cn } from "@/lib/utils";
 
@@ -63,6 +64,15 @@ export function HelpButton({ className }: { className?: string }) {
     setOpen(false);
   }
 
+  // The panel docks rather than covers: while it is open, `.help-docked` pads
+  // the page's <main> by the panel's width (globals.css), so a page's actions
+  // at the top right move into view instead of sitting behind the panel. A
+  // guide that points at a button has to leave the button visible.
+  useEffect(() => {
+    document.documentElement.classList.toggle("help-docked", open);
+    return () => document.documentElement.classList.remove("help-docked");
+  }, [open]);
+
   if (!pathname.startsWith("/dashboard") || pathname.startsWith(GUIDES_HREF)) {
     return null;
   }
@@ -101,12 +111,17 @@ export function HelpButton({ className }: { className?: string }) {
       >
         <CircleQuestionMark />
       </Button>
-      <Sheet open={open} onOpenChange={setOpen}>
+      {/* Non-modal on purpose: no overlay, no focus trap, and the page stays
+          clickable beside the guide, which is the whole point of a panel that
+          says "keep working with it open". Clicking the page must not close
+          it, so outside interaction is left alone; Escape and the X close it. */}
+      <Sheet open={open} onOpenChange={setOpen} modal={false}>
         {/* Nothing body-portalled goes inside: a popover or a select inside a
-            modal sheet paints but cannot be clicked (see app-shell.tsx). */}
+            sheet paints but cannot be clicked (see app-shell.tsx). */}
         <SheetContent
           side="right"
           className="flex flex-col gap-0 p-0 data-[side=right]:sm:max-w-md"
+          onInteractOutside={(event) => event.preventDefault()}
         >
           <SheetHeader className="border-b pr-12">
             <SheetTitle>{guide?.title ?? "Help"}</SheetTitle>
@@ -138,10 +153,15 @@ export function HelpButton({ className }: { className?: string }) {
               />
             )}
             {guide && (
-              <Markdown
-                source={guide.content}
-                linkBase={{ root: GUIDES_HREF, slug: guide.slug }}
-              />
+              // Live controls: a button drawn in the guide points at the real
+              // one on the screen beside the panel (guide-control.tsx).
+              <GuidePointerContext.Provider value={true}>
+                <Markdown
+                  source={guide.content}
+                  flavor="guide"
+                  linkBase={{ root: GUIDES_HREF, slug: guide.slug }}
+                />
+              </GuidePointerContext.Provider>
             )}
           </div>
           <SheetFooter className="flex-row items-center justify-between border-t">

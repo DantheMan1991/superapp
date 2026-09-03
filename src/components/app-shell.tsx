@@ -328,7 +328,10 @@ export function AppShell({
         inside a full-width module pushes the whole row past the viewport
         instead of scrolling within its own pane.
       */}
-      <main className="min-w-0 flex-1 bg-background lg:ml-60 print:ml-0">
+      {/* `data-app-main`: the help panel docks by padding this element
+          (`.help-docked` in globals.css), so the page moves over instead of
+          being covered. */}
+      <main data-app-main="" className="min-w-0 flex-1 bg-background lg:ml-60 print:ml-0">
         {fullWidth ? (
           // No padding and no clamp — a module that asked for the viewport
           // owns its own chrome, down to the edges.

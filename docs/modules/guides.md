@@ -7,6 +7,43 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-03 — Real buttons in the guides (`claude/real-buttons-in-the-guides`)
+
+Founder, with a screenshot of the rendered "Getting around" page: *"They are
+hard to read. Formatted weird etc. I think we need to have like actual button
+images to reference each feature … I even think the way some things are worded
+are a little off."* Three problems, three fixes, and two guides rewritten as
+the exemplar for the other 48.
+
+- **The backticks were real.** The typography plugin paints a literal backtick
+  before and after inline code, and the guides quoted every label in
+  backticks, so a client's page was peppered with them. `.guide-prose`
+  (globals.css, unlayered so it beats the plugin) removes them and draws a
+  quoted label as a chip in the app's own face. The build record keeps its
+  monospace: `Markdown` takes `flavor="guide"` only from the guide page and the
+  help panel.
+- **Controls are drawn by the components, not photographed.**
+  `{button:New bill|primary}`, `{badge:Overdue 3 days|destructive}`,
+  `{icon:calculator}`, `{kbd:Ctrl+K}` — a remark plugin
+  (`remark-guide-controls.ts`) turns the markers into `<guide-control>`
+  elements and `GuideControl` renders the real `Button` and `Badge` one size
+  down. A screenshot of a button rots with the next design sweep; the
+  component cannot. The grammar lives in `guides-core.ts`, and a test over the
+  real tree refuses a modifier it cannot place or an icon nobody registered
+  (`guide-icons.ts`).
+- **The panel points at the screen.** Inside the help sheet a drawn button is
+  live: click it and the real control scrolls into view and is ringed
+  (`.guide-target`), matched by the text the reader sees, so no screen needed
+  marking up. A control that is not on the screen right now (inside a dialog,
+  owner-only) says so in a toast.
+- **Voice and shape, written down.** `_TEMPLATE.md` gains CONTROLS, VOICE
+  (talk to the reader and tell them what to do; American English; quote only
+  what they must recognize; no words from our side of the glass) and SHAPE
+  (opening paragraph, What you see, How to <task>, Messages, Not on this page,
+  Who can do what). `workspace/getting-around` and `accounting/bills` are
+  rewritten to it as the exemplar. The other 48 guides follow once the founder
+  has judged these two.
+
 ### 2026-09-02 — Accounting, fourth area: Reports, Close, Companies, Recurring (`claude/accounting-guides-reports`)
 
 Twelve guides in `docs/help/accounting/` — `reports`, `profit-and-loss`,
@@ -195,6 +232,24 @@ stored in the database, and a tenant's vocabulary is read from the row
   this bar on reading the first two guides; `_TEMPLATE.md` (DEPTH) carries it.
   Writing to it is also a bug-finding pass — the first two areas turned up two
   dead ends in Land.
+- **A control in a guide is the component, not a picture of it.** `{button:…}`
+  and `{badge:…}` render the app's own `Button` and `Badge`, so a guide
+  can never show a control the screen no longer draws, and in the panel the
+  drawn control points at the real one. Screenshots stay deferred for the same
+  reason they always were: they rot, they double for dark mode, and a client's
+  data must never be captured. If pictures are ever wanted, one orientation
+  image per guide is the most that makes sense.
+- **The panel docks; it does not cover.** The first version was a modal
+  sheet, and the by-hand check of the pointer showed why that could not stay:
+  a page's actions live at the top right, exactly where the sheet sat, so the
+  ringed `New bill` was behind the panel and the page was dimmed and blurred.
+  The sheet is now non-modal (no overlay, no focus trap, outside clicks left
+  alone) and `.help-docked` pads `<main>` by the panel's width, so the page
+  reflows beside the guide and stays clickable. Escape and the X close it;
+  navigating away always did.
+- **A quoted label is a chip, not code.** Only for guides (`flavor="guide"`);
+  the build record keeps monospace, because there a backticked word usually is
+  code.
 - **A GET route, not a server action.** `PageHeader` is imported by five
   client files; a `"use server"` module reached through it would put an action
   reference into every page's client manifest, and this repo has already had a
@@ -234,6 +289,10 @@ stored in the database, and a tenant's vocabulary is read from the row
 
 ## Open items
 
+- **48 guides are still in the first voice and shape.** Only
+  `workspace/getting-around` and `accounting/bills` follow the CONTROLS,
+  VOICE and SHAPE rules in `_TEMPLATE.md`; the sweep of the rest waits on the
+  founder's verdict on those two.
 - **Screenshots.** Deliberately none yet. Manual captures rot within weeks at
   the current rate of UI change (the design sweep of 2026-08-11 would have
   invalidated every one), and dark mode doubles the set. The plan is Playwright

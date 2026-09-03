@@ -21,6 +21,21 @@ tokens and gets its own pass later.
 
 ## Build log
 
+### 2026-09-03 — The guide draws the real controls, and the panel docks (`claude/real-buttons-in-the-guides`)
+
+Two changes the guides needed ([guides.md](guides.md)) that touch primitives.
+`GuideControl` joins the table: a `{button:New bill|primary}` marker in a guide
+renders the app's own `Button` at `size="xs"`, a `{badge:…}` the `Badge`,
+with `success`/`warning` as the class tints the app already uses — so a guide
+can never show a control the design no longer draws. And the help sheet is now
+**non-modal and docked**: no overlay, no focus trap, and `.help-docked` pads
+`<main>` (`data-app-main` in `app-shell.tsx`) by the panel's width, so a
+page reflows beside its guide instead of being dimmed behind it. The
+"nothing body-portalled inside a modal sheet" rule still holds for the mobile
+drawer; the help panel is no longer a modal sheet at all. Inline code in guide
+prose is a label chip (`.guide-prose`), never monospace; the build record's
+`Markdown` is unchanged.
+
 ### 2026-09-02 — A "?" on every page, and six headings that were never swept (`claude/guides-plumbing`)
 
 The tenant guides ([guides.md](guides.md)) put a help button on every
@@ -368,6 +383,7 @@ directory is stock shadcn and stays upgradeable. These compose it.
 | `icon-registry.ts` | no | The shell's private `ICONS` map |
 | `Markdown` | no | Inline `ReactMarkdown` + hand-copied prose classes (two of seven adopted, 2026-09-02) |
 | `HelpButton` | **yes** | — (new: the "?" in `PageHeader`'s actions row and Mail's bar, and the guide sheet it opens) |
+| `GuideControl` | **yes** | — (new: the real `Button` or `Badge` a guide draws from a `{button:…}` marker; live in the help panel, where it points at the control on the page) |
 
 ### `DataTable` is a container, not a table
 

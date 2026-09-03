@@ -42,11 +42,56 @@ trade vocabulary at all.
 
 LINKS. Another guide: a relative markdown link, [Getting around](../workspace/getting-around.md).
 A screen: its path, [Land](/dashboard/m/land). Outside links open in a new tab.
+Link only to a guide that is on main already; a link to one in an open PR is a
+dead link until it merges.
 
-VOICE. Written for the client, not for us. Say what to do, in the order they do
-it, naming buttons and fields exactly as the screen does. Short sentences. No
-internal shorthand, no module jargon, no dashes for asides. A PR that changes a
-screen updates its guide (AGENTS.md).
+CONTROLS. Draw a control the way the screen draws it. The renderer turns these
+markers into the app's own components, so they cannot go stale the way a
+screenshot does:
+  {button:New bill|primary}            a button. Looks: primary, outline (the
+  {button:Void|outline|trash}          default), ghost, destructive, secondary,
+                                       link. An icon name may follow the look.
+  {badge:Overdue 3 days|destructive}   a status badge. Looks: primary, secondary,
+                                       outline (the default), destructive,
+                                       success, warning.
+  {icon:calculator}                    an icon on its own: a sidebar row's icon,
+                                       the "?" (circle-question-mark).
+  {kbd:Ctrl+K}                         a key.
+  `Statement end date`                 a field, tab, column, menu item or status
+                                       word the reader looks for: a chip in the
+                                       app's face, never code.
+Icon names: src/components/app/guide-icons.ts, plus the module icons in
+icon-registry.ts. Write the look the screen actually uses, not the one that
+reads best. In the help panel a drawn button is live: the reader clicks it and
+the real one on the screen is ringed, matched by its text, so spell the label
+exactly as rendered. tests/guides.test.ts fails on a modifier it cannot place
+or an icon nobody registered.
+
+VOICE. Talk to the reader, and tell them what to do:
+  "Click {button:Approve|primary}. You see `Approved and posted.`"
+  never "Approve posts the bill.", "the page reads", "a badge sits under it".
+American English in your own words (gray, canceled, check the box); a label is
+always quoted exactly as the screen spells it. One fact per sentence, most
+under fifteen words. Say what a control does in the same breath as naming it.
+Quote exact text only when the reader has to recognize it: a message, an empty
+state, an error, a status word. Everything else in plain words. No dashes for
+asides, no words from our side of the glass ("strip", "shelf", "obligation",
+"register", "entity"), no "simply" or "just".
+
+SHAPE. Every guide has the same sections in the same order, so a reader who has
+used one knows where to look in the next:
+  (opening paragraph)   what the page is for and how you get to it; two or
+                        three sentences, the main action named
+  ## What you see       one bullet per control or area, top to bottom: the
+                        bold name, what it shows, what happens when you use it
+  ## How to <task>      one section per task, numbered steps, ending with what
+                        the reader sees when it worked; link the next step
+  ## Messages           a table, the exact message then what it means and what
+                        to do; only when the page shows messages
+  ## Not on this page   what a reader might look for that is not built, with
+                        "ask us" where we would do it for them
+  ## Who can do what    owners, staff, accountants
+Leave out a section the page has no need of. Never add a different one.
 
 DEPTH. A guide is the manual for its screen, not a summary. One guide per
 screen. Cover every control on it: every field in every dialog (what it accepts
@@ -58,18 +103,33 @@ it against the running screen. Each feature also gets an overview guide that
 maps its screens. This is the founder's bar (2026-09-02): the first two guides
 were "not near detailed enough" and were rewritten to it. Two guides may share a
 route when one screen needs two pages (the tie goes to the earlier slug, which
-is the one the "?" shows; link to the other from it).
+is the one the "?" shows; link to the other from it). A PR that changes a
+screen updates its guide (AGENTS.md).
 -->
 
-## Before you start
+Open **Feature** in the sidebar. This page is where you do the thing. To start, click {button:Main action|primary}.
 
-What the reader needs to have done, or have to hand.
+## What you see
 
-## Do the thing
+- **The first control.** What it shows. What happens when you use it.
+- **The second control.** The same.
 
-1. The first step, naming the button or field exactly as the screen does.
-2. The second step.
+## How to do the thing
 
-## What happens next
+1. Click {button:Main action|primary}.
+2. Fill in `Field name`, then click {button:Save|primary}.
+3. You see `Saved.` and the new row in the list.
 
-Where the result shows up, and what to check.
+## Messages
+
+| Message | What it means |
+| --- | --- |
+| `Nothing here yet` | The list is empty. Click {button:Main action|primary} to add the first one. |
+
+## Not on this page
+
+What a reader might look for that is not built. Ask us if you need it.
+
+## Who can do what
+
+Owners can do everything here. Staff can see the page and add things. Accountants can only read it.

@@ -4,53 +4,58 @@
 > **Route:** /dashboard/m/accounting/banking/*
 > **Order:** 140
 
-## The top of the page
+Open **Banking** in the accounting menu and click an account's card. This is where the bank feed is worked: each transaction waits under `To review` until an owner posts it, matches it to something already in the books, or excludes it.
 
-The title is the account's name, and the line under it gives its kind, institution, last four digits and today's balance, or `owed` for a card. Badges show `connected` for a live feed and `closed` for a closed account.
+## What you see
 
-Owners see, while the account is open: **Import CSV**, **Suggest categories**, and **Reconcile**. Owners always see **Close account** or **Reopen account**.
+- **The top of the page.** The title is the account's name. The line under it gives its kind, institution, last four digits and today's balance, or `owed` for a card. {badge:connected|success} for a live feed and {badge:closed|outline} for a closed account. Owners see, while the account is open, {button:Import CSV|outline}, {button:Suggest categories|primary|sparkles} and {button:Reconcile|outline}, and always {button:Close account|outline} or {button:Reopen account|outline}.
+- **The three tabs.** `To review (3)`, transactions that have arrived and are not in your books yet. `All (120)`, everything. `Excluded (2)`, transactions you have set aside. The counts are live. The list shows up to 300 transactions, newest first. There is no search or date filter.
+- **Each row.** `Date` and `Description`, as the bank gave them, with a {icon:paperclip} and a count when receipts are attached from the Inbox. Under the description, on a row still to review, a chip with a suggested category: `RULE · 6300` means one of your bank rules matched, and hovering it shows which; `AI · 6100 · 87%` is the assistant's suggestion and how sure it is. When both have an opinion only the rule's chip is shown, because a rule is a decision you wrote down. `Payee`, the vendor, once a rule or a person has set one. `In` and `Out`. On `All`, `Status`: `unreviewed`, `posted` or `excluded`, where `posted` is a link to the entry in the journal. On `To review`, for owners, `Category`, a list of your accounts already set to the suggestion, with {button:Tag|outline} under it when your business has tags.
+- **The buttons on a row.** On `To review`: {button:Match|outline} when the row has something in the books it could be, {button:Post|primary} and {button:Exclude|ghost}. On `All`: {button:Unmatch|ghost} on a matched row. On `Excluded`: {button:Restore|outline}.
+- **{button:Accept 12 suggestions (≥70%)|outline}.** At the top of `To review`. See how to post many at once, below.
 
-## The three tabs
+## How to post a transaction
 
-- **To review (3).** Transactions that have arrived and are not in your books yet.
-- **All (120).** Everything.
-- **Excluded (2).** Transactions you have set aside.
+1. On `To review`, check the `Category`, or change it. Add a tag if you use them.
+2. Click {button:Post|primary}. You see `Posted`. The transaction becomes an entry in your books: the bank account on one side and the category on the other, dated the transaction date, in the account's company.
 
-The counts are live. The list shows up to 300 transactions, newest first. There is no search or date filter.
+Nothing is posted until you press the button, and the assistant never posts by itself. A bank rule set to post automatically can.
 
-When nothing is waiting: `Nothing to review — the feed is clear.` On the other tabs: `No transactions here yet.`
+## How to post many at once
 
-## Each row
+1. Click {button:Suggest categories|primary|sparkles} if rows are still without a suggestion. It reads `Thinking…`, then `Suggested categories for 12 of 14 transactions`.
+2. Click {button:Accept 12 suggestions (≥70%)|outline}. Every waiting transaction with a rule match, or a suggestion the assistant is at least 70% sure of, is posted, up to 50 at a time. You see `Posted 12`, or `Posted 9, skipped 3` with the first reason, such as a date in a closed month.
 
-- **Date** and **Description**, as the bank gave them. A paperclip with a count shows receipts attached from the Inbox.
-- Under the description, on a row still to review, a chip with a suggested category. `RULE · 6300` means one of your bank rules matched; hover it to see which. `AI · 6100 · 87%` is the assistant's suggestion and how sure it is. When both have an opinion only the rule's chip is shown, because a rule is a decision you wrote down.
-- **Payee.** The vendor, once a rule or a person has set one.
-- **In** and **Out.**
-- **Status** on the All tab: `unreviewed`, `posted` or `excluded`. `posted` is a link to the entry in the journal.
-- **Category** on the To review tab, for owners: a list of your accounts, already set to the suggestion, and a **Tag** button under it when your business has tags.
+## How to match a transaction to something already in the books
 
-## Posting a transaction
+1. When a transaction looks like money already recorded, a payment against an invoice or a bill, or an entry written by hand, click {button:Match|outline}. The dialog is `Match to an existing entry` and lists up to five entries for the same amount within a week, such as `Payment — INV-0009 · Millbrook Restaurant` or `Bill payment — Ridgeline Feed · INV-4471`.
+2. Click {button:Match|primary} beside the right one. You see `Matched — nothing new was posted`. The transaction is linked to that entry and nothing is posted twice.
 
-Owners, on the To review tab. Check or change the **Category** and click **Post**. You see `Posted`, and the transaction becomes an entry in your books: the bank account on one side and the category on the other, dated the transaction date, in the account's company. Nothing is posted until you press the button, and the assistant never posts by itself. A bank rule set to post automatically can.
+On `All`, {button:Unmatch|ghost} sends a matched transaction back to review; the entry stays posted. Voiding an entry from the journal also sends its transaction back to review.
 
-**Accept 12 suggestions (≥70%)** at the top of the tab posts every waiting transaction that has a rule match or a suggestion the assistant is at least 70% sure of. It works through up to 50 at a time and reports `Posted 12`, or `Posted 9, skipped 3` with the first reason, for example a date in a closed month.
+## How to exclude a transaction
 
-**Suggest categories** asks the assistant for a category on every waiting transaction that has none: `Suggested categories for 12 of 14 transactions`. Asking again within half a minute answers `Suggestions were just requested — try again in a moment.`
+1. Click {button:Exclude|ghost} on a transfer between your own accounts, or a duplicate. It moves to `Excluded` without being posted.
+2. Click {button:Restore|outline} on `Excluded` to bring it back.
 
-## Matching instead of posting
+## How to close the account
 
-When a transaction looks like money already recorded, a payment against an invoice or a bill, or an entry written by hand, the row offers **Match** instead. The dialog, **Match to an existing entry**, lists up to five entries for the same amount within a week, such as `Payment — INV-0009 · Millbrook Restaurant` or `Bill payment — Ridgeline Feed · INV-4471`. Click **Match** beside the right one. You see `Matched — nothing new was posted`. The transaction is linked to that entry and nothing is posted twice.
+1. Click {button:Close account|outline}. The dialog is `Close this account?` and reads `Nothing is deleted and no balance changes — the account stops taking new transactions, imports and reconciliations. You can reopen it whenever you like.`
+2. Confirm. A closed account shows a notice at the top and still lets you read the list, exclude and restore. {button:Reopen account|outline} reverses it.
 
-On the All tab, **Unmatch** sends a matched transaction back to review; the entry stays posted. Voiding an entry from the journal also sends its transaction back to review.
+## Messages
 
-## Excluding
+| Message | What it means |
+| --- | --- |
+| `Nothing to review — the feed is clear.` | Every transaction has been posted, matched or excluded. |
+| `No transactions here yet.` | The tab is empty. |
+| `Suggestions were just requested — try again in a moment.` | You asked the assistant twice within half a minute. |
+| `Posted 9, skipped 3` | Three suggestions could not be posted. The first reason follows. |
 
-**Exclude** sets a transaction aside without posting it, for a transfer between your own accounts or a duplicate. It moves to the Excluded tab, where **Restore** brings it back.
+## Not on this page
 
-## Closing the account
-
-**Close account** asks `Close this account?`: `Nothing is deleted and no balance changes — the account stops taking new transactions, imports and reconciliations. You can reopen it whenever you like.` A closed account shows a notice at the top and still lets you read the list, exclude and restore. **Reopen account** reverses it.
+There is no search or date filter, and the list stops at 300. Importing a statement and reconciling have their own pages. See [Import a statement](import-statement.md) and [Reconcile an account](reconcile.md).
 
 ## Who can do what
 
-Staff and accountants can read the list and the tabs. Posting, matching, excluding, importing and reconciling are the owner's.
+Staff and accountants can read the list and the tabs. Posting, matching, excluding, importing, reconciling and closing are the owner's.

@@ -13,6 +13,15 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-03 — The Banking and ledger guides rewritten to the new voice (`claude/sweep-accounting-banking-and-ledger`)
+
+No code change. The ten guides for Banking, an account's transactions,
+importing, reconciling, rules, the chart, the journal, an entry and the trial
+balance now follow the CONTROLS, VOICE and SHAPE rules in
+`docs/help/_TEMPLATE.md` (see [guides.md](guides.md)). Facts unchanged; every
+drawn button and badge carries the look this module's pages use. **A PR that
+changes one of these screens still updates its guide**, markers included.
+
 ### 2026-09-03 — The Purchases, Inbox and Sales guides rewritten to the new voice (`claude/sweep-accounting-purchases-and-sales`)
 
 No code change. The twelve guides for these screens now follow the CONTROLS,

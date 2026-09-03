@@ -7,6 +7,51 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-03 — Assets, in three guides (`claude/assets-guides`)
+
+Founder, after the CRM set: *"now start on the packs guides."* First of the
+five built packs, taken in dependency order — `assets`, then `inventory`,
+`livestock`, `production`, `retail` — so a later guide can link back to an
+earlier one. `land` already has its six. `crops` is declared and unbuilt: no
+`Component`, no route, so no guide, and that is the answer rather than a hole.
+
+Three guides in `docs/help/assets/`: `overview` (the `**` fallback, Order 0),
+`assets` (the list, 10), `asset` (one asset, 20). No `**Area:**` — three guides
+do not need captioning. No new icons: `wrench` comes from the module registry,
+which `guide-icons.ts` accepts alongside its own names, and every control icon
+was already registered.
+
+**A pack guide that deliberately uses no `{{placeholder}}`, which is new.**
+`_TEMPLATE.md` says a pack guide must never hardcode a renameable word. Assets
+declares `asset`/`Asset` and then never calls `labelFor` for it anywhere in
+`src/` — about a dozen visible strings spell it out. Writing `{{asset}}` would
+render *Add machine* next to a button reading `Add asset`, and since the help
+panel rings a control by matching its text, the chip would stop pointing at
+anything. **The rule assumes the pack reads its own label; when it does not,
+the screen wins.** Recorded in `docs/modules/assets.md` as the thing to fix,
+with a note that fixing it sweeps these three guides in the same PR. Expect the
+same question on `inventory`, where `lot` is declared and resolved nowhere at
+all and `item` is resolved only on the hub.
+
+**Method, unchanged from Mail and CRM:** parallel agents inventory every screen
+before a word is written. Three here — the list, the detail page, and the
+action layer — and the action-layer pass is the one that pays: it found six
+bugs the dossier did not have, including a disposal that doubles the
+accumulated-depreciation figure on both screens and a depreciable asset with no
+company that 500s the whole list. All recorded in `docs/modules/assets.md`.
+
+**One trap worth writing down: spawn inventory agents with a type that can
+write.** `Explore` has no Write tool, so a brief telling it to save notes to the
+scratchpad fails silently and the agent improvises the entire inventory into its
+final message — which lands in the parent's context instead of on disk, and is
+lost outright if it obeys a "report only briefly" instruction at the end. Caught
+mid-run and patched by messaging all seven agents still going.
+
+`tests/guides.test.ts` gains an `it(...)` resolving both Assets screens plus the
+overview fallback two levels down.
+
+Not clicked through live: the pane's Clerk session is still expired.
+
 ### 2026-09-03 — CRM, in sixteen guides (`claude/crm-guides`)
 
 Founder, after Mail merged: *"keep going."* Sixteen guides in `docs/help/crm/`

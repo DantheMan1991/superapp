@@ -668,6 +668,16 @@ describe("docs/help on disk", () => {
     expect(at("/dashboard/m/no-such-module")).toBeNull();
   });
 
+  it("resolves every Assets screen to its own guide", async () => {
+    const guides = await listGuides();
+    const at = (pathname: string) => matchGuide(guides, pathname, "")?.slug ?? null;
+    expect(at("/dashboard/m/assets")).toBe("assets/assets");
+    expect(at("/dashboard/m/assets/abc")).toBe("assets/asset");
+    // Nothing sits two levels down today. The overview's `**` is the floor, so
+    // a screen added under an asset gets a guide rather than nothing.
+    expect(at("/dashboard/m/assets/abc/anything")).toBe("assets/overview");
+  });
+
   it("reads a Land guide as paddocks for a homestead farm and zones for nobody in particular", async () => {
     const zone = await getGuide("land/zone");
     expect(zone).not.toBeNull();

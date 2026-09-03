@@ -7,6 +7,39 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-03 — Inventory, in eight guides (`claude/inventory-guides`)
+
+Second pack of the run, after `assets`. All seven screens plus an overview:
+`overview`, `items`, `item`, `counting`, `count`, `what-it-is-worth`,
+`deliveries-and-invoices`, `when-it-is-deducted`. No `**Area:**`, matching
+Documents at ten rather than CRM at sixteen.
+
+**The first feature where route precedence is load-bearing.** `item` claims
+`/dashboard/m/inventory/*`, the same depth as the `/counts`, `/value`,
+`/matching` and `/tax` tabs. An exact route beats a single wildcard, so each
+tab keeps its own guide and everything else one level down is an item. The test
+asserts all seven plus the two-levels-down fallback rather than trusting the
+ordering to stay put.
+
+**Vocabulary, split within one pack, deliberately.** `{{item}}` is written in
+`items.md` for the table header and the empty states, because those are the
+four places `InventoryModule.tsx` actually resolves it, and the literal
+`Add item` on the same screen, because the button does not. `{{lot}}` is
+written nowhere: the key is declared, the farm profile renames it to `Lot`,
+and `labelFor` is never called with it anywhere in `src/`, so every screen says
+`Batch` whatever a tenant asks for. Assets had the simple version of this
+question; inventory has the split one, and the answer is the same. The guide
+says what the screen says, and the pack bug is recorded.
+
+Five agents, seven screens, roughly ninety distinct message strings per screen
+group. The action-layer pass again paid for itself: `LedgerError` never enters
+the pack error map, so a closed accounting period and an accountant posting
+costed stock both surface as `Something went wrong saving that.`; the most
+useful sentence in the matching flow is thrown under a code that discards it;
+and the movement form is owner-gated over three member-level ops, directly
+under a comment saying it is ungated. All recorded in
+[inventory.md](inventory.md).
+
 ### 2026-09-03 — Assets, in three guides (`claude/assets-guides`)
 
 Founder, after the CRM set: *"now start on the packs guides."* First of the

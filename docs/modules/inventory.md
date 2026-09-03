@@ -33,6 +33,136 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-09-03 — Eight tenant guides, and what writing them found (`claude/inventory-guides`)
+
+Guides in `docs/help/inventory/` for all seven screens plus an overview:
+`overview` (the `**` fallback, 0), `items` (10), `item` (20), `counting` (30),
+`count` (40), `what-it-is-worth` (50), `deliveries-and-invoices` (60),
+`when-it-is-deducted` (70). No `**Area:**` — Documents carries ten guides
+without captions and this is eight. Five agents inventoried the screens and the
+action layer first.
+
+**The route grammar earns its precedence rule here.** `item` claims
+`/dashboard/m/inventory/*`, which is the same depth as `/counts`, `/value`,
+`/matching` and `/tax`. An exact route beats a single wildcard, so the four
+named tabs keep their own guides and everything else one level down is an item.
+`tests/guides.test.ts` asserts all seven plus the two-levels-down fallback,
+because this is the first feature where the rule is load-bearing rather than
+incidental.
+
+**Vocabulary: `{{item}}` on the hub guide, hardcoded everywhere else, and
+`{{lot}}` nowhere at all.** This is not sloppiness, it mirrors the code.
+`InventoryModule.tsx:161` resolves `item` and uses it in exactly four places —
+the table header, two empty states and the search aria-label. Every other
+screen in the pack hardcodes it, and so do the hub's own `Add item` button,
+`Add an item` dialog title and `Item added` toast. So `items.md` writes
+`{{item}}` for the column header and the literal `Add item` for the button on
+the same screen, which is exactly what a reader sees.
+
+**`labelFor(..., "lot", ...)` appears NOWHERE in `src/`.** The key is declared
+with fallback `Batch` (`packs/index.ts:112-117`) and the homestead-farm profile
+actively renames it to `Lot` (`industries/homestead-farm.ts:44`) — so a farm
+tenant is promised a rename that changes nothing on any screen, and the word
+`Batch` is hardcoded in at least a dozen strings across five files. The guides
+say `Batch`, because that is what the screen says. **Fixing the pack sweeps
+these guides in the same PR**, and the plural is hand-written (`batch`/
+`batches`) so a rename needs a plural rule the code does not have.
+
+**Bugs and contradictions the inventory found.** Cross-checked against this
+dossier; the ones it already records (`closeLot`/`mergeLot`/`recordMovement`
+dead, `wouldGoNegative` uncalled, the `editEntry` gap) are confirmed and not
+repeated.
+
+- **Recording stock in, out and adjusted is member-level on the server and
+  owner-only in the UI.** `receiveStock`, `issueStock` and `adjustStock` all
+  call `requireWrite(ctx, "member")`, the authorize doctrine says these are
+  chores done by whoever is standing in the pen, and the comment directly above
+  the gate at `[id]/page.tsx:167-171` says *"Recording stock in and out is a
+  chore and is ungated"* — and then `MovementForm` is rendered inside
+  `isOwner ? … : null`. **Counting is the only chore a staff member can
+  actually do.** Same shape as the assets maintenance panel found the same day.
+- **`LedgerError` never enters `toResult`'s vocabulary**, so two ordinary
+  situations both surface as `Something went wrong saving that.`: backdating a
+  costed movement into a closed accounting period (`PERIOD_CLOSED`, which
+  carries the date and the remedy), and an `expert` recording costed stock —
+  `allowsWrite` clears them at member level, the movement inserts, then
+  `requirePostingRight` refuses and the whole transaction rolls back with no
+  explanation.
+- **The most useful message in the matching flow is thrown under the wrong
+  code and never shown.** `that delivery is already fully invoiced, or carries
+  no cost to settle` (`ledger-ops.ts:1434-1437`) is a `NOT_FOUND`, which
+  `toResult` flattens to `That no longer exists.` — about a delivery visibly on
+  the screen the reader is looking at. Two hand-written `FORBIDDEN` sentences
+  (`only an owner can match a bill to stock`, `only an owner can unpick a bill
+  from stock`) are discarded the same way.
+- **`setTaxRule`'s unavailable-rule message is stale and contradicts its own
+  page.** `ops.ts:2139` still ends *"Only "when it is used" is applied today."*
+  while `IMPLEMENTED_TIMING_RULES` is `["consumed", "paid"]` and the card at the
+  top of the same screen correctly says `paid` changes cash-basis reports. The
+  identical wording in that page's header comment was corrected on 2026-08-26;
+  this string was missed.
+- **`LOT_CYCLE` and `descendantLotIds` are entirely unreachable.**
+  `assertParentUsable` is called once, from `createLot`, without `movingId`, so
+  it returns after the existence check; and `lotSchema` has no `parentLotId` at
+  all, so the parent path cannot be reached from the action surface. Both cycle
+  refusals and `toResult`'s `LOT_CYCLE` case are dead with it.
+  **`ALLOCATION_MISMATCH` is declared in the error union and handled in
+  `toResult`, and nothing throws it anywhere.**
+- **A zero cost correction would be told it is negative.** `adjustLotCost`
+  throws `INVALID_COST` with `a correction of nothing is not a correction`, and
+  `toResult` renders every `INVALID_COST` as `A cost cannot be negative.`
+  Masked today because Zod refuses zero first.
+- **The four count actions write no audit entry.** `startCount`,
+  `recordCountLine`, `removeCountLine` have no `logAudit` at all; only
+  `postCount` logs. Counting is the one member-level flow in the pack, so it is
+  the one where "who did this" is least obvious and least recorded.
+- **Quantity scale is enforced on five actions and silently rounded on three.**
+  `adjustStock`, `recordCountLine`, `splitLot`, `mergeLot` and `recordMovement`
+  use the `quantity` primitive and refuse a 5-decimal number; `receiveStock`,
+  `issueStock` and `matchBillLine` take a bare `z.number()` and round. The
+  primitive's own comment says it exists so a silently-rounded value is refused.
+- **A count's `Notes` is write-only.** Captured, trimmed, stored, and read back
+  by nothing anywhere in `src/`.
+- **A posted count line against a since-retired item shows the wrong unit.**
+  The page lists active items only, so the lookup misses and `unit` falls back
+  to `"each"` — `12.5 pounds` re-renders as `12.5 each` across `Counted`,
+  `Record said` and `Difference`.
+- **`postedOn` earlier than `countedOn` fails a DB CHECK** with no `min` on the
+  date field and no explanation: the reader gets `Something went wrong saving
+  that.`
+- **Re-counting the same item and batch silently overwrites**, and doing it
+  with the `Notes` box empty wipes the earlier note (`?? existing.notes` never
+  fires, because the client always sends a string).
+- **Kind pill counts include retired items; the list does not.** `listKindsInUse`
+  has no `status` predicate while the list defaults to active, so a pill reading
+  `Feed 5` can produce four rows. The enterprise pills beside it are computed
+  from the same population as the list, so one filter bar counts two different
+  things.
+- **`Going off soon` has no lower bound and caps at 12 without saying so.**
+  Stock that expired last year is in a panel headed "going off soon", and the
+  stat card above shows the truncated count, so a farm with 40 expiring batches
+  sees `12`.
+- **`formatMoney` drops the sign on three figures that are allowed to be
+  negative**: the GRNI headline (a shortfall creates a debit balance
+  deliberately), the valuation total (whose core file says negatives are summed
+  as they fall on purpose), and a credit bill line. `formatMoneySign` exists.
+- **The valuation's `As of` box does not re-sync on Back or Forward**, so the
+  page shows one date and the field another — defeating the exact behaviour the
+  component's own doc comment names as its design goal.
+- **Two words for one state.** The badge says `archived`; every control says
+  retired (`Show retired`, `Retire`, `Put back`, `Retire it`); the URL parameter
+  is `archived`.
+- **The matching empty state says `No draft bills`** and that a bill can only be
+  matched while it is a draft, but `awaiting_approval` bills are listed and are
+  matchable.
+- **A cost-correction reason is validated raw** while an adjustment reason is
+  trimmed and lowercased first, so the same word is accepted in one place and
+  refused in the other. And `createItemAction` revalidates without `"layout"`,
+  alone among the writes in the file.
+
+**Not clicked through live:** the browser pane's Clerk session is expired and
+only the founder can sign in. Everything above is read from source.
+
 ### 2026-09-01 — Saving a bill unmatched its deliveries (`claude/a-match-survives-an-edit`)
 
 **GRNI COULD BE CLEARED TWICE FOR ONE DELIVERY, AND NOTHING SAID SO.** The
@@ -1312,6 +1442,28 @@ commitment against a live animal to delivered without sitting on a shelf.
 
 ## Open items
 
+- **Staff cannot record stock in, out or adjusted**, although all three ops are
+  member-level by design and the comment above the gate says so. One prop:
+  `[id]/page.tsx:244`. Counting is the only chore they can reach.
+- **A closed period and an accountant's posting refusal both surface as
+  `Something went wrong saving that.`** `LedgerError` is not in `toResult`.
+- **The matching flow's most useful message is thrown as `NOT_FOUND`** and
+  flattened to `That no longer exists.` about a delivery on screen.
+- **`setTaxRule` still says only `when it is used` is applied.** Stale since
+  `paid` shipped, and contradicted by the card on the same page.
+- **The `lot` label is declared, renamed by the farm profile, and resolved
+  nowhere.** `item` is resolved only on the hub. Fixing either sweeps
+  `docs/help/inventory/*.md` in the same PR.
+- **The four count actions write no audit entry.**
+- **`LOT_CYCLE`, `descendantLotIds` and `ALLOCATION_MISMATCH` are unreachable
+  or never thrown.**
+- **Quantity scale is refused on five actions and silently rounded on three.**
+- **A count's notes are stored and never displayed**, and re-counting a shelf
+  with the box empty wipes the earlier note.
+- **Kind pill counts disagree with the list they filter.**
+- **`Going off soon` includes stock that already went off, and caps at 12
+  silently.**
+- **Money is rendered unsigned in three places where the value may be negative.**
 - **`capitalised_on` is set by `livestock` and by nothing else yet.** The column
   is neutral — a batch whose cost has been capitalised elsewhere is not a farm
   idea — and `valueStock` and `carriedCostByLot` both respect it. Anything else

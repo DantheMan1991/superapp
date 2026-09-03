@@ -668,6 +668,23 @@ describe("docs/help on disk", () => {
     expect(at("/dashboard/m/no-such-module")).toBeNull();
   });
 
+  it("resolves every Inventory screen to its own guide", async () => {
+    const guides = await listGuides();
+    const at = (pathname: string) => matchGuide(guides, pathname, "")?.slug ?? null;
+    expect(at("/dashboard/m/inventory")).toBe("inventory/items");
+    expect(at("/dashboard/m/inventory/abc")).toBe("inventory/item");
+    // The four named tabs sit at the same depth as the item wildcard. An exact
+    // route beats `*`, which is the whole reason `item` can claim `/*` at all.
+    expect(at("/dashboard/m/inventory/counts")).toBe("inventory/counting");
+    expect(at("/dashboard/m/inventory/value")).toBe("inventory/what-it-is-worth");
+    expect(at("/dashboard/m/inventory/matching")).toBe(
+      "inventory/deliveries-and-invoices",
+    );
+    expect(at("/dashboard/m/inventory/tax")).toBe("inventory/when-it-is-deducted");
+    expect(at("/dashboard/m/inventory/counts/abc")).toBe("inventory/count");
+    // Anything deeper falls back to the overview rather than to nothing.
+    expect(at("/dashboard/m/inventory/abc/anything")).toBe("inventory/overview");
+
   it("resolves every Assets screen to its own guide", async () => {
     const guides = await listGuides();
     const at = (pathname: string) => matchGuide(guides, pathname, "")?.slug ?? null;

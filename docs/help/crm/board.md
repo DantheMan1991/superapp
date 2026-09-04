@@ -73,7 +73,7 @@ Until an owner has opened this page, everybody else sees `No pipeline yet`. Staf
 | `That stage could not be found.` | The stage was removed while your page was open. Reload. |
 | `That stage belongs to a different pipeline.` | Reload the board. A deal can only move between stages on its own pipeline. |
 | `This record changed while you were editing it. Reload and try again.` | Somebody else changed the deal first. Reload and move it again. |
-| `Accountant access to this module is read-only.` | You are signed in as the outside accountant, who can read the board but not move anything. |
+| `Accountant access to this module is read-only.` | You are signed in as the outside accountant. The board no longer offers a control that answers this. |
 | `Invalid input` | The move was refused before it started. Reload the page. |
 | `Something went wrong. Please try again.` | Something unexpected. Nothing moved. Try again, and tell us if it keeps happening. |
 
@@ -95,4 +95,4 @@ Nothing here sends a message or an email when a deal moves. Rules can raise a fo
 
 ## Who can do what
 
-Owners see every card and can move any of them. Opening this page as an owner is what creates the first pipeline. Staff get the same board and can move deals as freely, except that a deal against a record they have not been given access to is missing from the board altogether, with no gap to show it was ever there. Only an owner can change the stages themselves, so {button:Stages|outline} opens a read-only list for everybody else. The outside accountant can read the board, and {button:Move|ghost|chevron-right} still shows on every card but answers `Accountant access to this module is read-only.`
+Owners see every card and can move any of them. Opening this page as an owner is what creates the first pipeline. Staff get the same board and can move deals as freely, except that a deal against a record they have not been given access to is missing from the board altogether, with no gap to show it was ever there. Only an owner can change the stages themselves, so {button:Stages|outline} opens a read-only list for everybody else. The outside accountant can read the board, with a line under the tabs saying so; {button:Move|ghost|chevron-right} is not drawn on any card.

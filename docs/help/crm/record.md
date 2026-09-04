@@ -129,7 +129,7 @@ To end one, click {icon:unlink} at the right of a current row. The dialog is `En
 | `That connection could not be found.` | The connection changed while your page was open. Reload. |
 | `No contact details yet.` / `No deals yet.` / `No connections yet.` | Nothing is there yet. Use the button beside the heading. |
 | `You do not have permission to do that.` | Only owners can grant or take away access. |
-| `Accountant access to this module is read-only.` | You are signed in as the outside accountant. Every button here answers this. |
+| `Accountant access to this module is read-only.` | You are signed in as the outside accountant. The page no longer offers a control that answers this. |
 
 ## Not on this page
 
@@ -137,4 +137,4 @@ Nobody owns a record. There is no field for an account manager and no page shows
 
 ## Who can do what
 
-Owners can do everything here, and only owners see `Restrict this record` and `Who can see this`. Staff can edit the fields, add and remove contact details, raise deals, make and end connections, and archive a record, on any record they can see. Staff cannot see a restricted record's CRM side at all unless an owner adds them, and cannot grant access even then. The outside accountant sees every box and button live but cannot use any of them, and gets `Accountant access to this module is read-only.` on every click.
+Owners can do everything here, and only owners see `Restrict this record` and `Who can see this`. Staff can edit the fields, add and remove contact details, raise deals, make and end connections, and archive a record, on any record they can see. Staff cannot see a restricted record's CRM side at all unless an owner adds them, and cannot grant access even then. The outside accountant reads the whole record and changes none of it. A line under the tabs says so, every box is filled in and readable but not typeable, and {button:Save|primary}, {button:Archive|outline}, `Add`, {button:Add a deal|outline}, `Add a connection` and the timeline's own buttons are not drawn.

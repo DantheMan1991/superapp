@@ -8,6 +8,8 @@ import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { WorkItemRow } from "@/components/app/work-item-row";
 import { CrmNav } from "@/modules/crm/components/crm-nav";
+import { AccountantNotice } from "@/modules/crm/components/accountant-notice";
+import { roleMayWrite } from "@/modules/crm/core/errors";
 import {
   listOpenTasksOnRecords,
   listRecentlyCompletedTasksOnRecords,
@@ -54,6 +56,9 @@ export default async function CrmFollowUpsPage() {
     isModuleEnabled(ctx.tenant.id, "work"),
   ]);
 
+  /** The same question all nine `gate()`s ask. */
+  const canWrite = roleMayWrite(ctx.role);
+
   const members = data.members.map((m) => ({
     clerkUserId: m.clerkUserId,
     label: memberLabel(m),
@@ -66,6 +71,13 @@ export default async function CrmFollowUpsPage() {
         description="What is still outstanding on your records."
       />
       <CrmNav />
+
+      {/* Every verb on this screen is `WorkItemRow`'s, so an accountant is left
+          with the list and the reason. See `timeline.tsx` for why this one is
+          stricter than its server. */}
+      {!canWrite && (
+        <AccountantNotice what="every follow-up, when it is due and who it is on" />
+      )}
 
       {data.open.length === 0 ? (
         <EmptyState
@@ -91,6 +103,7 @@ export default async function CrmFollowUpsPage() {
                   </Link>
                 )}
               </div>
+              {canWrite && (
               <WorkItemRow
                 item={{
                   id: task.id,
@@ -103,6 +116,7 @@ export default async function CrmFollowUpsPage() {
                 members={members}
                 revalidate={`${BASE}/tasks`}
               />
+              )}
             </li>
           ))}
         </ul>
@@ -120,6 +134,7 @@ export default async function CrmFollowUpsPage() {
                 <p className="min-w-0 text-sm text-muted-foreground">
                   {task.title}
                 </p>
+                {canWrite && (
                 <WorkItemRow
                   item={{
                     id: task.id,
@@ -132,6 +147,7 @@ export default async function CrmFollowUpsPage() {
                   members={members}
                   revalidate={`${BASE}/tasks`}
                 />
+                )}
               </li>
             ))}
           </ul>

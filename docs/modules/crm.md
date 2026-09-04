@@ -14,6 +14,60 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-09-04 — CRM reads, and says so (`claude/crm-reads-and-says-so`)
+
+**Twelve screens rendered every control enabled for an `expert` and refused
+every press.** All nine `gate()`s in this module have failed closed for the
+accountant since it shipped, and they were the only things that knew — not one
+screen asked, so `Add a record`, Save, Archive, Move stage, Add a deal, Add a
+connection, the timeline's four buttons, Save view, pin, delete and Save report
+all drew normally and each one came back
+`accountant access is read-only`.
+
+**`roleMayWrite` now lives in `core/errors.ts`** — pure, import-free, already
+the home of `CrmErrorCode` and already imported by every screen that renders an
+error. All nine gates call it instead of comparing the role themselves, and every
+screen calls it too.
+
+**Read-only is a rendering, and the rendering differs by screen.**
+
+- **Where the values are the point** — the record form, the deal form — the
+  controls stay and go `readOnly`, which browsers honour on text inputs and which
+  does NOT fade them. `disabled` was rejected: the UI kit puts
+  `disabled:opacity-50` on Input and Textarea, and fading a record's own values
+  at half opacity punishes the one reader who is here only to read them. The
+  pickers, which cannot be read-only, take `disabled` — there are two.
+- **Where the control is the point** — Archive, Move stage, Add, Remove, the
+  timeline buttons, Save view — it is not drawn.
+- **Where the whole page exists only to create** — `records/new` and
+  `records/[partyId]/deals/new` — the accountant gets a `Lock` panel instead of
+  the form, the way `duplicates` refuses a non-owner. A read-only rendering of a
+  create form is a form with nothing to do. This closes the recorded item
+  *`/dashboard/m/crm/records/new` has no role check at all*.
+- **Reads that look like writes stay.** Choosing a saved view, filtering, paging
+  and changing what a report asks are all just the address of the page, and all
+  keep working. Only KEEPING the question is a write.
+
+The four screens that were already owner-only — automations, duplicates, fields,
+pipelines — needed nothing: an accountant is not an owner and was already
+getting their non-owner branch.
+
+**ONE CONTROL IS NOW STRICTER THAN ITS SERVER, ON PURPOSE, AND IT IS THE NEXT
+THING TO FIX.** `WorkItemRow` — the shared follow-up row, on the record timeline
+and on `/tasks` — calls Layer 0's `setEntityWorkDoneAction`,
+`setEntityWorkAssigneeAction` and `setEntityWorkDueAction`
+(`src/lib/work/actions.ts`), and **those three apply no role rule at all**. So an
+accountant really could tick a CRM follow-up off, hand it over and re-date it;
+`docs/help/crm/tasks.md` documented it as *"the one part of CRM where accountant
+access is not read-only"*. It is hidden here, because a banner saying nothing can
+be changed above a control that changes something is worse than a control nobody
+knew they had. **The proper fix is in the seam, not here**, and it is not
+mechanical: that file's own header says *"THE GUARD IS THE OWNING FEATURE, NOT
+WORK"*, and the owning features disagree — CRM refuses an expert, a capability
+pack admits one at `member` level. See Open items.
+
+Guides swept in the same PR: all fifteen that mention the accountant.
+
 ### 2026-09-03 — A custom number field can be typed into (`claude/crm-number-field`)
 - **The number control could not be filled in on any screen that renders it**:
   the record page, `/dashboard/m/crm/records/new` and the deal form.
@@ -990,8 +1044,23 @@ values stay readable and the discontinuity is visible.
 - **Only party custom fields can be created**, so the deal form's own
   `listFieldDefs(tx, tenantId, "deal")` can never return anything, while
   the Fields page says `This appears on every record in the CRM.`
-- **The outside accountant is refused only on submit** across the module,
-  and `/dashboard/m/crm/records/new` has no role check at all.
+- ~~**The outside accountant is refused only on submit** across the module,
+  and `/dashboard/m/crm/records/new` has no role check at all.~~ — **fixed
+  2026-09-04**; see the build log.
+- **`src/lib/work/actions.ts` APPLIES NO ROLE RULE, and it is a Layer 0 seam.**
+  `setEntityWorkDoneAction`, `setEntityWorkAssigneeAction` and
+  `setEntityWorkDueAction` check the module is enabled and nothing else, so any
+  role that can see a `WorkItemRow` can work it — a CRM follow-up included, where
+  every other write is refused for `expert`. CRM's screens hide the row from an
+  accountant now, which makes them stricter than their server; that is a
+  deliberate holding position, not the fix. **The fix needs a decision the file's
+  own header points at**: it says the guard is the OWNING FEATURE, and the owning
+  features disagree about this role — CRM, Documents, Scheduling and Work all
+  refuse `expert`, while a capability pack admits one at `member` level
+  (`src/lib/packs/authorize.ts`, settled 2026-09-03). So the seam needs to ask the
+  owning feature for its rule rather than pick one, which is a registry keyed on
+  `extensionSlug` and wants its own slice. The same shape as the photo gate found
+  on 2026-09-04 — see [documents.md](documents.md).
 
 - **`party_addresses` is still deferred, and now deliberately rather than by
   omission.** Contact points landed because two features needed them; nothing

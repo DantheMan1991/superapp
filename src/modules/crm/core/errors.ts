@@ -169,3 +169,32 @@ export function friendlyMessage(err: unknown): string {
       return "Accountant access to this module is read-only.";
   }
 }
+
+/**
+ * The roles `requireTenant()` resolves. Inlined to keep this file import-free —
+ * `@/lib/auth` is `server-only` and this module is imported by client
+ * renderers. Same reasoning as `src/lib/packs/authorize.ts`.
+ */
+export type CrmRole = "owner" | "staff" | "expert";
+
+/**
+ * **May this ROLE write to the CRM at all?**
+ *
+ * `expert` — the platform's own bookkeeper working inside a client workspace —
+ * is read-only here, as it is in Documents, Scheduling and Work. Every one of
+ * this module's eight `gate()`s already said so; none of its twelve screens
+ * asked, so an accountant got every control enabled and
+ * `accountant access is read-only` on submit.
+ *
+ * **NOT THE SAME QUESTION AS `isOwner`.** Several actions here are deliberately
+ * NOT owner-only — a saved view and a saved report are somebody's own way of
+ * working, and `view-actions.ts` and `report-actions.ts` both say so. This asks
+ * whether the reader may write anything at all, which is asked first.
+ *
+ * Exported so a screen can ask the same question the gate asks, rather than
+ * restating it as a role comparison and drifting from it.
+ */
+export function roleMayWrite(role: CrmRole): boolean {
+  return role !== "expert";
+}
+

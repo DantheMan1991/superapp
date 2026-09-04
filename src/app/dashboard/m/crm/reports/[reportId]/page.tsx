@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { PageHeader } from "@/components/app/page-header";
 import { CrmNav } from "@/modules/crm/components/crm-nav";
+import { roleMayWrite } from "@/modules/crm/core/errors";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -174,12 +175,17 @@ export default async function ReportPage({
           The one client component on the page, and it earns its place: naming
           a thing needs a text box. Everything else stayed a link.
         */}
-        <SaveReport
-          definition={definition}
-          savedReportId={saved && !saved.isBuiltIn ? saved.id : null}
-          canDelete={!!saved && !saved.isBuiltIn && saved.isMine}
-          total={result.summary.total}
-        />
+        {/* Changing what the report ASKS is a link and stays — the question
+            lives in the URL, and running one is a read. Only KEEPING the
+            question is a write. */}
+        {roleMayWrite(ctx.role) && (
+          <SaveReport
+            definition={definition}
+            savedReportId={saved && !saved.isBuiltIn ? saved.id : null}
+            canDelete={!!saved && !saved.isBuiltIn && saved.isMine}
+            total={result.summary.total}
+          />
+        )}
       </div>
 
       <div className="rounded-md border">

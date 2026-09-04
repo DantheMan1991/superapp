@@ -41,6 +41,7 @@ export function Timeline({
   partyId,
   members = [],
   revalidate,
+  canWrite = true,
 }: {
   items: TimelineItem[];
   /** For the delete control — only activities carry one. */
@@ -55,6 +56,22 @@ export function Timeline({
   members?: Array<{ clerkUserId: string; label: string }>;
   /** The route the shared verbs refresh after a change. */
   revalidate?: string;
+  /**
+   * `roleMayWrite(role)`. The timeline itself is a read and stays whole; what
+   * goes is the follow-up row's Done / reassign / re-due and the activity's
+   * Delete.
+   *
+   * **THE FOLLOW-UP ROW IS THE ONE PLACE THIS SCREEN IS STRICTER THAN ITS
+   * SERVER.** `WorkItemRow` calls Layer 0's `setEntityWork*Action`
+   * (`src/lib/work/actions.ts`), which applies no role rule at all — so an
+   * accountant can in fact work a CRM follow-up today. That is a gap in the
+   * shared seam rather than in this module, and closing it needs the owning
+   * feature's rule (CRM says no, a pack says yes), which is a design question
+   * and not this PR's. Hidden here meanwhile, because a banner saying nothing
+   * can be changed above a control that changes something is worse than a
+   * control an accountant did not know they had.
+   */
+  canWrite?: boolean;
 }) {
   if (items.length === 0) {
     return (
@@ -103,7 +120,7 @@ export function Timeline({
               </p>
             </div>
 
-            {task && (
+            {task && canWrite && (
               // THE SHARED ROW, not a CRM-only control. Done, reopen,
               // reassign and re-due all happen here, in the timeline, so a
               // follow-up raised on a record can be worked without leaving
@@ -121,7 +138,7 @@ export function Timeline({
                 revalidate={revalidate}
               />
             )}
-            {activity && (
+            {activity && canWrite && (
               <DeleteActivityButton activityId={activity.id} partyId={partyId} />
             )}
           </li>

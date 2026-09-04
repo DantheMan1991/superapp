@@ -8,7 +8,7 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
 import { listAssignableMembers, memberLabel } from "@/lib/team";
 import { todayInTimezone } from "@/lib/timezone";
-import { CrmError, friendlyMessage } from "./core/errors";
+import { CrmError, friendlyMessage, roleMayWrite} from "./core/errors";
 import { logActivity, createTask } from "./timeline-ops";
 import type { CrmCtx } from "./core/types";
 import { callExtractNoteModel, gatherNoteInput, type NoteGathered } from "./ai/extract-note";
@@ -36,7 +36,7 @@ import {
 async function gate(): Promise<CrmCtx & { timezone: string }> {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "crm");
-  if (ctx.role === "expert") {
+  if (!roleMayWrite(ctx.role)) {
     throw new CrmError("FORBIDDEN_EXPERT", "accountant access is read-only");
   }
   return {

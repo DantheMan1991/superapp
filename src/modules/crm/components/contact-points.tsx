@@ -37,10 +37,13 @@ const KINDS: PartyContactKind[] = ["email", "phone", "website"];
  */
 export function ContactPoints({
   partyId,
+  canWrite = true,
   points,
 }: {
   partyId: string;
   points: PartyContactPoint[];
+  /** `roleMayWrite(role)`. False keeps every number and drops Add/Main/Remove. */
+  canWrite?: boolean;
 }) {
   const router = useRouter();
   const [adding, setAdding] = useState(false);
@@ -102,7 +105,7 @@ export function ContactPoints({
             Shared with Accounting and offered when composing mail.
           </p>
         </div>
-        {!adding && (
+        {canWrite && !adding && (
           <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
             <Plus className="mr-2 size-4" />
             Add
@@ -118,7 +121,12 @@ export function ContactPoints({
         points.length > 0 && (
           <ul className="divide-y rounded-md border">
             {points.map((point) => (
-              <ContactRow key={point.id} point={point} partyId={partyId} />
+              <ContactRow
+                key={point.id}
+                point={point}
+                partyId={partyId}
+                canWrite={canWrite}
+              />
             ))}
           </ul>
         )
@@ -232,9 +240,12 @@ export function ContactPoints({
 function ContactRow({
   point,
   partyId,
+  canWrite,
 }: {
   point: PartyContactPoint;
   partyId: string;
+  /** False keeps the number and the label and drops Make primary / Remove. */
+  canWrite: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -249,9 +260,11 @@ function ContactRow({
         </p>
       </div>
 
+      {/* The Main badge is a FACT about the row and stays for everybody. The
+          button that would change it does not. */}
       {point.isPrimary ? (
         <Badge variant="secondary">Main</Badge>
-      ) : (
+      ) : canWrite ? (
         <Button
           variant="ghost"
           size="sm"
@@ -273,8 +286,9 @@ function ContactRow({
         >
           <Star className="size-4" />
         </Button>
-      )}
+      ) : null}
 
+      {canWrite && (
       <Button
         variant="ghost"
         size="sm"
@@ -301,6 +315,7 @@ function ContactRow({
           <Trash2 className="size-4" />
         )}
       </Button>
+      )}
     </li>
   );
 }

@@ -11,9 +11,10 @@ import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
 import { EmptyState } from "@/components/app/empty-state";
 import { CrmNav } from "@/modules/crm/components/crm-nav";
+import { AccountantNotice } from "@/modules/crm/components/accountant-notice";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { CrmError } from "@/modules/crm/core/errors";
+import { CrmError, roleMayWrite } from "@/modules/crm/core/errors";
 import { loadRecord } from "@/modules/crm/party-ops";
 import { listDealsForParty } from "@/modules/crm/deal-ops";
 import {
@@ -96,6 +97,14 @@ export default async function RecordPage({
     isVendor,
   } = record;
   const isOwner = ctx.role === "owner";
+  /**
+   * **NOT THE SAME QUESTION AS `isOwner`.** That one decides whether this
+   * reader may adopt a record into the CRM and see who it is shared with; this
+   * one decides whether they may change anything at all. An accountant is
+   * neither, and until 2026-09-04 this page asked only the first — so every
+   * control below drew for them and every press was refused.
+   */
+  const canWrite = roleMayWrite(ctx.role);
   const current = affiliations.filter((a) => !a.affiliation.endedOn);
   const former = affiliations.filter((a) => a.affiliation.endedOn);
 
@@ -126,18 +135,24 @@ export default async function RecordPage({
           </span>
         }
         actions={
-          <>
-            {!details && <AdoptButton partyId={party.id} />}
-            <ArchiveButton
-              partyId={party.id}
-              partyVersion={party.version}
-              isActive={party.isActive}
-            />
-          </>
+          canWrite ? (
+            <>
+              {!details && <AdoptButton partyId={party.id} />}
+              <ArchiveButton
+                partyId={party.id}
+                partyVersion={party.version}
+                isActive={party.isActive}
+              />
+            </>
+          ) : null
         }
       />
 
       <CrmNav />
+
+      {!canWrite && (
+        <AccountantNotice what="this record, its timeline and its deals" />
+      )}
 
       {!details ? (
         <Panel>
@@ -149,7 +164,9 @@ export default async function RecordPage({
                 ? "Add it to track a stage, notes and connections."
                 : "You can see who this is, but not what the CRM holds on them — either nobody has worked this record yet, or it is restricted."
             }
-            action={isOwner ? <AdoptButton partyId={party.id} /> : undefined}
+            action={
+              isOwner && canWrite ? <AdoptButton partyId={party.id} /> : undefined
+            }
           />
         </Panel>
       ) : (
@@ -160,6 +177,7 @@ export default async function RecordPage({
             partyVersion={party.version}
             detailsVersion={details.version}
             isOwner={isOwner}
+            canWrite={canWrite}
             fieldDefs={fieldDefs}
             // Stored values may include ids whose definition has since been
             // archived. They are passed through untouched and simply not
@@ -181,14 +199,18 @@ export default async function RecordPage({
 
           <Separator />
 
-          <ContactPoints partyId={party.id} points={contactPoints} />
+          <ContactPoints
+            partyId={party.id}
+            points={contactPoints}
+            canWrite={canWrite}
+          />
 
           {/*
             Only where it means something: a restricted record, seen by an
             owner. On a `members` record everybody can already see everything,
             so the panel would be a control that does nothing.
           */}
-          {isOwner && details.visibility === "restricted" && (
+          {isOwner && canWrite && details.visibility === "restricted" && (
             <>
               <Separator />
               <RecordAccess
@@ -214,6 +236,8 @@ export default async function RecordPage({
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                {canWrite && (
+                <>
                 <NoteExtractor
                   partyId={party.id}
                   members={record.members.map((m) => ({
@@ -230,6 +254,8 @@ export default async function RecordPage({
                   }))}
                   currentUserId={ctx.userId}
                 />
+                </>
+                )}
               </div>
             </div>
 
@@ -246,6 +272,7 @@ export default async function RecordPage({
                 label: memberLabel(m),
               }))}
               revalidate={`/dashboard/m/crm/records/${party.id}`}
+              canWrite={canWrite}
             />
           </section>
 
@@ -259,12 +286,14 @@ export default async function RecordPage({
                   Work in front of this record, and what came of it.
                 </p>
               </div>
-              <Button asChild variant="outline" size="sm">
-                <Link href={`${BASE}/records/${party.id}/deals/new`}>
-                  <Plus className="mr-2 size-4" />
-                  Add a deal
-                </Link>
-              </Button>
+              {canWrite && (
+                <Button asChild variant="outline" size="sm">
+                  <Link href={`${BASE}/records/${party.id}/deals/new`}>
+                    <Plus className="mr-2 size-4" />
+                    Add a deal
+                  </Link>
+                </Button>
+              )}
             </div>
 
             {deals.length === 0 ? (
@@ -314,7 +343,9 @@ export default async function RecordPage({
                     : "Who works here, and who used to."}
                 </p>
               </div>
-              <AddAffiliationButton partyId={party.id} partyKind={party.kind} />
+              {canWrite && (
+                <AddAffiliationButton partyId={party.id} partyKind={party.kind} />
+              )}
             </div>
 
             {affiliations.length === 0 ? (
@@ -343,7 +374,7 @@ export default async function RecordPage({
                     {affiliation.isPrimary && !affiliation.endedOn && (
                       <Badge variant="secondary">Primary</Badge>
                     )}
-                    {!affiliation.endedOn && (
+                    {canWrite && !affiliation.endedOn && (
                       <EndAffiliationButton
                         affiliationId={affiliation.id}
                         expectedVersion={affiliation.version}

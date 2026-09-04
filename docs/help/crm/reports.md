@@ -80,4 +80,4 @@ The five things you can count are fixed, and you cannot add a sixth. Ask us if t
 
 ## Who can do what
 
-Owners and staff see the same list and can open every report on it. Both save their own reports and share them, and each of you can delete only the ones you saved yourself. Being an owner adds nothing here. The outside accountant can open this page and read any report on it, and saving or deleting answers `Accountant access to this module is read-only.`
+Owners and staff see the same list and can open every report on it. Both save their own reports and share them, and each of you can delete only the ones you saved yourself. Being an owner adds nothing here. The outside accountant can open this page and read any report on it. Saving and deleting are not offered to them.

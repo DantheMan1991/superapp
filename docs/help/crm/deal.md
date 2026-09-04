@@ -80,7 +80,7 @@ The stages themselves, and their order, are set up by an owner in [Stages](pipel
 | `That stage could not be found.` | The stage was archived or removed while your page was open. Reload. |
 | `That stage belongs to a different pipeline.` | Your page is out of date. Reload. |
 | `Nothing recorded yet.` | Under `History`, when this deal has no stage lines at all. Every deal raised in the app gets one when it is created, so you should not see it. |
-| `Accountant access to this module is read-only.` | You are signed in as the outside accountant. Nothing here can be changed. |
+| `Accountant access to this module is read-only.` | You are signed in as the outside accountant. The page no longer offers a control that answers this. |
 | `Something went wrong. Please try again.` | Something unexpected went wrong and nothing was stored. Try again, and tell us if it keeps happening. |
 | `Page not found` | The deal has gone, or it sits on a record somebody restricted and you were not given access to it. |
 
@@ -96,4 +96,4 @@ The stage cannot be changed from the form. The menu is the only way, on purpose,
 
 ## Who can do what
 
-Owners and staff get exactly the same page and can do all of it: change the boxes, save, and move the deal between stages. Neither can delete one. Accountants see the page, and {button:Save|primary} and {button:Move stage|ghost|chevron-right} both answer `Accountant access to this module is read-only.` A deal against a record somebody restricted is invisible to staff who were not given access to that record, and its link answers `Page not found` rather than saying they are not allowed.
+Owners and staff get exactly the same page and can do all of it: change the boxes, save, and move the deal between stages. Neither can delete one. Accountants read the page — every figure legible, a line under the tabs saying so — and neither {button:Save|primary} nor {button:Move stage|ghost|chevron-right} is drawn. A deal against a record somebody restricted is invisible to staff who were not given access to that record, and its link answers `Page not found` rather than saying they are not allowed.

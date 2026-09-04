@@ -1,8 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
+import { Lock } from "lucide-react";
 import { PageHeader } from "@/components/app/page-header";
+import { Panel } from "@/components/app/panel";
+import { EmptyState } from "@/components/app/empty-state";
 import { CrmNav } from "@/modules/crm/components/crm-nav";
+import { roleMayWrite } from "@/modules/crm/core/errors";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -32,6 +36,27 @@ export default async function NewDealPage({
   const { partyId } = await params;
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "crm");
+
+  /**
+   * **THIS PAGE EXISTS ONLY TO CREATE**, so a read-only rendering of it would
+   * be a form with nothing to do. Refused whole, the way `duplicates` refuses a
+   * non-owner.
+   */
+  if (!roleMayWrite(ctx.role)) {
+    return (
+      <div className="mx-auto w-full max-w-3xl space-y-6">
+        <PageHeader title="Add a deal" />
+        <CrmNav />
+        <Panel>
+          <EmptyState
+            icon={<Lock />}
+            title="Accountant access is read-only"
+            description="You can open every deal in the CRM and read everything on it. Adding one is not something this role does."
+          />
+        </Panel>
+      </div>
+    );
+  }
 
   const data = await withTenant(
     ctx.tenant.id,

@@ -81,4 +81,4 @@ You get one set of steps and you cannot make a second. There is no button that a
 
 ## Who can do what
 
-Owners do everything on this page. Staff and the outside accountant see the steps still in use and the line under each one, with the note `Only an owner can change these.` They get no buttons, and steps under `Archived` are hidden from them entirely. Owners and staff can move a deal between steps on the board, whatever they can do here. The accountant cannot move one.
+Owners do everything on this page. Staff and the outside accountant see the steps still in use and the line under each one, with the note `Only an owner can change these.` They get no buttons, and steps under `Archived` are hidden from them entirely. Owners and staff can move a deal between steps on the board, whatever they can do here. The accountant is not offered the control.

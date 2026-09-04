@@ -7,7 +7,7 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
 import { parseMoneyToCents } from "@/lib/money";
-import { CrmError, friendlyMessage } from "./core/errors";
+import { CrmError, friendlyMessage, roleMayWrite} from "./core/errors";
 import {
   DEAL_TITLE_MAX,
   PIPELINE_NAME_MAX,
@@ -47,7 +47,7 @@ type ActionResult<T = undefined> =
 async function gate(opts?: { ownerOnly?: boolean }): Promise<CrmCtx> {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "crm");
-  if (ctx.role === "expert") {
+  if (!roleMayWrite(ctx.role)) {
     throw new CrmError("FORBIDDEN_EXPERT", "accountant access is read-only");
   }
   if (opts?.ownerOnly && ctx.role !== "owner") {

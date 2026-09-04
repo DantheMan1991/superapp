@@ -31,6 +31,7 @@ export interface DealFormValues {
  * second one.
  */
 export function DealForm({
+  canWrite = true,
   mode,
   dealId,
   dealVersion,
@@ -40,6 +41,8 @@ export function DealForm({
   fieldDefs = [],
   initialCustom = {},
 }: {
+  /** `roleMayWrite(role)`. False leaves the figures legible and drops Save. */
+  canWrite?: boolean;
   mode: "create" | "edit";
   dealId?: string;
   dealVersion?: number;
@@ -120,6 +123,7 @@ export function DealForm({
       <div className="space-y-2">
         <Label htmlFor="crm-deal-title">What is it</Label>
         <Input
+          readOnly={!canWrite}
           id="crm-deal-title"
           value={values.title}
           onChange={(e) => setValues((v) => ({ ...v, title: e.target.value }))}
@@ -131,6 +135,7 @@ export function DealForm({
         <div className="space-y-2">
           <Label htmlFor="crm-deal-amount">Amount</Label>
           <Input
+          readOnly={!canWrite}
             id="crm-deal-amount"
             inputMode="decimal"
             value={values.amount}
@@ -141,6 +146,7 @@ export function DealForm({
         <div className="space-y-2">
           <Label htmlFor="crm-deal-close">Expected close</Label>
           <Input
+          readOnly={!canWrite}
             id="crm-deal-close"
             type="date"
             value={values.expectedCloseOn}
@@ -156,9 +162,10 @@ export function DealForm({
         values={custom}
         issues={fieldIssues}
         onChange={setCustomValue}
-        disabled={pending}
+        disabled={pending || !canWrite}
       />
 
+      {canWrite && (
       <div className="flex items-center gap-2">
         <Button onClick={submit} disabled={pending}>
           {pending && <Loader2 className="mr-2 size-4 animate-spin" />}
@@ -176,6 +183,7 @@ export function DealForm({
           Cancel
         </Button>
       </div>
+      )}
     </div>
   );
 }

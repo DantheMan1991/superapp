@@ -61,15 +61,12 @@ export function Timeline({
    * goes is the follow-up row's Done / reassign / re-due and the activity's
    * Delete.
    *
-   * **THE FOLLOW-UP ROW IS THE ONE PLACE THIS SCREEN IS STRICTER THAN ITS
-   * SERVER.** `WorkItemRow` calls Layer 0's `setEntityWork*Action`
-   * (`src/lib/work/actions.ts`), which applies no role rule at all — so an
-   * accountant can in fact work a CRM follow-up today. That is a gap in the
-   * shared seam rather than in this module, and closing it needs the owning
-   * feature's rule (CRM says no, a pack says yes), which is a design question
-   * and not this PR's. Hidden here meanwhile, because a banner saying nothing
-   * can be changed above a control that changes something is worse than a
-   * control an accountant did not know they had.
+   * The follow-up row was hidden here a day before its server agreed:
+   * `WorkItemRow` calls Layer 0's `setEntityWork*Action`, and those applied no
+   * role rule at all. **They ask the owning feature's rule now**
+   * (`ownerFeatureAllowsWrite`), and for a CRM record the owning feature is
+   * CRM, which refuses the accountant — so this prop and that server now say
+   * the same thing.
    */
   canWrite?: boolean;
 }) {

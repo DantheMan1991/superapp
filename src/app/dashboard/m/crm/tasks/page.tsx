@@ -73,8 +73,8 @@ export default async function CrmFollowUpsPage() {
       <CrmNav />
 
       {/* Every verb on this screen is `WorkItemRow`'s, so an accountant is left
-          with the list and the reason. See `timeline.tsx` for why this one is
-          stricter than its server. */}
+          with the list and the reason. Layer 0 refuses them too since
+          2026-09-04 — see `ownerFeatureAllowsWrite`. */}
       {!canWrite && (
         <AccountantNotice what="every follow-up, when it is due and who it is on" />
       )}

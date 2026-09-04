@@ -464,3 +464,40 @@ export async function relinkEntity(
     .set({ entityType: to.entityType, entityId: to.entityId })
     .where(scope);
 }
+
+/**
+ * The CATEGORIES of the features that own this work item — one entry per
+ * distinct owner, `null` for a link whose slug is not in the registry.
+ *
+ * **A LEFT JOIN, DELIBERATELY.** An inner join would drop a link whose
+ * `extension_slug` names nothing, and a dropped row means "no owner objected",
+ * which is the permissive answer to a question nobody could answer. `null`
+ * comes back instead and `ownerFeatureAllowsWrite` treats it as a core module,
+ * which is the strict one.
+ *
+ * **AN ITEM WITH NO LINKS RETURNS AN EMPTY LIST**, and that is correct rather
+ * than a gap: an unlinked item is the Work module's own, and Work refuses the
+ * accountant. The caller's `.every()` over an empty list is `true`, so the
+ * caller adds Work's rule itself — see `assertOwnersAllowWrite`.
+ */
+export async function owningCategories(
+  tx: Tx,
+  tenantId: string,
+  itemId: string,
+): Promise<(string | null)[]> {
+  const rows = await tx
+    .selectDistinct({ category: schema.modules.category })
+    .from(schema.workItemLinks)
+    .leftJoin(
+      schema.modules,
+      eq(schema.modules.id, schema.workItemLinks.extensionSlug),
+    )
+    .where(
+      and(
+        eq(schema.workItemLinks.tenantId, tenantId),
+        eq(schema.workItemLinks.itemId, itemId),
+      ),
+    );
+  return rows.map((r) => r.category);
+}
+

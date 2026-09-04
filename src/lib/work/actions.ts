@@ -3,12 +3,15 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { withWork } from "@/lib/work/with-work";
-import { requireTenant } from "@/lib/auth";
-import { isModuleEnabled } from "@/lib/modules";
+import { withTenant } from "@/db";
+import { requireTenant, type TenantRole } from "@/lib/auth";
+import { isModuleEnabled, moduleCategory } from "@/lib/modules";
+import { ownerFeatureAllowsWrite } from "@/lib/packs/authorize";
 import { logAudit } from "@/lib/audit";
 import { WorkError } from "@/lib/work/errors";
 import {
   createWorkForEntity,
+  owningCategories,
   setWorkAssignee,
   updateEntityWork,
 } from "@/lib/work/entity-work";
@@ -107,6 +110,45 @@ const addSchema = entityRef.extend({
   revalidate: z.string().max(500).optional(),
 });
 
+/**
+ * **WHOSE ROLE RULE APPLIES, AND THE ANSWER IS THE OWNING FEATURE'S.**
+ *
+ * The header above says the guard is the owning feature. That was true of
+ * whether the feature is switched ON and was never true of the ROLE: these verbs
+ * asked no role question at all, so an accountant could tick off, hand over and
+ * re-date a CRM follow-up, in a module where every other write refuses them.
+ * `docs/help/crm/tasks.md` documented it as the one part of CRM that was not
+ * read-only. Fixed 2026-09-04.
+ *
+ * The two kinds of owner disagree on purpose — a core module refuses `expert`,
+ * a capability pack admits one at `member` level — so this asks the DATABASE
+ * which kind each owner is (`modules.category`) rather than picking a side. See
+ * `ownerFeatureAllowsWrite`.
+ *
+ * **EVERY OWNER MUST ALLOW IT.** An item linked to a CRM record and to a tractor
+ * is refused if either says no. The alternative — any owner is enough — would
+ * make attaching a second record a way to widen who may change the first, which
+ * is a permission granted by a link.
+ *
+ * **AND THE WORK MODULE'S OWN RULE IS APPLIED TO AN UNLINKED ITEM.** No links
+ * means nobody raised it from a record, which makes it Work's, and Work refuses
+ * the accountant. Without this line an empty list would vacuously pass.
+ */
+async function assertOwnersAllowWrite(
+  tenantId: string,
+  role: TenantRole,
+  itemId: string,
+): Promise<string | null> {
+  const categories = await withTenant(tenantId, (tx) =>
+    owningCategories(tx, tenantId, itemId),
+  );
+  const owners = categories.length === 0 ? ["core"] : categories;
+  const allowed = owners.every((c) =>
+    ownerFeatureAllowsWrite(c ?? "core", role),
+  );
+  return allowed ? null : "You do not have access to do that.";
+}
+
 export async function addEntityWorkAction(input: unknown) {
   const ctx = await requireTenant();
   const parsed = addSchema.safeParse(input);
@@ -116,6 +158,17 @@ export async function addEntityWorkAction(input: unknown) {
 
   const blocked = await assertFeatureOn(ctx.tenant.id, extensionSlug);
   if (blocked) return { error: blocked };
+
+  /*
+   * The same rule as the three verbs below, asked the cheap way: this action is
+   * TOLD which feature owns the record, so there is nothing to look up. Raising
+   * a follow-up on a CRM record was open to the accountant for the same reason
+   * ticking one off was.
+   */
+  const category = await moduleCategory(ctx.tenant.id, extensionSlug);
+  if (!ownerFeatureAllowsWrite(category ?? "core", ctx.role)) {
+    return { error: "You do not have access to do that." };
+  }
 
   try {
     const itemId = await withWork(
@@ -169,6 +222,13 @@ export async function setEntityWorkDoneAction(input: unknown) {
   const ctx = await requireTenant();
   const parsed = stateSchema.safeParse(input);
   if (!parsed.success) return { error: "Could not update that." };
+
+  const refused = await assertOwnersAllowWrite(
+    ctx.tenant.id,
+    ctx.role,
+    parsed.data.itemId,
+  );
+  if (refused) return { error: refused };
 
   try {
     await withWork(
@@ -225,6 +285,13 @@ export async function setEntityWorkAssigneeAction(input: unknown) {
   const parsed = assigneeSchema.safeParse(input);
   if (!parsed.success) return { error: "Could not reassign that." };
 
+  const refused = await assertOwnersAllowWrite(
+    ctx.tenant.id,
+    ctx.role,
+    parsed.data.itemId,
+  );
+  if (refused) return { error: refused };
+
   try {
     await withWork(
       { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role },
@@ -254,6 +321,13 @@ export async function setEntityWorkDueAction(input: unknown) {
   const ctx = await requireTenant();
   const parsed = dueSchema.safeParse(input);
   if (!parsed.success) return { error: "Pick a date." };
+
+  const refused = await assertOwnersAllowWrite(
+    ctx.tenant.id,
+    ctx.role,
+    parsed.data.itemId,
+  );
+  if (refused) return { error: refused };
 
   try {
     await withWork(

@@ -1,5 +1,6 @@
 import "server-only";
 import { renderInvoicePdf } from "./invoice-pdf";
+import type { InvoicePdfBrand } from "./invoice-pdf-model";
 import { buildReminderEmail, type ReminderEmail } from "./reminder-email";
 import type { DueReminder } from "./reminder-run";
 
@@ -26,6 +27,13 @@ export interface ReminderRenderContext {
    * chased for. Both callers have a `tx` where they build this.
    */
   tax: { subtotalCents: number; taxCents: number; taxLabel: string };
+  /**
+   * The brand kit, with the logo's bytes already fetched. REQUIRED for the
+   * same reason `tax` is: the chasing letter must attach the invoice as the
+   * customer received it, logo and all, and a caller that could omit this
+   * would attach a plainer one.
+   */
+  brand: InvoicePdfBrand;
   lines: ReadonlyArray<{
     description: string;
     /** A decimal string, not a number — see `lines.ts` (P15/P16). */
@@ -55,6 +63,7 @@ export async function renderReminderMessage(
   // notice would be their bookkeeper.
   const pdf = await renderInvoicePdf({
     businessName: ctx.businessName,
+    brand: ctx.brand,
     invoiceNumber: due.invoiceNumber,
     status: due.status,
     issueDate: due.issueDate,

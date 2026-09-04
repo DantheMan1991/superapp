@@ -21,6 +21,17 @@ tokens and gets its own pass later.
 
 ## Build log
 
+### 2026-09-04 — Marketing's accent, and `hello` gives up its hue (`claude/brand-kit-at-layer-0`)
+
+- `--accent-marketing` is 320 in both themes. The fourteen-hue set had no gap
+  of 20° left, so instead of squeezing a fifteenth in, the stub module `hello`
+  — never switched on for a client — moved to 95, the yellow-green nobody
+  wanted for a visible pack, and Marketing took 320. Sorted, the visible set
+  still has 20° as its tightest gap.
+- `megaphone` added to `icon-registry.ts` in the same commit as the module,
+  and `image-up` to `guide-icons.ts` for the brand guide's upload button — the
+  two seams this file says a new module has to touch.
+
 ### 2026-09-03 — The guide draws the real controls, and the panel docks (`claude/real-buttons-in-the-guides`)
 
 Two changes the guides needed ([guides.md](guides.md)) that touch primitives.

@@ -30,6 +30,9 @@ export * from "./work";
 // charging the tenant — is `subscriptions` in platform.ts, and the two must
 // never get tangled. See ADR 0015.
 export * from "./payments";
+// Layer 0 identity: the logo, colours and tagline every consumer reads through
+// `src/lib/brand/`. Edited by the Marketing module, owned by nobody's module.
+export * from "./brand";
 // Layer 2a — pack-owned tables. Same rules as any domain above; the separation
 // that matters is in `src/packs/`, where the code lives.
 export * from "./assets";

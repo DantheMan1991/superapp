@@ -18,6 +18,7 @@ import {
   // for a lookup in here. lucide exports `Map as LucideMap` too; the name below
   // is the one the rest of the codebase would guess.
   Map as MapIcon,
+  Megaphone,
   ScrollText,
   Settings,
   Sparkles,
@@ -84,6 +85,7 @@ export const ICONS: Record<string, LucideIcon> = {
   folder: FolderOpen,
   mail: Mail,
   map: MapIcon,
+  megaphone: Megaphone,
   settings: Settings,
   sparkles: Sparkles,
   sprout: Sprout,

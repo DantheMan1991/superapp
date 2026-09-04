@@ -11,6 +11,7 @@ import {
   sentOffsetsFromKeys,
   testSubject,
 } from "./reminder-email";
+import { loadInvoiceBrand, withLogoBytes } from "./invoice-brand";
 import { renderReminderMessage } from "./reminder-render";
 import { invoiceTaxFields } from "./invoices";
 import { nextReminder, parseOffsets } from "./reminder-schedule";
@@ -140,10 +141,9 @@ export async function sendTestReminder(
   const contacts = customer
     ? await listContactPoints(tx, ctx.tenantId, customer.partyId)
     : [];
-  const tenant = await tx.query.tenants.findFirst({
-    where: eq(schema.tenants.id, ctx.tenantId),
-    columns: { name: true },
-  });
+  // The brand the real reminder would carry — the same resolver the sweep
+  // uses, for the same reason the tax resolver is shared.
+  const brand = await loadInvoiceBrand(tx, ctx.tenantId, invoice.entityId);
 
   // The owner's OWN address, from profiles. Never a parameter.
   const profile = await tx.query.profiles.findFirst({
@@ -174,7 +174,8 @@ export async function sendTestReminder(
   };
 
   const { email, pdf } = await renderReminderMessage(due, {
-    businessName: tenant?.name ?? "",
+    businessName: brand.businessName,
+    brand: await withLogoBytes(brand),
     customerAddress: customer?.address ?? "",
     customerEmail: preferredContactValue(contacts, "email") ?? "",
     // The same resolver the sweep uses, so the preview shows the tax the real

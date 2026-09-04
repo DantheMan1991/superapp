@@ -13,6 +13,27 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-04 — The invoice PDF carries the brand kit (`claude/brand-kit-at-layer-0`)
+
+The first consumer of the Layer 0 brand kit
+([ADR 0018](../decisions/0018-the-brand-kit-is-layer-0-data.md), dossier in
+[marketing.md](marketing.md)). All three paths that render an invoice PDF —
+the `/api/accounting/invoices/[id]/pdf` route, `send-invoice.ts` and the
+reminder sweep plus its test-send — read the kit through
+`invoicing/invoice-brand.ts`: `loadInvoiceBrand` resolves the row for the
+invoice's company INSIDE the transaction, `withLogoBytes` fetches the logo
+AFTER it (a blob read is a network call). The model (`invoice-pdf-model.ts`)
+grew `InvoicePdfBrand`, `INVOICE_INK` and `INVOICE_LOGO_BOX`: logo top-left
+fitted into 160×56pt, heading and rules in the primary colour — the heading
+only when it reads on white, the rules always — and the tagline under the
+name. **The business name on the document and in the email is now the kit's
+display name, falling back to the tenant's name**, which is exactly what it
+printed before. `ReminderRenderContext.brand` is REQUIRED for the reason
+`tax` is; the sweep caches one tenant's logo bytes per run. Accounting
+imports `@/lib/brand` and knows nothing about Marketing. Verified: four new
+model cases and a real render with an embedded PNG (`tests/invoice-pdf*.ts`).
+The invoice guide's PDF line says what the document now carries.
+
 ### 2026-09-03 — The Reports, Close, Companies and Recurring guides rewritten to the new voice (`claude/sweep-accounting-reports-and-close`)
 
 No code change. The twelve guides for the reports hub and the seven reports,

@@ -1,3 +1,4 @@
+import { fitLogo, readableOnWhite, type HexColor } from "@/lib/brand/core";
 import { formatCents } from "@/lib/money";
 
 /**
@@ -12,6 +13,28 @@ import { formatCents } from "@/lib/money";
  * All money arrives as integer cents and leaves as a formatted string. No
  * division happens here.
  */
+
+/**
+ * The brand kit as the invoice carries it (`src/lib/brand/`). Every field
+ * optional in effect: no kit renders exactly the invoice this file rendered
+ * before the kit existed.
+ */
+export interface InvoicePdfBrand {
+  tagline: string;
+  primaryColor: HexColor | null;
+  /** Decoded by the renderer; PNG or JPEG, the two the kit accepts. */
+  logo: {
+    data: Uint8Array;
+    width: number;
+    height: number;
+    format: "png" | "jpg";
+  } | null;
+}
+
+/** The ink the invoice has always used, and still does without a brand colour. */
+export const INVOICE_INK: HexColor = "#111827";
+/** A logo lives in the top-left corner; this is the most room it gets, in points. */
+export const INVOICE_LOGO_BOX = { width: 160, height: 56 } as const;
 
 export interface InvoicePdfInput {
   businessName: string;
@@ -36,6 +59,8 @@ export interface InvoicePdfInput {
   /** Free-text postal address as captured on the customer. */
   customerAddress: string;
   customerEmail: string;
+  /** Absent means the same as a kit with nothing set. */
+  brand?: InvoicePdfBrand;
   lines: ReadonlyArray<{
     description: string;
     /** Numeric string as stored, e.g. "1.00". */
@@ -54,6 +79,22 @@ export interface InvoicePdfRow {
 
 export interface InvoicePdfModel {
   businessName: string;
+  /** Under the name, small; empty renders nothing. */
+  tagline: string;
+  /**
+   * The brand colour where it is used as TEXT — only when it reads on white;
+   * a pale brand yellow makes a fine rule and an invisible heading, so the
+   * heading falls back to the ink while the rules keep the colour.
+   */
+  titleColor: HexColor;
+  ruleColor: HexColor;
+  /** Fitted into `INVOICE_LOGO_BOX` without distortion, or null. */
+  logo: {
+    data: Uint8Array;
+    width: number;
+    height: number;
+    format: "png" | "jpg";
+  } | null;
   title: string;
   invoiceNumber: string;
   issueDate: string;
@@ -104,9 +145,17 @@ export function buildInvoicePdfModel(input: InvoicePdfInput): InvoicePdfModel {
   // Falls back to the total rather than to zero: an invoice with no tax has a
   // subtotal, and it is its total.
   const subtotalCents = input.subtotalCents ?? input.totalCents;
+  const primary = input.brand?.primaryColor ?? null;
+  const logo = input.brand?.logo ?? null;
 
   return {
     businessName: input.businessName,
+    tagline: input.brand?.tagline.trim() ?? "",
+    titleColor: primary ? readableOnWhite(primary, INVOICE_INK) : INVOICE_INK,
+    ruleColor: primary ?? INVOICE_INK,
+    logo: logo
+      ? { data: logo.data, format: logo.format, ...fitLogo(logo, INVOICE_LOGO_BOX) }
+      : null,
     // A draft is not an invoice yet, and a document that says otherwise is the
     // kind of thing that gets paid twice.
     title: input.status === "draft" ? "DRAFT INVOICE" : "INVOICE",

@@ -10,6 +10,7 @@ import {
   reminderKeyPrefix,
   sentOffsetsFromKeys,
 } from "./reminder-email";
+import { loadInvoiceBrand, withLogoBytes } from "./invoice-brand";
 import { renderReminderMessage } from "./reminder-render";
 import { invoiceTaxFields } from "./invoices";
 import {
@@ -314,6 +315,7 @@ export async function runInvoiceReminders(
                 eq(schema.invoices.id, d.invoiceId),
               ),
               columns: {
+                entityId: true,
                 taxRateId: true,
                 taxRatePpm: true,
                 taxCents: true,
@@ -322,6 +324,13 @@ export async function runInvoiceReminders(
             });
             return {
               due: d,
+              // Per invoice, because each company may carry its own look;
+              // the logo bytes are fetched outside the transaction below.
+              brand: await loadInvoiceBrand(
+                tx,
+                tenant.id,
+                invoiceRow?.entityId ?? null,
+              ),
               to: preferredContactValue(contacts, "email") ?? "",
               customerAddress: customer?.address ?? "",
               customerEmail: preferredContactValue(contacts, "email") ?? "",
@@ -337,7 +346,7 @@ export async function runInvoiceReminders(
             };
           }),
         );
-        return { businessName: tenant.name ?? "", items: withRecipients };
+        return { items: withRecipients };
       });
 
       if (work === null) continue;
@@ -349,6 +358,8 @@ export async function runInvoiceReminders(
       // Sending happens OUTSIDE the transaction: rendering a PDF and waiting on
       // the mail provider are slow, and holding a tenant's transaction open
       // across them would pin a pooled connection for the whole sweep.
+      // One logo fetch per tenant per run, not one per reminder.
+      const logoCache = new Map<string, Uint8Array | null>();
       for (const item of work.items) {
         if (item.to === "") {
           result.skippedNoRecipient += 1;
@@ -358,7 +369,8 @@ export async function runInvoiceReminders(
           // Shared with the owner's test-send button — see reminder-render.ts
           // for why there is exactly one of these.
           const { email, pdf } = await renderReminderMessage(item.due, {
-            businessName: work.businessName,
+            businessName: item.brand.businessName,
+            brand: await withLogoBytes(item.brand, logoCache),
             customerAddress: item.customerAddress,
             customerEmail: item.customerEmail,
             tax: item.tax,

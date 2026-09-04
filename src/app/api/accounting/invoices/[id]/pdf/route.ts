@@ -5,6 +5,10 @@ import { resolveTenantContext } from "@/lib/auth";
 import { isModuleEnabled } from "@/lib/modules";
 import { preferredContactValue } from "@/lib/parties/contact-values";
 import { listContactPoints } from "@/lib/parties/contacts";
+import {
+  loadInvoiceBrand,
+  withLogoBytes,
+} from "@/modules/accounting/invoicing/invoice-brand";
 import { renderInvoicePdf } from "@/modules/accounting/invoicing/invoice-pdf";
 import { invoiceTaxFields } from "@/modules/accounting/invoicing/invoices";
 
@@ -74,7 +78,10 @@ export async function GET(
         ? await listContactPoints(tx, ctx.tenant.id, customer.partyId)
         : [];
       const tax = await invoiceTaxFields(tx, ctx.tenant.id, invoice);
-      return { invoice, customer, lines, payments, contacts, tax };
+      // The brand ROW here, inside the transaction; its logo's bytes below,
+      // outside it — a blob read is a network call.
+      const brand = await loadInvoiceBrand(tx, ctx.tenant.id, invoice.entityId);
+      return { invoice, customer, lines, payments, contacts, tax, brand };
     },
     { role: ctx.role },
   );
@@ -84,7 +91,8 @@ export async function GET(
   }
 
   const bytes = await renderInvoicePdf({
-    businessName: ctx.tenant.name,
+    businessName: data.brand.businessName,
+    brand: await withLogoBytes(data.brand),
     invoiceNumber: data.invoice.invoiceNumber,
     status: data.invoice.status,
     issueDate: data.invoice.issueDate,

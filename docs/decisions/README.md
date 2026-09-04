@@ -51,3 +51,5 @@ Keep them short — one page. An ADR nobody reads has failed at its only job.
 | [0014](0014-migrations-are-applied-before-the-merge.md) | Migrations are applied by hand, before the merge | 2026-08-23 | Accepted |
 | [0015](0015-a-connected-account-belongs-to-a-company.md) | A connected account belongs to a company, not to the client | 2026-08-25 | Accepted |
 | [0016](0016-a-catch-weight-item-is-stocked-in-packages.md) | A catch-weight item is stocked in packages and weighed on arrival | 2026-08-25 | Accepted |
+| [0017](0017-the-square-account-the-farm-already-has.md) | The Square account the farm already has | 2026-09-02 | Accepted |
+| [0018](0018-the-brand-kit-is-layer-0-data.md) | The brand kit is Layer 0 data, owned per company, edited by Marketing | 2026-09-04 | Accepted |

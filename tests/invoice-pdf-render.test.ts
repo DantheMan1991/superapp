@@ -64,4 +64,22 @@ describe("renderInvoicePdf", () => {
     });
     expect(Buffer.from(bytes.slice(0, 5)).toString("latin1")).toBe("%PDF-");
   });
+
+  it("renders a brand kit: a PNG logo from bytes, a colour and a tagline", async () => {
+    // A real 1×1 transparent PNG — react-pdf decodes the bytes, so they must
+    // be a genuine image rather than a stand-in.
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const bytes = await renderInvoicePdf({
+      ...base,
+      brand: {
+        tagline: "Grass-fed since 1998",
+        primaryColor: "#1f6f5f",
+        logo: { data: new Uint8Array(png), width: 400, height: 120, format: "png" },
+      },
+    });
+    expect(Buffer.from(bytes.slice(0, 5)).toString("latin1")).toBe("%PDF-");
+  });
 });

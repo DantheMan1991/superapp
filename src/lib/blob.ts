@@ -49,6 +49,14 @@ export function dmsPathPrefix(
 }
 
 /**
+ * The brand kit's logos (`brand_kits.logo_pathname`). Layer 0, not a module's:
+ * the invoice PDF reads from here and Accounting may not import Marketing.
+ */
+export function brandPathPrefix(tenantId: string): string {
+  return `brand/${tenantId}/logos/`;
+}
+
+/**
  * Every prefix a tenant is allowed to own, across modules. Used to validate
  * any client-supplied pathname before it is trusted as a blob location.
  *
@@ -64,6 +72,7 @@ export function isTenantBlobPath(tenantId: string, pathname: string): boolean {
     pathname.startsWith(dmsPathPrefix(tenantId, "files")) ||
     pathname.startsWith(dmsPathPrefix(tenantId, "generated")) ||
     pathname.startsWith(dmsPathPrefix(tenantId, "signatures")) ||
-    pathname.startsWith(dmsPathPrefix(tenantId, "signed"))
+    pathname.startsWith(dmsPathPrefix(tenantId, "signed")) ||
+    pathname.startsWith(brandPathPrefix(tenantId))
   );
 }

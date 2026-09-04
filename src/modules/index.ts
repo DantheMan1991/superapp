@@ -4,6 +4,7 @@ import { CrmModule } from "./crm/CrmModule";
 import { DocumentsModule } from "./documents/DocumentsModule";
 import { EmailModule } from "./email/EmailModule";
 import { HelloModule } from "./hello/HelloModule";
+import { MarketingModule } from "./marketing/MarketingModule";
 import { SchedulingModule } from "./scheduling/SchedulingModule";
 import { WorkModule } from "./work/WorkModule";
 
@@ -64,6 +65,16 @@ export const moduleRegistry: Record<string, ModuleDefinition> = {
     name: "Work",
     icon: "check-square",
     Component: WorkModule,
+  },
+  // Registered from slice 0 (the brand kit) while the seed row stays
+  // `coming_soon`, the arrangement scheduling and work used: a superadmin can
+  // switch it on for one tenant, and nobody is sold it until the website and
+  // domains slices make it a marketing tool rather than a settings page.
+  marketing: {
+    slug: "marketing",
+    name: "Marketing",
+    icon: "megaphone",
+    Component: MarketingModule,
   },
 };
 

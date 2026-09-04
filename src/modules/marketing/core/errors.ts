@@ -11,7 +11,9 @@ export type MarketingErrorCode =
   | "LOGO_NOT_AN_IMAGE"
   | "LOGO_TOO_LARGE"
   | "LOGO_MISSING"
-  | "STORAGE_UNAVAILABLE";
+  | "STORAGE_UNAVAILABLE"
+  | "IMAGE_UNAVAILABLE"
+  | "SPEC_INVALID";
 
 export class MarketingError extends Error {
   constructor(
@@ -35,13 +37,17 @@ export function friendlyMessage(err: unknown): string {
       case "COMPANY_NOT_FOUND":
         return "That company no longer exists.";
       case "LOGO_NOT_AN_IMAGE":
-        return "That file isn't a PNG or JPEG image. Export the logo as one and try again.";
+        return "That file isn't a PNG, JPEG or SVG image. Export the logo as one and try again.";
       case "LOGO_TOO_LARGE":
         return "That logo is over 2MB. Export it smaller and try again.";
       case "LOGO_MISSING":
         return "The upload didn't finish. Try again.";
       case "STORAGE_UNAVAILABLE":
         return "File storage isn't set up on this deployment yet.";
+      case "IMAGE_UNAVAILABLE":
+        return "Drawing isn't available on this deployment right now. Upload a PNG instead.";
+      case "SPEC_INVALID":
+        return "That candidate can't be drawn. Draw a new set and try again.";
     }
   }
   return "Something went wrong. Please try again.";

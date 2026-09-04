@@ -1,7 +1,8 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { withTenant } from "@/db";
+import { eq } from "drizzle-orm";
+import { schema, withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
@@ -10,7 +11,20 @@ import {
   BRAND_TAGLINE_MAX,
   normalizeHexColor,
 } from "@/lib/brand/core";
+import {
+  LOGO_LINE_MAX,
+  LogoSpecSchema,
+  initialsFor,
+  type LogoCandidate,
+} from "@/lib/brand/logo-spec";
+import { resolveBrandFor } from "@/lib/brand/read";
 import { MarketingError, friendlyMessage } from "./core/errors";
+import {
+  draftLogoCandidates,
+  drawLogoToBlob,
+  industryLabel,
+  type LogoDraftSource,
+} from "./logo-generate";
 import {
   clearKitLogo,
   deleteCompanyKit,
@@ -196,6 +210,98 @@ export async function removeBrandLogoAction(
     );
     void kit;
     await discardLogoBlob(previous);
+    revalidate();
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const draftSchema = z.object({
+  entityId: entityIdSchema,
+  name: z.string().trim().min(1).max(LOGO_LINE_MAX * 2),
+  initials: z.string().trim().max(3),
+});
+
+/**
+ * Six drawn candidates for the owner to pick from. Reads the kit for its
+ * colours and tagline inside a transaction; the model call and the drawing
+ * happen after it. Nothing is written — a draft is a conversation.
+ */
+export async function draftLogosAction(
+  input: unknown,
+): Promise<ActionResult<{ candidates: LogoCandidate[]; source: LogoDraftSource }>> {
+  try {
+    const ctx = await gate();
+    const parsed = draftSchema.safeParse(input);
+    if (!parsed.success) return { error: "Give the logo a name and try again." };
+    const { brand, industry } = await withTenant(
+      ctx.tenantId,
+      async (tx) => ({
+        brand: await resolveBrandFor(tx, ctx.tenantId, parsed.data.entityId),
+        industry: (
+          await tx.query.tenants.findFirst({
+            where: eq(schema.tenants.id, ctx.tenantId),
+            columns: { industry: true },
+          })
+        )?.industry,
+      }),
+      { role: ctx.role },
+    );
+    const name = parsed.data.name;
+    const data = await draftLogoCandidates({
+      name,
+      tagline: brand.tagline,
+      industry: industryLabel(industry),
+      primaryColor: brand.primaryColor,
+      accentColor: brand.accentColor,
+      initials: (parsed.data.initials || initialsFor(name)).toUpperCase().slice(0, 3),
+    });
+    return { ok: true, data };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const adoptSchema = z.object({
+  entityId: entityIdSchema,
+  spec: z.unknown(),
+});
+
+/**
+ * The owner chose one. The spec is re-validated and re-drawn here — the
+ * client never sends a picture — then stored like any other logo.
+ */
+export async function adoptLogoAction(input: unknown): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const parsed = adoptSchema.safeParse(input);
+    if (!parsed.success) return { error: "Pick a logo and try again." };
+    const spec = LogoSpecSchema.safeParse(parsed.data.spec);
+    if (!spec.success) throw new MarketingError("SPEC_INVALID", "spec rejected");
+    // Blob work first and outside the transaction, as for an upload.
+    const logo = await drawLogoToBlob(ctx.tenantId, spec.data);
+    const { kit, previous } = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const result = await setKitLogo(tx, ctx, parsed.data.entityId, logo);
+        await logAuditInTx(tx, {
+          action: "marketing.brand_kit.logo_drawn",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "brand_kit",
+          targetId: result.kit.id,
+          meta: {
+            entityId: parsed.data.entityId,
+            layout: spec.data.layout,
+            mark: spec.data.mark,
+          },
+        });
+        return result;
+      },
+      { role: ctx.role },
+    );
+    if (previous && previous !== kit.logoPathname) await discardLogoBlob(previous);
     revalidate();
     return { ok: true };
   } catch (err) {

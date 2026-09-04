@@ -46,7 +46,12 @@ let sharpPromise: Promise<SharpModule> | null = null;
  * upload, and the error should say which so the next person starts in the right
  * place.
  */
-function loadSharp(): Promise<SharpModule> {
+/**
+ * Exported since 2026-09-04 for `src/lib/brand/raster.ts`, which rasterises a
+ * logo. One loader, one error message, one place the incident above is
+ * written down — a second lazy import would be a second copy of this comment.
+ */
+export function loadSharp(): Promise<SharpModule> {
   sharpPromise ??= import("sharp").catch((cause) => {
     // Do not cache the failure: a redeploy that fixes the install should not
     // need a cold start to be believed.

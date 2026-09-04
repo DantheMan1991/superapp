@@ -107,3 +107,19 @@ function sniffJpeg(bytes: Uint8Array): SniffedImage | null {
 export function sniffImage(bytes: Uint8Array): SniffedImage | null {
   return sniffPng(bytes) ?? sniffJpeg(bytes);
 }
+
+/**
+ * Is this an SVG document? An optional BOM, whitespace, XML declaration,
+ * comments and a DOCTYPE, then `<svg`. Size is not read — a vector has none
+ * worth trusting — and an SVG is never stored: it is rasterised on the way in
+ * (`src/lib/brand/raster.ts`), which is what keeps the stored-XSS door the
+ * Documents allowlist describes shut for the brand kit too.
+ */
+export function isSvg(bytes: Uint8Array): boolean {
+  const head = new TextDecoder("utf-8", { fatal: false })
+    .decode(bytes.subarray(0, 2048))
+    .replace(/^﻿/, "");
+  return /^\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--[\s\S]*?-->\s*)*(?:<!DOCTYPE[^>]*>\s*)?<svg[\s>]/i.test(
+    head,
+  );
+}

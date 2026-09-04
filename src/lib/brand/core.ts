@@ -48,8 +48,18 @@ export interface ResolvedBrand {
   };
 }
 
-/** Uploads the kit accepts. PNG and JPEG are what the PDF renderer draws. */
+/** What the kit STORES. PNG and JPEG are what the PDF renderer draws. */
 export const BRAND_LOGO_MIME_TYPES = ["image/png", "image/jpeg"] as const;
+/**
+ * What an owner may UPLOAD. An SVG is accepted at the door and rasterised to
+ * a PNG on the way in (`src/lib/brand/raster.ts`); the vector itself is never
+ * kept, so nothing in the store can ever be served as markup.
+ */
+export const BRAND_UPLOAD_MIME_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/svg+xml",
+] as const;
 /** 2MB: a logo, not a photograph. */
 export const BRAND_LOGO_MAX_BYTES = 2 * 1024 * 1024;
 export const BRAND_DISPLAY_NAME_MAX = 80;
@@ -57,6 +67,10 @@ export const BRAND_TAGLINE_MAX = 140;
 
 export function isBrandLogoMimeType(mime: string): boolean {
   return (BRAND_LOGO_MIME_TYPES as readonly string[]).includes(mime);
+}
+
+export function isBrandUploadMimeType(mime: string): boolean {
+  return (BRAND_UPLOAD_MIME_TYPES as readonly string[]).includes(mime);
 }
 
 /**

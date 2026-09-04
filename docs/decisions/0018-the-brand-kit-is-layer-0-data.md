@@ -79,3 +79,15 @@ asks" is the lesson ADR 0015 recorded: a one-company tenant cannot see the
 difference between a row hung off the tenant and one hung off the company,
 which is precisely the blind spot that cost `production` slice 2c a real bug.
 The isolation test holds two companies on one tenant for the same reason.
+
+**Slice 0b landed the same day** and closed two of the open questions above
+in the direction this file leaned. `sharp` came in, on purpose and in one
+file, to rasterise a drawn wordmark and an uploaded SVG; the SVG is never
+kept, so the "no public blob, no markup in the store" line held. And a
+generated logo is a **spec** the code draws, not a picture a model paints:
+the assistant chooses layout, case, spacing, mark and colour from a fixed
+catalogue, fontkit sets the name from the PDF's own Noto Sans, and the spec
+is stored beside the PNG so the vector can be re-drawn for the website. The
+founder's offer of an image-model API was kept for a later, optional
+illustrated symbol — the one thing an image model does better — rather than
+for the name, which it sets badly and returns as a raster.

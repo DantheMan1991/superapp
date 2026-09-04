@@ -49,4 +49,6 @@ Open the booking and start the {{productionRun|lower}} from it. That carries the
 
 ## Who can do what
 
-Only an owner can book a date, change one, remove one, or start a {{productionRun|lower}} from one. Everyone else sees the list.
+Only an owner can book a date, change one, remove one, or start a {{productionRun|lower}} from one. Holding a date is a commitment to a plant.
+
+Writing a {{cutSheet|lower}} against a booked date is open to everyone, an accountant included, and so is everything on the sheet once it exists.

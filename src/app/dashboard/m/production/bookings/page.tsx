@@ -7,6 +7,7 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { todayInTimezone } from "@/lib/timezone";
 import { packContext } from "@/lib/packs/tenant-context";
 import { labelFor } from "@/lib/packs/resolve";
+import { allowsWrite } from "@/lib/packs/authorize";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { DataTable } from "@/components/app/data-table";
@@ -84,6 +85,8 @@ export default async function BookingsPage() {
   const cutSheetWord = labelFor(pack.labels, "cutSheet", "Order");
   const kindOptions = processorHandlesFrom(pack.config);
   const isOwner = ctx.role === "owner";
+  /** Chores, asked of the same function `requireWrite` asks. */
+  const canRecord = allowsWrite(ctx.role, "member");
 
   // Sheets by the date they were written against. A sheet that has become a run
   // is still listed here, because the booking is where somebody looks for it
@@ -223,7 +226,12 @@ export default async function BookingsPage() {
                           </Link>
                         </Button>
                       ))}
-                      {isOwner && !booking.runId && (
+                      {/* Writing a cut sheet is `member`-level in
+                          `order-ops.ts`, and the identical dialog on a run's
+                          own page is ungated. This one said `isOwner` until
+                          2026-09-03. Booking the date above it is still the
+                          owner's — that is a commitment to a plant. */}
+                      {canRecord && !booking.runId && (
                         <AddOrderDialog
                           processorId={booking.processorId}
                           processorName={processorName}

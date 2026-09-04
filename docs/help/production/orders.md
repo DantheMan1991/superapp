@@ -36,7 +36,7 @@ You can also start one from a {{productionRun|lower}}'s own page, which is usual
 | --- | --- |
 | `Started` | The sheet exists. Open it to add lines. |
 | `Nothing asked for yet.` | No sheet on this {{productionRun|lower}}. What they cut is what you told them to cut. |
-| `Only an owner can change this.` | You are signed in as staff for something owners do. |
+| `Only an owner can change this.` | You pressed something an owner keeps. Starting a {{cutSheet|lower}} is not one of those — this message reaches this page only from the {{processor|lower}} rates a line is priced from. |
 | `That no longer exists.` | The sheet or the {{productionRun|lower}} has gone. Reload. |
 | `Something went wrong saving that.` | Something unexpected. Tell us if it keeps happening. |
 
@@ -50,4 +50,6 @@ You can also start one from a {{productionRun|lower}}'s own page, which is usual
 
 ## Who can do what
 
-Writing and changing a {{cutSheet|lower}} is open to everyone. The button on this page is hidden from staff, but the same button on a {{productionRun|lower}}'s own page is not, and everything behind both is open to any member. That is us being inconsistent, not a rule.
+Writing and changing a {{cutSheet|lower}} is open to everyone, an accountant included. That is true of {button:Start a sheet|primary} here, of the same button on a {{productionRun|lower}}'s own page and on a booked date, and of everything on the sheet itself — adding a line, counting one, removing one, printing it.
+
+Only the rates a line is priced from belong to the owner, and those live on the {{processor|lower}}.

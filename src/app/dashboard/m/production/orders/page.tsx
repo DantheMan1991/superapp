@@ -7,6 +7,7 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { todayInTimezone } from "@/lib/timezone";
 import { packContext } from "@/lib/packs/tenant-context";
 import { labelFor } from "@/lib/packs/resolve";
+import { allowsWrite } from "@/lib/packs/authorize";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { DataTable } from "@/components/app/data-table";
@@ -83,7 +84,11 @@ export default async function CutSheetsPage() {
   const runWord = labelFor(pack.labels, "productionRun", "Run");
   const processorWord = labelFor(pack.labels, "processor", "Processor");
   const kindOptions = processorHandlesFrom(pack.config);
-  const isOwner = ctx.role === "owner";
+  /**
+   * Asked of the same pure function `requireWrite` asks, rather than restated
+   * here as a role comparison. Nothing on this screen is owner-level.
+   */
+  const canRecord = allowsWrite(ctx.role, "member");
 
   const nameByProcessor = new Map(
     processors.map((p) => [p.processor.id, p.name]),
@@ -154,7 +159,14 @@ export default async function CutSheetsPage() {
         */
         description={`What each ${processorWord.toLowerCase()} was asked to do with one lot of animals. The sheet goes over with the animals at drop-off, so it exists before the ${runWord.toLowerCase()} does — and this is where to find one again.`}
         actions={
-          isOwner ? (
+          /* **ONE ANSWER FOR THE SAME ACT.** `createOrder` is `member`-level
+             (`order-ops.ts:246`), as are adding, counting, editing, removing
+             and printing its lines — and the sheet's own detail page gates none
+             of them. This button was `isOwner` while the identical one on a
+             run's page was not, so writing a sheet was the owner's on the
+             screen for finding one and everybody's on the screen for the day it
+             belongs to. Fixed 2026-09-03. */
+          canRecord ? (
             <StartSheetDialog
               targets={targets}
               kindOptions={kindOptions}

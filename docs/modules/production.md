@@ -77,6 +77,36 @@ becomes 1d, unchanged.
 
 ## Build log
 
+### 2026-09-03 — One answer for the cut sheet (`claude/one-answer-for-the-cut-sheet`)
+
+Two mismatches, in opposite directions, both closed.
+
+**A cut sheet is a chore, on all three screens that start one.**
+`StartSheetDialog` was `isOwner` on `/orders` and `AddOrderDialog` was `isOwner`
+on `/bookings`, while the identical dialog on a run's own page was ungated and
+`createOrder` has been `member`-level since it was written
+(`order-ops.ts:246`). Adding, counting, editing, removing and printing a sheet's
+lines are all `member` too, and the sheet's own detail page gates none of them —
+so a staff member could rewrite every line of a sheet and delete it, and could
+not start one. Both list screens now ask `allowsWrite(ctx.role, "member")`.
+Booking the date stays the owner's: that is a commitment to a plant.
+
+**Reading a kill sheet off a photo is the owner's, and now the dialog says so.**
+`readKillSheetAction` calls `requireWrite(ctx, "owner")` and
+`ReadKillSheetDialog` was ungated, so a staff member picked a file, waited for
+two pages of handwriting to be read, and was refused at the end of it. **Settled
+2026-09-03 by gating the dialog rather than opening the action**, on cost: the
+read spends money per press and nothing rate-limits it — two `change` events once
+held a run's dialog for six minutes, which is still an open item below — and
+`ReadPriceListDialog`, the pack's other reader with the same cost and the same
+shape, has been `isOwner` on the processors page all along. `CarcassDialog`
+beside it stays `member`, so transcribing the sheet by hand is open to whoever
+is holding it.
+
+Guides swept in the same PR. `orders.md` carried the mismatch as a written
+apology — *"That is us being inconsistent, not a rule"* — and no longer needs
+one; `run.md` and `overview.md` now say the photo reader is the owner's and why.
+
 ### 2026-09-03 — Eight tenant guides, and what writing them found (`claude/production-guides`)
 
 Guides in `docs/help/production/` for all seven screens plus an overview:
@@ -109,14 +139,11 @@ count is exactly what the price-band lookup is checked against. The app's own co
 tells the reader to put the count on the sheet. `updateRunOutputAction` is dead
 too, so an output cannot be corrected before it lands.
 
-**Two permission mismatches, in opposite directions.** `StartSheetDialog` is
-behind `isOwner` on `/orders` while `createOrder` is member-level — and the same
-action is ungated on the run page, so the same act is owner-only on one screen and
-open on another. Worse, `ReadKillSheetDialog` is **ungated** on the run page while
-`readKillSheetAction` is **owner-only**, so a staff member uploads a photo, waits
-for it to be read, and is then refused. The guides say the sheet is open to
-everyone, because that is what the pack's own reasoning says it should be; this
-one is worth fixing rather than documenting.
+**Two permission mismatches, in opposite directions — both closed 2026-09-03.**
+Starting a cut sheet is `member`-level on all three screens that offer it now,
+and `ReadKillSheetDialog` is behind `isOwner`, matching the action it calls and
+matching `ReadPriceListDialog`. See the build log for why the reader moved rather
+than the action.
 
 **The vendor prerequisite is confirmed and has no message.**
 `matchableProcessorBillLines` joins processors to vendors through the party and
@@ -1631,9 +1658,9 @@ run model, separate templates), and the processing path and eligibility flag
 - **`updateOrderAction` is dead, so a cut sheet's head count can never be
   edited** — the value the price band is checked against, on a screen whose own
   copy tells the reader to set it. `updateRunOutputAction` is dead too.
-- **`ReadKillSheetDialog` is ungated while `readKillSheetAction` is owner-only**,
-  so staff upload a photo and are then refused. `StartSheetDialog` is gated on one
-  screen and ungated on another for the same member-level action.
+- ~~**`ReadKillSheetDialog` is ungated while `readKillSheetAction` is owner-only**~~
+  — **fixed 2026-09-03.** The dialog is gated and the two cut-sheet screens are
+  not; see the build log.
 - **A processor that is not a vendor is silently absent from billing**, and the
   one empty state that explains it disappears once any other plant has a bill.
 - **Eleven distinct "gone" sentences flatten to `That no longer exists.`**

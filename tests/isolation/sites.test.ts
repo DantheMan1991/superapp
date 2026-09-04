@@ -203,3 +203,145 @@ d("sites and site_pages (RLS)", () => {
     expect(rows).toBe(0);
   });
 });
+
+/**
+ * `site_page_versions` RLS — a page's history. Same posture as the page:
+ * members read, owners write, the composite FK makes another tenant's page
+ * unreachable even under `withSystem`, and history dies with its page.
+ */
+d("site_page_versions (RLS)", () => {
+  const STAMP = `iso-sitever-${process.pid}`;
+  const OWNER = `${STAMP}-owner`;
+  const MATE = `${STAMP}-mate`;
+  const OTHER = `${STAMP}-other`;
+  const EMPTY = { description: "", sections: [] };
+
+  let tenantA: string;
+  let tenantB: string;
+  let pageA: string;
+  let pageB: string;
+  let versionA: string;
+  let versionB: string;
+
+  const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantA, fn, { role: "staff", userId: MATE });
+  const asOwner = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantA, fn, { role: "owner", userId: OWNER });
+  const asOtherTenant = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantB, fn, { role: "owner", userId: OTHER });
+
+  beforeAll(async () => {
+    await withSystem(async (tx) => {
+      const tenants = await tx
+        .insert(schema.tenants)
+        .values([
+          { clerkOrgId: `${STAMP}-a`, name: "Ver A", slug: `${STAMP}-a` },
+          { clerkOrgId: `${STAMP}-b`, name: "Ver B", slug: `${STAMP}-b` },
+        ])
+        .returning();
+      tenantA = tenants[0].id;
+      tenantB = tenants[1].id;
+      const sites = await tx
+        .insert(schema.sites)
+        .values([
+          { tenantId: tenantA, slug: `${STAMP}-a` },
+          { tenantId: tenantB, slug: `${STAMP}-b` },
+        ])
+        .returning();
+      const pages = await tx
+        .insert(schema.sitePages)
+        .values([
+          { tenantId: tenantA, siteId: sites[0].id, path: "/", title: "Home" },
+          { tenantId: tenantB, siteId: sites[1].id, path: "/", title: "Home" },
+        ])
+        .returning();
+      pageA = pages[0].id;
+      pageB = pages[1].id;
+      const versions = await tx
+        .insert(schema.sitePageVersions)
+        .values([
+          { tenantId: tenantA, pageId: pageA, kind: "save", content: EMPTY },
+          { tenantId: tenantB, pageId: pageB, kind: "publish", content: EMPTY },
+        ])
+        .returning();
+      versionA = versions[0].id;
+      versionB = versions[1].id;
+    });
+  });
+
+  afterAll(async () => {
+    await withSystem(async (tx) => {
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantA));
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantB));
+    });
+  });
+
+  it("staff read their own page's history and nothing of the other tenant's", async () => {
+    const seen = await asStaff((tx) => tx.select().from(schema.sitePageVersions));
+    expect(seen.map((v) => v.id)).toEqual([versionA]);
+    expect(seen.some((v) => v.id === versionB)).toBe(false);
+  });
+
+  it("staff cannot add or delete a version; an owner can do both", async () => {
+    await expect(
+      asStaff((tx) =>
+        tx.insert(schema.sitePageVersions).values({ tenantId: tenantA, pageId: pageA, content: EMPTY }),
+      ),
+    ).rejects.toThrow();
+    const deleted = await asStaff((tx) =>
+      tx.delete(schema.sitePageVersions).where(eq(schema.sitePageVersions.id, versionA)).returning(),
+    );
+    expect(deleted).toHaveLength(0);
+    const [added] = await asOwner((tx) =>
+      tx
+        .insert(schema.sitePageVersions)
+        .values({ tenantId: tenantA, pageId: pageA, kind: "restore", content: EMPTY })
+        .returning(),
+    );
+    expect(added.kind).toBe("restore");
+    const gone = await asOwner((tx) =>
+      tx.delete(schema.sitePageVersions).where(eq(schema.sitePageVersions.id, added.id)).returning(),
+    );
+    expect(gone).toHaveLength(1);
+  });
+
+  it("another tenant cannot read or delete tenant A's history", async () => {
+    const seen = await asOtherTenant((tx) => tx.select().from(schema.sitePageVersions));
+    expect(seen.map((v) => v.id)).toEqual([versionB]);
+    const deleted = await asOtherTenant((tx) =>
+      tx.delete(schema.sitePageVersions).where(eq(schema.sitePageVersions.id, versionA)).returning(),
+    );
+    expect(deleted).toHaveLength(0);
+  });
+
+  it("a version on another tenant's page is unrepresentable, and an unknown kind is refused", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.sitePageVersions).values({ tenantId: tenantB, pageId: pageA, content: EMPTY }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.sitePageVersions).values({ tenantId: tenantA, pageId: pageA, kind: "draft", content: EMPTY }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("history goes with its page", async () => {
+    const [page] = await withSystem(async (tx) => {
+      const site = await tx.query.sites.findFirst({ where: eq(schema.sites.tenantId, tenantA) });
+      return tx
+        .insert(schema.sitePages)
+        .values({ tenantId: tenantA, siteId: site!.id, path: "/gone", title: "Gone" })
+        .returning();
+    });
+    const [version] = await withSystem((tx) =>
+      tx.insert(schema.sitePageVersions).values({ tenantId: tenantA, pageId: page.id, content: EMPTY }).returning(),
+    );
+    await withSystem((tx) => tx.delete(schema.sitePages).where(eq(schema.sitePages.id, page.id)));
+    const left = await withSystem((tx) =>
+      tx.query.sitePageVersions.findFirst({ where: eq(schema.sitePageVersions.id, version.id) }),
+    );
+    expect(left).toBeUndefined();
+  });
+});

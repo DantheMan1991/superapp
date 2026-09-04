@@ -80,6 +80,15 @@ move `yosherapp.com`'s nameservers to get a wildcard.
 
 ## Notes
 
+**Slice 2, the editor, landed the same day** and confirmed the shape: it
+edits `site_pages.draft` through the same Zod model, adds no table but a
+history (`site_page_versions`), and could not produce a page the renderer
+cannot draw. Puck was evaluated against the destination and not adopted —
+one vertical list of seven typed sections does not need a second data model,
+a second UI or a client-side re-rendering of sections; dnd-kit supplies the
+drag, the forms are ours, and the preview is the draft route itself in an
+iframe. The dossier's Decisions hold the detail.
+
 The lesson worth keeping is the one the migration taught within the hour:
 **drizzle-kit emits every foreign key before every index**, so a composite FK
 to a table created in the same migration fails unless the referenced unique

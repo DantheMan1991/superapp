@@ -18,7 +18,13 @@ export type MarketingErrorCode =
   | "SLUG_INVALID"
   | "SITE_EXISTS"
   | "SITE_MISSING"
-  | "SITE_EMPTY";
+  | "SITE_EMPTY"
+  | "PAGE_MISSING"
+  | "PAGE_PATH_TAKEN"
+  | "PAGE_PATH_INVALID"
+  | "PAGE_IS_HOME"
+  | "PAGE_INVALID"
+  | "VERSION_MISSING";
 
 export class MarketingError extends Error {
   constructor(
@@ -63,6 +69,18 @@ export function friendlyMessage(err: unknown): string {
         return "There is no website yet. Build one first.";
       case "SITE_EMPTY":
         return "There are no pages to publish yet.";
+      case "PAGE_MISSING":
+        return "That page no longer exists.";
+      case "PAGE_PATH_TAKEN":
+        return "Another page already has that address.";
+      case "PAGE_PATH_INVALID":
+        return err.message;
+      case "PAGE_IS_HOME":
+        return "The home page stays; every site has one.";
+      case "PAGE_INVALID":
+        return err.message;
+      case "VERSION_MISSING":
+        return "That version is gone.";
     }
   }
   return "Something went wrong. Please try again.";

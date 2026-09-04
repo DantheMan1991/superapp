@@ -20,7 +20,7 @@
 | **0b** | **Logo generation: Claude-chosen wordmarks and monograms drawn as vector paths from the shipped Noto Sans, rasterised with `sharp`; SVG upload, rasterised on the way in** | **built 2026-09-04** |
 | 0c | An illustrated symbol, optionally, from OpenAI's image model (`gpt-image-1`, transparent PNG, symbol only, never the name) composed with the kit's own wordmark. Needs `OPENAI_API_KEY`; the founder has an account | next, if the wordmarks feel plain |
 | **1** | **Site model and renderer — pages of typed sections, draft/publish, written by the assistant from the kit and the business's details, served at `/sites/<slug>` and at `<slug>.<SITE_DOMAIN>` through a host rewrite in `proxy.ts`, cached (ISR) and revalidated on publish.** [ADR 0019](../decisions/0019-a-website-is-pages-of-typed-sections.md) | **built 2026-09-04** — the site domain itself is still to buy |
-| 2 | The editor — blocks, drag to reorder, in-place editing, versions; evaluate Puck (MIT) against the destination first | |
+| **2** | **The editor — sections dragged into order (dnd-kit), a form per kind beside a live preview of the draft, pages added, ordered and removed, and a history of every save, publish and restore.** Puck was evaluated and not adopted (Decisions) | **built 2026-09-04** |
 | 3 | Domains at Layer 0 — one `domains` table with purposes (send mail, host mailboxes, website), connect an existing domain by records only, buy a new one through Vercel's registrar API and publish MX/SPF/DKIM/site records ourselves. Needs an ADR on who owns a purchased domain | |
 | 4 | Forms into CRM as parties with `source = 'website'`, raising Work follow-ups; page views | |
 | — | The shop block: `retail` slice 6 (online orders + pickup windows) fills a declared slot; blocked on commitments (retail 3) and web checkout (payments) | not this module's |
@@ -29,6 +29,46 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-04 — Slice 2: the page editor (`claude/marketing-site-editor`)
+
+- **The editor** at `/dashboard/m/marketing/website/pages/[pageId]`, owners
+  only: the page's title, address (not for home), menu switch and search
+  description; the sections as a sortable list (dnd-kit, pointer and
+  keyboard, plus arrow buttons) with a form per kind (`section-forms.tsx`)
+  for the selected one; a palette that adds a section after the selected
+  one; a history panel; and the draft route in an iframe as the preview,
+  reloaded after each save. Every edit is local until Save; the client
+  parses the content with the same Zod model the action does, so the first
+  message names the section and the field.
+- **`site_page_versions`** (`0248`, RLS `0249`): a version at every save
+  that changed content, every publish that changed what was live, and every
+  restore; the newest thirty kept per page, trimmed on write. Restore is a
+  version too.
+- **Pages on the Website screen** (`pages-panel.tsx`): drag to set the menu
+  order (saved at once), Edit, Add a page (title, address filled from it,
+  one text section to replace), and delete with confirmation, never home.
+- **`ModuleDefinition.fullWidthPaths`**: the editor takes the whole viewport
+  (`website/pages`) while the rest of Marketing keeps the standard column —
+  a flag on the definition, applied in `app/dashboard/layout.tsx`.
+- **Puck evaluated, not adopted** (Decisions). `@dnd-kit/core`, `sortable`
+  and `utilities` added as direct dependencies (MIT).
+- The module's gate is shared by a third actions file (`page-actions.ts`).
+- Verified: 8 pure tests over the catalogue, summaries, page-path rules,
+  paragraphs, moves and pruning; the isolation suite grew a
+  `site_page_versions` block (14 in the file). **Driven on the dev branch:**
+  the Pages panel with handles, Edit and delete; the editor for Home —
+  select a section, change the headline (the list's summary follows), add
+  Hours after it, move it down, Save (`Page saved…`, the preview redrawn
+  with the new headline, `Saved` in history); a second save then Restore of
+  the first (`Version restored into the draft.`, the headline back, `Restored`
+  on top); a keyboard drag (Space, Up, Space on the handle — dnd-kit's live
+  region announced the move) saved and shown in the preview's section order;
+  Add a page (`Services`, straight into its editor with one text section) and
+  its deletion (`Page deleted.`). **A pointer drag was not reproducible from
+  the browser tooling** (synthetic pointer events and the tool's drag did
+  not activate the sensor); the keyboard sensor shares the same context and
+  drop handler, and a hand on a mouse is the remaining check.
 
 ### 2026-09-04 — Slice 1: the website, built from the kit and put on an address (`claude/marketing-site-model`)
 
@@ -181,6 +221,7 @@ generated logo re-drawable as a vector.
 | --- | --- | --- |
 | `sites` | The business's website: its address, live details and status | FORCE RLS. `member_read`; INSERT/UPDATE/DELETE need `app_current_tenant_role() = 'owner'`. Unique on `tenant_id` (one site per tenant, this slice) and on `slug` platform-wide (it is a hostname label). CHECKs: slug shape `^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$`, `status in (draft, published)`, `copy_source in (model, standard)`, title ≤ 80. `settings` is `SiteSettingsSchema` |
 | `site_pages` | One page: its path, title, nav place, `draft` and `published` content | FORCE RLS, same policies. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. Unique `(site_id, path)`. CHECK: path `^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$`, title 1–80. `draft`/`published` are `PageContentSchema`; `published` null = never published |
+| `site_page_versions` | A page's history: the content at each `save`, `publish` and `restore` | FORCE RLS; `member_read`, owner INSERT and DELETE (no UPDATE — a version is never edited). Composite FK `(tenant_id, page_id) → site_pages` ON DELETE CASCADE. CHECK on `kind`. Trimmed to the newest `PAGE_VERSIONS_KEEP` (30) on every write by `recordVersion` |
 
 ## Key files & seams
 
@@ -208,6 +249,16 @@ generated logo re-drawable as a vector.
   `src/app/dashboard/m/marketing/website/page.tsx`
 - `docs/help/marketing/website.md` — the screen's guide; `SITE_DOMAIN` in
   `.env.example`
+- The editor: `src/lib/sites/pages.ts` (the section catalogue, fresh
+  sections, summaries, page-path rules, paragraph splitting, moves, history
+  pruning — pure), `src/modules/marketing/page-ops.ts` (save with a version,
+  add, delete, reorder, restore), `page-actions.ts`,
+  `components/page-editor.tsx` + `section-forms.tsx` (the screen),
+  `components/pages-panel.tsx` (the Website page's list),
+  `src/app/dashboard/m/marketing/website/pages/[pageId]/page.tsx`;
+  `docs/help/marketing/page-editor.md`. `ModuleDefinition.fullWidthPaths`
+  (`src/modules/types.ts`, applied in `app/dashboard/layout.tsx`) is the seam
+  that gives the editor the whole viewport without widening the module
 - `src/modules/marketing/` — `MarketingModule.tsx` (the screen), `actions.ts`
   (gate → Zod → withTenant + audit → revalidate; every write owner-only),
   `kit-ops.ts` (the tx-level writes), `logo-ingest.ts` (inspect the uploaded
@@ -276,6 +327,31 @@ generated logo re-drawable as a vector.
 - **The proxy reads `SITE_DOMAIN` per request, not at module load**, because
   its runtime does not promise module state survives, and `hostToSiteSlug`
   lives in a dependency-free file because the proxy runs before everything.
+- **Puck was evaluated against the destination and not adopted.** The
+  destination is seven typed sections in one vertical list, edited by an
+  owner and documented to the guide standard. Puck brings its own data
+  format (a conversion layer either way), its own UI (a sidebar, an outline,
+  a viewport switcher the guide would have to describe as ours), and a
+  preview that re-renders components on the client, where ours are server
+  components drawn by the one renderer. dnd-kit (MIT, ~40KB) gives the drag
+  the founder asked for on one list; the forms are ours and derive their
+  limits from the content model. Revisit when sections nest or gain columns.
+- **The preview is the draft route in an iframe, reloaded after each save.**
+  There is exactly one rendering of a section in the product. An
+  as-you-type preview would need a second renderer on the client or a
+  round trip per keystroke, and neither is worth a preview that is never
+  what the site shows.
+- **Structure is live; words wait.** The menu (order, titles, in-or-out)
+  is read from the page rows by the public renderer, so it changes on save;
+  a page's content is the published snapshot and changes on Publish. The
+  screens say so. A new page, never published, is not in the live menu
+  because it has no snapshot.
+- **A version is written only when content changed**, and the newest thirty
+  are kept per page, trimmed on every write — no sweep, no unbounded table.
+  Restore is itself a version, so history never loses a step.
+- **The editor remounts on the page's `updated_at`.** A restore, or a save
+  from another tab, re-renders the server page with new props; a client
+  component that kept its local state would silently show stale text.
 - **The logo stays private.** The `[id]/logo` route proves the tenant, reads
   the row through RLS, then streams — and it is NOT gated on the Marketing
   module, because the brand has consumers of its own. A public URL for the
@@ -305,10 +381,18 @@ generated logo re-drawable as a vector.
 - **An ISR cache hit has never been seen** — the dev server renders every
   request. The production build proves it: `x-nextjs-cache: HIT` on a second
   fetch of a published page, and a MISS right after a publish.
-- **Slice 2, the editor**: edit a page's words and order its sections, add a
-  page, through the same content model. Evaluate Puck against the
-  destination first. Photos on pages need a public image route like the
-  logo's.
+- **A pointer drag has not been seen by a person.** The editor's keyboard
+  drag is proven; the mouse path is the same sensor set and drop handler,
+  but the browser tooling could not produce a real pointer drag. Ten seconds
+  with a mouse on the dev branch settles it.
+- **Photos in sections** need a public image route like the logo's and an
+  upload in the editor; the content model gains an `image` section then.
+- **Rewriting one section with the assistant** (rather than the whole site)
+  is the editor-shaped version of "Rewrite the words"; the slot prompt
+  already exists per section kind.
+- **`DndContext` needs an `id`** or its accessibility ids differ between
+  server and client and React reports a hydration mismatch — found on the
+  first render of the Pages panel and fixed by naming both contexts.
 - **Slice 3, domains**: a `(domain → site)` table, Vercel's Domains API for a
   connected domain (CNAME/A + TXT), the registrar API for a purchased one,
   and the ownership ADR before the first purchase. `hostToSiteSlug` grows a

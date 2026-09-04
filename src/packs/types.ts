@@ -23,6 +23,7 @@ export interface PackDefinition {
   /** lucide icon name used in nav (kept as string to stay serializable). */
   icon: string;
   layout?: ModuleDefinition["layout"];
+  fullWidthPaths?: ModuleDefinition["fullWidthPaths"];
   /** Words this pack lets a tenant rename. See ModuleDefinition.labels. */
   labels?: LabelDefinition[];
   /**

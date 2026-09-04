@@ -3,9 +3,10 @@ import { and, eq } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { Site } from "@/db/schema";
 import type { AssembledPage } from "@/lib/sites/copy";
-import type { SiteSettings } from "@/lib/sites/schema";
+import { readPageContent, type SiteSettings } from "@/lib/sites/schema";
 import { MarketingError } from "./core/errors";
 import type { MarketingCtx } from "./kit-ops";
+import { recordVersion } from "./page-ops";
 
 /**
  * Writing the site. Takes the caller's `tx`; the action layer owns the
@@ -142,11 +143,15 @@ export async function changeSiteSlug(
   }
 }
 
-/** Every draft becomes the published snapshot, and the site goes live. */
+/**
+ * Every draft becomes the published snapshot, and the site goes live. Each
+ * page records a `publish` version, so history shows what was on the
+ * internet when, not only what was saved.
+ */
 export async function publishSite(tx: Tx, ctx: MarketingCtx, siteId: string): Promise<Site> {
   const pages = await tx.query.sitePages.findMany({
     where: and(eq(schema.sitePages.tenantId, ctx.tenantId), eq(schema.sitePages.siteId, siteId)),
-    columns: { id: true, draft: true },
+    columns: { id: true, draft: true, published: true },
   });
   if (pages.length === 0) throw new MarketingError("SITE_EMPTY", "no pages to publish");
   for (const page of pages) {
@@ -156,6 +161,11 @@ export async function publishSite(tx: Tx, ctx: MarketingCtx, siteId: string): Pr
       .where(and(eq(schema.sitePages.tenantId, ctx.tenantId), eq(schema.sitePages.id, page.id)))
       .returning({ id: schema.sitePages.id });
     if (!updated) throw new MarketingError("FORBIDDEN", "page not published");
+    // Only when something went live that was not live before; re-publishing
+    // an unchanged page is not a step worth a history row.
+    if (JSON.stringify(page.published) !== JSON.stringify(page.draft)) {
+      await recordVersion(tx, ctx, page.id, "publish", readPageContent(page.draft));
+    }
   }
   return updateSite(tx, ctx, siteId, { status: "published", publishedAt: new Date() });
 }

@@ -1,7 +1,7 @@
 import "server-only";
-import { and, asc, eq, isNotNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
 import { schema, withSystem, withTenant, type Tx } from "@/db";
-import type { Site, SitePage } from "@/db/schema";
+import type { Site, SitePage, SitePageVersion } from "@/db/schema";
 import type { ResolvedBrand } from "@/lib/brand/core";
 import { resolveBrandFor } from "@/lib/brand/read";
 import {
@@ -92,6 +92,40 @@ export async function loadPublishedSite(slug: string): Promise<PublicSite | null
     const brand = await resolveBrandFor(tx, hit.tenantId, null);
     return toView(site, brand, pages, "published");
   });
+}
+
+/** One page and its history, for the editor. Null when it is not this tenant's. */
+export async function loadPageEditor(
+  tx: Tx,
+  tenantId: string,
+  pageId: string,
+): Promise<{
+  site: Site;
+  page: SitePage;
+  siblings: Array<{ id: string; path: string; title: string }>;
+  versions: SitePageVersion[];
+} | null> {
+  const page = await tx.query.sitePages.findFirst({
+    where: and(eq(schema.sitePages.tenantId, tenantId), eq(schema.sitePages.id, pageId)),
+  });
+  if (!page) return null;
+  const site = await tx.query.sites.findFirst({
+    where: and(eq(schema.sites.tenantId, tenantId), eq(schema.sites.id, page.siteId)),
+  });
+  if (!site) return null;
+  const siblings = await tx.query.sitePages.findMany({
+    where: and(eq(schema.sitePages.tenantId, tenantId), eq(schema.sitePages.siteId, site.id)),
+    columns: { id: true, path: true, title: true },
+    orderBy: asc(schema.sitePages.navOrder),
+  });
+  const versions = await tx.query.sitePageVersions.findMany({
+    where: and(
+      eq(schema.sitePageVersions.tenantId, tenantId),
+      eq(schema.sitePageVersions.pageId, page.id),
+    ),
+    orderBy: desc(schema.sitePageVersions.createdAt),
+  });
+  return { site, page, siblings, versions };
 }
 
 /** The tenant's site with its drafts, inside the caller's transaction. Null when none. */

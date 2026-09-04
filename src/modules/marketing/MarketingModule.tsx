@@ -12,14 +12,15 @@ import {
   RemoveCompanyLookButton,
   StartCompanyLookButton,
 } from "./components/company-look-controls";
+import { MarketingStrip } from "./components/marketing-strip";
 
 /**
- * The module's only screen, for now: the brand kit.
+ * The module's front page: the brand kit, with the strip to the website.
  *
  * The data is Layer 0 (`brand_kits`, read through `src/lib/brand/`); this is
- * the one place it is EDITED. When the website and domains arrive they get
- * sections of their own and a strip, and the kit moves under `/brand`. Until
- * then a hub with a single tile would be a click that leads nowhere.
+ * the one place it is EDITED. The website lives at `./website`; the kit
+ * stayed at the module root when the strip arrived (slice 1) so the brand
+ * guide's route and every link to it kept working.
  *
  * THE COMPANY WORD IS EARNED, NOT ASSUMED. A one-company business — every
  * client today — sees one kit and never reads the word (ADR 0010). The
@@ -58,8 +59,9 @@ export async function MarketingModule({ ctx }: { ctx: TenantContext }) {
       <PageHeader
         icon={<Megaphone />}
         title="Marketing"
-        description={`How ${ctx.tenant.name} looks to its customers. Today that is your brand kit: the logo, colors and tagline on every invoice.`}
+        description={`How ${ctx.tenant.name} looks to its customers: the brand kit on every invoice, and the website.`}
       />
+      <MarketingStrip />
 
       <section className="space-y-3">
         <h2 className="font-heading text-lg font-semibold tracking-heading">

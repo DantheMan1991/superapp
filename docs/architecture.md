@@ -130,7 +130,10 @@ Tracing a tenant page request end to end — this is the spine of the system.
 ```
   Browser
     │
-    ├─ middleware.ts ───────── "is there a Clerk session?"  ← NOT authorization
+    ├─ proxy.ts ────────────── "is there a Clerk session?"  ← NOT authorization
+    │     (Next 16's name for middleware.ts) and one routing decision: a
+    │     request to <slug>.<SITE_DOMAIN> is a tenant's public website and is
+    │     rewritten to /hosted/<slug>/… (ADR 0019). Everything else passes.
     │
     ├─ layout / page (server component)
     │     requireTenant()  ──── Clerk session → active org → tenants row → role

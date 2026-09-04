@@ -1,9 +1,11 @@
 # Marketing
 
 > How the business looks to its customers, and — as the module grows — where
-> it is found. Slice 0 is the **brand kit**: logo, display name, tagline and
-> two colours, carried onto every invoice PDF. The roadmap adds a website
-> built from the business's own data, custom and purchased domains shared
+> it is found. Slices 0 and 0b are the **brand kit**: logo (uploaded or
+> drawn), display name, tagline and two colours, carried onto every invoice
+> PDF. Slice 1 is the **website**: pages of typed sections written by the
+> assistant from the kit and the business's details, published on a free
+> address. The roadmap adds the editor, custom and purchased domains shared
 > with the Mail module, forms that land in the CRM, and a shop block the
 > `retail` pack fills. The brand kit itself is Layer 0 data
 > ([ADR 0018](../decisions/0018-the-brand-kit-is-layer-0-data.md)); this
@@ -17,7 +19,7 @@
 | **0** | **Brand kit at Layer 0: `brand_kits`, the Marketing screen, the invoice PDF as first consumer** | **built 2026-09-04** |
 | **0b** | **Logo generation: Claude-chosen wordmarks and monograms drawn as vector paths from the shipped Noto Sans, rasterised with `sharp`; SVG upload, rasterised on the way in** | **built 2026-09-04** |
 | 0c | An illustrated symbol, optionally, from OpenAI's image model (`gpt-image-1`, transparent PNG, symbol only, never the name) composed with the kit's own wordmark. Needs `OPENAI_API_KEY`; the founder has an account | next, if the wordmarks feel plain |
-| 1 | Site model — pages and sections as JSON, draft/publish, a renderer on a free subdomain (host-based routing in `proxy.ts`), generation from the brand kit, profile section templates and the business's data, cached per site | |
+| **1** | **Site model and renderer — pages of typed sections, draft/publish, written by the assistant from the kit and the business's details, served at `/sites/<slug>` and at `<slug>.<SITE_DOMAIN>` through a host rewrite in `proxy.ts`, cached (ISR) and revalidated on publish.** [ADR 0019](../decisions/0019-a-website-is-pages-of-typed-sections.md) | **built 2026-09-04** — the site domain itself is still to buy |
 | 2 | The editor — blocks, drag to reorder, in-place editing, versions; evaluate Puck (MIT) against the destination first | |
 | 3 | Domains at Layer 0 — one `domains` table with purposes (send mail, host mailboxes, website), connect an existing domain by records only, buy a new one through Vercel's registrar API and publish MX/SPF/DKIM/site records ourselves. Needs an ADR on who owns a purchased domain | |
 | 4 | Forms into CRM as parties with `source = 'website'`, raising Work follow-ups; page views | |
@@ -27,6 +29,60 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-04 — Slice 1: the website, built from the kit and put on an address (`claude/marketing-site-model`)
+
+- **`sites` + `site_pages`** (`0246`, RLS `0247`): one site per tenant with a
+  platform-unique `slug` (a hostname label), live `settings` (phone, email,
+  address, hours) and a status; pages with `draft` and `published` JSON.
+  A page is a description and up to twelve typed sections
+  (`src/lib/sites/schema.ts`: hero, about, offer, hours, contact, text, cta),
+  validated on every write and degraded to empty on a malformed read. Members
+  read, owners write, as policies. **`0246` is hand-reordered**: drizzle-kit
+  emits every FK before every index, and the composite FK to `sites` needs
+  `sites_tenant_id_id_idx` first — the trap `ledger.ts` has warned about since
+  ADR 0010, met for the first time with the referenced table in the same file.
+- **The assistant writes into fixed slots; the code assembles pages.**
+  `ai/site-copy-prompt.ts` briefs it with the kit, the industry and the
+  details (facts, never files); `ai/site-copy-validate.ts` parses each slot on
+  its own so one bad slot costs one slot; `standardSiteCopy` fills the rest
+  and stands in entirely without a key; `assembleSite` (pure) makes home,
+  about and contact in a fixed order. Adaptive thinking, on purpose: this is
+  the reasoning-shaped task `lib/claude.ts` says new call sites should think
+  about, and the owner pressed "Build it" expecting to wait.
+- **Two addresses, one renderer.** `/sites/[slug]/[[...path]]` on the platform
+  host, always; `/hosted/[slug]/[[...path]]` is where `src/proxy.ts` rewrites
+  `<slug>.<SITE_DOMAIN>` (locally `<slug>.localhost:3000`, no hosts-file
+  edit). Both are ISR (`revalidate = 300`) and revalidated on publish by
+  route-file pattern. The draft preview (`/sites/[slug]/draft/…`) is dynamic
+  and session-checked; the logo (`/sites/[slug]/logo`, `/logo` on a site
+  host) is the public route ADR 0018 promised, with a public cache header.
+- **The public read path opens a tenant, not a hole**: `lookupSiteBySlug` is
+  the one `withSystem` read (identifiers only), then everything runs in that
+  tenant's context as `staff`. No public policy. `docs/security.md` §6 has the
+  rows.
+- **The screen** at `/dashboard/m/marketing/website` (the module grew a
+  `CategoryStrip`: Brand, Website): build (address + details → "Build it"),
+  status and addresses, preview, publish / publish changes / unpublish,
+  rewrite the words, the details that show live, and the address change.
+  The brand kit stayed at the module root so its guide's route and every link
+  to it kept working.
+- The module's one gate moved to `gate.ts` so `actions.ts` and
+  `site-actions.ts` cannot answer "who may change how the business looks?"
+  differently.
+- Verified: 13 pure tests (address rules, host parsing, links, the content
+  model, the standard copy and assembly, the slot merge, the writer's
+  fallbacks) and `tests/isolation/sites.test.ts` (two tenants, staff vs
+  owner, cross-tenant reads/writes, the platform-wide slug, the composite FK
+  under `withSystem`, the CHECKs, the cascade, default-deny). **Driven on the
+  dev branch against the live model:** a site for the Test tenant built in
+  18 seconds with the assistant's words; `/sites/oak-row-farm` answered 404
+  while a draft; the draft preview rendered with its banner, brand colour,
+  logo and nav; Publish made it 200 in two seconds; and
+  `http://oak-row-farm.localhost:3000/` rendered through the host rewrite
+  with root-relative links and the logo at `/logo`. Not seen: an ISR cache
+  hit, which the dev server never produces — it is the production build's to
+  prove.
 
 ### 2026-09-04 — Slice 0b: Yosher draws a logo, and takes an SVG (`claude/marketing-logo-generation`)
 
@@ -121,6 +177,11 @@ Since 0b (`0245`): `logo_source` is `upload` or `generated` (CHECK), and
 upload. The stored blob is always a PNG or JPEG; the spec is what makes a
 generated logo re-drawable as a vector.
 
+| Table | Purpose | Notes (RLS, invariants, FKs) |
+| --- | --- | --- |
+| `sites` | The business's website: its address, live details and status | FORCE RLS. `member_read`; INSERT/UPDATE/DELETE need `app_current_tenant_role() = 'owner'`. Unique on `tenant_id` (one site per tenant, this slice) and on `slug` platform-wide (it is a hostname label). CHECKs: slug shape `^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$`, `status in (draft, published)`, `copy_source in (model, standard)`, title ≤ 80. `settings` is `SiteSettingsSchema` |
+| `site_pages` | One page: its path, title, nav place, `draft` and `published` content | FORCE RLS, same policies. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. Unique `(site_id, path)`. CHECK: path `^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$`, title 1–80. `draft`/`published` are `PageContentSchema`; `published` null = never published |
+
 ## Key files & seams
 
 - `src/db/schema/brand.ts` — the table; `src/lib/brand/{core,image-sniff,read}.ts` — the seam
@@ -132,6 +193,21 @@ generated logo re-drawable as a vector.
 - `src/modules/marketing/logo-generate.ts` — the model call, padding from
   the standard set, `drawLogoToBlob`; `ai/logo-prompt.ts` + `ai/logo-validate.ts`;
   `components/logo-generator.tsx` — the dialog
+- `src/db/schema/sites.ts`; `src/lib/sites/schema.ts` (the content model),
+  `slug.ts` (address rules, `hostToSiteSlug`, `siteDomainFromEnv`, links —
+  dependency-free because the proxy imports it), `copy.ts` (`standardSiteCopy`,
+  `assembleSite`), `read.ts` (`lookupSiteBySlug`, `loadPublishedSite`,
+  `loadSiteDrafts`)
+- `src/proxy.ts` — the host rewrite; `src/components/site/site-page.tsx` (the
+  renderer) and `public-route.tsx` (the shared body of the two public routes)
+- `src/app/sites/[slug]/[[...path]]`, `src/app/hosted/[slug]/[[...path]]`,
+  `src/app/sites/[slug]/draft/[[...path]]`, `src/app/sites/[slug]/logo/route.ts`
+- `src/modules/marketing/site-actions.ts`, `site-ops.ts`, `site-generate.ts`,
+  `ai/site-copy-prompt.ts`, `ai/site-copy-validate.ts`, `gate.ts`;
+  `components/website-controls.tsx`, `components/marketing-strip.tsx`;
+  `src/app/dashboard/m/marketing/website/page.tsx`
+- `docs/help/marketing/website.md` — the screen's guide; `SITE_DOMAIN` in
+  `.env.example`
 - `src/modules/marketing/` — `MarketingModule.tsx` (the screen), `actions.ts`
   (gate → Zod → withTenant + audit → revalidate; every write owner-only),
   `kit-ops.ts` (the tx-level writes), `logo-ingest.ts` (inspect the uploaded
@@ -176,6 +252,30 @@ generated logo re-drawable as a vector.
 - **The name goes in type; a symbol may come from an image model later.**
   Image models set text badly and cannot be recoloured; that is why the
   founder's ChatGPT offer is 0c's symbol step, not this slice.
+- **Sections are data; the renderer decides how they look.** Nothing an
+  owner or the assistant writes is markup, so a public page rendered from
+  what a tenant typed cannot carry a script. A new kind of section is a new
+  member of the discriminated union plus a branch in `site-page.tsx` — and
+  the way a pack (the shop block) will extend the site, through a declared
+  slot, never by writing HTML.
+- **Contact and hours read the settings live.** The sections carry a heading
+  and a note only; the phone, email, address and hours come from
+  `sites.settings` at render time, so a changed number changes every page
+  that shows it without touching a draft or publishing.
+- **The site domain is a separate purchase, never `yosherapp.com`.** Its zone
+  carries the SES, Migadu and Stalwart records. Until a domain is bought and
+  put on Vercel's nameservers (a wildcard needs them), `SITE_DOMAIN` stays
+  unset in production and every site is a path on the platform host — which
+  is also the preview and the local-dev answer.
+- **`/hosted/<slug>` is reachable on the platform host too**, where its
+  root-relative links point at the platform. Harmless; not an address anyone
+  is given.
+- **The page title is `absolute`.** The root layout's `%s · Yosher` template
+  is the platform's name and leaked onto the first rendered site before the
+  metadata said otherwise.
+- **The proxy reads `SITE_DOMAIN` per request, not at module load**, because
+  its runtime does not promise module state survives, and `hostToSiteSlug`
+  lives in a dependency-free file because the proxy runs before everything.
 - **The logo stays private.** The `[id]/logo` route proves the tenant, reads
   the row through RLS, then streams — and it is NOT gated on the Marketing
   module, because the brand has consumers of its own. A public URL for the
@@ -198,6 +298,33 @@ generated logo re-drawable as a vector.
 
 ## Open items
 
+- **Buy the site domain and set `SITE_DOMAIN`.** A domain the platform owns,
+  on Vercel's nameservers, with a wildcard added to the project. Until then
+  every site is `/sites/<slug>` on the platform host. The founder decides the
+  name.
+- **An ISR cache hit has never been seen** — the dev server renders every
+  request. The production build proves it: `x-nextjs-cache: HIT` on a second
+  fetch of a published page, and a MISS right after a publish.
+- **Slice 2, the editor**: edit a page's words and order its sections, add a
+  page, through the same content model. Evaluate Puck against the
+  destination first. Photos on pages need a public image route like the
+  logo's.
+- **Slice 3, domains**: a `(domain → site)` table, Vercel's Domains API for a
+  connected domain (CNAME/A + TXT), the registrar API for a purchased one,
+  and the ownership ADR before the first purchase. `hostToSiteSlug` grows a
+  second lookup.
+- **Slice 4, forms into CRM**: the contact page's form creates a party with
+  `source = 'website'` and raises a Work follow-up; reuse
+  `public_access_attempts` for the cap. The `cta` and `hero` buttons point at
+  the contact page today; the assembler pins that, and the prompt now asks
+  for labels that say so.
+- **The shop block** is `retail` slice 6's, through a declared section slot.
+- **Sitemap and robots per site**, and a `canonical` pointing at the host
+  address once one exists.
+- **Rewriting replaces every draft.** Fine while the assistant is the only
+  writer; the editor makes a per-page rewrite the right grain.
+- **The dev-branch Test tenant now holds a published site `oak-row-farm`**,
+  left from this verification.
 - **Not yet looked at: dark mode, a phone, and a square mark on the PDF.**
   The screen was driven on the dev branch (build log) but only in the light
   theme on a desktop pane. The colour input on a phone and whether the

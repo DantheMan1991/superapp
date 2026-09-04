@@ -33,6 +33,9 @@ export * from "./payments";
 // Layer 0 identity: the logo, colours and tagline every consumer reads through
 // `src/lib/brand/`. Edited by the Marketing module, owned by nobody's module.
 export * from "./brand";
+// The business's public website: pages of typed sections, read by strangers
+// through one trusted slug lookup and then the ordinary tenant context.
+export * from "./sites";
 // Layer 2a — pack-owned tables. Same rules as any domain above; the separation
 // that matters is in `src/packs/`, where the code lives.
 export * from "./assets";

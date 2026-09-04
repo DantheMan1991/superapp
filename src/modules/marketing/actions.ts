@@ -3,8 +3,6 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
-import { requireTenant } from "@/lib/auth";
-import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
 import {
   BRAND_DISPLAY_NAME_MAX,
@@ -18,7 +16,8 @@ import {
   type LogoCandidate,
 } from "@/lib/brand/logo-spec";
 import { resolveBrandFor } from "@/lib/brand/read";
-import { MarketingError, friendlyMessage } from "./core/errors";
+import { MarketingError } from "./core/errors";
+import { fail, gate, type ActionResult } from "./gate";
 import {
   draftLogoCandidates,
   drawLogoToBlob,
@@ -31,7 +30,6 @@ import {
   ensureKit,
   saveKitFields,
   setKitLogo,
-  type MarketingCtx,
 } from "./kit-ops";
 import { discardLogoBlob, inspectUploadedLogo } from "./logo-ingest";
 
@@ -47,27 +45,6 @@ import { discardLogoBlob, inspectUploadedLogo } from "./logo-ingest";
  * in every core module.
  */
 const BASE = "/dashboard/m/marketing";
-
-type ActionResult<T = undefined> = { ok: true; data?: T } | { error: string };
-
-async function gate(): Promise<MarketingCtx> {
-  const ctx = await requireTenant();
-  await requireModuleEnabled(ctx.tenant.id, "marketing");
-  if (ctx.role === "expert") {
-    throw new MarketingError("FORBIDDEN_EXPERT", "accountant access is read-only");
-  }
-  if (ctx.role !== "owner") {
-    throw new MarketingError("FORBIDDEN", "owner role required");
-  }
-  return { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role };
-}
-
-function fail(err: unknown): { error: string } {
-  if (!(err instanceof MarketingError)) {
-    console.error("marketing action failed", err);
-  }
-  return { error: friendlyMessage(err) };
-}
 
 function revalidate(): void {
   revalidatePath(BASE);

@@ -1723,6 +1723,20 @@
       "when": 1788560658096,
       "tag": "0245_minor_nighthawk",
       "breakpoints": true
+    },
+    {
+      "idx": 246,
+      "version": "7",
+      "when": 1788562627207,
+      "tag": "0246_rich_molecule_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 247,
+      "version": "7",
+      "when": 1788562634141,
+      "tag": "0247_sites_rls",
+      "breakpoints": true
     }
   ]
 }

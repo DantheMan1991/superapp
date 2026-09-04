@@ -11,6 +11,8 @@ import {
   recordMeterReading,
   recordService,
 } from "../src/packs/assets/maintenance-ops";
+import { owningCategories } from "../src/lib/work/entity-work";
+import { ownerFeatureAllowsWrite } from "../src/lib/packs/authorize";
 
 const RUN = !!process.env.DATABASE_URL;
 const d = RUN ? describe : describe.skip;
@@ -130,6 +132,33 @@ d("maintenance raises work", () => {
       "maintenance_schedule",
     ]);
     expect(links.every((l) => l.extensionSlug === "assets")).toBe(true);
+  });
+
+  /**
+   * **WHOSE ROLE RULE THE SHARED WORK VERBS APPLY.** `WorkItemRow` on the asset
+   * page calls Layer 0's `setEntityWork*Action`, and those ask the OWNING
+   * feature — which for this item is `assets`, a pack, where the accountant
+   * writes at `member` level. The same row on a CRM record resolves to `core`
+   * and refuses them. Asserted through the real link rather than by calling the
+   * predicate with a literal, because the value that matters is the one the
+   * JOIN actually finds.
+   */
+  it("resolves this item's owner as a PACK, so a pack's rule applies", async () => {
+    const items = await asOwner((tx) =>
+      tx
+        .select({ id: schema.workItems.id })
+        .from(schema.workItems)
+        .where(eq(schema.workItems.tenantId, tenantId)),
+    );
+    const categories = await asOwner((tx) =>
+      owningCategories(tx, tenantId, items[0].id),
+    );
+    expect(categories).toEqual(["pack"]);
+    expect(categories.every((c) => ownerFeatureAllowsWrite(c ?? "core", "expert"))).toBe(
+      true,
+    );
+    // And the same list under a core owner would refuse them.
+    expect(ownerFeatureAllowsWrite("core", "expert")).toBe(false);
   });
 
   it("does not raise a second item while one is outstanding", async () => {

@@ -9,6 +9,56 @@
 
 ## Build log
 
+### 2026-09-04 — The guard is the owning feature, roles included (`claude/the-guard-is-the-owning-feature`)
+
+`src/lib/work/actions.ts` is Layer 0: one set of verbs so a follow-up on a CRM
+record and a job raised off a tractor are ticked off by the same action. Its
+header states the principle — *"THE GUARD IS THE OWNING FEATURE, NOT WORK"* — and
+applied it to whether the feature is switched ON. **It never applied it to the
+ROLE, and those verbs asked no role question at all.** So an accountant could
+tick off, hand over and re-date a CRM follow-up, in a module where every other
+write refuses them; `docs/help/crm/tasks.md` had documented that as the one part
+of CRM which was not read-only. Found writing the CRM gate sweep (#379), which
+hid the row and left the seam as an open item.
+
+**THE TWO OWNERS DISAGREE ON PURPOSE, WHICH IS WHY THE SEAM COULD NOT JUST PICK
+ONE.** A core module has no read-only-safe write and refuses `expert` outright. A
+capability pack admits one at `member` level, settled 2026-09-03: recording that
+something happened to a thing that already exists is a chore. Both are right
+about their own records, and a shared verb has to honour whichever owns the
+record in front of it.
+
+**THE DATABASE ALREADY KNEW WHICH IS WHICH.** `modules.category` is `core`,
+`pack` or `system` and has been since the packs were seeded — `scripts/seed.ts`
+even says so above the Layer 2a block. So `ownerFeatureAllowsWrite(category,
+role)` in `authorize.ts` needs no registry, no new column, no migration, and no
+import from a module into `src/lib/`, which `src/lib/packs/resolve.ts` already
+refuses for the same reason.
+
+Three decisions inside it, each of which could have gone the other way:
+
+- **Every owner must allow it, not any.** An item linked to a CRM record AND a
+  tractor is refused if either says no. "Any owner is enough" would make
+  attaching a second record a way to widen who may change the first — a
+  permission granted by a link.
+- **Anything unrecognised is treated as CORE**, the stricter rule. A slug nobody
+  registered is a question nobody can answer, and answering it permissively is
+  how a dropped registry row becomes a permission. `owningCategories` LEFT JOINs
+  for the same reason: an inner join would drop the unanswerable row entirely,
+  and a dropped row reads as "no owner objected".
+- **An item with NO links gets Work's own rule.** No links means nobody raised it
+  from a record, which makes it the Work module's, and Work refuses the
+  accountant. Without that line an empty list would vacuously pass.
+
+`addEntityWorkAction` asks the same question the cheap way — it is TOLD its
+`extensionSlug`, so it reads one category instead of looking up an item's links.
+
+**What did NOT change, and is now an open item**: only `addEntityWorkAction`
+checks that the owning feature is switched ON. The other three never have, so a
+follow-up on a record whose module was later turned off is still workable. That
+is the same header's other half and wants deciding on its own — turning it on
+silently would stop work somebody can see today.
+
 Newest first. One entry per session/PR that touched this area.
 
 ### 2026-08-19 — A profile can ask for a dollar sign (`claude/money-that-looks-like-money`)
@@ -407,6 +457,16 @@ Pack-owned tables follow the ordinary rules: `tenant_id`, FORCE RLS, a
   store page is ever built, it filters on `category = 'core'`.
 
 ## Open items
+
+- **Only one of Layer 0's four work verbs checks that the owning feature is
+  switched ON.** `addEntityWorkAction` calls `assertFeatureOn`;
+  `setEntityWorkDoneAction`, `setEntityWorkAssigneeAction` and
+  `setEntityWorkDueAction` never have. So a follow-up raised on a CRM record is
+  still tickable after CRM is switched off for that tenant. The file's header
+  says the guard is the owning feature and means this too — but adding it would
+  silently stop work somebody can currently see on their own list, so it is a
+  decision rather than an omission. The ROLE half of the same principle was
+  closed 2026-09-04; see the build log.
 
 - **Seed application is not built.** `IndustryProfile.seed` is declared and
   unread, so `installProfile` enables packs and stamps the profile but ships no

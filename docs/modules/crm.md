@@ -52,8 +52,9 @@ The four screens that were already owner-only — automations, duplicates, field
 pipelines — needed nothing: an accountant is not an owner and was already
 getting their non-owner branch.
 
-**ONE CONTROL IS NOW STRICTER THAN ITS SERVER, ON PURPOSE, AND IT IS THE NEXT
-THING TO FIX.** `WorkItemRow` — the shared follow-up row, on the record timeline
+**ONE CONTROL WAS STRICTER THAN ITS SERVER FOR A DAY — CLOSED 2026-09-04 by
+`ownerFeatureAllowsWrite`, see `packs-and-profiles.md`.** What follows is why it
+was hidden before the seam agreed.** `WorkItemRow` — the shared follow-up row, on the record timeline
 and on `/tasks` — calls Layer 0's `setEntityWorkDoneAction`,
 `setEntityWorkAssigneeAction` and `setEntityWorkDueAction`
 (`src/lib/work/actions.ts`), and **those three apply no role rule at all**. So an
@@ -1047,20 +1048,12 @@ values stay readable and the discontinuity is visible.
 - ~~**The outside accountant is refused only on submit** across the module,
   and `/dashboard/m/crm/records/new` has no role check at all.~~ — **fixed
   2026-09-04**; see the build log.
-- **`src/lib/work/actions.ts` APPLIES NO ROLE RULE, and it is a Layer 0 seam.**
-  `setEntityWorkDoneAction`, `setEntityWorkAssigneeAction` and
-  `setEntityWorkDueAction` check the module is enabled and nothing else, so any
-  role that can see a `WorkItemRow` can work it — a CRM follow-up included, where
-  every other write is refused for `expert`. CRM's screens hide the row from an
-  accountant now, which makes them stricter than their server; that is a
-  deliberate holding position, not the fix. **The fix needs a decision the file's
-  own header points at**: it says the guard is the OWNING FEATURE, and the owning
-  features disagree about this role — CRM, Documents, Scheduling and Work all
-  refuse `expert`, while a capability pack admits one at `member` level
-  (`src/lib/packs/authorize.ts`, settled 2026-09-03). So the seam needs to ask the
-  owning feature for its rule rather than pick one, which is a registry keyed on
-  `extensionSlug` and wants its own slice. The same shape as the photo gate found
-  on 2026-09-04 — see [documents.md](documents.md).
+- ~~**`src/lib/work/actions.ts` APPLIES NO ROLE RULE, and it is a Layer 0
+  seam.**~~ — **fixed 2026-09-04, the same day.** The seam asks the owning
+  feature's rule now (`ownerFeatureAllowsWrite`), reading `modules.category` to
+  tell a core module from a pack. CRM's screens are no longer stricter than
+  their server. See [ci-and-tests.md](ci-and-tests.md)'s neighbour
+  `packs-and-profiles.md` for the predicate, and the build log there.
 
 - **`party_addresses` is still deferred, and now deliberately rather than by
   omission.** Contact points landed because two features needed them; nothing

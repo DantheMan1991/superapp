@@ -51,3 +51,40 @@ export function allowsWrite(role: WriteRole, level: WriteLevel): boolean {
   if (level === "member") return true;
   return role === "owner";
 }
+
+/**
+ * **WHOSE RULE APPLIES TO WORK RAISED ON SOMEBODY ELSE'S RECORD.**
+ *
+ * `src/lib/work/actions.ts` is Layer 0: one set of verbs that every module and
+ * every pack calls, so a follow-up on a CRM record and a job raised off a
+ * tractor are ticked off by the same action. Its header states the principle —
+ * *"THE GUARD IS THE OWNING FEATURE, NOT WORK"* — and applied it to whether the
+ * feature is switched on. It did not apply it to the ROLE, and until 2026-09-04
+ * those verbs asked no role question at all: an accountant could tick off, hand
+ * over and re-date a CRM follow-up, in a module where every other write refuses
+ * them.
+ *
+ * **THE TWO OWNERS GENUINELY DISAGREE, WHICH IS WHY THIS CANNOT JUST PICK ONE.**
+ * A core module — CRM, Documents, Scheduling, Work — has no read-only-safe write
+ * and refuses `expert` outright. A capability pack admits one at `member` level,
+ * settled 2026-09-03: recording that something happened to a thing that already
+ * exists is a chore, and the accountant is a person with a tenant context like
+ * any other.
+ *
+ * **THE DATABASE ALREADY KNOWS WHICH IS WHICH.** `modules.category` is `core`,
+ * `pack` or `system`, seeded that way from the beginning — see the comment above
+ * the Layer 2a block in `scripts/seed.ts`. So this needs no registry, no new
+ * column and no import from a module into `src/lib/`, which
+ * `src/lib/packs/resolve.ts` already refuses to do for the same reason.
+ *
+ * Anything that is not a pack is treated as a core module, `system` included.
+ * A slug nobody recognises therefore gets the STRICTER rule, which is the right
+ * way round for a default.
+ */
+export function ownerFeatureAllowsWrite(
+  category: string,
+  role: WriteRole,
+): boolean {
+  return category === "pack" ? allowsWrite(role, "member") : role !== "expert";
+}
+

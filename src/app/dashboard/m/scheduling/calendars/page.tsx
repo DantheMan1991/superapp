@@ -4,6 +4,7 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { listAssignableMembers } from "@/lib/team";
 import { withSchedule } from "@/lib/schedule/with-schedule";
+import { roleMayWrite } from "@/lib/schedule/access";
 import {
   listCalendars,
   listShares,
@@ -56,6 +57,8 @@ export default async function CalendarsPage() {
     },
   );
 
+  const canWrite = roleMayWrite(ctx.role);
+
   return (
     <div className="space-y-4">
       <Link
@@ -74,8 +77,13 @@ export default async function CalendarsPage() {
         shares={shares}
         currentUserId={ctx.userId}
         isOwner={ctx.role === "owner"}
+        /* The same question `gate()` asks. This page called it nowhere until
+           2026-09-03, so an accountant rendered New calendar, Share, Edit,
+           Archive and Create link all enabled and every press came back
+           `accountant access is read-only`. */
+        canWrite={canWrite}
       />
-      <FeedSubscription tokens={tokens} />
+      <FeedSubscription tokens={tokens} canWrite={canWrite} />
     </div>
   );
 }

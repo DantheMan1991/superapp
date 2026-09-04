@@ -17,7 +17,14 @@ import { mintFeedTokenAction, revokeFeedTokenAction } from "../actions";
  * is shown exactly once, the copy is loud about that, and revoking says plainly
  * what it can and cannot undo.
  */
-export function FeedSubscription({ tokens }: { tokens: FeedTokenRow[] }) {
+export function FeedSubscription({
+  tokens,
+  canWrite,
+}: {
+  tokens: FeedTokenRow[];
+  /** `roleMayWrite(role)`. An accountant sees the links and mints none. */
+  canWrite: boolean;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [label, setLabel] = useState("");
@@ -103,38 +110,42 @@ export function FeedSubscription({ tokens }: { tokens: FeedTokenRow[] }) {
                     : "Never used yet"}
                 </p>
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-7 shrink-0"
-                disabled={pending}
-                onClick={() => revoke(t.id)}
-              >
-                <X className="size-4" />
-                <span className="sr-only">Revoke</span>
-              </Button>
+              {canWrite && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 shrink-0"
+                  disabled={pending}
+                  onClick={() => revoke(t.id)}
+                >
+                  <X className="size-4" />
+                  <span className="sr-only">Revoke</span>
+                </Button>
+              )}
             </li>
           ))}
         </ul>
       )}
 
-      <div className="flex items-end gap-2">
-        <div className="flex-1 space-y-1.5">
-          <Label htmlFor="feed-label" className="text-xs">
-            What is it for?
-          </Label>
-          <Input
-            id="feed-label"
-            value={label}
-            maxLength={60}
-            onChange={(e) => setLabel(e.target.value)}
-            placeholder="iPhone"
-          />
+      {canWrite && (
+        <div className="flex items-end gap-2">
+          <div className="flex-1 space-y-1.5">
+            <Label htmlFor="feed-label" className="text-xs">
+              What is it for?
+            </Label>
+            <Input
+              id="feed-label"
+              value={label}
+              maxLength={60}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="iPhone"
+            />
+          </div>
+          <Button onClick={mint} disabled={pending}>
+            Create link
+          </Button>
         </div>
-        <Button onClick={mint} disabled={pending}>
-          Create link
-        </Button>
-      </div>
+      )}
 
       {tokens.length > 0 && (
         <p className="text-xs text-muted-foreground">

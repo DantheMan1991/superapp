@@ -49,4 +49,4 @@ A calendar is shared as a whole, but a single event can be marked `Private`. The
 
 Everyone can keep a calendar, put events on it, share it, and set up a subscribe link. What you can do to somebody else's calendar is whatever they have granted you.
 
-**Your accountant cannot use this module.** They can see it, and every button they press fails with `accountant access is read-only`. Nothing on the screen warns them first. They also cannot be given access to a calendar at all.
+**Your accountant reads this module and writes nothing in it.** Both screens say so under the header rather than offering a button that fails, and the controls that would write are not drawn. They also cannot be given access to a calendar at all.

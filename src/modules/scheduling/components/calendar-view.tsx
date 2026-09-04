@@ -61,6 +61,7 @@ export function CalendarView({
   items,
   calendars,
   members,
+  canWrite,
 }: {
   mode: ScheduleViewMode;
   anchor: string;
@@ -70,6 +71,12 @@ export function CalendarView({
   items: ScheduleRangeItem[];
   calendars: CalendarSummary[];
   members: Array<{ clerkUserId: string; label: string }>;
+  /**
+   * `roleMayWrite(role)` — the accountant is read-only in this module and is
+   * still provisioned a calendar they administer, so `access` says `write` for
+   * them and is right to. Two different questions; both have to be asked.
+   */
+  canWrite: boolean;
 }) {
   const [composing, setComposing] = useState<{ date: string } | null>(null);
   const [editing, setEditing] = useState<{
@@ -78,7 +85,17 @@ export function CalendarView({
   } | null>(null);
 
   const colorOf = new Map(calendars.map((c) => [c.id, c.color || "slate"]));
-  const writable = calendars.filter((c) => c.access === "write");
+  /**
+   * **NOTHING IS WRITABLE TO SOMEBODY WHOSE ROLE CANNOT WRITE.** Folded in here
+   * rather than checked separately at each control, because every one of them
+   * already asks this list the question — `New event` disables on it, the
+   * banner below shows on it, and `EventForm` picks its calendar from it. One
+   * fold, and the read-only surface falls out of machinery that was already
+   * there for a member with no write grant anywhere.
+   */
+  const writable = canWrite
+    ? calendars.filter((c) => c.access === "write")
+    : [];
 
   const href = (next: { view?: ScheduleViewMode; date?: string }) =>
     `${BASE}?view=${next.view ?? mode}&date=${next.date ?? anchor}`;
@@ -158,16 +175,26 @@ export function CalendarView({
         </div>
       </header>
 
-      {writable.length === 0 && (
-        <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-          You can look at these calendars but not add to them. Anything you own
-          appears under{" "}
-          <Link href={`${BASE}/calendars`} className="underline">
-            Calendars
-          </Link>
-          .
-        </p>
-      )}
+      {writable.length === 0 &&
+        (canWrite ? (
+          <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+            You can look at these calendars but not add to them. Anything you own
+            appears under{" "}
+            <Link href={`${BASE}/calendars`} className="underline">
+              Calendars
+            </Link>
+            .
+          </p>
+        ) : (
+          /* The accountant gets the reason, not a disabled button with no
+             explanation beside it. Before this they got every control enabled
+             and `accountant access is read-only` on submit, which is the same
+             sentence arriving at the worst possible moment. */
+          <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+            Accountant access is read-only. You can see every calendar shared
+            with you and everything on it, and nothing here can be changed.
+          </p>
+        ))}
 
       {mode === "month" ? (
         <MonthGrid
@@ -177,7 +204,14 @@ export function CalendarView({
           timeZone={timeZone}
           colorOf={colorOf}
           onOpen={setEditing}
-          onAdd={(date) => setComposing({ date })}
+          /* A day number that opens a dialog with no calendar to save to is an
+             enabled control that fails, which is the thing this screen was
+             fixed for. Nothing to write to, nothing to open. */
+          onAdd={
+            writable.length === 0
+              ? undefined
+              : (date) => setComposing({ date })
+          }
         />
       ) : (
         <TimeGrid
@@ -437,7 +471,8 @@ function MonthGrid({
   timeZone: string;
   colorOf: Map<string, string>;
   onOpen: (item: { itemId: string; occurrenceDate: string | null }) => void;
-  onAdd: (date: string) => void;
+  /** Undefined when there is nothing to add to — the number stops being a button. */
+  onAdd?: (date: string) => void;
 }) {
   return (
     <div className="overflow-hidden rounded-xl border border-border">
@@ -460,16 +495,28 @@ function MonthGrid({
                 key={date}
                 className="min-h-[92px] space-y-0.5 border-l p-1 first:border-l-0"
               >
-                <button
-                  onClick={() => onAdd(date)}
-                  className={`text-xs ${
-                    date === today
-                      ? "font-semibold text-primary"
-                      : "text-muted-foreground"
-                  }`}
-                >
-                  {Number(date.slice(-2))}
-                </button>
+                {onAdd ? (
+                  <button
+                    onClick={() => onAdd(date)}
+                    className={`text-xs ${
+                      date === today
+                        ? "font-semibold text-primary"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {Number(date.slice(-2))}
+                  </button>
+                ) : (
+                  <span
+                    className={`block text-xs ${
+                      date === today
+                        ? "font-semibold text-primary"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {Number(date.slice(-2))}
+                  </span>
+                )}
                 {shown.map((item) => (
                   <button
                     key={keyOf(item)}

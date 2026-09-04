@@ -107,7 +107,7 @@ There is no way to change a link's address. Revoke it and make another.
 | `this is already your calendar` | You cannot grant yourself access to your own. |
 | `you already have 5 subscribe links — revoke one first` | Five is the limit. |
 | `Invalid input` | Something is missing. Most often a calendar with no colour. |
-| `accountant access is read-only` | Accountants cannot change anything here. |
+| `accountant access is read-only` | An accountant reached a write another way — through an old tab, or a link. The page itself no longer offers one. |
 
 ## Not on this page
 
@@ -124,4 +124,4 @@ There is no way to change a link's address. Revoke it and make another.
 
 Everyone keeps their own calendars, shares them, and makes their own subscribe links. Only a business owner administers a business calendar.
 
-Accountants see this page with every button enabled and every one of them fails with `accountant access is read-only`. Nothing warns them first, and they cannot be granted access to anybody's calendar.
+Accountants read this page and change nothing on it. There is no {button:New calendar|primary|plus}, and no share, edit or archive button on any row, including the calendar of their own they were given. A line under the header reads `Accountant access is read-only. You can see every calendar shared with you, who else can see it, and any subscription links already made — and nothing here can be changed.` They also cannot be granted access to anybody's calendar.

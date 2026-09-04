@@ -16,6 +16,48 @@
 
 ## Build log
 
+### 2026-09-03 — An accountant is told why (`claude/an-accountant-is-told-why`)
+
+**Both screens rendered every control enabled for an `expert` and refused every
+press.** `gate()` has failed closed for the accountant since the module shipped,
+and it was the ONLY place that knew the rule — neither `SchedulingModule` nor
+`calendars/page.tsx` asked it, so New event, New calendar, Share, Edit, Archive
+and Create link all drew normally and each one came back
+`accountant access is read-only`.
+
+**Why the existing read-only banner did not save it.** `CalendarView` already
+handles a reader who may write nowhere — `writable.length === 0` disables
+New event and explains itself. It never fired for an accountant, because
+`ensurePrimaryCalendar` is role-blind (deliberately: a calendar is the unit of
+sharing, and somebody without one cannot be shown a week), so they administer a
+calendar, `app_calendar_access` answers `write` for it, and `writable` is
+non-empty.
+
+**The rule now lives in `roleMayWrite`** (`lib/schedule/access.ts`, pure, already
+imported by the read path, the actions and a client renderer). `gate()` calls it
+instead of comparing the role itself, and both screens call it too, so they
+cannot drift. **The database was not touched**: `app_calendar_access` answers a
+GRANT question and answers it correctly; whether the role may write at all is an
+application rule, and moving it into the SQL function would have changed what RLS
+permits for a display concern.
+
+**One fold does the work in the calendar.** `writable` is `[]` when the role
+cannot write, so New event disables, the banner shows, and `EventForm` has no
+calendar to compose against — all machinery that was already there. The banner
+gained a second sentence for this case, because *"you can look but not add"* is
+the wrong explanation for an accountant. The month grid's day number is a
+`<span>` rather than a `<button>` when there is nothing to write to, which also
+closes the open item about it opening a dialog a read-only reader cannot use.
+
+**On the calendars page, `canAdmin` asks `canWrite` first.** An accountant owns
+the calendar they were provisioned and would otherwise still be offered Share,
+Edit and Archive on it. `New calendar` and the feed's `Create link` and `Revoke`
+are not drawn, and one line under the header says why.
+
+Guides swept in the same PR: `calendar.md`, `calendars.md` and `overview.md`
+described the broken behaviour explicitly — *"every button enabled and every one
+of them fails"* — and now describe what ships.
+
 ### 2026-09-03 — Three tenant guides, and what writing them found (`claude/scheduling-guides`)
 
 `docs/help/scheduling/` — `overview` (the `**` fallback, 0), `calendar` (10),
@@ -1166,12 +1208,14 @@ them. If something does, the boundary was drawn wrong.
 - **The provisioned main calendar cannot be renamed** without first clicking a
   colour swatch: its colour is `""`, `?? "blue"` does not catch it, and `Save`
   posts an empty colour that Zod refuses.
-- **Both screens render every control for an accountant and refuse every one on
-  submit.** Neither calls `gate()`, and an expert is provisioned a calendar
-  regardless of role, so even the read-only banner does not show.
+- ~~**Both screens render every control for an accountant and refuse every one on
+  submit.**~~ — **fixed 2026-09-03.** `roleMayWrite` in `lib/schedule/access.ts`,
+  asked by `gate()` and by both screens; see the build log.
 - **Nobody can see an RSVP.** The response is fetched and dropped client-side.
 - **`Business calendars` is unreachable** — nothing ever creates one.
-- **Month view's day number opens a create dialog a read-only reader cannot use.**
+- ~~**Month view's day number opens a create dialog a read-only reader cannot use.**~~
+  — **fixed 2026-09-03**, riding along with the accountant fix: the number is a
+  `<span>` rather than a `<button>` when nothing is writable.
 - **A read-only reader sees `Choose a calendar` rather than the calendar's name.**
 - **`Show as`, location and repeats never render on the grid.**
 - **"Move just this one" is built and unreachable** (`overrideOccurrence`).

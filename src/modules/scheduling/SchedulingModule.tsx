@@ -2,6 +2,7 @@ import type { TenantContext } from "@/lib/auth";
 import { listAssignableMembers } from "@/lib/team";
 import { withSchedule } from "@/lib/schedule/with-schedule";
 import { listRange } from "@/lib/schedule/range";
+import { roleMayWrite } from "@/lib/schedule/access";
 import { addDays, startOfDayInTimezone, todayInTimezone } from "@/lib/timezone";
 import { listCalendars } from "./calendar-ops";
 import { CalendarView } from "./components/calendar-view";
@@ -82,6 +83,11 @@ export async function SchedulingModule({
         clerkUserId: m.clerkUserId,
         label: m.name?.trim() || m.email,
       }))}
+      /* The same question `gate()` asks, so the page and the action cannot
+         disagree. They did until 2026-09-03: every control here rendered
+         enabled for an accountant and every press came back
+         `accountant access is read-only`. */
+      canWrite={roleMayWrite(ctx.role)}
     />
   );
 }

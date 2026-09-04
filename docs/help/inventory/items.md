@@ -62,7 +62,7 @@ The count of kinds on each pill includes retired things even when the list below
 | `Short by 2 batches nobody has costed` | Two batches have no price, so the total is understated by an unknown amount. |
 | `Check the details and try again.` | Something in the dialog is not right. Most often `How many, each` was left at zero. |
 | `Use lowercase letters, numbers and underscores.` | Your own kind has a capital, a symbol, or starts with a digit. |
-| `Only an owner can change stock records.` | You are signed in as staff. Ask an owner. |
+| `Only an owner can change stock records.` | You are signed in as staff and pressed something an owner keeps. Recording stock and counting are not among them. |
 | `Something went wrong saving that.` | Something unexpected. Try again, and tell us if it keeps happening. |
 
 ## Not on this page

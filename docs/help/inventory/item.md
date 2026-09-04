@@ -11,7 +11,7 @@ Open **Inventory** and click a name in the list. Every number on this page is ad
 The heading is the name. Under it sits the kind, then `counted in pounds` or whatever unit you chose. A badge shows if it has to be kept `Frozen`, `Refrigerated`, `Dry` or `Ambient`, and another reads `archived` once you have retired it.
 
 - **{button:New batch|outline}.** Starts a batch. Owners only, and gone once the {{item|lower}} is retired.
-- **{button:Record stock|primary}.** Records a delivery, stock going out, or a correction. Owners only, and gone once retired.
+- **{button:Record stock|primary}.** Records a delivery, stock going out, or a correction. Anyone can, including an accountant, and gone once retired.
 - **{button:Edit|outline|pencil}.** Changes what it is and how it is bought. Owners only, and it stays available on a retired {{item|lower}}.
 - **{button:Retire|ghost}.** Takes it out of lists without changing anything else. Once retired the button reads {button:Put back|outline}.
 - **`On hand`.** The total, in the counted unit. A dash means nothing has ever been recorded. Underneath, how many entries it was added up from, and the average paid across everything that came in with a price.
@@ -138,7 +138,7 @@ One of the notes under `Why` says to use a negative amount for a discount. Ignor
 | `give either an existing batch or a name for a new one` | You picked a batch and typed a new code. Choose one. |
 | `that lot belongs to a different item` | The batch you picked is not this {{item|lower}}'s. Reload and pick again. |
 | `Use lowercase letters, numbers and underscores.` | Your own reason has a capital, a symbol, or starts with a digit. |
-| `Only an owner can change stock records.` | You are signed in as staff. Ask an owner. |
+| `Only an owner can change stock records.` | You are signed in as staff and pressed something an owner keeps — starting a batch, splitting one, correcting a cost, or editing the {{item|lower}}. Recording stock is not one of those. |
 | `Something went wrong saving that.` | Something unexpected. It also covers a date that falls in a closed accounting period, which the message does not say. Tell us if you see it. |
 
 ## Not on this page
@@ -154,4 +154,6 @@ One of the notes under `Why` says to use a negative amount for a discount. Ignor
 
 ## Who can do what
 
-Only an owner can start a batch, record stock in or out, adjust a quantity, split a batch, correct what one cost, edit the {{item|lower}}, or retire it. Staff and accountants get this page with no buttons at all.
+Only an owner can start a batch, split one, correct what one cost, edit the {{item|lower}}, or retire it. Each of those either creates something the accounts group by, or changes what it costs.
+
+Recording stock in, out or adjusted is open to everyone, an accountant included. It is what the person unloading the pallet does, and it has to be recorded then rather than reported to somebody who can.

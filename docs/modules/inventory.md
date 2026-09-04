@@ -33,6 +33,33 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-09-03 — Recording stock is a chore, and now it is one (`claude/recording-stock-is-a-chore`)
+
+**The comment said ungated and the code four lines below it said `isOwner`.**
+`MovementForm` was nested inside the item header's owner block along with
+`LotForm` and `ItemControls`, directly beneath a comment reading *"Recording
+stock in and out is a chore and is ungated. Starting a batch or splitting one
+creates a cost object, so both stay with the owner."* `receiveStock`,
+`issueStock` and `adjustStock` have been `member`-level since 2026-08-15
+(`ops.ts:1328,1414,2419`). Counting was the only chore staff could reach in the
+whole pack.
+
+**The three controls in that header now ask three different questions.**
+`LotForm` and `ItemControls` keep `isOwner` — a batch is a cost object and an
+item is a thing the business is made of. `MovementForm` asks
+`allowsWrite(ctx.role, "member")`, the same pure function `requireWrite` calls,
+rather than restating the rule as a role comparison. The header renders when
+either side has something to show, so an archived item still gives the owner its
+Edit button and gives staff nothing.
+
+**Nothing on the ops side moved.** This was the UI disagreeing with a settled
+rule, not a question about the rule — see the 2026-08-15 entry in
+[livestock.md](livestock.md) for where it was settled and why.
+
+Guides swept in the same PR: `item.md`, `items.md` and `overview.md` no longer
+say recording stock is the owner's, and the two `Only an owner can change stock
+records.` rows now say which acts that message is actually about.
+
 ### 2026-09-03 — Eight tenant guides, and what writing them found (`claude/inventory-guides`)
 
 Guides in `docs/help/inventory/` for all seven screens plus an overview:
@@ -1442,9 +1469,9 @@ commitment against a live animal to delivered without sitting on a shelf.
 
 ## Open items
 
-- **Staff cannot record stock in, out or adjusted**, although all three ops are
-  member-level by design and the comment above the gate says so. One prop:
-  `[id]/page.tsx:244`. Counting is the only chore they can reach.
+- ~~**Staff cannot record stock in, out or adjusted**~~ — **fixed 2026-09-03.**
+  `MovementForm` is out of the header's owner block and asks `allowsWrite`; see
+  the build log.
 - **A closed period and an accountant's posting refusal both surface as
   `Something went wrong saving that.`** `LedgerError` is not in `toResult`.
 - **The matching flow's most useful message is thrown as `NOT_FOUND`** and

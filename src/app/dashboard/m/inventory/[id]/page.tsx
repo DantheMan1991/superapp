@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { Boxes, Layers } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
+import { allowsWrite } from "@/lib/packs/authorize";
 import { requireModuleEnabled } from "@/lib/modules";
 import { formatMoney } from "@/lib/money";
 import { todayInTimezone } from "@/lib/timezone";
@@ -168,8 +169,22 @@ export default async function InventoryItemPage({
    * Recording stock in and out is a chore and is ungated. Starting a batch or
    * splitting one creates a cost object, so both stay with the owner.
    * See src/lib/packs/authorize.ts.
+   *
+   * **THIS COMMENT WAS FALSE FROM THE DAY IT WAS WRITTEN**, and directly above
+   * the code that made it false: `MovementForm` was nested inside the header's
+   * `isOwner` block along with `LotForm` and `ItemControls`, so counting was the
+   * only chore staff could reach in the whole pack. `receiveStock`, `issueStock`
+   * and `adjustStock` have all been `member`-level since 2026-08-15
+   * (`ops.ts:1328,1414,2419`). Fixed 2026-09-03.
    */
   const isOwner = ctx.role === "owner";
+  /**
+   * Asked of the same pure function the ops layer asks, rather than restated
+   * here as a role comparison. A screen that spells the rule out in its own
+   * words is a screen that can drift from the server — which is exactly what
+   * this one did.
+   */
+  const canRecord = allowsWrite(ctx.role, "member");
   const enterpriseWord = labelFor(
     labels,
     ENTERPRISE_LABEL_KEY,
@@ -241,36 +256,45 @@ export default async function InventoryItemPage({
           </span>
         }
         actions={
-          isOwner ? (
+          isOwner || (item.status === "active" && canRecord) ? (
             <div className="flex flex-wrap items-center gap-2">
               {/* Starting a batch and moving stock are acts on a LIVE item.
                   Editing is not: a retired item is exactly the one somebody
                   needs to reach, to put it back. */}
               {item.status === "active" && (
                 <>
-                  <LotForm
-                    itemId={item.id}
-                    today={today}
-                    enterprises={enterprises.map((e) => ({
-                      id: e.id,
-                      name: e.name,
-                    }))}
-                    enterpriseWord={enterpriseWord}
-                    itemEnterpriseId={item.enterpriseId}
-                  />
-                  <MovementForm
-                    itemId={item.id}
-                    unitLabel={unitLabel}
-                    lots={lotOptions}
-                    locations={locationOptions}
-                    consumers={consumerOptions}
-                    unitSingular={unitSingular}
-                    stockedByMass={getUnit(unit)?.dimension === "mass"}
-                    currencySymbol={currencySymbol}
-                    today={today}
-                  />
+                  {/* Starting a batch creates a cost object, so it is the
+                      owner's. Moving stock in or out of one is what the person
+                      unloading the pallet does, and the three ops behind this
+                      form say `member`. They used to share a gate. */}
+                  {isOwner && (
+                    <LotForm
+                      itemId={item.id}
+                      today={today}
+                      enterprises={enterprises.map((e) => ({
+                        id: e.id,
+                        name: e.name,
+                      }))}
+                      enterpriseWord={enterpriseWord}
+                      itemEnterpriseId={item.enterpriseId}
+                    />
+                  )}
+                  {canRecord && (
+                    <MovementForm
+                      itemId={item.id}
+                      unitLabel={unitLabel}
+                      lots={lotOptions}
+                      locations={locationOptions}
+                      consumers={consumerOptions}
+                      unitSingular={unitSingular}
+                      stockedByMass={getUnit(unit)?.dimension === "mass"}
+                      currencySymbol={currencySymbol}
+                      today={today}
+                    />
+                  )}
                 </>
               )}
+              {isOwner && (
               <ItemControls
                 item={{
                   id: item.id,
@@ -296,6 +320,7 @@ export default async function InventoryItemPage({
                   rows.length === 0 ? null : formatQuantity(total, unit)
                 }
               />
+              )}
             </div>
           ) : null
         }

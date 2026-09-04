@@ -7,6 +7,33 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-03 — Livestock, in six guides (`claude/livestock-guides`)
+
+`overview`, `lots`, `lot`, `daily-round`, `feed`, `ask`, numbered in the pack's
+own tab order. Four agents; the lot page alone is eleven sections and nineteen
+dialogs, the largest screen any guide in this run has had to cover.
+
+**The worst vocabulary case of the five packs**, and the clearest argument that
+`_TEMPLATE.md`'s rule assumes something the packs do not deliver: `livestockLot`
+is honoured by about 22 strings and hardcoded by about 24, four of those as `pen`.
+`structure` reaches a reader exactly once, as `In a pen or barn`. Article
+agreement also breaks on any renamed word (`A enclosure`). Same resolution as
+`inventory` and `retail`: placeholders in prose where the code resolves them,
+literal quotes for what it hardcodes.
+
+**Two findings the guides had to work around rather than describe.** Head is
+counted one way on the hub and another on the lot page, and because `Treat`,
+`Weigh` and the daily check are gated on the lot's own balance, a lot whose head
+are all named members can be none of those things from its own page. And the Feed
+screen cannot record feed at all on a farm with no shared feeder — the by-name
+path exists in the component and is never mounted — so the guide sends readers to
+the lot page's own `Feed` button instead of describing a button that is not there.
+
+That makes four of five packs with a UI gate stricter than the ops layer beneath
+it. Retail is the only one without.
+
+Not clicked through live: the pane's Clerk session is still expired.
+
 ### 2026-09-03 — Retail, in four guides (`claude/retail-guides`)
 
 `overview`, `channels`, `channel`, `market-day`. No `**Area:**` at four guides.

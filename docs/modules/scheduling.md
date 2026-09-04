@@ -7,12 +7,117 @@
 > everything a particular trade calls that work. **Live from slice 4**: schema
 > and RLS, calendars and sharing, a week/day/month calendar with events and
 > attendees, links to the records an event is about, and the morning digest's
-> leading section. Recurrence, availability and the subscribe feed are the
-> remaining slices.
+> leading section. **Recurrence, availability and the subscribe feed have all
+> shipped since** — six fixed repeat options with no custom-rule editor, a
+> conflict warning rather than a booking system, and a per-person read-only ICS
+> link whose URL is its own credential.
 > Status: `available` · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 
 ## Build log
+
+### 2026-09-03 — Three tenant guides, and what writing them found (`claude/scheduling-guides`)
+
+`docs/help/scheduling/` — `overview` (the `**` fallback, 0), `calendar` (10),
+`calendars` (20). A core module, so no vocabulary placeholders. Three agents read
+the calendar and its 811-line event dialog, the manager with sharing and the
+feed, and the action layer. **The first area in the guides run that nobody has
+ever used in anger**, and it shows: the gap count is higher than any pack's.
+
+**The summary block at the top of this file was wrong and is fixed here.** It
+said recurrence, availability and the subscribe feed "are the remaining slices".
+All three have shipped. It also pointed at a `core/recurrence.ts` that does not
+exist and at a migration `0105` that is actually `work_rls`. `/admin/docs` parses
+that block, so it was wrong on a rendered page.
+
+**THE ONE TO FIX FIRST: archiving a calendar does not hide its events.**
+`listRange` — which both the week view and the ICS feed call — has no
+`archived_at` predicate at all; its `where` is the date window and nothing else.
+Archiving filters `listCalendars` (`calendar-ops.ts:108`) and the manager's own
+client-side list, and that is all. The comment at `calendar-ops.ts:173` says
+*"Archiving hides it and keeps the history"*. It does not hide it. Verified by
+reading `listRange` directly rather than taken on report.
+
+That matters more than it would elsewhere because of what it combines with:
+**the subscribe feed is the only unauthenticated route in the product that
+serves tenant data**, its URL is the whole credential, and it carries
+**everything the person can see** — their calendars, everything shared with
+them, business calendars, and events they are merely an attendee on — merged
+and named `Yosher`, 30 days back to 365 ahead. So somebody archives a calendar
+to stop it being seen and it keeps going out over a link that needs no login.
+The `calendars` guide says all of this plainly, including the window and the
+five-link cap, neither of which the screen mentions.
+
+**The secrecy warning is shown once.** `Anyone with this link can read your
+calendar without signing in. Treat it like a password…` renders only in the
+just-minted banner. Reload and it is gone; the standing token list carries no
+such wording. The guide repeats it and tells the reader to read it while it is
+there.
+
+**Day-one bug: the calendar every tenant is provisioned with cannot be renamed.**
+`ensurePrimaryCalendar` inserts with no colour, so `color` is `""`;
+`CalendarForm` seeds state with `?? "blue"`, which does not catch an empty
+string; `Save` posts `color: ""` and `z.enum(CALENDAR_COLORS)` refuses with
+`Invalid input`. Clicking any swatch first works. `calendar-view.tsx:80` gets the
+same read right with `|| "slate"`. This is the likeliest thing a first-time
+reader hits, so the guide names the workaround.
+
+**The accountant case is broken on both screens, and in the opposite direction
+to the packs.** Neither screen calls the actions' `gate()`, so an `expert` renders
+both pages complete with `New event`, `New calendar`, `Share`, `Edit`, `Archive`
+and `Create link` all enabled — and every press fails with `accountant access is
+read-only`. Opening an event toasts the error and snaps the dialog shut. They are
+provisioned a primary calendar regardless of role, which is why `writable` is
+non-empty and the read-only banner never shows. They also cannot be granted
+access to any calendar (`listAssignableMembers` excludes experts). **Where the
+packs gated a control the server allowed, this gates nothing the server refuses.**
+
+**Nobody can see an RSVP.** All four response states exist, `getEventAction`
+returns each attendee's `response`, and `EventForm` drops it when mapping into
+local state — the People list is names only. People can answer and no screen ever
+shows the answer.
+
+**`Business calendars` is unreachable.** Nothing in the repo ever inserts
+`owner_clerk_user_id = NULL`; both writers stamp an owner. The section, its
+heading, its blurb and the owner-admin path behind it are dead until something
+creates one.
+
+**Other findings.**
+
+- **Month view's day number opens the create dialog even when creating is
+  impossible.** `New event` is disabled at `writable.length === 0`; the day-number
+  button has no such guard, so a read-only reader gets an empty `Calendar` select
+  and `Invalid input` on save. Two contradictory answers on one screen.
+- **A read-only reader sees `Choose a calendar` instead of the calendar's name**,
+  because `EventForm` is passed only writable calendars while `calendarId` comes
+  from the fetched event. Same for an event on an archived calendar.
+- **`Show as`, `location` and `repeats` never render on the grid**, so a `Free`
+  event is indistinguishable from a busy one and nothing marks a series.
+- **Editing a repeating occurrence shows the series' dates, not the clicked
+  one's**, and `overrideOccurrence`'s move path has no caller outside tests —
+  "move just this one" is fully built and unreachable.
+- **Every Zod failure is `Invalid input`** at 17 sites, and every non-`SchedulingError`
+  including RLS denials is `Something went wrong.` Unusually, this module does NOT
+  flatten its own sentences — they pass through verbatim, which is better than any
+  pack managed. The one casualty is `an attendee is either a colleague or an email
+  address, not both`, whose own comment says it exists to be specific.
+- **`revokeShareAction`, `revokeFeedTokenAction` and `detachLinkAction` all report
+  success and audit a revocation when nothing matched.**
+- **A revoked feed row disappears from the list**, so the "when did I turn that
+  off" record the code comment says it keeps is not readable anywhere in the UI.
+- **`Copied` fires without awaiting or catching `clipboard.writeText`** — it can
+  claim success for a secret that is shown once and never again.
+- **No confirmation anywhere**: not on cancelling an event or a series, archiving a
+  calendar, removing somebody's access, or revoking a feed link.
+- **No empty state on either screen**, no loading labels, and the create-calendar
+  dialog keeps the last name and colour you typed.
+- Dead: `slotsForDay`, `findFreeSlots`, `DEFAULT_WORKING_HOURS`, `invertIntervals`,
+  `carriesTitle`/`carriesDetail`/`carriesWrite`, `findPrimaryCalendarId`, and
+  `FeedResult.label` (the route hardcodes the filename).
+
+**Not clicked through live:** the pane's Clerk session is expired, and this module
+has never been driven by hand by anyone. Everything above is read from source, and
+the guides describe behaviour no human has yet confirmed.
 
 ### 2026-08-30 — Somebody finally clicked it (`claude/nobody-has-clicked-it`)
 
@@ -1054,6 +1159,26 @@ them. If something does, the boundary was drawn wrong.
 
 ## Open items
 
+- **Archiving a calendar does not hide its events.** `listRange` has no
+  `archived_at` predicate, so archived calendars keep drawing on the week view and
+  keep shipping in the ICS feed, against the comment at `calendar-ops.ts:173`.
+  Worst in combination with the feed, which is unauthenticated. Found 2026-09-03.
+- **The provisioned main calendar cannot be renamed** without first clicking a
+  colour swatch: its colour is `""`, `?? "blue"` does not catch it, and `Save`
+  posts an empty colour that Zod refuses.
+- **Both screens render every control for an accountant and refuse every one on
+  submit.** Neither calls `gate()`, and an expert is provisioned a calendar
+  regardless of role, so even the read-only banner does not show.
+- **Nobody can see an RSVP.** The response is fetched and dropped client-side.
+- **`Business calendars` is unreachable** — nothing ever creates one.
+- **Month view's day number opens a create dialog a read-only reader cannot use.**
+- **A read-only reader sees `Choose a calendar` rather than the calendar's name.**
+- **`Show as`, location and repeats never render on the grid.**
+- **"Move just this one" is built and unreachable** (`overrideOccurrence`).
+- **Three actions report success and audit a revocation when nothing matched.**
+- **The feed's secrecy warning is shown once** and is gone after a reload; the
+  30-day/365-day window and the five-link cap are never stated at all.
+- **`Copied` can lie** about a secret that is displayed exactly once.
 - **The feed has no rate limiting.** A stranger guessing tokens costs a hash
   and an indexed lookup per attempt, which is cheap for them and cheap for us,
   but nothing throttles it. The token is 32 random bytes so guessing is not a

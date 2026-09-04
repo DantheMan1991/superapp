@@ -133,6 +133,41 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-09-03 — A chore is a chore in the pen too (`claude/a-chore-is-a-chore-in-the-pen`)
+
+Three UI gates on the lot page disagreed with the ops layer they call. All three
+were the UI being stricter than the server, so nothing that used to be refused is
+refused now.
+
+**Membership is a chore.** `AddToLotForm` and `TakeOutOfLotButton` were behind
+`isOwner` while `addLotToParent` and `removeLotFromParent` were both `member`
+(`ops.ts:1258,1343`). Putting an animal in a lot creates no cost object — she
+already exists and so does the lot — and the row says which pen she is in
+tonight, which is the definition of a chore. The section's own render condition
+moved with them, so a staff member on a lot with no members sees the invitation
+rather than an empty page.
+
+**And the photo panel's `ctx.role !== "expert"` is gone.** `photoGate` asks
+`allowsWrite(role, "member")` and that clears the accountant, so the screen was
+hiding a control its own action would have accepted. The comment above the gate
+claimed "the accountant role is read-only everywhere" and has been corrected —
+it was the sentence the page believed. **Settled 2026-09-03** by the founder:
+`authorize.ts` excludes `expert` from the OWNER level and no other, and that is
+the rule. `assets` carried the identical comment and the identical UI lockout;
+both are fixed in their own PR.
+
+**`Treat` and `Weigh` keep their `head > 0` gate.** It looks like a fourth
+mismatch and is not one: there is no server rule to disagree with, and the defect
+behind the symptom is already recorded as *Head is counted two ways, and it hides
+controls* — the lot page's balance excludes named members while the hub's
+includes them, so a lot whose head are all named reads 0 and loses three
+controls. That is a counting bug in the read, not a permission gate, and fixing
+it here would have hidden it.
+
+Guides swept in the same PR: `lot.md` and `overview.md` no longer put animals in
+and out of a lot on the owner's list, and no longer say the accountant cannot
+touch photos.
+
 ### 2026-09-03 — Six tenant guides, and what writing them found (`claude/livestock-guides`)
 
 Guides in `docs/help/livestock/` for all five screens plus an overview:
@@ -2328,14 +2363,19 @@ This pack is the one that forced the change; the full reasoning is in
 - **Head is counted two ways, and it hides controls.** The hub folds in members;
   the lot page does not. A lot whose head are all named members reads 0 on its own
   page, which hides `Treat`, `Weigh` and the daily check. `Lost` excludes members
-  while `Head` includes them.
+  while `Head` includes them. **Re-confirmed 2026-09-03 as a counting bug rather
+  than a permission one** — the `head > 0` gate on those controls has no server
+  rule behind it to disagree with, and was left alone by the gate sweep so that
+  fixing the fold is what closes this.
 - **The Feed screen cannot record feed without a shared feeder**, and is entirely
   inert for staff on a farm that has none.
 - **`Sold live` never appears under `Lost today`**, though it moves the head count.
 - **`moveLotsToZoneAction` and `retireIdentifierAction` are dead**; the second
   leaves a `Removed` column and a `current` badge no screen can produce.
 - **`ITEM_REQUIRED` has no case in the error mapper.**
-- **The accountant is read-only in a comment and a member everywhere else.**
+- ~~**The accountant is read-only in a comment and a member everywhere else.**~~
+  — **settled 2026-09-03: a member.** The comment was wrong and is gone, and the
+  photo panel's UI-only `!== "expert"` with it.
 - **Three silent truncations** (head events 25, fed-in 10, checks 14).
 - **`livestockLot` is hardcoded in about 24 strings, four of them as `pen`**, and
   `structure` reaches the reader once, as `In a pen or barn`. Article agreement

@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { listEntities } from "@/modules/accounting/core";
 import { requireTenant } from "@/lib/auth";
+import { allowsWrite } from "@/lib/packs/authorize";
 import { isModuleEnabled, requireModuleEnabled } from "@/lib/modules";
 import { attachmentsForRecord } from "@/modules/documents/attachments";
 import { RecordPhotos } from "@/modules/documents/components/record-photos";
@@ -139,6 +140,19 @@ export default async function AssetDetailPage({
       isPrimary: a.isPrimary,
     }));
   const isOwner = ctx.role === "owner";
+  /**
+   * **IS THIS A DECISION, OR IS IT A CHORE?** (`src/lib/packs/authorize.ts`.)
+   * Everything on this page that changes what the business OWNS is the owner's;
+   * recording what happened to a thing that already exists is open to anyone
+   * with a tenant context, **the accountant included** — `allowsWrite` clears
+   * `expert` at member level deliberately.
+   *
+   * Asked of the same pure function the ops layer asks, rather than restated as
+   * a role comparison here. A screen that spells the rule out in its own words
+   * is a screen that can disagree with the server, which is what both of this
+   * page's gates were doing.
+   */
+  const canRecord = allowsWrite(ctx.role, "member");
   /**
    * WHOSE BOOKS THIS ASSET IS ON. Undefined at one company, so nobody who has
    * never heard of the concept sees it — and shown otherwise, because this page
@@ -405,6 +419,14 @@ export default async function AssetDetailPage({
           canEdit={isOwner}
         />
 
+        {/* **WHOEVER CHANGED THE OIL LOGS THE OIL CHANGE.** Two props, because
+            this panel holds both kinds of act: setting a schedule up and
+            raising jobs off it are decisions, and marking one done or reading
+            the meter is what the person who did the work records. That was the
+            ops layer's rule from the day it was written
+            (`maintenance-ops.ts:379-385`) and this page passed `isOwner` to
+            both halves anyway, so for three weeks no staff member could log a
+            service. */}
         <MaintenancePanel
           assetId={asset.id}
           view={maintenanceView}
@@ -413,6 +435,7 @@ export default async function AssetDetailPage({
             label: memberLabel(m),
           }))}
           canEdit={isOwner}
+          canRecord={canRecord}
         />
 
         {documentsOn && (
@@ -421,15 +444,23 @@ export default async function AssetDetailPage({
               Photos {photos.length > 0 && `(${photos.length})`}
             </h2>
             <div className="mt-3">
-              {/* `canEdit` is NOT `isOwner`, unlike every other panel on this
-                  page. Editing an asset is a decision about what the business
-                  owns; photographing one is a record of what is there, and the
-                  person holding the phone in the yard is rarely the owner. */}
+              {/* `canEdit` is NOT `isOwner`, unlike the panels above.
+                  Editing an asset is a decision about what the business owns;
+                  photographing one is a record of what is there, and the
+                  person holding the phone in the yard is rarely the owner.
+
+                  It used to read `ctx.role !== "expert"`, which was this
+                  screen inventing a rule the server does not have: `photoGate`
+                  asks `allowsWrite(role, "member")`, and that clears the
+                  accountant. Settled 2026-09-03 in favour of the shared
+                  helper — a UI-only lockout is a button that lies in one
+                  direction or the other, and this one was hiding a control
+                  its own action would have accepted. */}
               <RecordPhotos
                 entityId={asset.id}
                 tenantId={ctx.tenant.id}
                 photos={photos}
-                canEdit={ctx.role !== "expert"}
+                canEdit={canRecord}
                 subject="asset"
                 attachAction={attachAssetPhotoAction}
                 setPrimaryAction={setAssetPhotoPrimaryAction}

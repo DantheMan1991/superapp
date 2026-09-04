@@ -40,10 +40,12 @@ Open **Assets** in the sidebar. This is where you record what the business owns,
 
 ## Who can do what
 
-What the business owns belongs to the owner. Only an owner can add an asset, edit one, dispose of one, set up or post depreciation, add a service schedule, mark a service done, record a meter reading, or raise jobs from due work.
+What the business owns belongs to the owner. Only an owner can add an asset, edit one, dispose of one, set up or post depreciation, add a service schedule, or raise jobs from due work.
+
+Maintenance is the other kind of thing. Marking a service done and recording a meter reading are open to everyone, an accountant included, because whoever changed the oil is the person standing there when it needs writing down.
 
 Everyone can see every page, including all the depreciation figures and every service schedule.
 
 Jobs raised from an asset are open to everyone. Any member can mark one done, give it to somebody, or set its date.
 
-Photos are open to everyone except an accountant, who sees them but cannot add or remove any.
+Photos are open to everyone, an accountant included.

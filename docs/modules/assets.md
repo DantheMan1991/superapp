@@ -15,6 +15,41 @@ to be listed by a trades profile unchanged.
 
 ## Build log
 
+### 2026-09-03 — Whoever changed the oil logs the oil change (`claude/staff-can-log-the-oil-change`)
+
+**The 2026-08-15 entry below is headed with that sentence and describes
+behaviour that never shipped.** `recordMeterReading` and `recordService` went
+out `member`-level, with a rationale block at `maintenance-ops.ts:379-385`
+saying why — and the detail page passed `canEdit={isOwner}` to the whole
+maintenance panel, so for three weeks the only person who could log a service
+was the one least likely to have done it. Found writing the tenant guides, which
+had to describe {button:Mark done today|ghost} as owners-only and did.
+
+**The panel now takes two props, because it holds two kinds of act.** `canEdit`
+is the owner's — adding a schedule, raising due work into jobs. `canRecord` is
+`allowsWrite(role, "member")` — marking a service done, reading the meter. The
+foot of the panel renders when either is true and each control asks for its own,
+so the Raise button and the meter box can sit in one row without sharing a rule.
+
+**The page asks `allowsWrite` rather than restating it.** `const canRecord =
+allowsWrite(ctx.role, "member")` — the same pure function the ops layer calls.
+A screen that spells the rule out in its own words is a screen that can drift
+from the server, which is what both of this page's gates were doing.
+
+**And the photo panel's `ctx.role !== "expert"` is gone.** That was the same
+defect wearing the opposite coat: `photoGate` asks `allowsWrite(role, "member")`
+and that clears the accountant, so the UI was hiding a control its own action
+would have accepted. The open item recorded it as *`expert` is not refused
+server-side*, i.e. proposed closing the gap from the other end. **Settled
+2026-09-03 the other way**, by the founder: `authorize.ts` says member level is
+"anyone with a tenant context, which is the point", and excludes `expert` from
+the OWNER level only. The comment above the gate claimed "the accountant role is
+read-only everywhere" and has been corrected — it was the sentence the page
+believed.
+
+Guides swept in the same PR: `asset.md` and `overview.md` no longer say a
+service, a meter reading or a photo is the owner's.
+
 ### 2026-09-03 — Three tenant guides, and what writing them found (`claude/assets-guides`)
 
 Assets now has a guide per screen in `docs/help/assets/` — `overview` (the
@@ -590,11 +625,13 @@ shape with livestock lot occupancy, so it waits for the pack that needs it.
 - **A depreciable asset with no company takes `/dashboard/m/assets` down.**
   `entityOf` throws out of an unguarded `getDepreciationStatus`. Reachable
   whenever the pack is on without accounting.
-- **Staff cannot record a service or a meter reading**, although the ops layer
-  is `member`-level for exactly that reason and a build-log entry says so. One
-  prop: `page.tsx:415`.
+- ~~**Staff cannot record a service or a meter reading**~~ — **fixed
+  2026-09-03.** The panel takes `canEdit` and `canRecord` now; see the build log.
 - **A disposed asset's cost object comes back on a rename.**
-- **`expert` is not refused server-side for setting or removing a photo.**
+- ~~**`expert` is not refused server-side for setting or removing a photo.**~~
+  — **answered 2026-09-03, and the answer is that it should not be.** The
+  accountant writes at `member` level by design; the UI's `ctx.role !== "expert"`
+  was the thing out of step, and is gone.
 - **A meter schedule cannot count anything but hours**, whatever unit it names.
 - **`Acquired` cannot be cleared once set.**
 - **The list has no filter, sort or search controls**, though `kind` and

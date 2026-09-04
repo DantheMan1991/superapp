@@ -62,9 +62,9 @@ Under the heading you see `What needs doing, and when it was last done.`
 - **{button:Add schedule|outline}.** Opens the dialog that adds something that comes round. Owners only.
 - **Each schedule** shows its name and where it stands: `Due in 30 days`, `Due today`, `Overdue by 12 days`, `Due now`, `Due in 50 hours`, or `No baseline yet`. Anything due is in red.
 - **{badge:raised|outline}.** A job for this schedule is already open, so it will not be raised again.
-- **{button:Mark done today|ghost}.** Records that the work was done today and starts the clock again. Owners only.
+- **{button:Mark done today|ghost}.** Records that the work was done today and starts the clock again. Anyone can, including an accountant. Whoever did the work records it.
 - **{button:Raise 2 due jobs|primary}.** Turns everything due into jobs on your Work list. Owners only, and only when something is due that has not been raised.
-- **`Current hours`.** A box for the meter reading, with {button:Record|outline} beside it. When a reading already exists the label reads `Current hours (was 1200)`. Owners only.
+- **`Current hours`.** A box for the meter reading, with {button:Record|outline} beside it. When a reading already exists the label reads `Current hours (was 1200)`. Anyone can, including an accountant.
 - **`Raised from this asset`.** The open jobs, each named `Oil change — Kubota L3901`. Everyone can work these.
 
 Something that has never been done reads `No baseline yet` rather than showing as overdue. A meter schedule with no reading at all stays there until you record one.
@@ -85,7 +85,7 @@ The reading box on the panel always says `Current hours`, whatever unit you chos
 1. Find the schedule and click {button:Mark done today|ghost}. You see `Recorded`, and the schedule's due date moves on.
 2. To record a meter reading on its own, type it into `Current hours` and click {button:Record|outline}. You see `Reading recorded`. Whole numbers only.
 
-**Marking a raised job done is not the same thing.** {button:Done|ghost} on a job under `Raised from this asset` closes that job, but the schedule still reads overdue and will raise the same job again. Only {button:Mark done today|ghost} tells the schedule the work happened. Since that button is owners only, staff should tell an owner once the work is finished.
+**Marking a raised job done is not the same thing.** {button:Done|ghost} on a job under `Raised from this asset` closes that job, but the schedule still reads overdue and will raise the same job again. Only {button:Mark done today|ghost} tells the schedule the work happened, so press that one too.
 
 ## How to turn due work into jobs
 
@@ -169,10 +169,12 @@ Emptying the `Acquired` box does not clear the date. It keeps whatever it had, a
 
 ## Who can do what
 
-Only an owner can edit an asset, dispose of one, set up or post depreciation, add a service schedule, mark a service done, record a meter reading, or raise jobs.
+Only an owner can edit an asset, dispose of one, set up or post depreciation, add a service schedule, or raise jobs.
+
+Anyone can mark a service done and record a meter reading, an accountant included. Whoever changed the oil logs the oil change — a service recorded late, or not at all, is worse than one recorded by the wrong person.
 
 Everyone sees every panel and every figure, including the depreciation.
 
 Jobs under `Raised from this asset` are open to everyone. Any member can mark one done, give it to somebody, or set its date.
 
-Photos can be added, chosen and removed by anyone except an accountant, who can only look.
+Photos can be added, chosen and removed by anyone, an accountant included.

@@ -64,11 +64,20 @@ export function MaintenancePanel({
   view,
   members,
   canEdit,
+  canRecord,
 }: {
   assetId: string;
   view: MaintenanceView;
   members: Array<{ clerkUserId: string; label: string }>;
+  /** Owner: setting a schedule up, and raising jobs off one. */
   canEdit: boolean;
+  /**
+   * Member: recording that the work happened, and reading the meter. **NOT
+   * `canEdit`** — the whole panel used to hang off that one prop, which meant
+   * nobody but the owner could log an oil change, on a pack whose ops layer is
+   * `member`-level for exactly that reason. See `maintenance-ops.ts:379-385`.
+   */
+  canRecord: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -229,7 +238,7 @@ export function MaintenancePanel({
                   {s.summary}
                 </span>
                 {s.hasOpenWork && <Badge variant="outline">raised</Badge>}
-                {canEdit && (
+                {canRecord && (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -255,9 +264,12 @@ export function MaintenancePanel({
           </ul>
         )}
 
-        {canEdit && (
+        {(canEdit || canRecord) && (
           <div className="flex flex-wrap items-end gap-3 border-t pt-4">
-            {view.dueCount > 0 && (
+            {/* Raising a job is the owner's, and reading the meter is not.
+                They share a row because they are the two things you do at the
+                foot of this panel, not because they share a rule. */}
+            {canEdit && view.dueCount > 0 && (
               <Button
                 size="sm"
                 disabled={pending}
@@ -268,6 +280,7 @@ export function MaintenancePanel({
                 {`Raise ${view.dueCount} due ${view.dueCount === 1 ? "job" : "jobs"}`}
               </Button>
             )}
+            {canRecord && (
             <form
               className="flex items-end gap-2"
               action={(fd) =>
@@ -307,6 +320,7 @@ export function MaintenancePanel({
                 Record
               </Button>
             </form>
+            )}
           </div>
         )}
 

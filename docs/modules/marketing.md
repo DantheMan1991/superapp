@@ -58,8 +58,14 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 - Verified: 14 pure tests over the core and the sniffer, 4 model cases and a
   real PDF render with an embedded PNG logo, and `tests/isolation/brand.test.ts`
   (two tenants, two companies on one of them, staff vs owner, the composite FK
-  under `withSystem`, the partial uniques, the CHECKs, the cascade). **Not yet
-  verified in a browser** — see Open items.
+  under `withSystem`, the partial uniques, the CHECKs, the cascade). **Driven
+  in the browser on the dev branch** on both Hilltop Farm (one company: no
+  `Companies` section) and Test (two companies): save, upload, replace, the
+  logo route serving the private blob, `Give it its own look` and `Use your
+  brand instead`. A draft invoice on Test then came back from the PDF route as
+  a 294KB `%PDF-1.3` with the logo embedded as an image XObject. Not driven:
+  the emailed invoice and the reminder sweep, which share the renderer and are
+  covered by the render test.
 
 ## Data model
 
@@ -129,11 +135,15 @@ the shared logo.
 
 ## Open items
 
-- **Not yet verified in a browser.** The screen has never been opened: enable
-  Marketing for a dev-branch tenant on `/admin/tenants/<id>`, upload a PNG,
-  set a colour, then open any invoice's PDF. The things to look at: the
-  preview strip in dark mode, the colour input on a phone, and whether the
-  logo box on the PDF wants to be taller for a square mark.
+- **Not yet looked at: dark mode, a phone, and a square mark on the PDF.**
+  The screen was driven on the dev branch (build log) but only in the light
+  theme on a desktop pane. The colour input on a phone and whether the
+  160×56pt logo box wants to be taller for a square mark (a 512×512 logo
+  renders 56pt square, which is small) are the two things to check with the
+  founder's real logo. **The dev-branch Test tenant now holds a draft
+  `INV-0001` and both dev tenants have Marketing switched on** — left from
+  this verification, harmless, and worth knowing before the next fixture
+  sweep.
 - **Logo generation (0b)** — Claude-drafted SVG wordmarks/monograms in the
   brand colours, stored as SVG and rasterised to PNG for the PDF; SVG upload
   behind the same rasteriser. An "AI logo" is a wordmark, and the product

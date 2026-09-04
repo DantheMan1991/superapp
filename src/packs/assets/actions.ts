@@ -9,7 +9,10 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { logAudit } from "@/lib/audit";
 import { LedgerError, friendlyMessage } from "@/modules/accounting/core";
 import { allowsWrite } from "@/lib/packs/authorize";
-import { friendlyMessage as friendlyDocsMessage } from "@/modules/documents/core/errors";
+import {
+  friendlyMessage as friendlyDocsMessage,
+  roleMayWrite,
+} from "@/modules/documents/core/errors";
 import {
   detachDocumentFromRecord,
   registerAttachedPhoto,
@@ -149,12 +152,17 @@ async function photoGate() {
   // asset is owner-only: a picture is a record of what is there, not a
   // decision about what the business owns or what it is worth.
   //
-  // **AND `member` INCLUDES THE ACCOUNTANT.** This comment used to end "the
-  // accountant role is read-only everywhere", which is not what the line under
-  // it does: `allowsWrite` excludes `expert` from the OWNER level only. The
-  // page believed the comment and hid the control; the server believed the
-  // code and would have accepted it. Settled 2026-09-03 in favour of the code.
-  if (!allowsWrite(ctx.role, "member")) {
+  // **BUT `member` IS NOT THE ONLY GATE, AND THE ACCOUNTANT FAILS THE OTHER
+  // ONE.** A photo is a row in `documents`, and Documents is a core module
+  // where `expert` is read-only by design. `allowsWrite` clears the accountant
+  // at member level — that is the PACK's answer about a pack chore — and
+  // `roleMayWrite` is the DMS's answer about the file. Both have to pass.
+  //
+  // Between 2026-09-03 and 2026-09-04 only the first was asked here, so an
+  // accountant was shown an upload control that `registerAttachedPhoto`
+  // refused, beside a Set-as-main and a Remove that worked. Settled by closing
+  // photos to the accountant; the pack's own chores stay open to them.
+  if (!allowsWrite(ctx.role, "member") || !roleMayWrite(ctx.role)) {
     throw new AssetError("FORBIDDEN", "cannot write here");
   }
   return ctx;
@@ -205,7 +213,7 @@ export async function setAssetPhotoPrimaryAction(input: unknown) {
       (tx) =>
         setPrimaryAttachment(
           tx,
-          { tenantId: ctx.tenant.id, userId: ctx.userId },
+          { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role },
           {
             documentId: parsed.data.documentId,
             target: photoTarget(parsed.data.entityId),
@@ -232,7 +240,7 @@ export async function detachAssetPhotoAction(input: unknown) {
       (tx) =>
         detachDocumentFromRecord(
           tx,
-          { tenantId: ctx.tenant.id, userId: ctx.userId },
+          { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role },
           {
             documentId: parsed.data.documentId,
             target: photoTarget(parsed.data.entityId),

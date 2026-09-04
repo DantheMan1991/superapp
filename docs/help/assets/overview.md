@@ -48,4 +48,4 @@ Everyone can see every page, including all the depreciation figures and every se
 
 Jobs raised from an asset are open to everyone. Any member can mark one done, give it to somebody, or set its date.
 
-Photos are open to everyone, an accountant included.
+Photos are open to everyone except an accountant, who sees them but cannot add or remove any. A photo is a file, and files belong to Documents, where an accountant reads and never writes.

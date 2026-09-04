@@ -133,6 +133,20 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-09-04 — Photos answer to Documents too (`claude/a-photo-is-still-the-dms-s`)
+
+The photo half of yesterday's entry was wrong and is reverted. `canEdit` on the
+Photos section is `canRecord && roleMayWrite(ctx.role)` now — the pack's rule AND
+the DMS's, because a photo is a pack chore that writes a row in `documents`, and
+`expert` is read-only in Documents by design.
+
+**Add-to-lot and Take-out-of-lot are unaffected** and stay open to everyone,
+accountant included: putting an animal in a pen writes no document. See
+[documents.md](documents.md) for the mechanism and the test.
+
+`docs/help/livestock/lot.md` and `overview.md` say photos are closed to the
+accountant again, and say why.
+
 ### 2026-09-03 — A chore is a chore in the pen too (`claude/a-chore-is-a-chore-in-the-pen`)
 
 Three UI gates on the lot page disagreed with the ops layer they call. All three
@@ -147,11 +161,12 @@ tonight, which is the definition of a chore. The section's own render condition
 moved with them, so a staff member on a lot with no members sees the invitation
 rather than an empty page.
 
-**And the photo panel's `ctx.role !== "expert"` is gone.** `photoGate` asks
-`allowsWrite(role, "member")` and that clears the accountant, so the screen was
-hiding a control its own action would have accepted. The comment above the gate
-claimed "the accountant role is read-only everywhere" and has been corrected —
-it was the sentence the page believed. **Settled 2026-09-03** by the founder:
+**And the photo panel's `ctx.role !== "expert"` is gone.** ~~`photoGate` asks
+`allowsWrite(role, "member")` and that clears the accountant.~~ **CORRECTED THE
+NEXT DAY — see the 2026-09-04 entry above.** A photo answers to TWO rules, and
+only the pack's was asked; the DMS refuses the accountant the `documents` row.
+The comment correction was right as far as it went. Add-to-lot and
+Take-out-of-lot are unaffected. **Settled 2026-09-03** by the founder:
 `authorize.ts` excludes `expert` from the OWNER level and no other, and that is
 the rule. `assets` carried the identical comment and the identical UI lockout;
 both are fixed in their own PR.

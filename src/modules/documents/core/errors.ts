@@ -154,3 +154,34 @@ export function friendlyMessage(err: unknown): string {
   if (err instanceof DocsError) return FRIENDLY[err.code];
   return "Something went wrong. Please try again.";
 }
+
+/**
+ * The roles `requireTenant()` resolves. Inlined to keep this file import-free —
+ * `@/lib/auth` is `server-only` and this module is imported by client
+ * renderers. Same reasoning as `src/lib/packs/authorize.ts`.
+ */
+export type DocsRole = "owner" | "staff" | "expert";
+
+/**
+ * **May this ROLE write to Documents at all?**
+ *
+ * `expert` — the platform's own bookkeeper working inside a client workspace —
+ * is read-only here, as it is in CRM, Scheduling and Work. This module has no
+ * read-only-safe write, so there is nothing to opt into.
+ *
+ * **A PACK'S PHOTO IS STILL A DOCUMENT, AND THIS IS STILL THE RULE.**
+ * `assets` and `livestock` attach photos through `attachments.ts`, and their own
+ * `allowsWrite(role, "member")` clears the accountant deliberately
+ * (`src/lib/packs/authorize.ts`). That is the PACK's rule about a pack chore;
+ * this is the DMS's rule about a row in `documents`, and both have to pass. On
+ * 2026-09-04 the pack gate alone was used and the accountant was offered an
+ * upload control that `registerAttachedPhoto` then refused — see the build log
+ * in `docs/modules/documents.md`.
+ *
+ * Exported so a screen can ask the same question the gate asks, rather than
+ * restating it as a role comparison and drifting from it.
+ */
+export function roleMayWrite(role: DocsRole): boolean {
+  return role !== "expert";
+}
+

@@ -22,6 +22,7 @@ import {
 import { packContext } from "@/lib/packs/tenant-context";
 import { labelFor } from "@/lib/packs/resolve";
 import { allowsWrite } from "@/lib/packs/authorize";
+import { roleMayWrite } from "@/modules/documents/core/errors";
 import { todayInTimezone } from "@/lib/timezone";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -1382,15 +1383,16 @@ export default async function LivestockLotPage({
               condition series that shows the gradual loss a daily look cannot,
               documentation for the vet, a sales listing, and evidence for a
               predator or insurance claim. */}
-          {/* `canEdit` used to read `ctx.role !== "expert"`, which was this
-              screen inventing a rule the server does not have: `photoGate` asks
-              `allowsWrite(role, "member")` and that clears the accountant.
-              Settled 2026-09-03 in favour of the shared helper. */}
+          {/* **TWO GATES, BOTH ASKED.** `canRecord` is the pack's answer about
+              a pack chore; `roleMayWrite` is the DMS's answer about a row in
+              `documents`, where the accountant is read-only by design. On
+              2026-09-03 only the first was asked and the accountant got an
+              upload control that `registerAttachedPhoto` refused. */}
           <RecordPhotos
             entityId={lot.id}
             tenantId={ctx.tenant.id}
             photos={photos}
-            canEdit={canRecord}
+            canEdit={canRecord && roleMayWrite(ctx.role)}
             subject={subjectWord}
             attachAction={attachLotPhotoAction}
             setPrimaryAction={setLotPhotoPrimaryAction}

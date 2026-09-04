@@ -6,6 +6,7 @@ import { schema, withTenant } from "@/db";
 import { listEntities } from "@/modules/accounting/core";
 import { requireTenant } from "@/lib/auth";
 import { allowsWrite } from "@/lib/packs/authorize";
+import { roleMayWrite } from "@/modules/documents/core/errors";
 import { isModuleEnabled, requireModuleEnabled } from "@/lib/modules";
 import { attachmentsForRecord } from "@/modules/documents/attachments";
 import { RecordPhotos } from "@/modules/documents/components/record-photos";
@@ -449,18 +450,17 @@ export default async function AssetDetailPage({
                   photographing one is a record of what is there, and the
                   person holding the phone in the yard is rarely the owner.
 
-                  It used to read `ctx.role !== "expert"`, which was this
-                  screen inventing a rule the server does not have: `photoGate`
-                  asks `allowsWrite(role, "member")`, and that clears the
-                  accountant. Settled 2026-09-03 in favour of the shared
-                  helper — a UI-only lockout is a button that lies in one
-                  direction or the other, and this one was hiding a control
-                  its own action would have accepted. */}
+                  **TWO GATES, BOTH ASKED.** `canRecord` is the pack's answer
+                  about a pack chore; `roleMayWrite` is the DMS's answer about a
+                  row in `documents`, where the accountant is read-only by
+                  design. On 2026-09-03 only the first was asked and the
+                  accountant got an upload control that `registerAttachedPhoto`
+                  refused. Both, or neither. */}
               <RecordPhotos
                 entityId={asset.id}
                 tenantId={ctx.tenant.id}
                 photos={photos}
-                canEdit={canRecord}
+                canEdit={canRecord && roleMayWrite(ctx.role)}
                 subject="asset"
                 attachAction={attachAssetPhotoAction}
                 setPrimaryAction={setAssetPhotoPrimaryAction}

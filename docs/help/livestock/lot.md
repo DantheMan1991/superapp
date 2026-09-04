@@ -146,8 +146,8 @@ She stops being stock and becomes something the business owns. What she cost mov
 
 Everyone can place head, record a loss, treat, weigh, feed, move to a paddock, add a tag, record a daily check, and correct or remove a treatment or weighing.
 
-Putting an animal into a {{livestockLot|lower}} and taking it out are open to everyone too, and so are photos.
+Putting an animal into a {{livestockLot|lower}} and taking it out are open to everyone too.
 
 Only an owner can split, name animals out, close or reopen, set breeding or parents, record a birth, or move an animal to and from breeding stock.
 
-Your accountant can do everything a staff member can.
+Your accountant can do everything a staff member can, except add or remove photos. A photo is a file, and files belong to Documents, where an accountant reads and never writes.

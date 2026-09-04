@@ -94,7 +94,7 @@ Only owners see this switch.
 | `Must be a full link, starting http:// or https://.` | A link field needs a whole web address. |
 | `Only http:// and https:// links are allowed.` | A link field will take a web address and nothing else. |
 | `Not one of the choices.` | Somebody changed that field's choices while your form was open. Reload and pick again. |
-| `Accountant access to this module is read-only.` | You are signed in as the outside accountant. You can open this form and fill it in, and this is the answer when you click {button:Add record|primary}. |
+| `Accountant access is read-only` | You are signed in as the outside accountant. The panel replaces the form; there is nothing to fill in. |
 | `Something went wrong. Please try again.` | Something unexpected. Nothing was saved. Try again. |
 
 A red message under one of your own fields clears as soon as you change that field.
@@ -105,4 +105,4 @@ There is no email, phone, website or address on this form. Add them on the recor
 
 ## Who can do what
 
-Owners and staff both get this form and both can add a record. Only an owner sees `Restrict this record`, and only an owner can restrict one. The outside accountant can open the form and type into it, and the save answers `Accountant access to this module is read-only.` Anybody whose business does not have CRM turned on cannot reach this page at all.
+Owners and staff both get this form and both can add a record. Only an owner sees `Restrict this record`, and only an owner can restrict one. The outside accountant does not get the form at all. This page exists only to add a record, so a read-only version of it would be a form with nothing to do; they get a {icon:lock} panel headed `Accountant access is read-only` instead, telling them they can open and read every record. Anybody whose business does not have CRM turned on cannot reach this page at all.

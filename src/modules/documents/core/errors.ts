@@ -172,6 +172,15 @@ export type DocsRole = "owner" | "staff" | "expert";
  * accountant got Upload, New folder, every row menu and the whole drag-and-drop
  * surface, and a refusal from each.
  *
+ * **A PACK'S PHOTO IS STILL A DOCUMENT, AND THIS IS STILL THE RULE.**
+ * `assets` and `livestock` attach photos through `attachments.ts`, and their own
+ * `allowsWrite(role, "member")` clears the accountant deliberately
+ * (`src/lib/packs/authorize.ts`). That is the PACK's rule about a pack chore;
+ * this is the DMS's rule about a row in `documents`, and both have to pass. On
+ * 2026-09-04 the pack gate alone was used and the accountant was offered an
+ * upload control that `registerAttachedPhoto` then refused — see the build log
+ * in `docs/modules/documents.md`.
+ *
  * Exported so a screen can ask the same question the gate asks, rather than
  * restating it as a role comparison and drifting from it.
  */

@@ -41,6 +41,7 @@ export function RecordForm({
   detailsVersion,
   initial,
   isOwner,
+  canWrite = true,
   fieldDefs = [],
   initialCustom = {},
 }: {
@@ -50,6 +51,14 @@ export function RecordForm({
   detailsVersion?: number;
   initial: RecordFormValues;
   isOwner: boolean;
+  /**
+   * `roleMayWrite(role)`. False leaves every value legible and takes the writes
+   * off: `readOnly` on the text controls, which browsers honour and which does
+   * NOT fade them, and `disabled` on the pickers, which cannot be read-only.
+   * Fading a record's own values at 50% would punish the one reader who is here
+   * only to read it.
+   */
+  canWrite?: boolean;
   fieldDefs?: CrmFieldDef[];
   initialCustom?: Record<string, unknown>;
 }) {
@@ -150,6 +159,7 @@ export function RecordForm({
         <div className="space-y-2">
           <Label htmlFor="crm-kind">Type</Label>
           <Select
+            disabled={!canWrite}
             value={values.kind}
             onValueChange={(v) => set("kind", v as PartyKind)}
           >
@@ -168,6 +178,7 @@ export function RecordForm({
             {isPerson ? "Display name" : "Name"}
           </Label>
           <Input
+            readOnly={!canWrite}
             id="crm-display-name"
             value={values.displayName}
             onChange={(e) => set("displayName", e.target.value)}
@@ -187,6 +198,7 @@ export function RecordForm({
           <div className="space-y-2">
             <Label htmlFor="crm-given-name">First name</Label>
             <Input
+            readOnly={!canWrite}
               id="crm-given-name"
               value={values.givenName}
               onChange={(e) => set("givenName", e.target.value)}
@@ -195,6 +207,7 @@ export function RecordForm({
           <div className="space-y-2">
             <Label htmlFor="crm-family-name">Last name</Label>
             <Input
+            readOnly={!canWrite}
               id="crm-family-name"
               value={values.familyName}
               onChange={(e) => set("familyName", e.target.value)}
@@ -209,6 +222,7 @@ export function RecordForm({
             {isPerson ? "Formal name" : "Legal name"}
           </Label>
           <Input
+            readOnly={!canWrite}
             id="crm-legal-name"
             value={values.legalName}
             onChange={(e) => set("legalName", e.target.value)}
@@ -218,6 +232,7 @@ export function RecordForm({
         <div className="space-y-2">
           <Label htmlFor="crm-stage">Stage</Label>
           <Input
+            readOnly={!canWrite}
             id="crm-stage"
             value={values.lifecycleStage}
             onChange={(e) => set("lifecycleStage", e.target.value)}
@@ -229,6 +244,7 @@ export function RecordForm({
       <div className="space-y-2">
         <Label htmlFor="crm-source">Where they came from</Label>
         <Input
+            readOnly={!canWrite}
           id="crm-source"
           value={values.source}
           onChange={(e) => set("source", e.target.value)}
@@ -239,6 +255,7 @@ export function RecordForm({
       <div className="space-y-2">
         <Label htmlFor="crm-notes">Notes</Label>
         <Textarea
+          readOnly={!canWrite}
           id="crm-notes"
           value={values.notes}
           onChange={(e) => set("notes", e.target.value)}
@@ -251,7 +268,7 @@ export function RecordForm({
         values={custom}
         issues={fieldIssues}
         onChange={setCustomValue}
-        disabled={pending}
+        disabled={pending || !canWrite}
       />
 
       {isOwner && (
@@ -273,6 +290,7 @@ export function RecordForm({
         </div>
       )}
 
+      {canWrite && (
       <div className="flex items-center gap-2">
         <Button onClick={submit} disabled={pending}>
           {pending && <Loader2 className="mr-2 size-4 animate-spin" />}
@@ -286,6 +304,7 @@ export function RecordForm({
           Cancel
         </Button>
       </div>
+      )}
     </div>
   );
 }

@@ -77,7 +77,7 @@ Staff searching here find a restricted record's name, because they can already s
 | `You do not have permission to do that.` | The action is kept to owners. Ask one. |
 | `This record changed while you were editing it. Reload and try again.` | Somebody saved it while your page was open. Reload, then redo your change. |
 | `That record could not be found.` | It was merged away or archived while your page was open. Go back to the list. |
-| `Accountant access to this module is read-only.` | You are signed in as the outside accountant. Every screen opens and nothing saves. |
+| `Accountant access to this module is read-only.` | You are signed in as the outside accountant. You should not see this from a button any more — the screens no longer offer one. Tell us if you do. |
 | `Something went wrong. Please try again.` | Nothing was saved. Try once more, and tell us if it keeps happening. |
 
 If CRM is switched off for your business, every address under CRM answers with the not-found page. There is no message and nothing to turn on from here.
@@ -92,6 +92,6 @@ The rest of CRM has a guide each: [Your records](records.md), [Filters and saved
 
 - **Owners** do everything: restrict a record and let one colleague in, set up fields, pipelines and stages, add, pause and delete rules, and merge duplicates. They see every record whole, restricted ones included.
 - **Staff** see every name in the business and work every record that is not restricted. They add records, edit them, raise deals and follow-ups, search, filter, and save and share views and reports of their own. They read `Fields`, `Pipelines` and `Automations` without changing them. `Duplicates` is closed to them.
-- **Your accountant** can open and read every CRM screen, search it and page through it. Buttons still show, and pressing one answers `Accountant access to this module is read-only.`
+- **Your accountant** can open and read every CRM screen, search it and page through it. Each screen says so in a line under the tabs, and the controls that would write are not drawn. The two pages that exist only to add something — `Add a record` and `Add a deal` — say it in a panel instead, because a form with nothing to save is not a page worth showing.
 - **A colleague let into one restricted record** works that record exactly as they would any other, and sees nothing more.
 - A saved view or a report is answered from the records you can see. Two people opening the same shared one get different totals, and both are right.

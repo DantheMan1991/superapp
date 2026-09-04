@@ -44,7 +44,7 @@ d("document attachments", () => {
     entityType: "livestock_lot",
     entityId: cow,
   };
-  const ctx = () => ({ tenantId, userId: USER });
+  const ctx = () => ({ tenantId, userId: USER, role: "staff" as const });
 
   const asOwner = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantId, fn, { role: "owner", userId: USER });
@@ -239,6 +239,39 @@ d("document attachments", () => {
       attachmentCounts(tx, tenantId, "livestock_lot", [cow]),
     );
     expect(counts.get(cow)).toBe(after.length);
+  });
+
+  /**
+   * **THE ACCOUNTANT IS REFUSED BY ALL THREE, NOT ONE.** `registerAttachedPhoto`
+   * has always refused an expert; `setPrimaryAttachment` and
+   * `detachDocumentFromRecord` did not, so between 2026-09-03 and 2026-09-04 a
+   * pack that opened its photo panel to the accountant gave them one control
+   * that failed and two that worked. Asserted here rather than in the packs,
+   * because it is the DMS's rule and the next pack to attach something will not
+   * think to re-test it.
+   */
+  it("an accountant cannot set the picture or detach one", async () => {
+    const doc = await newDoc("accountant.jpg");
+    await asOwner((tx) =>
+      attachDocumentToRecord(tx, ctx(), { documentId: doc, target }),
+    );
+    const asExpert = { ...ctx(), role: "expert" as const };
+
+    await expect(
+      asOwner((tx) =>
+        setPrimaryAttachment(tx, asExpert, { documentId: doc, target }),
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN_EXPERT" });
+
+    await expect(
+      asOwner((tx) =>
+        detachDocumentFromRecord(tx, asExpert, { documentId: doc, target }),
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN_EXPERT" });
+
+    // And nothing was half-done: the attachment is still there.
+    const rows = await asOwner((tx) => attachmentsForRecord(tx, tenantId, target));
+    expect(rows.some((r) => r.document.id === doc)).toBe(true);
   });
 
   it("refuses a target that is not a slug", async () => {

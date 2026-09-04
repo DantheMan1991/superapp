@@ -8,6 +8,8 @@ import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
 import { EmptyState } from "@/components/app/empty-state";
 import { CrmNav } from "./components/crm-nav";
+import { AccountantNotice } from "./components/accountant-notice";
+import { roleMayWrite } from "./core/errors";
 import { listRecords } from "./party-ops";
 import { listViews, pinnedViewId, resolveView } from "./view-ops";
 import { decodeConditions, describeFilter } from "./core/views";
@@ -58,6 +60,14 @@ export async function CrmModule({
 }) {
   const first = (v: string | string[] | undefined) =>
     Array.isArray(v) ? v[0] : v;
+
+  /*
+   * The same question all nine `gate()`s ask, so the screen and the action
+   * cannot disagree. They did until 2026-09-04: every control in this module
+   * drew enabled for an accountant and every press came back
+   * `accountant access is read-only`.
+   */
+  const canWrite = roleMayWrite(ctx.role);
 
   const query = first(searchParams.q)?.trim() ?? "";
   const kindParam = first(searchParams.kind);
@@ -128,13 +138,23 @@ export async function CrmModule({
         description="Everyone the business deals with, and where each one stands."
         icon={<Contact />}
         actions={
-          <Button asChild size="sm">
-            <Link href={`${BASE}/records/new`}>Add a record</Link>
-          </Button>
+          canWrite ? (
+            <Button asChild size="sm">
+              <Link href={`${BASE}/records/new`}>Add a record</Link>
+            </Button>
+          ) : null
         }
       />
 
       <CrmNav />
+
+      {/* Said once, at the top of the module's front door, rather than as a
+          disabled control on every screen behind it. An accountant who can see
+          the records and is told why is better served than one who presses
+          `Add a record` and is refused after typing the name. */}
+      {!canWrite && (
+        <AccountantNotice what="every record, and everything on one" />
+      )}
 
       <ViewControls
         views={views}
@@ -143,6 +163,7 @@ export async function CrmModule({
         sort={current.sort}
         pinnedViewId={pinned}
         total={page.total}
+        canWrite={canWrite}
       />
 
       <RecordSearch filter={filter} />
@@ -167,7 +188,7 @@ export async function CrmModule({
                 : "Anyone you invoice or buy from already appears here — the party spine means a customer and a vendor can be the same record."
             }
             action={
-              isFiltered ? undefined : (
+              isFiltered || !canWrite ? undefined : (
                 <Button asChild size="sm">
                   <Link href={`${BASE}/records/new`}>Add a record</Link>
                 </Button>

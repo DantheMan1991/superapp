@@ -44,6 +44,42 @@ and all four are what this role is here to do.
 
 Guides swept in the same PR: all ten.
 
+### 2026-09-04 — A photo is still the DMS's (`claude/a-photo-is-still-the-dms-s`)
+
+**A HOLE IN THIS MODULE'S OWN RULE, REACHABLE FROM A PACK, AND IT WAS LIVE FOR A
+DAY.** `registerAttachedPhoto` has always refused an `expert`.
+`setPrimaryAttachment` and `detachDocumentFromRecord` never did — `AttachmentCtx`
+did not even carry the role. That did not show while both packs hid their photo
+panel from the accountant. On 2026-09-03 the permission sweep opened those panels
+(#372, #374) on the founder's ruling that `expert` writes at `member` level
+inside a pack, and the hole became visible: an accountant on an asset or animal
+page saw the upload control, got `accountant access is read-only` from it, and
+could still set the picture and remove one.
+
+**The rule that was missing is that there are TWO rules.** A photo is a pack
+chore AND a row in `documents`. `allowsWrite(role, "member")` is the pack's
+answer about the chore; the DMS's answer about the file is this module's, and
+`expert` is read-only here by design (`actions.ts:42`). Both have to pass, and
+only one was being asked. **Settled 2026-09-04 by the founder: photos close to
+the accountant.** The pack's own chores — a service, a meter reading, stock in
+and out, placing head, lot membership — stay open to them; those write no
+document.
+
+**`roleMayWrite` now lives in `core/errors.ts`** — pure, import-free, already
+the home of `FORBIDDEN_EXPERT` and already imported by both packs. `gate()` asks
+it, `attachments.ts` asks it on all three writes through one
+`assertRoleMayWrite`, and the two pack pages ask it beside their own
+`allowsWrite`, so a screen cannot offer a third of a panel again.
+
+**`AttachmentCtx.role` is REQUIRED, not optional.** Making it so is what found
+every call site — four in the packs and six in the suite — rather than leaving a
+default that would have silently kept the hole open in whichever one was missed.
+
+`tests/documents-attachments.test.ts` gains the case: an expert is refused by
+set-primary and by detach, and the attachment is still there afterwards. It is
+asserted here rather than in the packs because it is the DMS's rule, and the next
+pack to attach something will not think to re-test it.
+
 ### 2026-09-03 — Tenant guides for every Documents screen (`claude/documents-guides`)
 
 No code change beyond `guide-icons.ts`. Ten guides under `docs/help/documents/`

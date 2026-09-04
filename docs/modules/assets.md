@@ -15,6 +15,22 @@ to be listed by a trades profile unchanged.
 
 ## Build log
 
+### 2026-09-04 — Photos answer to Documents too (`claude/a-photo-is-still-the-dms-s`)
+
+The photo half of yesterday's entry was wrong and is reverted. `canEdit` on the
+Photos panel is `canRecord && roleMayWrite(ctx.role)` now — the pack's rule AND
+the DMS's, because a photo is a pack chore that writes a row in `documents`, and
+`expert` is read-only in Documents by design. Opening the panel on the pack's
+rule alone gave the accountant an upload that failed beside a Set-as-main and a
+Remove that worked; `attachments.ts` refused one of the three and not the others.
+
+**Nothing else from yesterday moves.** Marking a service done and recording a
+meter reading stay open to everyone, the accountant included: neither writes a
+document. See [documents.md](documents.md) for the mechanism and the test.
+
+`docs/help/assets/asset.md` and `overview.md` say photos are closed to the
+accountant again, and say why.
+
 ### 2026-09-03 — Whoever changed the oil logs the oil change (`claude/staff-can-log-the-oil-change`)
 
 **The 2026-08-15 entry below is headed with that sentence and describes
@@ -36,16 +52,15 @@ allowsWrite(ctx.role, "member")` — the same pure function the ops layer calls.
 A screen that spells the rule out in its own words is a screen that can drift
 from the server, which is what both of this page's gates were doing.
 
-**And the photo panel's `ctx.role !== "expert"` is gone.** That was the same
-defect wearing the opposite coat: `photoGate` asks `allowsWrite(role, "member")`
-and that clears the accountant, so the UI was hiding a control its own action
-would have accepted. The open item recorded it as *`expert` is not refused
-server-side*, i.e. proposed closing the gap from the other end. **Settled
-2026-09-03 the other way**, by the founder: `authorize.ts` says member level is
-"anyone with a tenant context, which is the point", and excludes `expert` from
-the OWNER level only. The comment above the gate claimed "the accountant role is
-read-only everywhere" and has been corrected — it was the sentence the page
-believed.
+**And the photo panel's `ctx.role !== "expert"` is gone.** ~~That was the same
+defect wearing the opposite coat.~~ **CORRECTED THE NEXT DAY — see the 2026-09-04
+entry above; the accountant is closed out of photos after all.** What this
+paragraph missed is that a photo answers to TWO rules: `allowsWrite` is the
+pack's, about a chore, and the DMS has its own about the `documents` row it
+creates. Only the first was asked, and the accountant got an upload control that
+`registerAttachedPhoto` refused. The rest of this entry stands — the maintenance
+panel's split is unaffected, and the comment correction was right as far as it
+went.
 
 Guides swept in the same PR: `asset.md` and `overview.md` no longer say a
 service, a meter reading or a photo is the owner's.
@@ -629,9 +644,11 @@ shape with livestock lot occupancy, so it waits for the pack that needs it.
   2026-09-03.** The panel takes `canEdit` and `canRecord` now; see the build log.
 - **A disposed asset's cost object comes back on a rename.**
 - ~~**`expert` is not refused server-side for setting or removing a photo.**~~
-  — **answered 2026-09-03, and the answer is that it should not be.** The
-  accountant writes at `member` level by design; the UI's `ctx.role !== "expert"`
-  was the thing out of step, and is gone.
+  — **the item was RIGHT, and it is fixed 2026-09-04.** It was briefly answered
+  the other way on 2026-09-03; that missed the second gate. `setPrimaryAttachment`
+  and `detachDocumentFromRecord` refuse an expert now, like
+  `registerAttachedPhoto` always did, and the panel is closed to them again. See
+  [documents.md](documents.md).
 - **A meter schedule cannot count anything but hours**, whatever unit it names.
 - **`Acquired` cannot be cleared once set.**
 - **The list has no filter, sort or search controls**, though `kind` and

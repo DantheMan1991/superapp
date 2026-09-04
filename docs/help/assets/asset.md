@@ -177,4 +177,4 @@ Everyone sees every panel and every figure, including the depreciation.
 
 Jobs under `Raised from this asset` are open to everyone. Any member can mark one done, give it to somebody, or set its date.
 
-Photos can be added, chosen and removed by anyone, an accountant included.
+Photos can be added, chosen and removed by anyone except an accountant, who can only look. A photo is a file, and files belong to Documents, where an accountant reads and never writes.

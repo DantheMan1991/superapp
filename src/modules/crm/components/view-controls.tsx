@@ -75,6 +75,7 @@ export function ViewControls({
   sort,
   pinnedViewId,
   total,
+  canWrite = true,
 }: {
   views: ViewOption[];
   current: ViewOption;
@@ -82,6 +83,8 @@ export function ViewControls({
   sort: ViewSort;
   pinnedViewId: string | null;
   total: number;
+  /** `roleMayWrite(role)`. False keeps the reads and drops pin, delete and save. */
+  canWrite?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -170,17 +173,27 @@ export function ViewControls({
                 </span>
               </DropdownMenuItem>
             ))}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => pin(current.id)} disabled={pending}>
-              <Pin className="mr-2 size-3.5" /> Open this one by default
-            </DropdownMenuItem>
-            {!current.isBuiltIn && current.isMine && (
-              <DropdownMenuItem
-                onSelect={() => removeView(current)}
-                disabled={pending}
-              >
-                <Trash2 className="mr-2 size-3.5" /> Delete this view
-              </DropdownMenuItem>
+            {/* CHOOSING a view and FILTERING are reads — both are just the
+                URL — so an accountant keeps them. Pinning, deleting and saving
+                are writes and are not drawn. */}
+            {canWrite && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={() => pin(current.id)}
+                  disabled={pending}
+                >
+                  <Pin className="mr-2 size-3.5" /> Open this one by default
+                </DropdownMenuItem>
+                {!current.isBuiltIn && current.isMine && (
+                  <DropdownMenuItem
+                    onSelect={() => removeView(current)}
+                    disabled={pending}
+                  >
+                    <Trash2 className="mr-2 size-3.5" /> Delete this view
+                  </DropdownMenuItem>
+                )}
+              </>
             )}
           </DropdownMenuContent>
         </DropdownMenu>
@@ -206,7 +219,7 @@ export function ViewControls({
           "Save view" button on an unfiltered list is an invitation to create a
           view identical to the one already open.
         */}
-        {dirty && (
+        {dirty && canWrite && (
           <>
             <Button
               size="sm"

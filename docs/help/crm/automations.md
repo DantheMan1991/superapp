@@ -102,4 +102,4 @@ You cannot limit a rule to some records only. There is nothing here that narrows
 
 ## Who can do what
 
-Owners do everything here: add a rule, pause it, resume it and delete it. Staff and the outside accountant see the same page and the same rules as sentences, with the switch and the delete button absent, and the note telling them so. Every rule runs as the person whose action set it off, so a staff member's edit can never make a rule change a record they are not allowed to see.
+Owners do everything here: add a rule, pause it, resume it and delete it. Staff and the outside accountant see the same page and the same rules as sentences, with the switch and the delete button absent, and the note telling them so. This page was already owners-only for both, so nothing on it changed for the accountant. Every rule runs as the person whose action set it off, so a staff member's edit can never make a rule change a record they are not allowed to see.

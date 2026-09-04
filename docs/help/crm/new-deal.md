@@ -73,7 +73,7 @@ When something is wrong, a red line replaces the help text under that field, and
 | `Only http:// and https:// links are allowed.` | A link field holds an address of a kind the app will not store. |
 | `Must be 2000 characters or fewer.` | A text or link field is too long. |
 | `Not one of the choices.` | Somebody removed that choice while this page sat open. Reload and pick again. |
-| `Accountant access to this module is read-only.` | You are signed in as the outside accountant. The form fills in, and saving is refused. |
+| `Accountant access is read-only` | You are signed in as the outside accountant. The panel replaces the form; there is nothing to fill in. |
 | `Something went wrong. Please try again.` | Try once more. You also get this when you reach this page for a record that is held back to owners and you are not one of them, in which case saving will keep failing. |
 
 ## Not on this page
@@ -90,4 +90,4 @@ Nothing is kept if you leave this page. There is no draft and no warning, so a t
 
 ## Who can do what
 
-Owners and staff get exactly the same form and both can add deals. The outside accountant sees the form and can fill it in, and clicking {button:Add deal|primary} answers `Accountant access to this module is read-only.` A record held back to owners is invisible to staff, and its `Deals` section is hidden with the rest of it, so staff never reach this page for one by clicking.
+Owners and staff get exactly the same form and both can add deals. The outside accountant does not get the form at all. This page exists only to add a deal, so they get a {icon:lock} panel headed `Accountant access is read-only` instead, telling them they can open and read every deal. A record held back to owners is invisible to staff, and its `Deals` section is hidden with the rest of it, so staff never reach this page for one by clicking.

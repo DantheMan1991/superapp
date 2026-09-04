@@ -18,6 +18,8 @@ import { listFieldDefs } from "@/modules/crm/field-ops";
 import { centsToInput } from "@/modules/crm/core/pipeline";
 import { DealForm } from "@/modules/crm/components/deal-form";
 import { MoveDealButton } from "@/modules/crm/components/deal-controls";
+import { AccountantNotice } from "@/modules/crm/components/accountant-notice";
+import { roleMayWrite } from "@/modules/crm/core/errors";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +51,9 @@ export default async function DealPage({
     if (err instanceof CrmError && err.code === "DEAL_NOT_FOUND") notFound();
     throw err;
   });
+
+  /** The same question all nine `gate()`s ask. */
+  const canWrite = roleMayWrite(ctx.role);
 
   const { detail, stages, fieldDefs } = data;
   const { deal, party, stage, primaryContact, stakeholders, history } = detail;
@@ -90,6 +95,7 @@ export default async function DealPage({
           </span>
         }
         actions={
+          canWrite ? (
           <MoveDealButton
             dealId={deal.id}
             dealVersion={deal.version}
@@ -98,12 +104,16 @@ export default async function DealPage({
             stages={stages}
             label="Move stage"
           />
+          ) : null
         }
       />
 
       <CrmNav />
 
+      {!canWrite && <AccountantNotice what="this deal and where it stands" />}
+
       <DealForm
+        canWrite={canWrite}
         mode="edit"
         dealId={deal.id}
         dealVersion={deal.version}

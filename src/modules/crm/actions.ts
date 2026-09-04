@@ -14,7 +14,7 @@ import {
   setPrimaryContactPoint,
   updateContactPoint,
 } from "@/lib/parties/contacts";
-import { CrmError, friendlyMessage } from "./core/errors";
+import { CrmError, friendlyMessage, roleMayWrite} from "./core/errors";
 import {
   LIFECYCLE_STAGE_MAX,
   NOTES_MAX,
@@ -73,7 +73,7 @@ async function gate(opts?: { ownerOnly?: boolean }): Promise<CrmCtx> {
   await requireModuleEnabled(ctx.tenant.id, "crm");
   // Fail closed for the expert (accountant) role, as Documents does: this
   // module has no read-only-safe writes, so there is nothing to opt into.
-  if (ctx.role === "expert") {
+  if (!roleMayWrite(ctx.role)) {
     throw new CrmError("FORBIDDEN_EXPERT", "accountant access is read-only");
   }
   // Checked here as well as in RLS, and the duplication is deliberate: the

@@ -4,6 +4,8 @@ import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
 import { EmptyState } from "@/components/app/empty-state";
 import { CrmNav } from "@/modules/crm/components/crm-nav";
+import { AccountantNotice } from "@/modules/crm/components/accountant-notice";
+import { roleMayWrite } from "@/modules/crm/core/errors";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -76,11 +78,16 @@ export default async function DealsBoardPage({
     { role: ctx.role, userId: ctx.userId },
   );
 
+  /** The same question all nine `gate()`s ask. */
+  const canWrite = roleMayWrite(ctx.role);
+
   if (!board) {
     return (
       <div className="space-y-6">
         <PageHeader title="Board" />
         <CrmNav />
+
+      {!canWrite && <AccountantNotice what="every deal and which stage it is in" />}
         <Panel>
           <EmptyState
             icon={<KanbanSquare />}
@@ -185,6 +192,7 @@ export default async function DealsBoardPage({
                               `$${formatCents(deal.amountCents)}`
                             )}
                           </span>
+                          {canWrite && (
                           <MoveDealButton
                             dealId={deal.id}
                             dealVersion={deal.version}
@@ -192,6 +200,7 @@ export default async function DealsBoardPage({
                             currentStageId={deal.stageId}
                             stages={live}
                           />
+                          )}
                         </div>
                         {deal.expectedCloseOn && (
                           <p className="mt-1 text-xs text-muted-foreground">

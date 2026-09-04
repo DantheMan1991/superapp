@@ -465,32 +465,52 @@ export async function relinkEntity(
     .where(scope);
 }
 
+/** One feature that owns a work item: its slug, and what kind of thing it is. */
+export interface OwningFeature {
+  slug: string;
+  /** `core`, `pack`, `system` — or null when the slug is not registered. */
+  category: string | null;
+  /** Whether this tenant has it switched on. */
+  enabled: boolean;
+}
+
 /**
- * The CATEGORIES of the features that own this work item — one entry per
- * distinct owner, `null` for a link whose slug is not in the registry.
+ * The features that own this work item — one entry per distinct owner.
  *
- * **A LEFT JOIN, DELIBERATELY.** An inner join would drop a link whose
- * `extension_slug` names nothing, and a dropped row means "no owner objected",
- * which is the permissive answer to a question nobody could answer. `null`
- * comes back instead and `ownerFeatureAllowsWrite` treats it as a core module,
- * which is the strict one.
+ * **TWO LEFT JOINS, DELIBERATELY.** An inner join would drop a link whose
+ * `extension_slug` names nothing, or one the tenant has never had a
+ * `tenant_modules` row for, and a dropped row means "no owner objected" — the
+ * permissive answer to a question nobody could answer. Nulls come back instead,
+ * and the caller reads a null category as a core module (the strict rule) and a
+ * missing tenant row as not enabled.
  *
  * **AN ITEM WITH NO LINKS RETURNS AN EMPTY LIST**, and that is correct rather
- * than a gap: an unlinked item is the Work module's own, and Work refuses the
- * accountant. The caller's `.every()` over an empty list is `true`, so the
- * caller adds Work's rule itself — see `assertOwnersAllowWrite`.
+ * than a gap: an unlinked item is the Work module's own. The caller's `.every()`
+ * over an empty list is `true`, so the caller supplies Work's own rule — see
+ * `assertOwnersAllowWrite`.
  */
-export async function owningCategories(
+export async function owningFeatures(
   tx: Tx,
   tenantId: string,
   itemId: string,
-): Promise<(string | null)[]> {
+): Promise<OwningFeature[]> {
   const rows = await tx
-    .selectDistinct({ category: schema.modules.category })
+    .selectDistinct({
+      slug: schema.workItemLinks.extensionSlug,
+      category: schema.modules.category,
+      enabled: schema.tenantModules.enabled,
+    })
     .from(schema.workItemLinks)
     .leftJoin(
       schema.modules,
       eq(schema.modules.id, schema.workItemLinks.extensionSlug),
+    )
+    .leftJoin(
+      schema.tenantModules,
+      and(
+        eq(schema.tenantModules.tenantId, schema.workItemLinks.tenantId),
+        eq(schema.tenantModules.moduleId, schema.workItemLinks.extensionSlug),
+      ),
     )
     .where(
       and(
@@ -498,6 +518,10 @@ export async function owningCategories(
         eq(schema.workItemLinks.itemId, itemId),
       ),
     );
-  return rows.map((r) => r.category);
+  return rows.map((r) => ({
+    slug: r.slug,
+    category: r.category,
+    enabled: r.enabled === true,
+  }));
 }
 

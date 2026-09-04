@@ -9,6 +9,43 @@
 
 ## Build log
 
+### 2026-09-04 — A switched-off feature stops its work (`claude/a-switched-off-feature-stops-its-work`)
+
+The other half of the header's principle, closed the same day as the first. Until
+now only `addEntityWorkAction` checked that the owning feature is switched ON;
+`setEntityWorkDoneAction`, `setEntityWorkAssigneeAction` and
+`setEntityWorkDueAction` never had, so a follow-up raised on a CRM record stayed
+tickable after CRM was switched off.
+
+**IT IS A BACKSTOP, NOT A VISIBLE CHANGE, and the caution in the previous entry
+was wrong.** That entry said turning this on "would silently stop work somebody
+can see today". It would not: every surface that renders `WorkItemRow` — the CRM
+record timeline, CRM's follow-up list and the asset maintenance panel — already
+sits behind `requireModuleEnabled` for the feature that owns the item, so a
+reader whose module is off cannot reach the control in the first place. Checked
+by reading all three route files rather than assumed. What this closes is the
+stale tab and the direct call.
+
+**`owningCategories` became `owningFeatures`**, returning slug, category and
+enabled together — one row set, two questions, and a second LEFT JOIN onto
+`tenant_modules` for the same reason as the first: a tenant with no row for a
+module must read as OFF rather than vanish from the result and take the
+objection with it.
+
+**Enabled is reported before role.** When both fail, "that part of the product is
+not switched on" is the more useful sentence and the one an owner can act on.
+
+**An unlinked item gets the role rule and no enabled check**, deliberately: it is
+the Work module's own, and Work being off does not orphan an item nobody raised
+from a record — the header above already says what Work being off does and does
+not mean.
+
+**The fixture in `assets-maintenance-work.test.ts` never switched the pack on.**
+Every test in that file passed without a `tenant_modules` row, because the ops
+layer does not require one — only the actions do. It does now, and the new test
+flips it off and back to prove the join reads the tenant's own answer rather than
+a constant. Worth knowing before writing the next pack fixture.
+
 ### 2026-09-04 — The guard is the owning feature, roles included (`claude/the-guard-is-the-owning-feature`)
 
 `src/lib/work/actions.ts` is Layer 0: one set of verbs so a follow-up on a CRM
@@ -458,15 +495,11 @@ Pack-owned tables follow the ordinary rules: `tenant_id`, FORCE RLS, a
 
 ## Open items
 
-- **Only one of Layer 0's four work verbs checks that the owning feature is
-  switched ON.** `addEntityWorkAction` calls `assertFeatureOn`;
-  `setEntityWorkDoneAction`, `setEntityWorkAssigneeAction` and
-  `setEntityWorkDueAction` never have. So a follow-up raised on a CRM record is
-  still tickable after CRM is switched off for that tenant. The file's header
-  says the guard is the owning feature and means this too — but adding it would
-  silently stop work somebody can currently see on their own list, so it is a
-  decision rather than an omission. The ROLE half of the same principle was
-  closed 2026-09-04; see the build log.
+- ~~**Only one of Layer 0's four work verbs checks that the owning feature is
+  switched ON.**~~ — **closed 2026-09-04**, the same day as the role half. The
+  caution recorded here was wrong and the build log says why: every surface that
+  renders the control is already behind `requireModuleEnabled` for the same
+  feature, so nothing a reader can see was stopped.
 
 - **Seed application is not built.** `IndustryProfile.seed` is declared and
   unread, so `installProfile` enables packs and stamps the profile but ships no

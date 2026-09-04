@@ -11,7 +11,7 @@ import { logAudit } from "@/lib/audit";
 import { WorkError } from "@/lib/work/errors";
 import {
   createWorkForEntity,
-  owningCategories,
+  owningFeatures,
   setWorkAssignee,
   updateEntityWork,
 } from "@/lib/work/entity-work";
@@ -133,19 +133,41 @@ const addSchema = entityRef.extend({
  * **AND THE WORK MODULE'S OWN RULE IS APPLIED TO AN UNLINKED ITEM.** No links
  * means nobody raised it from a record, which makes it Work's, and Work refuses
  * the accountant. Without this line an empty list would vacuously pass.
+ *
+ * **THE OTHER HALF OF THE HEADER'S PRINCIPLE — IS THE OWNER SWITCHED ON —
+ * IS APPLIED HERE TOO, since 2026-09-04.** `addEntityWorkAction` had always
+ * checked it and these three never had, so a follow-up raised on a CRM record
+ * stayed workable after CRM was switched off. It is a backstop rather than a
+ * visible change: every surface that renders `WorkItemRow` — the CRM record
+ * timeline, CRM's follow-up list, the asset maintenance panel — already sits
+ * behind `requireModuleEnabled` for the same feature that owns the item, so a
+ * reader whose module is off cannot reach the control. What this closes is the
+ * stale tab and the direct call.
+ *
+ * Both checks read one row set, and the ENABLED one is reported first: "not
+ * switched on" is the more useful answer when both are true, and it is the one
+ * an owner can act on.
  */
 async function assertOwnersAllowWrite(
   tenantId: string,
   role: TenantRole,
   itemId: string,
 ): Promise<string | null> {
-  const categories = await withTenant(tenantId, (tx) =>
-    owningCategories(tx, tenantId, itemId),
+  const owners = await withTenant(tenantId, (tx) =>
+    owningFeatures(tx, tenantId, itemId),
   );
-  const owners = categories.length === 0 ? ["core"] : categories;
-  const allowed = owners.every((c) =>
-    ownerFeatureAllowsWrite(c ?? "core", role),
-  );
+  if (owners.some((o) => !o.enabled)) {
+    return "That part of the product is not switched on.";
+  }
+  /*
+   * An unlinked item is the Work module's own, so it gets a core owner's rule
+   * rather than passing vacuously. It needs no ENABLED check to match: Work
+   * being off does not orphan an item that was never raised from a record —
+   * see this file's header on what Work being off does and does not mean.
+   */
+  const categories =
+    owners.length === 0 ? ["core"] : owners.map((o) => o.category ?? "core");
+  const allowed = categories.every((c) => ownerFeatureAllowsWrite(c, role));
   return allowed ? null : "You do not have access to do that.";
 }
 

@@ -27,6 +27,7 @@ export function WorkList({
   showListName,
   viewQuery,
   emptyMessage,
+  canWrite = true,
 }: {
   groups: UrgencyGroup<WorkRowView>[];
   today: string;
@@ -35,6 +36,8 @@ export function WorkList({
   /** The current view's query string, so opening a row keeps the view. */
   viewQuery: string;
   emptyMessage: string;
+  /** `roleMayWrite(role)`. False draws state and assignee as text. */
+  canWrite?: boolean;
 }) {
   const { pending, run } = useWorkAction();
   const total = groups.reduce((n, group) => n + group.items.length, 0);
@@ -84,12 +87,18 @@ export function WorkList({
                 {showListName && row.listName && (
                   <ListBadge name={row.listName} color={row.listColor} />
                 )}
-                <StateControl row={row} pending={pending} run={run} />
+                <StateControl
+                  row={row}
+                  pending={pending}
+                  run={run}
+                  canWrite={canWrite}
+                />
                 <AssigneeControl
                   row={row}
                   members={members}
                   pending={pending}
                   run={run}
+                  canWrite={canWrite}
                 />
               </li>
             ))}

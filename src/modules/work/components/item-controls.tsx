@@ -108,12 +108,26 @@ export function StateControl({
   pending,
   run,
   className,
+  canWrite = true,
 }: {
   row: WorkRowView;
   pending: boolean;
   run: (action: () => Promise<ActionResult>) => void;
   className?: string;
+  /**
+   * False renders the value as text rather than a disabled select. A greyed
+   * dropdown reads as "not right now"; this state is "not you, ever", and the
+   * page says so once at the top instead.
+   */
+  canWrite?: boolean;
 }) {
+  if (!canWrite) {
+    return (
+      <span className="text-sm text-muted-foreground">
+        {describeWorkState(row.state, row.status)}
+      </span>
+    );
+  }
   return (
     <Select
       value={row.state}
@@ -144,13 +158,23 @@ export function AssigneeControl({
   pending,
   run,
   className,
+  canWrite = true,
 }: {
   row: WorkRowView;
   members: MemberOption[];
   pending: boolean;
   run: (action: () => Promise<ActionResult>) => void;
   className?: string;
+  /** See `StateControl`. Text, not a greyed dropdown. */
+  canWrite?: boolean;
 }) {
+  if (!canWrite) {
+    return (
+      <span className="text-sm text-muted-foreground">
+        {row.assigneeLabel ?? "Nobody"}
+      </span>
+    );
+  }
   return (
     <Select
       value={row.assignee ?? NOBODY}

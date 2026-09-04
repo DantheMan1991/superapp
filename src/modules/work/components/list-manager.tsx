@@ -58,9 +58,16 @@ const VISIBILITY_COPY: Record<WorkVisibility, string> = {
 export function ListManager({
   lists,
   isOwner,
+  canWrite,
 }: {
   lists: ListRowView[];
   isOwner: boolean;
+  /**
+   * `roleMayWrite(role)`. **Not the same question as `isOwner`** — that one
+   * decides whether the visibility select is usable, and this one decides
+   * whether anything on the page is.
+   */
+  canWrite: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -89,12 +96,22 @@ export function ListManager({
         title="Lists"
         description="A list is how work is grouped, and the only thing that decides who can see it."
         actions={
-          <Button size="sm" onClick={() => setCreating(true)}>
-            <Plus className="mr-1 h-4 w-4" />
-            New list
-          </Button>
+          canWrite ? (
+            <Button size="sm" onClick={() => setCreating(true)}>
+              <Plus className="mr-1 h-4 w-4" />
+              New list
+            </Button>
+          ) : null
         }
       />
+
+      {/* Said once, at the top, rather than as a row of disabled icons. */}
+      {!canWrite && (
+        <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+          Accountant access is read-only. You can see every list, its colour and
+          who it is visible to, and nothing here can be changed.
+        </p>
+      )}
 
       <Panel>
         <ul className="divide-y divide-divider">
@@ -122,18 +139,21 @@ export function ListManager({
               )}
               {VISIBILITY_COPY[list.visibility]}
             </Badge>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setEditing(list)}
-              aria-label={`Edit ${list.name}`}
-            >
-              <Pencil className="h-4 w-4" />
-            </Button>
+            {canWrite && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setEditing(list)}
+                aria-label={`Edit ${list.name}`}
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+            )}
             {/* The default list has no archive control at all: the action
                 refuses it, and offering a button that always fails is worse
-                than not offering one. */}
-            {!list.isDefault && (
+                than not offering one. The same sentence is why the two above
+                are gone for an accountant. */}
+            {canWrite && !list.isDefault && (
               <Button
                 variant="ghost"
                 size="sm"

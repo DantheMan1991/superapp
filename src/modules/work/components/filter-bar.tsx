@@ -43,12 +43,15 @@ export function FilterBar({
   members,
   currentUserId,
   savedViews,
+  canWrite = true,
 }: {
   view: WorkView;
   lists: ListOption[];
   members: MemberOption[];
   currentUserId: string;
   savedViews: SavedViewOption[];
+  /** `roleMayWrite(role)`. Filtering is a read; saving a view is not. */
+  canWrite?: boolean;
 }) {
   const router = useRouter();
   const [q, setQ] = useState(view.q);
@@ -196,7 +199,12 @@ export function FilterBar({
         </form>
 
         <div className="ml-auto flex items-center gap-2">
-          <SavedViews views={savedViews} currentParams={workViewToQuery(view)} />
+          {canWrite && (
+            <SavedViews
+              views={savedViews}
+              currentParams={workViewToQuery(view)}
+            />
+          )}
           {view.display === "list" && (
             <Button
               variant="ghost"

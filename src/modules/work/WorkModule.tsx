@@ -6,7 +6,7 @@ import type { TenantContext } from "@/lib/auth";
 import { listAssignableMembers, memberLabel } from "@/lib/team";
 import { todayInTimezone } from "@/lib/timezone";
 import { withWork } from "@/lib/work/with-work";
-import type { WorkState } from "@/lib/work/vocabulary";
+import { roleMayWrite, type WorkState } from "@/lib/work/vocabulary";
 import { getWorkItem, listWorkItems, listWorkLists } from "./read";
 import { resolveLinks } from "./link-ops";
 import { listSavedViews } from "./saved-view-ops";
@@ -53,6 +53,12 @@ export async function WorkModule({
   };
   const today = todayInTimezone(ctx.tenant.timezone);
   const view = parseWorkView(searchParams);
+  /*
+   * The same question `gate()` asks, so the page and the action cannot
+   * disagree. They did until 2026-09-03: every control here drew enabled for an
+   * accountant and every press came back `You do not have access to do that.`
+   */
+  const canWrite = roleMayWrite(ctx.role);
 
   /*
    * `?item=` is NOT part of the view, deliberately. It says which sheet is
@@ -176,6 +182,15 @@ export async function WorkModule({
           </Button>
         }
       />
+      {/* Said once, above the filters, rather than as a disabled control in
+          every row. An accountant who can see the page and is told why is
+          better served than one who presses something and is refused. */}
+      {!canWrite && (
+        <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+          Accountant access is read-only. You can see every list, every item on
+          it and who it is on, and nothing here can be changed.
+        </p>
+      )}
       <FilterBar
         view={view}
         lists={listOptions}
@@ -188,18 +203,21 @@ export async function WorkModule({
           scope: saved.scope,
           mine: saved.mine,
         }))}
+        canWrite={canWrite}
       />
-      <AddWork
-        lists={listOptions}
-        defaultListId={
-          view.listId ??
-          lists.find((list) => list.isDefault)?.id ??
-          lists[0]?.id ??
-          null
-        }
-        assignToSelf={view.assignee === "me"}
-        currentUserId={ctx.userId}
-      />
+      {canWrite && (
+        <AddWork
+          lists={listOptions}
+          defaultListId={
+            view.listId ??
+            lists.find((list) => list.isDefault)?.id ??
+            lists[0]?.id ??
+            null
+          }
+          assignToSelf={view.assignee === "me"}
+          currentUserId={ctx.userId}
+        />
+      )}
       {view.display === "board" ? (
         <WorkBoard
           rows={rows}
@@ -207,6 +225,7 @@ export async function WorkModule({
           members={memberOptions}
           showListName={showListName}
           viewQuery={viewQuery}
+          canWrite={canWrite}
         />
       ) : (
         <WorkList
@@ -215,6 +234,7 @@ export async function WorkModule({
           members={memberOptions}
           showListName={showListName}
           viewQuery={viewQuery}
+          canWrite={canWrite}
           emptyMessage={
             view.assignee === "me"
               ? "Nothing is on you right now."
@@ -229,6 +249,7 @@ export async function WorkModule({
         links={sheetLinks}
         members={memberOptions}
         backHref={workViewHref(view)}
+        canWrite={canWrite}
       />
     </div>
   );

@@ -66,7 +66,7 @@ Nothing on this screen deletes a list, and nothing deletes work.
 | --- | --- |
 | `Only an owner can restrict a list.` | You are staff. A new list will be visible to everyone. |
 | `The default list cannot be archived.` | It is where unfiled work lands. |
-| `You do not have access to do that.` | Your role cannot make this change. Accountants see this on everything here. |
+| `You do not have access to do that.` | Your role cannot make this change. An accountant reaching it means a write got through from an old tab; the page itself no longer offers one. |
 | `That work no longer exists, or you cannot see it.` | It has gone, or it is on a list you cannot see. |
 | `Invalid input` | Usually a name longer than 80 characters. |
 | `Something went wrong.` | Something unexpected. Tell us if it keeps happening. |
@@ -88,4 +88,4 @@ Everyone can make a list, rename it, recolour it and archive it. **Only an owner
 
 Staff never see an owners-only list at all, so it will not appear in this screen's list either.
 
-**Your accountant cannot change anything here.** Every button is shown and enabled, and each one fails with `You do not have access to do that.` Nothing warns them first.
+**Your accountant reads this page and changes nothing on it.** A line under the header reads `Accountant access is read-only. You can see every list, its colour and who it is visible to, and nothing here can be changed.` There is no {button:New list|primary|plus}, and no edit or archive button on any row.

@@ -35,6 +35,7 @@ export function WorkBoard({
   members,
   showListName,
   viewQuery,
+  canWrite = true,
 }: {
   rows: WorkRowView[];
   today: string;
@@ -42,6 +43,8 @@ export function WorkBoard({
   showListName: boolean;
   /** The current view's query string, so opening a card keeps the view. */
   viewQuery: string;
+  /** `roleMayWrite(role)`. False draws state and assignee as text. */
+  canWrite?: boolean;
 }) {
   const { pending, run } = useWorkAction();
 
@@ -104,6 +107,7 @@ export function WorkBoard({
                         pending={pending}
                         run={run}
                         className="h-8 w-[7.5rem]"
+                        canWrite={canWrite}
                       />
                       <AssigneeControl
                         row={row}
@@ -111,6 +115,7 @@ export function WorkBoard({
                         pending={pending}
                         run={run}
                         className="h-8 w-[7.5rem]"
+                        canWrite={canWrite}
                       />
                     </div>
                   </li>

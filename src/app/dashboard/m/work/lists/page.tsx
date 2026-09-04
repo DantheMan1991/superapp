@@ -3,6 +3,7 @@ import { ChevronLeft } from "lucide-react";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withWork } from "@/lib/work/with-work";
+import { roleMayWrite } from "@/lib/work/vocabulary";
 import { listWorkLists } from "@/modules/work/read";
 import {
   ListManager,
@@ -51,7 +52,15 @@ export default async function WorkListsPage() {
       >
         <ChevronLeft className="size-4" /> Back to my work
       </Link>
-      <ListManager lists={rows} isOwner={ctx.role === "owner"} />
+      {/* The same question `gate()` asks. This page called it nowhere until
+          2026-09-03, so an accountant saw New list, Edit and Archive all
+          enabled and every press came back `You do not have access to do
+          that.` */}
+      <ListManager
+        lists={rows}
+        isOwner={ctx.role === "owner"}
+        canWrite={roleMayWrite(ctx.role)}
+      />
     </div>
   );
 }

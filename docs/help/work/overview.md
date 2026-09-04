@@ -59,4 +59,4 @@ Everyone can add work, change it, assign it to anybody, make lists and save view
 
 **Only an owner can set a list to `Owners only`**, which is the one thing that hides work from colleagues.
 
-**Your accountant cannot use this module.** Every button is shown and enabled, and every one fails with `You do not have access to do that.` Nothing warns them first, and they can never be given work.
+**Your accountant reads this module and writes nothing in it.** Both screens say so under the header rather than offering a control that fails, and the controls that would write are not drawn. They can never be given work either.

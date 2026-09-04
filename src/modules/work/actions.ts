@@ -8,7 +8,11 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
 import { withWork, type WorkCtx } from "@/lib/work/with-work";
-import { WORK_STATES, WORK_VISIBILITIES } from "@/lib/work/vocabulary";
+import {
+  WORK_STATES,
+  WORK_VISIBILITIES,
+  roleMayWrite,
+} from "@/lib/work/vocabulary";
 import { WORK_COLORS } from "./core/colors";
 import { WorkError, friendlyMessage } from "./core/errors";
 import { createList, setListArchived, updateList } from "./list-ops";
@@ -49,10 +53,10 @@ async function gate(): Promise<WorkCtx> {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "work");
   // Fail closed for the accountant role, as CRM, Documents and Scheduling do.
-  // There is no read-only-safe write in this module — and `listAssignableMembers`
-  // already refuses to offer an expert as an assignee, so the loop is closed at
-  // both ends rather than half-open.
-  if (ctx.role === "expert") {
+  // The rule itself lives in `roleMayWrite` so the screens can ask it too —
+  // this used to be the only place that knew it, which is why both of them drew
+  // every control enabled and refused every press.
+  if (!roleMayWrite(ctx.role)) {
     throw new WorkError("FORBIDDEN", "accountant access is read-only");
   }
   return { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role };

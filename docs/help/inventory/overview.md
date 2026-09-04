@@ -49,8 +49,8 @@ Ask your accountant before turning it on. It changes your balance sheet.
 
 ## Who can do what
 
-Most of Inventory is owner work. Only an owner can add or change an {{item|lower}}, retire one, start a batch, split one, correct what a batch cost, record stock in or out, adjust a quantity, match a bill, or record a tax decision.
+Only an owner can add or change an {{item|lower}}, retire one, start a batch, split one, correct what a batch cost, match a bill, or record a tax decision. Each of those either creates something the accounts group by, or decides what it costs.
 
-Counting is open to everyone. Any member can start a count, record what they found, remove a line and post it, including the accountant.
+Recording stock and counting are the other kind of thing, and both are open to everyone, the accountant included. Any member can record a delivery, record stock going out, adjust a quantity, start a count, record what they found, remove a line and post it. These are what the person standing at the shelf does, and they have to be recorded there rather than reported to somebody who can.
 
 Everyone can read every page, including what everything is worth.

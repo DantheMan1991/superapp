@@ -153,6 +153,7 @@ export function FolderDropTarget({
   folderPath,
   children,
   className,
+  canWrite = true,
 }: {
   tenantId: string;
   folderId: string;
@@ -160,6 +161,8 @@ export function FolderDropTarget({
   folderPath: string;
   children: ReactNode;
   className?: string;
+  /** See `UploadDropZone`. False renders the children and takes no drop. */
+  canWrite?: boolean;
 }) {
   const router = useRouter();
   const [over, setOver] = useState(false);
@@ -229,6 +232,8 @@ export function FolderDropTarget({
     }
   }
 
+  if (!canWrite) return <div className={className}>{children}</div>;
+
   return (
     <div
       className={cn(
@@ -273,10 +278,17 @@ export function UploadDropZone({
   tenantId,
   folderId,
   children,
+  canWrite = true,
 }: {
   tenantId: string;
   folderId: string | null;
   children: ReactNode;
+  /**
+   * `roleMayWrite(role)`. False returns the children unwrapped, exactly as
+   * `DraggableRow` does with `disabled` — a drop zone that accepts a file and
+   * then hears `accountant access is read-only` is worse than no drop zone.
+   */
+  canWrite?: boolean;
 }) {
   const router = useRouter();
   const [over, setOver] = useState(false);
@@ -298,6 +310,8 @@ export function UploadDropZone({
       router.refresh();
     }
   }
+
+  if (!canWrite) return <>{children}</>;
 
   return (
     <div

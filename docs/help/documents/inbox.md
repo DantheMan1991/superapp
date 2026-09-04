@@ -39,4 +39,4 @@ Only the newest fifty unfiled files are shown here; the top of Browse shows the 
 
 ## Who can do what
 
-Owners and staff upload, file, tag, rename, version and trash. Accountants can open and download, and every other item answers `Accountant access is read-only — reviews, sign-offs and exports only.`
+Owners and staff upload, file, tag, rename, version and trash. Accountants can open and download. {button:Upload|primary} is not drawn for them, and the file menu keeps only `Version history`.

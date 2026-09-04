@@ -46,4 +46,4 @@ Nothing is ever deleted for good: the Trash keeps every file, and every version 
 
 - **Owners** do everything: make owners-only folders, move, delete and give an email address to folders, delete tags, reset a locked share link, and everything below.
 - **Staff** upload, rename, file, tag, version, trash and restore files, make and rename folders, create tags, share links, save views, and write templates. They never see owners-only folders.
-- **Your accountant** can open, preview, download and search everything staff can see, and nothing else. Every button still shows, and pressing one answers `Accountant access is read-only — reviews, sign-offs and exports only.`
+- **Your accountant** can open, preview, download and search everything staff can see, and nothing else. Each screen says so in a line under the tabs, and the controls that would write are not drawn — including drag-and-drop, which takes no file from them rather than accepting one and then refusing it.

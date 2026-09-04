@@ -75,4 +75,4 @@ The viewer shows no folder, tags, uploader or dates; those are on the row behind
 
 ## Who can do what
 
-Everyone can open, preview and download. Owners and staff rename, file, tag, version, restore and trash. Accountants see every item, and each answers `Accountant access is read-only — reviews, sign-offs and exports only.`
+Everyone can open, preview and download. Owners and staff rename, file, tag, version, restore and trash. Accountants keep one item on the {icon:more-horizontal} menu: `Version history`, which is a read and the thing somebody reviewing a file actually wants. Rename, `File into…`, `Tags…`, `Upload new version…`, `Share link…` and `Move to trash` are not drawn for them.

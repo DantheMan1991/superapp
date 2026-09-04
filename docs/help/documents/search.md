@@ -48,4 +48,4 @@ There is no total count of results, no sorting, no snippet of the matching text,
 
 ## Who can do what
 
-Everyone can search. Owners and staff save views; an owner can delete any view, staff their own. Accountants see the buttons, and each answers `Accountant access is read-only — reviews, sign-offs and exports only.`
+Everyone can search. Owners and staff save views; an owner can delete any view, staff their own. Accountants search exactly as everybody else does — a search is the address of the page, so nothing about it is a write. {button:Save this search|outline} is not drawn for them, and neither is a saved view's delete.

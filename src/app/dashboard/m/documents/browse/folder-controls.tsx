@@ -172,11 +172,19 @@ export function FolderRowMenu({
   isOwner,
   moveTargets,
   shareMaxTtlDays,
+  canWrite = true,
 }: {
   folder: FolderRow;
   isOwner: boolean;
   moveTargets: FolderOption[];
   shareMaxTtlDays?: number;
+  /**
+   * `roleMayWrite(role)`. **Every item on this menu writes** — rename, move,
+   * owners-only, the folder mailbox, share, delete — so there is nothing to
+   * leave behind and the whole menu goes. Unlike the file menu, which keeps
+   * `Version history`.
+   */
+  canWrite?: boolean;
 }) {
   const router = useRouter();
   const [renaming, setRenaming] = useState(false);
@@ -188,6 +196,9 @@ export function FolderRowMenu({
   const [name, setName] = useState(folder.name);
   const [target, setTarget] = useState<string>("__root__");
   const [pending, startTransition] = useTransition();
+
+  // Nothing on this menu is a read, so an accountant gets no trigger at all.
+  if (!canWrite) return null;
 
   function run(fn: () => Promise<{ ok: true } | { error: string }>, msg: string) {
     startTransition(async () => {

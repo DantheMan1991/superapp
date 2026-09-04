@@ -167,7 +167,10 @@ export type DocsRole = "owner" | "staff" | "expert";
  *
  * `expert` — the platform's own bookkeeper working inside a client workspace —
  * is read-only here, as it is in CRM, Scheduling and Work. This module has no
- * read-only-safe write, so there is nothing to opt into.
+ * read-only-safe write, so there is nothing to opt into. `gate()` has said so
+ * since the module shipped; no SCREEN asked until 2026-09-04, which is why an
+ * accountant got Upload, New folder, every row menu and the whole drag-and-drop
+ * surface, and a refusal from each.
  *
  * **A PACK'S PHOTO IS STILL A DOCUMENT, AND THIS IS STILL THE RULE.**
  * `assets` and `livestock` attach photos through `attachments.ts`, and their own

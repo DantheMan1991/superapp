@@ -20,6 +20,7 @@ import { folderInboundAddress } from "../inbound";
 import { wouldCreateCycle } from "../core/tree";
 import { DocumentsNav } from "./documents-nav";
 import { DocumentRowMenu, UploadButton } from "./document-controls";
+import { roleMayWrite } from "../core/errors";
 import {
   BreadcrumbDropTarget,
   DraggableRow,
@@ -58,6 +59,14 @@ export async function FolderBrowser({
   view?: ViewMode;
 }) {
   const isOwner = ctx.role === "owner";
+  /**
+   * **NOT THE SAME QUESTION AS `isOwner`.** That one decides who may make a
+   * folder, move one and set owners-only; this one decides whether the reader
+   * may change anything at all. Every `gate()` in this module refuses `expert`
+   * and no screen asked until 2026-09-04, so an accountant got Upload, New
+   * folder, drag-and-drop and every row menu, and a refusal from each.
+   */
+  const canWrite = roleMayWrite(ctx.role);
   const isGrid = view !== "list";
 
   const data = await withTenant(
@@ -152,11 +161,18 @@ export async function FolderBrowser({
               </Badge>
             )}
             <ViewSwitch current={view} />
-            <UploadButton
-              tenantId={ctx.tenant.id}
-              folderId={folder?.id ?? null}
-            />
-            <NewFolderButton parentId={folder?.id ?? null} isOwner={isOwner} />
+            {canWrite && (
+              <>
+                <UploadButton
+                  tenantId={ctx.tenant.id}
+                  folderId={folder?.id ?? null}
+                />
+                <NewFolderButton
+                  parentId={folder?.id ?? null}
+                  isOwner={isOwner}
+                />
+              </>
+            )}
           </>
         }
       />
@@ -165,7 +181,11 @@ export async function FolderBrowser({
 
       {/* Files dropped from the desktop anywhere that is not a folder row land
           in the folder being viewed. */}
-      <UploadDropZone tenantId={ctx.tenant.id} folderId={folder?.id ?? null}>
+      <UploadDropZone
+        tenantId={ctx.tenant.id}
+        folderId={folder?.id ?? null}
+        canWrite={canWrite}
+      >
       {contents.subfolders.length === 0 && contents.documents.length === 0 ? (
         <p className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
           This folder is empty. Drop files here to upload them.
@@ -174,6 +194,7 @@ export async function FolderBrowser({
         <TileGrid>
           {contents.subfolders.map((sub) => (
             <FolderDropTarget
+              canWrite={canWrite}
               key={sub.id}
               tenantId={ctx.tenant.id}
               folderId={sub.id}
@@ -187,7 +208,7 @@ export async function FolderBrowser({
                   path: sub.path,
                   version: sub.version,
                 }}
-                disabled={!isOwner}
+                disabled={!isOwner || !canWrite}
                 className="h-full"
               >
                 <FolderTile
@@ -200,6 +221,7 @@ export async function FolderBrowser({
                   invalid HTML and swallows its own clicks. */}
               <div className="absolute right-1 top-1">
                 <FolderRowMenu
+                  canWrite={canWrite}
                   folder={{
                     id: sub.id,
                     name: sub.name,
@@ -226,6 +248,7 @@ export async function FolderBrowser({
             <DraggableRow
               key={doc.id}
               payload={{ kind: "document", id: doc.id }}
+              disabled={!canWrite}
               className="relative h-full"
             >
               <FileOpenTrigger
@@ -250,6 +273,7 @@ export async function FolderBrowser({
               </FileOpenTrigger>
               <div data-no-viewer className="absolute right-1 top-1">
                 <DocumentRowMenu
+                  canWrite={canWrite}
                   documentId={doc.id}
                   folders={folderChoices}
                   version={doc.version}
@@ -270,6 +294,7 @@ export async function FolderBrowser({
         <div className="divide-y rounded-md border">
           {contents.subfolders.map((sub) => (
             <FolderDropTarget
+              canWrite={canWrite}
               key={sub.id}
               tenantId={ctx.tenant.id}
               folderId={sub.id}
@@ -286,7 +311,7 @@ export async function FolderBrowser({
                   path: sub.path,
                   version: sub.version,
                 }}
-                disabled={!isOwner}
+                disabled={!isOwner || !canWrite}
                 className="flex min-w-0 flex-1 items-center gap-3"
               >
                 <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
@@ -307,6 +332,7 @@ export async function FolderBrowser({
                 </Badge>
               )}
               <FolderRowMenu
+                  canWrite={canWrite}
                 folder={{
                   id: sub.id,
                   name: sub.name,
@@ -332,6 +358,7 @@ export async function FolderBrowser({
             <DraggableRow
               key={doc.id}
               payload={{ kind: "document", id: doc.id }}
+              disabled={!canWrite}
               className="flex items-center gap-3 px-4 py-3"
             >
               <FileText className="size-4 shrink-0 text-muted-foreground" />
@@ -372,6 +399,7 @@ export async function FolderBrowser({
                 {doc.createdAt.toLocaleDateString()}
               </span>
               <DocumentRowMenu
+                  canWrite={canWrite}
                 documentId={doc.id}
                 folders={folderChoices}
                 version={doc.version}

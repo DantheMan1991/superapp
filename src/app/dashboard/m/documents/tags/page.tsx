@@ -1,5 +1,6 @@
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
+import { roleMayWrite } from "@/modules/documents/core/errors";
 import { requireModuleEnabled } from "@/lib/modules";
 import { countDocumentsByTag, listTags } from "@/modules/documents/tag-ops";
 import { PageHeader } from "@/components/app/page-header";
@@ -18,6 +19,8 @@ export const dynamic = "force-dynamic";
  */
 export default async function DocumentsTagsPage() {
   const ctx = await requireTenant();
+  /** The same question `gate()` asks. */
+  const canWrite = roleMayWrite(ctx.role);
   await requireModuleEnabled(ctx.tenant.id, "documents");
 
   const data = await withTenant(
@@ -38,6 +41,13 @@ export default async function DocumentsTagsPage() {
 
       <DocumentsNav />
 
+      {!canWrite && (
+        <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+          Accountant access is read-only. You can see every tag and how many files carry it, and nothing here
+          can be changed.
+        </p>
+      )}
+
       <TagManager
         tags={data.tags.map((t) => ({
           id: t.id,
@@ -47,6 +57,7 @@ export default async function DocumentsTagsPage() {
         }))}
         counts={data.counts}
         isOwner={ctx.role === "owner"}
+        canWrite={canWrite}
       />
     </div>
   );

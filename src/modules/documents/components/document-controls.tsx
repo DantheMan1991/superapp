@@ -166,6 +166,7 @@ export function DocumentRowMenu({
   fileVersionCount,
   tags,
   documentTags,
+  canWrite = true,
 }: {
   documentId: string;
   folders: FolderChoice[];
@@ -184,6 +185,12 @@ export function DocumentRowMenu({
   /** The tenant's tag registry. Undefined hides the option entirely. */
   tags?: TagChoice[];
   documentTags?: readonly string[];
+  /**
+   * `roleMayWrite(role)`. False leaves ONE item on this menu — `Version
+   * history`, which is a read and the kind of thing an accountant reviewing a
+   * file actually wants. Everything else here writes.
+   */
+  canWrite?: boolean;
 }) {
   const router = useRouter();
   const [filing, setFiling] = useState(false);
@@ -227,6 +234,7 @@ export function DocumentRowMenu({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           {trashed ? (
+            canWrite ? (
             <DropdownMenuItem
               onSelect={() =>
                 run(
@@ -237,19 +245,22 @@ export function DocumentRowMenu({
             >
               Restore
             </DropdownMenuItem>
+            ) : null
           ) : (
             <>
-              {version !== undefined && (
+              {canWrite && version !== undefined && (
                 <DropdownMenuItem onSelect={() => setRenaming(true)}>
                   <Pencil className="size-4" />
                   Rename
                 </DropdownMenuItem>
               )}
-              <DropdownMenuItem onSelect={() => setFiling(true)}>
-                <FolderInput className="size-4" />
-                File into…
-              </DropdownMenuItem>
-              {tags !== undefined && (
+              {canWrite && (
+                <DropdownMenuItem onSelect={() => setFiling(true)}>
+                  <FolderInput className="size-4" />
+                  File into…
+                </DropdownMenuItem>
+              )}
+              {canWrite && tags !== undefined && (
                 <DropdownMenuItem
                   onSelect={(e) => {
                     e.preventDefault();
@@ -262,16 +273,21 @@ export function DocumentRowMenu({
               )}
               {canVersion && (
                 <>
-                  <DropdownMenuItem
-                    onSelect={(e) => {
-                      // Keep the menu from closing the dialog it just opened.
-                      e.preventDefault();
-                      setVersioning(true);
-                    }}
-                  >
-                    <FileUp className="size-4" />
-                    Upload new version…
-                  </DropdownMenuItem>
+                  {canWrite && (
+                    <DropdownMenuItem
+                      onSelect={(e) => {
+                        // Keep the menu from closing the dialog it just opened.
+                        e.preventDefault();
+                        setVersioning(true);
+                      }}
+                    >
+                      <FileUp className="size-4" />
+                      Upload new version…
+                    </DropdownMenuItem>
+                  )}
+                  {/* A READ, and the one thing left on this menu for an
+                      accountant: which revision is current and when each
+                      arrived. */}
                   <DropdownMenuItem
                     onSelect={(e) => {
                       e.preventDefault();
@@ -286,7 +302,7 @@ export function DocumentRowMenu({
                   </DropdownMenuItem>
                 </>
               )}
-              {shareMaxTtlDays !== undefined && (
+              {canWrite && shareMaxTtlDays !== undefined && (
                 <DropdownMenuItem
                   onSelect={(e) => {
                     // Keep the menu from closing the dialog it just opened.
@@ -298,18 +314,20 @@ export function DocumentRowMenu({
                   Share link…
                 </DropdownMenuItem>
               )}
-              <DropdownMenuItem
-                variant="destructive"
-                onSelect={() =>
-                  run(
-                    () => trashDocumentsAction({ documentIds: [documentId] }),
-                    "Moved to trash",
-                  )
-                }
-              >
-                <Trash2 className="size-4" />
-                Move to trash
-              </DropdownMenuItem>
+              {canWrite && (
+                <DropdownMenuItem
+                  variant="destructive"
+                  onSelect={() =>
+                    run(
+                      () => trashDocumentsAction({ documentIds: [documentId] }),
+                      "Moved to trash",
+                    )
+                  }
+                >
+                  <Trash2 className="size-4" />
+                  Move to trash
+                </DropdownMenuItem>
+              )}
             </>
           )}
         </DropdownMenuContent>
@@ -357,7 +375,12 @@ export function DocumentRowMenu({
               onOpenChange={setHistory}
               documentId={documentId}
               title={title || fileName || "this file"}
-              canRestore
+              /* Was hard-coded `true`, which is how an accountant reached a
+                 Restore that `restoreDocumentVersionAction` then refused —
+                 recorded as an open item and closed here. Reading the history
+                 is the point of leaving this sheet open to them; putting an old
+                 revision back is not. */
+              canRestore={canWrite}
             />
           )}
         </>

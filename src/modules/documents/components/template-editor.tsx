@@ -47,6 +47,7 @@ export function TemplateEditor({
   initialFields,
   publishedVersionNo,
   draftVersionNo,
+  canWrite = true,
 }: {
   templateId: string;
   templateName: string;
@@ -55,6 +56,12 @@ export function TemplateEditor({
   /** Newest published version, or null when nothing is published yet. */
   publishedVersionNo: number | null;
   draftVersionNo: number | null;
+  /**
+   * `roleMayWrite(role)`. False leaves the body and the fields readable — that
+   * is the whole point of the screen — and drops Save, Publish and the field
+   * editor's own controls.
+   */
+  canWrite?: boolean;
 }) {
   const router = useRouter();
   const [body, setBody] = useState(initialBody);
@@ -139,18 +146,28 @@ export function TemplateEditor({
             {draftVersionNo !== null && (
               <Badge variant="outline">Draft v{draftVersionNo}</Badge>
             )}
-            <Button variant="outline" disabled={pending} onClick={() => save()}>
-              {pending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Save className="size-4" />
-              )}
-              Save draft
-            </Button>
-            <Button disabled={pending} onClick={publish}>
-              <Send className="size-4" />
-              Publish
-            </Button>
+            {/* The badges above are FACTS about the template and stay for
+                everybody. These two are the writes. */}
+            {canWrite && (
+              <>
+                <Button
+                  variant="outline"
+                  disabled={pending}
+                  onClick={() => save()}
+                >
+                  {pending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Save className="size-4" />
+                  )}
+                  Save draft
+                </Button>
+                <Button disabled={pending} onClick={publish}>
+                  <Send className="size-4" />
+                  Publish
+                </Button>
+              </>
+            )}
           </>
         }
       />
@@ -171,6 +188,7 @@ export function TemplateEditor({
             goes
           </Label>
           <Textarea
+        readOnly={!canWrite}
             id="template-body"
             value={body}
             rows={20}
@@ -210,6 +228,7 @@ export function TemplateEditor({
               >
                 <code className="w-40 shrink-0 text-xs">{`{{${name}}}`}</code>
                 <Input
+            readOnly={!canWrite}
                   aria-label={`Label for ${name}`}
                   className="max-w-56"
                   placeholder="Label"
@@ -229,6 +248,7 @@ export function TemplateEditor({
                   Required
                 </label>
                 <Input
+            readOnly={!canWrite}
                   aria-label={`Sample value for ${name}`}
                   className="ml-auto max-w-56"
                   placeholder="Sample value (preview only)"

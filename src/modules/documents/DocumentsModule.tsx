@@ -8,6 +8,7 @@ import { SectionRow } from "@/components/app/section-row";
 import { EmptyState } from "@/components/app/empty-state";
 import { countDocumentsByFolder, listRootFolders } from "./folders";
 import { DocumentsNav } from "./components/documents-nav";
+import { roleMayWrite } from "./core/errors";
 import { UploadButton } from "./components/document-controls";
 import { NewFolderButton } from "@/app/dashboard/m/documents/browse/folder-controls";
 
@@ -26,6 +27,9 @@ const BASE = "/dashboard/m/documents";
  * see a filtered list — they see a list that never contained those rows.
  */
 export async function DocumentsModule({ ctx }: { ctx: TenantContext }) {
+  /** The same question `gate()` asks. */
+  const canWrite = roleMayWrite(ctx.role);
+
   const { folders, counts } = await withTenant(
     ctx.tenant.id,
     async (tx) => ({
@@ -42,14 +46,26 @@ export async function DocumentsModule({ ctx }: { ctx: TenantContext }) {
         description="Every file the business runs on — office, field and shop floor."
         icon={<FolderOpen />}
         actions={
-          <>
-            <UploadButton tenantId={ctx.tenant.id} folderId={null} />
-            <NewFolderButton parentId={null} isOwner={ctx.role === "owner"} />
-          </>
+          canWrite ? (
+            <>
+              <UploadButton tenantId={ctx.tenant.id} folderId={null} />
+              <NewFolderButton parentId={null} isOwner={ctx.role === "owner"} />
+            </>
+          ) : null
         }
       />
 
       <DocumentsNav />
+
+      {/* Said once, on the module's front door. Every `gate()` in this module
+          refuses `expert` and no screen asked until 2026-09-04, so an
+          accountant got every control and a refusal from each. */}
+      {!canWrite && (
+        <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+          Accountant access is read-only. You can open, preview, download and
+          search every file you can see, and nothing here can be changed.
+        </p>
+      )}
 
       {/* The Inbox is a destination, not a statistic, so it stays a full-width
           row rather than joining the folder grid. */}

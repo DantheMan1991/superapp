@@ -165,7 +165,10 @@ function ItemFields({
             id="work-item-starts"
             type="date"
             value={startsOn}
-            readOnly={!canWrite}
+            /* `disabled`, not `readOnly`, and only here: a native date picker
+               ignores `readOnly` in Chrome and Firefox, so the field would
+               still open a calendar and take a value nothing could save. */
+            disabled={!canWrite}
             onChange={(event) => setStartsOn(event.target.value)}
           />
         </div>
@@ -175,7 +178,7 @@ function ItemFields({
             id="work-item-due"
             type="date"
             value={dueOn}
-            readOnly={!canWrite}
+            disabled={!canWrite}
             onChange={(event) => setDueOn(event.target.value)}
           />
         </div>

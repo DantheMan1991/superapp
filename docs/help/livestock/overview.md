@@ -48,8 +48,8 @@ If nobody looks the period up, the animals read as **not clear**, not as clear. 
 
 ## Who can do what
 
-The daily work is open to everyone. Any member can place head, record a loss, treat, weigh, feed, tag, move to a paddock and walk the round.
+The daily work is open to everyone. Any member can place head, record a loss, treat, weigh, feed, tag, move to a paddock, walk the round, add a photo, and put an animal into a {{livestockLot|lower}} or take it out. Which pen she is in tonight is a record of where she is, not a decision about the herd.
 
-The shape of the herd belongs to the owner. Only an owner can start a {{livestockLot|lower}}, split one, name animals out of one, close or reopen one, put animals into one or take them out, record breeding or parents, record a birth, move an animal to breeding stock, or add and close a shared feeder.
+The shape of the herd belongs to the owner. Only an owner can start a {{livestockLot|lower}}, split one, name animals out of one, close or reopen one, record breeding or parents, record a birth, move an animal to breeding stock, or add and close a shared feeder.
 
-Your accountant can do everything a staff member can, except add or remove photos.
+Your accountant can do everything a staff member can.

@@ -21,6 +21,7 @@ import {
 } from "@/packs/livestock/actions";
 import { packContext } from "@/lib/packs/tenant-context";
 import { labelFor } from "@/lib/packs/resolve";
+import { allowsWrite } from "@/lib/packs/authorize";
 import { todayInTimezone } from "@/lib/timezone";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -539,8 +540,20 @@ export default async function LivestockLotPage({
    * ungated — anyone in the workspace can record what they just did. Only
    * SPLITTING is owner-gated, because it creates a new lot and therefore a cost
    * object. See src/lib/packs/authorize.ts.
+   *
+   * **PUTTING AN ANIMAL IN A LOT AND TAKING IT OUT ARE THE SAME KIND OF ACT**,
+   * and were `isOwner` here until 2026-09-03 while `addLotToParent` and
+   * `removeLotFromParent` were both `member` (`ops.ts:1258,1343`). Membership
+   * creates no cost object — the animal already exists and so does the lot; the
+   * row says which pen she is in tonight, which is the definition of a chore.
    */
   const isOwner = ctx.role === "owner";
+  /**
+   * Asked of the same pure function `requireWrite` asks, rather than restated
+   * here as a role comparison. That includes the accountant: `allowsWrite`
+   * excludes `expert` from the OWNER level and no other, deliberately.
+   */
+  const canRecord = allowsWrite(ctx.role, "member");
   const structureWord = labelFor(labels, "structure", "Pen or barn");
   const lotWord = labelFor(labels, "livestockLot", "Lot");
   /**
@@ -1114,13 +1127,13 @@ export default async function LivestockLotPage({
           things, so it gets nothing here rather than an empty invitation. */}
       {/* An ANIMAL holds nothing, so it is not offered the section at all —
           only a lot can contain things (slice 8c). */}
-      {!isAnimal && (members.length > 0 || (!insideOf && isOwner)) && (
+      {!isAnimal && (members.length > 0 || (!insideOf && canRecord)) && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="font-heading text-xl font-semibold tracking-heading">
               In this {lotWord.toLowerCase()}
             </h2>
-            {isOwner && !insideOf && (
+            {canRecord && !insideOf && (
               <AddToLotForm
                 parentLotId={lot.id}
                 parentSpecies={slugLabel(lot.species).toLowerCase()}
@@ -1148,7 +1161,7 @@ export default async function LivestockLotPage({
                   <TableHead>Species</TableHead>
                   <TableHead>In since</TableHead>
                   <TableHead className="text-right">Head</TableHead>
-                  {isOwner && <TableHead className="w-24" />}
+                  {canRecord && <TableHead className="w-24" />}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1179,7 +1192,7 @@ export default async function LivestockLotPage({
                     <TableCell className="text-right tabular-nums font-medium">
                       {m.head}
                     </TableCell>
-                    {isOwner && (
+                    {canRecord && (
                       <TableCell className="text-right">
                         <TakeOutOfLotButton
                           memberLotId={m.livestockLotId}
@@ -1369,11 +1382,15 @@ export default async function LivestockLotPage({
               condition series that shows the gradual loss a daily look cannot,
               documentation for the vet, a sales listing, and evidence for a
               predator or insurance claim. */}
+          {/* `canEdit` used to read `ctx.role !== "expert"`, which was this
+              screen inventing a rule the server does not have: `photoGate` asks
+              `allowsWrite(role, "member")` and that clears the accountant.
+              Settled 2026-09-03 in favour of the shared helper. */}
           <RecordPhotos
             entityId={lot.id}
             tenantId={ctx.tenant.id}
             photos={photos}
-            canEdit={ctx.role !== "expert"}
+            canEdit={canRecord}
             subject={subjectWord}
             attachAction={attachLotPhotoAction}
             setPrimaryAction={setLotPhotoPrimaryAction}

@@ -94,7 +94,7 @@ Moving them off is what starts the old paddock's rest clock. The button is missi
 
 **They stay in this group** and keep eating from the same feeders. Fifty at a time is the limit.
 
-To put an existing animal in, or start a new one inside, use {button:Add animals|outline} in the `In this {{livestockLot|lower}}` section. {button:Take out|ghost} takes one back out, and it stays on the farm.
+To put an existing animal in, or start a new one inside, use {button:Add animals|outline} in the `In this {{livestockLot|lower}}` section. {button:Take out|ghost} takes one back out, and it stays on the farm. Both are open to everyone: which pen an animal is in tonight is a record of where she is, not a decision about the herd.
 
 ## How to record breeding and births
 
@@ -146,6 +146,8 @@ She stops being stock and becomes something the business owns. What she cost mov
 
 Everyone can place head, record a loss, treat, weigh, feed, move to a paddock, add a tag, record a daily check, and correct or remove a treatment or weighing.
 
-Only an owner can split, name animals out, close or reopen, put animals in or take them out, set breeding or parents, record a birth, or move an animal to and from breeding stock.
+Putting an animal into a {{livestockLot|lower}} and taking it out are open to everyone too, and so are photos.
 
-Your accountant can do everything a staff member can, except add or remove photos.
+Only an owner can split, name animals out, close or reopen, set breeding or parents, record a birth, or move an animal to and from breeding stock.
+
+Your accountant can do everything a staff member can.

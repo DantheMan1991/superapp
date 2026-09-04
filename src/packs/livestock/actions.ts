@@ -193,7 +193,13 @@ async function photoGate() {
   await requireModuleEnabled(ctx.tenant.id, PACK);
   await requireModuleEnabled(ctx.tenant.id, "documents");
   // Taking a photo of an animal is a chore — `member`, like placing head and
-  // moving a lot. The accountant role is read-only everywhere.
+  // moving a lot.
+  //
+  // **AND `member` INCLUDES THE ACCOUNTANT.** This comment used to end "the
+  // accountant role is read-only everywhere", which is not what the line under
+  // it does: `allowsWrite` excludes `expert` from the OWNER level only. The
+  // page believed the comment and hid the control; the server believed the
+  // code and would have accepted it. Settled 2026-09-03 in favour of the code.
   if (!allowsWrite(ctx.role, "member")) {
     throw new LivestockError("FORBIDDEN", "cannot write here");
   }

@@ -9,7 +9,7 @@ import { isModuleEnabled } from "@/lib/modules";
 import { blobToken, brandPathPrefix, isTenantBlobPath } from "@/lib/blob";
 import {
   BRAND_LOGO_MAX_BYTES,
-  BRAND_LOGO_MIME_TYPES,
+  BRAND_UPLOAD_MIME_TYPES,
 } from "@/lib/brand/core";
 
 export const runtime = "nodejs";
@@ -24,7 +24,8 @@ export const runtime = "nodejs";
  *
  * Owner-only, like every write in the Marketing module: the logo on every
  * invoice is a decision. The token is scoped to this tenant's brand prefix,
- * to the two image types the kit accepts, and to 2MB; registration
+ * to the three types an owner may bring (PNG, JPEG, and an SVG that is
+ * rasterised on the way in and never kept), and to 2MB; registration
  * (`setBrandLogoAction`) then re-checks the REAL bytes, because a token
  * restricts what the client declares, not what it sends.
  */
@@ -55,7 +56,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           pathname,
           operations: ["put"],
           validUntil: Date.now() + 10 * 60_000,
-          allowedContentTypes: [...BRAND_LOGO_MIME_TYPES],
+          allowedContentTypes: [...BRAND_UPLOAD_MIME_TYPES],
           maximumSizeInBytes: BRAND_LOGO_MAX_BYTES,
         });
         return {

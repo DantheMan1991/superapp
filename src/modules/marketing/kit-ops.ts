@@ -3,6 +3,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { BrandKit } from "@/db/schema";
 import type { TenantRole } from "@/lib/auth";
+import type { LogoSpec } from "@/lib/brand/logo-spec";
 import { MarketingError } from "./core/errors";
 
 /**
@@ -35,6 +36,10 @@ export interface KitLogo {
   width: number;
   height: number;
   bytes: number;
+  /** `upload` for a file the owner brought (an SVG included), `generated` for one the kit drew. */
+  source: "upload" | "generated";
+  /** The `LogoSpec` a generated logo was drawn from; `{}` for an upload. */
+  spec: LogoSpec | Record<string, never>;
 }
 
 function kitWhere(tenantId: string, entityId: string | null) {
@@ -151,6 +156,8 @@ export async function setKitLogo(
     logoWidth: logo.width,
     logoHeight: logo.height,
     logoBytes: logo.bytes,
+    logoSource: logo.source,
+    logoSpec: logo.spec,
   });
   return { kit: updated, previous: kit.logoPathname };
 }
@@ -167,6 +174,8 @@ export async function clearKitLogo(
     logoWidth: 0,
     logoHeight: 0,
     logoBytes: 0,
+    logoSource: "upload",
+    logoSpec: {},
   });
   return { kit: updated, previous: kit.logoPathname };
 }

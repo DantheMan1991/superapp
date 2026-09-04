@@ -15,7 +15,8 @@
 | # | Slice | State |
 | --- | --- | --- |
 | **0** | **Brand kit at Layer 0: `brand_kits`, the Marketing screen, the invoice PDF as first consumer** | **built 2026-09-04** |
-| 0b | Logo generation: Claude-drafted SVG wordmarks and monograms in the brand colours, rasterised for the PDF (brings `sharp` in on purpose); SVG upload | next |
+| **0b** | **Logo generation: Claude-chosen wordmarks and monograms drawn as vector paths from the shipped Noto Sans, rasterised with `sharp`; SVG upload, rasterised on the way in** | **built 2026-09-04** |
+| 0c | An illustrated symbol, optionally, from OpenAI's image model (`gpt-image-1`, transparent PNG, symbol only, never the name) composed with the kit's own wordmark. Needs `OPENAI_API_KEY`; the founder has an account | next, if the wordmarks feel plain |
 | 1 | Site model — pages and sections as JSON, draft/publish, a renderer on a free subdomain (host-based routing in `proxy.ts`), generation from the brand kit, profile section templates and the business's data, cached per site | |
 | 2 | The editor — blocks, drag to reorder, in-place editing, versions; evaluate Puck (MIT) against the destination first | |
 | 3 | Domains at Layer 0 — one `domains` table with purposes (send mail, host mailboxes, website), connect an existing domain by records only, buy a new one through Vercel's registrar API and publish MX/SPF/DKIM/site records ourselves. Needs an ADR on who owns a purchased domain | |
@@ -26,6 +27,42 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-04 — Slice 0b: Yosher draws a logo, and takes an SVG (`claude/marketing-logo-generation`)
+
+- **The assistant picks, the code draws.** A logo is a `LogoSpec`
+  (`src/lib/brand/logo-spec.ts`): layout, the words, weight, case,
+  letter-spacing, one of eight simple marks and three colours. Claude fills
+  that form six times through a forced tool (`ai/logo-prompt.ts`, validated
+  by `ai/logo-validate.ts`, one bad candidate costs one slot); the renderer
+  (`logo-svg.ts`) turns each into SVG paths with fontkit from the Noto Sans
+  TTFs the PDF already ships — no `<text>`, no font anywhere, identical on
+  every machine. Without a key, or when the call fails, the standard set
+  (`logo-defaults.ts`) stands in and the dialog says so.
+- **Adoption re-draws server-side.** The dialog sends back the SPEC, never a
+  picture; `adoptLogoAction` re-validates it, draws it, rasterises it to a
+  1200px PNG with `sharp` (`raster.ts`, through the one lazy loader in
+  `vision-image.ts`) and stores the PNG like any upload, with
+  `logo_source = 'generated'` and the spec in `logo_spec` (`0245`) so the
+  vector can be re-drawn for the website later.
+- **An SVG upload is rasterised at the door and never kept.** `isSvg` on the
+  bytes → `sharp` → PNG stored → the SVG blob deleted. The Documents
+  allowlist's stored-XSS reasoning holds for the brand kit: nothing in the
+  store can be served as markup.
+- `next.config.ts` traces `SHARP_NATIVE` and the fonts for
+  `/dashboard/m/marketing`; `fontkit` and `@types/fontkit` became direct
+  dependencies (they were already installed under `@react-pdf/font`).
+- **The founder offered ChatGPT's API for this.** Kept for 0c, for a symbol
+  only: an image model draws illustrations well and sets a business name in
+  type badly, and its output is a raster that cannot be recoloured or scaled.
+- Verified: 17 tests over initials, the schema and its normalisation, the
+  standard set, every layout's SVG, the rasteriser (a real 1200px PNG), the
+  SVG sniff, the prompt, the validator and the drafting fallbacks with an
+  injected model. **Driven on the dev branch against the live model:** six
+  distinct candidates in eleven seconds in the kit's deep red, the leaf
+  candidate adopted (`Logo updated.`, `1200 × 355 PNG · drawn by Yosher`, the
+  logo route serving it), and an SVG uploaded through the ordinary button and
+  stored as a PNG.
 
 ### 2026-09-04 — Slice 0: the brand kit, at Layer 0 (`claude/brand-kit-at-layer-0`)
 
@@ -79,10 +116,22 @@ display name falls back to the tenant's name last. `sources` says where each
 answer came from, so the screen can tell an owner that a company is showing
 the shared logo.
 
+Since 0b (`0245`): `logo_source` is `upload` or `generated` (CHECK), and
+`logo_spec` holds the `LogoSpec` a generated logo was drawn from, `{}` for an
+upload. The stored blob is always a PNG or JPEG; the spec is what makes a
+generated logo re-drawable as a vector.
+
 ## Key files & seams
 
 - `src/db/schema/brand.ts` — the table; `src/lib/brand/{core,image-sniff,read}.ts` — the seam
 - `src/lib/blob.ts` — `brandPathPrefix()`, and the prefix in `isTenantBlobPath()`
+- `src/lib/brand/logo-spec.ts` (the catalogue, `LogoSpecSchema`,
+  `normalizeSpec`, `initialsFor`, the palette), `logo-defaults.ts` (the
+  standard set), `logo-svg.ts` (spec → SVG paths, fontkit over the PDF's
+  Noto Sans), `raster.ts` (SVG → PNG, `sharp`)
+- `src/modules/marketing/logo-generate.ts` — the model call, padding from
+  the standard set, `drawLogoToBlob`; `ai/logo-prompt.ts` + `ai/logo-validate.ts`;
+  `components/logo-generator.tsx` — the dialog
 - `src/modules/marketing/` — `MarketingModule.tsx` (the screen), `actions.ts`
   (gate → Zod → withTenant + audit → revalidate; every write owner-only),
   `kit-ops.ts` (the tx-level writes), `logo-ingest.ts` (inspect the uploaded
@@ -108,11 +157,25 @@ the shared logo.
   content type and size; registration re-reads the blob and parses its header.
   A rejected upload is deleted so nothing lingers unreferenced. A replaced
   logo's old blob is deleted only AFTER the new row commits.
-- **No `sharp` here, deliberately.** It is the right tool for resizing and it
-  is also an ELF dependency that has taken production down twice. PNG/JPEG
-  header parsing covers slice 0; the logo generator (0b) brings `sharp` in
-  when there is an SVG to rasterise, on a route added to
-  `outputFileTracingIncludes` in `next.config.ts`.
+- **`sharp` touches the kit in exactly one file, `raster.ts`, through the one
+  lazy loader.** Slice 0 kept it out on purpose (PNG/JPEG header parsing
+  needs no native library); 0b brought it in for the two things only it can
+  do — draw a vector to pixels — on a route traced in `next.config.ts`. An
+  upload that is already a PNG or JPEG still never loads it, and a libvips
+  failure surfaces as `Drawing isn't available on this deployment right now.
+  Upload a PNG instead.` rather than as a broken screen.
+- **A generated logo is a spec, not a picture.** The client only ever sends
+  the spec back; the server re-validates and re-draws. What lands in the
+  store is always this renderer's output, and the spec in `logo_spec` is what
+  the website will re-draw as a vector. The typeface is the PDF's Noto Sans,
+  the only face in the repo; a serif or display face would widen the set and
+  arrives with the website's fonts.
+- **The standard set is a feature, not an error path.** No key, a failed
+  call, or fewer than six valid candidates all end in six logos on screen,
+  with a line saying they are the standard set when none came from the model.
+- **The name goes in type; a symbol may come from an image model later.**
+  Image models set text badly and cannot be recoloured; that is why the
+  founder's ChatGPT offer is 0c's symbol step, not this slice.
 - **The logo stays private.** The `[id]/logo` route proves the tenant, reads
   the row through RLS, then streams — and it is NOT gated on the Marketing
   module, because the brand has consumers of its own. A public URL for the
@@ -144,10 +207,17 @@ the shared logo.
   `INV-0001` and both dev tenants have Marketing switched on** — left from
   this verification, harmless, and worth knowing before the next fixture
   sweep.
-- **Logo generation (0b)** — Claude-drafted SVG wordmarks/monograms in the
-  brand colours, stored as SVG and rasterised to PNG for the PDF; SVG upload
-  behind the same rasteriser. An "AI logo" is a wordmark, and the product
-  should say so.
+- **0c: an illustrated symbol** from OpenAI's image model, transparent PNG,
+  never the name, composed by the kit beside its own wordmark. Needs
+  `OPENAI_API_KEY` (local and Vercel), a lazy client, a stored mark blob and
+  `sharp` compositing; the spec grows `mark: "image"`.
+- **One typeface.** Every candidate is Noto Sans regular or bold; the set
+  would widen with a serif and a display face, which arrive with the website
+  (Noto Serif was not fetchable from the notofonts repository on 2026-09-04;
+  the Google Fonts zip is the other source).
+- **A designer's SVG is not preserved** — it becomes a 1200px PNG. If a
+  vector upload ever matters more than the no-markup-in-the-store rule, the
+  answer is a sanitiser, not serving the file.
 - **More consumers:** the mail signature default and mail templates, the
   Documents generator's letterhead, the public share page's header, the app
   shell's sidebar identity. Each is an import of `resolveBrandFor`.

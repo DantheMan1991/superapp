@@ -37,6 +37,7 @@ import {
   foreignKey,
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -89,6 +90,21 @@ export const brandKits = pgTable(
     logoWidth: integer("logo_width").notNull().default(0),
     logoHeight: integer("logo_height").notNull().default(0),
     logoBytes: integer("logo_bytes").notNull().default(0),
+    /**
+     * Where the logo came from: `upload` (a file the owner brought, including
+     * an SVG rasterised on the way in) or `generated` (drawn by the kit from
+     * `logo_spec`). The blob is a PNG either way; the difference is whether
+     * the VECTOR can be re-drawn — a generated logo can, from its spec, which
+     * is what the website will want. Slice 0b.
+     */
+    logoSource: text("logo_source").notNull().default("upload"),
+    /**
+     * The wordmark spec a generated logo was drawn from (`LogoSpec` in
+     * `src/lib/brand/logo-spec.ts`), `{}` otherwise. The spec is the source
+     * of truth for the vector; the stored PNG is what documents use and it
+     * stays stable even if the renderer changes.
+     */
+    logoSpec: jsonb("logo_spec").notNull().default({}),
     /** Attribution only — grants nothing. */
     updatedByClerkUserId: text("updated_by_clerk_user_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -139,6 +155,10 @@ export const brandKits = pgTable(
       "brand_kits_logo_whole",
       sql`(${t.logoPathname} is null and ${t.logoMimeType} = '' and ${t.logoWidth} = 0 and ${t.logoHeight} = 0 and ${t.logoBytes} = 0)
         or (${t.logoPathname} is not null and ${t.logoMimeType} <> '' and ${t.logoWidth} > 0 and ${t.logoHeight} > 0 and ${t.logoBytes} > 0)`,
+    ),
+    check(
+      "brand_kits_logo_source_values",
+      sql`${t.logoSource} in ('upload', 'generated')`,
     ),
     check("brand_kits_display_name_length", sql`length(${t.displayName}) <= 80`),
     check("brand_kits_tagline_length", sql`length(${t.tagline}) <= 140`),

@@ -35,6 +35,7 @@ export function BrandKitPanel({
         width: kit.logoWidth,
         height: kit.logoHeight,
         mimeType: kit.logoMimeType,
+        source: kit.logoSource === "generated" ? ("generated" as const) : ("upload" as const),
         version: kit.updatedAt.getTime(),
       }
     : null;
@@ -65,6 +66,7 @@ export function BrandKitPanel({
           tenantId={tenantId}
           entityId={entityId}
           logo={ownLogo ? { ...ownLogo, src: logoSrc(ownLogo.kitId, ownLogo.version) } : null}
+          nameForLogo={kit?.displayName || fallbackName}
           canWrite={canWrite}
         />
       </div>

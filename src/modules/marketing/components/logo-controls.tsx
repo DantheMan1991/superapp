@@ -7,15 +7,17 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   BRAND_LOGO_MAX_BYTES,
-  isBrandLogoMimeType,
+  isBrandUploadMimeType,
 } from "@/lib/brand/core";
 import { removeBrandLogoAction, setBrandLogoAction } from "../actions";
+import { LogoGenerator } from "./logo-generator";
 
 interface LogoView {
   src: string;
   width: number;
   height: number;
   mimeType: string;
+  source: "upload" | "generated";
 }
 
 /**
@@ -29,11 +31,14 @@ export function LogoControls({
   tenantId,
   entityId,
   logo,
+  nameForLogo,
   canWrite,
 }: {
   tenantId: string;
   entityId: string | null;
   logo: LogoView | null;
+  /** What "Draw one for me" puts on the logo: the kit's display name, else the business's. */
+  nameForLogo: string;
   canWrite: boolean;
 }) {
   const router = useRouter();
@@ -46,8 +51,8 @@ export function LogoControls({
     if (!file) return;
     // The same checks the server applies, done first so a wrong file is
     // refused before a byte is uploaded. The server re-checks the real bytes.
-    if (!isBrandLogoMimeType(file.type)) {
-      toast.error("Choose a PNG or JPEG image.");
+    if (!isBrandUploadMimeType(file.type)) {
+      toast.error("Choose a PNG, JPEG or SVG image.");
       return;
     }
     if (file.size > BRAND_LOGO_MAX_BYTES) {
@@ -112,17 +117,22 @@ export function LogoControls({
           <div className="font-medium">Logo</div>
           <div className="text-xs text-muted-foreground">
             {logo
-              ? `${logo.width} × ${logo.height} ${logo.mimeType === "image/png" ? "PNG" : "JPEG"}`
-              : "PNG or JPEG, up to 2MB. A wide logo suits the top of an invoice best."}
+              ? `${logo.width} × ${logo.height} ${logo.mimeType === "image/png" ? "PNG" : "JPEG"}${logo.source === "generated" ? " · drawn by Yosher" : ""}`
+              : "PNG, JPEG or SVG, up to 2MB. A wide logo suits the top of an invoice best."}
           </div>
         </div>
       </div>
       {canWrite && (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <LogoGenerator
+            entityId={entityId}
+            defaultName={nameForLogo}
+            hasLogo={logo !== null}
+          />
           <input
             ref={inputRef}
             type="file"
-            accept="image/png,image/jpeg"
+            accept="image/png,image/jpeg,image/svg+xml"
             className="hidden"
             onChange={(e) => void onPick(e.target.files)}
           />

@@ -1716,6 +1716,13 @@
       "when": 1788556557228,
       "tag": "0244_brand_kits_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 245,
+      "version": "7",
+      "when": 1788560658096,
+      "tag": "0245_minor_nighthawk",
+      "breakpoints": true
     }
   ]
 }

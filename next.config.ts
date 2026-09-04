@@ -67,6 +67,11 @@ const nextConfig: NextConfig = {
     "/dashboard/m/accounting/receipts": SHARP_NATIVE,
     "/dashboard/m/accounting/receipts/[id]": SHARP_NATIVE,
     "/dashboard/m/documents/browse": SHARP_NATIVE,
+    // The brand kit's logo generator (Marketing 0b) draws wordmarks from the
+    // Noto Sans TTFs with fontkit and rasterises them — and any uploaded SVG —
+    // with sharp, all from server actions that run under the Marketing screen.
+    // Both traps above apply to it at once: the fonts and libvips.
+    "/dashboard/m/marketing": [...SHARP_NATIVE, "./src/lib/pdf/fonts/**/*"],
   },
   experimental: {
     // Bank CSV imports travel as text through a server action (preview +

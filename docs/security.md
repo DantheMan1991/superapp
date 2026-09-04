@@ -348,6 +348,9 @@ Every path into the system, and what makes it trustworthy.
 | Resend inbound mail | Signature + address token | Token is the tenant claim; validate before use |
 | `/s/[token]` share links | Unguessable token + expiry + limits | **Unauthenticated by design.** Scope tightly, log access |
 | `/health-check` | Public | Prospect funnel. No tenant data. Treat all input as hostile |
+| `/sites/[slug]`, `/hosted/[slug]` (tenant websites) | Public | **Unauthenticated by design** (ADR 0019). `slug → tenant` is one `withSystem` lookup returning identifiers; pages are then read in that tenant's context as `staff` through the member policies. Only the PUBLISHED snapshot is rendered, from typed sections, never markup. `src/proxy.ts` rewrites `<slug>.<SITE_DOMAIN>` to `/hosted/…` |
+| `/sites/[slug]/draft` | Clerk session → `resolveTenantContext()` | The draft preview. 404 for a site that is not the caller's tenant's |
+| `/sites/[slug]/logo` | Public | The brand's logo, addressed by the site; the one blob stream with a public cache header (ADR 0018) |
 | JMAP → Stalwart | Per-mailbox credentials | Outbound; responses are untrusted input → Zod (S5) |
 | AI responses | None | Model output is **never** trusted. Validate, never `eval`, never let it choose a tenant id |
 

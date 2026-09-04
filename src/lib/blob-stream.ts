@@ -25,6 +25,13 @@ export interface StreamBlobInput {
   fileName: string;
   disposition: "inline" | "attachment";
   ifNoneMatch?: string;
+  /**
+   * Passed through to `fileResponseHeaders`, which documents the default and
+   * the rule. The one caller that overrides it is the website's logo route
+   * (`/sites/[slug]/logo`): a brand's logo on its public site is public by
+   * definition, and a CDN that cannot cache it fetches the blob per visitor.
+   */
+  cacheControl?: string;
 }
 
 export async function streamBlobResponse(
@@ -51,6 +58,7 @@ export async function streamBlobResponse(
       fileName: input.fileName,
       disposition: input.disposition,
       etag: result.blob.etag,
+      ...(input.cacheControl ? { cacheControl: input.cacheControl } : {}),
     }),
   });
 }

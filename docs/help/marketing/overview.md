@@ -8,7 +8,8 @@ Open **Marketing** in the sidebar. This page holds your brand kit. Upload a logo
 
 ## What you see
 
-- **The heading.** `Marketing`, with the line `How [your business] looks to its customers. Today that is your brand kit: the logo, colors and tagline on every invoice.`
+- **The heading.** `Marketing`, with the line `How [your business] looks to its customers: the brand kit on every invoice, and the website.`
+- **The row under the title.** Two tabs: `Brand`, this page, and `Website`, where you build and publish your site. See [Your website](website.md).
 - **`Your brand`.** One card in three parts, top to bottom: how it reads, the logo, and the fields. This is the look every invoice uses unless a company below has one of its own.
 - **How it reads.** The top of the card shows what the top of an invoice will show. Your logo if you have one, otherwise a colored square with the first letter of your name. Your name beside it, in your primary color. Your tagline under the name, or `No tagline yet`. At the right, two swatches, `Primary` and `Accent`, each with its hex value or the word `Default` when you have not chosen one.
 - **The logo row.** Your logo with its size and type, for example `400 × 120 PNG`, with `· drawn by Yosher` after it when Yosher drew it, or a dashed box reading `No logo yet` with the line `PNG, JPEG or SVG, up to 2MB. A wide logo suits the top of an invoice best.` Owners see {button:Draw one for me|outline|sparkles} and {button:Upload logo|outline|image-up} here. Once there is a logo the upload button reads {button:Replace logo|outline|image-up} and {button:Remove|ghost|trash} appears beside it.

@@ -13,7 +13,12 @@ export type MarketingErrorCode =
   | "LOGO_MISSING"
   | "STORAGE_UNAVAILABLE"
   | "IMAGE_UNAVAILABLE"
-  | "SPEC_INVALID";
+  | "SPEC_INVALID"
+  | "SLUG_TAKEN"
+  | "SLUG_INVALID"
+  | "SITE_EXISTS"
+  | "SITE_MISSING"
+  | "SITE_EMPTY";
 
 export class MarketingError extends Error {
   constructor(
@@ -48,6 +53,16 @@ export function friendlyMessage(err: unknown): string {
         return "Drawing isn't available on this deployment right now. Upload a PNG instead.";
       case "SPEC_INVALID":
         return "That candidate can't be drawn. Draw a new set and try again.";
+      case "SLUG_TAKEN":
+        return "That address is already taken. Choose another.";
+      case "SLUG_INVALID":
+        return "Use letters, numbers and hyphens for the address.";
+      case "SITE_EXISTS":
+        return "This business already has a website.";
+      case "SITE_MISSING":
+        return "There is no website yet. Build one first.";
+      case "SITE_EMPTY":
+        return "There are no pages to publish yet.";
     }
   }
   return "Something went wrong. Please try again.";

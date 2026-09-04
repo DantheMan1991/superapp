@@ -10,6 +10,84 @@
 
 ## Build log
 
+### 2026-09-03 — Three tenant guides, and what writing them found (`claude/work-guides`)
+
+`docs/help/work/` — `overview` (the `**` fallback, 0), `work` (the hub, 10),
+`lists` (20). A core module, so no vocabulary placeholders. Three agents read the
+hub in both its drawings, the item sheet and the lists screen, and the action
+layer. **The last area in the guides run.**
+
+Unlike scheduling, this module HAS been driven — 2026-08-18, and it held up — so
+the agents were briefed that a gap is more likely a real edge than a never-run
+path. The gap count came out lower than scheduling's and higher than a pack's.
+
+**The two traps the guides lead with, because both lose a reader's work.**
+
+1. **The item sheet has two save models and explains neither.** Title, notes,
+   start and due wait for the explicit `Save`; state and assignee fire the moment
+   the menu closes. Escape, the X or a click outside runs `router.push(backHref)`
+   with no dirty check and no warning (`item-sheet.tsx:66-68`), so typed text is
+   discarded while a state change made in the same visit is already committed.
+2. **Work with a future `starts_on` is hidden from `My work` entirely.**
+   `WorkModule.tsx:98-100` filters it out only when `assignee === "me"`, which is
+   the default view. It is not behind a toggle and no control reveals it — the
+   reader has to change who the view is for. The guide says so in both places.
+
+**Findings that are code, not documentation.**
+
+- **A start date later than the due date reports `Something went wrong.`** The DB
+  CHECK `work_items_starts_before_due` is not a `WorkError`, so `fail()` genericises
+  it. Two clicks away in the sheet. The guide names it under that message, because
+  a reader has no other way to know.
+- **`updateItemAction` never passes `expectedVersion`, and a comment says it does.**
+  `src/lib/work/items.ts:137` reads *"the sheet passes the version it rendered"*;
+  the sheet carries no version and the action takes three arguments. Editing from
+  the sheet is last-write-wins and `STALE` is unreachable there. The comment is
+  true of a different surface — Layer 0's `work-item-row.tsx`, which does pass it.
+- **Sub-items are uncreatable.** `setParentAction` (`actions.ts:280`) has zero
+  callers, nothing sends `parentId` on create, and the sheet renders no parent or
+  child UI. Both `WOULD_CYCLE` sentences are unreachable and the
+  `Filed under other work` chevron can only be produced by a direct database
+  write. **The dossier currently marks nesting as shipped; it is not reachable.**
+  The guides say sub-items are not available yet.
+- **An item cannot be moved between lists.** `updateItemAction` accepts `listId`
+  and nothing sends it. Since a list is the unit of visibility, that also means
+  there is no way to hide one existing item by moving it to an owners-only list.
+- **`status` has no writer anywhere in the product.** Accepted by the action, read
+  by `describeWorkState`, sent by nothing. Deliberate until a pack exists, but the
+  guides must not promise a status field — and this dossier's 2026-08-18 entry
+  says the sheet showed "status", which was the state control.
+- **The add row's list select and the search box freeze after first paint**
+  (`add-work.tsx:45`, `filter-bar.tsx:54`), so filtering to another list can file
+  new work into the wrong one. The guide tells readers to check the add row's list
+  on a filtered page.
+- **Board → List silently turns `show finished` back on** (`view-params.ts:102-103`
+  forces `openOnly = false` on the board), and a `state=` param filters the board
+  while its state control is hidden.
+- **The accountant case is the scheduling inverse, not the packs'.** Neither screen
+  role-gates; `gate()` refuses `expert` on every action. So an accountant gets both
+  screens fully enabled and every press — including *searching* to attach — returns
+  `You do not have access to do that.` Nothing warns them first.
+- **Flattening: heavy, like the packs and unlike scheduling.** Three distinct
+  FORBIDDEN sentences collapse to one, and four NOT_FOUND situations — item, list,
+  link and saved view — collapse to `That work no longer exists, or you cannot see
+  it.`, which says "work" about a link and about a view. All 13 Zod failures return
+  `Invalid input`.
+- Smaller: the attach button has no accessible name; a search matching nothing
+  renders no message at all; a link chip drops the sublabel that disambiguated it
+  in the results; the sheet asks `sm:max-w-lg` and gets `sm:max-w-sm`, which is the
+  unexplained 383 px measured on 2026-08-30; the Lists screen has no empty state;
+  no confirmation on archiving a list or detaching a link; no success toast
+  anywhere in either screen.
+
+**Confirmed working, so it does not get re-investigated:** the PR #200 self-link
+fix is intact and correctly two-layered — `searchLinkTargets` filters the item out
+of results and `attachLink` throws `SELF_LINK` regardless, so in normal use the
+reader never sees the refusal because the choice never appears.
+
+**Not clicked through live in this session:** the pane's Clerk session is expired.
+The 2026-08-18 drive stands as the last hand-verification.
+
 ### 2026-08-30 — Somebody finally clicked it (`claude/nobody-has-clicked-it`)
 
 **No code changed. Docs only, and one toggle on the dev branch.**
@@ -919,6 +997,26 @@ button do not change that.
 
 ## Open items
 
+- **Closing the item sheet discards unsaved title/notes/dates with no warning**,
+  while state and assignee from the same visit are already saved. Two save models
+  in one panel, neither explained.
+- **A start date after the due date reports `Something went wrong.`** — the CHECK
+  is not a `WorkError`.
+- **`updateItemAction` omits `expectedVersion`**, so sheet edits are
+  last-write-wins and `STALE` is unreachable there. `items.ts:137` claims
+  otherwise and is describing `work-item-row.tsx`.
+- **Sub-items are uncreatable** — `setParentAction` has no caller and nothing
+  sends `parentId`. Nesting is NOT shipped, whatever this dossier said before.
+- **An item cannot be moved between lists**, so one item cannot be hidden by
+  moving it to an owners-only list.
+- **Work with a future start date is invisible on `My work`** with no control to
+  reveal it.
+- **The add row's list select and the search box freeze after first paint**, so
+  new work can be filed into the wrong list on a filtered page.
+- **An accountant sees every control enabled on both screens and every press
+  fails**, with no warning first.
+- **The item sheet renders at `max-w-sm`, not the `max-w-lg` it asks for** — the
+  cause of the 383 px measured on 2026-08-30, and of the truncated assignee email.
 - **`listWorkItems` has no pagination, and slice 2 gave it a second caller that
   needs one.** The board reads without the open-only filter so its Done and
   Cancelled columns are not permanently empty, which means those two columns

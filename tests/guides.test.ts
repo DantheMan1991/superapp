@@ -744,6 +744,19 @@ describe("docs/help on disk", () => {
     );
   });
 
+  it("resolves every Work screen to its own guide", async () => {
+    const guides = await listGuides();
+    const at = (pathname: string) => matchGuide(guides, pathname, "")?.slug ?? null;
+    expect(at("/dashboard/m/work")).toBe("work/work");
+    expect(at("/dashboard/m/work/lists")).toBe("work/lists");
+    // The item panel is a query parameter on the hub, not a route, so the hub
+    // guide has to keep answering for it.
+    expect(
+      matchGuide(guides, "/dashboard/m/work", "item=abc&display=board")?.slug,
+    ).toBe("work/work");
+    expect(at("/dashboard/m/work/no-such-screen")).toBe("work/overview");
+  });
+
   it("resolves every Assets screen to its own guide", async () => {
     const guides = await listGuides();
     const at = (pathname: string) => matchGuide(guides, pathname, "")?.slug ?? null;

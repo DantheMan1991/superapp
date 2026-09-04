@@ -52,4 +52,4 @@ The daily work is open to everyone. Any member can place head, record a loss, tr
 
 The shape of the herd belongs to the owner. Only an owner can start a {{livestockLot|lower}}, split one, name animals out of one, close or reopen one, record breeding or parents, record a birth, move an animal to breeding stock, or add and close a shared feeder.
 
-Your accountant can do everything a staff member can.
+Your accountant can do everything a staff member can, except add or remove photos. A photo is a file, and files belong to Documents, where an accountant reads and never writes.

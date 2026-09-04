@@ -2,7 +2,7 @@ import "server-only";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { schema, withTenant, type Tx } from "@/db";
 import type { Document, DocumentAttachment } from "@/db/schema";
-import { DocsError } from "./core/errors";
+import { DocsError, roleMayWrite, type DocsRole } from "./core/errors";
 import { isDisplayableImage } from "./allowlist";
 import { createDmsDocument, inspectUploadedBlob } from "./ingest";
 import { extractDocumentText } from "./text/extract";
@@ -41,9 +41,27 @@ export interface AttachmentTarget {
 export interface AttachmentCtx {
   tenantId: string;
   userId: string;
+  /**
+   * **CARRIED SO THE DMS'S OWN RULE CAN BE ASKED HERE.** It was absent until
+   * 2026-09-04, which is why `registerAttachedPhoto` refused the accountant and
+   * the two functions below did not — a pack that opened its photo panel to an
+   * expert got one control that failed and two that worked.
+   */
+  role: DocsRole;
 }
 
 const SLUG = /^[a-z][a-z0-9_]{0,62}$/;
+
+/**
+ * Every write through this file asks it, so a caller cannot enable one third of
+ * the photo panel by accident. See `roleMayWrite` in `core/errors.ts` for why a
+ * pack's own `member` level does not settle this.
+ */
+function assertRoleMayWrite(ctx: { role: DocsRole }): void {
+  if (!roleMayWrite(ctx.role)) {
+    throw new DocsError("FORBIDDEN_EXPERT", "accountant access is read-only");
+  }
+}
 
 function assertTarget(target: AttachmentTarget): void {
   if (!SLUG.test(target.extensionSlug) || !SLUG.test(target.entityType)) {
@@ -165,6 +183,7 @@ export async function setPrimaryAttachment(
   ctx: AttachmentCtx,
   args: { documentId: string; target: AttachmentTarget },
 ): Promise<void> {
+  assertRoleMayWrite(ctx);
   assertTarget(args.target);
   const rows = await tx
     .select({
@@ -220,6 +239,7 @@ export async function detachDocumentFromRecord(
   ctx: AttachmentCtx,
   args: { documentId: string; target: AttachmentTarget },
 ): Promise<void> {
+  assertRoleMayWrite(ctx);
   assertTarget(args.target);
   const rows = await tx
     .delete(schema.documentAttachments)
@@ -424,7 +444,7 @@ const PHOTO_FOLDER = "Photos";
  * nobody knows the purpose of, sitting in the inbox.
  */
 export async function registerAttachedPhoto(
-  ctx: { tenantId: string; userId: string; role: "owner" | "staff" | "expert" },
+  ctx: { tenantId: string; userId: string; role: DocsRole },
   args: {
     pathname: string;
     target: AttachmentTarget;
@@ -437,9 +457,7 @@ export async function registerAttachedPhoto(
     makePrimary?: boolean;
   },
 ): Promise<{ documentId: string; isPrimary: boolean }> {
-  if (ctx.role === "expert") {
-    throw new DocsError("FORBIDDEN_EXPERT", "accountant access is read-only");
-  }
+  assertRoleMayWrite(ctx);
   // Blob inspection is network work and never holds a transaction open — the
   // same ordering `registerDocumentUploadAction` keeps and for the same reason.
   const inspected = await inspectUploadedBlob(ctx.tenantId, args.pathname);

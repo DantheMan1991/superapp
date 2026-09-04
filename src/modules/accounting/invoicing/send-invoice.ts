@@ -5,6 +5,7 @@ import { sendEmail, type SendResult } from "@/lib/email/send";
 import { preferredContactValue } from "@/lib/parties/contact-values";
 import { listContactPoints } from "@/lib/parties/contacts";
 import { LedgerError, requireOwnerRole, type LedgerCtx } from "../core";
+import { loadInvoiceBrand, withLogoBytes } from "./invoice-brand";
 import { renderInvoicePdf } from "./invoice-pdf";
 import { invoiceTaxFields } from "./invoices";
 import {
@@ -122,16 +123,16 @@ export async function sendInvoiceEmail(
   });
   const paidCents = payments.reduce((s, p) => s + p.amountCents, 0);
 
-  const tenant = await tx.query.tenants.findFirst({
-    where: eq(schema.tenants.id, ctx.tenantId),
-    columns: { name: true },
-  });
-  const businessName = tenant?.name ?? "";
+  // The name on the document and in the email is the brand kit's, which falls
+  // back to the tenant's name when nobody has set one (src/lib/brand).
+  const brand = await loadInvoiceBrand(tx, ctx.tenantId, invoice.entityId);
+  const businessName = brand.businessName;
 
   const tax = await invoiceTaxFields(tx, ctx.tenantId, invoice);
 
   const pdf = await renderInvoicePdf({
     businessName,
+    brand: await withLogoBytes(brand),
     invoiceNumber: invoice.invoiceNumber,
     status: invoice.status,
     issueDate: invoice.issueDate,

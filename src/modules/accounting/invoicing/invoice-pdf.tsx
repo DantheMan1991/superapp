@@ -2,6 +2,7 @@ import "server-only";
 import { createElement, type ReactElement } from "react";
 import {
   Document,
+  Image,
   Page,
   StyleSheet,
   Text,
@@ -32,6 +33,8 @@ const styles = StyleSheet.create({
   },
   header: { flexDirection: "row", justifyContent: "space-between", marginBottom: 28 },
   business: { fontSize: 15, fontWeight: "bold" },
+  logo: { marginBottom: 8 },
+  tagline: { marginTop: 2, color: "#4b5563" },
   title: { fontSize: 22, fontWeight: "bold", textAlign: "right" },
   meta: { marginTop: 4, textAlign: "right", color: "#4b5563" },
   parties: { flexDirection: "row", marginBottom: 24 },
@@ -106,7 +109,7 @@ export async function renderInvoicePdf(input: InvoicePdfInput): Promise<Uint8Arr
 
   const head = createElement(
     View,
-    { style: styles.tableHead },
+    { style: [styles.tableHead, { borderBottomColor: m.ruleColor }] },
     createElement(Text, { style: styles.cDesc }, "DESCRIPTION"),
     createElement(Text, { style: styles.cQty }, "QTY"),
     createElement(Text, { style: styles.cRate }, "RATE"),
@@ -165,7 +168,7 @@ export async function renderInvoicePdf(input: InvoicePdfInput): Promise<Uint8Arr
   totalRows.push(
     createElement(
       View,
-      { key: "b", style: styles.balanceRow },
+      { key: "b", style: [styles.balanceRow, { borderTopColor: m.ruleColor }] },
       createElement(Text, null, "Balance due"),
       createElement(Text, null, m.balance),
     ),
@@ -177,11 +180,29 @@ export async function renderInvoicePdf(input: InvoicePdfInput): Promise<Uint8Arr
     createElement(
       View,
       { key: "head", style: styles.header },
-      createElement(View, null, createElement(Text, { style: styles.business }, m.businessName)),
       createElement(
         View,
         null,
-        createElement(Text, { style: styles.title }, m.title),
+        // The logo sits above the name, in the box the model fitted it to.
+        // Bytes rather than a URL: the blob is private, and a renderer that
+        // fetched during layout would fail the whole document on a slow store.
+        ...(m.logo
+          ? [
+              createElement(Image, {
+                style: [styles.logo, { width: m.logo.width, height: m.logo.height }],
+                src: { data: Buffer.from(m.logo.data), format: m.logo.format },
+              }),
+            ]
+          : []),
+        createElement(Text, { style: [styles.business, { color: m.titleColor }] }, m.businessName),
+        ...(m.tagline
+          ? [createElement(Text, { style: styles.tagline }, m.tagline)]
+          : []),
+      ),
+      createElement(
+        View,
+        null,
+        createElement(Text, { style: [styles.title, { color: m.titleColor }] }, m.title),
         createElement(Text, { style: styles.meta }, `No. ${m.invoiceNumber}`),
         createElement(Text, { style: styles.meta }, `Issued ${m.issueDate}`),
         ...(m.dueDate

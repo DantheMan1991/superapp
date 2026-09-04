@@ -58,7 +58,8 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
   {
     id: "marketing",
     name: "Marketing",
-    description: "Content generation, review requests, lead nurture.",
+    description:
+      "Your brand kit: logo, colors and tagline, carried onto every invoice. Website and domain to follow.",
     category: "core",
     status: "coming_soon",
     sortOrder: 40,

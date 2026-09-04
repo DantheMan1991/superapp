@@ -205,7 +205,15 @@
   --accent-email: oklch(0.52 0.14 245);
   --accent-scheduling: oklch(0.52 0.1 200);
   --accent-work: oklch(0.53 0.16 35);
-  --accent-hello: oklch(0.52 0.15 320);
+  /*
+   * Marketing took 320 from `hello` on 2026-09-04: the stub module certifies
+   * the shell and is never switched on for a client, so it is the one hue in
+   * the set that can be given away without a visible module changing colour.
+   * `hello` moved to 95, the yellow-green gap the crops note below explains
+   * nobody wanted — fine for a screen only a superadmin ever opens.
+   */
+  --accent-marketing: oklch(0.52 0.15 320);
+  --accent-hello: oklch(0.55 0.12 95);
 
   /**
    * The packs. Added 2026-08-26; until then not one of the seven had a token,
@@ -298,7 +306,8 @@
   --accent-email: oklch(0.7 0.13 245);
   --accent-scheduling: oklch(0.72 0.1 200);
   --accent-work: oklch(0.72 0.15 35);
-  --accent-hello: oklch(0.72 0.13 320);
+  --accent-marketing: oklch(0.72 0.13 320);
+  --accent-hello: oklch(0.8 0.12 95);
   /* The packs, lifted the same way. Same hues as `:root`, higher L. */
   --accent-land: oklch(0.76 0.14 140);
   --accent-crops: oklch(0.78 0.13 118);

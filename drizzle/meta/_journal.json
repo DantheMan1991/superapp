@@ -1702,6 +1702,20 @@
       "when": 1788364913572,
       "tag": "0242_payment_credentials_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 243,
+      "version": "7",
+      "when": 1788556538101,
+      "tag": "0243_new_calypso",
+      "breakpoints": true
+    },
+    {
+      "idx": 244,
+      "version": "7",
+      "when": 1788556557228,
+      "tag": "0244_brand_kits_rls",
+      "breakpoints": true
     }
   ]
 }

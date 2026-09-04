@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildInvoicePdfModel,
   formatQuantity,
+  INVOICE_INK,
+  INVOICE_LOGO_BOX,
   type InvoicePdfInput,
 } from "../src/modules/accounting/invoicing/invoice-pdf-model";
 
@@ -149,5 +151,56 @@ describe("buildInvoicePdfModel", () => {
   it("trims the memo and treats whitespace as absent", () => {
     expect(buildInvoicePdfModel(input({ memo: "  Thanks!  " })).memo).toBe("Thanks!");
     expect(buildInvoicePdfModel(input({ memo: "   " })).memo).toBe("");
+  });
+});
+
+/**
+ * The brand kit on the document. No kit must render exactly the invoice this
+ * file rendered before the kit existed — the fallbacks are the contract.
+ */
+describe("buildInvoicePdfModel — brand", () => {
+  const png = new Uint8Array([1, 2, 3]);
+
+  it("with no brand: the ink, no tagline, no logo", () => {
+    const m = buildInvoicePdfModel(input());
+    expect(m.titleColor).toBe(INVOICE_INK);
+    expect(m.ruleColor).toBe(INVOICE_INK);
+    expect(m.tagline).toBe("");
+    expect(m.logo).toBeNull();
+  });
+
+  it("a readable brand colour colours the heading and the rules", () => {
+    const m = buildInvoicePdfModel(
+      input({ brand: { tagline: " Grass-fed since 1998 ", primaryColor: "#1f6f5f", logo: null } }),
+    );
+    expect(m.titleColor).toBe("#1f6f5f");
+    expect(m.ruleColor).toBe("#1f6f5f");
+    expect(m.tagline).toBe("Grass-fed since 1998");
+  });
+
+  it("a pale brand colour keeps the rules and hands the heading back to the ink", () => {
+    const m = buildInvoicePdfModel(
+      input({ brand: { tagline: "", primaryColor: "#ffe066", logo: null } }),
+    );
+    expect(m.titleColor).toBe(INVOICE_INK);
+    expect(m.ruleColor).toBe("#ffe066");
+  });
+
+  it("fits the logo into its box without distorting it, and keeps its format", () => {
+    const m = buildInvoicePdfModel(
+      input({
+        brand: {
+          tagline: "",
+          primaryColor: null,
+          logo: { data: png, width: 800, height: 200, format: "jpg" },
+        },
+      }),
+    );
+    expect(m.logo).toEqual({
+      data: png,
+      format: "jpg",
+      width: INVOICE_LOGO_BOX.width,
+      height: INVOICE_LOGO_BOX.width / 4,
+    });
   });
 });

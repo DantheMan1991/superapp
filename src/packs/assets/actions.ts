@@ -147,7 +147,13 @@ async function photoGate() {
   await requireModuleEnabled(ctx.tenant.id, "documents");
   // Photographing a tractor is a chore — `member` — even though EDITING the
   // asset is owner-only: a picture is a record of what is there, not a
-  // decision about what the business owns or what it is worth. The accountant role is read-only everywhere.
+  // decision about what the business owns or what it is worth.
+  //
+  // **AND `member` INCLUDES THE ACCOUNTANT.** This comment used to end "the
+  // accountant role is read-only everywhere", which is not what the line under
+  // it does: `allowsWrite` excludes `expert` from the OWNER level only. The
+  // page believed the comment and hid the control; the server believed the
+  // code and would have accepted it. Settled 2026-09-03 in favour of the code.
   if (!allowsWrite(ctx.role, "member")) {
     throw new AssetError("FORBIDDEN", "cannot write here");
   }

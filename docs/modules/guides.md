@@ -7,6 +7,34 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-03 — Scheduling, in three guides (`claude/scheduling-guides`)
+
+`overview`, `calendar`, `calendars`. A core module, so no vocabulary
+placeholders. Three agents read the calendar and its 811-line event dialog, the
+manager with sharing and the subscribe feed, and the action layer.
+
+**The first area in the run that nobody has ever used**, and the gap count is
+higher than any pack's. The guides therefore describe behaviour no human has
+confirmed, which the PR says out loud rather than implying otherwise.
+
+**The finding that matters most is a combination rather than one bug.**
+Archiving a calendar does not hide its events — `listRange`, which both the week
+view and the ICS feed call, has no `archived_at` predicate at all, against its
+own comment. That meets a subscribe feed which is the only unauthenticated route
+in the product serving tenant data, whose URL is the whole credential, and which
+carries everything the person can see rather than the one calendar its copy
+names. So archiving to stop something being seen does not stop it going out. The
+`calendars` guide states all of it, including the 30-day/365-day window and the
+five-link cap that the screen never mentions.
+
+**The accountant case inverts the packs' pattern.** Four of five packs gated a
+control the server allowed; here neither screen calls `gate()`, so an expert gets
+every button enabled and every press refused, with no warning first.
+
+Also fixed here: this module's own summary block, which `/admin/docs` renders,
+claimed recurrence, availability and the feed were "the remaining slices". All
+three shipped.
+
 ### 2026-09-03 — Production, in eight guides (`claude/production-guides`)
 
 `overview`, `runs`, `run`, `orders`, `order`, `bookings`, `billing`,

@@ -729,6 +729,21 @@ describe("docs/help on disk", () => {
     );
   });
 
+  it("resolves every Scheduling screen to its own guide", async () => {
+    const guides = await listGuides();
+    const at = (pathname: string) => matchGuide(guides, pathname, "")?.slug ?? null;
+    // The calendar is one screen with three views behind `?view=`, so the query
+    // string must not change which guide answers for it.
+    expect(at("/dashboard/m/scheduling")).toBe("scheduling/calendar");
+    expect(matchGuide(guides, "/dashboard/m/scheduling", "view=month")?.slug).toBe(
+      "scheduling/calendar",
+    );
+    expect(at("/dashboard/m/scheduling/calendars")).toBe("scheduling/calendars");
+    expect(at("/dashboard/m/scheduling/no-such-screen")).toBe(
+      "scheduling/overview",
+    );
+  });
+
   it("resolves every Assets screen to its own guide", async () => {
     const guides = await listGuides();
     const at = (pathname: string) => matchGuide(guides, pathname, "")?.slug ?? null;

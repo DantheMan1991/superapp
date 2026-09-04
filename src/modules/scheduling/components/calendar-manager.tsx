@@ -106,12 +106,20 @@ export function CalendarManager({
   shares,
   currentUserId,
   isOwner,
+  canWrite,
 }: {
   calendars: CalendarSummary[];
   members: Array<{ clerkUserId: string; label: string; role: "owner" | "staff" }>;
   shares: Record<string, ShareRow[]>;
   currentUserId: string;
   isOwner: boolean;
+  /**
+   * `roleMayWrite(role)`. **Not the same question as `isOwner`** — that one
+   * separates a business calendar from a personal one, and this one says
+   * whether the reader may change anything at all. The accountant administers
+   * their own provisioned calendar and may still not touch it.
+   */
+  canWrite: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -120,8 +128,13 @@ export function CalendarManager({
   const [sharing, setSharing] = useState<CalendarSummary | null>(null);
   const [showArchived, setShowArchived] = useState(false);
 
+  /**
+   * Administering is a grant AND a role. `canWrite` first, because an accountant
+   * owns the calendar they were provisioned and would otherwise be offered
+   * Share, Edit and Archive on it — three enabled buttons and three refusals.
+   */
   const canAdmin = (c: CalendarSummary) =>
-    c.group === "mine" || (c.group === "business" && isOwner);
+    canWrite && (c.group === "mine" || (c.group === "business" && isOwner));
 
   const visible = calendars.filter((c) => showArchived || c.archivedAt === null);
   const archivedCount = calendars.filter((c) => c.archivedAt !== null).length;
@@ -147,11 +160,25 @@ export function CalendarManager({
         title="Calendars"
         description="Everything you keep time in. Each one is private until you share it."
         actions={
-          <Button size="sm" onClick={() => setCreating(true)} disabled={pending}>
-            <Plus className="mr-1.5 size-4" /> New calendar
-          </Button>
+          canWrite ? (
+            <Button size="sm" onClick={() => setCreating(true)} disabled={pending}>
+              <Plus className="mr-1.5 size-4" /> New calendar
+            </Button>
+          ) : null
         }
       />
+
+      {/* Said once, at the top, rather than as a disabled button per row. An
+          accountant who can see the page and is told why is better served than
+          one who presses Share and is refused after the fact — which is what
+          this screen did until 2026-09-03. */}
+      {!canWrite && (
+        <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+          Accountant access is read-only. You can see every calendar shared with
+          you, who else can see it, and any subscription links already made —
+          and nothing here can be changed.
+        </p>
+      )}
 
       {(["mine", "shared", "business"] as const).map((group) => {
         const rows = visible.filter((c) => c.group === group);

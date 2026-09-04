@@ -37,7 +37,7 @@ Week view always starts on Sunday. That cannot be changed.
 ## Month view
 
 - Whole weeks, so the grid can be four, five or six rows, and days either side of the month are shown.
-- **The date at the top of a cell is a button.** Click it to make an event on that day.
+- **The date at the top of a cell is a button.** Click it to make an event on that day. It is plain text instead if you have nothing to write to — a reader with no calendar of their own, and your accountant.
 - Each event is a coloured dot and its title. **No times at all**, and all-day and timed events sit in the same list.
 - **A day shows three events at most**, then `+2 more`. That text is not clickable, and there is no way to expand the day. Switch to week or day view to see the rest.
 
@@ -113,7 +113,7 @@ There is no way to move a single occurrence of a repeating event to a different 
 | `an event cannot end before it starts` | Check the dates and times. |
 | `you can look at this calendar but not change it` | You have been given viewing access, not editing. |
 | `Invalid input` | Something is missing or malformed. Most often no calendar is chosen. |
-| `accountant access is read-only` | Accountants cannot change anything here. |
+| `accountant access is read-only` | An accountant reached a write another way — through an old tab, or a link. The page itself no longer offers one. |
 | `Something went wrong.` | Something unexpected. Tell us if it keeps happening. |
 
 ## Not on this page
@@ -133,4 +133,4 @@ What you can do depends on the calendar, not on your job title. Your own calenda
 
 Business calendars are editable by owners.
 
-Accountants see this page fully, with an enabled {button:New event|primary|plus} and no warning, and every click fails with `accountant access is read-only`. Opening an event closes it again with the same message.
+Accountants read this page and change nothing on it. {button:New event|primary|plus} is greyed out, the day numbers in month view are plain text rather than buttons, and a line under the header reads `Accountant access is read-only. You can see every calendar shared with you and everything on it, and nothing here can be changed.` Every event on every calendar shared with them is still visible.

@@ -10,7 +10,7 @@ import { logAuditInTx } from "@/lib/audit";
 import { appUrl } from "@/lib/stripe-customer";
 import { withSchedule } from "@/lib/schedule/with-schedule";
 import { busyForPeople, conflictsWith } from "@/lib/schedule/availability";
-import { SCHEDULE_ACCESS_LEVELS } from "@/lib/schedule/access";
+import { SCHEDULE_ACCESS_LEVELS, roleMayWrite } from "@/lib/schedule/access";
 import {
   addDays,
   dateInTimezone,
@@ -79,9 +79,11 @@ type ActionResult<T = undefined> = { ok: true; data?: T } | { error: string };
 async function gate(): Promise<SchedulingCtx & { timeZone: string }> {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "scheduling");
-  // Fail closed for the accountant role, as CRM and Documents do. There is no
-  // read-only-safe write in this module, so there is nothing to opt into.
-  if (ctx.role === "expert") {
+  // Fail closed for the accountant role, as CRM and Documents do. The rule
+  // itself lives in `roleMayWrite` so the screens can ask it too — this used to
+  // be the only place that knew it, which is why both of them rendered every
+  // control enabled and refused every press.
+  if (!roleMayWrite(ctx.role)) {
     throw new SchedulingError("FORBIDDEN", "accountant access is read-only");
   }
   return {

@@ -54,6 +54,8 @@ If your profile sets an exemption limit, the `Overview` page counts what you hav
 
 ## Who can do what
 
-The processing day is open to everyone. Any member can record what went in and what came out, transcribe the paperwork, and write a {{cutSheet|lower}}.
+The processing day is open to everyone. Any member can record what went in and what came out, transcribe the paperwork by hand, and write a {{cutSheet|lower}} — from the sheet list, from a booked date or from the {{productionRun|lower}} itself, all three the same.
 
 The decisions belong to the owner. Only an owner can start or finish a {{productionRun|lower}}, add or change a {{processor|lower}}, record what one charges, book or change a date, or match a bill.
+
+Reading a {{killSheet|lower}} or a rate sheet off a photo is the owner's too, and that one is about cost rather than trust: each press sends the file away to be read and is charged for.

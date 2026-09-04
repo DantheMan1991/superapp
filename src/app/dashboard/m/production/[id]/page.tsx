@@ -646,12 +646,27 @@ export default async function ProductionRunPage({
           </div>
           {/* Reading the page and typing it in sit side by side on purpose:
               the reader is a shortcut through the same form, not a second way
-              of recording a carcass. */}
-          <ReadKillSheetDialog
-            runId={run.id}
-            inputs={carcassInputs}
-            sheetWord={sheetWord}
-          />
+              of recording a carcass.
+
+              **THE SHORTCUT IS THE OWNER'S, THE FORM IS NOT.**
+              `readKillSheetAction` calls `requireWrite(ctx, "owner")` and this
+              dialog was ungated until 2026-09-03, so a staff member picked a
+              file, waited for the model to read two pages of handwriting, and
+              was refused at the end of it. Settled by gating the dialog rather
+              than opening the action: the read spends money per press and
+              nothing rate-limits it (two `change` events once held a run's
+              dialog for six minutes), and `ReadPriceListDialog` — the pack's
+              other reader, same cost, same shape — has been `isOwner` on the
+              processors page all along. `CarcassDialog` beside it is
+              `member`-level and stays that way, so transcribing the sheet by
+              hand is open to whoever is holding it. */}
+          {isOwner && (
+            <ReadKillSheetDialog
+              runId={run.id}
+              inputs={carcassInputs}
+              sheetWord={sheetWord}
+            />
+          )}
           <CarcassDialog
             runId={run.id}
             inputs={carcassInputs}

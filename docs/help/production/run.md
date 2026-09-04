@@ -13,7 +13,8 @@ Beside it sit badges: {badge:Open|primary} or {badge:Finished|outline}; `Done he
 - **{button:What went in|outline}.** Takes stock out and carries its cost onto the {{productionRun|lower}}. Open ones only.
 - **{button:What came out|outline}.** Records boxes as they come off. Open ones only.
 - **{button:Finish|primary}.** Lands the boxes in stock. Owners only, and greyed until something has come out.
-- **{button:Read a photo|outline}** and **{button:Add a line|outline}** on the {{killSheet|lower}} panel. Anyone, on a finished {{productionRun|lower}} too.
+- **{button:Add a line|outline}** on the {{killSheet|lower}} panel. Anyone, on a finished {{productionRun|lower}} too.
+- **{button:Read a photo|outline}** beside it. Owners only, because each press sends the photo to be read and that costs money. Everyone else types the sheet in with {button:Add a line|outline}, which records exactly the same thing.
 
 ## The three panels
 
@@ -67,6 +68,8 @@ Both ratios refuse rather than mislead. `The kill sheet accounts for fewer head 
 
 To read it off a photo instead, click {button:Read a photo|outline}, say which input the carcasses came out of, and choose the file. It reads it and shows you every line to check. **Nothing is recorded until you press {button:Record these|primary}**, an empty box means it could not read that number and would not guess, and you can untick any line.
 
+{button:Read a photo|outline} is owners only. Each press sends the photo away to be read and that costs money, which is why it sits with the person paying for it. Typing the sheet in records the same lines and is open to everyone.
+
 ## How to finish
 
 1. Click {button:Finish|primary}. Owners only.
@@ -102,6 +105,6 @@ The boxes land in stock as made-here batches, sharing what the {{productionRun|l
 
 ## Who can do what
 
-Everyone can record what went in and what came out, transcribe the {{killSheet|lower}}, correct a line, remove one, and write a {{cutSheet|lower}}. A processing day is two or three people, and transcribing somebody else's paperwork decides nothing.
+Everyone can record what went in and what came out, transcribe the {{killSheet|lower}} by hand, correct a line, remove one, and write a {{cutSheet|lower}}. A processing day is two or three people, and transcribing somebody else's paperwork decides nothing.
 
-Only an owner can start one, finish one, or create a new stock line from the `What came out` dialog.
+Only an owner can start a {{productionRun|lower}}, finish one, create a new stock line from the `What came out` dialog, or read a {{killSheet|lower}} off a photo. The last of those is about cost rather than trust: the reading is done by a model and every press is charged for.

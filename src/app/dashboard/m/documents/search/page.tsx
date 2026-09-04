@@ -2,6 +2,7 @@ import Link from "next/link";
 import { FileText, FolderOpen, Search, X } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
+import { roleMayWrite } from "@/modules/documents/core/errors";
 import { requireModuleEnabled } from "@/lib/modules";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -69,6 +70,8 @@ export default async function DocumentsSearchPage({
 }) {
   const sp = await searchParams;
   const ctx = await requireTenant();
+  /** The same question `gate()` asks. */
+  const canWrite = roleMayWrite(ctx.role);
   await requireModuleEnabled(ctx.tenant.id, "documents");
 
   const q = normalizeSearchQuery(sp.q);
@@ -194,13 +197,22 @@ export default async function DocumentsSearchPage({
         title="Search"
         description="Looks inside files as well as at their names, titles, descriptions and tags. Filter by tag with no search text at all."
         actions={
-          hasFilters && (
+          /* Searching and filtering are the address of the page and stay for
+             everybody. KEEPING a search is a write. */
+          hasFilters && canWrite ? (
             <SaveViewButton query={query} suggestedName={suggestedName} />
-          )
+          ) : null
         }
       />
 
       <DocumentsNav />
+
+      {!canWrite && (
+        <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+          Accountant access is read-only. You can search everything, open a
+          result and download it, and nothing here can be changed.
+        </p>
+      )}
 
       <SavedViewsStrip
         /* The rule is still this page's — owner, or the person who saved it —
@@ -212,8 +224,11 @@ export default async function DocumentsSearchPage({
           scope: v.scope,
           href: v.href,
           createdByClerkUserId: v.createdByClerkUserId,
+          // `canWrite` first: an accountant can save nothing, so they own no
+          // view and may delete none either.
           canDelete:
-            ctx.role === "owner" || v.createdByClerkUserId === ctx.userId,
+            canWrite &&
+            (ctx.role === "owner" || v.createdByClerkUserId === ctx.userId),
         }))}
         activeHref={activeHref}
       />
@@ -342,6 +357,7 @@ export default async function DocumentsSearchPage({
                   {hit.createdAt.toLocaleDateString()}
                 </span>
                 <DocumentRowMenu
+                  canWrite={canWrite}
                   documentId={hit.id}
                   folders={choices}
                   version={hit.version}

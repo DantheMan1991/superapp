@@ -1,6 +1,7 @@
 import { FileText, Trash2 } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
+import { roleMayWrite } from "@/modules/documents/core/errors";
 import { requireModuleEnabled } from "@/lib/modules";
 import { listTrashedDocuments } from "@/modules/documents/trash";
 import { formatBytes } from "@/modules/documents/lib/format";
@@ -19,6 +20,8 @@ export const dynamic = "force-dynamic";
  */
 export default async function DocumentsTrashPage() {
   const ctx = await requireTenant();
+  /** The same question `gate()` asks. */
+  const canWrite = roleMayWrite(ctx.role);
   await requireModuleEnabled(ctx.tenant.id, "documents");
 
   const documents = await withTenant(
@@ -35,6 +38,13 @@ export default async function DocumentsTrashPage() {
       />
 
       <DocumentsNav />
+
+      {!canWrite && (
+        <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+          Accountant access is read-only. You can open, preview, download and
+          search everything in the bin, and nothing here can be changed.
+        </p>
+      )}
 
       {documents.length === 0 ? (
         <Panel>
@@ -63,7 +73,12 @@ export default async function DocumentsTrashPage() {
                     ` · trashed ${doc.trashedAt.toLocaleDateString()}`}
                 </p>
               </div>
-              <DocumentRowMenu documentId={doc.id} folders={[]} trashed />
+              <DocumentRowMenu
+                documentId={doc.id}
+                folders={[]}
+                trashed
+                canWrite={canWrite}
+              />
             </div>
           ))}
           </div>

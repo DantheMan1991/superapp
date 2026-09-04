@@ -2,6 +2,7 @@ import Link from "next/link";
 import { FileType2 } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
+import { roleMayWrite } from "@/modules/documents/core/errors";
 import { requireModuleEnabled } from "@/lib/modules";
 import { Badge } from "@/components/ui/badge";
 import { listTemplates } from "@/modules/documents/doc-templates/template-ops";
@@ -22,6 +23,8 @@ const BASE = "/dashboard/m/documents/templates";
  */
 export default async function DocumentTemplatesPage() {
   const ctx = await requireTenant();
+  /** The same question `gate()` asks. */
+  const canWrite = roleMayWrite(ctx.role);
   await requireModuleEnabled(ctx.tenant.id, "documents");
 
   const templates = await withTenant(
@@ -38,10 +41,17 @@ export default async function DocumentTemplatesPage() {
       <PageHeader
         title="Templates"
         description="Write a document once, fill in the blanks every time after. A published version is frozen, so you can always tell what a document said on the day it went out."
-        actions={<NewTemplateButton />}
+        actions={canWrite ? <NewTemplateButton /> : null}
       />
 
       <DocumentsNav />
+
+      {!canWrite && (
+        <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+          Accountant access is read-only. You can see every template, and nothing here
+          can be changed.
+        </p>
+      )}
 
       {live.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-md border px-4 py-12 text-center">

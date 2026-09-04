@@ -71,4 +71,4 @@ Links are made on Browse, not here. A file's name is not shown in `Points at`; t
 
 ## Who can do what
 
-Everyone sees the list. Owners and staff make, copy, email and turn off links. Only an owner resets a locked link. Accountants can read the list and the activity, and every other item answers `Accountant access is read-only — reviews, sign-offs and exports only.`
+Everyone sees the list. Owners and staff make, copy, email and turn off links. Only an owner resets a locked link. Accountants can read the list and open `Activity…`, which is why they are on this page. `Copy link`, `Email link…`, the lock reset and `Turn off` are not drawn for them — copying is a write here, because the app records that the link was revealed.

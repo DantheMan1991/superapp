@@ -28,4 +28,4 @@ Nothing here can be deleted for good, and nothing is ever deleted on its own; th
 
 ## Who can do what
 
-Owners and staff restore. Accountants see the list, and `Restore` answers `Accountant access is read-only — reviews, sign-offs and exports only.`
+Owners and staff restore. Accountants see the list, with a line under the tabs saying that is all. `Restore` is not drawn for them.

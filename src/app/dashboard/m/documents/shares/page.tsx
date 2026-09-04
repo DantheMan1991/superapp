@@ -1,6 +1,7 @@
 import { Link2 } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
+import { roleMayWrite } from "@/modules/documents/core/errors";
 import { requireModuleEnabled } from "@/lib/modules";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -34,6 +35,8 @@ export const dynamic = "force-dynamic";
  */
 export default async function SharedLinksPage() {
   const ctx = await requireTenant();
+  /** The same question `gate()` asks. */
+  const canWrite = roleMayWrite(ctx.role);
   await requireModuleEnabled(ctx.tenant.id, "documents");
 
   const data = await withTenant(
@@ -79,6 +82,13 @@ export default async function SharedLinksPage() {
       />
 
       <DocumentsNav />
+
+      {!canWrite && (
+        <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+          Accountant access is read-only. You can see every link, who made it and when it was last used, and nothing here
+          can be changed.
+        </p>
+      )}
 
       {rows.length === 0 ? (
         <Panel>
@@ -147,6 +157,7 @@ export default async function SharedLinksPage() {
                       version={share.version}
                       status={status}
                       isOwner={ctx.role === "owner"}
+                      canWrite={canWrite}
                       hasPasscode={share.passcodeHash !== null}
                       label={share.label || "Untitled link"}
                     />

@@ -10,6 +10,40 @@
 
 ## Build log
 
+### 2026-09-04 — Documents reads, and says so (`claude/documents-reads-and-says-so`)
+
+**Ten screens rendered every control enabled for an `expert` and refused every
+press.** `gate()` has failed closed for the accountant since this module
+shipped, and it was the only thing that knew — not one screen asked, so Upload,
+New folder, every folder and file menu, tag create/rename/delete, template
+save/publish/archive/generate, share copy/email/revoke, restore from trash and
+Save this search all drew normally and each came back
+`accountant access is read-only`.
+
+**`roleMayWrite` in `core/errors.ts`**, the pure file that already owns
+`FORBIDDEN_EXPERT`. `gate()` asks it and so does every screen.
+
+**Read-only is a rendering, and three of the choices are worth writing down.**
+
+- **A drop zone that takes nothing rather than one that refuses.**
+  `UploadDropZone` and `FolderDropTarget` return their children unwrapped when
+  the reader cannot write, the way `DraggableRow` already did with `disabled`.
+  A page that accepts a dragged file and then says `accountant access is
+  read-only` is worse than one that never lit up.
+- **The FILE menu keeps one item and the FOLDER menu keeps none.**
+  `Version history` is a read, and it is the thing somebody reviewing a file
+  actually wants; everything else on the file menu writes. Every item on the
+  folder menu writes, so `FolderRowMenu` returns null outright.
+- **`Copy link` counts as a write.** `revealShareUrlAction` decrypts the token
+  AND records that it happened, so it goes with `Email link…` and the revoke.
+  `Activity…` stays — reading who used a link is why an accountant opens that
+  page at all.
+
+Searching, filtering, paging and previewing are untouched: none of them writes,
+and all four are what this role is here to do.
+
+Guides swept in the same PR: all ten.
+
 ### 2026-09-03 — Tenant guides for every Documents screen (`claude/documents-guides`)
 
 No code change beyond `guide-icons.ts`. Ten guides under `docs/help/documents/`
@@ -38,8 +72,11 @@ and what the code does. The guides describe the code. Worth fixes of their own:
 - **The viewer's fallback sentence is wrong for `.txt`, `.md`, TIFF, ZIP and
   `.eml`**: "Text files open in the app on your computer — there is no way to
   show one accurately in a browser." A plain-text preview does not exist.
-- **`canRestore` is hard-coded `true`** in `DocumentRowMenu`, so the
-  accountant sees Restore in the version history and is refused on press.
+- ~~**`canRestore` is hard-coded `true`** in `DocumentRowMenu`, so the
+  accountant sees Restore in the version history and is refused on press.~~ —
+  **fixed 2026-09-04**; it takes `canWrite` now. The version-history sheet is
+  deliberately the one thing left on that menu for an accountant, so the one
+  control inside it that writes had to go with the rest.
 - **`Email files here…` renders without `INBOUND_EMAIL_DOMAIN`**; the owner
   reaches the SETUP.md refusal on `Create address`.
 - **The file menu offers `Share link…` inside an owners-only folder** and

@@ -154,3 +154,28 @@ export function friendlyMessage(err: unknown): string {
   if (err instanceof DocsError) return FRIENDLY[err.code];
   return "Something went wrong. Please try again.";
 }
+
+/**
+ * The roles `requireTenant()` resolves. Inlined to keep this file import-free —
+ * `@/lib/auth` is `server-only` and this module is imported by client
+ * renderers. Same reasoning as `src/lib/packs/authorize.ts`.
+ */
+export type DocsRole = "owner" | "staff" | "expert";
+
+/**
+ * **May this ROLE write to Documents at all?**
+ *
+ * `expert` — the platform's own bookkeeper working inside a client workspace —
+ * is read-only here, as it is in CRM, Scheduling and Work. This module has no
+ * read-only-safe write, so there is nothing to opt into. `gate()` has said so
+ * since the module shipped; no SCREEN asked until 2026-09-04, which is why an
+ * accountant got Upload, New folder, every row menu and the whole drag-and-drop
+ * surface, and a refusal from each.
+ *
+ * Exported so a screen can ask the same question the gate asks, rather than
+ * restating it as a role comparison and drifting from it.
+ */
+export function roleMayWrite(role: DocsRole): boolean {
+  return role !== "expert";
+}
+

@@ -33,4 +33,4 @@ A template's name and description cannot be changed once it is made. There is no
 
 ## Who can do what
 
-Owners and staff make and edit templates. Accountants can read them, and every button answers `Accountant access is read-only — reviews, sign-offs and exports only.`
+Owners and staff make and edit templates. Accountants can read them. {button:New template|primary} is not drawn for them.

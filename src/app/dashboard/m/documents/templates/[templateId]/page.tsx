@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
+import { roleMayWrite } from "@/modules/documents/core/errors";
 import { requireModuleEnabled } from "@/lib/modules";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -38,6 +39,8 @@ export default async function TemplateEditorPage({
 }) {
   const { templateId } = await params;
   const ctx = await requireTenant();
+  /** The same question `gate()` asks. */
+  const canWrite = roleMayWrite(ctx.role);
   await requireModuleEnabled(ctx.tenant.id, "documents");
 
   const data = await withTenant(
@@ -83,6 +86,13 @@ export default async function TemplateEditorPage({
 
       <DocumentsNav />
 
+      {!canWrite && (
+        <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+          Accountant access is read-only. You can read this template, its fields
+          and its history, and nothing here can be changed.
+        </p>
+      )}
+
       {template.archivedAt && (
         <p className="rounded-md border px-4 py-3 text-sm text-muted-foreground">
           This template is archived. It is kept so documents generated from it
@@ -97,6 +107,8 @@ export default async function TemplateEditorPage({
             {generations.length > 0 &&
               ` ${generations.length} document${generations.length === 1 ? "" : "s"} made so far.`}
           </p>
+          {/* Generating MAKES a document, so it is a write like any other. */}
+          {canWrite && (
           <GenerateButton
             templateId={template.id}
             templateName={template.name}
@@ -104,10 +116,12 @@ export default async function TemplateEditorPage({
             fields={parseFields(published.fields)}
             folders={folderOptions(folders)}
           />
+          )}
         </div>
       )}
 
       <TemplateEditor
+        canWrite={canWrite}
         templateId={template.id}
         templateName={template.name}
         initialBody={startingBody}
@@ -142,11 +156,13 @@ export default async function TemplateEditorPage({
       </div>
 
       <div>
+        {canWrite && (
         <ArchiveTemplateButton
           templateId={template.id}
           version={template.version}
           archived={template.archivedAt !== null}
         />
+        )}
       </div>
     </div>
   );

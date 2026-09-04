@@ -190,10 +190,13 @@ export function TagManager({
   tags,
   counts,
   isOwner,
+  canWrite = true,
 }: {
   tags: TagChoice[];
   counts: Record<string, number>;
   isOwner: boolean;
+  /** `roleMayWrite(role)`. False leaves the tags and their counts and drops every control. */
+  canWrite?: boolean;
 }) {
   const router = useRouter();
   const [creating, setCreating] = useState("");
@@ -222,6 +225,8 @@ export function TagManager({
 
   return (
     <div className="space-y-6">
+      {/* Creating a tag is the only write at the top of this page. */}
+      {canWrite && (
       <div className="flex gap-2">
         <Input
           value={creating}
@@ -246,6 +251,7 @@ export function TagManager({
           Create
         </Button>
       </div>
+      )}
 
       {tags.length === 0 ? (
         <p className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
@@ -264,17 +270,19 @@ export function TagManager({
                 {counts[tag.slug] ?? 0} file
                 {(counts[tag.slug] ?? 0) === 1 ? "" : "s"}
               </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setEditing(tag);
-                  setDraftName(tag.name);
-                }}
-              >
-                Rename
-              </Button>
-              {isOwner && (
+              {canWrite && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setEditing(tag);
+                    setDraftName(tag.name);
+                  }}
+                >
+                  Rename
+                </Button>
+              )}
+              {canWrite && isOwner && (
                 <Button
                   variant="ghost"
                   size="icon-sm"

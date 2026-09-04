@@ -44,4 +44,4 @@ Tags have no colors, cannot be merged, and are put on files one file at a time. 
 
 ## Who can do what
 
-Owners and staff make and rename tags and put them on files. Only owners delete a tag. Accountants see the page, and each button answers `Accountant access is read-only — reviews, sign-offs and exports only.`
+Owners and staff make and rename tags and put them on files. Only owners delete a tag. Accountants see every tag and how many files carry it, with a line under the tabs saying that is all. The `Create` box, `Rename` and the delete are not drawn for them.

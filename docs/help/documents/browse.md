@@ -80,4 +80,4 @@ There is no sorting, no filter and no search on this page; use Search. Nothing s
 
 ## Who can do what
 
-Everyone can browse, open files, upload, and make and rename folders. Owners alone move and delete folders, make them owners-only or visible again, and give them an email address. Accountants can browse, open and download; every other button answers `Accountant access is read-only — reviews, sign-offs and exports only.`
+Everyone can browse, open files, upload, and make and rename folders. Owners alone move and delete folders, make them owners-only or visible again, and give them an email address. Accountants can browse, open and download. {button:Upload|primary}, {button:New folder|outline} and every folder's {icon:more-horizontal} menu are not drawn for them, dragging is off, and dropping a file onto the page or onto a folder does nothing.

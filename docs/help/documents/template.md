@@ -63,4 +63,4 @@ A template's name and description cannot be changed. A published version cannot 
 
 ## Who can do what
 
-Owners and staff write, publish, archive and make documents. Staff cannot file a document into an owners-only folder, because they cannot see it. Accountants can read a template, and every button answers `Accountant access is read-only — reviews, sign-offs and exports only.`
+Owners and staff write, publish, archive and make documents. Staff cannot file a document into an owners-only folder, because they cannot see it. Accountants can read a template, its fields and its whole history. The body and the field boxes are filled in and legible but not typeable, and {button:Save draft|outline}, {button:Publish|primary}, {button:Make a document|primary} and the archive control are not drawn for them.

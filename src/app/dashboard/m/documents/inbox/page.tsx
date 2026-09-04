@@ -1,6 +1,7 @@
 import { FileText, Inbox } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
+import { roleMayWrite } from "@/modules/documents/core/errors";
 import { requireModuleEnabled } from "@/lib/modules";
 import { listFolderContents } from "@/modules/documents/browse";
 import { listFolders } from "@/modules/documents/folders";
@@ -34,6 +35,8 @@ export default async function DocumentsInboxPage({
 }) {
   const { cursor } = await searchParams;
   const ctx = await requireTenant();
+  /** The same question `gate()` asks. */
+  const canWrite = roleMayWrite(ctx.role);
   await requireModuleEnabled(ctx.tenant.id, "documents");
 
   const data = await withTenant(
@@ -63,10 +66,21 @@ export default async function DocumentsInboxPage({
       <PageHeader
         title="Inbox"
         description="Captured but not filed yet — uploads and emailed attachments land here."
-        actions={<UploadButton tenantId={ctx.tenant.id} folderId={null} />}
+        actions={
+          canWrite ? (
+            <UploadButton tenantId={ctx.tenant.id} folderId={null} />
+          ) : null
+        }
       />
 
       <DocumentsNav />
+
+      {!canWrite && (
+        <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+          Accountant access is read-only. You can open, preview, download and
+          search every unfiled file, and nothing here can be changed.
+        </p>
+      )}
 
       {data.contents.documents.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-md border px-4 py-12 text-center">
@@ -98,6 +112,7 @@ export default async function DocumentsInboxPage({
                 {doc.createdAt.toLocaleDateString()}
               </span>
               <DocumentRowMenu
+                canWrite={canWrite}
                 documentId={doc.id}
                 folders={folderChoices}
                 version={doc.version}

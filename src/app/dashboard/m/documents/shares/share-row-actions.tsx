@@ -47,6 +47,7 @@ export function ShareRowActions({
   isOwner,
   hasPasscode,
   label,
+  canWrite = true,
 }: {
   shareId: string;
   version: number;
@@ -55,6 +56,12 @@ export function ShareRowActions({
   hasPasscode: boolean;
   /** What this link points at, for the activity sheet's header. */
   label?: string;
+  /**
+   * `roleMayWrite(role)`. Revoking is a write; WHO USED THE LINK is a read, and
+   * it is the reason an accountant is on this page — so the activity sheet
+   * stays and the revoke goes.
+   */
+  canWrite?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -76,7 +83,9 @@ export function ShareRowActions({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         {/* Copying decrypts the token server-side and records that it
-            happened — the URL is never sitting in this page's HTML. */}
+            happened — the URL is never sitting in this page's HTML. That
+            recording is a write, so it goes with the rest for an accountant. */}
+        {canWrite && (
         <DropdownMenuItem
           disabled={pending || revoked}
           onSelect={() => {
@@ -96,6 +105,7 @@ export function ShareRowActions({
           <Copy className="size-4" />
           Copy link
         </DropdownMenuItem>
+        )}
 
         {/* Available even on a revoked link — what happened while it was live
             is exactly what someone asks about after turning it off. */}
@@ -111,7 +121,7 @@ export function ShareRowActions({
 
         {/* A passcode-protected link is never emailable: the link and the
             passcode in one message is one factor, not two. */}
-        {!revoked && !hasPasscode && (
+        {canWrite && !revoked && !hasPasscode && (
           <DropdownMenuItem
             onSelect={(e) => {
               e.preventDefault();
@@ -123,7 +133,7 @@ export function ShareRowActions({
           </DropdownMenuItem>
         )}
 
-        {status === "locked" && isOwner && (
+        {canWrite && status === "locked" && isOwner && (
           <DropdownMenuItem
             disabled={pending}
             onSelect={() =>
@@ -143,7 +153,7 @@ export function ShareRowActions({
           </DropdownMenuItem>
         )}
 
-        {!revoked && (
+        {canWrite && !revoked && (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem

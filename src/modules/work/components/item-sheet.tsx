@@ -51,11 +51,19 @@ export function ItemSheet({
   links,
   members,
   backHref,
+  canWrite = true,
 }: {
   item: SheetItem | null;
   links: SheetLink[];
   members: MemberOption[];
   backHref: string;
+  /**
+   * `roleMayWrite(role)`. False leaves the sheet readable and takes every
+   * write off it — including the search box, because `searchLinkTargets` goes
+   * through the same gate and refused an accountant looking for something to
+   * attach.
+   */
+  canWrite?: boolean;
 }) {
   const router = useRouter();
   const { pending, run } = useWorkAction();
@@ -86,6 +94,7 @@ export function ItemSheet({
               members={members}
               pending={pending}
               run={run}
+              canWrite={canWrite}
             />
           </>
         )}
@@ -100,12 +109,14 @@ function ItemFields({
   members,
   pending,
   run,
+  canWrite,
 }: {
   item: SheetItem;
   links: SheetLink[];
   members: MemberOption[];
   pending: boolean;
   run: (action: () => Promise<{ ok: true } | { error: string }>) => void;
+  canWrite: boolean;
 }) {
   const [title, setTitle] = useState(item.title);
   const [description, setDescription] = useState(item.description);
@@ -131,6 +142,7 @@ function ItemFields({
         <Input
           id="work-item-title"
           value={title}
+          readOnly={!canWrite}
           onChange={(event) => setTitle(event.target.value)}
         />
       </div>
@@ -140,6 +152,7 @@ function ItemFields({
         <Textarea
           id="work-item-notes"
           value={description}
+          readOnly={!canWrite}
           onChange={(event) => setDescription(event.target.value)}
           rows={4}
         />
@@ -152,6 +165,7 @@ function ItemFields({
             id="work-item-starts"
             type="date"
             value={startsOn}
+            readOnly={!canWrite}
             onChange={(event) => setStartsOn(event.target.value)}
           />
         </div>
@@ -161,26 +175,41 @@ function ItemFields({
             id="work-item-due"
             type="date"
             value={dueOn}
+            readOnly={!canWrite}
             onChange={(event) => setDueOn(event.target.value)}
           />
         </div>
       </div>
 
-      <Button size="sm" onClick={save} disabled={pending || !title.trim()}>
-        Save
-      </Button>
+      {canWrite && (
+        <Button size="sm" onClick={save} disabled={pending || !title.trim()}>
+          Save
+        </Button>
+      )}
 
       <div className="flex flex-wrap gap-2 border-t pt-4">
-        <StateControl row={item} pending={pending} run={run} />
+        <StateControl
+          row={item}
+          pending={pending}
+          run={run}
+          canWrite={canWrite}
+        />
         <AssigneeControl
           row={item}
           members={members}
           pending={pending}
           run={run}
+          canWrite={canWrite}
         />
       </div>
 
-      <LinkSection itemId={item.id} links={links} pending={pending} run={run} />
+      <LinkSection
+        itemId={item.id}
+        links={links}
+        pending={pending}
+        run={run}
+        canWrite={canWrite}
+      />
     </div>
   );
 }
@@ -199,11 +228,19 @@ function LinkSection({
   links,
   pending,
   run,
+  canWrite,
 }: {
   itemId: string;
   links: SheetLink[];
   pending: boolean;
   run: (action: () => Promise<{ ok: true } | { error: string }>) => void;
+  /**
+   * **THE SEARCH BOX GOES TOO.** `searchLinkTargetsAction` calls the same
+   * `gate()` as every write, so an accountant typing a customer's name got
+   * `You do not have access to do that.` for a READ — the most confusing
+   * refusal in the module, and the reason this is not just about buttons.
+   */
+  canWrite: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
@@ -260,45 +297,49 @@ function LinkSection({
                   open
                 </a>
               )}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                disabled={pending}
-                aria-label={`Detach ${link.label ?? "record"}`}
-                onClick={() =>
-                  run(() => detachLinkAction({ linkId: link.linkId }))
-                }
-              >
-                <X className="h-3 w-3" />
-              </Button>
+              {canWrite && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  disabled={pending}
+                  aria-label={`Detach ${link.label ?? "record"}`}
+                  onClick={() =>
+                    run(() => detachLinkAction({ linkId: link.linkId }))
+                  }
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              )}
             </li>
           ))}
         </ul>
       )}
 
-      <form
-        className="flex items-center gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void search();
-        }}
-      >
-        <Input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Attach a customer, invoice, file…"
-          className="h-8"
-          aria-label="Search records to attach"
-        />
-        <Button type="submit" size="sm" variant="outline" disabled={searching}>
-          {searching ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Plus className="h-4 w-4" />
-          )}
-        </Button>
-      </form>
+      {canWrite && (
+        <form
+          className="flex items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void search();
+          }}
+        >
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Attach a customer, invoice, file…"
+            className="h-8"
+            aria-label="Search records to attach"
+          />
+          <Button type="submit" size="sm" variant="outline" disabled={searching}>
+            {searching ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Plus className="h-4 w-4" />
+            )}
+          </Button>
+        </form>
+      )}
 
       {groups.map((group) => (
         <div key={`${group.extensionSlug}:${group.entityType}`} className="space-y-1">

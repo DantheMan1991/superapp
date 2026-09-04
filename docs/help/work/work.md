@@ -92,7 +92,7 @@ Saved views appear in the same menu. You can delete your own. **A saved view doe
 | `Nothing here` | That board column is empty. |
 | `Nothing saved yet` | No saved views. |
 | `Make a list first.` | You tried to add work with no list to put it on. |
-| `You do not have access to do that.` | Your role cannot do that. Accountants see this on everything. |
+| `You do not have access to do that.` | Your role cannot do that. An accountant reaching it means a write got through from an old tab; the page itself no longer offers one. |
 | `That work no longer exists, or you cannot see it.` | It has gone, or it is on a list you cannot see. |
 | `Invalid input` | Usually a title over 200 characters or notes over 4,000. |
 | `Something went wrong.` | Something unexpected. **It also covers a start date later than the due date**, which the message does not say. Check those two before telling us. |
@@ -113,4 +113,4 @@ Saved views appear in the same menu. You can delete your own. **A saved view doe
 
 Everyone can add work, change it, assign it, and save views. What you see is decided by the lists you can see, which is set on the [Lists](lists.md) page.
 
-**Your accountant cannot change anything.** Every control is shown and enabled, and each one fails with `You do not have access to do that.` Even searching to attach a record fails. Nothing warns them first. They can also never be given work.
+**Your accountant reads this page and changes nothing on it.** A line above the filters reads `Accountant access is read-only. You can see every list, every item on it and who it is on, and nothing here can be changed.` The add row and {button:Save this view|outline} are not drawn, state and assignee show as plain text instead of dropdowns, and the item sheet opens with its fields read-only and no attach box — that last one because searching for a record to attach is refused too. Filtering, searching and switching between list and board all still work. They can also never be given work.

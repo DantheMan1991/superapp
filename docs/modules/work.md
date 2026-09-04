@@ -10,6 +10,38 @@
 
 ## Build log
 
+### 2026-09-03 — Work says so first (`claude/work-says-so-first`)
+
+**Both screens rendered every control enabled for an `expert` and refused every
+press.** `gate()` has failed closed for the accountant since slice 0, and it was
+the ONLY place that knew — neither `WorkModule` nor `lists/page.tsx` asked it, so
+the add row, the state and assignee dropdowns on every row, the item sheet's
+fields and Save, Save this view, New list, Edit and Archive all drew normally and
+each one came back `You do not have access to do that.`
+
+**Including a READ.** `searchLinkTargetsAction` goes through the same gate, so an
+accountant typing a customer's name into the attach box got a permission refusal
+for a search. That is the most confusing message in the module and is the reason
+this was not only about buttons.
+
+**The rule now lives in `roleMayWrite`** (`lib/work/vocabulary.ts` — the pure,
+import-free, directive-free file whose header already explains why it exists:
+`server-only` propagates through type imports and a board renders in the
+browser). `gate()` calls it instead of comparing the role itself, and both
+screens call it too, so they cannot drift.
+
+**Read-only is a rendering, not an absence.** The page keeps everything
+readable — every list, every item, who it is on, the filters, the search, and
+the list/board switch — and says why in one line above the filters rather than
+in a disabled control per row. `StateControl` and `AssigneeControl` take
+`canWrite` and draw their value as text when it is false: a greyed dropdown
+reads as *not right now*, and this is *not you, ever*. The item sheet opens with
+`readOnly` fields, no Save and no attach box.
+
+Guides swept in the same PR: `work.md`, `lists.md` and `overview.md` described
+the broken behaviour explicitly — *"Every control is shown and enabled, and each
+one fails"* — and now describe what ships.
+
 ### 2026-09-03 — Three tenant guides, and what writing them found (`claude/work-guides`)
 
 `docs/help/work/` — `overview` (the `**` fallback, 0), `work` (the hub, 10),
@@ -1013,8 +1045,9 @@ button do not change that.
   reveal it.
 - **The add row's list select and the search box freeze after first paint**, so
   new work can be filed into the wrong list on a filtered page.
-- **An accountant sees every control enabled on both screens and every press
-  fails**, with no warning first.
+- ~~**An accountant sees every control enabled on both screens and every press
+  fails**~~ — **fixed 2026-09-03.** `roleMayWrite` in `lib/work/vocabulary.ts`,
+  asked by `gate()` and by both screens; see the build log.
 - **The item sheet renders at `max-w-sm`, not the `max-w-lg` it asks for** — the
   cause of the 383 px measured on 2026-08-30, and of the truncated assignee email.
 - **`listWorkItems` has no pagination, and slice 2 gave it a second caller that

@@ -66,3 +66,28 @@ export function isWorkState(value: string): value is WorkState {
 export function isClosedState(state: WorkState): boolean {
   return (WORK_CLOSED_STATES as readonly string[]).includes(state);
 }
+
+/**
+ * The roles `requireTenant()` resolves. Inlined, like everything else in this
+ * file, because `@/lib/auth` is `server-only` and a board rendered in the
+ * browser asks the question below.
+ */
+export type WorkRole = "owner" | "staff" | "expert";
+
+/**
+ * **May this ROLE write to Work at all?**
+ *
+ * `expert` — the platform's own bookkeeper working inside a client workspace —
+ * is read-only here, as it is in CRM, Documents and Scheduling. There is no
+ * read-only-safe write in this module: `listAssignableMembers` will not offer an
+ * expert as an assignee either, so the loop is closed at both ends.
+ *
+ * **THE POINT OF IT BEING HERE IS THAT `gate()` IS NOT THE ONLY CALLER.** Until
+ * 2026-09-03 it was, and both screens drew every control enabled and returned
+ * `You do not have access to do that.` on every press — including on *searching*
+ * for a record to attach. A rule only the server knows is a rule the screen
+ * cannot draw.
+ */
+export function roleMayWrite(role: WorkRole): boolean {
+  return role !== "expert";
+}

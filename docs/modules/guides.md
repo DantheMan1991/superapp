@@ -7,6 +7,38 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-03 — Work, in three guides (`claude/work-guides`)
+
+`overview`, `work`, `lists`. A core module, so no vocabulary placeholders.
+**This finishes the founder's order** — accounting's core loop, documents, mail,
+CRM, the five packs, scheduling, and now work. Every screen in the product that
+has a guide-shaped surface has one.
+
+Unlike scheduling, this module HAS been driven (2026-08-18, and it held up), so
+the agents were briefed that a gap is more likely a real edge than a never-run
+path. That framing was worth setting: the gap count came out lower than
+scheduling's and higher than a pack's, which is about right for a module used
+once and then left alone.
+
+**The two findings the guides lead with both lose a reader's work**, which is why
+they are in the overview and not only in the screen guide. The item sheet has two
+save models and explains neither — state and assignee save on selection while
+title, notes and dates wait for `Save`, and closing discards the second set with
+no warning. And work with a future start date is hidden from `My work` entirely,
+not behind a toggle, with no control that reveals it.
+
+**Work is the third distinct answer to "who can see this".** Documents shares by
+folder, scheduling by calendar with per-person grants and private-by-default, and
+Work by list with exactly two choices and no grants at all — because the
+assignee is deliberately not a visibility term, so holiday cover works. Three
+modules, three models; each guide now says which one the reader is in rather
+than assuming the pattern carries.
+
+**The accountant case matches scheduling, not the packs**: both screens render
+every control enabled and every press is refused, including searching to attach.
+That is now two core modules with the inverse of the packs' problem, and the
+tally across the whole run is worth keeping — see `docs/modules/work.md`.
+
 ### 2026-09-03 — Scheduling, in three guides (`claude/scheduling-guides`)
 
 `overview`, `calendar`, `calendars`. A core module, so no vocabulary

@@ -11,7 +11,7 @@ import {
   recordMeterReading,
   recordService,
 } from "../src/packs/assets/maintenance-ops";
-import { owningCategories } from "../src/lib/work/entity-work";
+import { owningFeatures } from "../src/lib/work/entity-work";
 import { ownerFeatureAllowsWrite } from "../src/lib/packs/authorize";
 
 const RUN = !!process.env.DATABASE_URL;
@@ -51,6 +51,16 @@ d("maintenance raises work", () => {
         })
         .returning();
       tenantId = rows[0].id;
+      /*
+       * **SWITCH THE PACK ON FOR THIS TENANT.** The ops layer does not require
+       * it — only the actions do — so every test in this file passed without
+       * the row. `owningFeatures` reads it, and a fixture whose module is off
+       * would be testing a workspace nobody has.
+       */
+      await tx
+        .insert(schema.tenantModules)
+        .values({ tenantId, moduleId: "assets", enabled: true })
+        .onConflictDoNothing();
     });
     const a = await asOwner((tx) =>
       createAsset(tx, ctx(), {
@@ -150,15 +160,60 @@ d("maintenance raises work", () => {
         .from(schema.workItems)
         .where(eq(schema.workItems.tenantId, tenantId)),
     );
-    const categories = await asOwner((tx) =>
-      owningCategories(tx, tenantId, items[0].id),
+    const owners = await asOwner((tx) =>
+      owningFeatures(tx, tenantId, items[0].id),
     );
-    expect(categories).toEqual(["pack"]);
-    expect(categories.every((c) => ownerFeatureAllowsWrite(c ?? "core", "expert"))).toBe(
-      true,
-    );
-    // And the same list under a core owner would refuse them.
+    // One entry, not two: the item carries an `asset` link AND a
+    // `maintenance_schedule` link, and both name the same feature.
+    expect(owners).toEqual([{ slug: "assets", category: "pack", enabled: true }]);
+    expect(
+      owners.every((o) => ownerFeatureAllowsWrite(o.category ?? "core", "expert")),
+    ).toBe(true);
+    // And the same answer under a core owner would refuse them.
     expect(ownerFeatureAllowsWrite("core", "expert")).toBe(false);
+  });
+
+  /**
+   * The header's other half: is the owning feature switched ON. Asserted
+   * through the real `tenant_modules` row, because the point of the join is
+   * that it reads the tenant's own answer rather than a constant.
+   */
+  it("reports the owner as OFF once the pack is switched off", async () => {
+    const items = await asOwner((tx) =>
+      tx
+        .select({ id: schema.workItems.id })
+        .from(schema.workItems)
+        .where(eq(schema.workItems.tenantId, tenantId)),
+    );
+
+    await withSystem((tx) =>
+      tx
+        .update(schema.tenantModules)
+        .set({ enabled: false })
+        .where(
+          and(
+            eq(schema.tenantModules.tenantId, tenantId),
+            eq(schema.tenantModules.moduleId, "assets"),
+          ),
+        ),
+    );
+    const off = await asOwner((tx) =>
+      owningFeatures(tx, tenantId, items[0].id),
+    );
+    expect(off.map((o) => o.enabled)).toEqual([false]);
+
+    // Put it back, so the ordering of these tests cannot matter.
+    await withSystem((tx) =>
+      tx
+        .update(schema.tenantModules)
+        .set({ enabled: true })
+        .where(
+          and(
+            eq(schema.tenantModules.tenantId, tenantId),
+            eq(schema.tenantModules.moduleId, "assets"),
+          ),
+        ),
+    );
   });
 
   it("does not raise a second item while one is outstanding", async () => {

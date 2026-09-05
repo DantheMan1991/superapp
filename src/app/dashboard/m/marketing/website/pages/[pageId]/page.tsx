@@ -3,7 +3,8 @@ import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { isModuleEnabled, requireModuleEnabled } from "@/lib/modules";
 import { loadPageEditor } from "@/lib/sites/read";
-import { readPageContent } from "@/lib/sites/schema";
+import { mapStatusLine } from "@/lib/sites/map-core";
+import { readPageContent, readSiteSettings } from "@/lib/sites/schema";
 import { PageHeader } from "@/components/app/page-header";
 import { PageEditor, type VersionView } from "@/modules/marketing/components/page-editor";
 
@@ -70,6 +71,7 @@ export default async function PageEditorRoute({
           createdAt: i.createdAt.toISOString(),
         }))}
         schedulingOn={schedulingOn}
+        mapStatus={mapStatusLine(readSiteSettings(data.site.settings))}
       />
     </div>
   );

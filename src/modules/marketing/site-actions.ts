@@ -8,6 +8,8 @@ import { resolveBrandFor } from "@/lib/brand/read";
 import { assembleSite } from "@/lib/sites/copy";
 import { frameFromInput } from "@/lib/sites/frame";
 import { SOCIAL_NETWORKS } from "@/lib/sites/links";
+import { geocodeAddress } from "@/lib/sites/map";
+import { pinIsFor } from "@/lib/sites/map-core";
 import {
   EMPTY_SETTINGS,
   FOOTER_COLUMNS_MAX,
@@ -137,6 +139,7 @@ export async function createSiteAction(
       },
       { role: ctx.role },
     );
+    if (settings.address) await placeOnMap(ctx, settings.address);
     revalidateSite();
     return { ok: true, data: { slug } };
   } catch (err) {
@@ -195,12 +198,16 @@ export async function saveSiteDetailsAction(input: unknown): Promise<ActionResul
     const ctx = await gate();
     const parsed = detailsInput.safeParse(input);
     if (!parsed.success) return { error: "Check the fields and try again." };
-    await withTenant(
+    const saved = await withTenant(
       ctx.tenantId,
       async (tx) => {
         const site = await findSite(tx, ctx.tenantId);
         if (!site) throw new MarketingError("SITE_MISSING", "no site");
-        const settings = settingsFrom(readSiteSettings(site.settings), parsed.data);
+        const existing = readSiteSettings(site.settings);
+        const settings = settingsFrom(existing, parsed.data);
+        // The pin is kept only for the address it was placed from; any other
+        // address is placed again below, after the save.
+        settings.map = pinIsFor(existing.map, settings.address) ? existing.map : null;
         await updateSiteSettings(tx, ctx, site.id, { title: parsed.data.title, settings });
         await logAuditInTx(tx, {
           action: "marketing.site.details_saved",
@@ -209,14 +216,38 @@ export async function saveSiteDetailsAction(input: unknown): Promise<ActionResul
           targetType: "site",
           targetId: site.id,
         });
+        return { address: settings.address, placed: settings.map !== null };
       },
       { role: ctx.role },
     );
+    if (saved.address && !saved.placed) await placeOnMap(ctx, saved.address);
     revalidateSite();
     return { ok: true };
   } catch (err) {
     return fail(err);
   }
+}
+
+/**
+ * The address on the map (ADR 0026): the geocoder, outside any transaction,
+ * then the pin written beside the address it came from — unless the
+ * address changed again in the meantime, in which case the next save does
+ * this over. A miss writes nothing; the Website screen says so.
+ */
+async function placeOnMap(ctx: Awaited<ReturnType<typeof gate>>, address: string): Promise<void> {
+  const pin = await geocodeAddress(address);
+  if (!pin) return;
+  await withTenant(
+    ctx.tenantId,
+    async (tx) => {
+      const site = await findSite(tx, ctx.tenantId);
+      if (!site) return;
+      const current = readSiteSettings(site.settings);
+      if (current.address.trim() !== address.trim()) return;
+      await updateSiteSettings(tx, ctx, site.id, { settings: { ...current, map: pin } });
+    },
+    { role: ctx.role },
+  );
 }
 
 const linkInput = z.object({

@@ -251,6 +251,21 @@ export const SectionSchema = z.discriminatedUnion("type", [
     emptyText: short(160).default(""),
     style: SectionStyleSchema.optional(),
   }),
+  /**
+   * Find us — slice 10: a picture of where the address is, drawn by the
+   * platform from public-domain tiles at the section's zoom, with the
+   * address and a way to get directions (ADR 0026). The pin is the site's
+   * (`SiteSettings.map`); the section holds only how to show it.
+   */
+  z.object({
+    type: z.literal("map"),
+    heading: short(80).min(1),
+    note: short(300).default(""),
+    zoom: z.union([z.literal(13), z.literal(15), z.literal(16)]).default(15),
+    showAddress: z.boolean().default(true),
+    directions: z.boolean().default(true),
+    style: SectionStyleSchema.optional(),
+  }),
   z.object({
     type: z.literal("text"),
     heading: short(80).default(""),
@@ -379,6 +394,20 @@ export const SiteSettingsSchema = z.object({
   footerColumns: z.array(FooterColumnSchema).max(FOOTER_COLUMNS_MAX).default([]),
   /** A line under everything: "Family owned since 1978." */
   footerNote: short(160).default(""),
+  /**
+   * Where the address is on the map (ADR 0026): placed by the geocoder when
+   * the details are saved, kept with the address it was placed from. Null
+   * until placed, or when the address could not be.
+   */
+  map: z
+    .object({
+      lat: z.number().min(-90).max(90),
+      lng: z.number().min(-180).max(180),
+      matched: short(200).default(""),
+      address: short(240).default(""),
+    })
+    .nullable()
+    .default(null),
 });
 export type SiteSettings = z.infer<typeof SiteSettingsSchema>;
 
@@ -392,6 +421,7 @@ export const EMPTY_SETTINGS: SiteSettings = {
   social: [],
   footerColumns: [],
   footerNote: "",
+  map: null,
 };
 
 /** Parse what a row holds; a malformed blob degrades to empty rather than throwing at render. */

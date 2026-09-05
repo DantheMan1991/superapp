@@ -61,7 +61,7 @@ export const RESERVED_SITE_SLUGS: ReadonlySet<string> = new Set([
 ]);
 
 /** Page paths the platform's routes shadow under `/sites/<slug>/…`. */
-export const RESERVED_PAGE_PATHS: ReadonlySet<string> = new Set(["/draft", "/logo", "/images"]);
+export const RESERVED_PAGE_PATHS: ReadonlySet<string> = new Set(["/draft", "/logo", "/images", "/map"]);
 
 export type SlugCheck =
   | { ok: true; slug: string }
@@ -245,6 +245,8 @@ export function siteRewrite(kind: HostKind, pathname: string): string | null {
   if (pathname.startsWith("/_next/") || pathname.startsWith("/api/")) return null;
   const assetBase = kind.kind === "site" ? `/sites/${kind.slug}` : `/domain/${kind.host}`;
   const pageBase = kind.kind === "site" ? `/hosted/${kind.slug}` : `/domain/${kind.host}`;
-  if (pathname === "/logo" || pathname.startsWith("/images/")) return `${assetBase}${pathname}`;
+  if (pathname === "/logo" || pathname.startsWith("/images/") || pathname.startsWith("/map/")) {
+    return `${assetBase}${pathname}`;
+  }
   return `${pageBase}${pathname === "/" ? "" : pathname}`;
 }

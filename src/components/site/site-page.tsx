@@ -5,6 +5,7 @@ import { lookRadiusVars, resolveLook } from "@/lib/brand/looks";
 import type { PublicSite } from "@/lib/sites/read";
 import { eventDate, eventKey, eventWhen, upcomingEvents } from "@/lib/sites/events-core";
 import { isSafeHref } from "@/lib/sites/links";
+import { directionsUrl, MAP_ATTRIBUTION, MAP_HEIGHT, MAP_WIDTH, mapKey, pinIsFor } from "@/lib/sites/map-core";
 import type { ImageRef, Section, SectionStyle, SitePageView, SiteSettings } from "@/lib/sites/schema";
 import { SECTION_ATTR } from "@/lib/sites/preview";
 import { siteHref, type SiteMode } from "@/lib/sites/slug";
@@ -67,6 +68,13 @@ export function imageSrc(mode: SiteMode, slug: string, id: string): string {
   if (mode === "host") return `/images/${id}`;
   if (mode === "draft") return `/api/marketing/sites/images/${id}`;
   return `/sites/${slug}/images/${id}`;
+}
+
+/** The map picture's address for this mode, keyed by the pin, the zoom and the colour (`src/lib/sites/map.ts`). */
+export function mapSrc(mode: SiteMode, slug: string, key: string): string {
+  if (mode === "host") return `/map/${key}`;
+  if (mode === "draft") return `/api/marketing/sites/map/${key}`;
+  return `/sites/${slug}/map/${key}`;
 }
 
 /**
@@ -436,6 +444,65 @@ function SectionView({
           </div>
         </Shell>
       );
+    case "map": {
+      const address = site.settings.address.trim();
+      // Nothing to show and nobody to tell: the public page skips the section; the draft says why.
+      if (!address && mode !== "draft") return null;
+      const pin = pinIsFor(site.settings.map, address) ? site.settings.map : null;
+      const key = pin ? mapKey(pin, section.zoom, site.brand.primaryColor ?? "#1f2937") : null;
+      const aside = section.showAddress || section.directions;
+      return (
+        <Shell {...shell} spacing={room}>
+          <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
+          {section.note && <p className={cn("mt-3", tone.muted)}>{section.note}</p>}
+          <div className={cn("mt-6 grid gap-6", key && aside && "md:grid-cols-[3fr_2fr]", centred && "text-left")}>
+            {key && (
+              <figure>
+                {/* Our own route, a picture the platform drew; the optimiser would only add a hop in front of a cached file. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={mapSrc(mode, site.slug, key)}
+                  width={MAP_WIDTH}
+                  height={MAP_HEIGHT}
+                  alt={`Map showing ${address}`}
+                  loading="lazy"
+                  decoding="async"
+                  className="w-full rounded-[var(--site-radius)] shadow-sm ring-1 ring-neutral-200"
+                />
+                <figcaption className={cn("mt-2 text-xs", tone.faint)}>{MAP_ATTRIBUTION}</figcaption>
+              </figure>
+            )}
+            {aside && (
+              <div>
+                {!address ? (
+                  <p className={tone.muted}>Add an address in the site&rsquo;s details and it is shown here, on a map.</p>
+                ) : (
+                  <>
+                    {section.showAddress && <p className="whitespace-pre-line text-lg">{address}</p>}
+                    {!key && mode === "draft" && (
+                      <p className={cn("mt-2 text-sm", tone.muted)}>The address is not on the map yet. Save the site&rsquo;s details again to place it.</p>
+                    )}
+                    {section.directions && (
+                      <div className="mt-5">
+                        <a
+                          href={directionsUrl(address)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-block rounded-[var(--site-radius-button)] px-6 py-3 text-sm font-medium shadow-sm"
+                          style={tone.button}
+                        >
+                          Get directions
+                        </a>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </Shell>
+      );
+    }
     case "events": {
       // Live: whatever the Events calendar holds when the page is drawn (ADR 0025's sibling).
       const upcoming = upcomingEvents(site.events, new Date(), section.horizonDays, section.count);

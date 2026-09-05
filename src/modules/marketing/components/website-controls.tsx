@@ -61,10 +61,13 @@ function DetailFields({
   values,
   onChange,
   withTitle,
+  mapStatus,
 }: {
   values: { title: string; phone: string; email: string; address: string; hoursText: string };
   onChange: (patch: Partial<typeof values>) => void;
   withTitle: boolean;
+  /** Where the map stands (`mapStatusLine`); absent before the site exists. */
+  mapStatus?: string;
 }) {
   return (
     <div className="grid gap-4 sm:grid-cols-2">
@@ -92,6 +95,11 @@ function DetailFields({
         <Label htmlFor="site-address">Address</Label>
         <Textarea id="site-address" value={values.address} maxLength={240} rows={2} onChange={(e) => onChange({ address: e.target.value })} />
         <p className="text-xs text-muted-foreground">Shown on the contact page. Leave blank if customers come to you by appointment.</p>
+        {mapStatus && (
+          <p className={mapStatus.startsWith("On the map") ? "text-xs text-muted-foreground" : "text-xs text-amber-700"}>
+            {mapStatus}
+          </p>
+        )}
       </div>
       <div className="space-y-2">
         <Label htmlFor="site-hours">Hours</Label>
@@ -233,9 +241,12 @@ export function SiteSlugForm({ slug, siteDomain }: { slug: string; siteDomain: s
 export function SiteDetailsForm({
   title,
   settings,
+  mapStatus,
 }: {
   title: string;
   settings: SiteSettings;
+  /** Where the map stands (`mapStatusLine`), shown under the address. */
+  mapStatus: string;
 }) {
   const { pending, run } = useRun();
   const initial = {
@@ -249,7 +260,7 @@ export function SiteDetailsForm({
   const dirty = JSON.stringify(values) !== JSON.stringify(initial);
   return (
     <div className="space-y-4">
-      <DetailFields values={values} onChange={(p) => setValues((v) => ({ ...v, ...p }))} withTitle />
+      <DetailFields values={values} onChange={(p) => setValues((v) => ({ ...v, ...p }))} withTitle mapStatus={mapStatus} />
       <div className="flex items-center gap-3">
         <Button
           disabled={pending || !dirty}

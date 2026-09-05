@@ -1,3 +1,4 @@
+import { MAP_ZOOM_LABELS } from "./map-core";
 import { RESERVED_PAGE_PATHS } from "./slug";
 import type { ImageRef, PageContent, Section, SectionType } from "./schema";
 
@@ -23,6 +24,7 @@ export const SECTION_TYPES: ReadonlyArray<{
   { type: "form", label: "Enquiry form", hint: "Name, email, phone and a message. Each one lands in your workspace as a contact and a follow-up, and is emailed to you." },
   { type: "booking", label: "Book a time", hint: "A visitor picks an open time and it lands on your Bookings calendar, in your workspace and in your email. Needs Scheduling switched on." },
   { type: "events", label: "What's on", hint: "Upcoming events from your Events calendar in Scheduling, kept current by themselves. Needs Scheduling switched on." },
+  { type: "map", label: "Find us", hint: "A map of the address in your site's details, with the address and a Get directions button. United States addresses." },
   { type: "image", label: "Photo", hint: "One photo from your site's library, with a caption if you like." },
   { type: "gallery", label: "Photo gallery", hint: "Several photos in a grid, with a heading and captions if you like." },
   { type: "slideshow", label: "Slideshow", hint: "Photos shown one at a time with arrows, moving on by themselves if you like." },
@@ -61,6 +63,8 @@ export function newSection(type: SectionType): Section {
       return { type, heading: "Send us a message", note: "", buttonLabel: "Send", askPhone: true, thanks: "Thanks. We'll be in touch.", fields: [] };
     case "events":
       return { type, heading: "What's on", note: "", count: 5, horizonDays: 90, emptyText: "" };
+    case "map":
+      return { type, heading: "Find us", note: "", zoom: 15, showAddress: true, directions: true };
     case "booking":
       return {
         type,
@@ -120,6 +124,9 @@ export function sectionSummary(section: Section): string {
       break;
     case "events":
       text = `${section.heading}: the next ${section.count}`;
+      break;
+    case "map":
+      text = `${section.heading}: ${MAP_ZOOM_LABELS[section.zoom].toLowerCase()} map`;
       break;
     case "contact":
     case "hours":

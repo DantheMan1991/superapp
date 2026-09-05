@@ -4,6 +4,7 @@ import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { isModuleEnabled, requireModuleEnabled } from "@/lib/modules";
 import { describeBooking } from "@/lib/sites/booking-core";
+import { mapStatusLine } from "@/lib/sites/map-core";
 import { readDomainRecords } from "@/lib/sites/domains";
 import { listSiteEnquiries } from "@/lib/sites/enquiries";
 import { readEnquiryAnswers } from "@/lib/sites/enquiry-schema";
@@ -249,12 +250,13 @@ export default async function WebsitePage() {
             <h2 className="font-heading text-lg font-semibold tracking-heading">Details on the site</h2>
             <Panel className="p-6">
               {canWrite ? (
-                <SiteDetailsForm title={drafts.site.title} settings={drafts.view.settings} />
+                <SiteDetailsForm title={drafts.site.title} settings={drafts.view.settings} mapStatus={mapStatusLine(drafts.view.settings)} />
               ) : (
                 <dl className="grid gap-3 text-sm sm:grid-cols-2">
                   <div><dt className="text-xs text-muted-foreground">Phone</dt><dd>{drafts.view.settings.phone || "None"}</dd></div>
                   <div><dt className="text-xs text-muted-foreground">Email</dt><dd>{drafts.view.settings.email || "None"}</dd></div>
                   <div><dt className="text-xs text-muted-foreground">Address</dt><dd className="whitespace-pre-line">{drafts.view.settings.address || "None"}</dd></div>
+                  <div><dt className="text-xs text-muted-foreground">On the map</dt><dd>{mapStatusLine(drafts.view.settings)}</dd></div>
                   <div><dt className="text-xs text-muted-foreground">Hours</dt><dd>{drafts.view.settings.hoursLines.join("; ") || "None"}</dd></div>
                   <p className="text-xs text-muted-foreground sm:col-span-2">Only an owner can change these.</p>
                 </dl>

@@ -25,6 +25,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { FORM_FIELD_KINDS, newFormField } from "@/lib/sites/enquiry-schema";
 import { linkProblem } from "@/lib/sites/frame";
+import { MAP_ZOOM_LABELS, MAP_ZOOMS } from "@/lib/sites/map-core";
 import { iconLabel, moveItem, paragraphsToText, textToParagraphs } from "@/lib/sites/pages";
 import {
   BOOKING_MINUTES,
@@ -61,6 +62,8 @@ export function SectionForm(props: {
   photos: PhotoProps;
   /** Whether Scheduling is on: a booking section offers no times without it. */
   schedulingOn?: boolean;
+  /** Where the site's map stands (`mapStatusLine`), for the map section's note. */
+  mapStatus?: string;
 }) {
   return (
     <div className="space-y-6">
@@ -76,12 +79,14 @@ function SectionFields({
   idPrefix,
   photos,
   schedulingOn = true,
+  mapStatus = "",
 }: {
   section: Section;
   onChange: (next: Section) => void;
   idPrefix: string;
   photos: PhotoProps;
   schedulingOn?: boolean;
+  mapStatus?: string;
 }) {
   const id = (name: string) => `${idPrefix}-${name}`;
   switch (section.type) {
@@ -390,6 +395,38 @@ function SectionFields({
             {section.type === "contact"
               ? "The phone, email and address come from the Website page's details."
               : "The hours come from the Website page's details."}
+          </p>
+        </div>
+      );
+    case "map":
+      return (
+        <div className="space-y-4">
+          <p
+            className={
+              mapStatus.startsWith("On the map")
+                ? "rounded-xl bg-muted p-3 text-xs text-muted-foreground"
+                : "rounded-xl bg-amber-50 p-3 text-xs text-amber-800"
+            }
+          >
+            {mapStatus} The address comes from the site&apos;s details on the Website page.
+          </p>
+          <Field id={id("heading")} label="Heading">
+            <Input id={id("heading")} value={section.heading} maxLength={80} onChange={(e) => onChange({ ...section, heading: e.target.value })} />
+          </Field>
+          <Field id={id("note")} label="Note" hint="A line under the heading, or blank.">
+            <Input id={id("note")} value={section.note} maxLength={300} onChange={(e) => onChange({ ...section, note: e.target.value })} />
+          </Field>
+          <Choice label="How close" hint="Town shows the surroundings; street shows the block." value={section.zoom} options={MAP_ZOOM_OPTIONS} onChange={(zoom) => onChange({ ...section, zoom })} />
+          <div className="flex items-center gap-2">
+            <Switch id={id("showAddress")} checked={section.showAddress} onCheckedChange={(checked) => onChange({ ...section, showAddress: checked })} />
+            <Label htmlFor={id("showAddress")}>Show the address beside the map</Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch id={id("directions")} checked={section.directions} onCheckedChange={(checked) => onChange({ ...section, directions: checked })} />
+            <Label htmlFor={id("directions")}>Get directions button</Label>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            The map is drawn by Yosher from public-domain USGS maps of the United States, with your primary color as the pin, and nothing on your page comes from anywhere else. An address outside the United States shows the address and the button without a map.
           </p>
         </div>
       );
@@ -981,6 +1018,7 @@ const HORIZONS = [
   [30, "A month"],
   [60, "Two months"],
 ] as const;
+const MAP_ZOOM_OPTIONS = MAP_ZOOMS.map((zoom) => [zoom, MAP_ZOOM_LABELS[zoom]] as const);
 const EVENT_COUNT_OPTIONS = [
   [3, "3"],
   [5, "5"],

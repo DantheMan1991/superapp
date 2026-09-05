@@ -28,12 +28,14 @@ import { iconLabel, moveItem, paragraphsToText, textToParagraphs } from "@/lib/s
 import {
   CARD_ICON_NAMES,
   CARDS_MAX,
+  DEFAULT_SECTION_STYLE,
   FORM_FIELDS_MAX,
   GALLERY_ITEMS_MAX,
   type Card,
   type FormField,
   type FormFieldKind,
   type Section,
+  type SectionStyle,
 } from "@/lib/sites/schema";
 import { secondsLabel, SLIDESHOW_SECONDS } from "@/lib/sites/slides";
 import type { SitePhotoView } from "../image-actions";
@@ -46,8 +48,25 @@ type PhotoProps = { tenantId: string; library: SitePhotoView[]; onLibraryChange:
  * One form per kind of section. Each edits the section it is given and hands
  * back a whole new one; the editor owns the list. Every field's limit is the
  * content model's, so what the form allows is what the save will accept.
+ * The kind's own fields come first; the layout and look every kind shares
+ * (`StyleFields`) close the card.
  */
-export function SectionForm({
+export function SectionForm(props: {
+  section: Section;
+  onChange: (next: Section) => void;
+  idPrefix: string;
+  /** The site's photo library and how to change it, for the kinds that take a photo. */
+  photos: PhotoProps;
+}) {
+  return (
+    <div className="space-y-6">
+      <SectionFields {...props} />
+      <StyleFields {...props} />
+    </div>
+  );
+}
+
+function SectionFields({
   section,
   onChange,
   idPrefix,
@@ -56,8 +75,7 @@ export function SectionForm({
   section: Section;
   onChange: (next: Section) => void;
   idPrefix: string;
-  /** The site's photo library and how to change it, for the kinds that take a photo. */
-  photos: { tenantId: string; library: SitePhotoView[]; onLibraryChange: (next: SitePhotoView[]) => void };
+  photos: PhotoProps;
 }) {
   const id = (name: string) => `${idPrefix}-${name}`;
   switch (section.type) {
@@ -79,13 +97,16 @@ export function SectionForm({
           <PhotoField
             idPrefix={id("photo")}
             label="Photo beside the headline"
-            hint="Optional. A landscape photo sits to the right of the words on a wide screen and under them on a phone."
+            hint="Optional. A landscape photo sits beside the words on a wide screen and under them on a phone."
             tenantId={photos.tenantId}
             value={section.image}
             onChange={(image) => onChange({ ...section, image })}
             library={photos.library}
             onLibraryChange={photos.onLibraryChange}
           />
+          {section.image && (
+            <Choice label="Photo side" value={section.imageSide ?? "right"} options={SIDES} onChange={(imageSide) => onChange({ ...section, imageSide })} />
+          )}
         </div>
       );
     case "columns":
@@ -273,16 +294,21 @@ export function SectionForm({
             />
           </Field>
           {section.type === "about" && (
-            <PhotoField
-              idPrefix={id("photo")}
-              label="Photo beside the text"
-              hint="Optional. Sits to the right of the paragraphs on a wide screen and under them on a phone."
-              tenantId={photos.tenantId}
-              value={section.image}
-              onChange={(image) => onChange({ ...section, image })}
-              library={photos.library}
-              onLibraryChange={photos.onLibraryChange}
-            />
+            <>
+              <PhotoField
+                idPrefix={id("photo")}
+                label="Photo beside the text"
+                hint="Optional. Sits beside the paragraphs on a wide screen and under them on a phone."
+                tenantId={photos.tenantId}
+                value={section.image}
+                onChange={(image) => onChange({ ...section, image })}
+                library={photos.library}
+                onLibraryChange={photos.onLibraryChange}
+              />
+              {section.image && (
+                <Choice label="Photo side" value={section.imageSide ?? "right"} options={SIDES} onChange={(imageSide) => onChange({ ...section, imageSide })} />
+              )}
+            </>
           )}
         </div>
       );
@@ -798,5 +824,127 @@ function SortableCard({
       />
       <CtaFields idPrefix={id("cta")} cta={card.cta} optional onChange={(cta) => onChange({ cta })} />
     </li>
+  );
+}
+
+/** A row of pressed buttons: one value from a few, named. */
+function Choice<T extends string>({
+  label,
+  hint,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  value: T;
+  options: ReadonlyArray<readonly [T, string]>;
+  onChange: (next: T) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <div className="flex flex-wrap gap-2">
+        {options.map(([v, text]) => (
+          <Button key={v} type="button" variant={value === v ? "default" : "outline"} size="sm" aria-pressed={value === v} onClick={() => onChange(v)}>
+            {text}
+          </Button>
+        ))}
+      </div>
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    </div>
+  );
+}
+
+const SIDES = [
+  ["right", "Right"],
+  ["left", "Left"],
+] as const;
+const WIDTHS = [
+  ["default", "As designed"],
+  ["text", "Text column"],
+  ["page", "Page"],
+  ["full", "Full width"],
+] as const;
+const HEIGHTS = [
+  ["compact", "Compact"],
+  ["standard", "Standard"],
+  ["tall", "Tall"],
+] as const;
+const SPACINGS = [
+  ["default", "As designed"],
+  ["tight", "Tight"],
+  ["normal", "Normal"],
+  ["airy", "Airy"],
+] as const;
+const ALIGNS = [
+  ["default", "As designed"],
+  ["left", "Left"],
+  ["center", "Centred"],
+] as const;
+const BACKGROUNDS = [
+  ["default", "As designed"],
+  ["none", "None"],
+  ["tint", "Tint"],
+  ["brand", "Brand colour"],
+  ["dark", "Dark"],
+  ["photo", "Photo"],
+] as const;
+
+/**
+ * The layout and look every kind of section shares (`src/lib/sites/style.ts`):
+ * presets, never pixels. "As designed" is how the kind looks on its own. A
+ * photo section and a slideshow keep their own width control, so that row
+ * is left out for them; the hero has a height of its own instead of spacing.
+ */
+function StyleFields({
+  section,
+  onChange,
+  idPrefix,
+  photos,
+}: {
+  section: Section;
+  onChange: (next: Section) => void;
+  idPrefix: string;
+  photos: PhotoProps;
+}) {
+  const style = section.style ?? DEFAULT_SECTION_STYLE;
+  const set = (patch: Partial<SectionStyle>) => onChange({ ...section, style: { ...style, ...patch } });
+  const ownWidth = section.type === "image" || section.type === "slideshow";
+  return (
+    <div className="space-y-4 border-t border-divider pt-4">
+      <div>
+        <p className="text-sm font-medium">Layout and look</p>
+        <p className="text-xs text-muted-foreground">
+          Every choice is a preset that fits a phone as well as a laptop. As designed is how this kind of section looks on its own.
+        </p>
+      </div>
+      {!ownWidth && <Choice label="Width" value={style.width} options={WIDTHS} onChange={(width) => set({ width })} />}
+      {section.type === "hero" ? (
+        <Choice label="Height" value={section.height ?? "standard"} options={HEIGHTS} onChange={(height) => onChange({ ...section, height })} />
+      ) : (
+        <Choice label="Spacing" value={style.spacing} options={SPACINGS} onChange={(spacing) => set({ spacing })} />
+      )}
+      <Choice label="Alignment" value={style.align} options={ALIGNS} onChange={(align) => set({ align })} />
+      <Choice
+        label="Background"
+        value={style.background}
+        options={BACKGROUNDS}
+        onChange={(background) => set({ background })}
+        hint="A dark band or a photo turns the words white; the brand colour uses your brand's own contrast."
+      />
+      {style.background === "photo" && (
+        <PhotoField
+          idPrefix={`${idPrefix}-background`}
+          label="Background photo"
+          hint="Darkened so the words stay readable. It is decoration, so it needs no description."
+          tenantId={photos.tenantId}
+          value={style.photo}
+          onChange={(photo) => set({ photo })}
+          library={photos.library}
+          onLibraryChange={photos.onLibraryChange}
+        />
+      )}
+    </div>
   );
 }

@@ -119,11 +119,14 @@ export function Slideshow({
   slides,
   seconds,
   layout,
+  onDark = false,
 }: {
   slides: Slide[];
   /** Between photos; 0 moves only on a press. */
   seconds: number;
   layout: "inset" | "wide";
+  /** On a dark band or a photo: the caption row and the dots turn light. */
+  onDark?: boolean;
 }) {
   const n = slides.length;
   const [index, setIndex] = useState(0);
@@ -189,7 +192,7 @@ export function Slideshow({
         )}
       </div>
       <div className={`flex flex-wrap items-center justify-between gap-3 ${layout === "wide" ? "mx-auto max-w-5xl px-6" : "px-1"}`}>
-        <p className="min-h-5 text-sm text-neutral-600" aria-live="polite">
+        <p className={`min-h-5 text-sm ${onDark ? "text-neutral-200" : "text-neutral-600"}`} aria-live="polite">
           {slide.caption}
           <span className="sr-only"> {slideLabel(index, n)}</span>
         </p>
@@ -198,7 +201,7 @@ export function Slideshow({
             {moves && (
               <button
                 type="button"
-                className="text-xs text-neutral-600 underline-offset-4 hover:underline"
+                className={`text-xs underline-offset-4 hover:underline ${onDark ? "text-neutral-200" : "text-neutral-600"}`}
                 aria-pressed={paused}
                 onClick={() => setPaused((p) => !p)}
               >
@@ -214,7 +217,7 @@ export function Slideshow({
                   aria-current={i === index ? "true" : undefined}
                   onClick={() => setIndex(i)}
                   className="size-2.5 rounded-full"
-                  style={{ backgroundColor: i === index ? "var(--site-primary)" : "#d4d4d4" }}
+                  style={{ backgroundColor: i === index ? (onDark ? "#ffffff" : "var(--site-primary)") : onDark ? "rgba(255,255,255,0.45)" : "#d4d4d4" }}
                 />
               ))}
             </div>
@@ -229,17 +232,20 @@ export function Gallery({
   heading,
   tiles,
   columns,
+  captionClass = "text-neutral-600",
 }: {
   heading: string;
   tiles: Slide[];
   columns: 2 | 3 | 4;
+  /** The captions' colour class, from the section's tone. */
+  captionClass?: string;
 }) {
   const [open, setOpen] = useState<number | null>(null);
   const triggers = useRef<(HTMLAnchorElement | null)[]>([]);
   const cols =
     columns === 2 ? "sm:grid-cols-2" : columns === 4 ? "sm:grid-cols-3 lg:grid-cols-4" : "sm:grid-cols-3";
   return (
-    <section className="mx-auto max-w-5xl px-6 py-14">
+    <div>
       {heading && <h2 className="text-2xl font-semibold tracking-tight">{heading}</h2>}
       <ul className={`mt-6 grid grid-cols-2 gap-4 ${cols}`}>
         {tiles.map((tile, i) => (
@@ -269,7 +275,7 @@ export function Gallery({
                   className="aspect-[4/3] w-full object-cover"
                 />
               </a>
-              {tile.caption && <figcaption className="mt-2 text-sm text-neutral-600">{tile.caption}</figcaption>}
+              {tile.caption && <figcaption className={`mt-2 text-sm ${captionClass}`}>{tile.caption}</figcaption>}
             </figure>
           </li>
         ))}
@@ -286,7 +292,7 @@ export function Gallery({
           }}
         />
       )}
-    </section>
+    </div>
   );
 }
 

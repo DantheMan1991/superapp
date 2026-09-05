@@ -6,6 +6,7 @@ import { newSection, sectionSummary } from "../src/lib/sites/pages";
 import { PHOTO_MAX_EDGE, PhotoError, preparePhoto } from "../src/lib/sites/photo";
 import { ImageRefSchema, SectionSchema } from "../src/lib/sites/schema";
 import { classifyHost, RESERVED_PAGE_PATHS, siteRewrite } from "../src/lib/sites/slug";
+import { secondsLabel, slideLabel, SLIDESHOW_SECONDS, wrapIndex } from "../src/lib/sites/slides";
 
 const opts = { siteDomain: "yosher.site", platformHosts: ["localhost", "127.0.0.1", "yosherapp.com"] };
 const ID = "6d4c1a2e-9b3f-4c8d-8e7a-1f2b3c4d5e6f";
@@ -130,5 +131,38 @@ describe("a gallery", () => {
     expect(sectionSummary(newSection("gallery"))).toBe("Photos: no photos yet");
     expect(sectionSummary({ type: "gallery", heading: "", items: [item], columns: 3 })).toBe("1 photo");
     expect(sectionSummary({ type: "gallery", heading: "The farm", items: [item, item, item], columns: 2 })).toBe("The farm: 3 photos");
+  });
+});
+
+describe("a slideshow", () => {
+  const item = { image: { id: ID, alt: "" }, caption: "" };
+
+  it("is photos shown one at a time, full width, moving on every six seconds unless told otherwise", () => {
+    const fresh = newSection("slideshow");
+    expect(SectionSchema.safeParse(fresh).success).toBe(true);
+    expect(fresh).toEqual({ type: "slideshow", heading: "", items: [], seconds: 6, layout: "wide" });
+    expect(SectionSchema.parse({ type: "slideshow", seconds: 0, items: [{ image: { id: ID } }] })).toEqual({
+      type: "slideshow",
+      heading: "",
+      items: [item],
+      seconds: 0,
+      layout: "wide",
+    });
+    expect(SectionSchema.safeParse({ type: "slideshow", seconds: 31 }).success).toBe(false);
+    expect(SectionSchema.safeParse({ type: "slideshow", seconds: 2.5 }).success).toBe(false);
+    expect(SectionSchema.safeParse({ type: "slideshow", items: Array.from({ length: 13 }, () => item) }).success).toBe(false);
+    expect(sectionSummary({ type: "slideshow", heading: "On the farm", items: [item, item], seconds: 6, layout: "wide" })).toBe("On the farm: 2 photos");
+    expect(sectionSummary(newSection("slideshow"))).toBe("no photos yet");
+  });
+
+  it("wraps around at either end and names each photo and each pace", () => {
+    expect(wrapIndex(3, 3)).toBe(0);
+    expect(wrapIndex(-1, 3)).toBe(2);
+    expect(wrapIndex(4, 3)).toBe(1);
+    expect(wrapIndex(0, 0)).toBe(0);
+    expect(slideLabel(1, 5)).toBe("Photo 2 of 5");
+    expect([...SLIDESHOW_SECONDS]).toEqual([0, 4, 6, 10]);
+    expect(secondsLabel(0)).toBe("Only when pressed");
+    expect(secondsLabel(6)).toBe("Every 6 seconds");
   });
 });

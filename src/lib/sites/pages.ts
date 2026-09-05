@@ -23,6 +23,7 @@ export const SECTION_TYPES: ReadonlyArray<{
   { type: "form", label: "Enquiry form", hint: "Name, email, phone and a message. Each one lands in your workspace as a contact and a follow-up, and is emailed to you." },
   { type: "image", label: "Photo", hint: "One photo from your site's library, with a caption if you like." },
   { type: "gallery", label: "Photo gallery", hint: "Several photos in a grid, with a heading and captions if you like." },
+  { type: "slideshow", label: "Slideshow", hint: "Photos shown one at a time with arrows, moving on by themselves if you like." },
 ];
 
 export function sectionLabel(type: SectionType): string {
@@ -52,6 +53,8 @@ export function newSection(type: SectionType): Section {
       return { type, image: null, caption: "", layout: "inset" };
     case "gallery":
       return { type, heading: "Photos", items: [], columns: 3 };
+    case "slideshow":
+      return { type, heading: "", items: [], seconds: 6, layout: "wide" };
   }
 }
 
@@ -78,7 +81,8 @@ export function sectionSummary(section: Section): string {
     case "image":
       text = section.caption || (section.image ? "A photo" : "No photo chosen yet");
       break;
-    case "gallery": {
+    case "gallery":
+    case "slideshow": {
       const n = section.items.length;
       const count = n === 0 ? "no photos yet" : `${n} ${n === 1 ? "photo" : "photos"}`;
       text = section.heading ? `${section.heading}: ${count}` : count;

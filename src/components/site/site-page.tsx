@@ -4,17 +4,20 @@ import { foregroundOn } from "@/lib/brand/core";
 import type { PublicSite } from "@/lib/sites/read";
 import type { ImageRef, Section, SitePageView, SiteSettings } from "@/lib/sites/schema";
 import { siteHref, type SiteMode } from "@/lib/sites/slug";
+import type { Slide } from "@/lib/sites/slides";
 import { EnquiryForm } from "./enquiry-form";
+import { Gallery, Slideshow } from "./slideshow";
 import { ViewBeacon } from "./view-beacon";
 
 /**
  * The public renderer: one page of a tenant's site, from its typed sections.
  *
  * Server components, and nothing here is markup a tenant wrote — every
- * string arrives through the content model and React escapes it. The one
- * client island is the enquiry form (`enquiry-form.tsx`), which needs a
- * pending state and a thank-you. The brand's colours enter as CSS variables
- * on the root so the sections never learn a hex value.
+ * string arrives through the content model and React escapes it. The client
+ * islands are the view beacon, the enquiry form (a pending state and a
+ * thank-you) and the slideshow and gallery lightbox (`slideshow.tsx`, the
+ * page's one moving part). The brand's colours enter as CSS variables on
+ * the root so the sections never learn a hex value.
  *
  * `mode` decides what a link looks like: on the site's own hostname links
  * are root-relative, on the platform host they carry `/sites/<slug>`, and in
@@ -200,40 +203,29 @@ function SectionView({
       );
     }
     case "gallery": {
-      // A photo whose row is gone is skipped; a gallery with none left draws nothing.
-      const items = section.items.filter((item) => site.images[item.image.id]);
-      if (items.length === 0) return null;
-      const columns =
-        section.columns === 2
-          ? "sm:grid-cols-2"
-          : section.columns === 4
-            ? "sm:grid-cols-3 lg:grid-cols-4"
-            : "sm:grid-cols-3";
+      const tiles = toSlides(section.items, site, mode);
+      if (tiles.length === 0) return null;
+      return <Gallery heading={section.heading} tiles={tiles} columns={section.columns} />;
+    }
+    case "slideshow": {
+      const slides = toSlides(section.items, site, mode);
+      if (slides.length === 0) return null;
+      if (section.layout === "wide") {
+        return (
+          <section className="py-6">
+            {section.heading && (
+              <h2 className="mx-auto max-w-5xl px-6 pb-4 text-2xl font-semibold tracking-tight">{section.heading}</h2>
+            )}
+            <Slideshow slides={slides} seconds={section.seconds} layout="wide" />
+          </section>
+        );
+      }
       return (
-        <section className="mx-auto max-w-5xl px-6 py-14">
+        <section className="mx-auto max-w-3xl px-6 py-10">
           {section.heading && (
-            <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
+            <h2 className="pb-4 text-2xl font-semibold tracking-tight">{section.heading}</h2>
           )}
-          <ul className={`mt-6 grid grid-cols-2 gap-4 ${columns}`}>
-            {items.map((item, i) => (
-              <li key={i}>
-                <figure>
-                  {/* The photo itself, larger, in a new tab: a look without any script. */}
-                  <a
-                    href={imageSrc(mode, site.slug, item.image.id)}
-                    target="_blank"
-                    rel="noopener"
-                    className="block overflow-hidden rounded-xl bg-neutral-100"
-                  >
-                    <Photo site={site} mode={mode} image={item.image} className="aspect-[4/3] w-full object-cover" />
-                  </a>
-                  {item.caption && (
-                    <figcaption className="mt-2 text-sm text-neutral-600">{item.caption}</figcaption>
-                  )}
-                </figure>
-              </li>
-            ))}
-          </ul>
+          <Slideshow slides={slides} seconds={section.seconds} layout="inset" />
         </section>
       );
     }
@@ -335,6 +327,31 @@ function SectionView({
         </section>
       );
   }
+}
+
+/**
+ * A gallery's or a slideshow's photos as the client component takes them:
+ * the address for this mode and the size from the row. A photo whose row
+ * is gone is skipped, so a section with none left draws nothing.
+ */
+function toSlides(
+  items: ReadonlyArray<{ image: ImageRef; caption: string }>,
+  site: PublicSite,
+  mode: SiteMode,
+): Slide[] {
+  return items.flatMap((item) => {
+    const meta = site.images[item.image.id];
+    if (!meta) return [];
+    return [
+      {
+        src: imageSrc(mode, site.slug, item.image.id),
+        alt: item.image.alt,
+        caption: item.caption,
+        width: meta.width,
+        height: meta.height,
+      },
+    ];
+  });
 }
 
 /**

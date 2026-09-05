@@ -137,6 +137,14 @@ export const DEFAULT_SECTION_STYLE: SectionStyle = {
   photo: null,
 };
 
+/** How long a booking is, in minutes; the times offered align to the half hour. */
+export const BOOKING_MINUTES = [15, 30, 45, 60, 90, 120] as const;
+/** How much notice a booking needs, in hours. */
+export const BOOKING_LEAD_HOURS = [0, 2, 24, 48] as const;
+/** How far ahead a visitor may book, in days. */
+export const BOOKING_HORIZON_DAYS = [7, 14, 30, 60] as const;
+const wallClock = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+
 export const SectionSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("hero"),
@@ -198,6 +206,34 @@ export const SectionSchema = z.discriminatedUnion("type", [
     thanks: short(240).default(""),
     /** The business's own questions, asked between the phone and the message. */
     fields: z.array(FormFieldSchema).max(FORM_FIELDS_MAX).default([]),
+    style: SectionStyleSchema.optional(),
+  }),
+  /**
+   * Book a time — slice 8. The rules of the offer live here on the page;
+   * the times themselves come from the business's Bookings calendar, and a
+   * booking lands there and in the workspace like an enquiry (ADR 0025).
+   */
+  z.object({
+    type: z.literal("booking"),
+    heading: short(80).min(1),
+    note: short(300).default(""),
+    /** What is being booked, as it reads on the calendar and in the email: "Farm visit". */
+    title: short(60).min(1),
+    minutes: z
+      .union([z.literal(15), z.literal(30), z.literal(45), z.literal(60), z.literal(90), z.literal(120)])
+      .default(30),
+    /** The days of the week times are offered on; 0 is Sunday. */
+    days: z.array(z.number().int().min(0).max(6)).max(7).default([1, 2, 3, 4, 5]),
+    /** The window on each of those days, on the wall clock. */
+    from: wallClock.default("09:00"),
+    to: wallClock.default("17:00"),
+    leadHours: z.union([z.literal(0), z.literal(2), z.literal(24), z.literal(48)]).default(24),
+    horizonDays: z.union([z.literal(7), z.literal(14), z.literal(30), z.literal(60)]).default(30),
+    askPhone: z.boolean().default(true),
+    /** The button; blank reads "Book". */
+    buttonLabel: short(40).default(""),
+    /** Replaces the form once a time is booked; blank reads a standard line. */
+    thanks: short(240).default(""),
     style: SectionStyleSchema.optional(),
   }),
   z.object({

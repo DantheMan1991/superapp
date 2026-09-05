@@ -25,6 +25,8 @@ export interface EnquiryRowView {
   workItemId: string | null;
   followUp: "open" | "done" | "gone" | "none";
   notifyVia: string;
+  /** Set when the message is a booking: what was booked and when, already in words. */
+  booking: { title: string; when: string } | null;
 }
 
 /**
@@ -89,8 +91,19 @@ export function EnquiriesPanel({
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium">{row.name}</span>
                   <span className="text-sm text-muted-foreground">{row.receivedOn}</span>
+                  {row.booking && (
+                    <Badge variant="outline" className="border-sky-300 bg-sky-50 text-sky-800">
+                      booking
+                    </Badge>
+                  )}
                   <FollowUpBadge state={row.followUp} />
                 </div>
+                {row.booking && (
+                  <p className="text-sm">
+                    <span className="font-medium">{row.booking.title}</span>
+                    <span className="text-muted-foreground">, {row.booking.when}</span>
+                  </p>
+                )}
                 <div className="flex flex-wrap gap-x-4 text-sm text-muted-foreground">
                   <a href={`mailto:${row.email}`} className="underline-offset-4 hover:underline">
                     {row.email}

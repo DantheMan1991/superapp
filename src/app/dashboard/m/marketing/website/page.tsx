@@ -3,6 +3,7 @@ import { ExternalLink, Globe } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { isModuleEnabled, requireModuleEnabled } from "@/lib/modules";
+import { describeBooking } from "@/lib/sites/booking-core";
 import { readDomainRecords } from "@/lib/sites/domains";
 import { listSiteEnquiries } from "@/lib/sites/enquiries";
 import { readEnquiryAnswers } from "@/lib/sites/enquiry-schema";
@@ -217,6 +218,13 @@ export default async function WebsitePage() {
                   workItemId: enquiry.workItemId,
                   followUp,
                   notifyVia: enquiry.notifyVia,
+                  booking:
+                    enquiry.bookingStartsAt && enquiry.bookingEndsAt
+                      ? {
+                          title: enquiry.bookingTitle,
+                          when: describeBooking(enquiry.bookingStartsAt, enquiry.bookingEndsAt, ctx.tenant.timezone),
+                        }
+                      : null,
                 }))}
               />
             </Panel>

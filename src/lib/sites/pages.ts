@@ -21,6 +21,7 @@ export const SECTION_TYPES: ReadonlyArray<{
   { type: "contact", label: "Contact details", hint: "Your phone, email and address, from the site's details." },
   { type: "hours", label: "Hours", hint: "Your hours, from the site's details." },
   { type: "form", label: "Enquiry form", hint: "Name, email, phone and a message. Each one lands in your workspace as a contact and a follow-up, and is emailed to you." },
+  { type: "booking", label: "Book a time", hint: "A visitor picks an open time and it lands on your Bookings calendar, in your workspace and in your email. Needs Scheduling switched on." },
   { type: "image", label: "Photo", hint: "One photo from your site's library, with a caption if you like." },
   { type: "gallery", label: "Photo gallery", hint: "Several photos in a grid, with a heading and captions if you like." },
   { type: "slideshow", label: "Slideshow", hint: "Photos shown one at a time with arrows, moving on by themselves if you like." },
@@ -57,6 +58,22 @@ export function newSection(type: SectionType): Section {
       return { type, heading: "Hours", note: "" };
     case "form":
       return { type, heading: "Send us a message", note: "", buttonLabel: "Send", askPhone: true, thanks: "Thanks. We'll be in touch.", fields: [] };
+    case "booking":
+      return {
+        type,
+        heading: "Book a time",
+        note: "",
+        title: "Visit",
+        minutes: 30,
+        days: [1, 2, 3, 4, 5],
+        from: "09:00",
+        to: "17:00",
+        leadHours: 24,
+        horizonDays: 30,
+        askPhone: true,
+        buttonLabel: "Book",
+        thanks: "Thanks. We'll confirm by email.",
+      };
     case "image":
       return { type, image: null, caption: "", layout: "inset" };
     case "gallery":
@@ -94,6 +111,9 @@ export function sectionSummary(section: Section): string {
     case "about":
     case "text":
       text = section.heading || section.body[0] || "";
+      break;
+    case "booking":
+      text = `${section.heading}: ${section.title}, ${section.minutes} min`;
       break;
     case "contact":
     case "hours":

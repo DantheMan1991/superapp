@@ -38,7 +38,7 @@ describe("a section's style", () => {
     expect(resolveStyle("text", { ...DEFAULT_SECTION_STYLE, background: "dark" }).onDark).toBe(true);
     expect(resolveStyle("text", { ...DEFAULT_SECTION_STYLE, background: "brand" }).onDark).toBe(false);
     expect(resolveStyle("text", { ...DEFAULT_SECTION_STYLE, align: "center" }).align).toBe("center");
-    expect(Object.keys(SECTION_DEFAULTS).sort()).toEqual(["about", "columns", "contact", "cta", "form", "gallery", "hero", "hours", "image", "offer", "slideshow", "text"]);
+    expect(Object.keys(SECTION_DEFAULTS).sort()).toEqual(["about", "booking", "columns", "contact", "cta", "form", "gallery", "hero", "hours", "image", "offer", "slideshow", "text"]);
   });
 
   it("turns presets into columns, room and bands, never a pixel", () => {

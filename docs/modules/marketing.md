@@ -35,7 +35,7 @@
 | **6c** | **The frame around every page: an announcement bar, a header button, social links as marks, footer columns and a footer line, edited on the Website screen and live the moment they are saved; and a link is now one of four shapes, on save and at render.** | **built 2026-09-05** |
 | **6d** | **Fonts and looks on the brand kit: a Modern, Warm or Classic look, six curated font pairings bundled by the platform, and pill, rounded or square buttons, with the corners following the look; a sample beside the fields reads as the site will.** [ADR 0024](../decisions/0024-a-look-is-a-preset-and-its-fonts-are-the-platforms.md) | **built 2026-09-05** |
 | **7** | **The editor's preview at a phone's or a tablet's width, remembered per browser; a click on a section in the preview selects it in the editor, and the editor's selection is outlined in the preview, through `postMessage` on the same origin.** | **built 2026-09-05** |
-| 8 | Bookings: a "book a time" section on the scheduling module's calendars, landing like an enquiry | |
+| **8** | **Bookings: a `Book a time` section whose open times are the section's hours minus what is on a Bookings calendar the platform provisions; a booking lands as an enquiry with a time (party, CRM record, follow-up, email) and as a calendar item with the visitor on it.** [ADR 0025](../decisions/0025-a-booking-is-an-enquiry-with-a-time.md) | **built 2026-09-05** |
 | 9 | Live blocks fed by the modules: prices and availability from retail and inventory, the team, events | |
 | 10 | A map section from the address (MapLibre is in the repo) | |
 | 11 | The SEO pack: sitemap and robots per site, a drawn share image per page, local-business structured data, redirects on an address change; a favicon from the logo | |
@@ -46,6 +46,84 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-05 — Slice 8: book a time (`claude/marketing-site-bookings`)
+
+The site's second thing a visitor can do, and the first that crosses into
+another module's data
+([ADR 0025](../decisions/0025-a-booking-is-an-enquiry-with-a-time.md)).
+Migration `0259` adds four columns to `site_enquiries`; applied and
+verified on dev and production before the merge.
+
+- **The `booking` section** (`src/lib/sites/schema.ts`, the thirteenth
+  kind): `heading`, `note`, `title` (what is being booked, as it reads on
+  the calendar and in the email), `minutes` (15–120), `days` (0 = Sunday),
+  `from`/`to` on the wall clock, `leadHours` (0, 2, 24, 48), `horizonDays`
+  (7, 14, 30, 60), `askPhone`, `buttonLabel`, `thanks`. The editor's fields
+  (`section-forms.tsx`) are the same words; the section can be added only
+  while Scheduling is on (the editor page passes `bookingOn`), and says so
+  in amber when it is off.
+- **`src/lib/sites/booking-core.ts`** (pure, tested): the request schema
+  (the enquiry's with an ISO `start` in front), `bookingWindow` (after the
+  notice, before the horizon), `offerSlots` — `findFreeSlots` from the
+  scheduling module's availability seam over the section's rules and the
+  calendar's busy time, grouped by day with labels — and `isOffered`, the
+  check the write path makes. `describeBooking` is the sentence everything
+  else uses: "Tuesday, September 15, 9:00 am to 9:30 am".
+- **`src/lib/schedule/bookings-calendar.ts`** (the scheduling seam): the
+  business's Bookings calendar, made once through the managed unique index
+  (`marketing` / `bookings`), owned by the business and shared with
+  everyone at `write`; `busyOnCalendar` through `listRange` and `show_as`.
+  `savePageAction` calls `ensureBookingsCalendar` when a saved page holds a
+  booking section and Scheduling is on: an owner's context, since the
+  business owns it. The share is put back at `write` on every such save.
+- **`src/lib/sites/bookings.ts`**: `openBookingTimes` (the read: a
+  published site with Scheduling on, the section from the PUBLISHED page,
+  the calendar's busy time as `staff` with no user through the everyone
+  share, the open times) and `receiveSiteBooking` (the write: caps as the
+  enquiry's plus a per-site daily count of bookings, the section from the
+  published page again, `pg_advisory_xact_lock` on the calendar, `isOffered`
+  or "taken", then the party, the CRM record when CRM is on, the follow-up
+  `Confirm the booking with …` due today, the calendar item titled
+  `<title>: <name>` with the notes as its description and the visitor as an
+  `accepted` external attendee, the `site_enquiries` row with the time and a
+  soft `schedule_item_id`, the audit `site.booking.received`, the email).
+  `notifyPlan` and `tryAddContactPoint` are now exported from
+  `enquiries.ts` and shared.
+- **`GET /api/sites/slots`**: the third public door, a read — instants and
+  labels for a published site, an empty list for everything else, capped at
+  60 an hour per IP in `public_access_attempts`, never cached.
+- **The island** (`src/components/site/booking-form.tsx`, the public page's
+  fourth script where a booking section is on the page): fetches the open
+  times, day chips then time chips in the brand colour, the enquiry's
+  fields with a note in place of the message, the server action
+  `submitSiteBooking`; a time that was just taken is answered with the rest.
+  In the draft it is drawn and takes nothing. The Website screen's Messages
+  panel shows a booking as a message with a `booking` badge and
+  `<title>, <when>` under the name; the email's subject reads
+  `<name> booked <title> from your website` and its close names the
+  Bookings calendar.
+- **Words** (`enquiry-schema.ts`): `EnquiryWords.booking`, `bookingWorkTitle`,
+  and `enquiryNotes` / `enquiryEmail` reading as a booking when it is one;
+  a plain message reads exactly as before.
+- **Driven on the dev branch** on Test, with Scheduling switched on for it
+  from the superadmin's tenant page: a `Book a time` section on the contact
+  page (`Farm visit`, weekdays 9 to 12, half an hour, a day's notice, a
+  month ahead), saved (which made the `Bookings` calendar — it appeared
+  under `Business calendars` with Share, Edit and Archive) and published.
+  The live contact page offered Monday to Friday from the 7th to October 5
+  with `9:00 am` to `11:30 am` on each; `Pat Booker` booked Monday the 7th
+  at 9:00 with a note and read `Booked: Monday, September 7, 9:00 am to
+  9:30 am` and the thanks line. The Messages panel then showed the row with
+  a `booking` badge and `Visit, Monday, September 7, 9:00 am to 9:30 am`,
+  `Contact: Pat Booker`, `Emailed to the site's email address`; the week of
+  the 7th in Scheduling drew `Visit: Pat Booker`; the follow-up
+  `Confirm the booking with Pat Booker` opened from the row, about the
+  contact; and the live page no longer offered `9:00 am` on the 7th. One
+  slip on the way, worth knowing: a script that set `input[id$="-title"]`
+  renamed the PAGE (`#page-title`) rather than the section; the page was
+  put back and the section titled by its own id. Tests:
+  `tests/site-bookings.test.ts`.
 
 ### 2026-09-05 — Slice 7: the preview at a phone's width, and pointing at a section (`claude/marketing-editor-preview`)
 
@@ -978,7 +1056,7 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
 | `site_pages` | One page: its path, title, nav place, `draft` and `published` content | FORCE RLS, same policies. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. Unique `(site_id, path)`. CHECK: path `^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$`, title 1–80. `draft`/`published` are `PageContentSchema`; `published` null = never published |
 | `site_page_versions` | A page's history: the content at each `save`, `publish` and `restore` | FORCE RLS; `member_read`, owner INSERT and DELETE (no UPDATE — a version is never edited). Composite FK `(tenant_id, page_id) → site_pages` ON DELETE CASCADE. CHECK on `kind`. Trimmed to the newest `PAGE_VERSIONS_KEEP` (30) on every write by `recordVersion` |
 | `site_domains` | A domain the business owns, connected to its site | FORCE RLS; `member_read`, owner INSERT/UPDATE/DELETE. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. **Unique on `domain` platform-wide** (a hostname points at one site); at most five per site (`SITE_DOMAINS_MAX`). CHECKs: hostname shape, `status in (pending, active, error)`. `records` is `DnsRecordToPublish[]`, what the owner was last told to publish; `vercel_verified`/`vercel_configured_by` are Vercel's last words. **Only an `active` row routes**, and only Vercel makes a row active |
-| `site_enquiries` | A message sent through the site's form: the record of what was sent | FORCE RLS; `member_read`, **member INSERT** (`owner`/`staff` — the public path writes as `staff`, ADR 0021), owner DELETE, **no UPDATE policy**. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. `party_id` / `work_item_id` are **soft pointers** (no FK): the screen resolves them and says when one is gone. CHECKs: name 1–120, message 1–4000, `notify_via in (none, site_email, owners)`. `ip_hash` is the salted hash the caps use, never the IP. Capped at `ENQUIRY_SITE_DAILY_CAP` (100) per site per UTC day. Since 4b (`0254`): `answers` jsonb, `EnquiryAnswer[]` label snapshots of the business's own questions |
+| `site_enquiries` | A message sent through the site's form: the record of what was sent | FORCE RLS; `member_read`, **member INSERT** (`owner`/`staff` — the public path writes as `staff`, ADR 0021), owner DELETE, **no UPDATE policy**. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. `party_id` / `work_item_id` are **soft pointers** (no FK): the screen resolves them and says when one is gone. CHECKs: name 1–120, message 1–4000, `notify_via in (none, site_email, owners)`. `ip_hash` is the salted hash the caps use, never the IP. Capped at `ENQUIRY_SITE_DAILY_CAP` (100) per site per UTC day. Since 4b (`0254`): `answers` jsonb, `EnquiryAnswer[]` label snapshots of the business's own questions. Since 8 (`0259`): `booking_starts_at` / `booking_ends_at` (both or neither, CHECK `site_enquiries_booking_whole`), `booking_title`, and `schedule_item_id`, a soft pointer to the item on the Bookings calendar — a booking is an enquiry with a time (ADR 0025), capped at `BOOKING_SITE_DAILY_CAP` (100) bookings per site per day |
 | `site_page_views` | How many people looked at a page: one row per `(site, day, path)`, counters only | FORCE RLS; `member_read`, **member INSERT and UPDATE** (`owner`/`staff` — the beacon upserts as `staff`, ADR 0022), **no DELETE policy**. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. Unique `(site_id, day, path)`; `day` is a `date` in the tenant's timezone. CHECK: counts ≥ 0. Nothing about a person is stored; `visitors` is browsers reporting their first view of the day on that page |
 | `site_images` | The site's photo library: one row per derivative the platform made | FORCE RLS; `member_read`, owner INSERT/DELETE, **no UPDATE** (a replaced photo is a new row). Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. **Unique on `pathname`** (one blob, one row); at most `SITE_IMAGES_MAX` (60) per site. CHECKs: `mime_type in (image/jpeg, image/png)`, width/height/bytes > 0. The blob lives under `sites/<tenant>/photos/`; sections reference the row by id with their own alt text (ADR 0023) |
 
@@ -1034,6 +1112,13 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
   `src/app/api/marketing/sites/images/[id]`,
   `src/app/sites/[slug]/images/[imageId]`,
   `src/app/domain/[host]/images/[imageId]`
+- Bookings: `src/lib/sites/booking-core.ts` (the request, the window, the
+  offered times, the sentence — pure), `bookings.ts` (`openBookingTimes`,
+  `receiveSiteBooking`), `src/lib/schedule/bookings-calendar.ts`
+  (`ensureBookingsCalendar`, `findBookingsCalendarId`, `busyOnCalendar`),
+  `src/app/api/sites/slots/route.ts`, `src/components/site/booking-form.tsx`
+  + `booking-action.ts`, the `booking` case in `section-forms.tsx` and the
+  `bookingOn` gate in `page-editor.tsx`; migration `0259`
 - The preview: `src/lib/sites/preview.ts` (devices, the three messages —
   pure), `src/components/site/draft-select.tsx` (the draft's island),
   the `.site-draft` rules in `src/app/globals.css`, the device buttons and
@@ -1083,6 +1168,21 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
 
 ## Decisions & gotchas
 
+- **A booking is an enquiry with a time** (ADR 0025), not a table of its
+  own: the same party, follow-up, email and panel, plus four columns and a
+  calendar item. The calendar is one the platform provisions and shares
+  with everyone at `write`, because that share is what lets a write with no
+  user through the scheduling policies — the only alternative was a
+  `withSystem` insert stepping around them. The rules live on the section
+  and are read from the PUBLISHED page on every request; the busy time is
+  the calendar's `show_as`; the chosen start is recomputed against the
+  offer under an advisory lock and refused as "just taken" otherwise. No
+  confirmation email goes to the visitor: the platform mails a public
+  form's words to the business's own addresses only.
+- **The public page's scripts are four where a booking section is on it.**
+  The booking island is the enquiry form's twin with a time picker; it
+  fetches the open times from a public read and posts through a public
+  action, and every other page keeps its three.
 - **The draft has a fourth script; the public page keeps three.** The
   section-pointing island renders only in draft mode and does nothing unless
   framed by the editor, so "the public page's scripts are three" (below)
@@ -1314,6 +1414,18 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
 - **An ISR cache hit has never been seen** — the dev server renders every
   request. The production build proves it: `x-nextjs-cache: HIT` on a second
   fetch of a published page, and a MISS right after a publish.
+- **No confirmation email reaches the visitor who booked.** The page says
+  "we'll confirm by email" and the follow-up makes it true by hand. Mailing
+  an address a stranger typed is a decision about outbound mail (a verified
+  sender, a cap, an unsubscribe) rather than about bookings; when it is
+  made, the receiver has the words ready in `enquiryEmail`.
+- **Two offers share one calendar.** A second booking section (a
+  consultation beside a visit) lands on the same Bookings calendar and
+  blocks the same times. A calendar picker on the section, offering
+  business calendars, is the next step when somebody has two things to
+  book that do not compete for the same person.
+- **A booked time cannot be cancelled from the site.** The visitor emails;
+  a member cancels the item in Scheduling, which frees the time at once.
 - **The documents do not read the look yet.** The invoice PDF draws Noto
   Sans from `src/lib/pdf/fonts` whatever the kit says. Carrying the pairing
   onto the PDF means shipping the same nine families as TTFs for

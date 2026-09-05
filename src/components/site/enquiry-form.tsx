@@ -27,9 +27,9 @@ import { submitSiteEnquiry } from "./enquiry-action";
 
 const INITIAL: EnquiryState = { status: "idle" };
 
-const INPUT =
+export const INPUT =
   "block w-full rounded-[var(--site-radius-field)] border border-neutral-300 bg-white px-3 py-2 text-base text-neutral-900 shadow-sm placeholder:text-neutral-400 focus:border-[var(--site-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--site-primary)]/30 disabled:bg-neutral-100 disabled:text-neutral-500";
-const LABEL = "block text-sm font-medium text-neutral-800";
+export const LABEL = "block text-sm font-medium text-neutral-800";
 
 function FieldError({ id, error }: { id: string; error?: string }) {
   if (!error) return null;

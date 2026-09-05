@@ -104,7 +104,7 @@ type Outcome =
  * `withSystem` because `profiles` belong to the platform, not the tenant,
  * and the query takes only the tenant id the trusted lookup produced.
  */
-async function notifyPlan(tenantId: string, settingsEmail: string): Promise<NotifyPlan> {
+export async function notifyPlan(tenantId: string, settingsEmail: string): Promise<NotifyPlan> {
   if (settingsEmail) return { via: "site_email", recipients: [{ key: "site", email: settingsEmail }] };
   const owners = await withSystem((tx) =>
     tx
@@ -120,7 +120,7 @@ async function notifyPlan(tenantId: string, settingsEmail: string): Promise<Noti
 }
 
 /** A contact point that is not usable is left out; the message still carries it. */
-async function tryAddContactPoint(
+export async function tryAddContactPoint(
   tx: Tx,
   tenantId: string,
   partyId: string,

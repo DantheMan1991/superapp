@@ -80,6 +80,21 @@ anyone visited, and the form asked only what Yosher chose.
   (the questions block), the `site_page_views` isolation block. Guides:
   `website.md` (`Visitors`, the answers in `Messages`, the new messages),
   `page-editor.md` (`Questions`). Security row for the beacon.
+- **Driven on the dev branch (Test tenant, `oak-row-farm`)**: three
+  questions added in the editor (a `Pick one` with three choices, a
+  required `Short answer`, a `Yes or no`), saved and published; the live
+  contact page showed them between the phone and the message with
+  `(optional)` on the two that were; a send with the required one blank
+  came back with `Check the highlighted fields and try again.` and `This
+  one is needed to send.` under it; answered, the message landed with
+  `answers` as label snapshots on the row, the same three lines in the
+  follow-up's notes, and `Question: answer` lines under the sender in
+  `Messages`. Loading the home page once and the about page twice sent
+  four beacons (`204` each); `Visitors` then read `1 visitor and 4 page
+  views`, About 2 / Home 1 / Contact 1 with the one visitor on the contact
+  page, which was that browser's first page of the day. The dev server's
+  `x-forwarded-for` is empty, so the enquiry caps ran on the `unsalted`
+  key, as documented.
 
 ### 2026-09-04 — Slice 4: the form on the site lands in the workspace (`claude/marketing-site-forms`)
 

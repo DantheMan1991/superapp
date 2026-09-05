@@ -97,6 +97,16 @@ describe("classifyHost", () => {
     expect(classifyHost("justaword", opts)).toEqual({ kind: "platform" });
   });
 
+  it("lets a site's free address win over a platform host's subdomains, which on a laptop are the same names", () => {
+    const local = { siteDomain: "localhost", platformHosts: platformHostsFromEnv({ NEXT_PUBLIC_APP_URL: "http://localhost:3000" }) };
+    expect(classifyHost("oak-row-farm.localhost:3000", local)).toEqual({ kind: "site", slug: "oak-row-farm" });
+    expect(classifyHost("localhost:3000", local)).toEqual({ kind: "platform" });
+    expect(classifyHost("www.localhost:3000", local)).toEqual({ kind: "platform" });
+    // In production the platform's own subdomains stay its own.
+    expect(classifyHost("www.yosherapp.com", opts)).toEqual({ kind: "platform" });
+    expect(classifyHost("preview-x.vercel.app", opts)).toEqual({ kind: "platform" });
+  });
+
   it("reads the platform hosts from the app url and never fails on a bad one", () => {
     expect(platformHostsFromEnv({ NEXT_PUBLIC_APP_URL: "http://localhost:3000" })).toEqual(["localhost", "127.0.0.1", "localhost"]);
     expect(platformHostsFromEnv({ NEXT_PUBLIC_APP_URL: "not a url" })).toEqual(["localhost", "127.0.0.1"]);

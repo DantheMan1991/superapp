@@ -93,6 +93,32 @@ it is served from (our routes, published sites only) and where a photo may go
   `page-editor.md` (the photo fields, the `Photo` kind, the dialog, the
   messages), `website.md` (photos are no longer "not on this page").
   Security rows for the three routes.
+- **Driven on the dev branch (Test tenant, `oak-row-farm`, real blob
+  store)**: a 2400×1600 JPEG (55KB, drawn on a canvas and handed to the
+  picker's file input) uploaded through the presigned door, came back
+  `1600 × 1067` in the hero's `Photo beside the headline` with `Photo
+  added.`; alt text set, saved, published; the live home page drew it
+  beside the headline from `/sites/oak-row-farm/images/<id>` (200,
+  `image/jpeg`, 18,005 bytes, the public cache header, an ETag), with
+  `width`/`height` attributes and `loading="eager"`; the draft preview drew
+  the same photo from the member route; the member route answered 401
+  without a session, an unknown id and a malformed id 404, and `/images` as
+  a page 404. A 1200×900 PNG with transparency went into a full-width
+  `Photo` section on the about page and stayed a PNG at 1200×900 with its
+  caption. Removing it from the library (`Photo removed.`) cleared the
+  section, the published about page lost its figure, the route answered
+  404 and the blob was gone from the store; the audit log held one
+  `photo_added` per upload and one `photo_removed`. `curl -H "Host:
+  oak-row-farm.localhost:3000"` then served `/`, `/about`, `/logo` and
+  `/images/<id>` through the proxy's rewrite.
+- **Found while driving: `<slug>.localhost` had been reading as the
+  PLATFORM since slice 3**, because `classifyHost` treated any subdomain of
+  a platform host as the platform's before asking whether it was a site's
+  free address — and on a laptop the site domain and a platform host are
+  both `localhost`. Fixed by deciding the free address first (exact
+  platform hosts still win); production names are unaffected because the
+  site domain is never a platform host's. `tests/sites-domains.test.ts`
+  pins it. The slice 3 curl checks had only exercised `/domain/<host>`.
 
 ### 2026-09-04 — Slice 4b: who looked, and the business's own questions (`claude/marketing-site-views-and-questions`)
 
@@ -575,6 +601,13 @@ generated logo re-drawable as a vector.
 
 ## Decisions & gotchas
 
+- **A site's free address is decided before a platform host's
+  subdomains.** `classifyHost` checks exact platform hosts, then
+  `hostToSiteSlug`, then platform subdomains and `.vercel.app`. The order
+  only matters where the site domain and a platform host coincide, which
+  is a laptop (`localhost`); it is what makes `oak-row.localhost:3000` a
+  site. Reversing it (slice 3 did, unknowingly) turns local host routing
+  off with no error anywhere.
 - **One derivative is all a photo ever is** (ADR 0023). The upload is
   decoded, oriented, capped at 1,600px, re-encoded and stripped of every
   tag, then deleted; the store never holds an original, an SVG or a
@@ -807,7 +840,9 @@ generated logo re-drawable as a vector.
   left from this verification — since slice 4 with an enquiry form on its
   contact page, three messages (two from Jane Doe, one from Sam Rivers),
   the two parties, three `Reply to …` items and, because the CRM-on path
-  needed proving, **CRM and Work switched on** for it.
+  needed proving, **CRM and Work switched on** for it. Since slice 5 its
+  hero carries a photo (a green canvas reading "Oak Row Farm") and the
+  library holds that one row.
 - **Not yet looked at: dark mode, a phone, and a square mark on the PDF.**
   The screen was driven on the dev branch (build log) but only in the light
   theme on a desktop pane. The colour input on a phone and whether the

@@ -178,11 +178,20 @@ export function classifyHost(
   const bare = host.toLowerCase().split(":")[0] ?? "";
   if (bare === "") return { kind: "platform" };
   for (const own of env.platformHosts) {
-    if (bare === own || bare.endsWith(`.${own}`)) return { kind: "platform" };
+    if (bare === own) return { kind: "platform" };
   }
-  if (bare.endsWith(".vercel.app")) return { kind: "platform" };
+  // A site's free address is decided BEFORE a platform host's subdomains,
+  // because on a laptop the two coincide: the site domain defaults to
+  // `localhost` and `localhost` is a platform host, so `oak-row.localhost`
+  // must read as a site or host routing cannot be tried locally. In
+  // production the site domain is never a platform host's, so nothing here
+  // changes which real hostnames are the platform's.
   const slug = hostToSiteSlug(bare, env.siteDomain);
   if (slug) return { kind: "site", slug };
+  for (const own of env.platformHosts) {
+    if (bare.endsWith(`.${own}`)) return { kind: "platform" };
+  }
+  if (bare.endsWith(".vercel.app")) return { kind: "platform" };
   if (env.siteDomain) {
     const domain = env.siteDomain.toLowerCase().split(":")[0] ?? "";
     // The site domain's apex, its www, and any label that is not a valid

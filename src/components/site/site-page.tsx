@@ -8,7 +8,8 @@ import { isSafeHref } from "@/lib/sites/links";
 import { directionsUrl, MAP_ATTRIBUTION, MAP_HEIGHT, MAP_WIDTH, mapKey, pinIsFor } from "@/lib/sites/map-core";
 import type { ImageRef, Section, SectionStyle, SitePageView, SiteSettings } from "@/lib/sites/schema";
 import { SECTION_ATTR } from "@/lib/sites/preview";
-import { siteHref, type SiteMode } from "@/lib/sites/slug";
+import { jsonLdText, localBusinessJsonLd, type BusinessFacts } from "@/lib/sites/seo";
+import { siteDomainFromEnv, siteHref, type SiteMode } from "@/lib/sites/slug";
 import type { Slide } from "@/lib/sites/slides";
 import {
   backgroundClass,
@@ -70,6 +71,39 @@ export function imageSrc(mode: SiteMode, slug: string, id: string): string {
   return `/sites/${slug}/images/${id}`;
 }
 
+/**
+ * Where the site lives, as an absolute address: the connected domain when
+ * there is one (the canonical, wherever the page was reached), else the
+ * free address for a host, else the platform path.
+ */
+function siteBase(site: PublicSite, mode: SiteMode): string {
+  if (site.customHost) return `https://${site.customHost}`;
+  const app = (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+  const domain = siteDomainFromEnv(process.env);
+  if (mode === "host" && domain) {
+    const url = new URL(app);
+    return `${url.protocol}//${site.slug}.${domain}${url.port ? `:${url.port}` : ""}`;
+  }
+  return `${app}/sites/${site.slug}`;
+}
+
+/** What the settings say about the business, for the structured data. */
+function businessFacts(site: PublicSite, mode: SiteMode): BusinessFacts {
+  const base = siteBase(site, mode);
+  const address = site.settings.address.trim();
+  return {
+    name: site.title,
+    description: site.brand.tagline,
+    url: `${base}/`,
+    phone: site.settings.phone,
+    email: site.settings.email,
+    address,
+    pin: pinIsFor(site.settings.map, address) ? site.settings.map : null,
+    logoUrl: site.brand.logo ? `${base}/logo` : null,
+    sameAs: site.settings.social.map((s) => s.url),
+  };
+}
+
 /** The map picture's address for this mode, keyed by the pin, the zoom and the colour (`src/lib/sites/map.ts`). */
 export function mapSrc(mode: SiteMode, slug: string, key: string): string {
   if (mode === "host") return `/map/${key}`;
@@ -118,6 +152,13 @@ export function SitePage({
       {banner}
       {/* The draft preview is the owner looking, not a visitor: no count, and a way to point at a section. */}
       {mode === "draft" ? <DraftSelect /> : <ViewBeacon slug={site.slug} path={page.path} />}
+      {/* The home page tells search engines what the settings say about the business (slice 11). */}
+      {page.path === "/" && mode !== "draft" && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: jsonLdText(localBusinessJsonLd(businessFacts(site, mode))) }}
+        />
+      )}
       <Announcement site={site} mode={mode} />
       <SiteHeader site={site} mode={mode} pagePath={page.path} primary={primary} accent={accent} />
 

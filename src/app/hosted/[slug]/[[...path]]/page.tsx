@@ -13,7 +13,7 @@ type Params = Promise<{ slug: string; path?: string[] }>;
 
 export async function generateMetadata({ params }: { params: Params }) {
   const { slug, path } = await params;
-  return publicSiteMetadata({ by: "slug", slug }, path);
+  return publicSiteMetadata({ by: "slug", slug }, path, "host");
 }
 
 export default async function HostedSitePage({ params }: { params: Params }) {

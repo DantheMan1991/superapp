@@ -39,7 +39,8 @@
 | **9a** | **The first live block: `What's on`, the next events from an Events calendar the platform provisions, drawn from the calendar when the page is rendered and kept current by themselves.** | **built 2026-09-05** |
 | 9b | Prices and availability from the retail and inventory packs, through the declared-slot seam the shop block needs (`retail` slice 6): a pack contributes a block kind, its editor fields and its renderer; the site hosts them. A live team block is not planned: Columns already does a team by hand, and a live one raises consent questions a section should not answer | with the shop block |
 | **10** | **`Find us`: a map of the site's address, a picture the platform draws from public-domain USGS tiles around a pin the Census geocoder placed at save, with the address and a `Get directions` link. No client library, no third-party request from a visitor's browser, United States only.** [ADR 0026](../decisions/0026-a-map-is-a-picture-the-platform-draws.md) | **built 2026-09-05** |
-| 11 | The SEO pack: sitemap and robots per site, a drawn share image per page, local-business structured data, redirects on an address change; a favicon from the logo | |
+| **11a** | **What search engines and browsers ask a site for: `robots.txt` and `sitemap.xml` per site on every address it has, LocalBusiness structured data on the home page from the settings (address, phone, email, the map's pin, the logo, the social profiles), and an icon from the brand kit (a square logo as it is, otherwise a monogram in the brand colour) at 32, 180 and 512.** | **built 2026-09-05** |
+| 11b | A drawn share image per page (`og:image`, from the kit's colours and type paths) and redirects from an address the site used to have (a `previous_slugs` column) | next |
 | 12 | The assistant everywhere: rewrite one section, write a page from a sentence, suggest a photo description from the image | |
 | — | The shop block: `retail` slice 6 (online orders + pickup windows) fills a declared slot; blocked on commitments (retail 3) and web checkout (payments) | not this module's |
 
@@ -47,6 +48,60 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-05 — Slice 11a: robots, a sitemap, structured data and an icon (`claude/marketing-site-seo`)
+
+What a crawler and a browser ask a site for by name, answered per site
+on every address it has. No migration.
+
+- **`src/lib/sites/seo.ts`** (pure, tested): `robotsText`, `sitemapXml`
+  (escaped), `siteBaseUrl` (the host's root on a site host or a connected
+  domain, `/sites/<slug>` on the platform), `pageUrl`,
+  `localBusinessJsonLd` (a `LocalBusiness` that says only what the
+  settings say: name, url, the tagline as description, telephone, email,
+  the address as one line, `geo` from the map's pin, `logo`/`image`,
+  `sameAs` from the social links; a blank field is left out), `jsonLdText`
+  (`<` escaped so a name cannot close the tag), `ICON_SIZES` 32 | 180 |
+  512, `hash32`.
+- **`seo-routes.ts`** (`robotsResponse`, `sitemapResponse`): a published
+  site only, else 404 (robots read that as no rules, and it says nothing
+  about which addresses exist); the base is the connected domain when
+  there is one — the canonical, wherever the request came in — else the
+  origin the visitor used, classified with the proxy's own `classifyHost`.
+  The sitemap lists the published pages in menu order with the site's
+  `published_at` as `lastmod`. Routes `src/app/sites/[slug]/robots.txt`,
+  `…/sitemap.xml` and the `/domain/[host]/` twins; `siteRewrite` sends a
+  site host's `/robots.txt` and `/sitemap.xml` there, and its
+  `/favicon.ico` and `/apple-touch-icon.png` to the icon route. The
+  platform's own `robots.ts` and `sitemap.ts` are untouched: the proxy
+  answers before Next's metadata routes on a site host, and never on the
+  platform's.
+- **The icon** (`icon.ts`, `siteIconResponse`): a logo whose sides are
+  within 0.8–1.25 of each other is fitted on white as it is; anything else
+  (a wide wordmark squeezed into a tab is a smudge), and a business with no
+  logo, gets a monogram — the initials on a rounded square in the brand
+  colour, drawn by the kit's own `renderLogoSvg` with a `monogram` spec and
+  rasterised by `rasterizeSvgToPng`. Named by the logo's pathname, the
+  colour, the title and the size, cached like a photo. Routes
+  `src/app/sites/[slug]/icon/[size]` and the domain twin; the pages' metadata
+  names them as `icons` (`/icon/32` and `/icon/180` on a host, under
+  `/sites/<slug>` on the platform), and `/icon` is a reserved page path.
+- **Structured data**: `SitePage` writes a `<script type="application/ld+json">`
+  on the home page in the two public modes, from `businessFacts` (the
+  absolute base: the connected domain, else the free address on a host,
+  else the platform path).
+- **Driven on the dev branch** on Test's `oak-row-farm`: on the platform
+  path, `robots.txt` answered the four lines with the sitemap at
+  `/sites/oak-row-farm/sitemap.xml`, the sitemap listed the three pages
+  with the last publish as `lastmod`, the icons at 32 and 180 came back as
+  PNG with the photo cache headers and a 304 on the ETag, size 64 and an
+  unknown site were 404; on the free address `oak-row-farm.localhost:3000`
+  both files answered root-relative through the proxy; the home page's
+  head named the two icons and its structured data carried the name,
+  tagline, address, phone, email, the map's pin, the logo and the eight
+  social profiles; and the 512 icon was `OR` in the brand colour on a
+  rounded square, the fixture's logo being a wide wordmark. Tests:
+  `tests/site-seo.test.ts`.
 
 ### 2026-09-05 — Slice 10: find us, a map the platform draws (`claude/marketing-site-map`)
 
@@ -1219,6 +1274,12 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
   `src/app/api/marketing/sites/images/[id]`,
   `src/app/sites/[slug]/images/[imageId]`,
   `src/app/domain/[host]/images/[imageId]`
+- Search engines and icons: `src/lib/sites/seo.ts` (robots, the sitemap,
+  the structured data, the icon sizes — pure), `seo-routes.ts`
+  (`robotsResponse`, `sitemapResponse`), `icon.ts` (`siteIconResponse`,
+  the monogram), the `robots.txt`, `sitemap.xml` and `icon/[size]` routes
+  under `src/app/sites/[slug]/` and `src/app/domain/[host]/`, `iconsFor` in
+  `public-route.tsx`, `businessFacts` in `site-page.tsx`
 - The map: `src/lib/sites/map-core.ts` (the projection, the key, the
   marker, the geocoder's answer, the status line — pure), `map.ts`
   (`geocodeAddress`, `renderMap`, the two responses), the three `map/[key]`
@@ -1294,6 +1355,14 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
   offer under an advisory lock and refused as "just taken" otherwise. No
   confirmation email goes to the visitor: the platform mails a public
   form's words to the business's own addresses only.
+- **A wide logo does not become a favicon.** The tab's icon is the logo
+  only when it is roughly square; otherwise it is a monogram drawn by the
+  kit's own machinery, because a wordmark at 32 pixels is a smudge and a
+  business with no logo needs an icon just the same. The same rule will
+  serve the share image's corner.
+- **The structured data says what the settings say.** A LocalBusiness with
+  only the fields the owner filled in; nothing is invented for a blank one,
+  since a placeholder there is a placeholder in a search result.
 - **A map is a picture the platform draws** (ADR 0026): public-domain USGS
   Topo tiles stitched on the server around a pin the Census geocoder
   placed, cached like a photo under a key that changes with the pin, the

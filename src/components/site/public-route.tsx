@@ -19,9 +19,16 @@ function load(source: SiteSource): Promise<PublicSite | null> {
     : loadPublishedSiteByDomain(source.host);
 }
 
+/** The icon routes for this mode: the tab's, the home screen's. */
+function iconsFor(mode: SiteMode, slug: string): Metadata["icons"] {
+  const base = mode === "path" ? `/sites/${slug}/icon` : "/icon";
+  return { icon: [{ url: `${base}/32`, sizes: "32x32", type: "image/png" }], apple: [{ url: `${base}/180`, sizes: "180x180" }] };
+}
+
 export async function publicSiteMetadata(
   source: SiteSource,
   segments: string[] | undefined,
+  mode: SiteMode,
 ): Promise<Metadata> {
   const site = await load(source);
   if (!site) return { robots: { index: false, follow: false } };
@@ -36,6 +43,7 @@ export async function publicSiteMetadata(
     description,
     openGraph: { title: site.title, description, type: "website" },
     robots: { index: true, follow: true },
+    icons: iconsFor(mode, site.slug),
     // Whichever address the page was reached by, the business's own domain
     // is the one search engines should keep, once it is live.
     ...(site.customHost

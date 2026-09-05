@@ -61,7 +61,7 @@ export const RESERVED_SITE_SLUGS: ReadonlySet<string> = new Set([
 ]);
 
 /** Page paths the platform's routes shadow under `/sites/<slug>/…`. */
-export const RESERVED_PAGE_PATHS: ReadonlySet<string> = new Set(["/draft", "/logo", "/images", "/map"]);
+export const RESERVED_PAGE_PATHS: ReadonlySet<string> = new Set(["/draft", "/logo", "/images", "/map", "/icon"]);
 
 export type SlugCheck =
   | { ok: true; slug: string }
@@ -245,8 +245,14 @@ export function siteRewrite(kind: HostKind, pathname: string): string | null {
   if (pathname.startsWith("/_next/") || pathname.startsWith("/api/")) return null;
   const assetBase = kind.kind === "site" ? `/sites/${kind.slug}` : `/domain/${kind.host}`;
   const pageBase = kind.kind === "site" ? `/hosted/${kind.slug}` : `/domain/${kind.host}`;
-  if (pathname === "/logo" || pathname.startsWith("/images/") || pathname.startsWith("/map/")) {
+  if (pathname === "/logo" || pathname.startsWith("/images/") || pathname.startsWith("/map/") || pathname.startsWith("/icon/")) {
     return `${assetBase}${pathname}`;
+  }
+  // What a crawler or a browser asks a host for by name (slice 11).
+  if (pathname === "/robots.txt" || pathname === "/sitemap.xml") return `${assetBase}${pathname}`;
+  if (pathname === "/favicon.ico") return `${assetBase}/icon/32`;
+  if (pathname === "/apple-touch-icon.png" || pathname === "/apple-touch-icon-precomposed.png") {
+    return `${assetBase}/icon/180`;
   }
   return `${pageBase}${pathname === "/" ? "" : pathname}`;
 }

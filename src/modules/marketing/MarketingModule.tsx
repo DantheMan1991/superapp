@@ -53,6 +53,9 @@ export async function MarketingModule({ ctx }: { ctx: TenantContext }) {
   // a press that would come back refused.
   const canWrite = ctx.role === "owner";
   const showCompanies = companies.length > 1 || companyKits.size > 0;
+  // What a company kit's blank look falls back to: the business kit's answers.
+  const businessLook = resolveBrand({ tenantName: ctx.tenant.name, business, company: null });
+  const inherits = { look: businessLook.look, fontPairing: businessLook.fontPairing, buttonShape: businessLook.buttonShape };
 
   return (
     <div className="space-y-8">
@@ -76,6 +79,7 @@ export async function MarketingModule({ ctx }: { ctx: TenantContext }) {
             business,
             company: null,
           })}
+          inherits={null}
           fallbackName={ctx.tenant.name}
           canWrite={canWrite}
         />
@@ -136,6 +140,7 @@ export async function MarketingModule({ ctx }: { ctx: TenantContext }) {
                     business,
                     company: kit,
                   })}
+                  inherits={inherits}
                   fallbackName={company.name}
                   canWrite={canWrite}
                 />

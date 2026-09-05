@@ -28,7 +28,7 @@ import { submitSiteEnquiry } from "./enquiry-action";
 const INITIAL: EnquiryState = { status: "idle" };
 
 const INPUT =
-  "block w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-base text-neutral-900 shadow-sm placeholder:text-neutral-400 focus:border-[var(--site-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--site-primary)]/30 disabled:bg-neutral-100 disabled:text-neutral-500";
+  "block w-full rounded-[var(--site-radius-field)] border border-neutral-300 bg-white px-3 py-2 text-base text-neutral-900 shadow-sm placeholder:text-neutral-400 focus:border-[var(--site-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--site-primary)]/30 disabled:bg-neutral-100 disabled:text-neutral-500";
 const LABEL = "block text-sm font-medium text-neutral-800";
 
 function FieldError({ id, error }: { id: string; error?: string }) {
@@ -83,7 +83,7 @@ export function EnquiryForm({
     return (
       <div
         role="status"
-        className="mt-6 rounded-xl border border-neutral-200 bg-neutral-50 p-6 text-neutral-800"
+        className="mt-6 rounded-[var(--site-radius)] border border-neutral-200 bg-neutral-50 p-6 text-neutral-800"
       >
         <p className="font-medium" style={{ color: "var(--site-primary)" }}>
           Message sent.
@@ -293,7 +293,7 @@ export function EnquiryForm({
         <div className="flex flex-wrap items-center gap-4">
           <button
             type="submit"
-            className="inline-block rounded-full px-6 py-3 text-sm font-medium shadow-sm disabled:opacity-60"
+            className="inline-block rounded-[var(--site-radius-button)] px-6 py-3 text-sm font-medium shadow-sm disabled:opacity-60"
             style={{ backgroundColor: "var(--site-primary)", color: "var(--site-primary-fg)" }}
           >
             {pending ? "Sending…" : buttonLabel || "Send"}

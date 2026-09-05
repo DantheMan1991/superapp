@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import { foregroundOn } from "@/lib/brand/core";
+import { lookRadiusVars, resolveLook } from "@/lib/brand/looks";
 import type { PublicSite } from "@/lib/sites/read";
 import { isSafeHref } from "@/lib/sites/links";
 import type { ImageRef, Section, SectionStyle, SitePageView, SiteSettings } from "@/lib/sites/schema";
@@ -21,6 +22,7 @@ import {
 import { cn } from "@/lib/utils";
 import { CardIcon } from "./card-icons";
 import { EnquiryForm } from "./enquiry-form";
+import { siteFonts } from "./site-fonts";
 import { Gallery, Slideshow } from "./slideshow";
 import { SocialLinks } from "./social-icons";
 import { ViewBeacon } from "./view-beacon";
@@ -88,13 +90,19 @@ export function SitePage({
 }) {
   const primary = site.brand.primaryColor ?? "#1f2937";
   const accent = site.brand.accentColor ?? primary;
+  // The look (slice 6d): the fonts as bundled families, the corners as variables the classes read.
+  const look = resolveLook(site.brand);
+  const fonts = siteFonts(look.fontPairing);
   const style = {
     "--site-primary": primary,
     "--site-primary-fg": foregroundOn(primary),
     "--site-accent": accent,
+    "--site-font-heading": fonts.heading,
+    "--site-font-body": fonts.body,
+    ...lookRadiusVars(look),
   } as CSSProperties;
   return (
-    <div style={style} className="flex min-h-screen flex-col bg-white text-neutral-900">
+    <div style={style} className={cn("site-root flex min-h-screen flex-col bg-white text-neutral-900", fonts.className)}>
       {banner}
       {/* The draft preview is the owner looking, not a visitor: no count. */}
       {mode !== "draft" && <ViewBeacon slug={site.slug} path={page.path} />}
@@ -204,7 +212,7 @@ function SiteHeader({
             {button && buttonHref && (
               <Link
                 href={buttonHref}
-                className="inline-block rounded-full px-4 py-2 text-sm font-medium shadow-sm"
+                className="inline-block rounded-[var(--site-radius-button)] px-4 py-2 text-sm font-medium shadow-sm"
                 style={LIGHT_TONE.button}
               >
                 {button.label}
@@ -424,9 +432,9 @@ function SectionView({
         <Shell {...shell} spacing={heroHeightClass(section.height)} eager>
           {photo ? (
             <div className={cn("grid items-center gap-10", left ? "md:grid-cols-[2fr_3fr]" : "md:grid-cols-[3fr_2fr]")}>
-              {left && <Photo site={site} mode={mode} image={photo} eager className="w-full rounded-2xl object-cover shadow-sm" />}
+              {left && <Photo site={site} mode={mode} image={photo} eager className="w-full rounded-[var(--site-radius)] object-cover shadow-sm" />}
               {words}
-              {!left && <Photo site={site} mode={mode} image={photo} eager className="w-full rounded-2xl object-cover shadow-sm" />}
+              {!left && <Photo site={site} mode={mode} image={photo} eager className="w-full rounded-[var(--site-radius)] object-cover shadow-sm" />}
             </div>
           ) : (
             words
@@ -458,9 +466,9 @@ function SectionView({
               const photo = card.image && site.images[card.image.id] ? card.image : null;
               const to = card.cta ? resolveHref(mode, site.slug, card.cta.href) : null;
               return (
-                <li key={card.id} className={panels ? "rounded-2xl bg-white p-6 text-neutral-900 shadow-sm ring-1 ring-neutral-200" : ""}>
+                <li key={card.id} className={panels ? "rounded-[var(--site-radius)] bg-white p-6 text-neutral-900 shadow-sm ring-1 ring-neutral-200" : ""}>
                   {photo ? (
-                    <Photo site={site} mode={mode} image={photo} className="mb-4 aspect-[4/3] w-full rounded-xl object-cover" />
+                    <Photo site={site} mode={mode} image={photo} className="mb-4 aspect-[4/3] w-full rounded-[calc(var(--site-radius)*0.75)] object-cover" />
                   ) : card.icon ? (
                     <CardIcon name={card.icon} className="mb-4 size-8" style={{ color: inner.heading }} />
                   ) : null}
@@ -535,7 +543,7 @@ function SectionView({
               site={site}
               mode={mode}
               image={photo}
-              className={wide ? "max-h-[70vh] w-full object-cover" : "w-full rounded-2xl object-cover shadow-sm"}
+              className={wide ? "max-h-[70vh] w-full object-cover" : "w-full rounded-[var(--site-radius)] object-cover shadow-sm"}
             />
             {section.caption && (
               <figcaption className={cn("mt-3 text-sm", tone.muted, wide && "mx-auto max-w-5xl px-6")}>{section.caption}</figcaption>
@@ -550,7 +558,7 @@ function SectionView({
           <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
           <ul className={cn("mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3", centred && "text-left")}>
             {section.items.map((item, i) => (
-              <li key={i} className="rounded-2xl bg-white p-6 text-neutral-900 shadow-sm ring-1 ring-neutral-200">
+              <li key={i} className="rounded-[var(--site-radius)] bg-white p-6 text-neutral-900 shadow-sm ring-1 ring-neutral-200">
                 <h3 className="font-semibold" style={{ color: LIGHT_TONE.heading }}>
                   {item.name}
                 </h3>
@@ -578,9 +586,9 @@ function SectionView({
         <Shell {...shell} spacing={room}>
           {photo ? (
             <div className={cn("grid gap-8 md:items-start", left ? "md:grid-cols-[2fr_3fr]" : "md:grid-cols-[3fr_2fr]")}>
-              {left && <Photo site={site} mode={mode} image={photo} className="w-full rounded-2xl object-cover shadow-sm" />}
+              {left && <Photo site={site} mode={mode} image={photo} className="w-full rounded-[var(--site-radius)] object-cover shadow-sm" />}
               {words}
-              {!left && <Photo site={site} mode={mode} image={photo} className="w-full rounded-2xl object-cover shadow-sm" />}
+              {!left && <Photo site={site} mode={mode} image={photo} className="w-full rounded-[var(--site-radius)] object-cover shadow-sm" />}
             </div>
           ) : (
             words
@@ -680,7 +688,7 @@ function Photo({
 
 /** The button: the brand colour on a light background, white where the background is the brand colour or dark. */
 function CtaLink({ href, label, tone }: { href: string | null; label: string; tone: Tone }) {
-  const className = "inline-block rounded-full px-6 py-3 text-sm font-medium shadow-sm";
+  const className = "inline-block rounded-[var(--site-radius-button)] px-6 py-3 text-sm font-medium shadow-sm";
   // No usable link: the words stay, as a button that goes nowhere is still the owner's words.
   if (!href) {
     return (

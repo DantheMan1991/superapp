@@ -4,6 +4,7 @@ import { Panel } from "@/components/app/panel";
 import { BrandKitForm } from "./brand-kit-form";
 import { BrandPreview } from "./brand-preview";
 import { LogoControls } from "./logo-controls";
+import type { LookInherits } from "./look-fields";
 
 /**
  * One kit, drawn as: how it reads → the logo → the fields. Server component;
@@ -18,6 +19,7 @@ export function BrandKitPanel({
   entityId,
   kit,
   resolved,
+  inherits,
   fallbackName,
   canWrite,
 }: {
@@ -25,6 +27,8 @@ export function BrandKitPanel({
   entityId: string | null;
   kit: BrandKit | null;
   resolved: ResolvedBrand;
+  /** What a company kit's blank look falls back to (the business kit's answers); null on the business kit. */
+  inherits: LookInherits | null;
   /** What the name field falls back to when left blank. */
   fallbackName: string;
   canWrite: boolean;
@@ -78,7 +82,11 @@ export function BrandKitPanel({
             tagline: kit?.tagline ?? "",
             primaryColor: kit?.primaryColor ?? "",
             accentColor: kit?.accentColor ?? "",
+            look: kit?.look ?? "",
+            fontPairing: kit?.fontPairing ?? "",
+            buttonShape: kit?.buttonShape ?? "",
           }}
+          inherits={inherits}
           fallbackName={fallbackName}
           canWrite={canWrite}
         />

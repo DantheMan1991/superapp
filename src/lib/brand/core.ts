@@ -6,6 +6,15 @@
  * consumer would otherwise reinvent. Both are table-testable.
  */
 
+import {
+  isBrandLook,
+  isButtonShape,
+  isFontPairing,
+  type BrandLook,
+  type ButtonShape,
+  type FontPairing,
+} from "./looks";
+
 /** `#rrggbb`, lowercase. What `brand_kits.primary_color` stores. */
 export type HexColor = `#${string}`;
 
@@ -26,6 +35,10 @@ export interface BrandKitFields {
   logoMimeType: string;
   logoWidth: number;
   logoHeight: number;
+  /** The look (`looks.ts`): each `''` for "as the business kit says", or the platform default. */
+  look: string;
+  fontPairing: string;
+  buttonShape: string;
 }
 
 export interface ResolvedBrand {
@@ -37,6 +50,10 @@ export interface ResolvedBrand {
   primaryColor: HexColor | null;
   accentColor: HexColor | null;
   logo: BrandLogo | null;
+  /** The look, each null when nobody has chosen; `resolveLook` turns them into one answer. */
+  look: BrandLook | null;
+  fontPairing: FontPairing | null;
+  buttonShape: ButtonShape | null;
   /**
    * Where each answer came from, for the screen that explains it: a company
    * kit that only set a trading name still shows the shared logo, and the
@@ -161,6 +178,10 @@ export function resolveBrand(input: {
   const displayName = pick((k) => k.displayName);
   const companyLogo = logoOf(company);
   const businessLogo = logoOf(business);
+  // The CHECKs on the table keep these to the lists; the guards keep the types honest.
+  const look = pick((k) => k.look ?? "");
+  const fontPairing = pick((k) => k.fontPairing ?? "");
+  const buttonShape = pick((k) => k.buttonShape ?? "");
 
   return {
     displayName: displayName || input.tenantName,
@@ -168,6 +189,9 @@ export function resolveBrand(input: {
     primaryColor: asHex(pick((k) => k.primaryColor)),
     accentColor: asHex(pick((k) => k.accentColor)),
     logo: companyLogo ?? businessLogo,
+    look: isBrandLook(look) ? look : null,
+    fontPairing: isFontPairing(fontPairing) ? fontPairing : null,
+    buttonShape: isButtonShape(buttonShape) ? buttonShape : null,
     sources: {
       displayName: company?.displayName
         ? "company"

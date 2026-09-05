@@ -438,3 +438,18 @@
     padding-right: 28rem;
   }
 }
+
+/*
+ * A tenant's public site takes its type from the brand kit's look. The
+ * renderer sets these variables on its root (`src/components/site/site-page.tsx`)
+ * from the bundled families in `site-fonts.ts`; nothing else in the app
+ * carries the class.
+ */
+@layer base {
+  .site-root {
+    font-family: var(--site-font-body, var(--font-sans));
+  }
+  .site-root :where(h1, h2, h3) {
+    font-family: var(--site-font-heading, var(--font-sans));
+  }
+}

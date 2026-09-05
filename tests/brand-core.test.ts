@@ -19,6 +19,9 @@ const empty: BrandKitFields = {
   logoMimeType: "",
   logoWidth: 0,
   logoHeight: 0,
+  look: "",
+  fontPairing: "",
+  buttonShape: "",
 };
 
 describe("normalizeHexColor", () => {

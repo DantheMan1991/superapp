@@ -105,6 +105,16 @@ export const brandKits = pgTable(
      * stays stable even if the renderer changes.
      */
     logoSpec: jsonb("logo_spec").notNull().default({}),
+    /**
+     * The look of the business's website (and, one day, its documents): a
+     * look, a font pairing and a button shape, each one of the short lists
+     * in `src/lib/brand/looks.ts`, or `''` — "as the business kit says" on a
+     * company kit, the platform default on the business kit. Presets, never
+     * font files or CSS: the CHECKs below are the whole vocabulary. Slice 6d.
+     */
+    look: text("look").notNull().default(""),
+    fontPairing: text("font_pairing").notNull().default(""),
+    buttonShape: text("button_shape").notNull().default(""),
     /** Attribution only — grants nothing. */
     updatedByClerkUserId: text("updated_by_clerk_user_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -162,6 +172,12 @@ export const brandKits = pgTable(
     ),
     check("brand_kits_display_name_length", sql`length(${t.displayName}) <= 80`),
     check("brand_kits_tagline_length", sql`length(${t.tagline}) <= 140`),
+    check("brand_kits_look_values", sql`${t.look} in ('', 'modern', 'warm', 'classic')`),
+    check(
+      "brand_kits_font_pairing_values",
+      sql`${t.fontPairing} in ('', 'clean', 'warm', 'classic', 'bold', 'friendly', 'elegant')`,
+    ),
+    check("brand_kits_button_shape_values", sql`${t.buttonShape} in ('', 'pill', 'rounded', 'square')`),
   ],
 );
 

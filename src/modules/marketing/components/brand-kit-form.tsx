@@ -10,13 +10,19 @@ import {
   BRAND_TAGLINE_MAX,
   normalizeHexColor,
 } from "@/lib/brand/core";
+import { BUTTON_SHAPE_SPECS, FONT_PAIRING_SPECS, isBrandLook, isButtonShape, isFontPairing, LOOK_SPECS } from "@/lib/brand/looks";
 import { saveBrandKitAction } from "../actions";
+import { LookFields, type LookInherits } from "./look-fields";
 
 interface Fields {
   displayName: string;
   tagline: string;
   primaryColor: string;
   accentColor: string;
+  /** The look (`src/lib/brand/looks.ts`), each `''` for "as the look" or "as your brand's". */
+  look: string;
+  fontPairing: string;
+  buttonShape: string;
 }
 
 /**
@@ -27,22 +33,21 @@ interface Fields {
 export function BrandKitForm({
   entityId,
   initial,
+  inherits,
   fallbackName,
   canWrite,
 }: {
   entityId: string | null;
   initial: Fields;
+  /** What a company kit's blank look falls back to; null on the business kit. */
+  inherits: LookInherits | null;
   fallbackName: string;
   canWrite: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [fields, setFields] = useState<Fields>(initial);
-  const dirty =
-    fields.displayName !== initial.displayName ||
-    fields.tagline !== initial.tagline ||
-    fields.primaryColor !== initial.primaryColor ||
-    fields.accentColor !== initial.accentColor;
+  const dirty = JSON.stringify(fields) !== JSON.stringify(initial);
 
   function set<K extends keyof Fields>(key: K, value: Fields[K]) {
     setFields((f) => ({ ...f, [key]: value }));
@@ -67,6 +72,18 @@ export function BrandKitForm({
         <ReadOnly label="Tagline" value={fields.tagline || "None"} />
         <ReadOnly label="Primary color" value={fields.primaryColor || "Default"} mono />
         <ReadOnly label="Accent color" value={fields.accentColor || "Default"} mono />
+        <ReadOnly
+          label="Look"
+          value={isBrandLook(fields.look) ? LOOK_SPECS[fields.look].name : inherits ? "Your brand's" : "Modern"}
+        />
+        <ReadOnly
+          label="Fonts"
+          value={isFontPairing(fields.fontPairing) ? FONT_PAIRING_SPECS[fields.fontPairing].name : inherits ? "Your brand's" : "As the look"}
+        />
+        <ReadOnly
+          label="Buttons"
+          value={isButtonShape(fields.buttonShape) ? BUTTON_SHAPE_SPECS[fields.buttonShape].name : inherits ? "Your brand's" : "As the look"}
+        />
         <p className="text-xs text-muted-foreground sm:col-span-2">
           Only an owner can change these.
         </p>
@@ -118,6 +135,13 @@ export function BrandKitForm({
           onChange={(v) => set("accentColor", v)}
         />
       </div>
+      <LookFields
+        values={{ look: fields.look, fontPairing: fields.fontPairing, buttonShape: fields.buttonShape }}
+        inherits={inherits}
+        sampleName={fields.displayName || fallbackName}
+        primary={normalizeHexColor(fields.primaryColor)}
+        onChange={(patch) => setFields((f) => ({ ...f, ...patch }))}
+      />
       <div className="flex items-center gap-3">
         <Button onClick={onSave} disabled={pending || !dirty}>
           {pending ? "Saving…" : "Save"}

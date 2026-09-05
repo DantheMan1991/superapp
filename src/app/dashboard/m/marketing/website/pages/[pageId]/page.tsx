@@ -3,6 +3,7 @@ import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { isModuleEnabled, requireModuleEnabled } from "@/lib/modules";
 import { loadPageEditor } from "@/lib/sites/read";
+import { siteBlockCatalog } from "@/lib/site-blocks/resolve";
 import { mapStatusLine } from "@/lib/sites/map-core";
 import { readPageContent, readSiteSettings } from "@/lib/sites/schema";
 import { PageHeader } from "@/components/app/page-header";
@@ -33,7 +34,13 @@ export default async function PageEditorRoute({
   if (!/^[0-9a-f-]{36}$/i.test(pageId)) notFound();
   const data = await withTenant(
     ctx.tenant.id,
-    (tx) => loadPageEditor(tx, ctx.tenant.id, pageId),
+    async (tx) => {
+      const editor = await loadPageEditor(tx, ctx.tenant.id, pageId);
+      if (!editor) return null;
+      // The blocks the tenant's packs offer this site, with their fields (slice 9b).
+      const blocks = await siteBlockCatalog(tx, ctx.tenant.id);
+      return { ...editor, blocks };
+    },
     { role: ctx.role },
   );
   if (!data) notFound();
@@ -74,6 +81,7 @@ export default async function PageEditorRoute({
         schedulingOn={schedulingOn}
         mapStatus={mapStatusLine(readSiteSettings(data.site.settings))}
         assistantOn={assistantOn()}
+        blocks={data.blocks}
       />
     </div>
   );

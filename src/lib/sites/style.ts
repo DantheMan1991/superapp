@@ -35,6 +35,7 @@ export const SECTION_DEFAULTS: Record<SectionType, SectionDefaults> = {
   form: { background: "none", width: "text", spacing: "normal" },
   booking: { background: "none", width: "text", spacing: "normal" },
   events: { background: "none", width: "text", spacing: "normal" },
+  block: { background: "none", width: "text", spacing: "normal" },
   map: { background: "none", width: "page", spacing: "normal" },
   image: { background: "none", width: "text", spacing: "tight" },
   gallery: { background: "none", width: "page", spacing: "normal" },

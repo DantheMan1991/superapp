@@ -37,17 +37,85 @@
 | **7** | **The editor's preview at a phone's or a tablet's width, remembered per browser; a click on a section in the preview selects it in the editor, and the editor's selection is outlined in the preview, through `postMessage` on the same origin.** | **built 2026-09-05** |
 | **8** | **Bookings: a `Book a time` section whose open times are the section's hours minus what is on a Bookings calendar the platform provisions; a booking lands as an enquiry with a time (party, CRM record, follow-up, email) and as a calendar item with the visitor on it.** [ADR 0025](../decisions/0025-a-booking-is-an-enquiry-with-a-time.md) | **built 2026-09-05** |
 | **9a** | **The first live block: `What's on`, the next events from an Events calendar the platform provisions, drawn from the calendar when the page is rendered and kept current by themselves.** | **built 2026-09-05** |
-| 9b | Prices and availability from the retail and inventory packs, through the declared-slot seam the shop block needs (`retail` slice 6): a pack contributes a block kind, its editor fields and its renderer; the site hosts them. A live team block is not planned: Columns already does a team by hand, and a live one raises consent questions a section should not answer | with the shop block |
+| **9b** | **Prices and availability from the packs through a declared slot: a pack contributes a block kind, its editor fields (as data) and the rows to draw; the site offers it while the pack is on, draws it in its own look, and hosts it. Retail's `Price list` is the first block: one channel's current prices with what has run out marked, from Inventory's balance. A live team block is not planned: Columns does a team by hand, and a live one raises consent questions a section should not answer.** [ADR 0028](../decisions/0028-a-packs-block-is-data-the-site-draws.md) | **built 2026-09-05** |
 | **10** | **`Find us`: a map of the site's address, a picture the platform draws from public-domain USGS tiles around a pin the Census geocoder placed at save, with the address and a `Get directions` link. No client library, no third-party request from a visitor's browser, United States only.** [ADR 0026](../decisions/0026-a-map-is-a-picture-the-platform-draws.md) | **built 2026-09-05** |
 | **11a** | **What search engines and browsers ask a site for: `robots.txt` and `sitemap.xml` per site on every address it has, LocalBusiness structured data on the home page from the settings (address, phone, email, the map's pin, the logo, the social profiles), and an icon from the brand kit (a square logo as it is, otherwise a monogram in the brand colour) at 32, 180 and 512.** | **built 2026-09-05** |
 | **11b** | **A share image drawn per page (the page's title in the kit's type on the brand colour, the logo or the monogram in a white panel, the address in the corner) as `og:image` and the Twitter card; and an address the site used to have sends people on to the current one, for the same page, on the platform path and on the free address.** | **built 2026-09-05** |
 | **12** | **The assistant everywhere: new words for one section with an optional ask, a page from a sentence, a photo's description from its pixels. Each proposes words into slots the code chose, unsaved until the owner saves; nothing else about a section is sent or changed.** [ADR 0027](../decisions/0027-the-assistant-proposes-words-and-the-owner-saves-them.md) | **built 2026-09-05** |
-| — | The shop block: `retail` slice 6 (online orders + pickup windows) fills a declared slot; blocked on commitments (retail 3) and web checkout (payments) | not this module's |
+| — | The shop block: `retail` slice 6 (online orders + pickup windows) fills the slot 9b made, plus a client island the site owns and a provider names; blocked on commitments (retail 3) and web checkout (payments) | not this module's |
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-05 — Slice 9b: a pack's block on the page, and Retail's price list first (`claude/marketing-site-blocks-seam`)
+
+The last roadmap row. No migration. The site can now host a block a pack
+fills, and Retail fills it with one channel's prices
+([ADR 0028](../decisions/0028-a-packs-block-is-data-the-site-draws.md)).
+
+- **The slot** (`src/lib/site-blocks/`): `types.ts`, types only — a
+  provider is a kind (`pack.block`), a label and hint, editor FIELDS
+  described as data (a select with options, a switch), a pure
+  `parseConfig`, and a `load(tx, tenantId, config, now)` that answers ROWS
+  (name, detail, amount, sold out) and a footnote. `registry.ts` is the one
+  file in the chain that names a pack (the basis-lens shape). `resolve.ts`
+  is what the site calls: `siteBlockCatalog` for the editor,
+  `blockSectionsProblem` for the save, `loadSiteBlocks` for the render —
+  all bounded by the tenant's `tenant_modules`, read in the page's own
+  transaction, so a block whose pack is off is not offered, not saved and
+  not drawn. `core.ts` is pure: `blockKey` (kind + sorted config, so two
+  sections set up alike share one load), `newBlockSection`,
+  `filterCatalog`, `blockLabel`.
+- **One section kind, `block`** (`kind`, `config`, plus the site's heading,
+  note and empty line; `style` like any section). `newSection` and
+  `SECTION_TYPES` are now typed on `PlainSectionType`, because a block
+  starts from a catalogue entry the route loaded, never from a kind alone.
+  `PublicSite.blocks` carries the views; the renderer draws rows in the
+  site's tone with a `Sold out` pill, the empty line when there are none,
+  and in the draft preview a word to the owner when a block has no view.
+  The editor offers each catalogue entry as a button after the fixed
+  kinds, draws a provider's fields from their descriptions, names a block
+  row by its catalogue label, and shows an amber note on a block whose
+  pack has gone off. The assistant's slot map gained `block` (heading,
+  note, empty line).
+- **Retail's price list** (`src/packs/retail/site-blocks.ts` over the pure
+  `core/site-prices.ts`): `Prices from` one of the tenant's active
+  channels (chosen for the owner when there is one) and `When something
+  has run out` (marked, or left off). Rows are priced, active items by
+  name with what the price is per (`per lb`, `each`, `per dozen`) and the
+  figure in the tenant's symbol, dollars when none is set; sold out is
+  nothing on hand anywhere by inventory's `onHandByItem`, and an item
+  never counted is for sale. Read through the pack's own verbs as the
+  site's anonymous reader; names, prices and "sold out" reach the page and
+  nothing else. Retail's dossier carries its side.
+- **Driven on the dev branch.** Hilltop Farm (Retail, Inventory, two
+  channels, two prices) was the first target, and the Clerk dev instance
+  would not hold the organisation switch server-side: the client said
+  Hilltop Farm while server actions ran as Test, so a save was refused as
+  "needs the retail pack switched on" for the wrong tenant, and the log
+  showed Clerk's "refreshing the session token resulted in an infinite
+  redirect loop". (A Hilltop Farm site was built along the way; it is a
+  draft.) So Test got Retail, Inventory and Assets switched on by hand on
+  the dev branch, a `Saturday market` channel and three items, two priced.
+  The editor offered `Price list` after `Columns`; added after `About`,
+  the one channel was chosen for the owner (with one channel the select
+  offers no blank, so `needs its settings filled in` is reachable only
+  with several; `parsePriceBlockConfig` is what refuses, and it is tested);
+  saved with a heading and a note, the draft page listed
+  `Eggs · per dozen · $6.00` and `Ground beef · per lb · $8.99`, the
+  unpriced honey nowhere, and the published page was unchanged until
+  publish. Retail switched off by hand: the button gone from the editor,
+  the row named `Prices` from its kind, the amber note on the section, the
+  draft page showing the owner's line and no price; switched back on, and
+  the page published, the public page listed the two prices. Tests: `tests/site-blocks.test.ts` (the slot's shape, the key,
+  the catalogue filter, the presenter).
+- **Not built here:** a block a visitor can act on (the shop block needs a
+  client island the site owns and a provider names), any field kind beyond
+  a select and a switch, and a block from any pack but Retail. Prices
+  reach the site on the page cache's clock (five minutes), a save or a
+  publish redraws at once.
 
 ### 2026-09-05 — Slice 12: the assistant everywhere (`claude/marketing-site-assistant`)
 
@@ -1216,6 +1284,20 @@ feature means for it.
   `public_access_attempts`, keyed by a hash of the tenant id rather than
   `ipKey` (which is `unsalted`, and so no key at all, without
   `INTERVIEW_IP_SALT`).
+- **A pack's block is data the site draws** (9b, [ADR 0028](../decisions/0028-a-packs-block-is-data-the-site-draws.md)).
+  The third use of P5: the site names the slot (`src/lib/site-blocks`), the
+  registry names the packs, Retail fills it. A provider describes its editor
+  FIELDS as data (a select with options, a switch), checks a config, and
+  answers ROWS (name, detail, amount, sold out); the editor draws the
+  fields and the renderer draws the rows in the site's look, so no pack
+  ships a component or puts markup on a public origin. One section kind,
+  `block` (`kind`, `config`, plus the site's heading, note and empty line),
+  keyed on `PublicSite.blocks` by `blockKey` (kind + sorted config) so two
+  sections set up alike share one load. GATED on the pack being on, read in
+  the page's own transaction: not offered, not saved (`blockSectionsProblem`
+  in `savePageAction`), not drawn. `newSection` and `SECTION_TYPES` are typed
+  on `PlainSectionType` because a block starts from a catalogue entry, never
+  from a kind alone.
 - **Two addresses, one renderer.** `/sites/[slug]/[[...path]]` on the platform
   host, always; `/hosted/[slug]/[[...path]]` is where `src/proxy.ts` rewrites
   `<slug>.<SITE_DOMAIN>` (locally `<slug>.localhost:3000`, no hosts-file
@@ -1353,7 +1435,7 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
 | `sites` | The business's website: its address, live details and status | FORCE RLS. `member_read`; INSERT/UPDATE/DELETE need `app_current_tenant_role() = 'owner'`. Unique on `tenant_id` (one site per tenant, this slice) and on `slug` platform-wide (it is a hostname label). Since 11b (`0260`): `previous_slugs text[]`, the addresses the site used to have, newest first, at most ten, GIN-indexed for the containment lookup an old address makes. CHECKs: slug shape `^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$`, `status in (draft, published)`, `copy_source in (model, standard)`, title ≤ 80. `settings` is `SiteSettingsSchema`: the details (phone, email, address, hours), since 6c the frame (announcement bar, header button, social links, footer columns, footer line), and since 10 `map`, the geocoded pin kept with the address it was placed from (ADR 0026), all read live by the renderer |
-| `site_pages` | One page: its path, title, nav place, `draft` and `published` content | FORCE RLS, same policies. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. Unique `(site_id, path)`. CHECK: path `^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$`, title 1–80. `draft`/`published` are `PageContentSchema`; `published` null = never published |
+| `site_pages` | One page: its path, title, nav place, `draft` and `published` content | FORCE RLS, same policies. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. Unique `(site_id, path)`. CHECK: path `^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$`, title 1–80. `draft`/`published` are `PageContentSchema`; `published` null = never published. Since 9b a section may be a pack's `block` (`kind` such as `retail.prices`, a `config` its provider's fields set); no table changes, the pack's rows are read at render |
 | `site_page_versions` | A page's history: the content at each `save`, `publish` and `restore` | FORCE RLS; `member_read`, owner INSERT and DELETE (no UPDATE — a version is never edited). Composite FK `(tenant_id, page_id) → site_pages` ON DELETE CASCADE. CHECK on `kind`. Trimmed to the newest `PAGE_VERSIONS_KEEP` (30) on every write by `recordVersion` |
 | `site_domains` | A domain the business owns, connected to its site | FORCE RLS; `member_read`, owner INSERT/UPDATE/DELETE. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. **Unique on `domain` platform-wide** (a hostname points at one site); at most five per site (`SITE_DOMAINS_MAX`). CHECKs: hostname shape, `status in (pending, active, error)`. `records` is `DnsRecordToPublish[]`, what the owner was last told to publish; `vercel_verified`/`vercel_configured_by` are Vercel's last words. **Only an `active` row routes**, and only Vercel makes a row active |
 | `site_enquiries` | A message sent through the site's form: the record of what was sent | FORCE RLS; `member_read`, **member INSERT** (`owner`/`staff` — the public path writes as `staff`, ADR 0021), owner DELETE, **no UPDATE policy**. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. `party_id` / `work_item_id` are **soft pointers** (no FK): the screen resolves them and says when one is gone. CHECKs: name 1–120, message 1–4000, `notify_via in (none, site_email, owners)`. `ip_hash` is the salted hash the caps use, never the IP. Capped at `ENQUIRY_SITE_DAILY_CAP` (100) per site per UTC day. Since 4b (`0254`): `answers` jsonb, `EnquiryAnswer[]` label snapshots of the business's own questions. Since 8 (`0259`): `booking_starts_at` / `booking_ends_at` (both or neither, CHECK `site_enquiries_booking_whole`), `booking_title`, and `schedule_item_id`, a soft pointer to the item on the Bookings calendar — a booking is an enquiry with a time (ADR 0025), capped at `BOOKING_SITE_DAILY_CAP` (100) bookings per site per day |
@@ -1489,6 +1571,14 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
   `TEXT_PATHS`, `assemblePageBlocks`, the tools and user turns);
   `components/assistant-controls.tsx` (`RewriteWords`, `WritePage`,
   `SuggestDescription`); `tests/site-assistant.test.ts`
+- `src/lib/site-blocks/` — the declared slot (9b, ADR 0028): `types.ts` (the
+  provider shape, types only), `core.ts` (pure: `blockKey`, `newBlockSection`,
+  `filterCatalog`, `blockLabel`), `registry.ts` (the one file that names a
+  pack), `resolve.ts` (`siteBlockCatalog`, `blockSectionsProblem`,
+  `loadSiteBlocks`, all bounded by `tenant_modules`); the `block` section in
+  `schema.ts`; `PublicSite.blocks`; `src/packs/retail/site-blocks.ts` (the
+  price list provider) over `core/site-prices.ts` (pure presenter);
+  `tests/site-blocks.test.ts`
 - `docs/help/marketing/overview.md` — the screen's guide
 
 ## Decisions & gotchas
@@ -1847,7 +1937,7 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
   will be a client's, or the founder's own test on his site.
 - The `cta` and `hero` buttons point at the contact page; the assembler pins
   that, and the prompt asks for labels that say so.
-- **The shop block** is `retail` slice 6's, through a declared section slot.
+- **The shop block** is `retail` slice 6's, through the `block` slot 9b made; it needs a client island the site owns and a provider names, the slot's first change. **Only list-shaped blocks** exist today (rows: name, detail, amount, sold out) and only two field kinds (select, switch); both grow by adding a kind to the slot, where every pack gets it. **A price changed in Retail reaches the site on the page cache's clock** (five minutes); nothing in Retail revalidates a site, like Scheduling.
 - **Sitemap and robots per site**, and a `canonical` pointing at the host
   address once one exists.
 - **Rewriting replaces every draft.** Fine while the assistant is the only

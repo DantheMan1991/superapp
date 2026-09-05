@@ -74,6 +74,10 @@ A closed place stops being offered when you start a day. If you start one from t
 
 {button:Remove|ghost} deletes a day. There is no confirmation, and anyone can do it. **A day that has sales on it cannot be deleted**, and you get `Something went wrong saving that.` rather than an explanation.
 
+## Prices on your website
+
+A {{channel|lower}}'s current prices can be shown on your website as a `Price list` section, when Marketing is switched on too. In Marketing, open the page, click {button:Price list|outline} under `Add a section after the selected one`, and choose this {{channel|lower}} under `Prices from`. The site lists every active item with a price here, by name, with what the price is per and the figure; anything with nothing on hand anywhere in Inventory is marked `Sold out` or left off, as the page chooses. A price you change here reaches the site within a few minutes. Many businesses add a {{channel|lower}} called `Website` so the site can have prices of its own. See [Editing a page](../marketing/page-editor.md).
+
 ## Messages
 
 | Message | What it means |

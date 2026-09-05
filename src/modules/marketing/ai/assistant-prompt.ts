@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { SiteBrief } from "@/lib/sites/copy";
-import { newSection } from "@/lib/sites/pages";
+import { newSection, type PlainSectionType } from "@/lib/sites/pages";
 import { PageContentSchema, SectionSchema, type PageContent, type Section, type SectionType } from "@/lib/sites/schema";
 
 /**
@@ -47,6 +47,7 @@ const TEXT_PATHS: Record<SectionType, string[]> = {
   gallery: ["heading", "items[].caption"],
   slideshow: ["heading"],
   columns: ["heading", "intro", "cards[].heading", "cards[].body[]", "cards[].cta.label"],
+  block: ["heading", "note", "emptyText"],
 };
 
 /** How long each slot may be, by its last name; the schema is the law, this is what the model is told. */
@@ -327,10 +328,10 @@ const DraftSchema = z.object({
 
 const ONCE: ReadonlyArray<PageBlockKind> = ["contact", "hours", "booking", "events", "map", "form"];
 
-type Of<K extends SectionType> = Extract<Section, { type: K }>;
+type Of<K extends PlainSectionType> = Extract<Section, { type: K }>;
 
 /** A fresh section of one kind, typed as that kind so its words can be set. */
-function fresh<K extends SectionType>(type: K): Of<K> {
+function fresh<K extends PlainSectionType>(type: K): Of<K> {
   return newSection(type) as Of<K>;
 }
 

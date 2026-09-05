@@ -5,6 +5,7 @@ import { withTenant } from "@/db";
 import { logAuditInTx } from "@/lib/audit";
 import { isModuleEnabled } from "@/lib/modules";
 import { ensureManagedCalendar, MANAGED_CALENDAR_KEYS, type ManagedCalendarKey } from "@/lib/schedule/managed-calendars";
+import { blockSectionsProblem } from "@/lib/site-blocks/resolve";
 import {
   normalizePagePath,
   pagePathReasonMessage,
@@ -107,6 +108,11 @@ export async function savePageAction(input: unknown): Promise<ActionResult> {
     await withTenant(
       ctx.tenantId,
       async (tx) => {
+        // A pack's block may be kept only while its pack is on and its
+        // settings are ones the pack takes (slice 9b); the page's own
+        // content model cannot know either.
+        const blockProblem = await blockSectionsProblem(tx, ctx.tenantId, content.sections);
+        if (blockProblem) throw new MarketingError("PAGE_INVALID", blockProblem);
         const page = await savePageDraft(tx, ctx, parsed.data.pageId, {
           title: parsed.data.title,
           path,

@@ -60,7 +60,7 @@ export function SectionForm(props: {
   /** The site's photo library and how to change it, for the kinds that take a photo. */
   photos: PhotoProps;
   /** Whether Scheduling is on: a booking section offers no times without it. */
-  bookingOn?: boolean;
+  schedulingOn?: boolean;
 }) {
   return (
     <div className="space-y-6">
@@ -75,13 +75,13 @@ function SectionFields({
   onChange,
   idPrefix,
   photos,
-  bookingOn = true,
+  schedulingOn = true,
 }: {
   section: Section;
   onChange: (next: Section) => void;
   idPrefix: string;
   photos: PhotoProps;
-  bookingOn?: boolean;
+  schedulingOn?: boolean;
 }) {
   const id = (name: string) => `${idPrefix}-${name}`;
   switch (section.type) {
@@ -393,10 +393,34 @@ function SectionFields({
           </p>
         </div>
       );
+    case "events":
+      return (
+        <div className="space-y-4">
+          {!schedulingOn && (
+            <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800">
+              Scheduling is switched off, so this section shows nothing on the live site. Switch it on under Modules and save this page again.
+            </p>
+          )}
+          <Field id={id("heading")} label="Heading">
+            <Input id={id("heading")} value={section.heading} maxLength={80} onChange={(e) => onChange({ ...section, heading: e.target.value })} />
+          </Field>
+          <Field id={id("note")} label="Note" hint="A line under the heading, or blank.">
+            <Input id={id("note")} value={section.note} maxLength={300} onChange={(e) => onChange({ ...section, note: e.target.value })} />
+          </Field>
+          <Choice label="How many" value={section.count} options={EVENT_COUNT_OPTIONS} onChange={(count) => onChange({ ...section, count })} />
+          <Choice label="How far ahead" value={section.horizonDays} options={EVENT_HORIZON_OPTIONS} onChange={(horizonDays) => onChange({ ...section, horizonDays })} />
+          <Field id={id("emptyText")} label="When there is nothing" hint="Blank reads: Nothing scheduled yet. Check back soon.">
+            <Input id={id("emptyText")} value={section.emptyText} maxLength={160} onChange={(e) => onChange({ ...section, emptyText: e.target.value })} />
+          </Field>
+          <p className="text-xs text-muted-foreground">
+            The events shown are whatever is on your Events calendar in Scheduling when the page is drawn: the next ones, soonest first, with their day, time and location. Put an event on that calendar and it appears here within a few minutes; take it off and it goes.
+          </p>
+        </div>
+      );
     case "booking":
       return (
         <div className="space-y-4">
-          {!bookingOn && (
+          {!schedulingOn && (
             <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800">
               Scheduling is switched off, so this section offers no times on the live site. Switch it on under Modules and save this page again.
             </p>
@@ -956,6 +980,17 @@ const HORIZONS = [
   [14, "Two weeks"],
   [30, "A month"],
   [60, "Two months"],
+] as const;
+const EVENT_COUNT_OPTIONS = [
+  [3, "3"],
+  [5, "5"],
+  [10, "10"],
+] as const;
+const EVENT_HORIZON_OPTIONS = [
+  [30, "A month"],
+  [60, "Two months"],
+  [90, "Three months"],
+  [180, "Six months"],
 ] as const;
 const WIDTHS = [
   ["default", "As designed"],

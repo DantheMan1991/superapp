@@ -36,7 +36,7 @@ export default async function PageEditorRoute({
   );
   if (!data) notFound();
   // The guard is the owning feature: a booking section is offered only while Scheduling is on.
-  const bookingOn = await isModuleEnabled(ctx.tenant.id, "scheduling");
+  const schedulingOn = await isModuleEnabled(ctx.tenant.id, "scheduling");
   const versions: VersionView[] = data.versions.map((v) => ({
     id: v.id,
     kind: v.kind === "publish" || v.kind === "restore" ? v.kind : "save",
@@ -69,7 +69,7 @@ export default async function PageEditorRoute({
           mimeType: i.mimeType,
           createdAt: i.createdAt.toISOString(),
         }))}
-        bookingOn={bookingOn}
+        schedulingOn={schedulingOn}
       />
     </div>
   );

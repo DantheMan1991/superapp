@@ -114,6 +114,10 @@ When a visitor picks a day and a time, gives their name and email, and presses `
 
 The visitor sees `Booked: [day], [start] to [end]` and the line you set as `After booking`. The same limits as messages apply: five bookings an hour from one visitor, a hundred a day on one site.
 
+## How events show on your site
+
+A `What's on` section on a page (see [Editing a page](page-editor.md)) lists the next events on your `Events` calendar in Scheduling: Yosher makes that calendar the first time you save a page with the section, owned by the business and shared with everyone in it as `Can edit`, beside the `Bookings` calendar. Add an event to it in Scheduling with a title, a time or `All day`, and a location if you like; the section shows the next few, soonest first, with the day, the time and the location, and drops each one once it has passed. A change on the calendar reaches the site within a few minutes; saving or publishing a page shows it at once. Events on any other calendar never appear on the site. Without Scheduling switched on the section shows nothing.
+
 ## How to change the address
 
 1. In the last card, type the new address. The line under the box shows what it will be, or why it cannot be.

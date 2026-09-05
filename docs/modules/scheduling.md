@@ -24,7 +24,7 @@ booking pack the availability seam was built for, arrived from the other
 direction. Nothing in `src/modules/scheduling/` changed; the module's lib seam
 grew one file and the read path was consumed as designed.
 
-- **`src/lib/schedule/bookings-calendar.ts`**: `ensureBookingsCalendar`
+- **`src/lib/schedule/managed-calendars.ts`**: `ensureManagedCalendar`
   makes the business's Bookings calendar once through the managed unique
   index (`extension_slug = 'marketing'`, `extension_key = 'bookings'`,
   owner NULL, `kind = 'bookings'`, `green`) and puts a workspace-wide share at
@@ -37,6 +37,11 @@ grew one file and the read path was consumed as designed.
   with no user, ADR 0021's shape — inserts the item and its external
   attendee through `schedule_items_write` and
   `schedule_item_attendees_write` untouched. No `withSystem`, no new policy.
+- **Later the same day, `Events`** (Marketing slice 9a): the seam became
+  `managed-calendars.ts` with `MANAGED_CALENDARS` (`bookings` green, `events`
+  amber) and `itemsOnCalendar`; a page's `What's on` section lists the Events
+  calendar's next items, read as `staff` with no user through the same
+  everyone share. Two business calendars now, both the platform's.
 - **`Business calendars` is reachable now**: it holds this one, and the
   everyone share shows it to every member. The open item below is closed
   for the case that matters; nothing in the core UI creates a business
@@ -857,8 +862,8 @@ Built for availability:
 
 - `src/lib/schedule/availability.ts` — **the booking seam.** Merge, invert, find
   slots, and `busyForPeople`. Read its header before assuming what "busy" means.
-- `src/lib/schedule/bookings-calendar.ts` — the Bookings calendar Marketing
-  provisions (ADR 0025): `ensureBookingsCalendar`, `findBookingsCalendarId`,
+- `src/lib/schedule/managed-calendars.ts` — the Bookings calendar Marketing
+  provisions (ADR 0025): `ensureManagedCalendar`, `findManagedCalendarId`,
   `busyOnCalendar`. The first consumer of `findFreeSlots` outside the event
   form.
 
@@ -1248,7 +1253,7 @@ them. If something does, the boundary was drawn wrong.
 - **Nobody can see an RSVP.** The response is fetched and dropped client-side.
 - ~~**`Business calendars` is unreachable** — nothing ever creates one.~~
   **Reachable since 2026-09-05**: Marketing's `Book a time` section makes the
-  `Bookings` calendar (`src/lib/schedule/bookings-calendar.ts`). Nothing in
+  `Bookings` calendar (`src/lib/schedule/managed-calendars.ts`). Nothing in
   the core UI makes a business calendar by hand yet.
 - ~~**Month view's day number opens a create dialog a read-only reader cannot use.**~~
   — **fixed 2026-09-03**, riding along with the accountant fix: the number is a

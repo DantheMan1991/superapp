@@ -7,7 +7,7 @@ import { isModuleEnabled } from "@/lib/modules";
 import { createParty } from "@/lib/parties";
 import { findPartiesByContact } from "@/lib/parties/contacts";
 import { ipKey, overPublicCap, startOfUtcDay } from "@/lib/public-caps";
-import { busyOnCalendar, findBookingsCalendarId } from "@/lib/schedule/bookings-calendar";
+import { busyOnCalendar, findManagedCalendarId } from "@/lib/schedule/managed-calendars";
 import { getTenantTimezone } from "@/lib/tenant-timezone";
 import { todayInTimezone } from "@/lib/timezone";
 import { createUnlinkedWork, createWorkForEntity } from "@/lib/work/entity-work";
@@ -119,7 +119,7 @@ export async function openBookingTimes(
       if (!site || site.status !== "published") return null;
       const section = await publishedBookingSection(tx, hit.tenantId, site.id, input.page || "/", input.section);
       if (!section) return null;
-      const calendarId = await findBookingsCalendarId(tx, hit.tenantId);
+      const calendarId = await findManagedCalendarId(tx, hit.tenantId, "bookings");
       if (!calendarId) return null;
       const timezone = await getTenantTimezone(tx, hit.tenantId);
       const window = bookingWindow(section, now);
@@ -189,7 +189,7 @@ export async function receiveSiteBooking(
         const pagePath = input.page || "/";
         const section = await publishedBookingSection(tx, hit.tenantId, site.id, pagePath, input.section);
         if (!section) return { kind: "unavailable" };
-        const calendarId = await findBookingsCalendarId(tx, hit.tenantId);
+        const calendarId = await findManagedCalendarId(tx, hit.tenantId, "bookings");
         if (!calendarId) return { kind: "unavailable" };
         const timezone = await getTenantTimezone(tx, hit.tenantId);
 

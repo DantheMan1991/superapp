@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { foregroundOn } from "@/lib/brand/core";
 import { lookRadiusVars, resolveLook } from "@/lib/brand/looks";
 import type { PublicSite } from "@/lib/sites/read";
+import { eventDate, eventKey, eventWhen, upcomingEvents } from "@/lib/sites/events-core";
 import { isSafeHref } from "@/lib/sites/links";
 import type { ImageRef, Section, SectionStyle, SitePageView, SiteSettings } from "@/lib/sites/schema";
 import { SECTION_ATTR } from "@/lib/sites/preview";
@@ -435,6 +436,43 @@ function SectionView({
           </div>
         </Shell>
       );
+    case "events": {
+      // Live: whatever the Events calendar holds when the page is drawn (ADR 0025's sibling).
+      const upcoming = upcomingEvents(site.events, new Date(), section.horizonDays, section.count);
+      return (
+        <Shell {...shell} spacing={room}>
+          <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
+          {section.note && <p className={cn("mt-3", tone.muted)}>{section.note}</p>}
+          {upcoming.length === 0 ? (
+            <p className={cn("mt-6", tone.muted)}>{section.emptyText || "Nothing scheduled yet. Check back soon."}</p>
+          ) : (
+            <ol className={cn("mt-6 divide-y", resolved.onDark ? "divide-white/15" : "divide-neutral-200", centred && "text-left")}>
+              {upcoming.map((event) => {
+                const date = eventDate(event, site.timezone);
+                return (
+                  <li key={eventKey(event)} className="flex gap-5 py-4">
+                    <div className="w-14 shrink-0 text-center">
+                      <div className={cn("text-xs uppercase tracking-wide", tone.faint)}>{date.weekday}</div>
+                      <div className="text-2xl font-semibold leading-none" style={{ color: tone.heading }}>
+                        {date.day}
+                      </div>
+                      <div className={cn("text-xs uppercase tracking-wide", tone.faint)}>{date.month}</div>
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="font-semibold">{event.title}</h3>
+                      <p className={cn("text-sm", tone.muted)}>
+                        {eventWhen(event, site.timezone)}
+                        {event.location ? ` · ${event.location}` : ""}
+                      </p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </Shell>
+      );
+    }
     case "hero": {
       const photo = section.image && site.images[section.image.id] ? section.image : null;
       const left = (section.imageSide ?? "right") === "left";

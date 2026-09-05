@@ -236,6 +236,21 @@ export const SectionSchema = z.discriminatedUnion("type", [
     thanks: short(240).default(""),
     style: SectionStyleSchema.optional(),
   }),
+  /**
+   * What's on — slice 9a, the first live block: the section says how many
+   * and how far ahead; the events themselves are whatever is on the
+   * business's Events calendar when the page is drawn.
+   */
+  z.object({
+    type: z.literal("events"),
+    heading: short(80).min(1),
+    note: short(300).default(""),
+    count: z.union([z.literal(3), z.literal(5), z.literal(10)]).default(5),
+    horizonDays: z.union([z.literal(30), z.literal(60), z.literal(90), z.literal(180)]).default(90),
+    /** Shown when nothing is coming up; blank reads a standard line. */
+    emptyText: short(160).default(""),
+    style: SectionStyleSchema.optional(),
+  }),
   z.object({
     type: z.literal("text"),
     heading: short(80).default(""),

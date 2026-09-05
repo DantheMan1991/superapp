@@ -124,9 +124,12 @@ export async function updateSiteSettings(
   tx: Tx,
   ctx: MarketingCtx,
   siteId: string,
-  input: { title: string; settings: SiteSettings },
+  input: { title?: string; settings: SiteSettings },
 ): Promise<Site> {
-  return updateSite(tx, ctx, siteId, { title: input.title, settings: input.settings });
+  return updateSite(tx, ctx, siteId, {
+    ...(input.title === undefined ? {} : { title: input.title }),
+    settings: input.settings,
+  });
 }
 
 export async function changeSiteSlug(

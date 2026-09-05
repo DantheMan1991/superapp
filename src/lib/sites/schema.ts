@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isSafeHref, isWebUrl, LINK_RULE, SOCIAL_NETWORKS, WEB_URL_HINT } from "./links";
 
 /**
  * The website's content model — pure, Zod, no I/O.
@@ -14,11 +15,14 @@ const short = (max: number) => z.string().trim().max(max);
 const paragraphs = (max: number, each: number) =>
   z.array(z.string().trim().max(each)).max(max).default([]);
 
+/** One of four shapes — an in-site path, an http(s) address, a `mailto:` or a `tel:` — and nothing else (`links.ts`). */
+const linkHref = short(200).min(1).refine(isSafeHref, { message: LINK_RULE });
+
 export const CtaSchema = z.object({
   label: short(40).min(1),
-  /** An in-site path (`/contact`), a `mailto:`/`tel:` or an https URL. */
-  href: short(200).min(1),
+  href: linkHref,
 });
+export type Cta = z.infer<typeof CtaSchema>;
 
 /**
  * A question the business adds to its enquiry form. `id` is made once and
@@ -272,6 +276,41 @@ export const EMPTY_PAGE: PageContent = { description: "", sections: [] };
  * empty by default: a section with nothing to show renders nothing rather
  * than a placeholder a customer might try to call.
  */
+/**
+ * The frame around every page — the announcement bar, the header's button,
+ * the profiles elsewhere and the footer's columns — lives here too, beside
+ * the details, and for the same reason: it is the site's, not a page's, and
+ * a change to it shows at once rather than waiting for a publish. A bar
+ * that says "Closed Monday" has to be true the moment it is saved.
+ */
+export const AnnouncementSchema = z.object({
+  text: short(120).default(""),
+  /** Where the line leads, if anywhere. */
+  href: z.union([z.literal(""), linkHref]).default(""),
+  /** Off keeps the words for next time. */
+  shown: z.boolean().default(false),
+});
+export type Announcement = z.infer<typeof AnnouncementSchema>;
+
+export const SOCIAL_LINKS_MAX = 8;
+export const SocialLinkSchema = z.object({
+  network: z.enum(SOCIAL_NETWORKS),
+  url: short(200).min(1).refine(isWebUrl, { message: WEB_URL_HINT }),
+  /** What `other` is called: "Etsy shop". Ignored for a known network. */
+  label: short(30).default(""),
+});
+export type SocialLink = z.infer<typeof SocialLinkSchema>;
+
+export const FOOTER_COLUMNS_MAX = 3;
+export const FOOTER_LINKS_MAX = 6;
+export const FooterColumnSchema = z.object({
+  heading: short(40).default(""),
+  /** A few lines, breaks kept. */
+  text: short(300).default(""),
+  links: z.array(CtaSchema).max(FOOTER_LINKS_MAX).default([]),
+});
+export type FooterColumn = z.infer<typeof FooterColumnSchema>;
+
 export const SiteSettingsSchema = z.object({
   phone: short(40).default(""),
   email: z.union([z.literal(""), z.string().trim().email().max(120)]).default(""),
@@ -279,6 +318,16 @@ export const SiteSettingsSchema = z.object({
   address: short(240).default(""),
   /** One line each: "Saturday 8–12, at the market". */
   hoursLines: z.array(short(80)).max(7).default([]),
+  /** Above the header on every page, while `shown`. */
+  announcement: AnnouncementSchema.default({ text: "", href: "", shown: false }),
+  /** The button at the right of the menu; null is no button. */
+  headerButton: CtaSchema.nullable().default(null),
+  /** Profiles elsewhere, as icons in the footer. */
+  social: z.array(SocialLinkSchema).max(SOCIAL_LINKS_MAX).default([]),
+  /** The footer's own columns, beside the business's details. */
+  footerColumns: z.array(FooterColumnSchema).max(FOOTER_COLUMNS_MAX).default([]),
+  /** A line under everything: "Family owned since 1978." */
+  footerNote: short(160).default(""),
 });
 export type SiteSettings = z.infer<typeof SiteSettingsSchema>;
 
@@ -287,6 +336,11 @@ export const EMPTY_SETTINGS: SiteSettings = {
   email: "",
   address: "",
   hoursLines: [],
+  announcement: { text: "", href: "", shown: false },
+  headerButton: null,
+  social: [],
+  footerColumns: [],
+  footerNote: "",
 };
 
 /** Parse what a row holds; a malformed blob degrades to empty rather than throwing at render. */

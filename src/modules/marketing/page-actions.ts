@@ -36,6 +36,7 @@ function revalidateAll(): void {
   revalidatePath(`${BASE}/pages/[pageId]`, "page");
   revalidatePath("/sites/[slug]/[[...path]]", "page");
   revalidatePath("/hosted/[slug]/[[...path]]", "page");
+  revalidatePath("/domain/[host]/[[...path]]", "page");
 }
 
 /** "sections.2.headline: Too small" → "Section 3: headline is missing." */
@@ -44,6 +45,8 @@ function contentProblem(issue: z.ZodIssue): string {
   if (head === "sections" && typeof index === "number") {
     const where = `Section ${index + 1}`;
     if (field === undefined) return `${where}: ${issue.message}.`;
+    // A rule's own words (a link's four shapes), not a length or a blank.
+    if (issue.code === "custom") return `${where}: ${issue.message.charAt(0).toLowerCase()}${issue.message.slice(1)}`;
     return `${where}: ${String(field)} ${
       /small|required|expected/i.test(issue.message) ? "is missing" : "is too long"
     }.`;

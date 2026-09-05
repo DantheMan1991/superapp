@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import { foregroundOn } from "@/lib/brand/core";
 import type { PublicSite } from "@/lib/sites/read";
+import { isSafeHref } from "@/lib/sites/links";
 import type { ImageRef, Section, SectionStyle, SitePageView, SiteSettings } from "@/lib/sites/schema";
 import { siteHref, type SiteMode } from "@/lib/sites/slug";
 import type { Slide } from "@/lib/sites/slides";
@@ -21,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { CardIcon } from "./card-icons";
 import { EnquiryForm } from "./enquiry-form";
 import { Gallery, Slideshow } from "./slideshow";
+import { SocialLinks } from "./social-icons";
 import { ViewBeacon } from "./view-beacon";
 
 /**
@@ -61,8 +63,13 @@ export function imageSrc(mode: SiteMode, slug: string, id: string): string {
   return `/sites/${slug}/images/${id}`;
 }
 
-/** An in-site path becomes a link for this mode; anything else passes through. */
-export function resolveHref(mode: SiteMode, slug: string, href: string): string {
+/**
+ * An in-site path becomes a link for this mode and the other three shapes
+ * pass through; anything else is no link at all, whatever a row holds
+ * (`src/lib/sites/links.ts`).
+ */
+export function resolveHref(mode: SiteMode, slug: string, href: string): string | null {
+  if (!isSafeHref(href)) return null;
   if (href.startsWith("/")) return siteHref(mode, slug, href);
   return href;
 }
@@ -86,57 +93,13 @@ export function SitePage({
     "--site-primary-fg": foregroundOn(primary),
     "--site-accent": accent,
   } as CSSProperties;
-  const nav = site.pages
-    .filter((p) => p.inNav)
-    .sort((a, b) => a.navOrder - b.navOrder);
-  const href = (path: string) => siteHref(mode, site.slug, path);
-
   return (
     <div style={style} className="flex min-h-screen flex-col bg-white text-neutral-900">
       {banner}
       {/* The draft preview is the owner looking, not a visitor: no count. */}
       {mode !== "draft" && <ViewBeacon slug={site.slug} path={page.path} />}
-      <header className="border-b border-neutral-200">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-x-8 gap-y-3 px-6 py-4">
-          <Link href={href("/")} className="flex items-center gap-3">
-            {site.brand.logo ? (
-              // Our own logo route, public by definition (ADR 0018); the
-              // optimiser would only add a hop in front of a cached file.
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={logoSrc(mode, site.slug)}
-                alt={site.title}
-                className="h-10 w-auto max-w-[200px] object-contain"
-              />
-            ) : (
-              <span className="text-lg font-semibold" style={{ color: primary }}>
-                {site.title}
-              </span>
-            )}
-          </Link>
-          {nav.length > 1 && (
-            <nav aria-label="Site" className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
-              {nav.map((p) => {
-                const current = p.path === page.path;
-                return (
-                  <Link
-                    key={p.path}
-                    href={href(p.path)}
-                    aria-current={current ? "page" : undefined}
-                    className="border-b-2 py-1 transition-colors hover:text-neutral-900"
-                    style={{
-                      borderColor: current ? accent : "transparent",
-                      color: current ? "#171717" : "#525252",
-                    }}
-                  >
-                    {p.title}
-                  </Link>
-                );
-              })}
-            </nav>
-          )}
-        </div>
-      </header>
+      <Announcement site={site} mode={mode} />
+      <SiteHeader site={site} mode={mode} pagePath={page.path} primary={primary} accent={accent} />
 
       <main className="flex-1">
         {page.content.sections.map((section, i) => (
@@ -144,19 +107,191 @@ export function SitePage({
         ))}
       </main>
 
-      <footer className="border-t border-neutral-200">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-6 py-6 text-sm text-neutral-600">
-          <div>
-            <span className="font-medium text-neutral-900">{site.brand.displayName}</span>
-            {site.brand.tagline && <span> · {site.brand.tagline}</span>}
-          </div>
-          <div className="flex flex-wrap gap-x-4">
-            {site.settings.phone && <a href={`tel:${site.settings.phone}`}>{site.settings.phone}</a>}
-            {site.settings.email && <a href={`mailto:${site.settings.email}`}>{site.settings.email}</a>}
-          </div>
-        </div>
-      </footer>
+      <SiteFooter site={site} mode={mode} />
     </div>
+  );
+}
+
+/**
+ * The frame around every page — the bar across the top, the header and the
+ * footer — reads the site's settings live, as the contact section does:
+ * nothing here waits for a publish.
+ */
+function Announcement({ site, mode }: { site: PublicSite; mode: SiteMode }) {
+  const bar = site.settings.announcement;
+  if (!bar.shown || !bar.text) return null;
+  const to = bar.href ? resolveHref(mode, site.slug, bar.href) : null;
+  return (
+    <div
+      role="region"
+      aria-label="Announcement"
+      className="px-6 py-2 text-center text-sm font-medium"
+      style={{ backgroundColor: "var(--site-primary)", color: "var(--site-primary-fg)" }}
+    >
+      {to ? (
+        <Link href={to} className="underline decoration-1 underline-offset-4 hover:decoration-2">
+          {bar.text}
+        </Link>
+      ) : (
+        bar.text
+      )}
+    </div>
+  );
+}
+
+/** The logo or the name, the menu, and the owner's button at the end of it. */
+function SiteHeader({
+  site,
+  mode,
+  pagePath,
+  primary,
+  accent,
+}: {
+  site: PublicSite;
+  mode: SiteMode;
+  pagePath: string;
+  primary: string;
+  accent: string;
+}) {
+  const nav = site.pages
+    .filter((p) => p.inNav)
+    .sort((a, b) => a.navOrder - b.navOrder);
+  const href = (path: string) => siteHref(mode, site.slug, path);
+  const button = site.settings.headerButton;
+  const buttonHref = button ? resolveHref(mode, site.slug, button.href) : null;
+  return (
+    <header className="border-b border-neutral-200">
+      <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-x-8 gap-y-3 px-6 py-4">
+        <Link href={href("/")} className="flex items-center gap-3">
+          {site.brand.logo ? (
+            // Our own logo route, public by definition (ADR 0018); the
+            // optimiser would only add a hop in front of a cached file.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={logoSrc(mode, site.slug)}
+              alt={site.title}
+              className="h-10 w-auto max-w-[200px] object-contain"
+            />
+          ) : (
+            <span className="text-lg font-semibold" style={{ color: primary }}>
+              {site.title}
+            </span>
+          )}
+        </Link>
+        {(nav.length > 1 || buttonHref) && (
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            {nav.length > 1 && (
+              <nav aria-label="Site" className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+                {nav.map((p) => {
+                  const current = p.path === pagePath;
+                  return (
+                    <Link
+                      key={p.path}
+                      href={href(p.path)}
+                      aria-current={current ? "page" : undefined}
+                      className="border-b-2 py-1 transition-colors hover:text-neutral-900"
+                      style={{
+                        borderColor: current ? accent : "transparent",
+                        color: current ? "#171717" : "#525252",
+                      }}
+                    >
+                      {p.title}
+                    </Link>
+                  );
+                })}
+              </nav>
+            )}
+            {button && buttonHref && (
+              <Link
+                href={buttonHref}
+                className="inline-block rounded-full px-4 py-2 text-sm font-medium shadow-sm"
+                style={LIGHT_TONE.button}
+              >
+                {button.label}
+              </Link>
+            )}
+          </div>
+        )}
+      </div>
+    </header>
+  );
+}
+
+const FOOTER_GRID = ["", "sm:grid-cols-2", "sm:grid-cols-2 lg:grid-cols-3", "sm:grid-cols-2 lg:grid-cols-4"];
+
+/**
+ * The details and the profiles elsewhere, the owner's columns beside them
+ * when there are any, and the year. Without columns it stays the one quiet
+ * row it has always been.
+ */
+function SiteFooter({ site, mode }: { site: PublicSite; mode: SiteMode }) {
+  const { settings, brand } = site;
+  const columns = settings.footerColumns;
+  const details = (
+    <>
+      {settings.phone && <a href={`tel:${settings.phone}`}>{settings.phone}</a>}
+      {settings.email && <a href={`mailto:${settings.email}`}>{settings.email}</a>}
+    </>
+  );
+  return (
+    <footer className="border-t border-neutral-200">
+      <div className="mx-auto max-w-5xl px-6 py-8">
+        {columns.length === 0 ? (
+          <div className="flex flex-wrap items-center justify-between gap-4 text-sm text-neutral-600">
+            <div>
+              <span className="font-medium text-neutral-900">{brand.displayName}</span>
+              {brand.tagline && <span> · {brand.tagline}</span>}
+            </div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              {details}
+              <SocialLinks links={settings.social} />
+            </div>
+          </div>
+        ) : (
+          <div className={cn("grid gap-8", FOOTER_GRID[columns.length])}>
+            <div className="space-y-3 text-sm text-neutral-600">
+              <div>
+                <p className="font-medium text-neutral-900">{brand.displayName}</p>
+                {brand.tagline && <p>{brand.tagline}</p>}
+              </div>
+              {settings.address && <p className="whitespace-pre-line">{settings.address}</p>}
+              {(settings.phone || settings.email) && <p className="flex flex-col gap-1">{details}</p>}
+              <SocialLinks links={settings.social} />
+            </div>
+            {columns.map((column, i) => (
+              <div key={i} className="text-sm">
+                {column.heading && <h2 className="font-semibold text-neutral-900">{column.heading}</h2>}
+                {column.text && <p className="mt-2 whitespace-pre-line text-neutral-600">{column.text}</p>}
+                {column.links.length > 0 && (
+                  <ul className="mt-2 space-y-1.5">
+                    {column.links.map((link, j) => {
+                      const to = resolveHref(mode, site.slug, link.href);
+                      return (
+                        <li key={j}>
+                          {to ? (
+                            <Link href={to} className="text-neutral-600 transition-colors hover:text-neutral-900">
+                              {link.label}
+                            </Link>
+                          ) : (
+                            <span className="text-neutral-600">{link.label}</span>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-x-6 gap-y-1 border-t border-neutral-100 pt-4 text-xs text-neutral-500">
+          <p>
+            © {new Date().getFullYear()} {brand.displayName}
+          </p>
+          {settings.footerNote && <p>{settings.footerNote}</p>}
+        </div>
+      </div>
+    </footer>
   );
 }
 
@@ -321,6 +456,7 @@ function SectionView({
           <ul className={cn("grid gap-6", grid, (section.heading || section.intro) && "mt-8", centred && "text-left")}>
             {section.cards.map((card) => {
               const photo = card.image && site.images[card.image.id] ? card.image : null;
+              const to = card.cta ? resolveHref(mode, site.slug, card.cta.href) : null;
               return (
                 <li key={card.id} className={panels ? "rounded-2xl bg-white p-6 text-neutral-900 shadow-sm ring-1 ring-neutral-200" : ""}>
                   {photo ? (
@@ -340,9 +476,9 @@ function SectionView({
                       ))}
                     </div>
                   )}
-                  {card.cta && (
+                  {card.cta && to && (
                     <Link
-                      href={resolveHref(mode, site.slug, card.cta.href)}
+                      href={to}
                       className="mt-4 inline-block text-sm font-medium underline-offset-4 hover:underline"
                       style={{ color: inner.heading }}
                     >
@@ -543,9 +679,18 @@ function Photo({
 }
 
 /** The button: the brand colour on a light background, white where the background is the brand colour or dark. */
-function CtaLink({ href, label, tone }: { href: string; label: string; tone: Tone }) {
+function CtaLink({ href, label, tone }: { href: string | null; label: string; tone: Tone }) {
+  const className = "inline-block rounded-full px-6 py-3 text-sm font-medium shadow-sm";
+  // No usable link: the words stay, as a button that goes nowhere is still the owner's words.
+  if (!href) {
+    return (
+      <span className={className} style={tone.button}>
+        {label}
+      </span>
+    );
+  }
   return (
-    <Link href={href} className="inline-block rounded-full px-6 py-3 text-sm font-medium shadow-sm" style={tone.button}>
+    <Link href={href} className={className} style={tone.button}>
       {label}
     </Link>
   );

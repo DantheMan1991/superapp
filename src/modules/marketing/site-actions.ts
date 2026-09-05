@@ -6,7 +6,17 @@ import { schema, withTenant } from "@/db";
 import { logAuditInTx } from "@/lib/audit";
 import { resolveBrandFor } from "@/lib/brand/read";
 import { assembleSite } from "@/lib/sites/copy";
-import { SiteSettingsSchema, type SiteSettings } from "@/lib/sites/schema";
+import { frameFromInput } from "@/lib/sites/frame";
+import { SOCIAL_NETWORKS } from "@/lib/sites/links";
+import {
+  EMPTY_SETTINGS,
+  FOOTER_COLUMNS_MAX,
+  FOOTER_LINKS_MAX,
+  readSiteSettings,
+  SiteSettingsSchema,
+  SOCIAL_LINKS_MAX,
+  type SiteSettings,
+} from "@/lib/sites/schema";
 import { normalizeSiteSlug, slugReasonMessage } from "@/lib/sites/slug";
 import { MarketingError } from "./core/errors";
 import { fail, gate, type ActionResult } from "./gate";
@@ -34,14 +44,15 @@ const BASE = "/dashboard/m/marketing/website";
 
 /**
  * The public pages are cached (ISR); this is what makes a publish show up at
- * once. Both route files are named because `revalidatePath` works on the
- * route file, not the URL a visitor sees — the host rewrite lands on the
- * second one.
+ * once. All three route files are named because `revalidatePath` works on
+ * the route file, not the URL a visitor sees — the host rewrite lands on
+ * the second, a connected domain on the third.
  */
 function revalidateSite(): void {
   revalidatePath(BASE);
   revalidatePath("/sites/[slug]/[[...path]]", "page");
   revalidatePath("/hosted/[slug]/[[...path]]", "page");
+  revalidatePath("/domain/[host]/[[...path]]", "page");
 }
 
 const detailsInput = z.object({
@@ -53,14 +64,19 @@ const detailsInput = z.object({
   hoursText: z.string().max(800).default(""),
 });
 
-/** Textarea → settings, through the schema the renderer reads. */
-function settingsFrom(input: z.infer<typeof detailsInput>): SiteSettings {
+/**
+ * Textarea → settings, through the schema the renderer reads. The details
+ * are four of the settings' fields; the frame (the header, the footer, the
+ * bar) is the rest, and a save of the details leaves it as it was.
+ */
+function settingsFrom(existing: SiteSettings, input: z.infer<typeof detailsInput>): SiteSettings {
   const hoursLines = input.hoursText
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean)
     .slice(0, 7);
   const parsed = SiteSettingsSchema.safeParse({
+    ...existing,
     phone: input.phone,
     email: input.email,
     address: input.address,
@@ -86,7 +102,7 @@ export async function createSiteAction(
     const parsed = buildInput.safeParse(input);
     if (!parsed.success) return { error: "Check the fields and try again." };
     const slug = slugFrom(parsed.data.slug);
-    const settings = settingsFrom(parsed.data);
+    const settings = settingsFrom(EMPTY_SETTINGS, parsed.data);
     const brief = await withTenant(
       ctx.tenantId,
       async (tx) => {
@@ -179,15 +195,89 @@ export async function saveSiteDetailsAction(input: unknown): Promise<ActionResul
     const ctx = await gate();
     const parsed = detailsInput.safeParse(input);
     if (!parsed.success) return { error: "Check the fields and try again." };
-    const settings = settingsFrom(parsed.data);
     await withTenant(
       ctx.tenantId,
       async (tx) => {
         const site = await findSite(tx, ctx.tenantId);
         if (!site) throw new MarketingError("SITE_MISSING", "no site");
+        const settings = settingsFrom(readSiteSettings(site.settings), parsed.data);
         await updateSiteSettings(tx, ctx, site.id, { title: parsed.data.title, settings });
         await logAuditInTx(tx, {
           action: "marketing.site.details_saved",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "site",
+          targetId: site.id,
+        });
+      },
+      { role: ctx.role },
+    );
+    revalidateSite();
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const linkInput = z.object({
+  label: z.string().trim().max(40).default(""),
+  href: z.string().trim().max(200).default(""),
+});
+
+/** The Header and footer form, every row as typed; `frameFromInput` applies the rules. */
+const headerFooterInput = z.object({
+  announcement: z.object({
+    text: z.string().trim().max(120).default(""),
+    href: z.string().trim().max(200).default(""),
+    shown: z.boolean().default(false),
+  }),
+  headerButton: linkInput,
+  social: z
+    .array(
+      z.object({
+        network: z.enum(SOCIAL_NETWORKS),
+        url: z.string().trim().max(200).default(""),
+        label: z.string().trim().max(30).default(""),
+      }),
+    )
+    .max(SOCIAL_LINKS_MAX),
+  footerColumns: z
+    .array(
+      z.object({
+        heading: z.string().trim().max(40).default(""),
+        text: z.string().trim().max(300).default(""),
+        links: z.array(linkInput).max(FOOTER_LINKS_MAX),
+      }),
+    )
+    .max(FOOTER_COLUMNS_MAX),
+  footerNote: z.string().trim().max(160).default(""),
+});
+
+/**
+ * The frame around every page: the announcement bar, the header's button,
+ * the profiles elsewhere, the footer's columns and line. Settings, like the
+ * details, so it shows on the live site the moment it is saved.
+ */
+export async function saveHeaderFooterAction(input: unknown): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const parsed = headerFooterInput.safeParse(input);
+    if (!parsed.success) return { error: "Check the fields and try again." };
+    const checked = frameFromInput(parsed.data);
+    if (!checked.ok) return { error: checked.message };
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const site = await findSite(tx, ctx.tenantId);
+        if (!site) throw new MarketingError("SITE_MISSING", "no site");
+        const settings = SiteSettingsSchema.safeParse({
+          ...readSiteSettings(site.settings),
+          ...checked.frame,
+        });
+        if (!settings.success) throw new MarketingError("INVALID_INPUT", "settings rejected");
+        await updateSiteSettings(tx, ctx, site.id, { settings: settings.data });
+        await logAuditInTx(tx, {
+          action: "marketing.site.header_footer_saved",
           tenantId: ctx.tenantId,
           actorClerkUserId: ctx.userId,
           targetType: "site",

@@ -32,7 +32,7 @@
 | **5e** | **The alt text nudge: photos without a description are counted per section and per page in the editor's list, and per page on the Website screen's Pages panel.** | **built 2026-09-05** |
 | **6** | **Columns and cards: two to four columns of cards (photo or icon, heading, a few lines, a button), sortable in the editor, in white panels on a band or plain, with a wide-left or wide-right variant for two columns.** | **built 2026-09-05** |
 | **6b** | **Layout presets on every section (width, spacing, alignment; the hero's height and photo side, the about section's photo side) and backgrounds (none, a tint, the brand colour, dark, a photo with an overlay), with the words' tone following the background.** | **built 2026-09-05** |
-| 6c | Header and footer editing: a header button, social links, footer columns, an announcement bar | |
+| **6c** | **The frame around every page: an announcement bar, a header button, social links as marks, footer columns and a footer line, edited on the Website screen and live the moment they are saved; and a link is now one of four shapes, on save and at render.** | **built 2026-09-05** |
 | 6d | Fonts and looks: curated font pairings and a warm/modern/classic switch from the brand kit; button shapes | |
 | 7 | Phone and tablet toggle on the preview; click a section in the preview to select it in the editor | |
 | 8 | Bookings: a "book a time" section on the scheduling module's calendars, landing like an enquiry | |
@@ -46,6 +46,80 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-05 — Slice 6c: the header, the footer and the bar across the top (`claude/marketing-site-header-footer`)
+
+The frame around every page, edited on the Website screen and shown the
+moment it is saved. No migration: the frame lives in `sites.settings`
+beside the details, with a default for every row saved before it existed.
+
+- **`SiteSettingsSchema`** (`src/lib/sites/schema.ts`) gains `announcement`
+  (`text`, an optional `href`, `shown`), `headerButton` (a `Cta` or null),
+  `social` (up to eight `SocialLink`s: `network`, `url`, and a `label` for
+  `other`), `footerColumns` (up to three, each a heading, a few lines and up
+  to six links) and `footerNote`. Every one has a default, so
+  `readSiteSettings` of an older row is the row plus an empty frame; and a
+  save of the details now merges into the existing settings instead of
+  rebuilding them (`settingsFrom(existing, input)`), which is what keeps the
+  frame when the phone number changes.
+- **A link is one of four shapes** (`src/lib/sites/links.ts`, pure): a page
+  on this site (`/contact`, never `//host`), `http(s)://`, `mailto:`,
+  `tel:`. `CtaSchema.href` now refines on it, so the editor's buttons and
+  cards refuse a `javascript:` on save, in the rule's own words through
+  `contentProblem`; and the renderer's `resolveHref` returns null for
+  anything else, drawing a button as words and a card's link not at all.
+  Before this slice `href` was any 200 characters, and the public pages sit
+  on the platform's own origin: a stored `javascript:` was a stored XSS
+  against anyone signed in who clicked it. Every link stored on the dev and
+  production branches was checked against the rule before the merge (dev 6,
+  production 3, none outside it), so the tighter schema blanks no page.
+- **`src/lib/sites/frame.ts`** (pure, tested): `FrameInput` is the form as
+  typed, blanks and all; `frameFromInput` trims, drops the blank rows and
+  names the first thing wrong (`The header button needs a link.`,
+  `The footer link "Map" needs a link.`, the four shapes for a bad one);
+  `frameInputFrom` is the way back. `linkProblem` and `webUrlProblem` give
+  the form its inline messages from the same rules.
+- **The renderer** (`site-page.tsx`): `Announcement` (a brand-colour band
+  above the header, the text a link when it has one), `SiteHeader` (the
+  button after the menu, in the light tone's button style; menu and button
+  wrap under the logo on a phone), `SiteFooter` (the one quiet row it was
+  when there are no columns, plus the marks; a grid of the details column
+  and the owner's columns when there are; and, always, `© <year> <name>`
+  with the footer line beside it). `src/components/site/social-icons.tsx`
+  holds the marks as filled paths and draws `other` as its own words in a
+  pill; each opens in a new tab with `rel="noopener noreferrer"`.
+- **The screen**: a `Header and footer` card on the Website page
+  (`components/header-footer-form.tsx`) in four blocks: the bar (a switch,
+  the text, the link), the button (label, goes to), the social links (a
+  network, the address, the name of `other`; the network fills itself in
+  from a pasted address through `guessNetwork`), the footer (columns with a
+  heading, text and links; the footer line). Save is held while any link is
+  wrong and the save's refusal names the row. Staff see a read-only
+  summary. `saveHeaderFooterAction` (`site-actions.ts`): gate → Zod →
+  `frameFromInput` → merge into the existing settings → `updateSiteSettings`
+  → audit `marketing.site.header_footer_saved` → revalidate.
+- **Fixed on the way: a publish or a details save did not revalidate a
+  connected domain's pages.** `revalidateSite` in `site-actions.ts` and
+  `revalidateAll` in `page-actions.ts` named the platform and hosted routes
+  but not `/domain/[host]/[[...path]]` (the image and domain actions did),
+  so on a custom domain a publish showed only when the five-minute cache ran
+  out. Both now name all three.
+- **Driven on the dev branch** on Test's `oak-row-farm`: the bar switched on
+  with `Closed Monday, September 7, for Labor Day` linking to `/contact`; a
+  `Book a visit` button; a Facebook address whose network filled in by
+  itself, and an Etsy shop as `Another site`; a `Visit` column with a line
+  and two links and an `Hours` column of text alone; `Family owned since
+  1978.` as the line. The save answered `Header and footer saved. They show
+  on the site straight away.`, and the live home page then carried the
+  brand-colour bar with its link, the button at the end of the menu, the
+  Facebook mark and the `Etsy shop` pill opening in a new tab, the
+  three-column footer, and `© 2026 Oak Row Farm Co.` beside the line. Then
+  the six other networks, each recognised from its pasted address, to see
+  all seven marks at once (they read right at 44px; `Add a link` greyed out
+  at eight); a details save that changed the phone left the frame as it
+  was; and `www.example.com` in the button's `Goes to` put the four shapes
+  in red under the box and held Save until `Discard changes`. Tests:
+  `tests/site-frame.test.ts`.
 
 ### 2026-09-05 — Slice 6b: layout presets and backgrounds (`claude/marketing-site-layout-presets`)
 
@@ -773,7 +847,7 @@ generated logo re-drawable as a vector.
 
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
-| `sites` | The business's website: its address, live details and status | FORCE RLS. `member_read`; INSERT/UPDATE/DELETE need `app_current_tenant_role() = 'owner'`. Unique on `tenant_id` (one site per tenant, this slice) and on `slug` platform-wide (it is a hostname label). CHECKs: slug shape `^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$`, `status in (draft, published)`, `copy_source in (model, standard)`, title ≤ 80. `settings` is `SiteSettingsSchema` |
+| `sites` | The business's website: its address, live details and status | FORCE RLS. `member_read`; INSERT/UPDATE/DELETE need `app_current_tenant_role() = 'owner'`. Unique on `tenant_id` (one site per tenant, this slice) and on `slug` platform-wide (it is a hostname label). CHECKs: slug shape `^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$`, `status in (draft, published)`, `copy_source in (model, standard)`, title ≤ 80. `settings` is `SiteSettingsSchema`: the details (phone, email, address, hours) and, since 6c, the frame (announcement bar, header button, social links, footer columns, footer line), all read live by the renderer |
 | `site_pages` | One page: its path, title, nav place, `draft` and `published` content | FORCE RLS, same policies. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. Unique `(site_id, path)`. CHECK: path `^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$`, title 1–80. `draft`/`published` are `PageContentSchema`; `published` null = never published |
 | `site_page_versions` | A page's history: the content at each `save`, `publish` and `restore` | FORCE RLS; `member_read`, owner INSERT and DELETE (no UPDATE — a version is never edited). Composite FK `(tenant_id, page_id) → site_pages` ON DELETE CASCADE. CHECK on `kind`. Trimmed to the newest `PAGE_VERSIONS_KEEP` (30) on every write by `recordVersion` |
 | `site_domains` | A domain the business owns, connected to its site | FORCE RLS; `member_read`, owner INSERT/UPDATE/DELETE. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. **Unique on `domain` platform-wide** (a hostname points at one site); at most five per site (`SITE_DOMAINS_MAX`). CHECKs: hostname shape, `status in (pending, active, error)`. `records` is `DnsRecordToPublish[]`, what the owner was last told to publish; `vercel_verified`/`vercel_configured_by` are Vercel's last words. **Only an `active` row routes**, and only Vercel makes a row active |
@@ -833,6 +907,13 @@ generated logo re-drawable as a vector.
   `src/app/api/marketing/sites/images/[id]`,
   `src/app/sites/[slug]/images/[imageId]`,
   `src/app/domain/[host]/images/[imageId]`
+- The frame: `src/lib/sites/links.ts` (a link's four shapes, `isSafeHref`,
+  the social networks, `guessNetwork` — pure), `frame.ts` (the Header and
+  footer form ↔ the settings, `frameFromInput` and its messages — pure),
+  `src/components/site/social-icons.tsx` (the marks), `Announcement`,
+  `SiteHeader` and `SiteFooter` in `site-page.tsx`;
+  `src/modules/marketing/components/header-footer-form.tsx` and
+  `saveHeaderFooterAction` in `site-actions.ts`
 - The editor: `src/lib/sites/pages.ts` (the section catalogue, fresh
   sections, summaries, page-path rules, paragraph splitting, moves, history
   pruning — pure), `src/modules/marketing/page-ops.ts` (save with a version,
@@ -866,6 +947,26 @@ generated logo re-drawable as a vector.
 
 ## Decisions & gotchas
 
+- **The frame is settings, and shows at once.** The announcement bar, the
+  header button, the social links and the footer live in `sites.settings`
+  beside the phone and the hours, not in a page's draft, for the same
+  reason the contact section reads the settings live: they are the site's,
+  not a page's, and a bar that says "Closed Monday" has to be true the
+  moment it is saved. There is no draft of the frame; the Website screen
+  says so under the card's heading.
+- **A link is one of four shapes, checked twice.** On save, `CtaSchema`
+  and the frame refuse anything but an in-site path, `http(s)://`,
+  `mailto:` or `tel:`; at render, `resolveHref` returns null for anything
+  else and the words are drawn without a link. The second check is for a
+  row that did not come through the first — an older page, a hand edit —
+  and it costs nothing. The rule was missing until 6c; see the build log
+  for why it is a security rule on the platform's origin.
+- **The marks are paths in the repo, and `other` is words.** lucide 1.x
+  dropped its brand icons, so the seven networks' marks are filled 24×24
+  paths in `social-icons.tsx`, drawn in the current colour. A network
+  without a mark (Etsy, Nextdoor, a Google profile) is `other`, shown as
+  the owner's own label in a pill: a row of marks with one stroke icon
+  among them reads as a mistake.
 - **The public page's scripts are three, and each earns its place.** The
   view beacon (a count), the enquiry form (a pending state and a thank-you)
   and the slideshow with the gallery's lightbox (photos one at a time).
@@ -1058,6 +1159,16 @@ generated logo re-drawable as a vector.
 - **An ISR cache hit has never been seen** — the dev server renders every
   request. The production build proves it: `x-nextjs-cache: HIT` on a second
   fetch of a published page, and a MISS right after a publish.
+- **The header on a phone wraps; it does not fold.** With four menu items
+  and a button, the menu and the button wrap under the logo on a narrow
+  screen, which reads fine at five items and would not at ten. A folding
+  menu (one button, a sheet) is the first thing to build when a site has
+  more pages than a row can hold; the `PAGE_SECTIONS_MAX`-style ceiling on
+  pages in the menu does not exist yet either.
+- **Six marks are from memory.** The Facebook, Instagram, YouTube, TikTok,
+  LinkedIn, X and Pinterest paths in `social-icons.tsx` were checked by eye
+  at 44px on the dev branch, not against the networks' brand files. A mark
+  that looks off on a real phone is a path to replace, nothing else.
 - **A pointer drag has not been seen by a person.** The editor's keyboard
   drag is proven; the mouse path is the same sensor set and drop handler,
   but the browser tooling could not produce a real pointer drag. Ten seconds

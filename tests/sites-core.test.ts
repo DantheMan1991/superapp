@@ -5,6 +5,7 @@ import {
   type SiteBrief,
 } from "../src/lib/sites/copy";
 import {
+  EMPTY_SETTINGS,
   PageContentSchema,
   SectionSchema,
   SiteSettingsSchema,
@@ -95,7 +96,7 @@ describe("the content model", () => {
   it("degrades a malformed row to empty rather than throwing at render", () => {
     expect(readPageContent({ sections: [{ type: "nope" }] })).toEqual({ description: "", sections: [] });
     expect(readPageContent(null)).toEqual({ description: "", sections: [] });
-    expect(readSiteSettings({ phone: 5 })).toEqual({ phone: "", email: "", address: "", hoursLines: [] });
+    expect(readSiteSettings({ phone: 5 })).toEqual(EMPTY_SETTINGS);
   });
 
   it("checks the email but allows it blank", () => {

@@ -19,6 +19,7 @@ import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
 import { ConnectDomainForm, DomainRow } from "@/modules/marketing/components/domain-controls";
 import { EnquiriesPanel } from "@/modules/marketing/components/enquiries-panel";
+import { HeaderFooterForm, HeaderFooterSummary } from "@/modules/marketing/components/header-footer-form";
 import { VisitorsPanel } from "@/modules/marketing/components/visitors-panel";
 import { MarketingStrip } from "@/modules/marketing/components/marketing-strip";
 import { PagesPanel } from "@/modules/marketing/components/pages-panel";
@@ -249,6 +250,23 @@ export default async function WebsitePage() {
                   <div><dt className="text-xs text-muted-foreground">Hours</dt><dd>{drafts.view.settings.hoursLines.join("; ") || "None"}</dd></div>
                   <p className="text-xs text-muted-foreground sm:col-span-2">Only an owner can change these.</p>
                 </dl>
+              )}
+            </Panel>
+          </section>
+
+          <section className="space-y-3">
+            <div>
+              <h2 className="font-heading text-lg font-semibold tracking-heading">Header and footer</h2>
+              <p className="text-sm text-muted-foreground">
+                What every page shares: a line across the top, a button in the header, your pages
+                elsewhere, and the footer&rsquo;s columns. Saved changes show on the site straight away.
+              </p>
+            </div>
+            <Panel className="p-6">
+              {canWrite ? (
+                <HeaderFooterForm settings={drafts.view.settings} />
+              ) : (
+                <HeaderFooterSummary settings={drafts.view.settings} />
               )}
             </Panel>
           </section>

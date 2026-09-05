@@ -24,6 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { FORM_FIELD_KINDS, newFormField } from "@/lib/sites/enquiry-schema";
+import { linkProblem } from "@/lib/sites/frame";
 import { iconLabel, moveItem, paragraphsToText, textToParagraphs } from "@/lib/sites/pages";
 import {
   CARD_ICON_NAMES,
@@ -598,9 +599,17 @@ function CtaFields({
       <Field
         id={`${idPrefix}-cta-href`}
         label="Goes to"
-        hint="A page on this site such as /contact, a full https:// address, or mailto: and tel: links."
+        hint="A page on this site such as /contact, a full https:// address, or a mailto: or tel: link."
       >
-        <Input id={`${idPrefix}-cta-href`} value={cta.href} maxLength={200} className="font-mono" onChange={(e) => onChange({ ...cta, href: e.target.value })} />
+        <Input
+          id={`${idPrefix}-cta-href`}
+          value={cta.href}
+          maxLength={200}
+          className="font-mono"
+          aria-invalid={linkProblem(cta.href) !== null}
+          onChange={(e) => onChange({ ...cta, href: e.target.value })}
+        />
+        {linkProblem(cta.href) && <p className="text-xs text-destructive">That is not a link the site can use.</p>}
       </Field>
     </div>
   );

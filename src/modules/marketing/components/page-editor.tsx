@@ -35,6 +35,7 @@ import {
   newSection,
   normalizePagePath,
   pagePathReasonMessage,
+  type PlainSectionType,
   sectionLabel,
   sectionSummary,
   undescribedPhotos,
@@ -48,8 +49,10 @@ import {
   readPreviewMessage,
   type PreviewDevice,
 } from "@/lib/sites/preview";
-import { PageContentSchema, type PageContent, type Section, type SectionType } from "@/lib/sites/schema";
+import { PageContentSchema, type PageContent, type Section } from "@/lib/sites/schema";
 import type { SitePhotoView } from "../image-actions";
+import { blockLabel, newBlockSection } from "@/lib/site-blocks/core";
+import type { BlockCatalogEntry } from "@/lib/site-blocks/types";
 import { restorePageVersionAction, savePageAction } from "../page-actions";
 import { RewriteWords, WritePage } from "./assistant-controls";
 import { SectionForm } from "./section-forms";
@@ -144,6 +147,7 @@ export function PageEditor({
   schedulingOn,
   mapStatus,
   assistantOn,
+  blocks,
 }: {
   pageId: string;
   slug: string;
@@ -159,6 +163,8 @@ export function PageEditor({
   mapStatus: string;
   /** Whether the assistant is set up on this deployment: its controls are drawn only then. */
   assistantOn: boolean;
+  /** The blocks the tenant's packs offer this site, with their fields (slice 9b). */
+  blocks: BlockCatalogEntry[];
 }) {
   const router = useRouter();
   const [library, setLibrary] = useState(photos);
@@ -170,6 +176,8 @@ export function PageEditor({
   // Follows the unsaved rows, so typing a description clears it at once.
   const pageNudge = altNudge(undescribedPhotosOnPage({ sections: rows.map((r) => r.section) }));
   const [selected, setSelected] = useState<string | null>(rows[0]?.key ?? null);
+  // A block section is called by its catalogue name; every other kind by its own.
+  const labelFor = (section: Section) => (section.type === "block" ? blockLabel(section.kind, blocks) : sectionLabel(section.type));
   const [saved, setSaved] = useState(() => JSON.stringify({ title: initial.title, path: initial.path, inNav: initial.inNav, content: initial.content }));
   const [previewKey, setPreviewKey] = useState(0);
   const [savedPath, setSavedPath] = useState(initial.path);
@@ -241,8 +249,8 @@ export function PageEditor({
     });
   }
 
-  function add(type: SectionType) {
-    const row = keyed(newSection(type));
+  /** A new row after the selected one, or at the end, and selected. */
+  function place(row: Row) {
     setRows((list) => {
       const at = selected ? list.findIndex((r) => r.key === selected) + 1 : list.length;
       const next = [...list];
@@ -250,6 +258,15 @@ export function PageEditor({
       return next;
     });
     setSelected(row.key);
+  }
+
+  function add(type: PlainSectionType) {
+    place(keyed(newSection(type)));
+  }
+
+  /** A pack's block from the catalogue (slice 9b). */
+  function addBlock(entry: BlockCatalogEntry) {
+    place(keyed(newBlockSection(entry)));
   }
 
   function remove(key: string) {
@@ -399,6 +416,7 @@ export function PageEditor({
                       <SortableRow
                         key={row.key}
                         row={row}
+                        label={labelFor(row.section)}
                         index={i}
                         count={rows.length}
                         selected={row.key === selected}
@@ -430,6 +448,11 @@ export function PageEditor({
                     </Button>
                   );
                 })}
+                {blocks.map((b) => (
+                  <Button key={b.kind} type="button" variant="outline" size="sm" title={b.hint} disabled={rows.length >= 12} onClick={() => addBlock(b)}>
+                    {b.label}
+                  </Button>
+                ))}
               </div>
             </div>
           </Panel>
@@ -439,7 +462,7 @@ export function PageEditor({
             <Panel className="space-y-4 p-5">
               <div className="flex items-center justify-between">
                 <h2 className="font-heading text-base font-semibold tracking-heading">
-                  {sectionLabel(selectedRow.section.type)}
+                  {labelFor(selectedRow.section)}
                 </h2>
                 <Button type="button" variant="ghost" size="sm" onClick={() => remove(selectedRow.key)}>
                   <Trash2 className="size-4" />
@@ -453,6 +476,7 @@ export function PageEditor({
                 photos={{ tenantId, library, onLibraryChange: setLibrary, assistantOn }}
                 schedulingOn={schedulingOn}
                 mapStatus={mapStatus}
+                blocks={blocks}
               />
               {assistantOn && (
                 <RewriteWords
@@ -540,6 +564,7 @@ export function PageEditor({
 
 function SortableRow({
   row,
+  label,
   index,
   count,
   selected,
@@ -548,6 +573,7 @@ function SortableRow({
   onRemove,
 }: {
   row: Row;
+  label: string;
   index: number;
   count: number;
   selected: boolean;
@@ -578,7 +604,7 @@ function SortableRow({
         <GripVertical className="size-4" />
       </button>
       <button type="button" className="min-w-0 flex-1 text-left" onClick={onSelect}>
-        <div className="text-sm font-medium">{sectionLabel(row.section.type)}</div>
+        <div className="text-sm font-medium">{label}</div>
         <div className="truncate text-xs text-muted-foreground">{sectionSummary(row.section) || "Empty"}</div>
         {nudge && <div className="text-xs text-amber-700">{nudge}</div>}
       </button>

@@ -322,6 +322,24 @@ export const SectionSchema = z.discriminatedUnion("type", [
     cards: z.array(CardSchema).max(CARDS_MAX).default([]),
     style: SectionStyleSchema.optional(),
   }),
+  /**
+   * A pack's block — slice 9b, the declared slot (ADR 0028). The site knows
+   * the shape and nothing of what fills it: `kind` names a provider a pack
+   * registered (`pack.block`, e.g. `retail.prices`), `config` holds what
+   * that provider's editor fields set and is checked by the provider on
+   * save and again at load. The heading, the note, the empty line and the
+   * look are the site's, like any section's.
+   */
+  z.object({
+    type: z.literal("block"),
+    kind: z.string().regex(/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/, "not a block"),
+    heading: short(80).default(""),
+    note: short(300).default(""),
+    /** Shown when the block has nothing to list; blank reads a standard line. */
+    emptyText: short(160).default(""),
+    config: z.record(z.string().max(40), z.union([z.string().max(200), z.number(), z.boolean()])).default({}),
+    style: SectionStyleSchema.optional(),
+  }),
 ]);
 export type Section = z.infer<typeof SectionSchema>;
 export type SectionType = Section["type"];

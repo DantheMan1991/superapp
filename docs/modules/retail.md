@@ -33,10 +33,42 @@ Rows are listed in build order; the numbers are left alone because the build log
 | 3 | Commitments: reservations, deposits, hanging-weight final invoice, fulfilment point — needs `production` | |
 | **8** | **Selling by the pound** — `retail_prices.price_basis`, `weight_lb` and `line_total_cents` on the sale line, a weigh box on the till. [ADR 0016](../decisions/0016-a-catch-weight-item-is-stocked-in-packages.md) | **shipped 2026-08-25** |
 | 4 | Farm store, attended and count-derived | |
-| 6 | Online orders + pickup windows | |
+| 6 | Online orders + pickup windows — fills the website's `block` slot Marketing 9b made (the price list, `site-blocks.ts`, is its first tenant) plus a client island the site owns and the provider names | |
 | 7 | Shipping (costed), then wholesale (eligibility becomes load-bearing) | |
 
 ## Build log
+
+### 2026-09-05 — A channel's prices on the website (`claude/marketing-site-blocks-seam`)
+
+Marketing slice 9b made the website a declared slot a pack can fill
+([ADR 0028](../decisions/0028-a-packs-block-is-data-the-site-draws.md)),
+and this pack is the first to fill it. No migration, no new table, no
+change to a price.
+
+- **`src/packs/retail/site-blocks.ts`** — the `retail.prices` provider: a
+  `Price list` block the page editor offers while Retail is on. Its fields
+  are data (`Prices from`, a select over the tenant's active channels, chosen
+  for the owner when there is one; `When something has run out`, marked or
+  dropped); its `load` reads through the pack's own verbs (`listChannels`,
+  `priceListFor` on the tenant's day, inventory's `onHandByItem`) as the
+  site's anonymous reader and answers rows. The only file in the pack that
+  knows a website exists.
+- **`core/site-prices.ts`** — pure: `presentPriceList` shows PRICED, ACTIVE
+  items by name with what the price is per (`per lb` for a by-the-pound
+  basis, `each` for a thing, `per dozen` for a dozen) and the figure in the
+  tenant's symbol (dollars when none is set: a public price wants one);
+  sold out is nothing on hand anywhere, and an item Inventory never counted
+  is for sale. `priceListFor` includes the unpriced on purpose for the
+  owner's screen; a visitor never sees a row with no figure.
+- **The website has no prices of its own.** A price is a row on
+  `(channel, item)` and the page picks a channel, so a business that wants
+  site prices makes a channel called Website. The channel guide says so.
+- **Driven on the dev branch** on Test, given Retail and Inventory, a
+  `Saturday market` channel and three items, two of them priced: the
+  block was offered in the editor, the one channel was chosen for the
+  owner, and the draft page listed `Ground beef · per lb · $8.99` and
+  `Eggs · per dozen · $6.00`, the unpriced honey nowhere. Tests:
+  `tests/site-blocks.test.ts`.
 
 ### 2026-09-03 — Four tenant guides, and what writing them found (`claude/retail-guides`)
 
@@ -654,9 +686,24 @@ guard with nothing to read.
   `drizzle/0173_retail_rls.sql`
 - `tests/retail.test.ts` · `tests/retail-ops.test.ts` ·
   `tests/isolation/retail.test.ts`
+- `src/packs/retail/site-blocks.ts` — the price list on the tenant's website
+  (Marketing 9b, [ADR 0028](../decisions/0028-a-packs-block-is-data-the-site-draws.md)):
+  the provider for the site's declared slot, and the only file in the pack
+  that knows a website exists; `core/site-prices.ts` — pure, what a visitor
+  sees of a channel's prices and what they never see; `tests/site-blocks.test.ts`
 
 ## Decisions & gotchas
 
+- **The website shows a channel's prices; it does not have prices of its own**
+  (Marketing 9b). A price is a row on `(channel, item)` and the page picks a
+  channel, so a business that wants site prices makes a channel called
+  Website and the pack learns nothing new. The block reads through the
+  pack's own verbs (`listChannels`, `priceListFor`, inventory's
+  `onHandByItem`) as the site's anonymous reader, and shows PRICED, ACTIVE
+  items only: `priceListFor` includes the unpriced on purpose for the
+  owner's screen, and a visitor must never see a row with no figure. "Sold
+  out" is nothing on hand anywhere, and an item Inventory never counted is
+  for sale; the owner chooses marked or dropped.
 - **`retail_sale_lines.quantity` MEANS PACKAGES, ON EVERY LINE, INCLUDING A
   WEIGHED ONE.** It issues the movement and it is what `soldByItem` /
   `remainingOnTruck` count the truck down by. Putting a weight in it is the

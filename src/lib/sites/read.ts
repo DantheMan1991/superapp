@@ -6,10 +6,13 @@ import type { ResolvedBrand } from "@/lib/brand/core";
 import { resolveBrandFor } from "@/lib/brand/read";
 import { findManagedCalendarId, itemsOnCalendar } from "@/lib/schedule/managed-calendars";
 import { getTenantTimezone } from "@/lib/tenant-timezone";
+import { loadSiteBlocks } from "@/lib/site-blocks/resolve";
+import type { BlockView } from "@/lib/site-blocks/types";
 import { EVENTS_LOAD_DAYS, type LiveEvent } from "./events-core";
 import {
   readPageContent,
   readSiteSettings,
+  type Section,
   type SitePageView,
   type SiteSettings,
 } from "./schema";
@@ -52,6 +55,12 @@ export interface PublicSite {
    * empty when Scheduling has never made the calendar.
    */
   events: LiveEvent[];
+  /**
+   * What each pack block on show lists, by `blockKey`, loaded through the
+   * declared slot only for the blocks a page on show carries and only
+   * while their pack is on (slice 9b); a block with no entry draws nothing.
+   */
+  blocks: Record<string, BlockView>;
 }
 
 export interface SiteHit {
@@ -112,6 +121,11 @@ export async function lookupSiteByDomain(host: string): Promise<SiteHit | null> 
   return rows[0] ?? null;
 }
 
+/** Every section of every page on show, for the slot to pick its blocks from. */
+function sectionsOnShow(pages: SitePage[], which: "draft" | "published"): Section[] {
+  return pages.flatMap((p) => readPageContent(which === "draft" ? p.draft : p.published).sections);
+}
+
 /** Whether any page on show carries a live events block, so the calendar is read only when it is drawn. */
 function wantsEvents(pages: SitePage[], which: "draft" | "published"): boolean {
   return pages.some((p) =>
@@ -144,11 +158,13 @@ function toView(
   images: SiteImage[],
   timezone: string,
   events: LiveEvent[],
+  blocks: Record<string, BlockView>,
 ): PublicSite {
   return {
     images: Object.fromEntries(images.map((i) => [i.id, { width: i.width, height: i.height }])),
     timezone,
     events,
+    blocks,
     id: site.id,
     slug: site.slug,
     title: site.title || brand.displayName,
@@ -202,7 +218,8 @@ async function loadPublishedFromHit(hit: SiteHit): Promise<PublicSite | null> {
     const images = await listSiteImages(tx, hit.tenantId, site.id);
     const timezone = await getTenantTimezone(tx, hit.tenantId);
     const events = wantsEvents(pages, "published") ? await liveEvents(tx, hit.tenantId) : [];
-    return toView(site, brand, pages, "published", customHost, images, timezone, events);
+    const blocks = await loadSiteBlocks(tx, hit.tenantId, sectionsOnShow(pages, "published"));
+    return toView(site, brand, pages, "published", customHost, images, timezone, events, blocks);
   });
 }
 
@@ -276,7 +293,8 @@ export async function loadSiteDrafts(
   const images = await listSiteImages(tx, tenantId, site.id);
   const timezone = await getTenantTimezone(tx, tenantId);
   const events = wantsEvents(pages, "draft") ? await liveEvents(tx, tenantId) : [];
-  return { site, pages, domains, view: toView(site, brand, pages, "draft", customHost, images, timezone, events) };
+  const blocks = await loadSiteBlocks(tx, tenantId, sectionsOnShow(pages, "draft"));
+  return { site, pages, domains, view: toView(site, brand, pages, "draft", customHost, images, timezone, events, blocks) };
 }
 
 /** The site's photo library, newest last, inside the caller's transaction. */

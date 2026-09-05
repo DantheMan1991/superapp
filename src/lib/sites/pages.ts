@@ -9,8 +9,11 @@ import type { ImageRef, PageContent, Section, SectionType } from "./schema";
  * Pure, and shared by the client editor and the server actions.
  */
 
+/** Every kind an owner adds by itself; a `block` needs a pack's catalogue entry (`site-blocks/core.ts`). */
+export type PlainSectionType = Exclude<SectionType, "block">;
+
 export const SECTION_TYPES: ReadonlyArray<{
-  type: SectionType;
+  type: PlainSectionType;
   label: string;
   hint: string;
 }> = [
@@ -43,7 +46,7 @@ export function sectionLabel(type: SectionType): string {
 }
 
 /** A section with enough in it to draw, ready to be edited. */
-export function newSection(type: SectionType): Section {
+export function newSection(type: PlainSectionType): Section {
   switch (type) {
     case "hero":
       return { type, headline: "A headline for this page", subheadline: "", cta: { label: "Get in touch", href: "/contact" }, image: null };
@@ -143,6 +146,9 @@ export function sectionSummary(section: Section): string {
       text = section.heading ? `${section.heading}: ${count}` : count;
       break;
     }
+    case "block":
+      text = section.heading || section.kind;
+      break;
     case "columns": {
       const names = section.cards.map((c) => c.heading.trim()).filter(Boolean).join(", ");
       const n = section.cards.length;

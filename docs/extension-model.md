@@ -179,6 +179,19 @@ already run in. What a provider is permitted to do is deliberately tiny: drop an
 entry WHOLE, re-point a line, and nothing else, because anything wider
 unbalances a report.
 
+**Used a third time on 2026-09-05, core slot and pack filler again, for the
+website.** A tenant's site (Marketing) must not learn that Retail exists and
+Retail must not learn the shape of a page, yet a price list belongs on the
+page. [src/lib/site-blocks/](../src/lib/site-blocks/types.ts) holds the slot
+(types only), `registry.ts` names the packs, `resolve.ts` is what the site
+calls; `packs/retail/site-blocks.ts` fills it. What a provider does is small
+on purpose: describe its editor FIELDS as data, check a config, answer ROWS.
+The editor draws the fields and the public page draws the rows in the site's
+own look, so a pack ships no component and puts no markup on a public origin.
+Gated on the pack being switched on, unlike the basis lens, because a price
+list is a thing the business shows strangers
+([ADR 0028](decisions/0028-a-packs-block-is-data-the-site-draws.md)).
+
 What is **not** sanctioned: adding a column to a core table for one industry,
 branching on `tenant.industry` inside core, or a pack reading another pack's
 tables directly.

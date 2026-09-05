@@ -40,6 +40,8 @@ import {
   type Section,
   type SectionStyle,
 } from "@/lib/sites/schema";
+import { packOfKind } from "@/lib/site-blocks/core";
+import type { BlockCatalogEntry } from "@/lib/site-blocks/types";
 import { secondsLabel, SLIDESHOW_SECONDS } from "@/lib/sites/slides";
 import type { SitePhotoView } from "../image-actions";
 import { memberPhotoSrc, PhotoField, PhotoLibraryDialog } from "./photo-picker";
@@ -71,6 +73,8 @@ export function SectionForm(props: {
   schedulingOn?: boolean;
   /** Where the site's map stands (`mapStatusLine`), for the map section's note. */
   mapStatus?: string;
+  /** The blocks the tenant's packs offer, with their fields (slice 9b). */
+  blocks?: BlockCatalogEntry[];
 }) {
   return (
     <div className="space-y-6">
@@ -87,6 +91,7 @@ function SectionFields({
   photos,
   schedulingOn = true,
   mapStatus = "",
+  blocks = [],
 }: {
   section: Section;
   onChange: (next: Section) => void;
@@ -94,6 +99,7 @@ function SectionFields({
   photos: PhotoProps;
   schedulingOn?: boolean;
   mapStatus?: string;
+  blocks?: BlockCatalogEntry[];
 }) {
   const id = (name: string) => `${idPrefix}-${name}`;
   switch (section.type) {
@@ -408,6 +414,59 @@ function SectionFields({
           </p>
         </div>
       );
+    case "block": {
+      // A pack's block (slice 9b): the words are the site's, the settings
+      // are the provider's fields, drawn here from their descriptions.
+      const entry = blocks.find((b) => b.kind === section.kind);
+      const setConfig = (key: string, value: string | boolean) => onChange({ ...section, config: { ...section.config, [key]: value } });
+      return (
+        <div className="space-y-4">
+          {!entry && (
+            <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800">
+              This section needs the {packOfKind(section.kind)} pack switched on. It shows nothing on the site until then, and the page cannot be saved with it.
+            </p>
+          )}
+          <Field id={id("heading")} label="Heading" hint="Optional.">
+            <Input id={id("heading")} value={section.heading} maxLength={80} onChange={(e) => onChange({ ...section, heading: e.target.value })} />
+          </Field>
+          <Field id={id("note")} label="Note" hint="A line under the heading, or blank.">
+            <Input id={id("note")} value={section.note} maxLength={300} onChange={(e) => onChange({ ...section, note: e.target.value })} />
+          </Field>
+          {entry?.fields.map((field) =>
+            field.kind === "select" ? (
+              <Field key={field.key} id={id(field.key)} label={field.label} hint={field.hint}>
+                <select
+                  id={id(field.key)}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
+                  value={String(section.config[field.key] ?? field.default)}
+                  onChange={(e) => setConfig(field.key, e.target.value)}
+                >
+                  {field.options.length === 0 && <option value="">Nothing to choose from yet</option>}
+                  {field.default === "" && field.options.length > 0 && <option value="">Choose…</option>}
+                  {field.options.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            ) : (
+              <div key={field.key} className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <Switch id={id(field.key)} checked={Boolean(section.config[field.key] ?? field.default)} onCheckedChange={(checked) => setConfig(field.key, checked)} />
+                  <Label htmlFor={id(field.key)}>{field.label}</Label>
+                </div>
+                {field.hint && <p className="text-xs text-muted-foreground">{field.hint}</p>}
+              </div>
+            ),
+          )}
+          <Field id={id("empty")} label="When there is nothing to list" hint="Blank reads: Nothing listed yet. Check back soon.">
+            <Input id={id("empty")} value={section.emptyText} maxLength={160} onChange={(e) => onChange({ ...section, emptyText: e.target.value })} />
+          </Field>
+          {entry && <p className="text-xs text-muted-foreground">{entry.hint} The list is whatever the pack holds when the page is drawn, and changes reach the site within a few minutes.</p>}
+        </div>
+      );
+    }
     case "map":
       return (
         <div className="space-y-4">

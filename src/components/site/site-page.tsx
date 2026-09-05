@@ -4,6 +4,7 @@ import { foregroundOn } from "@/lib/brand/core";
 import { lookRadiusVars, resolveLook } from "@/lib/brand/looks";
 import type { PublicSite } from "@/lib/sites/read";
 import { eventDate, eventKey, eventWhen, upcomingEvents } from "@/lib/sites/events-core";
+import { blockKey } from "@/lib/site-blocks/core";
 import { isSafeHref } from "@/lib/sites/links";
 import { directionsUrl, MAP_ATTRIBUTION, MAP_HEIGHT, MAP_WIDTH, mapKey, pinIsFor } from "@/lib/sites/map-core";
 import type { ImageRef, Section, SectionStyle, SitePageView, SiteSettings } from "@/lib/sites/schema";
@@ -562,6 +563,42 @@ function SectionView({
               })}
             </ol>
           )}
+        </Shell>
+      );
+    }
+    case "block": {
+      // A pack's block (slice 9b): the site draws the rows the slot loaded,
+      // in its own look. No entry means the pack is off or could not answer:
+      // nothing on a public page, a word to the owner in the draft.
+      const view = site.blocks[blockKey(section)];
+      if (!view && mode !== "draft") return null;
+      return (
+        <Shell {...shell} spacing={room}>
+          {section.heading && <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>}
+          {section.note && <p className={cn("mt-3", tone.muted)}>{section.note}</p>}
+          {!view ? (
+            <p className={cn("mt-6 text-sm", tone.faint)}>Nothing to show yet: check this section&apos;s settings, and that its pack is switched on.</p>
+          ) : view.rows.length === 0 ? (
+            <p className={cn("mt-6", tone.muted)}>{section.emptyText || "Nothing listed yet. Check back soon."}</p>
+          ) : (
+            <ul className={cn("mt-6 divide-y", resolved.onDark ? "divide-white/15" : "divide-neutral-200", centred && "text-left")}>
+              {view.rows.map((row, i) => (
+                <li key={i} className="flex items-baseline justify-between gap-4 py-3">
+                  <div className="min-w-0">
+                    <span className="font-medium">{row.name}</span>
+                    {row.status === "sold_out" && (
+                      <span className={cn("ml-2 rounded-full px-2 py-0.5 text-xs uppercase tracking-wide", resolved.onDark ? "bg-white/15" : "bg-neutral-100 text-neutral-600")}>
+                        Sold out
+                      </span>
+                    )}
+                    {row.detail && <div className={cn("text-sm", tone.faint)}>{row.detail}</div>}
+                  </div>
+                  <span className={cn("shrink-0 tabular-nums", row.status === "sold_out" ? tone.faint : "font-semibold")}>{row.amount}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {view?.footnote && <p className={cn("mt-4 text-sm", tone.faint)}>{view.footnote}</p>}
         </Shell>
       );
     }

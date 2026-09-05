@@ -113,3 +113,54 @@ export function hash32(text: string): string {
   }
   return hash.toString(16).padStart(8, "0");
 }
+
+/**
+ * Where the site lives, as an absolute address, for what has to be absolute
+ * (structured data, the share image): the connected domain when there is
+ * one — the canonical, wherever the page was reached — else the free
+ * address for a host, else the platform path.
+ */
+export function siteBaseUrlFor(
+  site: { slug: string; customHost: string | null },
+  mode: "path" | "host" | "draft",
+  env: { NEXT_PUBLIC_APP_URL?: string; SITE_DOMAIN?: string; NODE_ENV?: string },
+): string {
+  if (site.customHost) return `https://${site.customHost}`;
+  const app = (env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+  const domain = env.SITE_DOMAIN?.trim() || (env.NODE_ENV === "development" ? "localhost" : "");
+  if (mode === "host" && domain) {
+    const url = new URL(app);
+    return `${url.protocol}//${site.slug}.${domain}${url.port ? `:${url.port}` : ""}`;
+  }
+  return `${app}/sites/${site.slug}`;
+}
+
+/** The share image's ingredients: the words on it, the colour behind them, the mark in the corner. */
+export interface ShareFacts {
+  title: string;
+  subtitle: string;
+  host: string;
+  colour: string;
+  logoPathname: string | null;
+}
+
+/** What a page's share image says: the page's title over the site's, or the site's over its tagline on the home page. */
+export function shareFacts(
+  site: { title: string; brand: { tagline: string; primaryColor: string | null; logo: { pathname: string } | null } },
+  page: { path: string; title: string },
+  base: string,
+): ShareFacts {
+  const home = page.path === "/";
+  return {
+    title: home ? site.title : page.title,
+    subtitle: home ? site.brand.tagline : site.title,
+    host: base.replace(/^https?:\/\//, "").replace(/\/+$/, ""),
+    colour: site.brand.primaryColor ?? "#1f2937",
+    logoPathname: site.brand.logo?.pathname ?? null,
+  };
+}
+
+/** The picture's name: its ingredients hashed, so a retitled page or a new colour is a new address. */
+export function shareKey(facts: ShareFacts): string {
+  return hash32([facts.title, facts.subtitle, facts.host, facts.colour, facts.logoPathname ?? ""].join("|"));
+}

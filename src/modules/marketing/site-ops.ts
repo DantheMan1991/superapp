@@ -4,6 +4,7 @@ import { schema, type Tx } from "@/db";
 import type { Site } from "@/db/schema";
 import type { AssembledPage } from "@/lib/sites/copy";
 import { readPageContent, type SiteSettings } from "@/lib/sites/schema";
+import { withPreviousSlug } from "@/lib/sites/slug";
 import { MarketingError } from "./core/errors";
 import type { MarketingCtx } from "./kit-ops";
 import { recordVersion } from "./page-ops";
@@ -135,11 +136,15 @@ export async function updateSiteSettings(
 export async function changeSiteSlug(
   tx: Tx,
   ctx: MarketingCtx,
-  siteId: string,
+  site: Pick<Site, "id" | "slug" | "previousSlugs">,
   slug: string,
 ): Promise<Site> {
   try {
-    return await updateSite(tx, ctx, siteId, { slug });
+    // The old address is kept (slice 11b) so it can send people on.
+    return await updateSite(tx, ctx, site.id, {
+      slug,
+      previousSlugs: withPreviousSlug(site.previousSlugs, site.slug, slug),
+    });
   } catch (err) {
     if (isUniqueViolation(err)) throw new MarketingError("SLUG_TAKEN", slug);
     throw err;

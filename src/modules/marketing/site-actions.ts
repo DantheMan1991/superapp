@@ -340,7 +340,7 @@ export async function changeSiteSlugAction(
         const site = await findSite(tx, ctx.tenantId);
         if (!site) throw new MarketingError("SITE_MISSING", "no site");
         if (site.slug === slug) return;
-        await changeSiteSlug(tx, ctx, site.id, slug);
+        await changeSiteSlug(tx, ctx, site, slug);
         await logAuditInTx(tx, {
           action: "marketing.site.address_changed",
           tenantId: ctx.tenantId,

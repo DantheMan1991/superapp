@@ -171,6 +171,20 @@ export interface RenderedLogo {
   height: number;
 }
 
+/**
+ * A line of text as SVG paths, for anything the platform draws with the
+ * kit's type (a site's share image): its ink box's top-left at (x, y),
+ * `size` px per em. Paths, not a `<text>` element, so no rasteriser needs a
+ * font installed.
+ */
+export function textPaths(
+  text: string,
+  options: { weight: LogoWeight; size: number; color: string; x: number; y: number; tracking?: number },
+): { svg: string; width: number; height: number } {
+  const block = textBlock(text, options.weight, options.tracking ?? 0, options.size, options.color, options.x, options.y);
+  return { svg: block.svg, width: block.width, height: block.height };
+}
+
 const MARGIN = 16;
 
 function cased(text: string, spec: LogoSpec): string {

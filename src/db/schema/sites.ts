@@ -59,6 +59,13 @@ export const sites = pgTable(
      * CHECK repeats the shape so a row cannot be written any other way.
      */
     slug: text("slug").notNull(),
+    /**
+     * Addresses this site used to have (slice 11b): an old free address
+     * sends people on to the current one for as long as it is here. Newest
+     * first, at most `PREVIOUS_SLUGS_MAX`; a current slug elsewhere wins over
+     * a previous one here.
+     */
+    previousSlugs: text("previous_slugs").array().notNull().default(sql`'{}'::text[]`),
     /** The name in the site's header. Empty = the brand kit's display name. */
     title: text("title").notNull().default(""),
     /**
@@ -89,6 +96,8 @@ export const sites = pgTable(
     uniqueIndex("sites_tenant_idx").on(t.tenantId),
     // The address is platform-wide; two tenants cannot share a hostname.
     uniqueIndex("sites_slug_idx").on(t.slug),
+    // An old address is looked up by containment, across every tenant, under `withSystem`.
+    index("sites_previous_slugs_idx").using("gin", t.previousSlugs),
     check(
       "sites_slug_shape",
       sql`${t.slug} ~ '^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$'`,

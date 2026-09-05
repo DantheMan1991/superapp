@@ -120,7 +120,7 @@ A `Find us` section on a page (see [Editing a page](page-editor.md)) shows a map
 
 ## What search engines and browsers get
 
-Once the site is published, every address it has answers what a search engine asks for: `robots.txt` (crawl everything but the form's inner workings) and `sitemap.xml` (every published page, with the date you last published), pointing at your own domain once one is live. The home page carries a description of the business for search engines built from `Details on the site`, the map's pin, your logo and your social links; a blank detail is simply left out. The browser tab and a phone's home screen show your logo when it is roughly square, otherwise your initials on a square in your primary color, drawn from your brand kit. None of this needs anything from you beyond publishing.
+Once the site is published, every address it has answers what a search engine asks for: `robots.txt` (crawl everything but the form's inner workings) and `sitemap.xml` (every published page, with the date you last published), pointing at your own domain once one is live. The home page carries a description of the business for search engines built from `Details on the site`, the map's pin, your logo and your social links; a blank detail is simply left out. The browser tab and a phone's home screen show your logo when it is roughly square, otherwise your initials on a square in your primary color, drawn from your brand kit. A link to any page pasted into a message or a social feed shows a picture Yosher draws for that page: its title in your brand's type on your primary color, your name or tagline under it, your logo (or your initials) in a white panel, and the site's address in the corner. None of this needs anything from you beyond publishing.
 
 ## How events show on your site
 
@@ -129,7 +129,7 @@ A `What's on` section on a page (see [Editing a page](page-editor.md)) lists the
 ## How to change the address
 
 1. In the last card, type the new address. The line under the box shows what it will be, or why it cannot be.
-2. Click {button:Change address|outline}. You see `Address changed.` Links to the old address stop working.
+2. Click {button:Change address|outline}. You see `Address changed.` Links to the old address keep working for as long as the site remembers it: a visitor who follows one is sent on to the same page at the new address, on the free address and on Yosher alike. Yosher remembers the last ten addresses a site has had; if another business later takes an address you gave up, it is theirs.
 
 ## Messages
 

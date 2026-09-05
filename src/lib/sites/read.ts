@@ -4,6 +4,9 @@ import { schema, withSystem, withTenant, type Tx } from "@/db";
 import type { Site, SiteDomain, SiteImage, SitePage, SitePageVersion } from "@/db/schema";
 import type { ResolvedBrand } from "@/lib/brand/core";
 import { resolveBrandFor } from "@/lib/brand/read";
+import { findManagedCalendarId, itemsOnCalendar } from "@/lib/schedule/managed-calendars";
+import { getTenantTimezone } from "@/lib/tenant-timezone";
+import { EVENTS_LOAD_DAYS, type LiveEvent } from "./events-core";
 import {
   readPageContent,
   readSiteSettings,
@@ -41,6 +44,14 @@ export interface PublicSite {
   customHost: string | null;
   /** The site's photos by id, as the renderer needs them: a section whose photo is not here draws none. */
   images: Record<string, { width: number; height: number }>;
+  /** The business's timezone: what an event's day and time are said in. */
+  timezone: string;
+  /**
+   * What is on the Events calendar for the next `EVENTS_LOAD_DAYS`, loaded
+   * only when a page on show has an events section; empty otherwise, and
+   * empty when Scheduling has never made the calendar.
+   */
+  events: LiveEvent[];
 }
 
 export interface SiteHit {
@@ -84,6 +95,29 @@ export async function lookupSiteByDomain(host: string): Promise<SiteHit | null> 
   return rows[0] ?? null;
 }
 
+/** Whether any page on show carries a live events block, so the calendar is read only when it is drawn. */
+function wantsEvents(pages: SitePage[], which: "draft" | "published"): boolean {
+  return pages.some((p) =>
+    readPageContent(which === "draft" ? p.draft : p.published).sections.some((s) => s.type === "events"),
+  );
+}
+
+/** The Events calendar's next months, as the renderer takes them; nothing when there is no such calendar. */
+async function liveEvents(tx: Tx, tenantId: string, now = new Date()): Promise<LiveEvent[]> {
+  const calendarId = await findManagedCalendarId(tx, tenantId, "events");
+  if (!calendarId) return [];
+  const items = await itemsOnCalendar(tx, calendarId, now, new Date(now.getTime() + EVENTS_LOAD_DAYS * 86_400_000));
+  return items.map((item) => ({
+    id: item.id,
+    occurrenceDate: item.occurrenceDate,
+    title: item.title ?? "",
+    location: item.location ?? "",
+    startsAt: item.startsAt.toISOString(),
+    endsAt: item.endsAt.toISOString(),
+    allDay: item.allDay,
+  }));
+}
+
 function toView(
   site: Site,
   brand: ResolvedBrand,
@@ -91,9 +125,13 @@ function toView(
   which: "draft" | "published",
   customHost: string | null,
   images: SiteImage[],
+  timezone: string,
+  events: LiveEvent[],
 ): PublicSite {
   return {
     images: Object.fromEntries(images.map((i) => [i.id, { width: i.width, height: i.height }])),
+    timezone,
+    events,
     id: site.id,
     slug: site.slug,
     title: site.title || brand.displayName,
@@ -145,7 +183,9 @@ async function loadPublishedFromHit(hit: SiteHit): Promise<PublicSite | null> {
     const brand = await resolveBrandFor(tx, hit.tenantId, null);
     const customHost = await activeHost(tx, hit.tenantId, site.id);
     const images = await listSiteImages(tx, hit.tenantId, site.id);
-    return toView(site, brand, pages, "published", customHost, images);
+    const timezone = await getTenantTimezone(tx, hit.tenantId);
+    const events = wantsEvents(pages, "published") ? await liveEvents(tx, hit.tenantId) : [];
+    return toView(site, brand, pages, "published", customHost, images, timezone, events);
   });
 }
 
@@ -217,7 +257,9 @@ export async function loadSiteDrafts(
   const brand = await resolveBrandFor(tx, tenantId, null);
   const customHost = domains.find((d) => d.status === "active")?.domain ?? null;
   const images = await listSiteImages(tx, tenantId, site.id);
-  return { site, pages, domains, view: toView(site, brand, pages, "draft", customHost, images) };
+  const timezone = await getTenantTimezone(tx, tenantId);
+  const events = wantsEvents(pages, "draft") ? await liveEvents(tx, tenantId) : [];
+  return { site, pages, domains, view: toView(site, brand, pages, "draft", customHost, images, timezone, events) };
 }
 
 /** The site's photo library, newest last, inside the caller's transaction. */

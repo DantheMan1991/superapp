@@ -4,7 +4,7 @@
 - **Status:** Accepted (built 2026-09-05, Marketing slice 8)
 - **Affects:** Marketing (the `booking` section, `site_enquiries`'s booking
   columns, `src/lib/sites/bookings.ts`, the `/api/sites/slots` route, the
-  booking island), Scheduling (`src/lib/schedule/bookings-calendar.ts`, the
+  booking island), Scheduling (`src/lib/schedule/managed-calendars.ts`, the
   first managed business calendar), `docs/security.md` trust boundaries
 - **Builds on:** [0019](0019-a-website-is-pages-of-typed-sections.md),
   [0021](0021-a-website-enquiry-lands-as-a-party.md) (the public write

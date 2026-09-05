@@ -4,7 +4,7 @@ import { z } from "zod";
 import { withTenant } from "@/db";
 import { logAuditInTx } from "@/lib/audit";
 import { isModuleEnabled } from "@/lib/modules";
-import { ensureBookingsCalendar } from "@/lib/schedule/bookings-calendar";
+import { ensureManagedCalendar, MANAGED_CALENDAR_KEYS, type ManagedCalendarKey } from "@/lib/schedule/managed-calendars";
 import {
   normalizePagePath,
   pagePathReasonMessage,
@@ -73,6 +73,12 @@ function parsePath(raw: string): string {
   return check.path;
 }
 
+/** The section kind that needs each managed calendar. */
+const SECTION_FOR: Record<ManagedCalendarKey, PageContent["sections"][number]["type"]> = {
+  bookings: "booking",
+  events: "events",
+};
+
 const saveInput = z.object({
   pageId: z.string().uuid(),
   title: z.string().trim().min(1, "Give the page a title.").max(80),
@@ -91,11 +97,13 @@ export async function savePageAction(input: unknown): Promise<ActionResult> {
     }
     const content = parseContent(parsed.data.content);
     const path = parsed.data.path === null ? null : parsePath(parsed.data.path);
-    // A booking section needs the business's Bookings calendar to exist and
-    // to be shared with everyone at `write` (ADR 0025); the save is where it
-    // is made, by an owner, and only while Scheduling is on.
-    const bookings =
-      content.sections.some((s) => s.type === "booking") && (await isModuleEnabled(ctx.tenantId, "scheduling"));
+    // A booking or an events section needs the business's calendar of that
+    // name to exist and to be shared with everyone at `write` (ADR 0025);
+    // the save is where it is made, by an owner, and only while Scheduling
+    // is on.
+    const wanted = MANAGED_CALENDAR_KEYS.filter((key) => content.sections.some((s) => s.type === SECTION_FOR[key]));
+    const calendars: ManagedCalendarKey[] =
+      wanted.length > 0 && (await isModuleEnabled(ctx.tenantId, "scheduling")) ? wanted : [];
     await withTenant(
       ctx.tenantId,
       async (tx) => {
@@ -105,7 +113,7 @@ export async function savePageAction(input: unknown): Promise<ActionResult> {
           inNav: parsed.data.inNav,
           content,
         });
-        if (bookings) await ensureBookingsCalendar(tx, ctx.tenantId);
+        for (const key of calendars) await ensureManagedCalendar(tx, ctx.tenantId, key);
         await logAuditInTx(tx, {
           action: "marketing.site.page_saved",
           tenantId: ctx.tenantId,

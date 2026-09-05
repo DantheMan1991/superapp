@@ -36,7 +36,8 @@
 | **6d** | **Fonts and looks on the brand kit: a Modern, Warm or Classic look, six curated font pairings bundled by the platform, and pill, rounded or square buttons, with the corners following the look; a sample beside the fields reads as the site will.** [ADR 0024](../decisions/0024-a-look-is-a-preset-and-its-fonts-are-the-platforms.md) | **built 2026-09-05** |
 | **7** | **The editor's preview at a phone's or a tablet's width, remembered per browser; a click on a section in the preview selects it in the editor, and the editor's selection is outlined in the preview, through `postMessage` on the same origin.** | **built 2026-09-05** |
 | **8** | **Bookings: a `Book a time` section whose open times are the section's hours minus what is on a Bookings calendar the platform provisions; a booking lands as an enquiry with a time (party, CRM record, follow-up, email) and as a calendar item with the visitor on it.** [ADR 0025](../decisions/0025-a-booking-is-an-enquiry-with-a-time.md) | **built 2026-09-05** |
-| 9 | Live blocks fed by the modules: prices and availability from retail and inventory, the team, events | |
+| **9a** | **The first live block: `What's on`, the next events from an Events calendar the platform provisions, drawn from the calendar when the page is rendered and kept current by themselves.** | **built 2026-09-05** |
+| 9b | Prices and availability from the retail and inventory packs, through the declared-slot seam the shop block needs (`retail` slice 6): a pack contributes a block kind, its editor fields and its renderer; the site hosts them. A live team block is not planned: Columns already does a team by hand, and a live one raises consent questions a section should not answer | with the shop block |
 | 10 | A map section from the address (MapLibre is in the repo) | |
 | 11 | The SEO pack: sitemap and robots per site, a drawn share image per page, local-business structured data, redirects on an address change; a favicon from the logo | |
 | 12 | The assistant everywhere: rewrite one section, write a page from a sentence, suggest a photo description from the image | |
@@ -46,6 +47,57 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-05 — Slice 9a: what's on, the first live block (`claude/marketing-site-events`)
+
+A section whose content is not typed: the next events on the business's
+Events calendar, read when the page is drawn. The second managed business
+calendar, on the mechanism ADR 0025 settled for the first. No migration.
+
+- **`src/lib/schedule/managed-calendars.ts`** replaces `bookings-calendar.ts`:
+  `MANAGED_CALENDARS` (`bookings` green, `events` amber), `ensureManagedCalendar`,
+  `findManagedCalendarId`, `itemsOnCalendar` (through `listRange`, one
+  calendar, soonest first) and `busyOnCalendar` on top of it. `savePageAction`
+  provisions each calendar a saved page's sections call for, while Scheduling
+  is on.
+- **The `events` section** (`heading`, `note`, `count` 3 | 5 | 10,
+  `horizonDays` 30 | 60 | 90 | 180, `emptyText`) and
+  **`src/lib/sites/events-core.ts`** (pure, tested): `LiveEvent`,
+  `upcomingEvents` (still to come or under way, inside the horizon, soonest
+  first, at most the count), `eventDate` (the poster's day block) and
+  `eventWhen` ("8:00 am to 12:00 pm", "All day", "Sep 12 to Sep 14", a span
+  across days with times).
+- **`PublicSite.events` and `PublicSite.timezone`** (`read.ts`): the read
+  loads the calendar's next 180 days only when a page on show carries an
+  events section (`wantsEvents`), as `staff` with no user for the public
+  routes — the everyone share at `write` is what lets the page see titles
+  and locations — and as the owner for the draft. The renderer's `events`
+  case takes its `count` and `horizonDays` from `site.events` and draws a
+  list: the day block in the tone's heading colour, the title, when, and
+  the location after a middle dot. Nothing coming up reads the section's
+  `emptyText` or a standard line.
+- **Freshness is the page cache's.** The public routes are ISR at 300s and
+  nothing in Scheduling revalidates a site, so an event added or cancelled
+  in the calendar reaches the page within five minutes; a page save or a
+  publish revalidates at once. The guide says "within a few minutes".
+- **What row 9 does not include, and why.** Prices and availability come
+  from the retail and inventory packs; the site cannot import a pack, so
+  they need the declared-slot seam (a pack contributes a block kind, its
+  fields and its renderer) that the shop block needs too, and a seam with
+  no implementor in hand is the thing this repo keeps refusing to build.
+  They wait for `retail` slice 6 as row 9b. A live team block is not
+  planned: Columns does a team by hand today, and a block that lists
+  members from their profiles would decide for each of them whether their
+  name is public.
+- **Driven on the dev branch** on Test: a `What's on` section added at the
+  end of the home page with a note, saved (`Events` appeared under
+  `Business calendars` beside `Bookings`) and published; the live page read
+  `Nothing scheduled yet. Check back soon.`; then `Open barn day` on
+  Saturday, September 19, 10 to 2 at `The barn, 17 Main St`, made in
+  Scheduling's own New event dialog with `Events` picked as the calendar
+  (`Event created`), and the live home page listed `SAT 19 SEP · Open barn
+  day · 10:00 am to 2:00 pm · The barn, 17 Main St`. Tests:
+  `tests/site-events.test.ts`.
 
 ### 2026-09-05 — Slice 8: book a time (`claude/marketing-site-bookings`)
 
@@ -70,11 +122,11 @@ verified on dev and production before the merge.
   calendar's busy time, grouped by day with labels — and `isOffered`, the
   check the write path makes. `describeBooking` is the sentence everything
   else uses: "Tuesday, September 15, 9:00 am to 9:30 am".
-- **`src/lib/schedule/bookings-calendar.ts`** (the scheduling seam): the
+- **`src/lib/schedule/managed-calendars.ts`** (the scheduling seam): the
   business's Bookings calendar, made once through the managed unique index
   (`marketing` / `bookings`), owned by the business and shared with
   everyone at `write`; `busyOnCalendar` through `listRange` and `show_as`.
-  `savePageAction` calls `ensureBookingsCalendar` when a saved page holds a
+  `savePageAction` calls `ensureManagedCalendar` when a saved page holds a
   booking section and Scheduling is on: an owner's context, since the
   business owns it. The share is put back at `write` on every such save.
 - **`src/lib/sites/bookings.ts`**: `openBookingTimes` (the read: a
@@ -1112,10 +1164,13 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
   `src/app/api/marketing/sites/images/[id]`,
   `src/app/sites/[slug]/images/[imageId]`,
   `src/app/domain/[host]/images/[imageId]`
+- Events: `src/lib/sites/events-core.ts` (`upcomingEvents`, `eventDate`,
+  `eventWhen` — pure), `wantsEvents` / `liveEvents` in `read.ts`, the
+  `events` case in `site-page.tsx` and `section-forms.tsx`
 - Bookings: `src/lib/sites/booking-core.ts` (the request, the window, the
   offered times, the sentence — pure), `bookings.ts` (`openBookingTimes`,
-  `receiveSiteBooking`), `src/lib/schedule/bookings-calendar.ts`
-  (`ensureBookingsCalendar`, `findBookingsCalendarId`, `busyOnCalendar`),
+  `receiveSiteBooking`), `src/lib/schedule/managed-calendars.ts`
+  (`ensureManagedCalendar`, `findManagedCalendarId`, `busyOnCalendar`),
   `src/app/api/sites/slots/route.ts`, `src/components/site/booking-form.tsx`
   + `booking-action.ts`, the `booking` case in `section-forms.tsx` and the
   `bookingOn` gate in `page-editor.tsx`; migration `0259`
@@ -1179,6 +1234,13 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
   offer under an advisory lock and refused as "just taken" otherwise. No
   confirmation email goes to the visitor: the platform mails a public
   form's words to the business's own addresses only.
+- **A live block reads at render, on the page cache's clock.** The events
+  block is the renderer reading the workspace (through `PublicSite`, loaded
+  inside the same tenant transaction as the pages) rather than a section
+  that was typed. It costs one calendar read per page render, only when a
+  page on show has the block, and it is as fresh as the ISR window. The
+  same shape — load into `PublicSite` when a section calls for it, draw
+  from it — is what a pack's block will do through the declared-slot seam.
 - **The public page's scripts are four where a booking section is on it.**
   The booking island is the enquiry form's twin with a time picker; it
   fetches the open times from a public read and posts through a public

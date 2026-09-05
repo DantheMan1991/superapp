@@ -140,7 +140,7 @@ export function PageEditor({
   versions,
   tenantId,
   photos,
-  bookingOn,
+  schedulingOn,
 }: {
   pageId: string;
   slug: string;
@@ -151,7 +151,7 @@ export function PageEditor({
   /** The site's photo library, as loaded; the editor keeps it current as photos are added and removed. */
   photos: SitePhotoView[];
   /** Whether Scheduling is on: a booking section can be added only then, and offers no times without it. */
-  bookingOn: boolean;
+  schedulingOn: boolean;
 }) {
   const router = useRouter();
   const [library, setLibrary] = useState(photos);
@@ -396,7 +396,7 @@ export function PageEditor({
               <p className="text-xs text-muted-foreground">Add a section after the selected one</p>
               <div className="flex flex-wrap gap-2">
                 {SECTION_TYPES.map((s) => {
-                  const needsScheduling = s.type === "booking" && !bookingOn;
+                  const needsScheduling = (s.type === "booking" || s.type === "events") && !schedulingOn;
                   return (
                     <Button
                       key={s.type}
@@ -432,7 +432,7 @@ export function PageEditor({
                 section={selectedRow.section}
                 onChange={(next) => update(selectedRow.key, next)}
                 photos={{ tenantId, library, onLibraryChange: setLibrary }}
-                bookingOn={bookingOn}
+                schedulingOn={schedulingOn}
               />
             </Panel>
             </div>

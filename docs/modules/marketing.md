@@ -30,12 +30,69 @@
 | **5c** | **A `Slideshow` section (photos one at a time, arrows and dots, moving on by itself if asked, paused on hover, still under reduced motion) and a lightbox for the gallery's tiles — the public page's one moving part, in one client component with no library.** | **built 2026-09-04** |
 | **5d** | **A swipe across a slideshow or the lightbox moves between photos (pointer events, vertical scrolling left to the browser); the arrow keys move a focused slideshow.** | **built 2026-09-04** |
 | **5e** | **The alt text nudge: photos without a description are counted per section and per page in the editor's list, and per page on the Website screen's Pages panel.** | **built 2026-09-05** |
+| **6** | **Columns and cards: two to four columns of cards (photo or icon, heading, a few lines, a button), sortable in the editor, in white panels on a band or plain, with a wide-left or wide-right variant for two columns.** | **built 2026-09-05** |
+| 6b | Layout presets on every section (width, hero height, alignment, photo side, spacing) and section backgrounds (a tint, the brand colour as a band, a photo with an overlay) | next |
+| 6c | Header and footer editing: a header button, social links, footer columns, an announcement bar | |
+| 6d | Fonts and looks: curated font pairings and a warm/modern/classic switch from the brand kit; button shapes | |
+| 7 | Phone and tablet toggle on the preview; click a section in the preview to select it in the editor | |
+| 8 | Bookings: a "book a time" section on the scheduling module's calendars, landing like an enquiry | |
+| 9 | Live blocks fed by the modules: prices and availability from retail and inventory, the team, events | |
+| 10 | A map section from the address (MapLibre is in the repo) | |
+| 11 | The SEO pack: sitemap and robots per site, a drawn share image per page, local-business structured data, redirects on an address change; a favicon from the logo | |
+| 12 | The assistant everywhere: rewrite one section, write a page from a sentence, suggest a photo description from the image | |
 | — | The shop block: `retail` slice 6 (online orders + pickup windows) fills a declared slot; blocked on commitments (retail 3) and web checkout (payments) | not this module's |
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-05 — Slice 6: columns and cards (`claude/marketing-site-columns`)
+
+The founder asked for "drag and resize sections, columns" and an elite
+builder. The assessment (kept in the roadmap rows 6b–12): no pixel drag or
+resize — it breaks on phones and starves the assistant and the live
+blocks — but every layout choice people reach for as presets, starting
+with the biggest structural gap, a columns section.
+
+- **`columns` section** (`src/lib/sites/schema.ts`): `heading`, `intro`,
+  `columns` 2 | 3 | 4, `widths` equal | wide-left | wide-right (read with
+  two columns), `look` cards | plain, and `cards` (≤ `CARDS_MAX` = 12) of
+  `CardSchema`: `{ id, image: ImageRef | null, icon, heading, body ≤ 4
+  paragraphs, cta | null }`. `icon` is one of `CARD_ICON_NAMES`, twenty-four
+  trade-neutral lucide names, drawn by `src/components/site/card-icons.tsx`
+  (`CARD_ICONS`, `CardIcon`); a test keeps the two lists equal. A card's
+  `id` is made once in the editor (the form field's `makeFieldId`) so a
+  dragged card keeps its identity.
+- **Rendered** (`site-page.tsx`): a band with white panels (the offer
+  section's look) or plain; the grid is one column on a phone, two on a
+  tablet, `columns` on a laptop, and for two columns `md:grid-cols-[2fr_1fr]`
+  or `[1fr_2fr]` when a side is wider. A card shows its photo (4:3,
+  rounded) or, without one, its icon in the brand colour; then the heading
+  in the brand colour, the paragraphs, and the button as a text link.
+- **The editor** (`section-forms.tsx`): `Heading`, `Line under it`,
+  `Columns` (2/3/4), `Widths` (only with two), `Look` (Cards/Plain) and
+  `CardsFields`: a sortable list on its own `DndContext` (`cards-<section>`,
+  never colliding with the sections list), each card a panel with a drag
+  handle, `Card n`, ↑/↓, remove, `Heading`, `Text`, `Icon` (a select of
+  `iconLabel` names), `Photo` (the library picker) and the button fields;
+  {button:Add a card|outline|plus} up to twelve. `iconLabel` ("map-pin" →
+  "Map pin") lives in `pages.ts`, pure. `undescribedPhotos` counts card
+  photos; `sectionSummary` reads `Heading: card, card, card`.
+- Tests: `tests/site-columns.test.ts` (the card and section shapes, the
+  icon list against the drawings, summaries, photo counts),
+  `sites-pages` catalogue. Guide: `page-editor.md`.
+- **Driven on the dev branch (Test tenant, `oak-row-farm`)**: a `Columns`
+  section added after the home page's About, headed "Why people buy from
+  us" with a line under it; the three starter cards overwritten (a `truck`
+  icon on the first, the library's photo on the second, a `Get in touch`
+  button to `/contact` on the third), the third moved up with the arrow,
+  saved (the list read `Columns Why people buy from us: Delivered on
+  Fridays, Ask us anyt…` with the alt nudge under it for the photo card),
+  published. The live home page drew the tinted band with three white
+  panels in a `sm:grid-cols-2 lg:grid-cols-3` grid: the icon card, the
+  card with the text link to `/sites/oak-row-farm/contact`, and the photo
+  card with its icon hidden.
 
 ### 2026-09-05 — Slice 5e: the alt text nudge (`claude/marketing-site-alt-nudge`)
 

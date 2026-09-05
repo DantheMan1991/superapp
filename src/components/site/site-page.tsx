@@ -5,6 +5,7 @@ import type { PublicSite } from "@/lib/sites/read";
 import type { ImageRef, Section, SitePageView, SiteSettings } from "@/lib/sites/schema";
 import { siteHref, type SiteMode } from "@/lib/sites/slug";
 import type { Slide } from "@/lib/sites/slides";
+import { CardIcon } from "./card-icons";
 import { EnquiryForm } from "./enquiry-form";
 import { Gallery, Slideshow } from "./slideshow";
 import { ViewBeacon } from "./view-beacon";
@@ -198,6 +199,65 @@ function SectionView({
             {photo && (
               <Photo site={site} mode={mode} image={photo} eager className="w-full rounded-2xl object-cover shadow-sm" />
             )}
+          </div>
+        </section>
+      );
+    }
+    case "columns": {
+      if (section.cards.length === 0) return null;
+      const grid =
+        section.columns === 2
+          ? section.widths === "wide-left"
+            ? "md:grid-cols-[2fr_1fr]"
+            : section.widths === "wide-right"
+              ? "md:grid-cols-[1fr_2fr]"
+              : "sm:grid-cols-2"
+          : section.columns === 4
+            ? "sm:grid-cols-2 lg:grid-cols-4"
+            : "sm:grid-cols-2 lg:grid-cols-3";
+      const panels = section.look === "cards";
+      return (
+        <section className={panels ? "border-t border-neutral-100 bg-neutral-50" : undefined}>
+          <div className="mx-auto max-w-5xl px-6 py-14">
+            {section.heading && (
+              <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
+            )}
+            {section.intro && <p className="mt-3 max-w-2xl text-neutral-600">{section.intro}</p>}
+            <ul className={`grid gap-6 ${grid} ${section.heading || section.intro ? "mt-8" : ""}`}>
+              {section.cards.map((card) => {
+                const photo = card.image && site.images[card.image.id] ? card.image : null;
+                return (
+                  <li key={card.id} className={panels ? "rounded-2xl bg-white p-6 shadow-sm ring-1 ring-neutral-200" : ""}>
+                    {photo ? (
+                      <Photo site={site} mode={mode} image={photo} className="mb-4 aspect-[4/3] w-full rounded-xl object-cover" />
+                    ) : card.icon ? (
+                      <CardIcon name={card.icon} className="mb-4 size-8" style={{ color: "var(--site-primary)" }} />
+                    ) : null}
+                    {card.heading && (
+                      <h3 className="font-semibold" style={{ color: "var(--site-primary)" }}>
+                        {card.heading}
+                      </h3>
+                    )}
+                    {card.body.length > 0 && (
+                      <div className="mt-2 space-y-2 text-sm text-neutral-600">
+                        {card.body.map((paragraph, i) => (
+                          <p key={i}>{paragraph}</p>
+                        ))}
+                      </div>
+                    )}
+                    {card.cta && (
+                      <Link
+                        href={resolveHref(mode, site.slug, card.cta.href)}
+                        className="mt-4 inline-block text-sm font-medium underline-offset-4 hover:underline"
+                        style={{ color: "var(--site-primary)" }}
+                      >
+                        {card.cta.label}
+                      </Link>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
           </div>
         </section>
       );

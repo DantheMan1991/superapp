@@ -24,7 +24,15 @@ export const SECTION_TYPES: ReadonlyArray<{
   { type: "image", label: "Photo", hint: "One photo from your site's library, with a caption if you like." },
   { type: "gallery", label: "Photo gallery", hint: "Several photos in a grid, with a heading and captions if you like." },
   { type: "slideshow", label: "Slideshow", hint: "Photos shown one at a time with arrows, moving on by themselves if you like." },
+  { type: "columns", label: "Columns", hint: "Two to four columns of cards, each with a photo or an icon, a heading, a few lines and a button. Services, your team, reasons to choose you." },
 ];
+
+/** "map-pin" → "Map pin"; "" → "None". For the editor's icon list. */
+export function iconLabel(name: string): string {
+  if (name === "") return "None";
+  const words = name.replace(/-/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 
 export function sectionLabel(type: SectionType): string {
   return SECTION_TYPES.find((s) => s.type === type)?.label ?? type;
@@ -55,6 +63,20 @@ export function newSection(type: SectionType): Section {
       return { type, heading: "Photos", items: [], columns: 3 };
     case "slideshow":
       return { type, heading: "", items: [], seconds: 6, layout: "wide" };
+    case "columns":
+      return {
+        type,
+        heading: "Why choose us",
+        intro: "",
+        columns: 3,
+        widths: "equal",
+        look: "cards",
+        cards: [
+          { id: "card01", image: null, icon: "star", heading: "Something you do well", body: ["A line or two about it."], cta: null },
+          { id: "card02", image: null, icon: "heart", heading: "Something people like", body: ["A line or two about it."], cta: null },
+          { id: "card03", image: null, icon: "check", heading: "Something you promise", body: ["A line or two about it."], cta: null },
+        ],
+      };
   }
 }
 
@@ -88,6 +110,13 @@ export function sectionSummary(section: Section): string {
       text = section.heading ? `${section.heading}: ${count}` : count;
       break;
     }
+    case "columns": {
+      const names = section.cards.map((c) => c.heading.trim()).filter(Boolean).join(", ");
+      const n = section.cards.length;
+      const count = names || (n === 0 ? "no cards yet" : `${n} ${n === 1 ? "card" : "cards"}`);
+      text = section.heading ? `${section.heading}: ${count}` : count;
+      break;
+    }
   }
   text = text.trim();
   return text.length > 60 ? `${text.slice(0, 57).trimEnd()}…` : text;
@@ -108,6 +137,8 @@ function placedPhotos(section: Section): ImageRef[] {
     case "gallery":
     case "slideshow":
       return section.items.map((item) => item.image);
+    case "columns":
+      return section.cards.flatMap((card) => (card.image ? [card.image] : []));
     default:
       return [];
   }

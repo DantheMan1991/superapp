@@ -104,7 +104,27 @@ feature means for it.
   updated for the new section.
 - Guides: `website.md` (the Messages panel, what a visitor sees, the new
   messages), `page-editor.md` (the Enquiry form kind and its fields).
-- Verified on the dev branch: see the entry's end once driven.
+- **Driven on the dev branch (Test tenant, `oak-row-farm`)**: the form
+  section added from the editor's catalogue, saved (history entry), the
+  site republished (`Your website is updated.`); a message sent from
+  `/sites/oak-row-farm/contact` with CRM and Work OFF became a person with
+  two contact points, an unlinked item `Reply to Jane Doe` due that day with
+  the notes, the enquiry row (`notify_via = site_email`) and the audit row;
+  with CRM and Work switched ON, a second sender became a CRM record whose
+  `Where they came from` reads `website`, with the follow-up on the
+  record's timeline and linked `crm/contact`; a third message from the
+  first sender's email in UPPER CASE matched the same party
+  (`matchedExisting: true`, one Jane Doe) and gave it a CRM record. The
+  Messages panel listed all three newest first with working `Follow-up` and
+  `Contact` links; the draft preview showed the form disabled with its note;
+  a two-letter message came back with `Check the highlighted fields and try
+  again.` under the message field and the name kept. The email said
+  `not_configured` in the dev log (no `RESEND_API_KEY` locally) and the
+  message still landed — the send is the same `sendEmail` door every other
+  kind uses.
+- **Found while driving: a `Follow-up` link to a switched-off Work is a
+  404**, so the panel now takes `workOn` as well as `crmOn` and offers each
+  link only where there is a page; the records exist either way.
 
 ### 2026-09-04 — Slice 3: a domain the business owns, connected by records (`claude/marketing-site-domains`)
 
@@ -607,7 +627,10 @@ generated logo re-drawable as a vector.
 - **Rewriting replaces every draft.** Fine while the assistant is the only
   writer; the editor makes a per-page rewrite the right grain.
 - **The dev-branch Test tenant now holds a published site `oak-row-farm`**,
-  left from this verification.
+  left from this verification — since slice 4 with an enquiry form on its
+  contact page, three messages (two from Jane Doe, one from Sam Rivers),
+  the two parties, three `Reply to …` items and, because the CRM-on path
+  needed proving, **CRM and Work switched on** for it.
 - **Not yet looked at: dark mode, a phone, and a square mark on the PDF.**
   The screen was driven on the dev branch (build log) but only in the light
   theme on a desktop pane. The colour input on a phone and whether the

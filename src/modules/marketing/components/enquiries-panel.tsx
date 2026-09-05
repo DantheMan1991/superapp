@@ -35,10 +35,15 @@ export function EnquiriesPanel({
   rows,
   canWrite,
   crmOn,
+  workOn,
 }: {
   rows: EnquiryRowView[];
   canWrite: boolean;
+  /** Where the contact and the follow-up can be opened. A switched-off
+   *  module's page is a 404, so its link is not offered; the follow-up and
+   *  the record exist either way (ADR 0021). */
   crmOn: boolean;
+  workOn: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -107,7 +112,7 @@ export function EnquiriesPanel({
                 </button>
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
-                {row.workItemId && row.followUp !== "gone" && (
+                {workOn && row.workItemId && row.followUp !== "gone" && (
                   <Button asChild variant="outline" size="sm">
                     <Link href={`/dashboard/m/work?item=${row.workItemId}`}>Follow-up</Link>
                   </Button>

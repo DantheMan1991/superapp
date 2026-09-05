@@ -43,8 +43,12 @@ export default async function WebsitePage() {
     },
     { role: ctx.role },
   );
-  // Where a message's contact lives, if CRM is on: the panel links there.
-  const crmOn = drafts ? await isModuleEnabled(ctx.tenant.id, "crm") : false;
+  // Where a message's contact and follow-up can be opened: the panel links
+  // there only when the module is on, since a switched-off module's page
+  // is a 404. The records exist either way.
+  const [crmOn, workOn] = drafts
+    ? await Promise.all([isModuleEnabled(ctx.tenant.id, "crm"), isModuleEnabled(ctx.tenant.id, "work")])
+    : [false, false];
   const canWrite = ctx.role === "owner";
   const siteDomain = siteDomainFromEnv(process.env);
   const appUrl = new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000");
@@ -189,6 +193,7 @@ export default async function WebsitePage() {
               <EnquiriesPanel
                 canWrite={canWrite}
                 crmOn={crmOn}
+                workOn={workOn}
                 rows={enquiries.map(({ enquiry, partyName, followUp }) => ({
                   id: enquiry.id,
                   name: enquiry.name,

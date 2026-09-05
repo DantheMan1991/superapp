@@ -138,6 +138,61 @@ export function siteDomainFromEnv(
   return env.NODE_ENV === "development" ? "localhost" : null;
 }
 
+/**
+ * The hostnames that are the platform's own and must never be treated as a
+ * customer's domain: the app's host (`NEXT_PUBLIC_APP_URL`), every Vercel
+ * preview host, and the loopback names a laptop uses.
+ */
+export function platformHostsFromEnv(env: Record<string, string | undefined>): string[] {
+  const hosts = ["localhost", "127.0.0.1"];
+  const raw = env.NEXT_PUBLIC_APP_URL?.trim();
+  if (raw) {
+    try {
+      hosts.push(new URL(raw).hostname.toLowerCase());
+    } catch {
+      // A malformed URL is a deploy mistake somebody else will notice; it must
+      // not take routing down.
+    }
+  }
+  return hosts;
+}
+
+export type HostKind =
+  | { kind: "platform" }
+  | { kind: "site"; slug: string }
+  | { kind: "custom"; host: string };
+
+/**
+ * Whose request is this? The platform's (its own host, a preview, a laptop),
+ * a site's free address (`<slug>.<SITE_DOMAIN>`), or a domain a business
+ * connected (anything else that looks like a hostname). The proxy rewrites
+ * the last two; the page resolves a custom host to a site, or 404s.
+ *
+ * Pure and dependency-free like everything in this file: the proxy runs it
+ * before anything else on every request.
+ */
+export function classifyHost(
+  host: string,
+  env: { siteDomain: string | null; platformHosts: string[] },
+): HostKind {
+  const bare = host.toLowerCase().split(":")[0] ?? "";
+  if (bare === "") return { kind: "platform" };
+  for (const own of env.platformHosts) {
+    if (bare === own || bare.endsWith(`.${own}`)) return { kind: "platform" };
+  }
+  if (bare.endsWith(".vercel.app")) return { kind: "platform" };
+  const slug = hostToSiteSlug(bare, env.siteDomain);
+  if (slug) return { kind: "site", slug };
+  if (env.siteDomain) {
+    const domain = env.siteDomain.toLowerCase().split(":")[0] ?? "";
+    // The site domain's apex, its www, and any label that is not a valid
+    // slug are the platform's business, not a customer's domain.
+    if (bare === domain || bare.endsWith(`.${domain}`)) return { kind: "platform" };
+  }
+  if (!bare.includes(".") || /^[0-9.]+$/.test(bare)) return { kind: "platform" };
+  return { kind: "custom", host: bare };
+}
+
 /** How a rendered page is being reached, which decides what its links look like. */
 export type SiteMode = "host" | "path" | "draft";
 

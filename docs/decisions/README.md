@@ -54,3 +54,4 @@ Keep them short — one page. An ADR nobody reads has failed at its only job.
 | [0017](0017-the-square-account-the-farm-already-has.md) | The Square account the farm already has | 2026-09-02 | Accepted |
 | [0018](0018-the-brand-kit-is-layer-0-data.md) | The brand kit is Layer 0 data, owned per company, edited by Marketing | 2026-09-04 | Accepted |
 | [0019](0019-a-website-is-pages-of-typed-sections.md) | A website is pages of typed sections, hosted by the platform | 2026-09-04 | Accepted |
+| [0020](0020-a-connected-domain-is-records-only.md) | A connected domain is records only; a purchased one is held for the client | 2026-09-04 | Accepted |

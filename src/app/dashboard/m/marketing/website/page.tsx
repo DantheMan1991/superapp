@@ -3,13 +3,16 @@ import { ExternalLink, Globe } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
+import { readDomainRecords } from "@/lib/sites/domains";
 import { loadSiteDrafts } from "@/lib/sites/read";
-import { normalizeSiteSlug, siteDomainFromEnv } from "@/lib/sites/slug";
+import { normalizeSiteSlug, platformHostsFromEnv, siteDomainFromEnv } from "@/lib/sites/slug";
+import { isVercelConfigured } from "@/lib/vercel/domains";
 import { dateInTimezone } from "@/lib/timezone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
+import { ConnectDomainForm, DomainRow } from "@/modules/marketing/components/domain-controls";
 import { MarketingStrip } from "@/modules/marketing/components/marketing-strip";
 import { PagesPanel } from "@/modules/marketing/components/pages-panel";
 import {
@@ -179,6 +182,47 @@ export default async function WebsitePage() {
                   <div><dt className="text-xs text-muted-foreground">Hours</dt><dd>{drafts.view.settings.hoursLines.join("; ") || "None"}</dd></div>
                   <p className="text-xs text-muted-foreground sm:col-span-2">Only an owner can change these.</p>
                 </dl>
+              )}
+            </Panel>
+          </section>
+
+          <section className="space-y-3">
+            <div>
+              <h2 className="font-heading text-lg font-semibold tracking-heading">Your own domain</h2>
+              <p className="text-sm text-muted-foreground">
+                Point a domain you already own at this site. Your free address keeps
+                working alongside it.
+              </p>
+            </div>
+            <Panel className="divide-y divide-divider">
+              {drafts.domains.map((d) => (
+                <DomainRow
+                  key={d.id}
+                  canWrite={canWrite}
+                  row={{
+                    id: d.id,
+                    domain: d.domain,
+                    status: d.status === "active" || d.status === "error" ? d.status : "pending",
+                    records: readDomainRecords(d.records),
+                    vercelVerified: d.vercelVerified,
+                    vercelConfiguredBy: d.vercelConfiguredBy,
+                    lastError: d.lastError,
+                    lastCheckedAt: d.lastCheckedAt?.toISOString() ?? null,
+                  }}
+                />
+              ))}
+              {canWrite ? (
+                <div className="p-5">
+                  <ConnectDomainForm
+                    enabled={isVercelConfigured()}
+                    platformHosts={platformHostsFromEnv(process.env)}
+                    siteDomain={siteDomain}
+                  />
+                </div>
+              ) : (
+                drafts.domains.length === 0 && (
+                  <p className="p-5 text-sm text-muted-foreground">No domain connected yet.</p>
+                )
               )}
             </Panel>
           </section>

@@ -187,8 +187,75 @@ export const sitePageVersions = pgTable(
   ],
 );
 
+/**
+ * A domain the business already owns, connected to its site. Slice 3;
+ * ADR 0020.
+ *
+ * **RECORDS ONLY, NEVER NAMESERVERS.** The owner publishes one or two records
+ * at their registrar (a CNAME or an A record, plus a TXT when Vercel asks for
+ * proof) and Vercel serves the site and its certificate. Nothing here can
+ * move a domain's nameservers, because that moves every record the business
+ * has — its mail included — and is the failure that breaks businesses.
+ *
+ * `status` is decided by Vercel, never locally: `active` once the project
+ * reports the domain verified and correctly configured, `pending` until then,
+ * `error` when the last check failed for a reason worth showing. The public
+ * renderer routes a hostname only through an `active` row.
+ *
+ * `domain` is unique across the platform: a hostname can point at one site.
+ */
+export const siteDomains = pgTable(
+  "site_domains",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    siteId: uuid("site_id").notNull(),
+    /** Lowercase, no scheme, no port, no trailing dot: `www.oakrowfarm.com`. */
+    domain: text("domain").notNull(),
+    /** `oakrowfarm.com` rather than `www.oakrowfarm.com` — decides A vs CNAME. */
+    apex: boolean("apex").notNull().default(false),
+    status: text("status").notNull().default("pending"),
+    /** `DnsRecordToPublish[]` — what the owner was last told to publish. */
+    records: jsonb("records").notNull().default([]),
+    /** What Vercel last said, for the screen: verified, and how it resolves. */
+    vercelVerified: boolean("vercel_verified").notNull().default(false),
+    vercelConfiguredBy: text("vercel_configured_by").notNull().default(""),
+    lastError: text("last_error").notNull().default(""),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("site_domains_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("site_domains_tenant_idx").on(t.tenantId),
+    index("site_domains_site_idx").on(t.siteId),
+    uniqueIndex("site_domains_domain_idx").on(t.domain),
+    foreignKey({
+      name: "site_domains_site_fk",
+      columns: [t.tenantId, t.siteId],
+      foreignColumns: [sites.tenantId, sites.id],
+    }).onDelete("cascade"),
+    check(
+      "site_domains_domain_shape",
+      sql`${t.domain} ~ '^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$'`,
+    ),
+    check(
+      "site_domains_status_values",
+      sql`${t.status} in ('pending', 'active', 'error')`,
+    ),
+  ],
+);
+
 export type Site = typeof sites.$inferSelect;
 export type NewSite = typeof sites.$inferInsert;
 export type SitePage = typeof sitePages.$inferSelect;
 export type NewSitePage = typeof sitePages.$inferInsert;
 export type SitePageVersion = typeof sitePageVersions.$inferSelect;
+export type SiteDomain = typeof siteDomains.$inferSelect;

@@ -351,6 +351,8 @@ Every path into the system, and what makes it trustworthy.
 | `/sites/[slug]`, `/hosted/[slug]` (tenant websites) | Public | **Unauthenticated by design** (ADR 0019). `slug → tenant` is one `withSystem` lookup returning identifiers; pages are then read in that tenant's context as `staff` through the member policies. Only the PUBLISHED snapshot is rendered, from typed sections, never markup. `src/proxy.ts` rewrites `<slug>.<SITE_DOMAIN>` to `/hosted/…` |
 | `/sites/[slug]/draft` | Clerk session → `resolveTenantContext()` | The draft preview. 404 for a site that is not the caller's tenant's |
 | `/sites/[slug]/logo` | Public | The brand's logo, addressed by the site; the one blob stream with a public cache header (ADR 0018) |
+| `/domain/[host]` (a domain the business connected) | Public | **Unauthenticated by design** (ADR 0020). `src/proxy.ts` rewrites every hostname that is not the platform's own here; `host → tenant` is one `withSystem` lookup over `site_domains`, `active` rows only (Vercel's word), then the tenant's context as `staff`. A hostname nobody connected is a 404 |
+| Vercel Domains API | `VERCEL_API_TOKEN`, project-scoped | Outbound only, from owner actions; every response Zod-parsed (S5). The token adds and removes domains on THIS project and nothing else |
 | JMAP → Stalwart | Per-mailbox credentials | Outbound; responses are untrusted input → Zod (S5) |
 | AI responses | None | Model output is **never** trusted. Validate, never `eval`, never let it choose a tenant id |
 

@@ -345,3 +345,149 @@ d("site_page_versions (RLS)", () => {
     expect(left).toBeUndefined();
   });
 });
+
+/**
+ * `site_domains` RLS — a domain the business connected. Members read, owners
+ * write, one hostname points at one site across the platform, and a domain
+ * on another tenant's site is unrepresentable even under `withSystem`.
+ */
+d("site_domains (RLS)", () => {
+  const STAMP = `iso-sitedom-${process.pid}`;
+  const OWNER = `${STAMP}-owner`;
+  const MATE = `${STAMP}-mate`;
+  const OTHER = `${STAMP}-other`;
+  const DOMAIN_A = `www.${STAMP}-a.example`;
+  const DOMAIN_B = `www.${STAMP}-b.example`;
+
+  let tenantA: string;
+  let tenantB: string;
+  let siteA: string;
+  let siteB: string;
+  let domainA: string;
+  let domainB: string;
+
+  const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantA, fn, { role: "staff", userId: MATE });
+  const asOwner = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantA, fn, { role: "owner", userId: OWNER });
+  const asOtherTenant = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantB, fn, { role: "owner", userId: OTHER });
+
+  beforeAll(async () => {
+    await withSystem(async (tx) => {
+      const tenants = await tx
+        .insert(schema.tenants)
+        .values([
+          { clerkOrgId: `${STAMP}-a`, name: "Dom A", slug: `${STAMP}-a` },
+          { clerkOrgId: `${STAMP}-b`, name: "Dom B", slug: `${STAMP}-b` },
+        ])
+        .returning();
+      tenantA = tenants[0].id;
+      tenantB = tenants[1].id;
+      const sites = await tx
+        .insert(schema.sites)
+        .values([
+          { tenantId: tenantA, slug: `${STAMP}-a` },
+          { tenantId: tenantB, slug: `${STAMP}-b` },
+        ])
+        .returning();
+      siteA = sites[0].id;
+      siteB = sites[1].id;
+      const domains = await tx
+        .insert(schema.siteDomains)
+        .values([
+          { tenantId: tenantA, siteId: siteA, domain: DOMAIN_A, status: "active" },
+          { tenantId: tenantB, siteId: siteB, domain: DOMAIN_B, apex: false },
+        ])
+        .returning();
+      domainA = domains[0].id;
+      domainB = domains[1].id;
+    });
+  });
+
+  afterAll(async () => {
+    await withSystem(async (tx) => {
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantA));
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantB));
+    });
+  });
+
+  it("staff read their own domains and nothing of the other tenant's", async () => {
+    const seen = await asStaff((tx) => tx.select().from(schema.siteDomains));
+    expect(seen.map((d) => d.id)).toEqual([domainA]);
+    expect(seen.some((d) => d.id === domainB)).toBe(false);
+  });
+
+  it("staff cannot connect, change or remove a domain; an owner can", async () => {
+    await expect(
+      asStaff((tx) =>
+        tx.insert(schema.siteDomains).values({ tenantId: tenantA, siteId: siteA, domain: `x.${STAMP}-a.example` }),
+      ),
+    ).rejects.toThrow();
+    const updated = await asStaff((tx) =>
+      tx.update(schema.siteDomains).set({ status: "error" }).where(eq(schema.siteDomains.id, domainA)).returning(),
+    );
+    expect(updated).toHaveLength(0);
+    const [added] = await asOwner((tx) =>
+      tx
+        .insert(schema.siteDomains)
+        .values({ tenantId: tenantA, siteId: siteA, domain: `shop.${STAMP}-a.example` })
+        .returning(),
+    );
+    expect(added.status).toBe("pending");
+    const gone = await asOwner((tx) =>
+      tx.delete(schema.siteDomains).where(eq(schema.siteDomains.id, added.id)).returning(),
+    );
+    expect(gone).toHaveLength(1);
+  });
+
+  it("another tenant cannot read, update or delete tenant A's domain", async () => {
+    const seen = await asOtherTenant((tx) => tx.select().from(schema.siteDomains));
+    expect(seen.map((d) => d.id)).toEqual([domainB]);
+    const updated = await asOtherTenant((tx) =>
+      tx.update(schema.siteDomains).set({ status: "error" }).where(eq(schema.siteDomains.id, domainA)).returning(),
+    );
+    expect(updated).toHaveLength(0);
+    const deleted = await asOtherTenant((tx) =>
+      tx.delete(schema.siteDomains).where(eq(schema.siteDomains.id, domainA)).returning(),
+    );
+    expect(deleted).toHaveLength(0);
+  });
+
+  it("a hostname points at one site across tenants, and a domain on another tenant's site is unrepresentable", async () => {
+    await expect(
+      withSystem((tx) => tx.insert(schema.siteDomains).values({ tenantId: tenantB, siteId: siteB, domain: DOMAIN_A })),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) => tx.insert(schema.siteDomains).values({ tenantId: tenantB, siteId: siteA, domain: `y.${STAMP}.example` })),
+    ).rejects.toThrow();
+  });
+
+  it("the CHECKs refuse a bad hostname and an unknown status", async () => {
+    await expect(
+      asOwner((tx) => tx.insert(schema.siteDomains).values({ tenantId: tenantA, siteId: siteA, domain: "Not A Domain" })),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) => tx.update(schema.siteDomains).set({ status: "live" }).where(eq(schema.siteDomains.id, domainA))),
+    ).rejects.toThrow();
+  });
+
+  it("domains go with their site", async () => {
+    // A tenant holds one site, so the throwaway site needs a tenant of its own.
+    const [extra] = await withSystem((tx) =>
+      tx.insert(schema.tenants).values({ clerkOrgId: `${STAMP}-c`, name: "Dom C", slug: `${STAMP}-c` }).returning(),
+    );
+    const [site] = await withSystem((tx) =>
+      tx.insert(schema.sites).values({ tenantId: extra.id, slug: `${STAMP}-c` }).returning(),
+    );
+    const [domain] = await withSystem((tx) =>
+      tx.insert(schema.siteDomains).values({ tenantId: extra.id, siteId: site.id, domain: `c.${STAMP}.example` }).returning(),
+    );
+    await withSystem((tx) => tx.delete(schema.sites).where(eq(schema.sites.id, site.id)));
+    const left = await withSystem((tx) =>
+      tx.query.siteDomains.findFirst({ where: eq(schema.siteDomains.id, domain.id) }),
+    );
+    expect(left).toBeUndefined();
+    await withSystem((tx) => tx.delete(schema.tenants).where(eq(schema.tenants.id, extra.id)));
+  });
+});

@@ -21,7 +21,8 @@
 | 0c | An illustrated symbol, optionally, from OpenAI's image model (`gpt-image-1`, transparent PNG, symbol only, never the name) composed with the kit's own wordmark. Needs `OPENAI_API_KEY`; the founder has an account | next, if the wordmarks feel plain |
 | **1** | **Site model and renderer — pages of typed sections, draft/publish, written by the assistant from the kit and the business's details, served at `/sites/<slug>` and at `<slug>.<SITE_DOMAIN>` through a host rewrite in `proxy.ts`, cached (ISR) and revalidated on publish.** [ADR 0019](../decisions/0019-a-website-is-pages-of-typed-sections.md) | **built 2026-09-04** — the site domain itself is still to buy |
 | **2** | **The editor — sections dragged into order (dnd-kit), a form per kind beside a live preview of the draft, pages added, ordered and removed, and a history of every save, publish and restore.** Puck was evaluated and not adopted (Decisions) | **built 2026-09-04** |
-| 3 | Domains at Layer 0 — one `domains` table with purposes (send mail, host mailboxes, website), connect an existing domain by records only, buy a new one through Vercel's registrar API and publish MX/SPF/DKIM/site records ourselves. Needs an ADR on who owns a purchased domain | |
+| **3** | **Connect a domain the business owns — records only, through Vercel's Domains API; the proxy routes any hostname that is not the platform's to the site it names.** Purchasing designed, not built ([ADR 0020](../decisions/0020-a-connected-domain-is-records-only.md)) | **built 2026-09-04** — needs `VERCEL_API_TOKEN` + `VERCEL_PROJECT_ID` in Vercel to switch on |
+| 3b | Buying a domain through Vercel's registrar into Yosher's account, held for the client; the platform publishes the mail and site records itself; the shared `domains` table with the mail module arrives here | after the terms, the transfer runbook and a billing decision |
 | 4 | Forms into CRM as parties with `source = 'website'`, raising Work follow-ups; page views | |
 | — | The shop block: `retail` slice 6 (online orders + pickup windows) fills a declared slot; blocked on commitments (retail 3) and web checkout (payments) | not this module's |
 
@@ -29,6 +30,47 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-04 — Slice 3: a domain the business owns, connected by records (`claude/marketing-site-domains`)
+
+- **`site_domains`** (`0250`, RLS `0251`): a hostname per row, unique across
+  the platform, at most five per site; `status` decided by Vercel and the
+  records the owner was last told to publish. Members read, owners write.
+- **Vercel's Domains API** in `src/lib/vercel/domains.ts`: add to the
+  project, read, verify, config, remove; every answer Zod-parsed against the
+  REST reference's shapes (checked 2026-09-04). Gated on `VERCEL_API_TOKEN`
+  and `VERCEL_PROJECT_ID`; the screen says when they are missing.
+- **Records only, never nameservers**, and Vercel decides when a row is
+  `active` (ADR 0020). `dnsInstructions` gives a subdomain a CNAME and an
+  apex an A record, from Vercel's recommended values with the documented
+  fallbacks, and a TXT first when Vercel asks for proof of ownership.
+- **The proxy classifies every hostname** (`classifyHost`, pure): the
+  platform's own pass, a free address goes to `/hosted/<slug>`, anything else
+  to `/domain/<host>`, where the page resolves the host through one
+  `withSystem` lookup over `active` rows or answers 404. The site's logo
+  answers on the domain at `/logo`, and every address of a site names the
+  live domain as canonical.
+- **The screen**: `Your own domain` on the Website page — connect, the
+  records table with copy buttons, `Check again`, `Remove` (Vercel first,
+  then the row; the provider step is skipped without a token so a row can
+  always be cleaned up), read-only for staff.
+- **Purchasing designed, not built**: ADR 0020 records the ownership rule
+  (bought through Vercel into Yosher's account, held for the client,
+  transferred out on request) and what has to exist first.
+- Verified: 20 pure tests (normalisation and refusals, apex detection, the
+  records for each case, status mapping, `classifyHost` for every kind of
+  host, the Vercel schemas against the documented shapes); the isolation
+  suite grew a `site_domains` block (20 in the file). **Driven on the dev
+  branch** with an `active` row seeded by hand, there being no Vercel token
+  here: `curl -H "Host: www.oakrowfarm.example"` answered 200 for `/` and
+  `/about`, 200 `image/png` for `/logo`, and 404 for a hostname nobody
+  connected; the page's title carried no platform name, its nav links were
+  root-relative, and both it and the free address carried the canonical
+  link to the domain. The Website screen showed the row as `Live`; `Check
+  again` without a token said the feature is not switched on; `Remove`
+  took the row away (`Domain disconnected.`) and the hostname answered 404
+  after. **Not exercised: a real call to Vercel.** The first real connect is
+  the founder's, once the token and project id are set.
 
 ### 2026-09-04 — Slice 2: the page editor (`claude/marketing-site-editor`)
 
@@ -222,6 +264,7 @@ generated logo re-drawable as a vector.
 | `sites` | The business's website: its address, live details and status | FORCE RLS. `member_read`; INSERT/UPDATE/DELETE need `app_current_tenant_role() = 'owner'`. Unique on `tenant_id` (one site per tenant, this slice) and on `slug` platform-wide (it is a hostname label). CHECKs: slug shape `^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$`, `status in (draft, published)`, `copy_source in (model, standard)`, title ≤ 80. `settings` is `SiteSettingsSchema` |
 | `site_pages` | One page: its path, title, nav place, `draft` and `published` content | FORCE RLS, same policies. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. Unique `(site_id, path)`. CHECK: path `^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$`, title 1–80. `draft`/`published` are `PageContentSchema`; `published` null = never published |
 | `site_page_versions` | A page's history: the content at each `save`, `publish` and `restore` | FORCE RLS; `member_read`, owner INSERT and DELETE (no UPDATE — a version is never edited). Composite FK `(tenant_id, page_id) → site_pages` ON DELETE CASCADE. CHECK on `kind`. Trimmed to the newest `PAGE_VERSIONS_KEEP` (30) on every write by `recordVersion` |
+| `site_domains` | A domain the business owns, connected to its site | FORCE RLS; `member_read`, owner INSERT/UPDATE/DELETE. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. **Unique on `domain` platform-wide** (a hostname points at one site); at most five per site (`SITE_DOMAINS_MAX`). CHECKs: hostname shape, `status in (pending, active, error)`. `records` is `DnsRecordToPublish[]`, what the owner was last told to publish; `vercel_verified`/`vercel_configured_by` are Vercel's last words. **Only an `active` row routes**, and only Vercel makes a row active |
 
 ## Key files & seams
 
@@ -259,6 +302,15 @@ generated logo re-drawable as a vector.
   `docs/help/marketing/page-editor.md`. `ModuleDefinition.fullWidthPaths`
   (`src/modules/types.ts`, applied in `app/dashboard/layout.tsx`) is the seam
   that gives the editor the whole viewport without widening the module
+- Domains: `src/lib/sites/domains.ts` (pure: `normalizeDomain`,
+  `isApexDomain`, `dnsInstructions`, `domainStatusFrom`, `readDomainRecords`),
+  `classifyHost` + `platformHostsFromEnv` in `slug.ts` (what the proxy runs),
+  `src/lib/vercel/domains.ts` (the Domains API, Zod-parsed),
+  `src/lib/sites/logo.ts` (the public logo for a resolved site),
+  `src/modules/marketing/domain-ops.ts`, `domain-actions.ts`,
+  `components/domain-controls.tsx`; `src/app/domain/[host]/[[...path]]` and
+  `src/app/domain/[host]/logo/route.ts`; `VERCEL_API_TOKEN`,
+  `VERCEL_PROJECT_ID`, `VERCEL_TEAM_ID` in `.env.example`
 - `src/modules/marketing/` — `MarketingModule.tsx` (the screen), `actions.ts`
   (gate → Zod → withTenant + audit → revalidate; every write owner-only),
   `kit-ops.ts` (the tx-level writes), `logo-ingest.ts` (inspect the uploaded
@@ -352,6 +404,27 @@ generated logo re-drawable as a vector.
 - **The editor remounts on the page's `updated_at`.** A restore, or a save
   from another tab, re-renders the server page with new props; a client
   component that kept its local state would silently show stale text.
+- **A connected domain is records only, and Vercel decides its state.**
+  ADR 0020. The owner publishes a CNAME or an A record (and a TXT when
+  Vercel asks for proof); the row goes `active` only when Vercel reports the
+  domain verified and correctly configured, on a button, never a poller.
+  Nameservers are never suggested: that moves the business's mail.
+- **The proxy routes every hostname that is not the platform's own** to
+  `/domain/<host>/…` without a database: `classifyHost` names the platform's
+  hosts (the app, `*.vercel.app`, the loopbacks, the site domain's own
+  labels), the free addresses, and everything else. The page does the one
+  trusted lookup — `active` rows only — or answers 404, which is what a
+  hostname nobody connected deserves.
+- **The platform-wide uniqueness of a hostname is checked under `withSystem`
+  before Vercel is asked**, one boolean, because a tenant transaction cannot
+  see another tenant's rows and the unique index would otherwise refuse the
+  insert after the domain was already on the project.
+- **Remove is provider-first, then the row**, as Square's disconnect does it;
+  without a token the provider step is skipped so a row can always be
+  cleaned up.
+- **`example.co.uk` reads as a subdomain** and is offered a CNAME. The guide
+  tells the owner to connect the `www` form, which is Vercel's own advice for
+  any apex.
 - **The logo stays private.** The `[id]/logo` route proves the tenant, reads
   the row through RLS, then streams — and it is NOT gated on the Marketing
   module, because the brand has consumers of its own. A public URL for the
@@ -393,10 +466,17 @@ generated logo re-drawable as a vector.
 - **`DndContext` needs an `id`** or its accessibility ids differ between
   server and client and React reports a hydration mismatch — found on the
   first render of the Pages panel and fixed by naming both contexts.
-- **Slice 3, domains**: a `(domain → site)` table, Vercel's Domains API for a
-  connected domain (CNAME/A + TXT), the registrar API for a purchased one,
-  and the ownership ADR before the first purchase. `hostToSiteSlug` grows a
-  second lookup.
+- **Switch connecting on: `VERCEL_API_TOKEN`, `VERCEL_PROJECT_ID` (and
+  `VERCEL_TEAM_ID`) in Vercel.** Until then the screen says the feature is
+  not switched on and the free address carries on. The first real connect
+  is the founder's, with a domain he owns; the Vercel calls have only been
+  exercised against the documented shapes.
+- **Purchasing (3b)** waits on the terms, the transfer runbook and a billing
+  decision — ADR 0020 has the rules. That is also when the mail module's
+  wizards publish through Vercel DNS and the shared `domains` table arrives.
+- **Apex + www as a pair.** Vercel redirects between them on its own; the
+  screen connects one name at a time and does not yet offer "add the other
+  one too".
 - **Slice 4, forms into CRM**: the contact page's form creates a party with
   `source = 'website'` and raises a Work follow-up; reuse
   `public_access_attempts` for the cap. The `cta` and `hero` buttons point at

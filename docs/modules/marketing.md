@@ -70,6 +70,21 @@ No migration; two sections' JSON.
   `wrapIndex`, the labels), `sites-pages` catalogue. Guides:
   `page-editor.md` (the Slideshow kind; the gallery's tiles now open over
   the page), `website.md`.
+- **Driven on the dev branch (Test tenant, `oak-row-farm`)**: a `Slideshow`
+  added under the home page's hero, headed "Life on the farm", `Every 4
+  seconds`, full width, the library's two photos with captions; saved (the
+  list read `Life on the farm: 2 photos`), published. On the live home page
+  it had already moved to the second photo by the time the checks ran;
+  `Next photo` wrapped to the first with the live caption row reading `The
+  front field Photo 1 of 2`, `Previous photo` went back, 4.6 seconds later
+  the dot had moved on its own, `Pause` became `Play` (`aria-pressed`) and
+  4.6 seconds later nothing had moved. On the about page a gallery tile
+  (still a `target="_blank"` link to the photo's route) opened a
+  `role="dialog" aria-modal` labelled `Photo 1 of 2` with focus on `Close`
+  and the body's scroll locked; ArrowRight read `Photo 2 of 2` with the
+  second photo, ArrowRight again wrapped to the first, Escape closed it
+  with focus back on the tile and the scroll restored; the second tile
+  opened at `Photo 2 of 2` and `Close` closed it.
 
 ### 2026-09-04 — Slice 5b: the gallery (`claude/marketing-site-gallery`)
 
@@ -925,7 +940,8 @@ generated logo re-drawable as a vector.
   needed proving, **CRM and Work switched on** for it. Since slice 5 its
   hero carries a photo (a green canvas reading "Oak Row Farm"); since 5b
   the about page ends in a two-photo gallery and the library holds two
-  rows.
+  rows; since 5c a two-photo slideshow moving every four seconds sits
+  under the home page's hero.
 - **Not yet looked at: dark mode, a phone, and a square mark on the PDF.**
   The screen was driven on the dev branch (build log) but only in the light
   theme on a desktop pane. The colour input on a phone and whether the

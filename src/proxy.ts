@@ -4,6 +4,7 @@ import {
   classifyHost,
   platformHostsFromEnv,
   siteDomainFromEnv,
+  siteRewrite,
 } from "@/lib/sites/slug";
 
 /**
@@ -24,29 +25,23 @@ import {
  *     rewritten to `/domain/<host>/…`, where the page resolves it to a site
  *     through one trusted lookup or answers 404.
  *
- * `/logo` on either kind of site host is that site's logo route. The rewrite
- * is invisible to the visitor, and nothing else about the request changes.
- * The environment is read per request rather than at module load: the
- * proxy's runtime does not promise module state survives, and the read is
- * cheap. No database here — a host that is not ours becomes a path, and the
- * page does the lookup.
+ * `/logo` and `/images/<id>` on either kind of site host are that site's
+ * asset routes (`siteRewrite`, pure and tested beside `classifyHost`). The
+ * rewrite is invisible to the visitor, and nothing else about the request
+ * changes. The environment is read per request rather than at module load:
+ * the proxy's runtime does not promise module state survives, and the read
+ * is cheap. No database here — a host that is not ours becomes a path, and
+ * the page does the lookup.
  */
 export default clerkMiddleware((_auth, req) => {
   const kind = classifyHost(req.headers.get("host") ?? "", {
     siteDomain: siteDomainFromEnv(process.env),
     platformHosts: platformHostsFromEnv(process.env),
   });
-  if (kind.kind === "platform") return;
+  const target = siteRewrite(kind, req.nextUrl.pathname);
+  if (target === null) return;
   const url = req.nextUrl.clone();
-  const pathname = url.pathname;
-  // Framework and API paths are the platform's, on any host.
-  if (pathname.startsWith("/_next/") || pathname.startsWith("/api/")) return;
-  const logoBase = kind.kind === "site" ? `/sites/${kind.slug}` : `/domain/${kind.host}`;
-  const pageBase = kind.kind === "site" ? `/hosted/${kind.slug}` : `/domain/${kind.host}`;
-  url.pathname =
-    pathname === "/logo"
-      ? `${logoBase}/logo`
-      : `${pageBase}${pathname === "/" ? "" : pathname}`;
+  url.pathname = target;
   return NextResponse.rewrite(url);
 });
 

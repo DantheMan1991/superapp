@@ -30,6 +30,10 @@ export type MarketingErrorCode =
   | "DOMAIN_TAKEN"
   | "DOMAIN_MISSING"
   | "ENQUIRY_MISSING"
+  | "PHOTO_NOT_A_PHOTO"
+  | "PHOTO_TOO_LARGE"
+  | "PHOTO_MISSING"
+  | "PHOTO_LIMIT"
   | "DOMAIN_LIMIT"
   | "DOMAIN_PROVIDER";
 
@@ -98,6 +102,14 @@ export function friendlyMessage(err: unknown): string {
         return "That domain is no longer connected.";
       case "ENQUIRY_MISSING":
         return "That message is already gone.";
+      case "PHOTO_NOT_A_PHOTO":
+        return "That file isn't a photo Yosher can use. Use a JPEG, PNG or WebP.";
+      case "PHOTO_TOO_LARGE":
+        return "That photo is over 12MB. Export it smaller and try again.";
+      case "PHOTO_MISSING":
+        return "That photo is no longer there. Upload it again.";
+      case "PHOTO_LIMIT":
+        return "A site can hold up to 60 photos. Remove one first.";
       case "DOMAIN_LIMIT":
         return "A site can have up to five domains. Remove one first.";
       case "DOMAIN_PROVIDER":

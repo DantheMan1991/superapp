@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
 import { schema, withSystem, withTenant, type Tx } from "@/db";
-import type { Site, SiteDomain, SitePage, SitePageVersion } from "@/db/schema";
+import type { Site, SiteDomain, SiteImage, SitePage, SitePageVersion } from "@/db/schema";
 import type { ResolvedBrand } from "@/lib/brand/core";
 import { resolveBrandFor } from "@/lib/brand/read";
 import {
@@ -39,6 +39,8 @@ export interface PublicSite {
    * the page was reached by.
    */
   customHost: string | null;
+  /** The site's photos by id, as the renderer needs them: a section whose photo is not here draws none. */
+  images: Record<string, { width: number; height: number }>;
 }
 
 export interface SiteHit {
@@ -88,8 +90,10 @@ function toView(
   pages: SitePage[],
   which: "draft" | "published",
   customHost: string | null,
+  images: SiteImage[],
 ): PublicSite {
   return {
+    images: Object.fromEntries(images.map((i) => [i.id, { width: i.width, height: i.height }])),
     id: site.id,
     slug: site.slug,
     title: site.title || brand.displayName,
@@ -140,7 +144,8 @@ async function loadPublishedFromHit(hit: SiteHit): Promise<PublicSite | null> {
     });
     const brand = await resolveBrandFor(tx, hit.tenantId, null);
     const customHost = await activeHost(tx, hit.tenantId, site.id);
-    return toView(site, brand, pages, "published", customHost);
+    const images = await listSiteImages(tx, hit.tenantId, site.id);
+    return toView(site, brand, pages, "published", customHost, images);
   });
 }
 
@@ -166,6 +171,7 @@ export async function loadPageEditor(
   page: SitePage;
   siblings: Array<{ id: string; path: string; title: string }>;
   versions: SitePageVersion[];
+  images: SiteImage[];
 } | null> {
   const page = await tx.query.sitePages.findFirst({
     where: and(eq(schema.sitePages.tenantId, tenantId), eq(schema.sitePages.id, pageId)),
@@ -187,7 +193,8 @@ export async function loadPageEditor(
     ),
     orderBy: desc(schema.sitePageVersions.createdAt),
   });
-  return { site, page, siblings, versions };
+  const images = await listSiteImages(tx, tenantId, site.id);
+  return { site, page, siblings, versions, images };
 }
 
 /** The tenant's site with its drafts and domains, inside the caller's transaction. Null when none. */
@@ -209,5 +216,14 @@ export async function loadSiteDrafts(
   });
   const brand = await resolveBrandFor(tx, tenantId, null);
   const customHost = domains.find((d) => d.status === "active")?.domain ?? null;
-  return { site, pages, domains, view: toView(site, brand, pages, "draft", customHost) };
+  const images = await listSiteImages(tx, tenantId, site.id);
+  return { site, pages, domains, view: toView(site, brand, pages, "draft", customHost, images) };
+}
+
+/** The site's photo library, newest last, inside the caller's transaction. */
+export async function listSiteImages(tx: Tx, tenantId: string, siteId: string): Promise<SiteImage[]> {
+  return tx.query.siteImages.findMany({
+    where: and(eq(schema.siteImages.tenantId, tenantId), eq(schema.siteImages.siteId, siteId)),
+    orderBy: asc(schema.siteImages.createdAt),
+  });
 }

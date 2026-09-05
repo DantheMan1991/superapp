@@ -58,6 +58,15 @@ export default async function PageEditorRoute({
           content: readPageContent(data.page.draft),
         }}
         versions={versions}
+        tenantId={ctx.tenant.id}
+        photos={data.images.map((i) => ({
+          id: i.id,
+          width: i.width,
+          height: i.height,
+          bytes: i.bytes,
+          mimeType: i.mimeType,
+          createdAt: i.createdAt.toISOString(),
+        }))}
       />
     </div>
   );

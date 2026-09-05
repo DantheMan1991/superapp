@@ -108,11 +108,12 @@ export function assembleSite(brief: SiteBrief, copy: SiteCopy): AssembledPage[] 
       headline: copy.hero.headline,
       subheadline: copy.hero.subheadline,
       cta: { label: copy.hero.ctaLabel || "Get in touch", href: CONTACT_PATH },
+      image: null,
     },
     ...(hasOffer
       ? [{ type: "offer" as const, heading: copy.offer.heading, items: copy.offer.items }]
       : []),
-    { type: "about", heading: copy.about.heading, body: copy.about.body },
+    { type: "about", heading: copy.about.heading, body: copy.about.body, image: null },
     {
       type: "cta",
       headline: copy.closing.headline,

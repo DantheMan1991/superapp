@@ -25,12 +25,74 @@
 | 3b | Buying a domain through Vercel's registrar into Yosher's account, held for the client; the platform publishes the mail and site records itself; the shared `domains` table with the mail module arrives here | after the terms, the transfer runbook and a billing decision |
 | **4** | **Forms into CRM — a `form` section on the site; each message becomes a party (matched by email), a CRM record with `source = 'website'` when CRM is on, a Work follow-up due today, a `site_enquiries` row and an email to the business.** [ADR 0021](../decisions/0021-a-website-enquiry-lands-as-a-party.md) | **built 2026-09-04** |
 | **4b** | **Page views — a first-party beacon, counters per page per day, a `Visitors` panel; and the business's own questions on the form, checked against the published definition.** [ADR 0022](../decisions/0022-page-views-are-a-first-party-beacon.md) | **built 2026-09-04** |
+| **5** | **Photos — a library per site in the private store (one derivative, metadata stripped, ≤ 1,600px), uploaded from the editor's picker, served by the platform on every public route, placed beside the hero, beside the about section, and as a `Photo` section of its own.** [ADR 0023](../decisions/0023-photos-are-one-derivative-in-the-sites-library.md) | **built 2026-09-04** |
 | — | The shop block: `retail` slice 6 (online orders + pickup windows) fills a declared slot; blocked on commitments (retail 3) and web checkout (payments) | not this module's |
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-04 — Slice 5: photos on the pages (`claude/marketing-site-photos`)
+
+The pictures the brochure was missing. [ADR 0023](../decisions/0023-photos-are-one-derivative-in-the-sites-library.md)
+settles what is kept (one derivative the platform made, nothing else), where
+it is served from (our routes, published sites only) and where a photo may go
+(three placements).
+
+- **`site_images`** (`0256`, RLS in `0257`): a library per site under the new
+  blob prefix `sitePhotoPathPrefix(tenant)` = `sites/<tenant>/photos/`
+  (`src/lib/blob.ts`, in the tenant allowlist), at most `SITE_IMAGES_MAX`
+  (60) rows; members read, owners insert and delete, no UPDATE. Unique on
+  `pathname`; CHECKs on the mime (`image/jpeg`, `image/png`) and the
+  dimensions.
+- **The upload** is the logo's twin: `POST /api/marketing/sites/upload`
+  issues a presigned token bounded to the prefix, the photo types and
+  `PHOTO_MAX_BYTES` (12MB); the browser uploads straight to the store
+  (`uploadPresigned`); `registerSitePhotoAction` then runs
+  `inspectUploadedPhoto` (`photo-ingest.ts`), which re-reads the real bytes,
+  refuses an SVG, and hands them to **`preparePhoto`**
+  (`src/lib/sites/photo.ts`): `sharp` decodes with a 50-megapixel limit,
+  `rotate()` bakes the EXIF orientation in, the long edge is capped at
+  `PHOTO_MAX_EDGE` (1,600), and the result is a JPEG (q82, mozjpeg) or a
+  PNG when the upload had transparency — with every metadata tag dropped,
+  because nothing calls `withMetadata()`. The derivative is `put`, the
+  upload is `del`eted, the row is written inside `withTenant` and audited
+  (`marketing.site.photo_added`); a row that fails takes its blob with it.
+- **The content model**: `ImageRefSchema` `{ id, alt }`; `hero.image` and
+  `about.image` (nullable), and a new `image` section `{ image, caption,
+  layout: inset | wide }`. `PublicSite.images` maps id → `{ width, height }`
+  so the renderer draws a photo only when its row still exists and can give
+  the `<img>` its size (no layout shift). `imageSrc(mode, slug, id)`: `/images/<id>`
+  on a site host, `/sites/<slug>/images/<id>` on the platform host, the
+  member route in the draft preview.
+- **Served** by `siteImageResponse` (`src/lib/sites/images.ts`) at
+  `/sites/[slug]/images/[imageId]` and `/domain/[host]/images/[imageId]`,
+  **published sites only**, `public, max-age=3600, s-maxage=604800`; and to
+  members at `/api/marketing/sites/images/[id]`. The proxy's mapping moved
+  into the pure **`siteRewrite`** (`slug.ts`) so it could be tested: `/logo`
+  and `/images/*` go to the site's asset routes, everything else to the
+  page route; `/images` joined the reserved page paths.
+- **The editor**: `PhotoField` (`components/photo-picker.tsx`) on the hero
+  (`Photo beside the headline`), the about section (`Photo beside the
+  text`) and the `Photo` section (with `Caption` and `Width`: `In the text
+  column` / `Full width`); the placed photo shows with its size and a
+  `Describe the photo` alt field, {button:Change photo|outline|image-plus}
+  and {button:Remove|ghost|trash}; {button:Add a photo|outline|image-plus}
+  opens the **library dialog** (`Your site's photos`): a grid to pick from,
+  {button:Upload a photo|outline|image-plus}, and a {icon:trash} per photo
+  that removes it from the site after a confirm. The library is the
+  editor's state, handed to every section's picker (`PageEditor` takes
+  `photos` and `tenantId` from the route).
+- Tests: `tests/site-photos.test.ts` (the schema, `imageSrc`, the reserved
+  path, the prefix, `siteRewrite` for both host kinds, and `preparePhoto`
+  end to end with `sharp`: a 3000×2000 JPEG becomes 1600×1067, a
+  transparent PNG stays PNG and is not enlarged, orientation 6 becomes
+  600×800 with no EXIF left, an SVG and junk are refused);
+  `tests/isolation/sites.test.ts` gains the `site_images` block. Guides:
+  `page-editor.md` (the photo fields, the `Photo` kind, the dialog, the
+  messages), `website.md` (photos are no longer "not on this page").
+  Security rows for the three routes.
 
 ### 2026-09-04 — Slice 4b: who looked, and the business's own questions (`claude/marketing-site-views-and-questions`)
 
@@ -426,6 +488,7 @@ generated logo re-drawable as a vector.
 | `site_domains` | A domain the business owns, connected to its site | FORCE RLS; `member_read`, owner INSERT/UPDATE/DELETE. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. **Unique on `domain` platform-wide** (a hostname points at one site); at most five per site (`SITE_DOMAINS_MAX`). CHECKs: hostname shape, `status in (pending, active, error)`. `records` is `DnsRecordToPublish[]`, what the owner was last told to publish; `vercel_verified`/`vercel_configured_by` are Vercel's last words. **Only an `active` row routes**, and only Vercel makes a row active |
 | `site_enquiries` | A message sent through the site's form: the record of what was sent | FORCE RLS; `member_read`, **member INSERT** (`owner`/`staff` — the public path writes as `staff`, ADR 0021), owner DELETE, **no UPDATE policy**. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. `party_id` / `work_item_id` are **soft pointers** (no FK): the screen resolves them and says when one is gone. CHECKs: name 1–120, message 1–4000, `notify_via in (none, site_email, owners)`. `ip_hash` is the salted hash the caps use, never the IP. Capped at `ENQUIRY_SITE_DAILY_CAP` (100) per site per UTC day. Since 4b (`0254`): `answers` jsonb, `EnquiryAnswer[]` label snapshots of the business's own questions |
 | `site_page_views` | How many people looked at a page: one row per `(site, day, path)`, counters only | FORCE RLS; `member_read`, **member INSERT and UPDATE** (`owner`/`staff` — the beacon upserts as `staff`, ADR 0022), **no DELETE policy**. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. Unique `(site_id, day, path)`; `day` is a `date` in the tenant's timezone. CHECK: counts ≥ 0. Nothing about a person is stored; `visitors` is browsers reporting their first view of the day on that page |
+| `site_images` | The site's photo library: one row per derivative the platform made | FORCE RLS; `member_read`, owner INSERT/DELETE, **no UPDATE** (a replaced photo is a new row). Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. **Unique on `pathname`** (one blob, one row); at most `SITE_IMAGES_MAX` (60) per site. CHECKs: `mime_type in (image/jpeg, image/png)`, width/height/bytes > 0. The blob lives under `sites/<tenant>/photos/`; sections reference the row by id with their own alt text (ADR 0023) |
 
 ## Key files & seams
 
@@ -469,6 +532,16 @@ generated logo re-drawable as a vector.
 - Questions: `FormFieldSchema` in `src/lib/sites/schema.ts`,
   `answersFromForm` / `newFormField` / `FORM_FIELD_KINDS` in
   `enquiry-schema.ts`, `QuestionsFields` in `section-forms.tsx`
+- Photos: `src/lib/sites/photo.ts` (`preparePhoto`, the limits),
+  `images.ts` (`siteImageResponse`, the public cache header),
+  `read.ts` (`listSiteImages`, `PublicSite.images`), `slug.ts`
+  (`siteRewrite`, `/images` reserved), `src/lib/blob.ts`
+  (`sitePhotoPathPrefix`); `src/modules/marketing/photo-ingest.ts`,
+  `image-ops.ts`, `image-actions.ts`, `components/photo-picker.tsx`;
+  routes `src/app/api/marketing/sites/upload`,
+  `src/app/api/marketing/sites/images/[id]`,
+  `src/app/sites/[slug]/images/[imageId]`,
+  `src/app/domain/[host]/images/[imageId]`
 - The editor: `src/lib/sites/pages.ts` (the section catalogue, fresh
   sections, summaries, page-path rules, paragraph splitting, moves, history
   pruning — pure), `src/modules/marketing/page-ops.ts` (save with a version,
@@ -502,6 +575,15 @@ generated logo re-drawable as a vector.
 
 ## Decisions & gotchas
 
+- **One derivative is all a photo ever is** (ADR 0023). The upload is
+  decoded, oriented, capped at 1,600px, re-encoded and stripped of every
+  tag, then deleted; the store never holds an original, an SVG or a
+  camera's GPS position. A replaced photo is a new row, which is why the
+  table has no UPDATE policy and the public cache can hold an id for a week.
+- **A photo on an unpublished site is not on the internet.** The public
+  route refuses unless the site is `published`; the editor and the draft
+  preview read the member route. `PublicSite.images` is the renderer's
+  guard as well as its sizes: a section whose row is gone draws nothing.
 - **The browser says whether it is a visitor** (ADR 0022). Telling
   browsers apart by hashed address would keep something about a person for
   no reason the business could name; a `localStorage` note keyed by site
@@ -675,8 +757,12 @@ generated logo re-drawable as a vector.
   drag is proven; the mouse path is the same sensor set and drop handler,
   but the browser tooling could not produce a real pointer drag. Ten seconds
   with a mouse on the dev branch settles it.
-- **Photos in sections** need a public image route like the logo's and an
-  upload in the editor; the content model gains an `image` section then.
+- **A gallery section** (several photos in a grid) is the next photo
+  placement; the library and the routes are ready for it. Alt text is asked
+  for and never enforced.
+- **A second, smaller derivative** per photo if pages get heavy: the row
+  has the room, the route can pick by a query, and the renderer already
+  knows every placement's width.
 - **Rewriting one section with the assistant** (rather than the whole site)
   is the editor-shaped version of "Rewrite the words"; the slot prompt
   already exists per section kind.

@@ -363,6 +363,51 @@ export const sitePageViews = pgTable(
   ],
 );
 
+/**
+ * A photo in the site's library — Marketing slice 5, ADR 0023.
+ *
+ * The bytes live in the private blob store under `sites/<tenant>/photos/`
+ * as ONE derivative the platform made (long edge ≤ 1600px, JPEG, or PNG
+ * when the upload had transparency; every metadata tag stripped, so a
+ * phone's GPS position never reaches the internet). The upload itself is
+ * never kept. Sections point at a row by id and carry their own alt text;
+ * deleting the row takes the photo off every page that showed it, which
+ * the screen warns about. Served publicly by `/sites/<slug>/images/<id>`
+ * for a published site only, and to members by the marketing API.
+ */
+export const siteImages = pgTable(
+  "site_images",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    siteId: uuid("site_id").notNull(),
+    /** The derivative's blob path, under `sitePhotoPathPrefix(tenant)`. */
+    pathname: text("pathname").notNull(),
+    mimeType: text("mime_type").notNull(),
+    width: integer("width").notNull(),
+    height: integer("height").notNull(),
+    bytes: integer("bytes").notNull(),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("site_images_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("site_images_site_idx").on(t.siteId, t.createdAt),
+    uniqueIndex("site_images_pathname_idx").on(t.pathname),
+    foreignKey({
+      name: "site_images_site_fk",
+      columns: [t.tenantId, t.siteId],
+      foreignColumns: [sites.tenantId, sites.id],
+    }).onDelete("cascade"),
+    check("site_images_mime_values", sql`${t.mimeType} in ('image/jpeg', 'image/png')`),
+    check("site_images_dimensions", sql`${t.width} > 0 and ${t.height} > 0 and ${t.bytes} > 0`),
+  ],
+);
+
 export type Site = typeof sites.$inferSelect;
 export type NewSite = typeof sites.$inferInsert;
 export type SitePage = typeof sitePages.$inferSelect;
@@ -371,3 +416,4 @@ export type SitePageVersion = typeof sitePageVersions.$inferSelect;
 export type SiteDomain = typeof siteDomains.$inferSelect;
 export type SiteEnquiry = typeof siteEnquiries.$inferSelect;
 export type SitePageView = typeof sitePageViews.$inferSelect;
+export type SiteImage = typeof siteImages.$inferSelect;

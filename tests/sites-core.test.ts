@@ -86,7 +86,7 @@ describe("site domain and links", () => {
 describe("the content model", () => {
   it("accepts every section type and fills the defaults", () => {
     const hero = SectionSchema.parse({ type: "hero", headline: "Hay for sale" });
-    expect(hero).toEqual({ type: "hero", headline: "Hay for sale", subheadline: "", cta: null });
+    expect(hero).toEqual({ type: "hero", headline: "Hay for sale", subheadline: "", cta: null, image: null });
     expect(SectionSchema.safeParse({ type: "offer", heading: "x", items: [] }).success).toBe(false);
     expect(SectionSchema.safeParse({ type: "banner", headline: "x" }).success).toBe(false);
     expect(PageContentSchema.safeParse({ sections: new Array(13).fill(hero) }).success).toBe(false);

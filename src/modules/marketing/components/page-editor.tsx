@@ -38,6 +38,7 @@ import {
   sectionSummary,
 } from "@/lib/sites/pages";
 import { PageContentSchema, type PageContent, type Section, type SectionType } from "@/lib/sites/schema";
+import type { SitePhotoView } from "../image-actions";
 import { restorePageVersionAction, savePageAction } from "../page-actions";
 import { SectionForm } from "./section-forms";
 
@@ -78,14 +79,20 @@ export function PageEditor({
   isHome,
   initial,
   versions,
+  tenantId,
+  photos,
 }: {
   pageId: string;
   slug: string;
   isHome: boolean;
   initial: { title: string; path: string; inNav: boolean; content: PageContent };
   versions: VersionView[];
+  tenantId: string;
+  /** The site's photo library, as loaded; the editor keeps it current as photos are added and removed. */
+  photos: SitePhotoView[];
 }) {
   const router = useRouter();
+  const [library, setLibrary] = useState(photos);
   const [title, setTitle] = useState(initial.title);
   const [path, setPath] = useState(initial.path);
   const [inNav, setInNav] = useState(initial.inNav);
@@ -308,6 +315,7 @@ export function PageEditor({
                 idPrefix={selectedRow.key}
                 section={selectedRow.section}
                 onChange={(next) => update(selectedRow.key, next)}
+                photos={{ tenantId, library, onLibraryChange: setLibrary }}
               />
             </Panel>
           )}

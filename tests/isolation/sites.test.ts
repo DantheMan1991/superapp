@@ -786,3 +786,153 @@ d("site_page_views (RLS)", () => {
     expect(seen).toHaveLength(0);
   });
 });
+
+/**
+ * `site_images` RLS — the site's photo library.
+ *
+ * Members read; owners insert and delete; nobody updates; another tenant
+ * sees nothing; a photo on another tenant's site is unrepresentable; one
+ * blob is one row; photos go with their site.
+ */
+d("site_images (RLS)", () => {
+  const STAMP = `iso-img-${process.pid}`;
+  const OWNER = `${STAMP}-owner`;
+  const MATE = `${STAMP}-mate`;
+  const OTHER = `${STAMP}-other`;
+
+  let tenantA: string;
+  let tenantB: string;
+  let siteA: string;
+  let siteB: string;
+  let imageA: string;
+  let imageB: string;
+
+  const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantA, fn, { role: "staff", userId: MATE });
+  const asOwner = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantA, fn, { role: "owner", userId: OWNER });
+  const asOtherTenant = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantB, fn, { role: "owner", userId: OTHER });
+  const photo = (tenantId: string, siteId: string, name: string) => ({
+    tenantId,
+    siteId,
+    pathname: `sites/${tenantId}/photos/${STAMP}-${name}.jpg`,
+    mimeType: "image/jpeg",
+    width: 1600,
+    height: 1067,
+    bytes: 245_000,
+  });
+
+  beforeAll(async () => {
+    await withSystem(async (tx) => {
+      const tenants = await tx
+        .insert(schema.tenants)
+        .values([
+          { clerkOrgId: `${STAMP}-a`, name: "Img A", slug: `${STAMP}-a` },
+          { clerkOrgId: `${STAMP}-b`, name: "Img B", slug: `${STAMP}-b` },
+        ])
+        .returning();
+      tenantA = tenants[0].id;
+      tenantB = tenants[1].id;
+      const sites = await tx
+        .insert(schema.sites)
+        .values([
+          { tenantId: tenantA, slug: `${STAMP}-a` },
+          { tenantId: tenantB, slug: `${STAMP}-b` },
+        ])
+        .returning();
+      siteA = sites[0].id;
+      siteB = sites[1].id;
+      const rows = await tx
+        .insert(schema.siteImages)
+        .values([photo(tenantA, siteA, "barn"), photo(tenantB, siteB, "field")])
+        .returning();
+      imageA = rows[0].id;
+      imageB = rows[1].id;
+    });
+  });
+
+  afterAll(async () => {
+    await withSystem(async (tx) => {
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantA));
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantB));
+    });
+  });
+
+  it("staff read their own photos and nothing of the other tenant's", async () => {
+    const seen = await asStaff((tx) => tx.select().from(schema.siteImages));
+    expect(seen.map((r) => r.id)).toEqual([imageA]);
+    expect(seen.some((r) => r.id === imageB)).toBe(false);
+  });
+
+  it("staff cannot add, change or remove a photo; an owner adds and removes, nobody changes", async () => {
+    await expect(
+      asStaff((tx) => tx.insert(schema.siteImages).values(photo(tenantA, siteA, "staff"))),
+    ).rejects.toThrow();
+    const byStaff = await asStaff((tx) =>
+      tx.delete(schema.siteImages).where(eq(schema.siteImages.id, imageA)).returning(),
+    );
+    expect(byStaff).toHaveLength(0);
+    const [added] = await asOwner((tx) =>
+      tx.insert(schema.siteImages).values(photo(tenantA, siteA, "owner")).returning(),
+    );
+    expect(added.width).toBe(1600);
+    const changed = await asOwner((tx) =>
+      tx.update(schema.siteImages).set({ width: 1 }).where(eq(schema.siteImages.id, added.id)).returning(),
+    );
+    expect(changed).toHaveLength(0);
+    const gone = await asOwner((tx) =>
+      tx.delete(schema.siteImages).where(eq(schema.siteImages.id, added.id)).returning(),
+    );
+    expect(gone).toHaveLength(1);
+  });
+
+  it("another tenant cannot read or delete tenant A's photos", async () => {
+    const seen = await asOtherTenant((tx) => tx.select().from(schema.siteImages));
+    expect(seen.map((r) => r.id)).toEqual([imageB]);
+    const deleted = await asOtherTenant((tx) =>
+      tx.delete(schema.siteImages).where(eq(schema.siteImages.id, imageA)).returning(),
+    );
+    expect(deleted).toHaveLength(0);
+  });
+
+  it("a photo on another tenant's site is unrepresentable, one blob is one row, and the CHECKs hold", async () => {
+    await expect(
+      withSystem((tx) => tx.insert(schema.siteImages).values(photo(tenantB, siteA, "cross"))),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) => tx.insert(schema.siteImages).values(photo(tenantA, siteA, "barn"))),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) => tx.insert(schema.siteImages).values({ ...photo(tenantA, siteA, "svg"), mimeType: "image/svg+xml" })),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) => tx.insert(schema.siteImages).values({ ...photo(tenantA, siteA, "flat"), height: 0 })),
+    ).rejects.toThrow();
+  });
+
+  it("photos go with their site", async () => {
+    const [extra] = await withSystem((tx) =>
+      tx.insert(schema.tenants).values({ clerkOrgId: `${STAMP}-c`, name: "Img C", slug: `${STAMP}-c` }).returning(),
+    );
+    const [site] = await withSystem((tx) =>
+      tx.insert(schema.sites).values({ tenantId: extra.id, slug: `${STAMP}-c` }).returning(),
+    );
+    const [row] = await withSystem((tx) =>
+      tx.insert(schema.siteImages).values(photo(extra.id, site.id, "c")).returning(),
+    );
+    await withSystem((tx) => tx.delete(schema.sites).where(eq(schema.sites.id, site.id)));
+    const left = await withSystem((tx) =>
+      tx.query.siteImages.findFirst({ where: eq(schema.siteImages.id, row.id) }),
+    );
+    expect(left).toBeUndefined();
+    await withSystem((tx) => tx.delete(schema.tenants).where(eq(schema.tenants.id, extra.id)));
+  });
+
+  it("default-deny: no context sees no photos", async () => {
+    const seen = await withTenant("00000000-0000-0000-0000-000000000000", (tx) =>
+      tx.select().from(schema.siteImages),
+    );
+    expect(seen).toHaveLength(0);
+  });
+});

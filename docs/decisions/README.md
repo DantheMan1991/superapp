@@ -60,3 +60,4 @@ Keep them short — one page. An ADR nobody reads has failed at its only job.
 | [0023](0023-photos-are-one-derivative-in-the-sites-library.md) | Photos are one derivative in the site's own library, served by the platform | 2026-09-04 | Accepted |
 | [0024](0024-a-look-is-a-preset-and-its-fonts-are-the-platforms.md) | A look is a preset, and its fonts are the platform's | 2026-09-05 | Accepted |
 | [0025](0025-a-booking-is-an-enquiry-with-a-time.md) | A booking is an enquiry with a time, on a calendar the platform provisions | 2026-09-05 | Accepted |
+| [0026](0026-a-map-is-a-picture-the-platform-draws.md) | A map is a picture the platform draws, from public-domain tiles | 2026-09-05 | Accepted |

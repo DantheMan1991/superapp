@@ -141,6 +141,7 @@ export function PageEditor({
   tenantId,
   photos,
   schedulingOn,
+  mapStatus,
 }: {
   pageId: string;
   slug: string;
@@ -152,6 +153,8 @@ export function PageEditor({
   photos: SitePhotoView[];
   /** Whether Scheduling is on: a booking section can be added only then, and offers no times without it. */
   schedulingOn: boolean;
+  /** Where the site's map stands (`mapStatusLine`), shown on a map section's form. */
+  mapStatus: string;
 }) {
   const router = useRouter();
   const [library, setLibrary] = useState(photos);
@@ -433,6 +436,7 @@ export function PageEditor({
                 onChange={(next) => update(selectedRow.key, next)}
                 photos={{ tenantId, library, onLibraryChange: setLibrary }}
                 schedulingOn={schedulingOn}
+                mapStatus={mapStatus}
               />
             </Panel>
             </div>

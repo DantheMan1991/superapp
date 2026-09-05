@@ -38,7 +38,7 @@
 | **8** | **Bookings: a `Book a time` section whose open times are the section's hours minus what is on a Bookings calendar the platform provisions; a booking lands as an enquiry with a time (party, CRM record, follow-up, email) and as a calendar item with the visitor on it.** [ADR 0025](../decisions/0025-a-booking-is-an-enquiry-with-a-time.md) | **built 2026-09-05** |
 | **9a** | **The first live block: `What's on`, the next events from an Events calendar the platform provisions, drawn from the calendar when the page is rendered and kept current by themselves.** | **built 2026-09-05** |
 | 9b | Prices and availability from the retail and inventory packs, through the declared-slot seam the shop block needs (`retail` slice 6): a pack contributes a block kind, its editor fields and its renderer; the site hosts them. A live team block is not planned: Columns already does a team by hand, and a live one raises consent questions a section should not answer | with the shop block |
-| 10 | A map section from the address (MapLibre is in the repo) | |
+| **10** | **`Find us`: a map of the site's address, a picture the platform draws from public-domain USGS tiles around a pin the Census geocoder placed at save, with the address and a `Get directions` link. No client library, no third-party request from a visitor's browser, United States only.** [ADR 0026](../decisions/0026-a-map-is-a-picture-the-platform-draws.md) | **built 2026-09-05** |
 | 11 | The SEO pack: sitemap and robots per site, a drawn share image per page, local-business structured data, redirects on an address change; a favicon from the logo | |
 | 12 | The assistant everywhere: rewrite one section, write a page from a sentence, suggest a photo description from the image | |
 | — | The shop block: `retail` slice 6 (online orders + pickup windows) fills a declared slot; blocked on commitments (retail 3) and web checkout (payments) | not this module's |
@@ -47,6 +47,61 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-05 — Slice 10: find us, a map the platform draws (`claude/marketing-site-map`)
+
+MapLibre is in the repo and was not used
+([ADR 0026](../decisions/0026-a-map-is-a-picture-the-platform-draws.md)):
+a map on a public page is one `<img>` the platform drew. No migration; the
+pin is JSON on the settings.
+
+- **The pin** (`SiteSettings.map`: `lat`, `lng`, the geocoder's `matched`
+  address, and the `address` it was placed from): `saveSiteDetailsAction`
+  keeps the pin only while the address is the one it was placed from,
+  then `placeOnMap` asks the Census Bureau's geocoder outside the
+  transaction and writes the pin beside the address in a second one,
+  unless the address changed again meanwhile. `createSiteAction` does the
+  same after the site is made. A miss writes nothing and the Website
+  screen's `On the map` line says so (`mapStatusLine`).
+- **`src/lib/sites/map-core.ts`** (pure, tested): Web Mercator
+  (`lngLatToPixel`, `tilesForWindow` for a 960×540 window), `mapKey` (an
+  FNV hash of the pin, the zoom and the colour, plus the zoom), `zoomFromKey`,
+  `markerSvg`, `directionsUrl`, `pinFromCensus`, `pinIsFor`,
+  `mapStatusLine`, and the tile source: USGS Topo, `{z}/{y}/{x}`, zoom 0–16
+  (17 answers 404; checked).
+- **`src/lib/sites/map.ts`**: `geocodeAddress` (Census, 8s, a User-Agent),
+  `renderMap` (the tiles fetched in parallel, composed on a canvas that
+  holds every tile whole because `sharp` places overlays at non-negative
+  offsets only, cut to the window, the marker on top, WebP q82),
+  `siteMapResponse` (published only, the key must be the one the site
+  holds, ETag = the key, the photo routes' public cache headers) and
+  `memberMapResponse` (the draft preview). Routes:
+  `src/app/sites/[slug]/map/[key]`, `src/app/domain/[host]/map/[key]`,
+  `src/app/api/marketing/sites/map/[key]`; `siteRewrite` maps `/map/*` on a
+  site host and `/map` is reserved as a page path.
+- **The `map` section** (`heading`, `note`, `zoom` 13 town | 15
+  neighborhood | 16 street, `showAddress`, `directions`) renders the
+  picture with `Map: USGS The National Map` under it, the address beside,
+  and `Get directions` opening the visitor's maps app in a new tab; with
+  no pin it still prints the address and the button, and with no address
+  the public page skips it while the draft says why. The editor's form
+  carries the `On the map` line (`mapStatus` from the editor page) and the
+  three controls.
+- **Driven on the dev branch** on Test: the fixture's `17 Main St` had read
+  `Not on the map` (the geocoder's first match for it is `17 E MAIN ST`,
+  across town), so the details were saved as `17 N Main St`, and the line
+  became `On the map as 17 N MAIN ST, MOUNT VERNON, OH, 43050.` A `Find us`
+  section at the end of the contact page, saved and published, drew the
+  live page's picture from `/sites/oak-row-farm/map/85c6ecf0-15`: 960×540
+  WebP, `200`, the photo cache headers, `ETag "85c6ecf0-15"`, the downtown
+  and the river with the brand-colour pin in the middle, `Map: USGS The
+  National Map` under it, the address and `Get directions` (a new tab, the
+  visitor's maps app) beside. The draft preview drew the same picture
+  through the member route; a key the site does not hold and a zoom the
+  key cannot carry were both 404; the same key with `If-None-Match` was
+  304. Tests: `tests/site-map.test.ts` (the projection agreed with the
+  fetched tile's row once the hand arithmetic was corrected: 12358, not
+  12359).
 
 ### 2026-09-05 — Slice 9a: what's on, the first live block (`claude/marketing-site-events`)
 
@@ -1104,7 +1159,7 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
 
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
-| `sites` | The business's website: its address, live details and status | FORCE RLS. `member_read`; INSERT/UPDATE/DELETE need `app_current_tenant_role() = 'owner'`. Unique on `tenant_id` (one site per tenant, this slice) and on `slug` platform-wide (it is a hostname label). CHECKs: slug shape `^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$`, `status in (draft, published)`, `copy_source in (model, standard)`, title ≤ 80. `settings` is `SiteSettingsSchema`: the details (phone, email, address, hours) and, since 6c, the frame (announcement bar, header button, social links, footer columns, footer line), all read live by the renderer |
+| `sites` | The business's website: its address, live details and status | FORCE RLS. `member_read`; INSERT/UPDATE/DELETE need `app_current_tenant_role() = 'owner'`. Unique on `tenant_id` (one site per tenant, this slice) and on `slug` platform-wide (it is a hostname label). CHECKs: slug shape `^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$`, `status in (draft, published)`, `copy_source in (model, standard)`, title ≤ 80. `settings` is `SiteSettingsSchema`: the details (phone, email, address, hours), since 6c the frame (announcement bar, header button, social links, footer columns, footer line), and since 10 `map`, the geocoded pin kept with the address it was placed from (ADR 0026), all read live by the renderer |
 | `site_pages` | One page: its path, title, nav place, `draft` and `published` content | FORCE RLS, same policies. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. Unique `(site_id, path)`. CHECK: path `^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$`, title 1–80. `draft`/`published` are `PageContentSchema`; `published` null = never published |
 | `site_page_versions` | A page's history: the content at each `save`, `publish` and `restore` | FORCE RLS; `member_read`, owner INSERT and DELETE (no UPDATE — a version is never edited). Composite FK `(tenant_id, page_id) → site_pages` ON DELETE CASCADE. CHECK on `kind`. Trimmed to the newest `PAGE_VERSIONS_KEEP` (30) on every write by `recordVersion` |
 | `site_domains` | A domain the business owns, connected to its site | FORCE RLS; `member_read`, owner INSERT/UPDATE/DELETE. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. **Unique on `domain` platform-wide** (a hostname points at one site); at most five per site (`SITE_DOMAINS_MAX`). CHECKs: hostname shape, `status in (pending, active, error)`. `records` is `DnsRecordToPublish[]`, what the owner was last told to publish; `vercel_verified`/`vercel_configured_by` are Vercel's last words. **Only an `active` row routes**, and only Vercel makes a row active |
@@ -1164,6 +1219,11 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
   `src/app/api/marketing/sites/images/[id]`,
   `src/app/sites/[slug]/images/[imageId]`,
   `src/app/domain/[host]/images/[imageId]`
+- The map: `src/lib/sites/map-core.ts` (the projection, the key, the
+  marker, the geocoder's answer, the status line — pure), `map.ts`
+  (`geocodeAddress`, `renderMap`, the two responses), the three `map/[key]`
+  routes, `placeOnMap` in `site-actions.ts`, the `map` case in
+  `site-page.tsx` and `section-forms.tsx`
 - Events: `src/lib/sites/events-core.ts` (`upcomingEvents`, `eventDate`,
   `eventWhen` — pure), `wantsEvents` / `liveEvents` in `read.ts`, the
   `events` case in `site-page.tsx` and `section-forms.tsx`
@@ -1234,6 +1294,13 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
   offer under an advisory lock and refused as "just taken" otherwise. No
   confirmation email goes to the visitor: the platform mails a public
   form's words to the business's own addresses only.
+- **A map is a picture the platform draws** (ADR 0026): public-domain USGS
+  Topo tiles stitched on the server around a pin the Census geocoder
+  placed, cached like a photo under a key that changes with the pin, the
+  zoom and the colour. No MapLibre on a public page, no visitor request to
+  a tile server, no commercial basemap terms; United States only, as the
+  Land pack accepted for its aerial. The section says how close; the
+  settings hold where.
 - **A live block reads at render, on the page cache's clock.** The events
   block is the renderer reading the workspace (through `PublicSite`, loaded
   inside the same tenant transaction as the pages) rather than a section
@@ -1476,6 +1543,14 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
 - **An ISR cache hit has never been seen** — the dev server renders every
   request. The production build proves it: `x-nextjs-cache: HIT` on a second
   fetch of a published page, and a MISS right after a publish.
+- **The map is United States only, and trusts the geocoder's first
+  match.** An address elsewhere is "not on the map" (the section still
+  prints the address and offers directions); a second public-domain source
+  with the same standing, or a tenant-level override as the Land pack's
+  basemap has, is the shape a fix would take. An ambiguous address may pin
+  the wrong match; the screen shows the matched address so the owner can
+  make theirs more specific. A control to nudge the pin by hand is not
+  built.
 - **No confirmation email reaches the visitor who booked.** The page says
   "we'll confirm by email" and the follow-up makes it true by hand. Mailing
   an address a stranger typed is a decision about outbound mail (a verified

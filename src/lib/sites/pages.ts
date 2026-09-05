@@ -45,7 +45,7 @@ export function newSection(type: SectionType): Section {
     case "hours":
       return { type, heading: "Hours", note: "" };
     case "form":
-      return { type, heading: "Send us a message", note: "", buttonLabel: "Send", askPhone: true, thanks: "Thanks. We'll be in touch." };
+      return { type, heading: "Send us a message", note: "", buttonLabel: "Send", askPhone: true, thanks: "Thanks. We'll be in touch.", fields: [] };
   }
 }
 

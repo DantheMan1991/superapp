@@ -14,6 +14,8 @@ export interface EnquiryRowView {
   email: string;
   phone: string;
   message: string;
+  /** The business's own questions, answered, in the order asked. */
+  answers: { label: string; value: string }[];
   pagePath: string;
   /** Already formatted in the workspace's timezone. */
   receivedOn: string;
@@ -100,6 +102,16 @@ export function EnquiriesPanel({
                   )}
                   {row.pagePath !== "/" && <span>from {row.pagePath}</span>}
                 </div>
+                {row.answers.length > 0 && (
+                  <dl className="text-sm">
+                    {row.answers.map((a, i) => (
+                      <div key={i}>
+                        <dt className="inline text-muted-foreground">{a.label}: </dt>
+                        <dd className="inline whitespace-pre-line">{a.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
                 <p className={expanded ? "whitespace-pre-line text-sm" : "truncate text-sm"}>
                   {row.message}
                 </p>

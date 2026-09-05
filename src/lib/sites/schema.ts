@@ -20,6 +20,24 @@ export const CtaSchema = z.object({
   href: short(200).min(1),
 });
 
+/**
+ * A question the business adds to its enquiry form. `id` is made once and
+ * never changes, so a renamed question keeps its answers' key; the label is
+ * what the visitor reads and what the answer is filed under.
+ */
+export const FORM_FIELDS_MAX = 6;
+export const FormFieldKindSchema = z.enum(["text", "long", "choice", "yesno"]);
+export type FormFieldKind = z.infer<typeof FormFieldKindSchema>;
+export const FormFieldSchema = z.object({
+  id: z.string().regex(/^[a-z0-9]{4,12}$/),
+  label: short(80).min(1),
+  kind: FormFieldKindSchema,
+  required: z.boolean().default(false),
+  /** For `choice`: the options, in order. Ignored by the other kinds. */
+  options: z.array(short(60).min(1)).max(12).default([]),
+});
+export type FormField = z.infer<typeof FormFieldSchema>;
+
 export const SectionSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("hero"),
@@ -64,6 +82,8 @@ export const SectionSchema = z.discriminatedUnion("type", [
     askPhone: z.boolean().default(true),
     /** Replaces the form once a message is sent; blank reads a standard thank-you. */
     thanks: short(240).default(""),
+    /** The business's own questions, asked between the phone and the message. */
+    fields: z.array(FormFieldSchema).max(FORM_FIELDS_MAX).default([]),
   }),
   z.object({
     type: z.literal("text"),

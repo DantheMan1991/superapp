@@ -129,7 +129,7 @@ export function assembleSite(brief: SiteBrief, copy: SiteCopy): AssembledPage[] 
       : []),
     // Fixed words, not the model's: the form is the same on every site and
     // the owner edits it like any section.
-    { type: "form", heading: "Send us a message", note: "", buttonLabel: "Send", askPhone: true, thanks: "Thanks. We'll be in touch." },
+    { type: "form", heading: "Send us a message", note: "", buttonLabel: "Send", askPhone: true, thanks: "Thanks. We'll be in touch.", fields: [] },
   ];
   const pages: AssembledPage[] = [
     { path: "/", title: "Home", navOrder: 0, inNav: true, content: { description: copy.description, sections: home } },

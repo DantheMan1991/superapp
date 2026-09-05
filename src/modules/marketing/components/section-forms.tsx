@@ -5,8 +5,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { paragraphsToText, textToParagraphs } from "@/lib/sites/pages";
-import type { Section } from "@/lib/sites/schema";
+import { FORM_FIELD_KINDS, newFormField } from "@/lib/sites/enquiry-schema";
+import { moveItem, paragraphsToText, textToParagraphs } from "@/lib/sites/pages";
+import { FORM_FIELDS_MAX, type FormField, type FormFieldKind, type Section } from "@/lib/sites/schema";
 
 /**
  * One form per kind of section. Each edits the section it is given and hands
@@ -166,12 +167,141 @@ export function SectionForm({
           <Field id={id("thanks")} label="After sending" hint="Shown in place of the form once a message is sent.">
             <Input id={id("thanks")} value={section.thanks} maxLength={240} onChange={(e) => onChange({ ...section, thanks: e.target.value })} />
           </Field>
+          <QuestionsFields
+            idPrefix={idPrefix}
+            fields={section.fields}
+            onChange={(fields) => onChange({ ...section, fields })}
+          />
           <p className="text-xs text-muted-foreground">
             Name, email and message are always asked. Each message becomes a contact and a follow-up in your workspace, and is emailed to the site&apos;s email address, or to the owners when there is none.
           </p>
         </div>
       );
   }
+}
+
+/** Six characters of base 36: matches the content model's id shape and is made once. */
+function makeFieldId(): string {
+  return Math.random().toString(36).slice(2, 8).padEnd(6, "0");
+}
+
+/**
+ * The business's own questions on the form: label, kind, whether it must
+ * be answered, and for "Pick one" the choices, one input each — a textarea
+ * of lines cannot be typed into while every keystroke re-splits it.
+ */
+function QuestionsFields({
+  idPrefix,
+  fields,
+  onChange,
+}: {
+  idPrefix: string;
+  fields: FormField[];
+  onChange: (fields: FormField[]) => void;
+}) {
+  const update = (i: number, patch: Partial<FormField>) =>
+    onChange(fields.map((f, j) => (j === i ? { ...f, ...patch } : f)));
+  return (
+    <div className="space-y-3">
+      <Label>Questions</Label>
+      {fields.map((field, i) => {
+        const qid = `${idPrefix}-q-${field.id}`;
+        return (
+          <div key={field.id} className="space-y-2 rounded-xl bg-muted/50 p-3">
+            <div className="flex items-center gap-2">
+              <Input
+                aria-label={`Question ${i + 1}`}
+                value={field.label}
+                maxLength={80}
+                placeholder="The question"
+                onChange={(e) => update(i, { label: e.target.value })}
+              />
+              <select
+                aria-label={`Question ${i + 1} kind`}
+                className="h-9 shrink-0 rounded-md border border-input bg-background px-2 text-sm"
+                value={field.kind}
+                onChange={(e) => {
+                  const kind = e.target.value as FormFieldKind;
+                  update(i, {
+                    kind,
+                    options: kind === "choice" ? (field.options.length > 0 ? field.options : newFormField(field.id, "choice").options) : [],
+                  });
+                }}
+              >
+                {FORM_FIELD_KINDS.map((k) => (
+                  <option key={k.kind} value={k.kind}>
+                    {k.label}
+                  </option>
+                ))}
+              </select>
+              <Button type="button" variant="ghost" size="sm" aria-label={`Move question ${i + 1} up`} disabled={i === 0} onClick={() => onChange(moveItem(fields, i, i - 1))}>
+                ↑
+              </Button>
+              <Button type="button" variant="ghost" size="sm" aria-label={`Move question ${i + 1} down`} disabled={i === fields.length - 1} onClick={() => onChange(moveItem(fields, i, i + 1))}>
+                ↓
+              </Button>
+              <Button type="button" variant="ghost" size="sm" aria-label={`Remove question ${i + 1}`} onClick={() => onChange(fields.filter((_, j) => j !== i))}>
+                <Trash2 className="size-4" />
+              </Button>
+            </div>
+            {field.kind === "choice" && (
+              <div className="space-y-2 pl-1">
+                {field.options.map((option, k) => (
+                  <div key={k} className="flex items-center gap-2">
+                    <Input
+                      aria-label={`Question ${i + 1} choice ${k + 1}`}
+                      value={option}
+                      maxLength={60}
+                      placeholder="A choice"
+                      onChange={(e) => update(i, { options: field.options.map((o, m) => (m === k ? e.target.value : o)) })}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-label={`Remove choice ${k + 1} of question ${i + 1}`}
+                      disabled={field.options.length <= 1}
+                      onClick={() => update(i, { options: field.options.filter((_, m) => m !== k) })}
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={field.options.length >= 12}
+                  onClick={() => update(i, { options: [...field.options, ""] })}
+                >
+                  <Plus className="size-4" />
+                  Add a choice
+                </Button>
+                <p className="text-xs text-muted-foreground">Between one and twelve choices, each with a name.</p>
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <Switch id={`${qid}-required`} checked={field.required} onCheckedChange={(checked) => update(i, { required: checked })} />
+              <Label htmlFor={`${qid}-required`}>Must be answered</Label>
+            </div>
+          </div>
+        );
+      })}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={fields.length >= FORM_FIELDS_MAX}
+        onClick={() => onChange([...fields, newFormField(makeFieldId(), "text")])}
+      >
+        <Plus className="size-4" />
+        Add a question
+      </Button>
+      <p className="text-xs text-muted-foreground">
+        Up to six, asked between the phone number and the message. Answers arrive with the message, in the follow-up and in the email.
+      </p>
+    </div>
+  );
 }
 
 function Field({

@@ -1,11 +1,13 @@
 "use client";
 
 import { useActionState, useId, useState } from "react";
-import { ENQUIRY_MESSAGE_MAX, type EnquiryState } from "@/lib/sites/enquiry-schema";
+import { answerInputName, ENQUIRY_MESSAGE_MAX, type EnquiryState } from "@/lib/sites/enquiry-schema";
+import type { FormField } from "@/lib/sites/schema";
 import { submitSiteEnquiry } from "./enquiry-action";
 
 /**
- * The enquiry form — the one client island on a public site.
+ * The enquiry form — one of the two client islands on a public site (the
+ * other is the view beacon).
  *
  * Plain elements styled with the site's CSS variables rather than the
  * product's components: this is the business's page, not Yosher's, and it
@@ -17,6 +19,10 @@ import { submitSiteEnquiry } from "./enquiry-action";
  * action resolves, so with uncontrolled inputs a validation error would hand
  * the visitor an empty form and their message would be gone. Losing what
  * someone just wrote is the one failure this form must not have.
+ *
+ * The business's own questions come from the section and are asked between
+ * the phone and the message. The server checks the answers against the
+ * PUBLISHED questions, not against these props.
  */
 
 const INITIAL: EnquiryState = { status: "idle" };
@@ -34,29 +40,39 @@ function FieldError({ id, error }: { id: string; error?: string }) {
   );
 }
 
+function Optional() {
+  return <span className="font-normal text-neutral-500"> (optional)</span>;
+}
+
 export function EnquiryForm({
   siteSlug,
   pagePath,
+  sectionIndex,
   buttonLabel,
   askPhone,
   thanks,
+  fields,
   disabled,
 }: {
   siteSlug: string;
   pagePath: string;
+  sectionIndex: number;
   buttonLabel: string;
   askPhone: boolean;
   thanks: string;
+  fields: FormField[];
   /** The draft preview: the form is shown but takes nothing. */
   disabled?: boolean;
 }) {
   const [state, formAction, pending] = useActionState(submitSiteEnquiry, INITIAL);
   const id = useId();
   const [values, setValues] = useState({ name: "", email: "", phone: "", message: "" });
+  const [answers, setAnswers] = useState<Record<string, string>>({});
   const set =
     (field: keyof typeof values) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       setValues((v) => ({ ...v, [field]: e.target.value }));
+  const setAnswer = (name: string, value: string) => setAnswers((a) => ({ ...a, [name]: value }));
 
   if (state.status === "success") {
     return (
@@ -74,11 +90,13 @@ export function EnquiryForm({
 
   const errors = state.fieldErrors ?? {};
   const field = (name: string) => `${id}-${name}`;
+  const describedBy = (name: string) => (errors[name] ? field(`${name}-error`) : undefined);
 
   return (
     <form action={formAction} className="mt-6 max-w-xl">
       <input type="hidden" name="site" value={siteSlug} />
       <input type="hidden" name="page" value={pagePath} />
+      <input type="hidden" name="section" value={sectionIndex} />
       {/* Honeypot. Hidden from people and from screen readers; bots fill it in
           and the action silently discards the submission. Not `display:none`:
           some bots skip those. */}
@@ -103,7 +121,7 @@ export function EnquiryForm({
               value={values.name}
               onChange={set("name")}
               aria-invalid={!!errors.name}
-              aria-describedby={errors.name ? field("name-error") : undefined}
+              aria-describedby={describedBy("name")}
               className={`${INPUT} mt-1`}
             />
             <FieldError id={field("name-error")} error={errors.name} />
@@ -122,7 +140,7 @@ export function EnquiryForm({
               value={values.email}
               onChange={set("email")}
               aria-invalid={!!errors.email}
-              aria-describedby={errors.email ? field("email-error") : undefined}
+              aria-describedby={describedBy("email")}
               className={`${INPUT} mt-1`}
             />
             <FieldError id={field("email-error")} error={errors.email} />
@@ -131,7 +149,8 @@ export function EnquiryForm({
         {askPhone && (
           <div>
             <label htmlFor={field("phone")} className={LABEL}>
-              Phone <span className="font-normal text-neutral-500">(optional)</span>
+              Phone
+              <Optional />
             </label>
             <input
               id={field("phone")}
@@ -142,12 +161,105 @@ export function EnquiryForm({
               value={values.phone}
               onChange={set("phone")}
               aria-invalid={!!errors.phone}
-              aria-describedby={errors.phone ? field("phone-error") : undefined}
+              aria-describedby={describedBy("phone")}
               className={`${INPUT} mt-1`}
             />
             <FieldError id={field("phone-error")} error={errors.phone} />
           </div>
         )}
+
+        {fields.map((q) => {
+          const name = answerInputName(q.id);
+          const value = answers[name] ?? "";
+          const label = (
+            <label htmlFor={field(name)} className={LABEL}>
+              {q.label}
+              {!q.required && q.kind !== "yesno" && <Optional />}
+            </label>
+          );
+          switch (q.kind) {
+            case "text":
+              return (
+                <div key={q.id}>
+                  {label}
+                  <input
+                    id={field(name)}
+                    name={name}
+                    type="text"
+                    maxLength={200}
+                    value={value}
+                    onChange={(e) => setAnswer(name, e.target.value)}
+                    aria-invalid={!!errors[name]}
+                    aria-describedby={describedBy(name)}
+                    className={`${INPUT} mt-1`}
+                  />
+                  <FieldError id={field(`${name}-error`)} error={errors[name]} />
+                </div>
+              );
+            case "long":
+              return (
+                <div key={q.id}>
+                  {label}
+                  <textarea
+                    id={field(name)}
+                    name={name}
+                    rows={3}
+                    maxLength={1000}
+                    value={value}
+                    onChange={(e) => setAnswer(name, e.target.value)}
+                    aria-invalid={!!errors[name]}
+                    aria-describedby={describedBy(name)}
+                    className={`${INPUT} mt-1`}
+                  />
+                  <FieldError id={field(`${name}-error`)} error={errors[name]} />
+                </div>
+              );
+            case "choice":
+              return (
+                <div key={q.id}>
+                  {label}
+                  <select
+                    id={field(name)}
+                    name={name}
+                    value={value}
+                    onChange={(e) => setAnswer(name, e.target.value)}
+                    aria-invalid={!!errors[name]}
+                    aria-describedby={describedBy(name)}
+                    className={`${INPUT} mt-1`}
+                  >
+                    <option value="">Choose one</option>
+                    {q.options.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                  <FieldError id={field(`${name}-error`)} error={errors[name]} />
+                </div>
+              );
+            case "yesno":
+              return (
+                <div key={q.id}>
+                  <label htmlFor={field(name)} className="flex items-start gap-3 text-sm text-neutral-800">
+                    <input
+                      id={field(name)}
+                      name={name}
+                      type="checkbox"
+                      checked={value === "on"}
+                      onChange={(e) => setAnswer(name, e.target.checked ? "on" : "")}
+                      aria-invalid={!!errors[name]}
+                      aria-describedby={describedBy(name)}
+                      className="mt-1 size-4 rounded border-neutral-300"
+                      style={{ accentColor: "var(--site-primary)" }}
+                    />
+                    <span>{q.label}</span>
+                  </label>
+                  <FieldError id={field(`${name}-error`)} error={errors[name]} />
+                </div>
+              );
+          }
+        })}
+
         <div>
           <label htmlFor={field("message")} className={LABEL}>
             Message
@@ -161,7 +273,7 @@ export function EnquiryForm({
             value={values.message}
             onChange={set("message")}
             aria-invalid={!!errors.message}
-            aria-describedby={errors.message ? field("message-error") : undefined}
+            aria-describedby={describedBy("message")}
             className={`${INPUT} mt-1`}
           />
           <FieldError id={field("message-error")} error={errors.message} />

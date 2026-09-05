@@ -639,3 +639,150 @@ d("site_enquiries (RLS)", () => {
     expect(seen).toHaveLength(0);
   });
 });
+
+/**
+ * `site_page_views` RLS — one row per page per day, counters only.
+ *
+ * Members read; MEMBERS insert and update, because the public beacon
+ * upserts as `staff` inside the tenant it resolved (ADR 0022); nobody
+ * deletes. An accountant cannot write; another tenant sees nothing; a row
+ * on another tenant's site is unrepresentable; rows go with their site.
+ */
+d("site_page_views (RLS)", () => {
+  const STAMP = `iso-views-${process.pid}`;
+  const OWNER = `${STAMP}-owner`;
+  const MATE = `${STAMP}-mate`;
+  const OTHER = `${STAMP}-other`;
+
+  let tenantA: string;
+  let tenantB: string;
+  let siteA: string;
+  let siteB: string;
+  let rowA: string;
+  let rowB: string;
+
+  const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantA, fn, { role: "staff", userId: MATE });
+  const asOwner = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantA, fn, { role: "owner", userId: OWNER });
+  const asExpert = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantA, fn, { role: "expert", userId: MATE });
+  const asOtherTenant = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantB, fn, { role: "owner", userId: OTHER });
+
+  beforeAll(async () => {
+    await withSystem(async (tx) => {
+      const tenants = await tx
+        .insert(schema.tenants)
+        .values([
+          { clerkOrgId: `${STAMP}-a`, name: "Views A", slug: `${STAMP}-a` },
+          { clerkOrgId: `${STAMP}-b`, name: "Views B", slug: `${STAMP}-b` },
+        ])
+        .returning();
+      tenantA = tenants[0].id;
+      tenantB = tenants[1].id;
+      const sites = await tx
+        .insert(schema.sites)
+        .values([
+          { tenantId: tenantA, slug: `${STAMP}-a` },
+          { tenantId: tenantB, slug: `${STAMP}-b` },
+        ])
+        .returning();
+      siteA = sites[0].id;
+      siteB = sites[1].id;
+      const rows = await tx
+        .insert(schema.sitePageViews)
+        .values([
+          { tenantId: tenantA, siteId: siteA, day: "2026-09-04", path: "/", views: 3, visitors: 1 },
+          { tenantId: tenantB, siteId: siteB, day: "2026-09-04", path: "/", views: 5, visitors: 2 },
+        ])
+        .returning();
+      rowA = rows[0].id;
+      rowB = rows[1].id;
+    });
+  });
+
+  afterAll(async () => {
+    await withSystem(async (tx) => {
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantA));
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantB));
+    });
+  });
+
+  it("staff read their own counts and nothing of the other tenant's", async () => {
+    const seen = await asStaff((tx) => tx.select().from(schema.sitePageViews));
+    expect(seen.map((r) => r.id)).toEqual([rowA]);
+    expect(seen.some((r) => r.id === rowB)).toBe(false);
+  });
+
+  it("staff upsert a day's row (the beacon's role); an accountant cannot; nobody deletes", async () => {
+    const upsert = (visitors: number) =>
+      asStaff((tx) =>
+        tx
+          .insert(schema.sitePageViews)
+          .values({ tenantId: tenantA, siteId: siteA, day: "2026-09-04", path: "/", views: 1, visitors })
+          .onConflictDoUpdate({
+            target: [schema.sitePageViews.siteId, schema.sitePageViews.day, schema.sitePageViews.path],
+            set: { views: sql`${schema.sitePageViews.views} + 1`, visitors: sql`${schema.sitePageViews.visitors} + ${visitors}` },
+          })
+          .returning(),
+      );
+    const [after] = await upsert(1);
+    expect(after.id).toBe(rowA);
+    expect(after.views).toBe(4);
+    expect(after.visitors).toBe(2);
+    const [again] = await upsert(0);
+    expect(again.views).toBe(5);
+    expect(again.visitors).toBe(2);
+    await expect(
+      asExpert((tx) => tx.insert(schema.sitePageViews).values({ tenantId: tenantA, siteId: siteA, day: "2026-09-05", path: "/" })),
+    ).rejects.toThrow();
+    const byOwner = await asOwner((tx) =>
+      tx.delete(schema.sitePageViews).where(eq(schema.sitePageViews.id, rowA)).returning(),
+    );
+    expect(byOwner).toHaveLength(0);
+  });
+
+  it("another tenant cannot read or update tenant A's counts", async () => {
+    const seen = await asOtherTenant((tx) => tx.select().from(schema.sitePageViews));
+    expect(seen.map((r) => r.id)).toEqual([rowB]);
+    const updated = await asOtherTenant((tx) =>
+      tx.update(schema.sitePageViews).set({ views: 0 }).where(eq(schema.sitePageViews.id, rowA)).returning(),
+    );
+    expect(updated).toHaveLength(0);
+  });
+
+  it("a row on another tenant's site is unrepresentable, and a negative count is refused", async () => {
+    await expect(
+      withSystem((tx) => tx.insert(schema.sitePageViews).values({ tenantId: tenantB, siteId: siteA, day: "2026-09-04", path: "/x" })),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) => tx.insert(schema.sitePageViews).values({ tenantId: tenantA, siteId: siteA, day: "2026-09-06", path: "/", views: -1 })),
+    ).rejects.toThrow();
+  });
+
+  it("counts go with their site", async () => {
+    const [extra] = await withSystem((tx) =>
+      tx.insert(schema.tenants).values({ clerkOrgId: `${STAMP}-c`, name: "Views C", slug: `${STAMP}-c` }).returning(),
+    );
+    const [site] = await withSystem((tx) =>
+      tx.insert(schema.sites).values({ tenantId: extra.id, slug: `${STAMP}-c` }).returning(),
+    );
+    const [row] = await withSystem((tx) =>
+      tx.insert(schema.sitePageViews).values({ tenantId: extra.id, siteId: site.id, day: "2026-09-04", path: "/" }).returning(),
+    );
+    await withSystem((tx) => tx.delete(schema.sites).where(eq(schema.sites.id, site.id)));
+    const left = await withSystem((tx) =>
+      tx.query.sitePageViews.findFirst({ where: eq(schema.sitePageViews.id, row.id) }),
+    );
+    expect(left).toBeUndefined();
+    await withSystem((tx) => tx.delete(schema.tenants).where(eq(schema.tenants.id, extra.id)));
+  });
+
+  it("default-deny: no context sees no counts", async () => {
+    const seen = await withTenant("00000000-0000-0000-0000-000000000000", (tx) =>
+      tx.select().from(schema.sitePageViews),
+    );
+    expect(seen).toHaveLength(0);
+  });
+});

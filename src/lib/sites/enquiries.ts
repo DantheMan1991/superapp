@@ -12,6 +12,7 @@ import { getTenantTimezone } from "@/lib/tenant-timezone";
 import { todayInTimezone } from "@/lib/timezone";
 import { createUnlinkedWork, createWorkForEntity } from "@/lib/work/entity-work";
 import {
+  answersFromForm,
   ENQUIRY_DAILY_CAP,
   ENQUIRY_HOURLY_IP_CAP,
   ENQUIRY_SITE_DAILY_CAP,
@@ -23,18 +24,19 @@ import {
   type SiteEnquiryInput,
 } from "./enquiry-schema";
 import { lookupSiteBySlug } from "./read";
-import { readSiteSettings } from "./schema";
+import { readPageContent, readSiteSettings } from "./schema";
 import { normalizeSiteSlug } from "./slug";
 
 /**
  * A message from a site's form, landing in the workspace — ADR 0021.
  *
- * THE ONE PUBLIC WRITE PATH INTO A TENANT. A stranger's request carries no
- * session, so the site's slug is turned into a tenant by the same trusted
- * lookup the renderer uses (`lookupSiteBySlug`, `withSystem`, identifiers
- * only), and only a PUBLISHED site takes messages. Everything after that
- * runs as `staff` inside the tenant's own context, through the shared doors
- * every member action uses — `createParty`, `addContactPoint`,
+ * THE ONE PUBLIC WRITE PATH INTO A TENANT (the view beacon, ADR 0022, is
+ * the smaller second). A stranger's request carries no session, so the
+ * site's slug is turned into a tenant by the same trusted lookup the
+ * renderer uses (`lookupSiteBySlug`, `withSystem`, identifiers only), and
+ * only a PUBLISHED site takes messages. Everything after that runs as
+ * `staff` inside the tenant's own context, through the shared doors every
+ * member action uses — `createParty`, `addContactPoint`,
  * `createWorkForEntity` — so the database is still deciding what a form may
  * write, and it is exactly what a staff member could.
  *
@@ -45,12 +47,18 @@ import { normalizeSiteSlug } from "./slug";
  *      because the table is CRM's and a feature that is off writes nothing;
  *   3. a FOLLOW-UP in Work, due today, linked to the contact when CRM is on
  *      (the guard is the owning feature) and unlinked otherwise;
- *   4. the `site_enquiries` row, the record of what was actually sent;
+ *   4. the `site_enquiries` row, the record of what was actually sent, the
+ *      business's own questions answered included;
  *   5. an audit row, identifiers only.
  * Then, outside the transaction, the business is EMAILED — to the site's
  * contact email if the details name one, else to every owner — with Reply-To
  * set to the sender. A failed send is logged and never fails the message;
  * the row and the follow-up already exist.
+ *
+ * THE QUESTIONS ARE READ FROM THE PUBLISHED PAGE, never from the request:
+ * the form names its page and its place on it, and the answers are checked
+ * against what that section says the questions are. A form on a page that
+ * has since changed simply has its answers dropped.
  *
  * Caps: per IP per hour and platform-wide per day in `public_access_attempts`
  * (`src/lib/public-caps.ts`), plus a per-site daily count on this table so
@@ -67,7 +75,13 @@ const CAP = {
 
 export type ReceiveResult =
   | { ok: true }
+  | { ok: false; reason: "fields"; fieldErrors: Record<string, string> }
   | { ok: false; reason: "capped" | "unavailable" | "failed" };
+
+type NotifyPlan =
+  | { via: "site_email"; recipients: { key: string; email: string }[] }
+  | { via: "owners"; recipients: { key: string; email: string }[] }
+  | { via: "none"; recipients: [] };
 
 interface Landed {
   enquiryId: string;
@@ -77,10 +91,11 @@ interface Landed {
   plan: NotifyPlan;
 }
 
-type NotifyPlan =
-  | { via: "site_email"; recipients: { key: string; email: string }[] }
-  | { via: "owners"; recipients: { key: string; email: string }[] }
-  | { via: "none"; recipients: [] };
+type Outcome =
+  | { kind: "landed"; landed: Landed }
+  | { kind: "capped" }
+  | { kind: "unavailable" }
+  | { kind: "fields"; errors: Record<string, string> };
 
 /**
  * Who gets the business's copy. The site's contact email is what the
@@ -122,6 +137,7 @@ async function tryAddContactPoint(
 
 export async function receiveSiteEnquiry(
   input: SiteEnquiryInput,
+  rawAnswers: Record<string, string>,
   ip: string,
 ): Promise<ReceiveResult> {
   const slug = normalizeSiteSlug(input.site);
@@ -134,15 +150,15 @@ export async function receiveSiteEnquiry(
 
   const crmOn = await isModuleEnabled(hit.tenantId, "crm");
 
-  let landed: Landed | "capped" | null;
+  let outcome: Outcome;
   try {
-    landed = await withTenant(
+    outcome = await withTenant(
       hit.tenantId,
-      async (tx): Promise<Landed | "capped" | null> => {
+      async (tx): Promise<Outcome> => {
         const site = await tx.query.sites.findFirst({
           where: and(eq(schema.sites.tenantId, hit.tenantId), eq(schema.sites.id, hit.id)),
         });
-        if (!site || site.status !== "published") return null;
+        if (!site || site.status !== "published") return { kind: "unavailable" };
 
         const [{ n: today }] = await tx
           .select({ n: sql<number>`count(*)::int` })
@@ -154,7 +170,22 @@ export async function receiveSiteEnquiry(
               gte(schema.siteEnquiries.createdAt, startOfUtcDay(new Date())),
             ),
           );
-        if (today >= ENQUIRY_SITE_DAILY_CAP) return "capped";
+        if (today >= ENQUIRY_SITE_DAILY_CAP) return { kind: "capped" };
+
+        // The business's questions, from the PUBLISHED page the form was on.
+        const pagePath = input.page || "/";
+        const page = await tx.query.sitePages.findFirst({
+          where: and(
+            eq(schema.sitePages.tenantId, hit.tenantId),
+            eq(schema.sitePages.siteId, site.id),
+            eq(schema.sitePages.path, pagePath),
+          ),
+          columns: { published: true },
+        });
+        const section = page ? readPageContent(page.published).sections[input.section] : undefined;
+        const fields = section?.type === "form" ? section.fields : [];
+        const checked = answersFromForm(fields, (name) => rawAnswers[name] ?? "");
+        if (Object.keys(checked.errors).length > 0) return { kind: "fields", errors: checked.errors };
 
         const settings = readSiteSettings(site.settings);
         const plan = await notifyPlan(hit.tenantId, settings.email);
@@ -190,11 +221,12 @@ export async function receiveSiteEnquiry(
         // 3. The follow-up, due today so it reaches the morning digest.
         const words: EnquiryWords = {
           siteTitle: site.title || tenant?.name || "your website",
-          pagePath: input.page || "/",
+          pagePath,
           name: input.name,
           email: input.email,
           phone: input.phone,
           message: input.message,
+          answers: checked.answers,
           receivedOn,
         };
         const workInput = { title: enquiryWorkTitle(input.name), notes: enquiryNotes(words), dueOn: receivedOn };
@@ -214,11 +246,12 @@ export async function receiveSiteEnquiry(
           .values({
             tenantId: hit.tenantId,
             siteId: site.id,
-            pagePath: words.pagePath,
+            pagePath,
             name: input.name,
             email: input.email,
             phone: input.phone,
             message: input.message,
+            answers: checked.answers,
             partyId: party.id,
             workItemId,
             notifyVia: plan.via,
@@ -239,10 +272,14 @@ export async function receiveSiteEnquiry(
             workItemId,
             crmRecord: crmOn,
             notifyVia: plan.via,
+            answers: checked.answers.length,
           },
         });
 
-        return { enquiryId: row.id, tenantId: hit.tenantId, words, contactRecord: crmOn, plan };
+        return {
+          kind: "landed",
+          landed: { enquiryId: row.id, tenantId: hit.tenantId, words, contactRecord: crmOn, plan },
+        };
       },
       { role: "staff" },
     );
@@ -250,11 +287,13 @@ export async function receiveSiteEnquiry(
     console.error("site enquiry: could not be recorded", err instanceof Error ? err.message : err);
     return { ok: false, reason: "failed" };
   }
-  if (landed === null) return { ok: false, reason: "unavailable" };
-  if (landed === "capped") return { ok: false, reason: "capped" };
+  if (outcome.kind === "unavailable") return { ok: false, reason: "unavailable" };
+  if (outcome.kind === "capped") return { ok: false, reason: "capped" };
+  if (outcome.kind === "fields") return { ok: false, reason: "fields", fieldErrors: outcome.errors };
 
   // The business's copy. Outside the transaction: the message is already
   // safe, and a provider hiccup must not undo it.
+  const { landed } = outcome;
   const mail = enquiryEmail(landed.words, { followUp: true, contact: landed.contactRecord });
   for (const to of landed.plan.recipients) {
     const sent = await sendEmail({

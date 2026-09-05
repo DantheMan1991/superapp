@@ -5,6 +5,7 @@ import type { PublicSite } from "@/lib/sites/read";
 import type { Section, SitePageView, SiteSettings } from "@/lib/sites/schema";
 import { siteHref, type SiteMode } from "@/lib/sites/slug";
 import { EnquiryForm } from "./enquiry-form";
+import { ViewBeacon } from "./view-beacon";
 
 /**
  * The public renderer: one page of a tenant's site, from its typed sections.
@@ -59,6 +60,8 @@ export function SitePage({
   return (
     <div style={style} className="flex min-h-screen flex-col bg-white text-neutral-900">
       {banner}
+      {/* The draft preview is the owner looking, not a visitor: no count. */}
+      {mode !== "draft" && <ViewBeacon slug={site.slug} path={page.path} />}
       <header className="border-b border-neutral-200">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-x-8 gap-y-3 px-6 py-4">
           <Link href={href("/")} className="flex items-center gap-3">
@@ -103,7 +106,7 @@ export function SitePage({
 
       <main className="flex-1">
         {page.content.sections.map((section, i) => (
-          <SectionView key={i} section={section} site={site} mode={mode} pagePath={page.path} />
+          <SectionView key={i} section={section} site={site} mode={mode} pagePath={page.path} sectionIndex={i} />
         ))}
       </main>
 
@@ -128,11 +131,14 @@ function SectionView({
   site,
   mode,
   pagePath,
+  sectionIndex,
 }: {
   section: Section;
   site: PublicSite;
   mode: SiteMode;
   pagePath: string;
+  /** Where on the page this is: the form names it so its questions can be read back. */
+  sectionIndex: number;
 }) {
   switch (section.type) {
     case "form":
@@ -143,9 +149,11 @@ function SectionView({
           <EnquiryForm
             siteSlug={site.slug}
             pagePath={pagePath}
+            sectionIndex={sectionIndex}
             buttonLabel={section.buttonLabel}
             askPhone={section.askPhone}
             thanks={section.thanks}
+            fields={section.fields}
             // The preview shows the form; only the live site takes messages.
             disabled={mode === "draft"}
           />

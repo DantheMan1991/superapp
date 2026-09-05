@@ -5,16 +5,20 @@ import { requireTenant } from "@/lib/auth";
 import { isModuleEnabled, requireModuleEnabled } from "@/lib/modules";
 import { readDomainRecords } from "@/lib/sites/domains";
 import { listSiteEnquiries } from "@/lib/sites/enquiries";
+import { readEnquiryAnswers } from "@/lib/sites/enquiry-schema";
 import { loadSiteDrafts } from "@/lib/sites/read";
+import { listSiteViews } from "@/lib/sites/views";
+import { summarizeViews } from "@/lib/sites/views-core";
 import { normalizeSiteSlug, platformHostsFromEnv, siteDomainFromEnv } from "@/lib/sites/slug";
 import { isVercelConfigured } from "@/lib/vercel/domains";
-import { dateInTimezone } from "@/lib/timezone";
+import { dateInTimezone, todayInTimezone } from "@/lib/timezone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
 import { ConnectDomainForm, DomainRow } from "@/modules/marketing/components/domain-controls";
 import { EnquiriesPanel } from "@/modules/marketing/components/enquiries-panel";
+import { VisitorsPanel } from "@/modules/marketing/components/visitors-panel";
 import { MarketingStrip } from "@/modules/marketing/components/marketing-strip";
 import { PagesPanel } from "@/modules/marketing/components/pages-panel";
 import {
@@ -34,12 +38,14 @@ export const dynamic = "force-dynamic";
 export default async function WebsitePage() {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "marketing");
-  const { drafts, enquiries } = await withTenant(
+  const today = todayInTimezone(ctx.tenant.timezone);
+  const { drafts, enquiries, views } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
       const drafts = await loadSiteDrafts(tx, ctx.tenant.id);
       const enquiries = drafts ? await listSiteEnquiries(tx, ctx.tenant.id, drafts.site.id) : [];
-      return { drafts, enquiries };
+      const views = drafts ? await listSiteViews(tx, ctx.tenant.id, drafts.site.id, today) : [];
+      return { drafts, enquiries, views };
     },
     { role: ctx.role },
   );
@@ -200,6 +206,7 @@ export default async function WebsitePage() {
                   email: enquiry.email,
                   phone: enquiry.phone,
                   message: enquiry.message,
+                  answers: readEnquiryAnswers(enquiry.answers),
                   pagePath: enquiry.pagePath,
                   receivedOn: dateInTimezone(enquiry.createdAt, ctx.tenant.timezone),
                   partyId: enquiry.partyId,
@@ -208,6 +215,21 @@ export default async function WebsitePage() {
                   followUp,
                   notifyVia: enquiry.notifyVia,
                 }))}
+              />
+            </Panel>
+          </section>
+
+          <section className="space-y-3">
+            <div>
+              <h2 className="font-heading text-lg font-semibold tracking-heading">Visitors</h2>
+              <p className="text-sm text-muted-foreground">
+                How many people looked at your site in the last thirty days, and which pages.
+              </p>
+            </div>
+            <Panel>
+              <VisitorsPanel
+                summary={summarizeViews(views, today)}
+                titles={Object.fromEntries(drafts.view.pages.map((p) => [p.path, p.title]))}
               />
             </Panel>
           </section>

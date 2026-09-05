@@ -17,6 +17,10 @@ Open **Marketing** in the sidebar. This page holds your brand kit. Upload a logo
 - **`Tagline`.** A line under the name on documents. Optional, up to 140 characters. Leave it blank and no line is printed.
 - **`Primary color`.** A color swatch, a box for a hex value like `#1f6f5f`, and {button:Clear|ghost} once something is in the box. Click the swatch to pick a color, or type the value. The text under the box reads `Headings and rules on your documents. Blank keeps the default black.` Type something that is not a hex value and it reads `Needs to be a hex value like #1f6f5f.` instead, and the box is outlined.
 - **`Accent color`.** The same controls. A second color for later: the website and highlights. Blank is fine; nothing uses it yet.
+- **`Look`.** Three buttons, {button:Modern|outline}, {button:Warm|outline} and {button:Classic|outline}, with a line under them saying what the pressed one means: `Clean type, pill buttons, soft corners.`, `A serif for headings, rounded buttons, softer corners.` or `Serifs throughout, squared buttons, straight corners.` The look sets your website's fonts, its buttons and how soft its corners are, all at once. Every site starts as `Modern`. On a company's own card the row starts with {button:Your brand's|outline}, which follows this card.
+- **`Fonts`.** {button:As the look|outline} and six pairings: {button:Clean|outline} (Geist, the platform's own type), {button:Warm|outline} (Lora over Nunito), {button:Classic|outline} (Playfair Display over Source Serif), {button:Bold|outline} (Oswald over Source Sans), {button:Friendly|outline} (Poppins over Nunito) and {button:Elegant|outline} (Cormorant Garamond over Montserrat). The line under the row names the two typefaces in use and where they suit, such as `Lora over Nunito. A soft serif over a rounded sans. Farms, food, families.` `As the look` follows the `Look` above; a pairing you press wins over it. The first typeface is for headings, the second for everything else.
+- **`Buttons`.** {button:As the look|outline}, {button:Pill|outline}, {button:Rounded|outline} and {button:Square|outline}. The line under the row reads `Pill, as the look says.` or `Square buttons on every page.`
+- **`How your website reads`.** A white sample under the three rows: your business name in the heading typeface and your primary color, a line in the body typeface, and a `Get in touch` button in the shape, with the sample's own corners as soft as the look makes them. It changes as you press the buttons, before you save. The same sample, from what is saved, sits at the top of the card under `On the website`, labelled with the look, the fonts and the buttons in use.
 - **{button:Save|primary}.** Grayed out until you change something. While it saves it reads `Saving…`. {button:Discard changes|ghost} appears beside it once you have changed something and puts every field back to what was saved.
 - **`Companies`.** Appears only when your business has more than one company on Accounting's Companies page, or when a company already has a look of its own. Under the heading: `Each company uses your brand unless you give it a look of its own. A company's own look fills in only what you set; anything left blank still comes from your brand.` Each company is a row reading `Uses your brand.` with {button:Give it its own look|outline}, or, once it has one, its own card with the same three parts as `Your brand` and {button:Use your brand instead|ghost} at the top right. A company's card that has no logo of its own shows your brand's logo in its preview with the note `Using your brand's logo.`
 
@@ -49,6 +53,14 @@ To swap it, click {button:Replace logo|outline|image-up} and choose the new file
 3. For `Primary color`, click the swatch and pick a color, or type a hex value such as `#1f6f5f`. The preview at the top changes as you save, not as you type. A very pale color still colors the rules on the page, but the heading stays black so it can be read.
 4. Set `Accent color` the same way if you already know your second color.
 5. Click {button:Save|primary}. You see `Brand saved.` and the preview at the top updates.
+
+## How to choose your website's look
+
+1. Under `Look`, press {button:Modern|outline}, {button:Warm|outline} or {button:Classic|outline}. `How your website reads` under the rows changes at once.
+2. If the look's fonts are not quite right, press a pairing under `Fonts`; press {button:As the look|outline} to go back to the look's own. Do the same under `Buttons`.
+3. Click {button:Save|primary}. You see `Brand saved.` Your website takes the look straight away, on every page, published or not; there is no need to publish again. The preview at the top of the card shows it under `On the website`.
+
+The look is the business's, not one page's: every page of the site reads in it, and a company with its own look can choose differently for its own site later.
 
 ## How to give a company its own look
 
@@ -93,7 +105,7 @@ To swap it, click {button:Replace logo|outline|image-up} and choose the new file
 
 ## Not on this page
 
-An illustrated symbol drawn for you, such as an animal, a tool or a building; Yosher draws your name in type, with simple shapes at most. A choice of typefaces. Your website and your domain name. The logo in your email signature and on generated documents. Choosing a different logo for one invoice. Ask us if you need any of these; they are the next things this page grows.
+An illustrated symbol drawn for you, such as an animal, a tool or a building; Yosher draws your name in type, with simple shapes at most. A typeface of your own outside the six pairings, or the look's fonts on your invoices, which keep their own type for now. Your website and your domain name. The logo in your email signature and on generated documents. Choosing a different logo for one invoice. Ask us if you need any of these; they are the next things this page grows.
 
 ## Who can do what
 

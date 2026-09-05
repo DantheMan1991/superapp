@@ -4,7 +4,7 @@
 > **Route:** /dashboard/m/marketing/website
 > **Order:** 200
 
-Open **Marketing** in the sidebar and click `Website` in the row under the title. The first time, this page asks for an address and your contact details and builds three pages: home, about and contact. The words are written from your brand kit, the kind of business you are and the details you give; the logo and colors come from your brand kit. Nothing is on the internet until you click {button:Publish|primary}.
+Open **Marketing** in the sidebar and click `Website` in the row under the title. The first time, this page asks for an address and your contact details and builds three pages: home, about and contact. The words are written from your brand kit, the kind of business you are and the details you give; the logo, colors, fonts and the shape of the buttons come from your brand kit (see `Look` in [Your brand kit](overview.md)). Nothing is on the internet until you click {button:Publish|primary}.
 
 ## What you see
 

@@ -28,6 +28,10 @@ export interface KitFieldsPatch {
   /** `#rrggbb` or empty — already normalised by the action. */
   primaryColor: string;
   accentColor: string;
+  /** One of the lists in `src/lib/brand/looks.ts`, or empty — checked by the action's Zod. */
+  look: string;
+  fontPairing: string;
+  buttonShape: string;
 }
 
 export interface KitLogo {

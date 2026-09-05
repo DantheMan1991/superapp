@@ -149,7 +149,7 @@ export function Slideshow({
   const frame =
     layout === "wide"
       ? "relative aspect-[16/9] max-h-[70vh] w-full overflow-hidden bg-neutral-100"
-      : "relative aspect-[3/2] w-full overflow-hidden rounded-2xl bg-neutral-100";
+      : "relative aspect-[3/2] w-full overflow-hidden rounded-[var(--site-radius)] bg-neutral-100";
   return (
     <div
       className="space-y-3"
@@ -259,7 +259,7 @@ export function Gallery({
                 ref={(el) => {
                   triggers.current[i] = el;
                 }}
-                className="block overflow-hidden rounded-xl bg-neutral-100 focus:outline-none focus:ring-2 focus:ring-[var(--site-primary)]"
+                className="block overflow-hidden rounded-[calc(var(--site-radius)*0.75)] bg-neutral-100 focus:outline-none focus:ring-2 focus:ring-[var(--site-primary)]"
                 onClick={(e) => {
                   e.preventDefault();
                   setOpen(i);

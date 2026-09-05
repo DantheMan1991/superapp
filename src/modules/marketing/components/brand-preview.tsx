@@ -1,4 +1,7 @@
-import { foregroundOn, type ResolvedBrand } from "@/lib/brand/core";
+import { siteFonts } from "@/components/site/site-fonts";
+import { foregroundOn, type HexColor, type ResolvedBrand } from "@/lib/brand/core";
+import { BUTTON_SHAPE_SPECS, FONT_PAIRING_SPECS, LOOK_SPECS, resolveLook } from "@/lib/brand/looks";
+import { cn } from "@/lib/utils";
 
 /**
  * How the kit reads — a letterhead strip, the way the top of the invoice
@@ -18,9 +21,12 @@ export function BrandPreview({
   logoSrc: string | null;
   inheritedLogoNote: string | null;
 }) {
-  const primary = resolved.primaryColor ?? "#111827";
+  const primary: HexColor = resolved.primaryColor ?? "#111827";
   const monogram = resolved.displayName.trim().charAt(0).toUpperCase() || "?";
+  const look = resolveLook(resolved);
+  const fonts = siteFonts(look.fontPairing);
   return (
+    <div className="space-y-5">
     <div className="flex flex-wrap items-center justify-between gap-6">
       <div className="flex min-w-0 items-center gap-4">
         {logoSrc ? (
@@ -70,6 +76,29 @@ export function BrandPreview({
         <Swatch label="Primary" hex={resolved.primaryColor} />
         <Swatch label="Accent" hex={resolved.accentColor} />
       </dl>
+    </div>
+    {/* How the website reads: the look's fonts and buttons, the same way the strip above is the invoice. */}
+    <div
+      className={cn("border border-divider bg-white p-4 text-neutral-900", fonts.className)}
+      style={{ borderRadius: look.radius }}
+    >
+      <p className="text-xs text-neutral-500">
+        On the website: {LOOK_SPECS[look.look].name} look, {FONT_PAIRING_SPECS[look.fontPairing].name} fonts,{" "}
+        {BUTTON_SHAPE_SPECS[look.buttonShape].name.toLowerCase()} buttons
+      </p>
+      <p className="mt-1 text-2xl font-semibold tracking-tight" style={{ fontFamily: fonts.heading, color: primary }}>
+        {resolved.displayName}
+      </p>
+      <p className="mt-1 text-sm text-neutral-700" style={{ fontFamily: fonts.body }}>
+        {resolved.tagline || "A line of the page, in the body type."}
+      </p>
+      <span
+        className="mt-3 inline-block px-5 py-2 text-sm font-medium shadow-sm"
+        style={{ borderRadius: look.buttonRadius, backgroundColor: primary, color: foregroundOn(primary), fontFamily: fonts.body }}
+      >
+        Get in touch
+      </span>
+    </div>
     </div>
   );
 }

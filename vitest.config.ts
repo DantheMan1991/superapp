@@ -34,6 +34,10 @@ export default defineConfig({
       // The "server-only" guard package throws outside a React server
       // context; tests exercise server code directly, so stub it out.
       "server-only": path.resolve(__dirname, "tests/stubs/server-only.ts"),
+      // A build-time loader whose exports are not callable outside Next's
+      // compiler; the site's fonts module (and every screen that imports it)
+      // gets callable stubs instead.
+      "next/font/google": path.resolve(__dirname, "tests/stubs/next-font-google.ts"),
       "@": path.resolve(__dirname, "src"),
     },
   },

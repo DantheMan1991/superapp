@@ -33,7 +33,7 @@
 | **6** | **Columns and cards: two to four columns of cards (photo or icon, heading, a few lines, a button), sortable in the editor, in white panels on a band or plain, with a wide-left or wide-right variant for two columns.** | **built 2026-09-05** |
 | **6b** | **Layout presets on every section (width, spacing, alignment; the hero's height and photo side, the about section's photo side) and backgrounds (none, a tint, the brand colour, dark, a photo with an overlay), with the words' tone following the background.** | **built 2026-09-05** |
 | **6c** | **The frame around every page: an announcement bar, a header button, social links as marks, footer columns and a footer line, edited on the Website screen and live the moment they are saved; and a link is now one of four shapes, on save and at render.** | **built 2026-09-05** |
-| 6d | Fonts and looks: curated font pairings and a warm/modern/classic switch from the brand kit; button shapes | |
+| **6d** | **Fonts and looks on the brand kit: a Modern, Warm or Classic look, six curated font pairings bundled by the platform, and pill, rounded or square buttons, with the corners following the look; a sample beside the fields reads as the site will.** [ADR 0024](../decisions/0024-a-look-is-a-preset-and-its-fonts-are-the-platforms.md) | **built 2026-09-05** |
 | 7 | Phone and tablet toggle on the preview; click a section in the preview to select it in the editor | |
 | 8 | Bookings: a "book a time" section on the scheduling module's calendars, landing like an enquiry | |
 | 9 | Live blocks fed by the modules: prices and availability from retail and inventory, the team, events | |
@@ -46,6 +46,68 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-05 — Slice 6d: fonts and looks (`claude/marketing-site-looks`)
+
+The site's character, from the brand kit: a look, a font pairing and a
+button shape, each a preset from a short list
+([ADR 0024](../decisions/0024-a-look-is-a-preset-and-its-fonts-are-the-platforms.md)).
+Migration `0258` adds three text columns to `brand_kits` with CHECKs that
+are the whole vocabulary; applied and verified on dev and production before
+the merge.
+
+- **`src/lib/brand/looks.ts`** (pure, tested): `BRAND_LOOKS` (modern, warm,
+  classic), `FONT_PAIRINGS` (clean, warm, classic, bold, friendly, elegant),
+  `BUTTON_SHAPES` (pill, rounded, square), the specs with their captions,
+  `LOOK_SPECS` (each look's default pairing, shape and two corner radii),
+  `resolveLook({ look, fontPairing, buttonShape })` (the look's defaults
+  under the owner's own choices; nothing chosen is `modern`, which is how
+  every site started) and `lookRadiusVars`. `resolveBrand` picks the three
+  fields like a colour (company's, else business's, else nobody's) through
+  type guards, so a value outside the lists reads as nobody's.
+- **The fonts** (`src/components/site/site-fonts.ts`): nine families through
+  `next/font/google` with `preload: false`, paired as Geist/Geist (`clean`),
+  Lora/Nunito, Playfair Display/Source Serif 4, Oswald/Source Sans 3,
+  Poppins/Nunito, Cormorant Garamond/Montserrat. `siteFonts(pairing)` hands
+  the renderer the variable classes and two `font-family` values.
+- **The renderer**: the root carries `site-root`, the pairing's classes and
+  five new variables (`--site-font-heading`, `--site-font-body`,
+  `--site-radius`, `--site-radius-field`, `--site-radius-button`); a rule
+  in `globals.css` gives `.site-root` its body family and its `h1`–`h3` the
+  heading family; every photo, panel, tile, box and button now reads its
+  corners from the variables (`rounded-[var(--site-radius)]` and so on)
+  instead of a fixed class. The slideshow's arrows and dots and the social
+  marks stay round: they are controls and marks, not the look.
+- **The brand screen**: a `Look`, `Fonts` and `Buttons` row in the kit's
+  fields (`components/look-fields.tsx`), each a pressed-button row with a
+  caption, and under them `How your website reads`: the business name in
+  the heading family, a line in the body family and a button in the shape,
+  changing as the owner clicks. The preview strip at the top of the card
+  gains the same sample from the SAVED kit, labelled with the look, the
+  fonts and the buttons. On a company kit the rows offer `Your brand's` as
+  the blank; on the business kit `As the look`. Staff see the three as
+  words.
+- **Fixed on the way: a brand kit save did not revalidate the public site.**
+  `revalidate()` in `actions.ts` named only the brand screen, so a new
+  colour (since slice 1) reached a live site only when the five-minute cache
+  ran out. It now names the website screen and the three public routes.
+- **`next/font/google` under vitest** is a build-time loader whose exports
+  are not callable, and the guides and vocabulary tests import every screen,
+  so `tests/stubs/next-font-google.ts` (aliased in `vitest.config.ts`) hands
+  them callable stubs. A new family needs a line there too.
+- **Driven on the dev branch** on Test: the brand screen's sample changed
+  as the rows were pressed (Classic → Playfair Display over Source Serif 4,
+  2px buttons, 6px corners; Bold → Oswald over Source Sans 3; `As the look`
+  back to the look's own; Rounded → 10px buttons), `Brand saved.` on Save,
+  and the live home page then read in Playfair Display and Source Serif 4
+  with the `Book a visit` and `See what we offer` buttons at 10px and the
+  cards at 6px; the browser had loaded those two families and no other. The
+  contact page's boxes were 4px and its labels in Source Serif. Then the
+  Warm look with the buttons `As the look`: Lora over Nunito, 24px corners
+  in the sample and 1.5rem on the site, the gallery's tiles soft, only Lora
+  and Nunito fetched. The Test site is left on Warm. Tests:
+  `tests/brand-looks.test.ts`, the `resolveBrand` cases in
+  `tests/brand-core.test.ts`.
 
 ### 2026-09-05 — Slice 6c: the header, the footer and the bar across the top (`claude/marketing-site-header-footer`)
 
@@ -845,6 +907,13 @@ Since 0b (`0245`): `logo_source` is `upload` or `generated` (CHECK), and
 upload. The stored blob is always a PNG or JPEG; the spec is what makes a
 generated logo re-drawable as a vector.
 
+Since 6d (`0258`): `look`, `font_pairing` and `button_shape`, each `''` or
+one of the words in `src/lib/brand/looks.ts` (CHECKs `brand_kits_look_values`,
+`brand_kits_font_pairing_values`, `brand_kits_button_shape_values`). `''` on
+a company kit is "as the business kit says"; on the business kit it is the
+platform default, `modern`. Resolved by `resolveBrand` like a colour and
+turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-a-preset-and-its-fonts-are-the-platforms.md)).
+
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
 | `sites` | The business's website: its address, live details and status | FORCE RLS. `member_read`; INSERT/UPDATE/DELETE need `app_current_tenant_role() = 'owner'`. Unique on `tenant_id` (one site per tenant, this slice) and on `slug` platform-wide (it is a hostname label). CHECKs: slug shape `^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$`, `status in (draft, published)`, `copy_source in (model, standard)`, title ≤ 80. `settings` is `SiteSettingsSchema`: the details (phone, email, address, hours) and, since 6c, the frame (announcement bar, header button, social links, footer columns, footer line), all read live by the renderer |
@@ -907,6 +976,11 @@ generated logo re-drawable as a vector.
   `src/app/api/marketing/sites/images/[id]`,
   `src/app/sites/[slug]/images/[imageId]`,
   `src/app/domain/[host]/images/[imageId]`
+- The look: `src/lib/brand/looks.ts` (the lists, the specs, `resolveLook`,
+  `lookRadiusVars` — pure), `src/components/site/site-fonts.ts` (the
+  bundled families, `siteFonts`), the `.site-root` rule in
+  `src/app/globals.css`, `components/look-fields.tsx` and the sample in
+  `components/brand-preview.tsx`; migration `0258`
 - The frame: `src/lib/sites/links.ts` (a link's four shapes, `isSafeHref`,
   the social networks, `guessNetwork` — pure), `frame.ts` (the Header and
   footer form ↔ the settings, `frameFromInput` and its messages — pure),
@@ -947,6 +1021,18 @@ generated logo re-drawable as a vector.
 
 ## Decisions & gotchas
 
+- **A look is a preset, and its fonts are the platform's** (ADR 0024). Three
+  words on the kit, each from a short list, and nine families bundled at
+  build time by `next/font`; never an uploaded font, never a stylesheet,
+  never a request from a visitor's browser to a third party. `clean` IS
+  Geist, so a kit that has said nothing reads exactly as before. The
+  corners travel as CSS variables the classes read, so no component knows
+  which look is on, and a fourth look is an entry in `LOOK_SPECS`.
+- **The look is the business's, not the website's.** It sits on the brand
+  kit beside the colours because a share page, a mail signature and the
+  documents will want the same answer; the invoice PDF ignores it for now
+  and keeps Noto Sans (`src/lib/pdf/fonts`), which is an open item, not a
+  contradiction.
 - **The frame is settings, and shows at once.** The announcement bar, the
   header button, the social links and the footer live in `sites.settings`
   beside the phone and the hours, not in a page's draft, for the same
@@ -1159,6 +1245,11 @@ generated logo re-drawable as a vector.
 - **An ISR cache hit has never been seen** — the dev server renders every
   request. The production build proves it: `x-nextjs-cache: HIT` on a second
   fetch of a published page, and a MISS right after a publish.
+- **The documents do not read the look yet.** The invoice PDF draws Noto
+  Sans from `src/lib/pdf/fonts` whatever the kit says. Carrying the pairing
+  onto the PDF means shipping the same nine families as TTFs for
+  `@react-pdf/renderer` and registering them by name; the seam is
+  `invoice-brand.ts`, and nothing is asking for it yet.
 - **The header on a phone wraps; it does not fold.** With four menu items
   and a button, the menu and the button wrap under the logo on a narrow
   screen, which reads fine at five items and would not at ten. A folding

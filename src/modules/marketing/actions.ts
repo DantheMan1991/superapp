@@ -15,6 +15,7 @@ import {
   initialsFor,
   type LogoCandidate,
 } from "@/lib/brand/logo-spec";
+import { BRAND_LOOKS, BUTTON_SHAPES, FONT_PAIRINGS } from "@/lib/brand/looks";
 import { resolveBrandFor } from "@/lib/brand/read";
 import { MarketingError } from "./core/errors";
 import { fail, gate, type ActionResult } from "./gate";
@@ -46,8 +47,17 @@ import { discardLogoBlob, inspectUploadedLogo } from "./logo-ingest";
  */
 const BASE = "/dashboard/m/marketing";
 
+/**
+ * The kit is on every public page too (the colours since slice 1, the look
+ * since 6d), and those pages are cached: name their route files as the
+ * website actions do, or a new colour waits for the cache to run out.
+ */
 function revalidate(): void {
   revalidatePath(BASE);
+  revalidatePath(`${BASE}/website`);
+  revalidatePath("/sites/[slug]/[[...path]]", "page");
+  revalidatePath("/hosted/[slug]/[[...path]]", "page");
+  revalidatePath("/domain/[host]/[[...path]]", "page");
 }
 
 const entityIdSchema = z.string().uuid().nullable();
@@ -58,6 +68,10 @@ const fieldsSchema = z.object({
   tagline: z.string().trim().max(BRAND_TAGLINE_MAX),
   primaryColor: z.string().trim().max(16),
   accentColor: z.string().trim().max(16),
+  /** The look: a preset from the lists, or empty for "as the look says" / the default. */
+  look: z.enum(["", ...BRAND_LOOKS]).default(""),
+  fontPairing: z.enum(["", ...FONT_PAIRINGS]).default(""),
+  buttonShape: z.enum(["", ...BUTTON_SHAPES]).default(""),
 });
 
 const COLOR_MESSAGE =
@@ -89,6 +103,9 @@ export async function saveBrandKitAction(
           tagline: parsed.data.tagline,
           primaryColor,
           accentColor,
+          look: parsed.data.look,
+          fontPairing: parsed.data.fontPairing,
+          buttonShape: parsed.data.buttonShape,
         });
         await logAuditInTx(tx, {
           action: "marketing.brand_kit.saved",

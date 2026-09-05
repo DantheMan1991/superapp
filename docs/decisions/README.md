@@ -57,3 +57,4 @@ Keep them short — one page. An ADR nobody reads has failed at its only job.
 | [0020](0020-a-connected-domain-is-records-only.md) | A connected domain is records only; a purchased one is held for the client | 2026-09-04 | Accepted |
 | [0021](0021-a-website-enquiry-lands-as-a-party.md) | A website enquiry lands as a party, a follow-up and an email, written as staff | 2026-09-04 | Accepted |
 | [0022](0022-page-views-are-a-first-party-beacon.md) | Page views are counted by a first-party beacon that keeps nothing about the person | 2026-09-04 | Accepted |
+| [0023](0023-photos-are-one-derivative-in-the-sites-library.md) | Photos are one derivative in the site's own library, served by the platform | 2026-09-04 | Accepted |

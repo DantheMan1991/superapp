@@ -61,7 +61,7 @@ export const RESERVED_SITE_SLUGS: ReadonlySet<string> = new Set([
 ]);
 
 /** Page paths the platform's routes shadow under `/sites/<slug>/…`. */
-export const RESERVED_PAGE_PATHS: ReadonlySet<string> = new Set(["/draft", "/logo"]);
+export const RESERVED_PAGE_PATHS: ReadonlySet<string> = new Set(["/draft", "/logo", "/images"]);
 
 export type SlugCheck =
   | { ok: true; slug: string }
@@ -178,11 +178,20 @@ export function classifyHost(
   const bare = host.toLowerCase().split(":")[0] ?? "";
   if (bare === "") return { kind: "platform" };
   for (const own of env.platformHosts) {
-    if (bare === own || bare.endsWith(`.${own}`)) return { kind: "platform" };
+    if (bare === own) return { kind: "platform" };
   }
-  if (bare.endsWith(".vercel.app")) return { kind: "platform" };
+  // A site's free address is decided BEFORE a platform host's subdomains,
+  // because on a laptop the two coincide: the site domain defaults to
+  // `localhost` and `localhost` is a platform host, so `oak-row.localhost`
+  // must read as a site or host routing cannot be tried locally. In
+  // production the site domain is never a platform host's, so nothing here
+  // changes which real hostnames are the platform's.
   const slug = hostToSiteSlug(bare, env.siteDomain);
   if (slug) return { kind: "site", slug };
+  for (const own of env.platformHosts) {
+    if (bare.endsWith(`.${own}`)) return { kind: "platform" };
+  }
+  if (bare.endsWith(".vercel.app")) return { kind: "platform" };
   if (env.siteDomain) {
     const domain = env.siteDomain.toLowerCase().split(":")[0] ?? "";
     // The site domain's apex, its www, and any label that is not a valid
@@ -219,4 +228,23 @@ export function siteHref(mode: SiteMode, slug: string, path: string): string {
 export function pagePathFromSegments(segments: string[] | undefined): string {
   if (!segments || segments.length === 0) return "/";
   return `/${segments.join("/")}`;
+}
+
+/**
+ * Where the proxy sends a request that arrived on a site's hostname.
+ *
+ * The page routes are `/hosted/<slug>/…` and `/domain/<host>/…`; the
+ * site's own assets — its logo and its photos — are the platform's routes
+ * under `/sites/<slug>/…` or `/domain/<host>/…`, addressed on the site as
+ * `/logo` and `/images/<id>` (both reserved page paths). Framework and API
+ * paths are the platform's on any host and are not rewritten. Null means
+ * "leave the request alone".
+ */
+export function siteRewrite(kind: HostKind, pathname: string): string | null {
+  if (kind.kind === "platform") return null;
+  if (pathname.startsWith("/_next/") || pathname.startsWith("/api/")) return null;
+  const assetBase = kind.kind === "site" ? `/sites/${kind.slug}` : `/domain/${kind.host}`;
+  const pageBase = kind.kind === "site" ? `/hosted/${kind.slug}` : `/domain/${kind.host}`;
+  if (pathname === "/logo" || pathname.startsWith("/images/")) return `${assetBase}${pathname}`;
+  return `${pageBase}${pathname === "/" ? "" : pathname}`;
 }

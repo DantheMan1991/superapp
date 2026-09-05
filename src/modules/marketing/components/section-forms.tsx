@@ -8,6 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { FORM_FIELD_KINDS, newFormField } from "@/lib/sites/enquiry-schema";
 import { moveItem, paragraphsToText, textToParagraphs } from "@/lib/sites/pages";
 import { FORM_FIELDS_MAX, type FormField, type FormFieldKind, type Section } from "@/lib/sites/schema";
+import type { SitePhotoView } from "../image-actions";
+import { PhotoField } from "./photo-picker";
 
 /**
  * One form per kind of section. Each edits the section it is given and hands
@@ -18,10 +20,13 @@ export function SectionForm({
   section,
   onChange,
   idPrefix,
+  photos,
 }: {
   section: Section;
   onChange: (next: Section) => void;
   idPrefix: string;
+  /** The site's photo library and how to change it, for the kinds that take a photo. */
+  photos: { tenantId: string; library: SitePhotoView[]; onLibraryChange: (next: SitePhotoView[]) => void };
 }) {
   const id = (name: string) => `${idPrefix}-${name}`;
   switch (section.type) {
@@ -40,6 +45,44 @@ export function SectionForm({
             optional
             onChange={(cta) => onChange({ ...section, cta })}
           />
+          <PhotoField
+            idPrefix={id("photo")}
+            label="Photo beside the headline"
+            hint="Optional. A landscape photo sits to the right of the words on a wide screen and under them on a phone."
+            tenantId={photos.tenantId}
+            value={section.image}
+            onChange={(image) => onChange({ ...section, image })}
+            library={photos.library}
+            onLibraryChange={photos.onLibraryChange}
+          />
+        </div>
+      );
+    case "image":
+      return (
+        <div className="space-y-4">
+          <PhotoField
+            idPrefix={id("photo")}
+            label="Photo"
+            tenantId={photos.tenantId}
+            value={section.image}
+            onChange={(image) => onChange({ ...section, image })}
+            library={photos.library}
+            onLibraryChange={photos.onLibraryChange}
+          />
+          <Field id={id("caption")} label="Caption" hint="A line under the photo, or blank.">
+            <Input id={id("caption")} value={section.caption} maxLength={240} onChange={(e) => onChange({ ...section, caption: e.target.value })} />
+          </Field>
+          <div className="space-y-2">
+            <Label>Width</Label>
+            <div className="flex gap-2">
+              <Button type="button" variant={section.layout === "inset" ? "default" : "outline"} size="sm" aria-pressed={section.layout === "inset"} onClick={() => onChange({ ...section, layout: "inset" })}>
+                In the text column
+              </Button>
+              <Button type="button" variant={section.layout === "wide" ? "default" : "outline"} size="sm" aria-pressed={section.layout === "wide"} onClick={() => onChange({ ...section, layout: "wide" })}>
+                Full width
+              </Button>
+            </div>
+          </div>
         </div>
       );
     case "cta":
@@ -71,6 +114,18 @@ export function SectionForm({
               onChange={(e) => onChange({ ...section, body: textToParagraphs(e.target.value) })}
             />
           </Field>
+          {section.type === "about" && (
+            <PhotoField
+              idPrefix={id("photo")}
+              label="Photo beside the text"
+              hint="Optional. Sits to the right of the paragraphs on a wide screen and under them on a phone."
+              tenantId={photos.tenantId}
+              value={section.image}
+              onChange={(image) => onChange({ ...section, image })}
+              library={photos.library}
+              onLibraryChange={photos.onLibraryChange}
+            />
+          )}
         </div>
       );
     case "offer":

@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import { foregroundOn } from "@/lib/brand/core";
 import type { PublicSite } from "@/lib/sites/read";
-import type { Section, SitePageView, SiteSettings } from "@/lib/sites/schema";
+import type { ImageRef, Section, SitePageView, SiteSettings } from "@/lib/sites/schema";
 import { siteHref, type SiteMode } from "@/lib/sites/slug";
 import { EnquiryForm } from "./enquiry-form";
 import { ViewBeacon } from "./view-beacon";
@@ -25,6 +25,18 @@ export function logoSrc(mode: SiteMode, slug: string): string {
   // On a site host the proxy maps `/logo` to the site's logo route; on the
   // platform host the route is addressed directly.
   return mode === "host" ? "/logo" : `/sites/${slug}/logo`;
+}
+
+/**
+ * A photo's address for this mode. On a site host the proxy maps
+ * `/images/<id>` to the site's image route; on the platform host the route
+ * is addressed directly; the draft preview reads the member route, so a
+ * photo on an unpublished site is seen only by the people who put it there.
+ */
+export function imageSrc(mode: SiteMode, slug: string, id: string): string {
+  if (mode === "host") return `/images/${id}`;
+  if (mode === "draft") return `/api/marketing/sites/images/${id}`;
+  return `/sites/${slug}/images/${id}`;
 }
 
 /** An in-site path becomes a link for this mode; anything else passes through. */
@@ -159,25 +171,59 @@ function SectionView({
           />
         </section>
       );
-    case "hero":
+    case "hero": {
+      const photo = section.image && site.images[section.image.id] ? section.image : null;
       return (
         <section className="mx-auto max-w-5xl px-6 py-16 sm:py-24">
-          <h1
-            className="max-w-3xl text-4xl font-semibold leading-tight tracking-tight sm:text-5xl"
-            style={{ color: "var(--site-primary)" }}
-          >
-            {section.headline}
-          </h1>
-          {section.subheadline && (
-            <p className="mt-4 max-w-2xl text-lg text-neutral-600">{section.subheadline}</p>
-          )}
-          {section.cta && (
-            <div className="mt-8">
-              <CtaLink href={resolveHref(mode, site.slug, section.cta.href)} label={section.cta.label} />
+          <div className={photo ? "grid items-center gap-10 md:grid-cols-[3fr_2fr]" : undefined}>
+            <div>
+              <h1
+                className="max-w-3xl text-4xl font-semibold leading-tight tracking-tight sm:text-5xl"
+                style={{ color: "var(--site-primary)" }}
+              >
+                {section.headline}
+              </h1>
+              {section.subheadline && (
+                <p className="mt-4 max-w-2xl text-lg text-neutral-600">{section.subheadline}</p>
+              )}
+              {section.cta && (
+                <div className="mt-8">
+                  <CtaLink href={resolveHref(mode, site.slug, section.cta.href)} label={section.cta.label} />
+                </div>
+              )}
             </div>
-          )}
+            {photo && (
+              <Photo site={site} mode={mode} image={photo} eager className="w-full rounded-2xl object-cover shadow-sm" />
+            )}
+          </div>
         </section>
       );
+    }
+    case "image": {
+      const photo = section.image && site.images[section.image.id] ? section.image : null;
+      if (!photo) return null;
+      return (
+        <section className={section.layout === "wide" ? "px-0 py-6" : "mx-auto max-w-3xl px-6 py-10"}>
+          <figure>
+            <Photo
+              site={site}
+              mode={mode}
+              image={photo}
+              className={
+                section.layout === "wide"
+                  ? "max-h-[70vh] w-full object-cover"
+                  : "w-full rounded-2xl object-cover shadow-sm"
+              }
+            />
+            {section.caption && (
+              <figcaption className={`mt-3 text-sm text-neutral-600 ${section.layout === "wide" ? "mx-auto max-w-5xl px-6" : ""}`}>
+                {section.caption}
+              </figcaption>
+            )}
+          </figure>
+        </section>
+      );
+    }
     case "offer":
       return (
         <section className="border-t border-neutral-100 bg-neutral-50">
@@ -197,9 +243,10 @@ function SectionView({
         </section>
       );
     case "about":
-    case "text":
-      return (
-        <section className="mx-auto max-w-3xl px-6 py-14">
+    case "text": {
+      const photo = section.type === "about" && section.image && site.images[section.image.id] ? section.image : null;
+      const words = (
+        <div>
           {section.heading && (
             <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
           )}
@@ -208,8 +255,18 @@ function SectionView({
               <p key={i}>{paragraph}</p>
             ))}
           </div>
+        </div>
+      );
+      if (!photo) return <section className="mx-auto max-w-3xl px-6 py-14">{words}</section>;
+      return (
+        <section className="mx-auto max-w-5xl px-6 py-14">
+          <div className="grid gap-8 md:grid-cols-[3fr_2fr] md:items-start">
+            {words}
+            <Photo site={site} mode={mode} image={photo} className="w-full rounded-2xl object-cover shadow-sm" />
+          </div>
         </section>
       );
+    }
     case "cta":
       return (
         <section style={{ backgroundColor: "var(--site-primary)", color: "var(--site-primary-fg)" }}>
@@ -240,6 +297,40 @@ function SectionView({
         </section>
       );
   }
+}
+
+/**
+ * A photo from the site's library. Width and height come from the row so
+ * the page keeps its shape while the bytes arrive; the hero's is eager,
+ * everything else lazy. Our own route, like the logo: the optimiser would
+ * only add a hop in front of a cached file.
+ */
+function Photo({
+  site,
+  mode,
+  image,
+  className,
+  eager,
+}: {
+  site: PublicSite;
+  mode: SiteMode;
+  image: ImageRef;
+  className: string;
+  eager?: boolean;
+}) {
+  const meta = site.images[image.id];
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={imageSrc(mode, site.slug, image.id)}
+      alt={image.alt}
+      width={meta.width}
+      height={meta.height}
+      loading={eager ? "eager" : "lazy"}
+      decoding="async"
+      className={className}
+    />
+  );
 }
 
 function CtaLink({ href, label }: { href: string; label: string }) {

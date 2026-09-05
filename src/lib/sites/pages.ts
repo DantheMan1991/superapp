@@ -21,6 +21,7 @@ export const SECTION_TYPES: ReadonlyArray<{
   { type: "contact", label: "Contact details", hint: "Your phone, email and address, from the site's details." },
   { type: "hours", label: "Hours", hint: "Your hours, from the site's details." },
   { type: "form", label: "Enquiry form", hint: "Name, email, phone and a message. Each one lands in your workspace as a contact and a follow-up, and is emailed to you." },
+  { type: "image", label: "Photo", hint: "One photo from your site's library, with a caption if you like." },
 ];
 
 export function sectionLabel(type: SectionType): string {
@@ -31,11 +32,11 @@ export function sectionLabel(type: SectionType): string {
 export function newSection(type: SectionType): Section {
   switch (type) {
     case "hero":
-      return { type, headline: "A headline for this page", subheadline: "", cta: { label: "Get in touch", href: "/contact" } };
+      return { type, headline: "A headline for this page", subheadline: "", cta: { label: "Get in touch", href: "/contact" }, image: null };
     case "offer":
       return { type, heading: "What we offer", items: [{ name: "Something we do", blurb: "" }] };
     case "about":
-      return { type, heading: "About us", body: ["A paragraph about the business."] };
+      return { type, heading: "About us", body: ["A paragraph about the business."], image: null };
     case "text":
       return { type, heading: "", body: ["A paragraph."] };
     case "cta":
@@ -46,6 +47,8 @@ export function newSection(type: SectionType): Section {
       return { type, heading: "Hours", note: "" };
     case "form":
       return { type, heading: "Send us a message", note: "", buttonLabel: "Send", askPhone: true, thanks: "Thanks. We'll be in touch.", fields: [] };
+    case "image":
+      return { type, image: null, caption: "", layout: "inset" };
   }
 }
 
@@ -68,6 +71,9 @@ export function sectionSummary(section: Section): string {
     case "hours":
     case "form":
       text = section.heading;
+      break;
+    case "image":
+      text = section.caption || (section.image ? "A photo" : "No photo chosen yet");
       break;
   }
   text = text.trim();

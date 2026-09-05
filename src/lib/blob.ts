@@ -57,6 +57,16 @@ export function brandPathPrefix(tenantId: string): string {
 }
 
 /**
+ * A site's photos (Marketing slice 5, ADR 0023): the one derivative the
+ * platform made from each upload. Sibling of the logo prefix for the same
+ * reason it is here rather than in the module: the public routes stream
+ * from it and the upload door validates against it.
+ */
+export function sitePhotoPathPrefix(tenantId: string): string {
+  return `sites/${tenantId}/photos/`;
+}
+
+/**
  * Every prefix a tenant is allowed to own, across modules. Used to validate
  * any client-supplied pathname before it is trusted as a blob location.
  *
@@ -73,6 +83,7 @@ export function isTenantBlobPath(tenantId: string, pathname: string): boolean {
     pathname.startsWith(dmsPathPrefix(tenantId, "generated")) ||
     pathname.startsWith(dmsPathPrefix(tenantId, "signatures")) ||
     pathname.startsWith(dmsPathPrefix(tenantId, "signed")) ||
-    pathname.startsWith(brandPathPrefix(tenantId))
+    pathname.startsWith(brandPathPrefix(tenantId)) ||
+    pathname.startsWith(sitePhotoPathPrefix(tenantId))
   );
 }

@@ -38,17 +38,33 @@ export const FormFieldSchema = z.object({
 });
 export type FormField = z.infer<typeof FormFieldSchema>;
 
+/**
+ * A photo placed in a section: the library row it points at, and what it
+ * shows for people who cannot see it. The library holds the pixels; the
+ * section holds the meaning, so one photo can be placed twice with
+ * different words. A row that no longer exists renders as no photo.
+ */
+export const ImageRefSchema = z.object({
+  id: z.string().uuid(),
+  alt: short(160).default(""),
+});
+export type ImageRef = z.infer<typeof ImageRefSchema>;
+
 export const SectionSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("hero"),
     headline: short(120).min(1),
     subheadline: short(240).default(""),
     cta: CtaSchema.nullable().default(null),
+    /** Beside the headline, on the right. */
+    image: ImageRefSchema.nullable().default(null),
   }),
   z.object({
     type: z.literal("about"),
     heading: short(80).min(1),
     body: paragraphs(6, 800),
+    /** Beside the paragraphs. */
+    image: ImageRefSchema.nullable().default(null),
   }),
   z.object({
     type: z.literal("offer"),
@@ -94,6 +110,13 @@ export const SectionSchema = z.discriminatedUnion("type", [
     type: z.literal("cta"),
     headline: short(120).min(1),
     cta: CtaSchema,
+  }),
+  z.object({
+    type: z.literal("image"),
+    image: ImageRefSchema.nullable().default(null),
+    caption: short(240).default(""),
+    /** `inset` sits in the text column; `wide` spans the page. */
+    layout: z.enum(["inset", "wide"]).default("inset"),
   }),
 ]);
 export type Section = z.infer<typeof SectionSchema>;

@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import {
   DndContext,
   KeyboardSensor,
@@ -19,7 +19,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ChevronLeft, GripVertical, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronLeft, GripVertical, Monitor, RefreshCw, Smartphone, Tablet, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Panel } from "@/components/app/panel";
 import { Button } from "@/components/ui/button";
@@ -40,6 +40,14 @@ import {
   undescribedPhotos,
   undescribedPhotosOnPage,
 } from "@/lib/sites/pages";
+import {
+  isPreviewDevice,
+  PREVIEW_DEVICE_KEY,
+  PREVIEW_DEVICES,
+  previewWidth,
+  readPreviewMessage,
+  type PreviewDevice,
+} from "@/lib/sites/preview";
 import { PageContentSchema, type PageContent, type Section, type SectionType } from "@/lib/sites/schema";
 import type { SitePhotoView } from "../image-actions";
 import { restorePageVersionAction, savePageAction } from "../page-actions";
@@ -54,7 +62,55 @@ import { SectionForm } from "./section-forms";
  * the renderer draws — there is no second rendering of a section anywhere.
  * Drag to reorder with dnd-kit (pointer and keyboard); the arrow buttons do
  * the same for anyone dragging cannot serve.
+ *
+ * The preview and the editor talk in `postMessage`s on the same origin
+ * (`src/lib/sites/preview.ts`): a click on a section in the preview selects
+ * it here, and the selection here is outlined there. The preview can be
+ * shown at a phone's or a tablet's width, remembered per browser.
  */
+const DEVICE_ICONS: Record<PreviewDevice, typeof Monitor> = {
+  desktop: Monitor,
+  tablet: Tablet,
+  phone: Smartphone,
+};
+
+/**
+ * The device is an external store — the browser's storage — read through
+ * `useSyncExternalStore`, so the server renders desktop, the client reads
+ * what this browser last chose without a state update in an effect, and a
+ * browser that keeps nothing still shows what was clicked (`chosen`).
+ */
+const DEVICE_EVENT = "yosher:site-preview-device";
+let chosen: PreviewDevice = "desktop";
+
+function readDevice(): PreviewDevice {
+  try {
+    const stored = window.localStorage.getItem(PREVIEW_DEVICE_KEY);
+    if (stored && isPreviewDevice(stored)) return stored;
+  } catch {
+    // Storage refused: fall through to what was clicked this session.
+  }
+  return chosen;
+}
+
+function subscribeDevice(onChange: () => void): () => void {
+  window.addEventListener("storage", onChange);
+  window.addEventListener(DEVICE_EVENT, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(DEVICE_EVENT, onChange);
+  };
+}
+
+function chooseDevice(next: PreviewDevice) {
+  chosen = next;
+  try {
+    window.localStorage.setItem(PREVIEW_DEVICE_KEY, next);
+  } catch {
+    // Not remembered, still shown.
+  }
+  window.dispatchEvent(new Event(DEVICE_EVENT));
+}
 export interface VersionView {
   id: string;
   kind: "save" | "publish" | "restore";
@@ -108,6 +164,49 @@ export function PageEditor({
   const [previewKey, setPreviewKey] = useState(0);
   const [savedPath, setSavedPath] = useState(initial.path);
   const [pending, startTransition] = useTransition();
+  const device = useSyncExternalStore(subscribeDevice, readDevice, () => "desktop" as PreviewDevice);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const formRef = useRef<HTMLDivElement>(null);
+  // The preview said a section was clicked: bring its form into view.
+  const [showForm, setShowForm] = useState(0);
+
+  function tellPreview(index: number) {
+    iframeRef.current?.contentWindow?.postMessage(
+      { type: "yosher:site-select", index },
+      window.location.origin,
+    );
+  }
+
+  // What the preview says: a click on a section, or that it has loaded.
+  // Registered again whenever the rows or the selection change, so it never
+  // reads a stale list; a listener is cheap.
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.source !== iframeRef.current?.contentWindow) return;
+      const message = readPreviewMessage(event.data);
+      if (!message) return;
+      if (message.type === "yosher:site-section") {
+        const row = rows[message.index];
+        if (!row) return;
+        setSelected(row.key);
+        setShowForm((n) => n + 1);
+      } else if (message.type === "yosher:site-ready") {
+        tellPreview(rows.findIndex((r) => r.key === selected));
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [rows, selected]);
+
+  const selectedIndex = rows.findIndex((r) => r.key === selected);
+  useEffect(() => {
+    tellPreview(selectedIndex);
+  }, [selectedIndex]);
+
+  useEffect(() => {
+    if (showForm > 0) formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [showForm]);
 
   const content: PageContent = useMemo(
     () => ({ description, sections: rows.map((r) => r.section) }),
@@ -311,6 +410,7 @@ export function PageEditor({
           </Panel>
 
           {selectedRow && (
+            <div ref={formRef} className="scroll-mt-4">
             <Panel className="space-y-4 p-5">
               <div className="flex items-center justify-between">
                 <h2 className="font-heading text-base font-semibold tracking-heading">
@@ -328,6 +428,7 @@ export function PageEditor({
                 photos={{ tenantId, library, onLibraryChange: setLibrary }}
               />
             </Panel>
+            </div>
           )}
 
           <Panel className="space-y-3 p-5">
@@ -356,21 +457,46 @@ export function PageEditor({
         </div>
 
         <div className="lg:sticky lg:top-4 lg:self-start">
-          <div className="mb-2 flex items-center justify-between">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-muted-foreground">
-              Preview of the saved draft{dirty ? " (save to see your changes)" : ""}
+              Preview of the saved draft{dirty ? " (save to see your changes)" : ""}. Click a section to edit it.
             </p>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setPreviewKey((k) => k + 1)}>
-              <RefreshCw className="size-4" />
-              Reload
-            </Button>
+            <div className="flex items-center gap-1">
+              {PREVIEW_DEVICES.map((d) => {
+                const Icon = DEVICE_ICONS[d.key];
+                return (
+                  <Button
+                    key={d.key}
+                    type="button"
+                    variant={device === d.key ? "default" : "ghost"}
+                    size="sm"
+                    aria-pressed={device === d.key}
+                    aria-label={d.label}
+                    title={d.label}
+                    onClick={() => chooseDevice(d.key)}
+                  >
+                    <Icon className="size-4" />
+                  </Button>
+                );
+              })}
+              <Button type="button" variant="ghost" size="sm" onClick={() => setPreviewKey((k) => k + 1)}>
+                <RefreshCw className="size-4" />
+                Reload
+              </Button>
+            </div>
           </div>
-          <iframe
-            key={previewKey}
-            src={previewSrc}
-            title="Draft preview"
-            className="h-[75vh] w-full rounded-2xl bg-white shadow-elevation-1"
-          />
+          <div className="mx-auto transition-[width] duration-200" style={{ width: previewWidth(device), maxWidth: "100%" }}>
+            <iframe
+              ref={iframeRef}
+              key={previewKey}
+              src={previewSrc}
+              title="Draft preview"
+              className={cn(
+                "h-[75vh] w-full bg-white shadow-elevation-1",
+                device === "desktop" ? "rounded-2xl" : "rounded-[1.5rem] ring-8 ring-neutral-800",
+              )}
+            />
+          </div>
         </div>
       </div>
     </div>

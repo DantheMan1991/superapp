@@ -453,3 +453,22 @@
     font-family: var(--site-font-heading, var(--font-sans));
   }
 }
+
+/*
+ * The draft preview inside the editor's frame: every section is something
+ * to point at. `DraftSelect` adds `site-draft` only when the page is framed,
+ * so the draft opened on its own has none of this.
+ */
+@layer base {
+  .site-draft [data-section-index] {
+    cursor: pointer;
+  }
+  .site-draft [data-section-index]:hover {
+    outline: 2px dashed var(--site-primary);
+    outline-offset: -2px;
+  }
+  .site-draft [data-section-index].site-selected {
+    outline: 2px solid var(--site-primary);
+    outline-offset: -2px;
+  }
+}

@@ -34,7 +34,7 @@
 | **6b** | **Layout presets on every section (width, spacing, alignment; the hero's height and photo side, the about section's photo side) and backgrounds (none, a tint, the brand colour, dark, a photo with an overlay), with the words' tone following the background.** | **built 2026-09-05** |
 | **6c** | **The frame around every page: an announcement bar, a header button, social links as marks, footer columns and a footer line, edited on the Website screen and live the moment they are saved; and a link is now one of four shapes, on save and at render.** | **built 2026-09-05** |
 | **6d** | **Fonts and looks on the brand kit: a Modern, Warm or Classic look, six curated font pairings bundled by the platform, and pill, rounded or square buttons, with the corners following the look; a sample beside the fields reads as the site will.** [ADR 0024](../decisions/0024-a-look-is-a-preset-and-its-fonts-are-the-platforms.md) | **built 2026-09-05** |
-| 7 | Phone and tablet toggle on the preview; click a section in the preview to select it in the editor | |
+| **7** | **The editor's preview at a phone's or a tablet's width, remembered per browser; a click on a section in the preview selects it in the editor, and the editor's selection is outlined in the preview, through `postMessage` on the same origin.** | **built 2026-09-05** |
 | 8 | Bookings: a "book a time" section on the scheduling module's calendars, landing like an enquiry | |
 | 9 | Live blocks fed by the modules: prices and availability from retail and inventory, the team, events | |
 | 10 | A map section from the address (MapLibre is in the repo) | |
@@ -46,6 +46,64 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-05 — Slice 7: the preview at a phone's width, and pointing at a section (`claude/marketing-editor-preview`)
+
+The editor's preview grows two things the founder asked for in the
+"elite builder" brainstorm, without a second renderer: a device toggle,
+and a click in the preview that selects the section in the editor. No
+migration.
+
+- **`src/lib/sites/preview.ts`** (pure, tested): `PREVIEW_DEVICES`
+  (desktop = the pane, tablet 820px, phone 390px), `previewWidth`,
+  `PREVIEW_DEVICE_KEY` (the `localStorage` key the choice is kept under),
+  `SECTION_ATTR` (`data-section-index`) and `readPreviewMessage`, which
+  believes exactly three messages — `yosher:site-section` (a click, index ≥
+  0), `yosher:site-select` (the editor's selection, -1 for none) and
+  `yosher:site-ready` — and nothing else; extensions and devtools post their
+  own and every one of them is null here.
+- **The renderer** marks every section's `<section>` with its index, in
+  draft mode only, and mounts `DraftSelect`
+  (`src/components/site/draft-select.tsx`) in place of the view beacon. The
+  island does nothing unless the page is framed (`window.parent !== window`):
+  the draft opened in its own tab stays a page like any other. Framed, it
+  adds `site-draft` to the root (the hover and selection outlines in
+  `globals.css`, in the brand colour), turns a click on a section into a
+  message to the editor — a link or a button inside a section selects the
+  section instead of going anywhere; the menu, outside any section, still
+  moves between pages — and answers the editor's selection by outlining and
+  scrolling to the section. On mount it says it is ready, so a reloaded
+  preview gets the current selection back.
+- **The editor** (`page-editor.tsx`): one `message` listener, registered
+  once, that checks the origin and that the source is its own iframe before
+  reading; a click selects the row at that index and scrolls the section's
+  form into view; the selection (as an index) is posted to the frame
+  whenever it changes and whenever the frame says it is ready. The device
+  buttons (`Monitor`, `Tablet`, `Smartphone`) sit beside Reload; the frame
+  narrows with a transition and takes a dark bezel at a device width.
+- **Indices, not ids.** The preview shows the SAVED draft; the list may be
+  unsaved. A click maps by position into the current rows, which is right
+  until sections are added, moved or removed and not yet saved, and the
+  guide says so. Ids would need a stable id per section in the content
+  model, which nothing else has asked for.
+- **Two lint rules shaped the editor's state.** The React Compiler's rules
+  refuse a `setState` inside an effect and a ref written during render, so
+  the remembered device is read through `useSyncExternalStore` (the server
+  renders desktop, the browser reads its storage, a browser that keeps
+  nothing still shows what was clicked), and the message listener is
+  registered again on every change of the rows or the selection rather
+  than reading a ref. The guide's `{icon:monitor}`, `{icon:tablet}` and
+  `{icon:smartphone}` needed registering in `guide-icons.ts` first; the
+  guides test says so by name.
+- **Driven on the dev branch** on Test's home page: the frame loaded with
+  seven marked sections and the first outlined; a click on the third in the
+  preview selected the `Hours` row and opened its form; a click on the
+  second row in the list outlined the slideshow in the preview; a click on
+  the hero's button selected the hero and left the preview's address alone;
+  `Phone` narrowed the frame to 390px in a bezel, was still pressed after a
+  reload of the editor, and `Desktop` put it back. The draft opened in its
+  own tab had the markers but no `site-draft` class, no outline and an
+  ordinary cursor. Tests: `tests/site-preview.test.ts`.
 
 ### 2026-09-05 — Slice 6d: fonts and looks (`claude/marketing-site-looks`)
 
@@ -976,6 +1034,10 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
   `src/app/api/marketing/sites/images/[id]`,
   `src/app/sites/[slug]/images/[imageId]`,
   `src/app/domain/[host]/images/[imageId]`
+- The preview: `src/lib/sites/preview.ts` (devices, the three messages —
+  pure), `src/components/site/draft-select.tsx` (the draft's island),
+  the `.site-draft` rules in `src/app/globals.css`, the device buttons and
+  the listener in `components/page-editor.tsx`
 - The look: `src/lib/brand/looks.ts` (the lists, the specs, `resolveLook`,
   `lookRadiusVars` — pure), `src/components/site/site-fonts.ts` (the
   bundled families, `siteFonts`), the `.site-root` rule in
@@ -1021,6 +1083,13 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
 
 ## Decisions & gotchas
 
+- **The draft has a fourth script; the public page keeps three.** The
+  section-pointing island renders only in draft mode and does nothing unless
+  framed by the editor, so "the public page's scripts are three" (below)
+  still holds for every visitor, and the draft opened on its own is not
+  cluttered with outlines. The messages are the smallest possible surface —
+  an index each way and a ready — on the same origin, source-checked on
+  both sides; nothing in them is content.
 - **A look is a preset, and its fonts are the platform's** (ADR 0024). Three
   words on the kit, each from a short list, and nine families bundled at
   build time by `next/font`; never an uploaded font, never a stylesheet,

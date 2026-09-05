@@ -34,6 +34,8 @@ export interface PageRowView {
   path: string;
   title: string;
   sections: number;
+  /** Photos on the page's draft with no description. */
+  undescribed: number;
   published: boolean;
 }
 
@@ -213,6 +215,12 @@ function PageRow({
             <span className="font-mono">{page.path}</span>
             {" · "}
             {page.sections} section{page.sections === 1 ? "" : "s"}
+            {page.undescribed > 0 && (
+              <span className="text-amber-700">
+                {" · "}
+                {page.undescribed} photo{page.undescribed === 1 ? "" : "s"} without a description
+              </span>
+            )}
             {page.published ? " · published" : " · draft only"}
           </div>
         </div>

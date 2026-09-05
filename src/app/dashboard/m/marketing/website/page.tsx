@@ -6,6 +6,7 @@ import { isModuleEnabled, requireModuleEnabled } from "@/lib/modules";
 import { readDomainRecords } from "@/lib/sites/domains";
 import { listSiteEnquiries } from "@/lib/sites/enquiries";
 import { readEnquiryAnswers } from "@/lib/sites/enquiry-schema";
+import { undescribedPhotosOnPage } from "@/lib/sites/pages";
 import { loadSiteDrafts } from "@/lib/sites/read";
 import { listSiteViews } from "@/lib/sites/views";
 import { summarizeViews } from "@/lib/sites/views-core";
@@ -181,6 +182,7 @@ export default async function WebsitePage() {
                   path: page.path,
                   title: page.title,
                   sections: page.content.sections.length,
+                  undescribed: undescribedPhotosOnPage(page.content).missing,
                   published: row?.published !== null && row?.published !== undefined,
                 };
               })}

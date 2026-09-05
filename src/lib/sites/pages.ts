@@ -1,5 +1,5 @@
 import { RESERVED_PAGE_PATHS } from "./slug";
-import type { Section, SectionType } from "./schema";
+import type { ImageRef, PageContent, Section, SectionType } from "./schema";
 
 /**
  * What the editor needs that is not I/O: the section catalogue with its
@@ -91,6 +91,53 @@ export function sectionSummary(section: Section): string {
   }
   text = text.trim();
   return text.length > 60 ? `${text.slice(0, 57).trimEnd()}…` : text;
+}
+
+/** How many photos a section (or a page) places, and how many of them have no description. */
+export interface PhotoCount {
+  missing: number;
+  total: number;
+}
+
+function placedPhotos(section: Section): ImageRef[] {
+  switch (section.type) {
+    case "hero":
+    case "about":
+    case "image":
+      return section.image ? [section.image] : [];
+    case "gallery":
+    case "slideshow":
+      return section.items.map((item) => item.image);
+    default:
+      return [];
+  }
+}
+
+export function undescribedPhotos(section: Section): PhotoCount {
+  const refs = placedPhotos(section);
+  return { total: refs.length, missing: refs.filter((ref) => ref.alt.trim() === "").length };
+}
+
+export function undescribedPhotosOnPage(content: Pick<PageContent, "sections">): PhotoCount {
+  return content.sections.reduce<PhotoCount>(
+    (sum, section) => {
+      const count = undescribedPhotos(section);
+      return { total: sum.total + count.total, missing: sum.missing + count.missing };
+    },
+    { total: 0, missing: 0 },
+  );
+}
+
+/**
+ * The nudge under a section or a page, or null when every photo has its
+ * words. A description is what a screen reader and a search engine say
+ * instead of the picture; nothing enforces it, so the list says so.
+ */
+export function altNudge(count: PhotoCount): string | null {
+  if (count.missing === 0) return null;
+  if (count.total === 1) return "The photo has no description.";
+  if (count.missing === count.total) return `${count.total} photos have no description.`;
+  return `${count.missing} of ${count.total} photos have no description.`;
 }
 
 export type PagePathCheck =

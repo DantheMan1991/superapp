@@ -29,12 +29,42 @@
 | **5b** | **A `Photo gallery` section: up to twelve photos from the library in a grid of two, three or four, with a heading and a caption each; a photo opens larger in a new tab.** | **built 2026-09-04** |
 | **5c** | **A `Slideshow` section (photos one at a time, arrows and dots, moving on by itself if asked, paused on hover, still under reduced motion) and a lightbox for the gallery's tiles — the public page's one moving part, in one client component with no library.** | **built 2026-09-04** |
 | **5d** | **A swipe across a slideshow or the lightbox moves between photos (pointer events, vertical scrolling left to the browser); the arrow keys move a focused slideshow.** | **built 2026-09-04** |
+| **5e** | **The alt text nudge: photos without a description are counted per section and per page in the editor's list, and per page on the Website screen's Pages panel.** | **built 2026-09-05** |
 | — | The shop block: `retail` slice 6 (online orders + pickup windows) fills a declared slot; blocked on commitments (retail 3) and web checkout (payments) | not this module's |
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-05 — Slice 5e: the alt text nudge (`claude/marketing-site-alt-nudge`)
+
+Nothing enforces a photo's description, so the lists say when one is
+missing. No migration.
+
+- **`undescribedPhotos(section)` / `undescribedPhotosOnPage(content)` /
+  `altNudge(count)`** (`src/lib/sites/pages.ts`, pure, tested): every
+  placed photo — the hero's, the about section's, a `Photo` section's, a
+  gallery's or a slideshow's items — counted, with those whose `alt` is
+  blank after trimming; the line reads `The photo has no description.`,
+  `3 photos have no description.` or `2 of 3 photos have no description.`,
+  and is null when nothing is missing.
+- **The editor** (`page-editor.tsx`): a section's row in the list shows the
+  nudge in amber under its summary; under the `Sections` heading the
+  page's count appears with `Screen readers and search engines say the
+  description instead of the picture; add one under each photo.` Both
+  follow the unsaved state, so typing a description clears them at once.
+- **The Website screen** (`pages-panel.tsx`): each page's row adds `· 2
+  photos without a description` in amber, from the page's DRAFT (what the
+  editor would show), beside the section count.
+- Guides: `page-editor.md`, `website.md`.
+- **Driven on the dev branch**: the Pages panel read `Home / · 6 sections
+  · 2 photos without a description · published` (the slideshow's two
+  photos had captions but no descriptions) and nothing for About and
+  Contact; the home page's editor showed `2 of 3 photos have no
+  description.` under `Sections` and `2 photos have no description.`
+  under the Slideshow row; typing one description made them `1 of 3` and
+  `1 of 2`, typing the second cleared both; saved.
 
 ### 2026-09-04 — Slice 5d: the swipe (`claude/marketing-site-swipe`)
 
@@ -915,10 +945,10 @@ generated logo re-drawable as a vector.
   drag is proven; the mouse path is the same sensor set and drop handler,
   but the browser tooling could not produce a real pointer drag. Ten seconds
   with a mouse on the dev branch settles it.
-- **Alt text is asked for everywhere a photo is placed and never
-  enforced.** A photo with none is an image search engines and screen
-  readers cannot name; a nudge in the editor's list ("2 photos without a
-  description") is the cheap next step.
+- **Alt text is nudged, never enforced.** The lists count photos without
+  a description (5e); publishing is not blocked by one, on purpose — a
+  missing description is worse than a late one but better than a page
+  that cannot go live.
 - **A second, smaller derivative** per photo if pages get heavy: the row
   has the room, the route can pick by a query, and the renderer already
   knows every placement's width.

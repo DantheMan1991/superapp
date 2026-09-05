@@ -60,6 +60,15 @@ No migration: a gallery is a section, so it is JSON on the page.
   from the gallery's items at once.
 - Tests: `tests/site-photos.test.ts` (the gallery's shape, limits and
   summaries), `sites-pages` catalogue list. Guides: `page-editor.md`.
+- **Driven on the dev branch (Test tenant, `oak-row-farm`)**: a `Photo
+  gallery` added to the about page from the catalogue, headed "Around the
+  farm" at two per row; the first photo picked from the library (the
+  hero's), the second uploaded through the gallery's dialog (an 1800×1200
+  canvas JPEG, back at 1600×1067 with `Photo added.`); descriptions and
+  captions typed, saved (the list read `Around the farm: 2 photos`),
+  published. The live about page drew the heading and two 4:3 tiles, each
+  a `target="_blank"` link to its photo's route, with the alt text and the
+  captions underneath.
 
 ### 2026-09-04 — Slice 5: photos on the pages (`claude/marketing-site-photos`)
 
@@ -870,8 +879,9 @@ generated logo re-drawable as a vector.
   contact page, three messages (two from Jane Doe, one from Sam Rivers),
   the two parties, three `Reply to …` items and, because the CRM-on path
   needed proving, **CRM and Work switched on** for it. Since slice 5 its
-  hero carries a photo (a green canvas reading "Oak Row Farm") and the
-  library holds that one row.
+  hero carries a photo (a green canvas reading "Oak Row Farm"); since 5b
+  the about page ends in a two-photo gallery and the library holds two
+  rows.
 - **Not yet looked at: dark mode, a phone, and a square mark on the PDF.**
   The screen was driven on the dev branch (build log) but only in the light
   theme on a desktop pane. The colour input on a phone and whether the

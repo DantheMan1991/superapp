@@ -3,6 +3,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { paragraphsToText, textToParagraphs } from "@/lib/sites/pages";
 import type { Section } from "@/lib/sites/schema";
@@ -143,6 +144,30 @@ export function SectionForm({
             {section.type === "contact"
               ? "The phone, email and address come from the Website page's details."
               : "The hours come from the Website page's details."}
+          </p>
+        </div>
+      );
+    case "form":
+      return (
+        <div className="space-y-4">
+          <Field id={id("heading")} label="Heading">
+            <Input id={id("heading")} value={section.heading} maxLength={80} onChange={(e) => onChange({ ...section, heading: e.target.value })} />
+          </Field>
+          <Field id={id("note")} label="Note" hint="A line under the heading, or blank.">
+            <Input id={id("note")} value={section.note} maxLength={300} onChange={(e) => onChange({ ...section, note: e.target.value })} />
+          </Field>
+          <Field id={id("buttonLabel")} label="Button" hint="Blank reads Send.">
+            <Input id={id("buttonLabel")} value={section.buttonLabel} maxLength={40} onChange={(e) => onChange({ ...section, buttonLabel: e.target.value })} />
+          </Field>
+          <div className="flex items-center gap-2">
+            <Switch id={id("askPhone")} checked={section.askPhone} onCheckedChange={(checked) => onChange({ ...section, askPhone: checked })} />
+            <Label htmlFor={id("askPhone")}>Ask for a phone number</Label>
+          </div>
+          <Field id={id("thanks")} label="After sending" hint="Shown in place of the form once a message is sent.">
+            <Input id={id("thanks")} value={section.thanks} maxLength={240} onChange={(e) => onChange({ ...section, thanks: e.target.value })} />
+          </Field>
+          <p className="text-xs text-muted-foreground">
+            Name, email and message are always asked. Each message becomes a contact and a follow-up in your workspace, and is emailed to the site&apos;s email address, or to the owners when there is none.
           </p>
         </div>
       );

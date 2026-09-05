@@ -1765,6 +1765,20 @@
       "when": 1788568675771,
       "tag": "0251_site_domains_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 252,
+      "version": "7",
+      "when": 1788571427526,
+      "tag": "0252_medical_jack_power",
+      "breakpoints": true
+    },
+    {
+      "idx": 253,
+      "version": "7",
+      "when": 1788571742899,
+      "tag": "0253_site_enquiries_rls",
+      "breakpoints": true
     }
   ]
 }

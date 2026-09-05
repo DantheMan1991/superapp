@@ -491,3 +491,151 @@ d("site_domains (RLS)", () => {
     await withSystem((tx) => tx.delete(schema.tenants).where(eq(schema.tenants.id, extra.id)));
   });
 });
+
+/**
+ * `site_enquiries` RLS — what a site's form received.
+ *
+ * Members read; MEMBERS insert, because the public path writes as `staff`
+ * inside the tenant it resolved (ADR 0021); owners delete; nobody updates.
+ * The composite FK makes an enquiry on another tenant's site unrepresentable
+ * even under `withSystem`, and the row goes with its site.
+ */
+d("site_enquiries (RLS)", () => {
+  const STAMP = `iso-enq-${process.pid}`;
+  const OWNER = `${STAMP}-owner`;
+  const MATE = `${STAMP}-mate`;
+  const OTHER = `${STAMP}-other`;
+
+  let tenantA: string;
+  let tenantB: string;
+  let siteA: string;
+  let siteB: string;
+  let enquiryA: string;
+  let enquiryB: string;
+
+  const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantA, fn, { role: "staff", userId: MATE });
+  const asOwner = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantA, fn, { role: "owner", userId: OWNER });
+  const asExpert = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantA, fn, { role: "expert", userId: MATE });
+  const asOtherTenant = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantB, fn, { role: "owner", userId: OTHER });
+  const message = (tenantId: string, siteId: string, name: string) => ({
+    tenantId,
+    siteId,
+    name,
+    email: `${name.toLowerCase()}@example.com`,
+    message: "Do you have half a beef this autumn?",
+  });
+
+  beforeAll(async () => {
+    await withSystem(async (tx) => {
+      const tenants = await tx
+        .insert(schema.tenants)
+        .values([
+          { clerkOrgId: `${STAMP}-a`, name: "Enq A", slug: `${STAMP}-a` },
+          { clerkOrgId: `${STAMP}-b`, name: "Enq B", slug: `${STAMP}-b` },
+        ])
+        .returning();
+      tenantA = tenants[0].id;
+      tenantB = tenants[1].id;
+      const sites = await tx
+        .insert(schema.sites)
+        .values([
+          { tenantId: tenantA, slug: `${STAMP}-a` },
+          { tenantId: tenantB, slug: `${STAMP}-b` },
+        ])
+        .returning();
+      siteA = sites[0].id;
+      siteB = sites[1].id;
+      const rows = await tx
+        .insert(schema.siteEnquiries)
+        .values([message(tenantA, siteA, "Ann"), message(tenantB, siteB, "Bob")])
+        .returning();
+      enquiryA = rows[0].id;
+      enquiryB = rows[1].id;
+    });
+  });
+
+  afterAll(async () => {
+    await withSystem(async (tx) => {
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantA));
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantB));
+    });
+  });
+
+  it("staff read their own messages and nothing of the other tenant's", async () => {
+    const seen = await asStaff((tx) => tx.select().from(schema.siteEnquiries));
+    expect(seen.map((e) => e.id)).toEqual([enquiryA]);
+    expect(seen.some((e) => e.id === enquiryB)).toBe(false);
+  });
+
+  it("staff insert (the public path's role); an accountant cannot; nobody updates", async () => {
+    const [added] = await asStaff((tx) =>
+      tx.insert(schema.siteEnquiries).values(message(tenantA, siteA, "Cid")).returning(),
+    );
+    expect(added.notifyVia).toBe("none");
+    await expect(
+      asExpert((tx) => tx.insert(schema.siteEnquiries).values(message(tenantA, siteA, "Dee"))),
+    ).rejects.toThrow();
+    const updated = await asOwner((tx) =>
+      tx.update(schema.siteEnquiries).set({ name: "Changed" }).where(eq(schema.siteEnquiries.id, added.id)).returning(),
+    );
+    expect(updated).toHaveLength(0);
+    const byStaff = await asStaff((tx) =>
+      tx.delete(schema.siteEnquiries).where(eq(schema.siteEnquiries.id, added.id)).returning(),
+    );
+    expect(byStaff).toHaveLength(0);
+    const byOwner = await asOwner((tx) =>
+      tx.delete(schema.siteEnquiries).where(eq(schema.siteEnquiries.id, added.id)).returning(),
+    );
+    expect(byOwner).toHaveLength(1);
+  });
+
+  it("another tenant cannot read or delete tenant A's messages", async () => {
+    const seen = await asOtherTenant((tx) => tx.select().from(schema.siteEnquiries));
+    expect(seen.map((e) => e.id)).toEqual([enquiryB]);
+    const deleted = await asOtherTenant((tx) =>
+      tx.delete(schema.siteEnquiries).where(eq(schema.siteEnquiries.id, enquiryA)).returning(),
+    );
+    expect(deleted).toHaveLength(0);
+  });
+
+  it("a message on another tenant's site is unrepresentable, and the CHECKs hold", async () => {
+    await expect(
+      withSystem((tx) => tx.insert(schema.siteEnquiries).values(message(tenantB, siteA, "Eve"))),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) => tx.insert(schema.siteEnquiries).values({ ...message(tenantA, siteA, "Fay"), message: "" })),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) => tx.insert(schema.siteEnquiries).values({ ...message(tenantA, siteA, "Gus"), notifyVia: "sms" })),
+    ).rejects.toThrow();
+  });
+
+  it("messages go with their site", async () => {
+    const [extra] = await withSystem((tx) =>
+      tx.insert(schema.tenants).values({ clerkOrgId: `${STAMP}-c`, name: "Enq C", slug: `${STAMP}-c` }).returning(),
+    );
+    const [site] = await withSystem((tx) =>
+      tx.insert(schema.sites).values({ tenantId: extra.id, slug: `${STAMP}-c` }).returning(),
+    );
+    const [row] = await withSystem((tx) =>
+      tx.insert(schema.siteEnquiries).values(message(extra.id, site.id, "Hal")).returning(),
+    );
+    await withSystem((tx) => tx.delete(schema.sites).where(eq(schema.sites.id, site.id)));
+    const left = await withSystem((tx) =>
+      tx.query.siteEnquiries.findFirst({ where: eq(schema.siteEnquiries.id, row.id) }),
+    );
+    expect(left).toBeUndefined();
+    await withSystem((tx) => tx.delete(schema.tenants).where(eq(schema.tenants.id, extra.id)));
+  });
+
+  it("default-deny: no context sees no messages", async () => {
+    const seen = await withTenant("00000000-0000-0000-0000-000000000000", (tx) =>
+      tx.select().from(schema.siteEnquiries),
+    );
+    expect(seen).toHaveLength(0);
+  });
+});

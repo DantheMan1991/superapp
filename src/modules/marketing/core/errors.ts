@@ -29,6 +29,7 @@ export type MarketingErrorCode =
   | "DOMAIN_INVALID"
   | "DOMAIN_TAKEN"
   | "DOMAIN_MISSING"
+  | "ENQUIRY_MISSING"
   | "DOMAIN_LIMIT"
   | "DOMAIN_PROVIDER";
 
@@ -95,6 +96,8 @@ export function friendlyMessage(err: unknown): string {
         return "That domain is already connected to a site on Yosher.";
       case "DOMAIN_MISSING":
         return "That domain is no longer connected.";
+      case "ENQUIRY_MISSING":
+        return "That message is already gone.";
       case "DOMAIN_LIMIT":
         return "A site can have up to five domains. Remove one first.";
       case "DOMAIN_PROVIDER":

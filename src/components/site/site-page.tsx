@@ -4,14 +4,16 @@ import { foregroundOn } from "@/lib/brand/core";
 import type { PublicSite } from "@/lib/sites/read";
 import type { Section, SitePageView, SiteSettings } from "@/lib/sites/schema";
 import { siteHref, type SiteMode } from "@/lib/sites/slug";
+import { EnquiryForm } from "./enquiry-form";
 
 /**
  * The public renderer: one page of a tenant's site, from its typed sections.
  *
- * Server components only, no client JavaScript of its own, and nothing here
- * is markup a tenant wrote — every string arrives through the content model
- * and React escapes it. The brand's colours enter as CSS variables on the
- * root so the sections never learn a hex value.
+ * Server components, and nothing here is markup a tenant wrote — every
+ * string arrives through the content model and React escapes it. The one
+ * client island is the enquiry form (`enquiry-form.tsx`), which needs a
+ * pending state and a thank-you. The brand's colours enter as CSS variables
+ * on the root so the sections never learn a hex value.
  *
  * `mode` decides what a link looks like: on the site's own hostname links
  * are root-relative, on the platform host they carry `/sites/<slug>`, and in
@@ -101,7 +103,7 @@ export function SitePage({
 
       <main className="flex-1">
         {page.content.sections.map((section, i) => (
-          <SectionView key={i} section={section} site={site} mode={mode} />
+          <SectionView key={i} section={section} site={site} mode={mode} pagePath={page.path} />
         ))}
       </main>
 
@@ -125,12 +127,30 @@ function SectionView({
   section,
   site,
   mode,
+  pagePath,
 }: {
   section: Section;
   site: PublicSite;
   mode: SiteMode;
+  pagePath: string;
 }) {
   switch (section.type) {
+    case "form":
+      return (
+        <section className="mx-auto max-w-3xl px-6 py-14">
+          <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
+          {section.note && <p className="mt-3 text-neutral-600">{section.note}</p>}
+          <EnquiryForm
+            siteSlug={site.slug}
+            pagePath={pagePath}
+            buttonLabel={section.buttonLabel}
+            askPhone={section.askPhone}
+            thanks={section.thanks}
+            // The preview shows the form; only the live site takes messages.
+            disabled={mode === "draft"}
+          />
+        </section>
+      );
     case "hero":
       return (
         <section className="mx-auto max-w-5xl px-6 py-16 sm:py-24">

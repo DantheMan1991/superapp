@@ -23,13 +23,108 @@
 | **2** | **The editor — sections dragged into order (dnd-kit), a form per kind beside a live preview of the draft, pages added, ordered and removed, and a history of every save, publish and restore.** Puck was evaluated and not adopted (Decisions) | **built 2026-09-04** |
 | **3** | **Connect a domain the business owns — records only, through Vercel's Domains API; the proxy routes any hostname that is not the platform's to the site it names.** Purchasing designed, not built ([ADR 0020](../decisions/0020-a-connected-domain-is-records-only.md)) | **built 2026-09-04** — needs `VERCEL_API_TOKEN` + `VERCEL_PROJECT_ID` in Vercel to switch on |
 | 3b | Buying a domain through Vercel's registrar into Yosher's account, held for the client; the platform publishes the mail and site records itself; the shared `domains` table with the mail module arrives here | after the terms, the transfer runbook and a billing decision |
-| 4 | Forms into CRM as parties with `source = 'website'`, raising Work follow-ups; page views | |
+| **4** | **Forms into CRM — a `form` section on the site; each message becomes a party (matched by email), a CRM record with `source = 'website'` when CRM is on, a Work follow-up due today, a `site_enquiries` row and an email to the business.** [ADR 0021](../decisions/0021-a-website-enquiry-lands-as-a-party.md) | **built 2026-09-04** |
+| 4b | Page views, and a form with the business's own fields | |
 | — | The shop block: `retail` slice 6 (online orders + pickup windows) fills a declared slot; blocked on commitments (retail 3) and web checkout (payments) | not this module's |
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-04 — Slice 4: the form on the site lands in the workspace (`claude/marketing-site-forms`)
+
+A message sent through a site's form becomes what the business already works
+with — a person, a thing to do, an email — instead of a mail in a box nobody
+watches. [ADR 0021](../decisions/0021-a-website-enquiry-lands-as-a-party.md)
+settles what a message becomes, who writes it and what a switched-off
+feature means for it.
+
+- **A `form` section** (`src/lib/sites/schema.ts`): heading, note, button
+  label, whether to ask for a phone number, and the thank-you shown after
+  sending. The fields a visitor fills in are fixed — name, email, phone
+  (optional), message. The assembler puts one on every new contact page
+  after the details; an existing site adds it from the editor's catalogue
+  ({button:Enquiry form}). The renderer's one client island,
+  `src/components/site/enquiry-form.tsx`, is plain elements styled by the
+  site's CSS variables, controlled inputs so a validation error never
+  empties the message, a honeypot, and a disabled fieldset in the draft
+  preview ("Visitors can send this once the site is published").
+- **The public action** `src/components/site/enquiry-action.ts`
+  (`submitSiteEnquiry`): honeypot → Zod (`SiteEnquirySchema`, pure, in
+  `src/lib/sites/enquiry-schema.ts`) → `receiveSiteEnquiry`. Its messages are
+  the business's site talking, not Yosher's.
+- **`receiveSiteEnquiry`** (`src/lib/sites/enquiries.ts`) is **the one public
+  WRITE path into a tenant**: `normalizeSiteSlug` → `lookupSiteBySlug`
+  (identifiers only) → refused unless `published` → caps → then
+  `withTenant(tenantId, …, { role: "staff" })` with no user. Inside one
+  transaction: the party (`findPartiesByContact` by email, else
+  `createParty` as a person with `splitPersonName`), contact points through
+  `addContactPoint` (an unusable phone is left out, never fatal), CRM's
+  details row with `source = 'website'` **only when CRM is enabled**
+  (`ON CONFLICT DO NOTHING`, so an existing record keeps its own source),
+  the Work item via `createWorkForEntity` linked to `crm/contact` when CRM
+  is on and `createUnlinkedWork` otherwise — titled `Reply to <name>`, due
+  TODAY in the tenant's timezone so it reaches the digest, the whole
+  message in its notes — the `site_enquiries` row, and an audit row
+  (`site.enquiry.received`, identifiers only). After the transaction the
+  business is emailed (`sendEmail`, new kind `enquiry`, idempotency key
+  `enquiry:<id>:<recipient>`, Reply-To the sender): to the site's contact
+  email if the details name one, else to every owner's profile address;
+  `notify_via` on the row says which. A failed send is logged and never
+  fails the message.
+- **Caps**: `src/lib/public-caps.ts` now holds the `public_access_attempts`
+  valve (`ipKey`, `overPublicCap`) the platform's contact form had privately;
+  `src/lib/contact.ts` calls it with its old numbers. The form's kind is
+  `site_enquiry`: 5 per IP per hour, 1,000 platform-wide per day, plus
+  `ENQUIRY_SITE_DAILY_CAP` = 100 per site per day counted on
+  `site_enquiries`.
+- **`site_enquiries`** (`0252`, RLS in `0253`): members read, members
+  INSERT (the public path's role), owners delete, **no UPDATE policy** — an
+  enquiry is never edited. Composite FK to `sites` ON DELETE CASCADE;
+  `party_id` and `work_item_id` are soft pointers (Decisions).
+- **The Website screen** gains `Messages` (`components/enquiries-panel.tsx`):
+  newest thirty, each with name, date, email and phone links, the page it
+  came from, the message (truncated, `Show the whole message`), a badge from
+  the follow-up's state (`to reply` / `replied` / `follow-up removed`),
+  {button:Follow-up|outline} to the Work item, {button:Contact|outline} to
+  the CRM record when CRM is on, and for owners {button:Remove|ghost|trash}
+  (`deleteEnquiryAction`, audited as `marketing.site.enquiry_deleted`) —
+  which removes the record of the message only; the contact and the
+  follow-up stay where they live. A line under each row says where it went
+  and who was emailed.
+- **The editor** (`section-forms.tsx`): the form section's fields —
+  `Heading`, `Note`, `Button`, `Ask for a phone number` (a switch), `After
+  sending`.
+- Tests: `tests/site-enquiries.test.ts` (the schema, `splitPersonName`,
+  the follow-up's words, the email, the section, the assembler);
+  `tests/isolation/sites.test.ts` gains the `site_enquiries` block (staff
+  insert, expert cannot, nobody updates, owner deletes, cross-tenant,
+  composite FK, cascade, default-deny); `sites-core` and `sites-pages`
+  updated for the new section.
+- Guides: `website.md` (the Messages panel, what a visitor sees, the new
+  messages), `page-editor.md` (the Enquiry form kind and its fields).
+- **Driven on the dev branch (Test tenant, `oak-row-farm`)**: the form
+  section added from the editor's catalogue, saved (history entry), the
+  site republished (`Your website is updated.`); a message sent from
+  `/sites/oak-row-farm/contact` with CRM and Work OFF became a person with
+  two contact points, an unlinked item `Reply to Jane Doe` due that day with
+  the notes, the enquiry row (`notify_via = site_email`) and the audit row;
+  with CRM and Work switched ON, a second sender became a CRM record whose
+  `Where they came from` reads `website`, with the follow-up on the
+  record's timeline and linked `crm/contact`; a third message from the
+  first sender's email in UPPER CASE matched the same party
+  (`matchedExisting: true`, one Jane Doe) and gave it a CRM record. The
+  Messages panel listed all three newest first with working `Follow-up` and
+  `Contact` links; the draft preview showed the form disabled with its note;
+  a two-letter message came back with `Check the highlighted fields and try
+  again.` under the message field and the name kept. The email said
+  `not_configured` in the dev log (no `RESEND_API_KEY` locally) and the
+  message still landed — the send is the same `sendEmail` door every other
+  kind uses.
+- **Found while driving: a `Follow-up` link to a switched-off Work is a
+  404**, so the panel now takes `workOn` as well as `crmOn` and offers each
+  link only where there is a page; the records exist either way.
 
 ### 2026-09-04 — Slice 3: a domain the business owns, connected by records (`claude/marketing-site-domains`)
 
@@ -265,6 +360,7 @@ generated logo re-drawable as a vector.
 | `site_pages` | One page: its path, title, nav place, `draft` and `published` content | FORCE RLS, same policies. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. Unique `(site_id, path)`. CHECK: path `^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$`, title 1–80. `draft`/`published` are `PageContentSchema`; `published` null = never published |
 | `site_page_versions` | A page's history: the content at each `save`, `publish` and `restore` | FORCE RLS; `member_read`, owner INSERT and DELETE (no UPDATE — a version is never edited). Composite FK `(tenant_id, page_id) → site_pages` ON DELETE CASCADE. CHECK on `kind`. Trimmed to the newest `PAGE_VERSIONS_KEEP` (30) on every write by `recordVersion` |
 | `site_domains` | A domain the business owns, connected to its site | FORCE RLS; `member_read`, owner INSERT/UPDATE/DELETE. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. **Unique on `domain` platform-wide** (a hostname points at one site); at most five per site (`SITE_DOMAINS_MAX`). CHECKs: hostname shape, `status in (pending, active, error)`. `records` is `DnsRecordToPublish[]`, what the owner was last told to publish; `vercel_verified`/`vercel_configured_by` are Vercel's last words. **Only an `active` row routes**, and only Vercel makes a row active |
+| `site_enquiries` | A message sent through the site's form: the record of what was sent | FORCE RLS; `member_read`, **member INSERT** (`owner`/`staff` — the public path writes as `staff`, ADR 0021), owner DELETE, **no UPDATE policy**. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. `party_id` / `work_item_id` are **soft pointers** (no FK): the screen resolves them and says when one is gone. CHECKs: name 1–120, message 1–4000, `notify_via in (none, site_email, owners)`. `ip_hash` is the salted hash the caps use, never the IP. Capped at `ENQUIRY_SITE_DAILY_CAP` (100) per site per UTC day |
 
 ## Key files & seams
 
@@ -292,6 +388,15 @@ generated logo re-drawable as a vector.
   `src/app/dashboard/m/marketing/website/page.tsx`
 - `docs/help/marketing/website.md` — the screen's guide; `SITE_DOMAIN` in
   `.env.example`
+- Forms: `src/lib/sites/enquiry-schema.ts` (the form's Zod, the follow-up's
+  and the email's words, `splitPersonName` — pure), `enquiries.ts`
+  (`receiveSiteEnquiry`, the one public write path; `listSiteEnquiries`),
+  `src/lib/public-caps.ts` (the `public_access_attempts` valve, shared with
+  `src/lib/contact.ts`), `src/components/site/enquiry-action.ts` +
+  `enquiry-form.tsx` (the public action and the client island),
+  `src/modules/marketing/enquiry-ops.ts` + `enquiry-actions.ts` (an owner
+  removing one), `components/enquiries-panel.tsx` (the Website page's
+  `Messages`); `EmailKind` `enquiry` in `src/lib/email/send.ts`
 - The editor: `src/lib/sites/pages.ts` (the section catalogue, fresh
   sections, summaries, page-path rules, paragraph splitting, moves, history
   pruning — pure), `src/modules/marketing/page-ops.ts` (save with a version,
@@ -325,6 +430,32 @@ generated logo re-drawable as a vector.
 
 ## Decisions & gotchas
 
+- **The form writes as `staff`, inside the tenant the slug names** (ADR
+  0021). No third database role, no `withSystem` write: the trusted lookup
+  produces a tenant id and the member policies bound everything after it.
+  The `site_enquiries` INSERT policy is a member policy for exactly that
+  reason, and `tests/isolation/sites.test.ts` proves an `expert` cannot use
+  it and nobody can UPDATE.
+- **A hand-written migration must be in `drizzle/meta/_journal.json` or the
+  migrator skips it silently.** `0253_site_enquiries_rls.sql` was written
+  by hand, `db:migrate -- --dev` reported "Migrations complete", and
+  `db:verify-rls` then found the table with no RLS at all. `db:generate --
+  --custom` writes the journal entry for you; a file created any other way
+  needs the entry added by hand (`idx`, `version: "7"`, `when`, `tag`,
+  `breakpoints: true`). ADR 0014's verify step is what caught it.
+- **The guard is the owning feature, applied to a public write.** CRM's
+  details row and the `crm/contact` link exist only when CRM is on; the
+  party and the follow-up exist regardless, because parties are Layer 0
+  and Work's rule is that a switched-off Work does not stop a follow-up.
+- **Soft pointers on the enquiry.** `party_id` and `work_item_id` carry no
+  FK: CRM merges parties and Work deletes items without knowing this table
+  exists, and the message must outlive both. The screen resolves the
+  pointers under the caller's context and says "removed" when one is gone.
+- **The email goes to the business's own addresses.** The site's contact
+  email first (it is what the business tells customers to write to), else
+  the owners' profile emails, never a visitor's input; Reply-To is the
+  visitor so answering is one click. Kind `enquiry` in the outbound log,
+  one row per recipient, idempotency `enquiry:<id>:<recipient>`.
 - **The data is Layer 0; the module is the editor.** Accounting reads the
   brand the way it reads the timezone and never learns Marketing exists. A
   new consumer is an import of `src/lib/brand/read.ts`, not a seam. ADR 0018.
@@ -477,18 +608,29 @@ generated logo re-drawable as a vector.
 - **Apex + www as a pair.** Vercel redirects between them on its own; the
   screen connects one name at a time and does not yet offer "add the other
   one too".
-- **Slice 4, forms into CRM**: the contact page's form creates a party with
-  `source = 'website'` and raises a Work follow-up; reuse
-  `public_access_attempts` for the cap. The `cta` and `hero` buttons point at
-  the contact page today; the assembler pins that, and the prompt now asks
-  for labels that say so.
+- **The form's fields are fixed** (name, email, phone, message). A business
+  that needs its own questions gets them in 4b, on the same landing path
+  (ADR 0021); the `custom` bag on `crm_party_details` is where the answers
+  would go.
+- **CRM's `record_created` automation does not fire for a website record**
+  — the public path writes the details row directly rather than through
+  CRM's `createRecord`. Noted in crm.md's open items; a "website lead" rule
+  needs a trigger the shared path can call.
+- **Nobody has sent a real message through a live site yet.** The path was
+  driven on the dev branch (see the build log); the first production message
+  will be a client's, or the founder's own test on his site.
+- The `cta` and `hero` buttons point at the contact page; the assembler pins
+  that, and the prompt asks for labels that say so.
 - **The shop block** is `retail` slice 6's, through a declared section slot.
 - **Sitemap and robots per site**, and a `canonical` pointing at the host
   address once one exists.
 - **Rewriting replaces every draft.** Fine while the assistant is the only
   writer; the editor makes a per-page rewrite the right grain.
 - **The dev-branch Test tenant now holds a published site `oak-row-farm`**,
-  left from this verification.
+  left from this verification — since slice 4 with an enquiry form on its
+  contact page, three messages (two from Jane Doe, one from Sam Rivers),
+  the two parties, three `Reply to …` items and, because the CRM-on path
+  needed proving, **CRM and Work switched on** for it.
 - **Not yet looked at: dark mode, a phone, and a square mark on the PDF.**
   The screen was driven on the dev branch (build log) but only in the light
   theme on a desktop pane. The colour input on a phone and whether the

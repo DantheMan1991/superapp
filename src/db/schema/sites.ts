@@ -253,9 +253,70 @@ export const siteDomains = pgTable(
   ],
 );
 
+/**
+ * A message sent through a site's enquiry form — Marketing slice 4, ADR 0021.
+ *
+ * The row is the record of WHAT WAS SENT, kept whatever becomes of the rest:
+ * the sender also becomes (or matches) a party, a follow-up is raised in Work
+ * and the business is emailed, but those are pointers here, not the message.
+ * `party_id` and `work_item_id` are SOFT — no FK — because a merged party or
+ * a deleted item must not take the message with it; the screen resolves them
+ * and says when one is gone.
+ *
+ * THE INSERT COMES FROM THE PUBLIC PATH. A stranger's request resolves the
+ * site (one trusted lookup, like the renderer's) and then writes as `staff`
+ * inside that tenant's context, so the member INSERT policy is the one the
+ * form uses. Nothing updates a row — an enquiry is never edited — and only
+ * an owner deletes one.
+ */
+export const siteEnquiries = pgTable(
+  "site_enquiries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    siteId: uuid("site_id").notNull(),
+    /** The page the form was on. */
+    pagePath: text("page_path").notNull().default("/"),
+    name: text("name").notNull(),
+    email: text("email").notNull(),
+    phone: text("phone").notNull().default(""),
+    message: text("message").notNull(),
+    /** The party the sender became or matched by email. Soft pointer. */
+    partyId: uuid("party_id"),
+    /** The follow-up raised in Work. Soft pointer. */
+    workItemId: uuid("work_item_id"),
+    /** Who the business's copy went to: `site_email`, `owners` or `none` (no address to send to). */
+    notifyVia: text("notify_via").notNull().default("none"),
+    /** Salted hash of the sender's IP, for the abuse story; never the IP. */
+    ipHash: text("ip_hash").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("site_enquiries_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("site_enquiries_tenant_idx").on(t.tenantId),
+    index("site_enquiries_site_idx").on(t.siteId, t.createdAt),
+    foreignKey({
+      name: "site_enquiries_site_fk",
+      columns: [t.tenantId, t.siteId],
+      foreignColumns: [sites.tenantId, sites.id],
+    }).onDelete("cascade"),
+    check("site_enquiries_name_len", sql`char_length(${t.name}) between 1 and 120`),
+    check("site_enquiries_message_len", sql`char_length(${t.message}) between 1 and 4000`),
+    check(
+      "site_enquiries_notify_values",
+      sql`${t.notifyVia} in ('none', 'site_email', 'owners')`,
+    ),
+  ],
+);
+
 export type Site = typeof sites.$inferSelect;
 export type NewSite = typeof sites.$inferInsert;
 export type SitePage = typeof sitePages.$inferSelect;
 export type NewSitePage = typeof sitePages.$inferInsert;
 export type SitePageVersion = typeof sitePageVersions.$inferSelect;
 export type SiteDomain = typeof siteDomains.$inferSelect;
+export type SiteEnquiry = typeof siteEnquiries.$inferSelect;

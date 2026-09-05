@@ -127,6 +127,9 @@ export function assembleSite(brief: SiteBrief, copy: SiteCopy): AssembledPage[] 
     ...(brief.hoursLines.length > 0
       ? [{ type: "hours" as const, heading: copy.hoursHeading || "Hours", note: "" }]
       : []),
+    // Fixed words, not the model's: the form is the same on every site and
+    // the owner edits it like any section.
+    { type: "form", heading: "Send us a message", note: "", buttonLabel: "Send", askPhone: true, thanks: "Thanks. We'll be in touch." },
   ];
   const pages: AssembledPage[] = [
     { path: "/", title: "Home", navOrder: 0, inNav: true, content: { description: copy.description, sections: home } },

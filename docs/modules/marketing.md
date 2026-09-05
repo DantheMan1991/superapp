@@ -24,13 +24,62 @@
 | **3** | **Connect a domain the business owns — records only, through Vercel's Domains API; the proxy routes any hostname that is not the platform's to the site it names.** Purchasing designed, not built ([ADR 0020](../decisions/0020-a-connected-domain-is-records-only.md)) | **built 2026-09-04** — needs `VERCEL_API_TOKEN` + `VERCEL_PROJECT_ID` in Vercel to switch on |
 | 3b | Buying a domain through Vercel's registrar into Yosher's account, held for the client; the platform publishes the mail and site records itself; the shared `domains` table with the mail module arrives here | after the terms, the transfer runbook and a billing decision |
 | **4** | **Forms into CRM — a `form` section on the site; each message becomes a party (matched by email), a CRM record with `source = 'website'` when CRM is on, a Work follow-up due today, a `site_enquiries` row and an email to the business.** [ADR 0021](../decisions/0021-a-website-enquiry-lands-as-a-party.md) | **built 2026-09-04** |
-| 4b | Page views, and a form with the business's own fields | |
+| **4b** | **Page views — a first-party beacon, counters per page per day, a `Visitors` panel; and the business's own questions on the form, checked against the published definition.** [ADR 0022](../decisions/0022-page-views-are-a-first-party-beacon.md) | **built 2026-09-04** |
 | — | The shop block: `retail` slice 6 (online orders + pickup windows) fills a declared slot; blocked on commitments (retail 3) and web checkout (payments) | not this module's |
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-04 — Slice 4b: who looked, and the business's own questions (`claude/marketing-site-views-and-questions`)
+
+Two things the form slice left open: the business could not tell whether
+anyone visited, and the form asked only what Yosher chose.
+
+- **Page views** ([ADR 0022](../decisions/0022-page-views-are-a-first-party-beacon.md)).
+  `src/components/site/view-beacon.tsx` is the second client island on a
+  public page: after the page draws it posts `{ site, path, first }` to
+  `POST /api/sites/view` (`sendBeacon`, a keep-alive fetch as fallback,
+  silence on failure), where `first` is the browser's own word — it keeps a
+  `yosher-site-visit:<slug>:<day>` note in `localStorage` and clears older
+  days' notes. No cookie, no IP, no user agent. Not in the draft preview.
+  `recordSiteView` (`src/lib/sites/views.ts`) is the write: slug → trusted
+  lookup → published only → `withTenant(…, { role: "staff" })` → the path
+  must be a PUBLISHED page of the site → one upsert on `site_page_views`
+  (`views + 1`, `visitors + first`) keyed `(site, day, path)`, the day in
+  the tenant's timezone. The route answers 204 whatever happened.
+  `summarizeViews` (`views-core.ts`, pure) turns thirty days of rows into
+  totals, a zero-filled day series and a per-page table; the Website screen
+  gains **`Visitors`** (`components/visitors-panel.tsx`, server-rendered:
+  totals, a bar a day, a row a page, and one line saying what a visitor is).
+- **The business's own questions.** The `form` section gains `fields`
+  (up to `FORM_FIELDS_MAX` = 6): `{ id, label, kind, required, options }`,
+  kinds `text` (≤200), `long` (≤1,000), `choice` (one of up to twelve
+  options) and `yesno` (a box). `id` is six base-36 characters made once in
+  the editor, so a renamed question keeps its key. The editor
+  (`section-forms.tsx`, `QuestionsFields`) edits label, kind, choices (one
+  input each — a textarea of lines cannot be typed into while every
+  keystroke re-splits it), `Must be answered`, order and removal. The public
+  form renders them between the phone and the message, controlled like the
+  rest. **The answers are checked against the PUBLISHED page**: the form
+  posts its page path and its section index, `receiveSiteEnquiry` reads that
+  section's `fields` from `site_pages.published` and runs `answersFromForm`
+  (pure) — required, membership of the choices, lengths — refusing with
+  per-question messages in the site's voice (`This one is needed to send.`,
+  `Pick one of the choices.`, `Tick this one to send.`, `Keep this under
+  200 characters.`). A form on a page that changed since has its answers
+  dropped rather than trusted. Answers are stored on the enquiry as
+  `{ label, value }` snapshots (`answers` jsonb, `0254`), listed in the
+  follow-up's notes, the email and the `Messages` panel as `Question:
+  answer` lines. They do not reach CRM's `custom` bag yet (Open items).
+- Migrations `0254` (table + column) and `0255` (RLS: members read,
+  members insert and update, no delete) — the custom file made with
+  `db:generate -- --custom --name …` so its journal entry exists (the slice 4
+  trap). Tests: `tests/site-views.test.ts`, `tests/site-enquiries.test.ts`
+  (the questions block), the `site_page_views` isolation block. Guides:
+  `website.md` (`Visitors`, the answers in `Messages`, the new messages),
+  `page-editor.md` (`Questions`). Security row for the beacon.
 
 ### 2026-09-04 — Slice 4: the form on the site lands in the workspace (`claude/marketing-site-forms`)
 
@@ -360,7 +409,8 @@ generated logo re-drawable as a vector.
 | `site_pages` | One page: its path, title, nav place, `draft` and `published` content | FORCE RLS, same policies. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. Unique `(site_id, path)`. CHECK: path `^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$`, title 1–80. `draft`/`published` are `PageContentSchema`; `published` null = never published |
 | `site_page_versions` | A page's history: the content at each `save`, `publish` and `restore` | FORCE RLS; `member_read`, owner INSERT and DELETE (no UPDATE — a version is never edited). Composite FK `(tenant_id, page_id) → site_pages` ON DELETE CASCADE. CHECK on `kind`. Trimmed to the newest `PAGE_VERSIONS_KEEP` (30) on every write by `recordVersion` |
 | `site_domains` | A domain the business owns, connected to its site | FORCE RLS; `member_read`, owner INSERT/UPDATE/DELETE. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. **Unique on `domain` platform-wide** (a hostname points at one site); at most five per site (`SITE_DOMAINS_MAX`). CHECKs: hostname shape, `status in (pending, active, error)`. `records` is `DnsRecordToPublish[]`, what the owner was last told to publish; `vercel_verified`/`vercel_configured_by` are Vercel's last words. **Only an `active` row routes**, and only Vercel makes a row active |
-| `site_enquiries` | A message sent through the site's form: the record of what was sent | FORCE RLS; `member_read`, **member INSERT** (`owner`/`staff` — the public path writes as `staff`, ADR 0021), owner DELETE, **no UPDATE policy**. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. `party_id` / `work_item_id` are **soft pointers** (no FK): the screen resolves them and says when one is gone. CHECKs: name 1–120, message 1–4000, `notify_via in (none, site_email, owners)`. `ip_hash` is the salted hash the caps use, never the IP. Capped at `ENQUIRY_SITE_DAILY_CAP` (100) per site per UTC day |
+| `site_enquiries` | A message sent through the site's form: the record of what was sent | FORCE RLS; `member_read`, **member INSERT** (`owner`/`staff` — the public path writes as `staff`, ADR 0021), owner DELETE, **no UPDATE policy**. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. `party_id` / `work_item_id` are **soft pointers** (no FK): the screen resolves them and says when one is gone. CHECKs: name 1–120, message 1–4000, `notify_via in (none, site_email, owners)`. `ip_hash` is the salted hash the caps use, never the IP. Capped at `ENQUIRY_SITE_DAILY_CAP` (100) per site per UTC day. Since 4b (`0254`): `answers` jsonb, `EnquiryAnswer[]` label snapshots of the business's own questions |
+| `site_page_views` | How many people looked at a page: one row per `(site, day, path)`, counters only | FORCE RLS; `member_read`, **member INSERT and UPDATE** (`owner`/`staff` — the beacon upserts as `staff`, ADR 0022), **no DELETE policy**. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. Unique `(site_id, day, path)`; `day` is a `date` in the tenant's timezone. CHECK: counts ≥ 0. Nothing about a person is stored; `visitors` is browsers reporting their first view of the day on that page |
 
 ## Key files & seams
 
@@ -397,6 +447,13 @@ generated logo re-drawable as a vector.
   `src/modules/marketing/enquiry-ops.ts` + `enquiry-actions.ts` (an owner
   removing one), `components/enquiries-panel.tsx` (the Website page's
   `Messages`); `EmailKind` `enquiry` in `src/lib/email/send.ts`
+- Views: `src/lib/sites/views-core.ts` (`ViewBeaconSchema`,
+  `summarizeViews`, the storage key — pure), `views.ts` (`recordSiteView`,
+  `listSiteViews`), `src/app/api/sites/view/route.ts` (the beacon's door),
+  `src/components/site/view-beacon.tsx`, `src/modules/marketing/components/visitors-panel.tsx`
+- Questions: `FormFieldSchema` in `src/lib/sites/schema.ts`,
+  `answersFromForm` / `newFormField` / `FORM_FIELD_KINDS` in
+  `enquiry-schema.ts`, `QuestionsFields` in `section-forms.tsx`
 - The editor: `src/lib/sites/pages.ts` (the section catalogue, fresh
   sections, summaries, page-path rules, paragraph splitting, moves, history
   pruning — pure), `src/modules/marketing/page-ops.ts` (save with a version,
@@ -430,6 +487,20 @@ generated logo re-drawable as a vector.
 
 ## Decisions & gotchas
 
+- **The browser says whether it is a visitor** (ADR 0022). Telling
+  browsers apart by hashed address would keep something about a person for
+  no reason the business could name; a `localStorage` note keyed by site
+  and day answers the same question and leaves nothing on our disk. The
+  number can be inflated by anyone who cares to, and nothing else hangs off
+  it, so nothing is lost by trusting it.
+- **Answers are checked against the published page, never the request.**
+  The form names its page and its section index; the definition is read
+  from `site_pages.published`. A request that claims different questions
+  gets nothing for them, and a form left open across a republish has its
+  answers dropped rather than filed under questions that no longer exist.
+- **Only a published page's path counts a view.** Without that check a
+  stranger could grow `site_page_views` one row per invented path; with it
+  the table is bounded by pages × days.
 - **The form writes as `staff`, inside the tenant the slug names** (ADR
   0021). No third database role, no `withSystem` write: the trusted lookup
   produces a tenant id and the member policies bound everything after it.
@@ -608,10 +679,15 @@ generated logo re-drawable as a vector.
 - **Apex + www as a pair.** Vercel redirects between them on its own; the
   screen connects one name at a time and does not yet offer "add the other
   one too".
-- **The form's fields are fixed** (name, email, phone, message). A business
-  that needs its own questions gets them in 4b, on the same landing path
-  (ADR 0021); the `custom` bag on `crm_party_details` is where the answers
-  would go.
+- **Answers stay on the enquiry, the follow-up and the email; they do not
+  reach CRM's `custom` fields.** Mapping a question to a CRM field needs
+  CRM's field definitions (`validateCustom`), which a shared path cannot
+  import; a CRM-side "file website answers under these fields" setting is
+  the shape, and it waits for someone to want it.
+- **Views have no ceiling.** The beacon's write is an increment on one
+  bounded row, so no cap was added (ADR 0022). If a site's numbers are ever
+  inflated on purpose, a per-site daily ceiling on `views` is the first
+  thing to add.
 - **CRM's `record_created` automation does not fire for a website record**
   — the public path writes the details row directly rather than through
   CRM's `createRecord`. Noted in crm.md's open items; a "website lead" rule

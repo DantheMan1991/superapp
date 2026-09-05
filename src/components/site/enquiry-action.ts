@@ -13,6 +13,10 @@ import { receiveSiteEnquiry } from "@/lib/sites/enquiries";
  * refuses unless that site is published. The words a visitor reads back are
  * the business's site talking, not Yosher.
  *
+ * The business's own questions arrive as `q_<id>` values and are checked in
+ * `receiveSiteEnquiry` against the PUBLISHED definition of the form, never
+ * against anything the request says the questions are.
+ *
  * Only async functions may be exported from this file — the schema and the
  * state type live in `src/lib/sites/enquiry-schema.ts`.
  */
@@ -22,6 +26,8 @@ async function clientIp(): Promise<string> {
   const h = await headers();
   return h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "";
 }
+
+const CHECK_FIELDS = "Check the highlighted fields and try again.";
 
 export async function submitSiteEnquiry(
   _prev: EnquiryState,
@@ -37,23 +43,27 @@ export async function submitSiteEnquiry(
   const parsed = SiteEnquirySchema.safeParse({
     site: formData.get("site") ?? "",
     page: formData.get("page") ?? "/",
+    section: formData.get("section") ?? "0",
     name: formData.get("name") ?? "",
     email: formData.get("email") ?? "",
     phone: formData.get("phone") ?? "",
     message: formData.get("message") ?? "",
   });
   if (!parsed.success) {
-    return {
-      status: "error",
-      message: "Check the highlighted fields and try again.",
-      fieldErrors: fieldErrorsFrom(parsed.error.issues),
-    };
+    return { status: "error", message: CHECK_FIELDS, fieldErrors: fieldErrorsFrom(parsed.error.issues) };
   }
 
-  const result = await receiveSiteEnquiry(parsed.data, await clientIp());
+  const rawAnswers: Record<string, string> = {};
+  for (const [key, value] of formData.entries()) {
+    if (key.startsWith("q_") && typeof value === "string") rawAnswers[key] = value;
+  }
+
+  const result = await receiveSiteEnquiry(parsed.data, rawAnswers, await clientIp());
   if (result.ok) return { status: "success" };
 
   switch (result.reason) {
+    case "fields":
+      return { status: "error", message: CHECK_FIELDS, fieldErrors: result.fieldErrors };
     case "capped":
       return {
         status: "error",

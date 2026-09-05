@@ -32,6 +32,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  date,
   foreignKey,
   index,
   integer,
@@ -289,6 +290,12 @@ export const siteEnquiries = pgTable(
     workItemId: uuid("work_item_id"),
     /** Who the business's copy went to: `site_email`, `owners` or `none` (no address to send to). */
     notifyVia: text("notify_via").notNull().default("none"),
+    /**
+     * `EnquiryAnswer[]` — the business's own questions, answered. Label
+     * snapshots, not field ids: a renamed or removed question must not make
+     * an old answer unreadable.
+     */
+    answers: jsonb("answers").notNull().default([]),
     /** Salted hash of the sender's IP, for the abuse story; never the IP. */
     ipHash: text("ip_hash").notNull().default(""),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -313,6 +320,49 @@ export const siteEnquiries = pgTable(
   ],
 );
 
+/**
+ * How many people looked at a page — Marketing slice 4b, ADR 0022.
+ *
+ * ONE ROW PER PAGE PER DAY, counters only. `views` is every load a browser
+ * reported; `visitors` is browsers that reported their FIRST load of the
+ * day on this page, so a day's visitors is the sum over its pages. Nothing
+ * identifies a person: no cookie, no IP, no user agent — the browser keeps
+ * its own "seen today" note (ADR 0022) and the server trusts it, because a
+ * counter that can be inflated is still only a counter.
+ *
+ * Written by the public beacon as `staff` inside the site's tenant, the
+ * same shape as `site_enquiries`; read on the Website screen. Rows are
+ * never deleted by the app (pages × days is small) and go with the site.
+ */
+export const sitePageViews = pgTable(
+  "site_page_views",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    siteId: uuid("site_id").notNull(),
+    /** `yyyy-mm-dd` in the tenant's timezone. */
+    day: date("day").notNull(),
+    path: text("path").notNull().default("/"),
+    views: integer("views").notNull().default(0),
+    visitors: integer("visitors").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("site_page_views_site_day_path_idx").on(t.siteId, t.day, t.path),
+    index("site_page_views_tenant_idx").on(t.tenantId),
+    foreignKey({
+      name: "site_page_views_site_fk",
+      columns: [t.tenantId, t.siteId],
+      foreignColumns: [sites.tenantId, sites.id],
+    }).onDelete("cascade"),
+    check("site_page_views_counts", sql`${t.views} >= 0 and ${t.visitors} >= 0`),
+  ],
+);
+
 export type Site = typeof sites.$inferSelect;
 export type NewSite = typeof sites.$inferInsert;
 export type SitePage = typeof sitePages.$inferSelect;
@@ -320,3 +370,4 @@ export type NewSitePage = typeof sitePages.$inferInsert;
 export type SitePageVersion = typeof sitePageVersions.$inferSelect;
 export type SiteDomain = typeof siteDomains.$inferSelect;
 export type SiteEnquiry = typeof siteEnquiries.$inferSelect;
+export type SitePageView = typeof sitePageViews.$inferSelect;

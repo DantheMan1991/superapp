@@ -160,9 +160,13 @@ export default async function DashboardLayout({
 
   // Modules that asked for the whole viewport. Only enabled ones are listed,
   // so a switched-off module can never widen the shell.
-  const fullWidthPathPrefixes = renderable
-    .filter(({ module }) => getRenderableFeature(module.id)?.layout === "full")
-    .map(({ module }) => `/dashboard/m/${module.id}`);
+  const fullWidthPathPrefixes = renderable.flatMap(({ module }) => {
+    const def = getRenderableFeature(module.id);
+    const base = `/dashboard/m/${module.id}`;
+    const prefixes = def?.layout === "full" ? [base] : [];
+    for (const sub of def?.fullWidthPaths ?? []) prefixes.push(`${base}/${sub}`);
+    return prefixes;
+  });
 
   return (
     <AppShell

@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
 import { MarketingStrip } from "@/modules/marketing/components/marketing-strip";
+import { PagesPanel } from "@/modules/marketing/components/pages-panel";
 import {
   BuildSiteForm,
   SiteDetailsForm,
@@ -141,34 +142,28 @@ export default async function WebsitePage() {
           </Panel>
 
           <section className="space-y-3">
-            <h2 className="font-heading text-lg font-semibold tracking-heading">Pages</h2>
-            <Panel className="divide-y divide-divider">
-              {drafts.view.pages.map((page) => {
+            <div>
+              <h2 className="font-heading text-lg font-semibold tracking-heading">Pages</h2>
+              <p className="text-sm text-muted-foreground">
+                Drag to set the menu order. A page&rsquo;s words wait for Publish; its
+                place in the menu shows at once.
+              </p>
+            </div>
+            <PagesPanel
+              key={drafts.pages.map((p) => `${p.id}:${p.navOrder}`).join(",")}
+              slug={drafts.site.slug}
+              canWrite={canWrite}
+              pages={drafts.view.pages.map((page) => {
                 const row = drafts.pages.find((p) => p.path === page.path);
-                return (
-                  <div key={page.path} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
-                    <div>
-                      <div className="font-medium">{page.title}</div>
-                      <div className="text-xs text-muted-foreground">
-                        <span className="font-mono">{page.path}</span>
-                        {" · "}
-                        {page.content.sections.length} section{page.content.sections.length === 1 ? "" : "s"}
-                        {row?.published ? " · published" : " · draft only"}
-                      </div>
-                    </div>
-                    <Button asChild variant="ghost" size="sm">
-                      <Link
-                        href={`/sites/${drafts.site.slug}/draft${page.path === "/" ? "" : page.path}`}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Preview
-                      </Link>
-                    </Button>
-                  </div>
-                );
+                return {
+                  id: row?.id ?? page.path,
+                  path: page.path,
+                  title: page.title,
+                  sections: page.content.sections.length,
+                  published: row?.published !== null && row?.published !== undefined,
+                };
               })}
-            </Panel>
+            />
           </section>
 
           <section className="space-y-3">

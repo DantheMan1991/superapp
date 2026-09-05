@@ -146,7 +146,49 @@ export const sitePages = pgTable(
   ],
 );
 
+/**
+ * A page's history: the draft as it was at each save, publish and restore.
+ * Slice 2 (the editor). Kept to the last `PAGE_VERSIONS_KEEP`
+ * (`src/lib/sites/pages.ts`) per page, pruned on write; restoring writes the
+ * chosen content back into the draft and records that as a version too, so
+ * history never loses a step.
+ */
+export const sitePageVersions = pgTable(
+  "site_page_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    pageId: uuid("page_id").notNull(),
+    /** `save` from the editor, `publish` when the site went live, `restore` from history. */
+    kind: text("kind").notNull().default("save"),
+    /** `PageContent`, as it was. */
+    content: jsonb("content").notNull(),
+    /** Attribution only — grants nothing. */
+    createdByClerkUserId: text("created_by_clerk_user_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("site_page_versions_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("site_page_versions_tenant_idx").on(t.tenantId),
+    index("site_page_versions_page_idx").on(t.pageId, t.createdAt),
+    foreignKey({
+      name: "site_page_versions_page_fk",
+      columns: [t.tenantId, t.pageId],
+      foreignColumns: [sitePages.tenantId, sitePages.id],
+    }).onDelete("cascade"),
+    check(
+      "site_page_versions_kind_values",
+      sql`${t.kind} in ('save', 'publish', 'restore')`,
+    ),
+  ],
+);
+
 export type Site = typeof sites.$inferSelect;
 export type NewSite = typeof sites.$inferInsert;
 export type SitePage = typeof sitePages.$inferSelect;
 export type NewSitePage = typeof sitePages.$inferInsert;
+export type SitePageVersion = typeof sitePageVersions.$inferSelect;

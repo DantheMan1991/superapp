@@ -28,6 +28,14 @@ export interface ModuleDefinition {
    */
   layout?: "standard" | "full";
   /**
+   * Sub-paths (relative to `/dashboard/m/<slug>/`) that want the whole
+   * viewport while the rest of the module keeps the standard column. For
+   * one editor-shaped screen inside an ordinary module — Marketing's page
+   * editor, a form beside a live preview — without widening every page of
+   * the module. Same prefix test the shell uses for `layout: "full"`.
+   */
+  fullWidthPaths?: string[];
+  /**
    * Words this feature lets a tenant rename. Declared so the admin screen can
    * LIST what is customisable instead of somebody having to grep for
    * `labelFor`, and so a test can catch a key used but never declared.

@@ -23,7 +23,7 @@ Once there is a website:
 - **{button:Open the live site|outline|external-link}.** Appears once published. Opens the site as customers see it.
 - **{button:Publish|primary}.** Owners only. Puts every draft page on the internet. Once published it becomes {button:Publish changes|primary}, which puts your latest drafts live, and {button:Unpublish|outline} appears beside it.
 - **{button:Rewrite the words|ghost}.** Owners only. Writes every page again from your brand kit and details. Your browser asks `Write every page again from your brand kit and details? The current drafts are replaced. What is published stays until you publish again.`
-- **`Pages`.** One row per page: its title, its path such as `/about`, how many sections it has, and `published` or `draft only`. {button:Preview|ghost} opens that page's draft in a new tab.
+- **`Pages`.** Under the heading: `Drag to set the menu order. A page's words wait for Publish; its place in the menu shows at once.` One row per page: its title, its address such as `/about`, how many sections it has, and `published` or `draft only`. {button:Preview|ghost} opens that page's draft in a new tab. Owners also see the {icon:grip-vertical} drag handle, {button:Edit|outline|pencil}, which opens the page in the editor (see [Editing a page](page-editor.md)), and {icon:trash} on every page but the home page. Under the list, {button:Add a page|outline|plus} opens a `Title` and an `Address` with {button:Add page|primary} and {button:Cancel|ghost}; the address fills in from the title and the line under it reads `Will be at /services` or says why it cannot be used.
 - **`Details on the site`.** `Name in the header`, `Phone`, `Email`, `Address` and `Hours`, the same fields as when you built the site, with {button:Save|primary} and {button:Discard changes|ghost}. The header name is blank by default, which uses your brand kit's business name. These details show on the live site the moment you save; there is no need to publish again.
 - **`Address`** (the last card). Owners only. The address field again, with {button:Change address|outline}. The line under it reads `Changing the address breaks links people already have to the old one.`
 
@@ -44,6 +44,13 @@ Once there is a website:
 3. After you change details or rewrite the words, click {button:Publish changes|primary}. You see `Your website is updated.`
 
 To take it down, click {button:Unpublish|outline}; your browser asks `Take the website off the internet? Your pages are kept and you can publish again any time.` and you see `Your website is offline.`
+
+## How to add, reorder or delete a page
+
+1. Under `Pages`, click {button:Add a page|outline|plus}. Type a `Title`; the `Address` fills in from it, and you can change it.
+2. Click {button:Add page|primary}. You see `Page added. Write it, then publish when it reads right.` and the new page opens in the editor with one text section to replace.
+3. To change the menu order, drag a page's {icon:grip-vertical} handle up or down. You see `Menu order saved.` and the live site's menu changes at once.
+4. To delete a page, click {icon:trash} on its row. Your browser asks `Delete the [title] page? It comes off the internet at once, with its history. This cannot be undone.` Confirm and you see `Page deleted.` The home page cannot be deleted.
 
 ## How to change the details on the site
 
@@ -75,13 +82,18 @@ To take it down, click {button:Unpublish|outline}; your browser asks `Take the w
 | `Check the fields and try again.` | A field is over its length, or the email address is not one. |
 | `Only an owner can change how the business looks.` | You are signed in as staff. Ask an owner. |
 | `Accountant access is read-only.` | You are signed in as the accountant. |
+| `Page added. Write it, then publish when it reads right.` | The page exists as a draft and the editor is open. |
+| `Menu order saved.` | The order you dragged into is saved and live. |
+| `Page deleted.` | The page, its published copy and its history are gone. |
+| `Another page already has that address.` | Two pages cannot share an address. |
+| `The home page stays; every site has one.` | The home page cannot be deleted. |
 | `Not on the internet yet.` | The site is a draft. |
 | `On the internet since [date].` | When it was last published. |
 | `draft only` | In `Pages`: this page has never been published. |
 
 ## Not on this page
 
-Editing a page's words yourself, adding a page or moving sections around; today the assistant writes and you can ask again. Photos on the pages. Your own domain name, such as `oakrowfarm.com`. A contact form that lands in your CRM. An online shop. Visitor counts. Ask us if you need any of these; they are the next things this page grows.
+Photos on the pages. Your own domain name, such as `oakrowfarm.com`. A contact form that lands in your CRM. An online shop. Visitor counts. Ask us if you need any of these; they are the next things this page grows.
 
 ## Who can do what
 

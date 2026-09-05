@@ -74,6 +74,9 @@ export const moduleRegistry: Record<string, ModuleDefinition> = {
     slug: "marketing",
     name: "Marketing",
     icon: "megaphone",
+    // The page editor is a form beside a live preview; the rest of the module
+    // reads better in the standard column.
+    fullWidthPaths: ["website/pages"],
     Component: MarketingModule,
   },
 };

@@ -33,6 +33,7 @@ export const SECTION_DEFAULTS: Record<SectionType, SectionDefaults> = {
   contact: { background: "none", width: "text", spacing: "normal" },
   hours: { background: "none", width: "text", spacing: "normal" },
   form: { background: "none", width: "text", spacing: "normal" },
+  booking: { background: "none", width: "text", spacing: "normal" },
   image: { background: "none", width: "text", spacing: "tight" },
   gallery: { background: "none", width: "page", spacing: "normal" },
   slideshow: { background: "none", width: "page", spacing: "tight" },

@@ -16,6 +16,36 @@
 
 ## Build log
 
+### 2026-09-05 — The first business calendar: Bookings, made by Marketing (`claude/marketing-site-bookings`)
+
+The website's `Book a time` section (Marketing slice 8,
+[ADR 0025](../decisions/0025-a-booking-is-an-enquiry-with-a-time.md)) is the
+booking pack the availability seam was built for, arrived from the other
+direction. Nothing in `src/modules/scheduling/` changed; the module's lib seam
+grew one file and the read path was consumed as designed.
+
+- **`src/lib/schedule/bookings-calendar.ts`**: `ensureBookingsCalendar`
+  makes the business's Bookings calendar once through the managed unique
+  index (`extension_slug = 'marketing'`, `extension_key = 'bookings'`,
+  owner NULL, `kind = 'bookings'`, `green`) and puts a workspace-wide share at
+  `write` on it — an owner's context, since the business owns it; a lowered
+  share is put back on the next page save. `busyOnCalendar` is `listRange`
+  filtered to the calendar and `occupiesTime(show_as)`, merged.
+- **A write with no user goes through the policies as designed.**
+  `app_calendar_access` answers `write` for the everyone share whatever
+  `app_current_user()` says, so the site's booking — `withTenant` as `staff`
+  with no user, ADR 0021's shape — inserts the item and its external
+  attendee through `schedule_items_write` and
+  `schedule_item_attendees_write` untouched. No `withSystem`, no new policy.
+- **`Business calendars` is reachable now**: it holds this one, and the
+  everyone share shows it to every member. The open item below is closed
+  for the case that matters; nothing in the core UI creates a business
+  calendar by hand yet.
+- The item is `kind = 'booking'` with `metadata.source = 'website'`, the
+  visitor an `accepted` external attendee, the notes in the description. The
+  grid draws it like any event; cancelling it in Scheduling frees the time
+  on the site at once (`listRange` skips `cancelled_at`).
+
 ### 2026-09-03 — An accountant is told why (`claude/an-accountant-is-told-why`)
 
 **Both screens rendered every control enabled for an `expert` and refused every
@@ -827,6 +857,10 @@ Built for availability:
 
 - `src/lib/schedule/availability.ts` — **the booking seam.** Merge, invert, find
   slots, and `busyForPeople`. Read its header before assuming what "busy" means.
+- `src/lib/schedule/bookings-calendar.ts` — the Bookings calendar Marketing
+  provisions (ADR 0025): `ensureBookingsCalendar`, `findBookingsCalendarId`,
+  `busyOnCalendar`. The first consumer of `findFreeSlots` outside the event
+  form.
 
 Built for recurrence:
 
@@ -1212,7 +1246,10 @@ them. If something does, the boundary was drawn wrong.
   submit.**~~ — **fixed 2026-09-03.** `roleMayWrite` in `lib/schedule/access.ts`,
   asked by `gate()` and by both screens; see the build log.
 - **Nobody can see an RSVP.** The response is fetched and dropped client-side.
-- **`Business calendars` is unreachable** — nothing ever creates one.
+- ~~**`Business calendars` is unreachable** — nothing ever creates one.~~
+  **Reachable since 2026-09-05**: Marketing's `Book a time` section makes the
+  `Bookings` calendar (`src/lib/schedule/bookings-calendar.ts`). Nothing in
+  the core UI makes a business calendar by hand yet.
 - ~~**Month view's day number opens a create dialog a read-only reader cannot use.**~~
   — **fixed 2026-09-03**, riding along with the accountant fix: the number is a
   `<span>` rather than a `<button>` when nothing is writable.

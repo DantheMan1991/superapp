@@ -27,6 +27,7 @@ import { FORM_FIELD_KINDS, newFormField } from "@/lib/sites/enquiry-schema";
 import { linkProblem } from "@/lib/sites/frame";
 import { iconLabel, moveItem, paragraphsToText, textToParagraphs } from "@/lib/sites/pages";
 import {
+  BOOKING_MINUTES,
   CARD_ICON_NAMES,
   CARDS_MAX,
   DEFAULT_SECTION_STYLE,
@@ -58,6 +59,8 @@ export function SectionForm(props: {
   idPrefix: string;
   /** The site's photo library and how to change it, for the kinds that take a photo. */
   photos: PhotoProps;
+  /** Whether Scheduling is on: a booking section offers no times without it. */
+  bookingOn?: boolean;
 }) {
   return (
     <div className="space-y-6">
@@ -72,11 +75,13 @@ function SectionFields({
   onChange,
   idPrefix,
   photos,
+  bookingOn = true,
 }: {
   section: Section;
   onChange: (next: Section) => void;
   idPrefix: string;
   photos: PhotoProps;
+  bookingOn?: boolean;
 }) {
   const id = (name: string) => `${idPrefix}-${name}`;
   switch (section.type) {
@@ -385,6 +390,75 @@ function SectionFields({
             {section.type === "contact"
               ? "The phone, email and address come from the Website page's details."
               : "The hours come from the Website page's details."}
+          </p>
+        </div>
+      );
+    case "booking":
+      return (
+        <div className="space-y-4">
+          {!bookingOn && (
+            <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800">
+              Scheduling is switched off, so this section offers no times on the live site. Switch it on under Modules and save this page again.
+            </p>
+          )}
+          <Field id={id("heading")} label="Heading">
+            <Input id={id("heading")} value={section.heading} maxLength={80} onChange={(e) => onChange({ ...section, heading: e.target.value })} />
+          </Field>
+          <Field id={id("note")} label="Note" hint="A line under the heading, or blank.">
+            <Input id={id("note")} value={section.note} maxLength={300} onChange={(e) => onChange({ ...section, note: e.target.value })} />
+          </Field>
+          <Field id={id("title")} label="What is being booked" hint="As it reads on your calendar and in the email: Farm visit, Consultation, Fitting.">
+            <Input id={id("title")} value={section.title} maxLength={60} onChange={(e) => onChange({ ...section, title: e.target.value })} />
+          </Field>
+          <Choice label="How long" value={section.minutes} options={MINUTES} onChange={(minutes) => onChange({ ...section, minutes })} />
+          <div className="space-y-2">
+            <Label>Days</Label>
+            <div className="flex flex-wrap gap-2">
+              {DAY_NAMES.map((name, dow) => {
+                const on = section.days.includes(dow);
+                return (
+                  <Button
+                    key={name}
+                    type="button"
+                    variant={on ? "default" : "outline"}
+                    size="sm"
+                    aria-pressed={on}
+                    onClick={() =>
+                      onChange({
+                        ...section,
+                        days: on ? section.days.filter((d) => d !== dow) : [...section.days, dow].sort((a, b) => a - b),
+                      })
+                    }
+                  >
+                    {name}
+                  </Button>
+                );
+              })}
+            </div>
+            <p className="text-xs text-muted-foreground">Times are offered on the days pressed.</p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field id={id("from")} label="From">
+              <Input id={id("from")} type="time" step={1800} value={section.from} onChange={(e) => onChange({ ...section, from: e.target.value })} />
+            </Field>
+            <Field id={id("to")} label="To">
+              <Input id={id("to")} type="time" step={1800} value={section.to} onChange={(e) => onChange({ ...section, to: e.target.value })} />
+            </Field>
+          </div>
+          <Choice label="Notice" hint="How soon a visitor may book." value={section.leadHours} options={LEADS} onChange={(leadHours) => onChange({ ...section, leadHours })} />
+          <Choice label="How far ahead" value={section.horizonDays} options={HORIZONS} onChange={(horizonDays) => onChange({ ...section, horizonDays })} />
+          <Field id={id("buttonLabel")} label="Button" hint="Blank reads Book.">
+            <Input id={id("buttonLabel")} value={section.buttonLabel} maxLength={40} onChange={(e) => onChange({ ...section, buttonLabel: e.target.value })} />
+          </Field>
+          <div className="flex items-center gap-2">
+            <Switch id={id("askPhone")} checked={section.askPhone} onCheckedChange={(checked) => onChange({ ...section, askPhone: checked })} />
+            <Label htmlFor={id("askPhone")}>Ask for a phone number</Label>
+          </div>
+          <Field id={id("thanks")} label="After booking" hint="Shown in place of the form once a time is booked.">
+            <Input id={id("thanks")} value={section.thanks} maxLength={240} onChange={(e) => onChange({ ...section, thanks: e.target.value })} />
+          </Field>
+          <p className="text-xs text-muted-foreground">
+            The times offered are the open ones on your Bookings calendar in Scheduling, inside these days and hours. Each booking goes on that calendar with the person on it, becomes a contact and a follow-up in your workspace, and is emailed to you. Put anything on the Bookings calendar to keep a time from being offered.
           </p>
         </div>
       );
@@ -837,7 +911,7 @@ function SortableCard({
 }
 
 /** A row of pressed buttons: one value from a few, named. */
-function Choice<T extends string>({
+function Choice<T extends string | number>({
   label,
   hint,
   value,
@@ -868,6 +942,20 @@ function Choice<T extends string>({
 const SIDES = [
   ["right", "Right"],
   ["left", "Left"],
+] as const;
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+const MINUTES = BOOKING_MINUTES.map((m) => [m, m < 60 ? `${m} min` : m === 60 ? "1 hour" : m === 90 ? "1½ hours" : "2 hours"] as const);
+const LEADS = [
+  [0, "None"],
+  [2, "2 hours"],
+  [24, "A day"],
+  [48, "Two days"],
+] as const;
+const HORIZONS = [
+  [7, "A week"],
+  [14, "Two weeks"],
+  [30, "A month"],
+  [60, "Two months"],
 ] as const;
 const WIDTHS = [
   ["default", "As designed"],

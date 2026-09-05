@@ -21,6 +21,7 @@ import {
   type Tone,
 } from "@/lib/sites/style";
 import { cn } from "@/lib/utils";
+import { BookingForm } from "./booking-form";
 import { CardIcon } from "./card-icons";
 import { DraftSelect } from "./draft-select";
 import { EnquiryForm } from "./enquiry-form";
@@ -407,6 +408,27 @@ function SectionView({
               thanks={section.thanks}
               fields={section.fields}
               // The preview shows the form; only the live site takes messages.
+              disabled={mode === "draft"}
+              onDark={resolved.onDark || resolved.background === "brand"}
+            />
+          </div>
+        </Shell>
+      );
+    case "booking":
+      return (
+        <Shell {...shell} spacing={room}>
+          <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
+          {section.note && <p className={cn("mt-3", tone.muted)}>{section.note}</p>}
+          <div className={cn(centred && "mx-auto max-w-xl text-left")}>
+            <BookingForm
+              siteSlug={site.slug}
+              pagePath={pagePath}
+              sectionIndex={sectionIndex}
+              title={section.title}
+              minutes={section.minutes}
+              buttonLabel={section.buttonLabel}
+              askPhone={section.askPhone}
+              thanks={section.thanks}
               disabled={mode === "draft"}
               onDark={resolved.onDark || resolved.background === "brand"}
             />

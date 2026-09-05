@@ -180,6 +180,8 @@ export interface EnquiryWords {
   answers: EnquiryAnswer[];
   /** `yyyy-mm-dd` in the tenant's timezone. */
   receivedOn: string;
+  /** Set when the message is a booking (ADR 0025): what was booked and when, as words. */
+  booking?: { title: string; when: string };
 }
 
 function whereFrom(w: Pick<EnquiryWords, "siteTitle" | "pagePath">): string {
@@ -202,15 +204,18 @@ export function enquiryWorkTitle(name: string): string {
   return title.length > 120 ? `${title.slice(0, 117).trimEnd()}...` : title;
 }
 
+/** A booking's follow-up: confirm it with the person. */
+export function bookingWorkTitle(name: string): string {
+  const title = `Confirm the booking with ${name.trim()}`;
+  return title.length > 120 ? `${title.slice(0, 117).trimEnd()}...` : title;
+}
+
 /** The follow-up's notes: everything the person sent, and where it came from. */
 export function enquiryNotes(w: EnquiryWords): string {
-  return [
-    `A message from the form on ${whereFrom(w)}, ${w.receivedOn}.`,
-    "",
-    ...detailLines(w),
-    "",
-    w.message,
-  ].join("\n");
+  const opening = w.booking
+    ? `${w.name} booked ${w.booking.title} for ${w.booking.when}, from ${whereFrom(w)}, ${w.receivedOn}.`
+    : `A message from the form on ${whereFrom(w)}, ${w.receivedOn}.`;
+  return [opening, "", ...detailLines(w), "", w.message].join("\n");
 }
 
 /** The email to the business. Plain text; Reply reaches the person who wrote. */
@@ -218,22 +223,22 @@ export function enquiryEmail(
   w: EnquiryWords,
   landed: { followUp: boolean; contact: boolean },
 ): { subject: string; text: string } {
+  const where = w.booking ? "on your Bookings calendar in Yosher" : "in your Yosher workspace";
   const also = landed.contact
-    ? "It is also in your Yosher workspace as a follow-up, and on their contact record."
+    ? `It is also ${where}, as a follow-up, and on their contact record.`
     : landed.followUp
-      ? "It is also in your Yosher workspace as a follow-up."
-      : "";
+      ? `It is also ${where} and as a follow-up.`
+      : w.booking
+        ? `It is also ${where}.`
+        : "";
+  const opening = w.booking
+    ? `${w.name} booked ${w.booking.title} for ${w.booking.when} on ${whereFrom(w)}.`
+    : `${w.name} sent this from the form on ${whereFrom(w)}.`;
+  const ask = w.booking ? "Reply to this email to confirm with them." : "Reply to this email to answer them.";
   return {
-    subject: `${w.name} sent a message from your website`,
-    text: [
-      `${w.name} sent this from the form on ${whereFrom(w)}.`,
-      "",
-      ...detailLines(w),
-      "",
-      w.message,
-      "",
-      "--",
-      `Reply to this email to answer them. ${also}`.trim(),
-    ].join("\n"),
+    subject: w.booking
+      ? `${w.name} booked ${w.booking.title} from your website`
+      : `${w.name} sent a message from your website`,
+    text: [opening, "", ...detailLines(w), "", w.message, "", "--", `${ask} ${also}`.trim()].join("\n"),
   };
 }

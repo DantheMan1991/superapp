@@ -3,6 +3,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { withTenant } from "@/db";
 import { logAuditInTx } from "@/lib/audit";
+import { isModuleEnabled } from "@/lib/modules";
+import { ensureBookingsCalendar } from "@/lib/schedule/bookings-calendar";
 import {
   normalizePagePath,
   pagePathReasonMessage,
@@ -89,6 +91,11 @@ export async function savePageAction(input: unknown): Promise<ActionResult> {
     }
     const content = parseContent(parsed.data.content);
     const path = parsed.data.path === null ? null : parsePath(parsed.data.path);
+    // A booking section needs the business's Bookings calendar to exist and
+    // to be shared with everyone at `write` (ADR 0025); the save is where it
+    // is made, by an owner, and only while Scheduling is on.
+    const bookings =
+      content.sections.some((s) => s.type === "booking") && (await isModuleEnabled(ctx.tenantId, "scheduling"));
     await withTenant(
       ctx.tenantId,
       async (tx) => {
@@ -98,6 +105,7 @@ export async function savePageAction(input: unknown): Promise<ActionResult> {
           inNav: parsed.data.inNav,
           content,
         });
+        if (bookings) await ensureBookingsCalendar(tx, ctx.tenantId);
         await logAuditInTx(tx, {
           action: "marketing.site.page_saved",
           tenantId: ctx.tenantId,

@@ -298,6 +298,15 @@ export const siteEnquiries = pgTable(
     answers: jsonb("answers").notNull().default([]),
     /** Salted hash of the sender's IP, for the abuse story; never the IP. */
     ipHash: text("ip_hash").notNull().default(""),
+    /**
+     * A booking is an enquiry with a time (ADR 0025): the slot the visitor
+     * chose, what was booked, and a SOFT pointer to the calendar item it
+     * became on the Bookings calendar. All empty on a plain message.
+     */
+    bookingStartsAt: timestamp("booking_starts_at", { withTimezone: true }),
+    bookingEndsAt: timestamp("booking_ends_at", { withTimezone: true }),
+    bookingTitle: text("booking_title").notNull().default(""),
+    scheduleItemId: uuid("schedule_item_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -316,6 +325,10 @@ export const siteEnquiries = pgTable(
     check(
       "site_enquiries_notify_values",
       sql`${t.notifyVia} in ('none', 'site_email', 'owners')`,
+    ),
+    check(
+      "site_enquiries_booking_whole",
+      sql`(${t.bookingStartsAt} is null) = (${t.bookingEndsAt} is null)`,
     ),
   ],
 );

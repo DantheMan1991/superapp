@@ -140,6 +140,7 @@ export function PageEditor({
   versions,
   tenantId,
   photos,
+  bookingOn,
 }: {
   pageId: string;
   slug: string;
@@ -149,6 +150,8 @@ export function PageEditor({
   tenantId: string;
   /** The site's photo library, as loaded; the editor keeps it current as photos are added and removed. */
   photos: SitePhotoView[];
+  /** Whether Scheduling is on: a booking section can be added only then, and offers no times without it. */
+  bookingOn: boolean;
 }) {
   const router = useRouter();
   const [library, setLibrary] = useState(photos);
@@ -392,19 +395,22 @@ export function PageEditor({
             <div className="space-y-2 border-t border-divider pt-3">
               <p className="text-xs text-muted-foreground">Add a section after the selected one</p>
               <div className="flex flex-wrap gap-2">
-                {SECTION_TYPES.map((s) => (
-                  <Button
-                    key={s.type}
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    title={s.hint}
-                    disabled={rows.length >= 12}
-                    onClick={() => add(s.type)}
-                  >
-                    {s.label}
-                  </Button>
-                ))}
+                {SECTION_TYPES.map((s) => {
+                  const needsScheduling = s.type === "booking" && !bookingOn;
+                  return (
+                    <Button
+                      key={s.type}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      title={needsScheduling ? "Switch on Scheduling under Modules to take bookings." : s.hint}
+                      disabled={rows.length >= 12 || needsScheduling}
+                      onClick={() => add(s.type)}
+                    >
+                      {s.label}
+                    </Button>
+                  );
+                })}
               </div>
             </div>
           </Panel>
@@ -426,6 +432,7 @@ export function PageEditor({
                 section={selectedRow.section}
                 onChange={(next) => update(selectedRow.key, next)}
                 photos={{ tenantId, library, onLibraryChange: setLibrary }}
+                bookingOn={bookingOn}
               />
             </Panel>
             </div>

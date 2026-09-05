@@ -14,7 +14,7 @@ Three sections, each of which disappears when it has nothing in it.
 
 - **`My calendars`** — `Private unless you share them.`
 - **`Shared with me`** — `What colleagues have given you access to.`
-- **`Business calendars`** — `Owned by the workspace rather than a person.`
+- **`Business calendars`** — `Owned by the workspace rather than a person.` The first one most businesses see is `Bookings`, which Yosher makes when an owner saves a website page with a `Book a time` section (see [Your website](../marketing/website.md)): visitors' bookings land on it with the person on them, everyone in the business can see and edit it, and anything you put on it blocks that time from being offered on the site. Owners administer it like any other business calendar.
 
 Each row has a colour dot, the name, and badges: {badge:Main|secondary} on the one you were given when you joined, {badge:Archived|outline} on one you have put away, and on a calendar somebody else owns, a badge naming your access.
 

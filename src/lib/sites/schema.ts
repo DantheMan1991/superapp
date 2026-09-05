@@ -53,6 +53,60 @@ export type ImageRef = z.infer<typeof ImageRefSchema>;
 /** Photos a gallery holds. A page is not an album. */
 export const GALLERY_ITEMS_MAX = 12;
 
+/**
+ * The icons a card may carry: chosen to suit any trade (a core module
+ * speaks no industry), drawn by the renderer from lucide. The empty string
+ * is "no icon".
+ */
+export const CARD_ICON_NAMES = [
+  "award",
+  "calendar",
+  "check",
+  "clock",
+  "credit-card",
+  "gift",
+  "hammer",
+  "heart",
+  "home",
+  "leaf",
+  "mail",
+  "map-pin",
+  "package",
+  "phone",
+  "shield-check",
+  "shopping-bag",
+  "sparkles",
+  "star",
+  "sun",
+  "tag",
+  "thumbs-up",
+  "truck",
+  "users",
+  "wrench",
+] as const;
+export type CardIconName = (typeof CARD_ICON_NAMES)[number];
+
+/** Cards a Columns section holds: four rows of three is a long page already. */
+export const CARDS_MAX = 12;
+
+/**
+ * One card in a Columns section: a photo or an icon on top, a heading, a
+ * few lines and a button, any of them blank. `id` is made once in the
+ * editor so a dragged card keeps its place in React's eyes.
+ */
+export const CardSchema = z.object({
+  id: z.string().regex(/^[a-z0-9]{4,12}$/),
+  image: ImageRefSchema.nullable().default(null),
+  icon: z
+    .string()
+    .refine((v) => v === "" || (CARD_ICON_NAMES as readonly string[]).includes(v), "not an icon")
+    .default(""),
+  heading: short(80).default(""),
+  body: paragraphs(4, 400),
+  cta: CtaSchema.nullable().default(null),
+});
+export type Card = z.infer<typeof CardSchema>;
+
 export const SectionSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("hero"),
@@ -141,6 +195,18 @@ export const SectionSchema = z.discriminatedUnion("type", [
     /** Seconds between photos; 0 moves only when a visitor presses an arrow. */
     seconds: z.number().int().min(0).max(30).default(6),
     layout: z.enum(["inset", "wide"]).default("wide"),
+  }),
+  z.object({
+    type: z.literal("columns"),
+    heading: short(80).default(""),
+    intro: short(300).default(""),
+    /** Per row on a wide screen; a phone stacks them. */
+    columns: z.union([z.literal(2), z.literal(3), z.literal(4)]).default(3),
+    /** Read only with two columns: which side is wider. */
+    widths: z.enum(["equal", "wide-left", "wide-right"]).default("equal"),
+    /** `cards` puts each in a white panel on a tinted band; `plain` stacks them on the page. */
+    look: z.enum(["cards", "plain"]).default("cards"),
+    cards: z.array(CardSchema).max(CARDS_MAX).default([]),
   }),
 ]);
 export type Section = z.infer<typeof SectionSchema>;

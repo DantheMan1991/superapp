@@ -1,14 +1,40 @@
 "use client";
 import { useState } from "react";
-import { ImagePlus, Plus, Trash2 } from "lucide-react";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { GripVertical, ImagePlus, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { FORM_FIELD_KINDS, newFormField } from "@/lib/sites/enquiry-schema";
-import { moveItem, paragraphsToText, textToParagraphs } from "@/lib/sites/pages";
-import { FORM_FIELDS_MAX, GALLERY_ITEMS_MAX, type FormField, type FormFieldKind, type Section } from "@/lib/sites/schema";
+import { iconLabel, moveItem, paragraphsToText, textToParagraphs } from "@/lib/sites/pages";
+import {
+  CARD_ICON_NAMES,
+  CARDS_MAX,
+  FORM_FIELDS_MAX,
+  GALLERY_ITEMS_MAX,
+  type Card,
+  type FormField,
+  type FormFieldKind,
+  type Section,
+} from "@/lib/sites/schema";
 import { secondsLabel, SLIDESHOW_SECONDS } from "@/lib/sites/slides";
 import type { SitePhotoView } from "../image-actions";
 import { memberPhotoSrc, PhotoField, PhotoLibraryDialog } from "./photo-picker";
@@ -59,6 +85,58 @@ export function SectionForm({
             onChange={(image) => onChange({ ...section, image })}
             library={photos.library}
             onLibraryChange={photos.onLibraryChange}
+          />
+        </div>
+      );
+    case "columns":
+      return (
+        <div className="space-y-4">
+          <Field id={id("heading")} label="Heading" hint="Optional.">
+            <Input id={id("heading")} value={section.heading} maxLength={80} onChange={(e) => onChange({ ...section, heading: e.target.value })} />
+          </Field>
+          <Field id={id("intro")} label="Line under it" hint="A sentence or two, or blank.">
+            <Input id={id("intro")} value={section.intro} maxLength={300} onChange={(e) => onChange({ ...section, intro: e.target.value })} />
+          </Field>
+          <div className="space-y-2">
+            <Label>Columns</Label>
+            <div className="flex gap-2">
+              {([2, 3, 4] as const).map((n) => (
+                <Button key={n} type="button" variant={section.columns === n ? "default" : "outline"} size="sm" aria-pressed={section.columns === n} onClick={() => onChange({ ...section, columns: n })}>
+                  {n}
+                </Button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">On a wide screen. A phone stacks them.</p>
+          </div>
+          {section.columns === 2 && (
+            <div className="space-y-2">
+              <Label>Widths</Label>
+              <div className="flex gap-2">
+                {(["equal", "wide-left", "wide-right"] as const).map((w) => (
+                  <Button key={w} type="button" variant={section.widths === w ? "default" : "outline"} size="sm" aria-pressed={section.widths === w} onClick={() => onChange({ ...section, widths: w })}>
+                    {w === "equal" ? "Equal" : w === "wide-left" ? "Wide left" : "Wide right"}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="space-y-2">
+            <Label>Look</Label>
+            <div className="flex gap-2">
+              <Button type="button" variant={section.look === "cards" ? "default" : "outline"} size="sm" aria-pressed={section.look === "cards"} onClick={() => onChange({ ...section, look: "cards" })}>
+                Cards
+              </Button>
+              <Button type="button" variant={section.look === "plain" ? "default" : "outline"} size="sm" aria-pressed={section.look === "plain"} onClick={() => onChange({ ...section, look: "plain" })}>
+                Plain
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">Cards sit in white panels on a tinted band; plain stacks them on the page.</p>
+          </div>
+          <CardsFields
+            idPrefix={idPrefix}
+            cards={section.cards}
+            onChange={(cards) => onChange({ ...section, cards })}
+            photos={photos}
           />
         </div>
       );
@@ -579,5 +657,146 @@ function GalleryFields({
         onRemoved={(id) => onChange(items.filter((it) => it.image.id !== id))}
       />
     </div>
+  );
+}
+
+/**
+ * A Columns section's cards: a sortable list (drag the handle, or the
+ * arrows), each card a panel of heading, text, icon, photo and button.
+ * Its own DndContext, named after the section, so it never collides with
+ * the editor's list of sections around it.
+ */
+function CardsFields({
+  idPrefix,
+  cards,
+  onChange,
+  photos,
+}: {
+  idPrefix: string;
+  cards: Card[];
+  onChange: (cards: Card[]) => void;
+  photos: PhotoProps;
+}) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const update = (i: number, patch: Partial<Card>) => onChange(cards.map((c, j) => (j === i ? { ...c, ...patch } : c)));
+  function onDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const from = cards.findIndex((c) => c.id === active.id);
+    const to = cards.findIndex((c) => c.id === over.id);
+    if (from >= 0 && to >= 0) onChange(arrayMove(cards, from, to));
+  }
+  return (
+    <div className="space-y-3">
+      <Label>Cards</Label>
+      <DndContext id={`cards-${idPrefix}`} sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <SortableContext items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+          <ul className="space-y-3">
+            {cards.map((card, i) => (
+              <SortableCard
+                key={card.id}
+                idPrefix={idPrefix}
+                card={card}
+                index={i}
+                count={cards.length}
+                photos={photos}
+                onChange={(patch) => update(i, patch)}
+                onMove={(to) => onChange(moveItem(cards, i, to))}
+                onRemove={() => onChange(cards.filter((_, j) => j !== i))}
+              />
+            ))}
+          </ul>
+        </SortableContext>
+      </DndContext>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={cards.length >= CARDS_MAX}
+        onClick={() => onChange([...cards, { id: makeFieldId(), image: null, icon: "", heading: "", body: [], cta: null }])}
+      >
+        <Plus className="size-4" />
+        Add a card
+      </Button>
+      <p className="text-xs text-muted-foreground">Up to twelve. Cards fill the columns left to right, row by row; drag one to move it.</p>
+    </div>
+  );
+}
+
+function SortableCard({
+  idPrefix,
+  card,
+  index,
+  count,
+  photos,
+  onChange,
+  onMove,
+  onRemove,
+}: {
+  idPrefix: string;
+  card: Card;
+  index: number;
+  count: number;
+  photos: PhotoProps;
+  onChange: (patch: Partial<Card>) => void;
+  onMove: (to: number) => void;
+  onRemove: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+  const id = (name: string) => `${idPrefix}-card-${card.id}-${name}`;
+  return (
+    <li ref={setNodeRef} style={style} className={`space-y-3 rounded-xl bg-muted/50 p-3 ${isDragging ? "opacity-70 shadow-elevation-1" : ""}`}>
+      <div className="flex items-center gap-2">
+        <button type="button" className="cursor-grab touch-none text-muted-foreground" aria-label={`Drag to move card ${index + 1}`} {...attributes} {...listeners}>
+          <GripVertical className="size-4" />
+        </button>
+        <span className="flex-1 text-sm font-medium">Card {index + 1}</span>
+        <Button type="button" variant="ghost" size="sm" aria-label={`Move card ${index + 1} up`} disabled={index === 0} onClick={() => onMove(index - 1)}>
+          ↑
+        </Button>
+        <Button type="button" variant="ghost" size="sm" aria-label={`Move card ${index + 1} down`} disabled={index === count - 1} onClick={() => onMove(index + 1)}>
+          ↓
+        </Button>
+        <Button type="button" variant="ghost" size="sm" aria-label={`Remove card ${index + 1}`} onClick={onRemove}>
+          <Trash2 className="size-4" />
+        </Button>
+      </div>
+      <Field id={id("heading")} label="Heading">
+        <Input id={id("heading")} value={card.heading} maxLength={80} onChange={(e) => onChange({ heading: e.target.value })} />
+      </Field>
+      <Field id={id("body")} label="Text" hint="A line or two. A blank line starts a new paragraph, up to four.">
+        <Textarea id={id("body")} value={paragraphsToText(card.body)} rows={3} onChange={(e) => onChange({ body: textToParagraphs(e.target.value, 4) })} />
+      </Field>
+      <Field id={id("icon")} label="Icon" hint="Shown above the heading when the card has no photo.">
+        <select
+          id={id("icon")}
+          className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+          value={card.icon}
+          onChange={(e) => onChange({ icon: e.target.value })}
+        >
+          <option value="">{iconLabel("")}</option>
+          {CARD_ICON_NAMES.map((name) => (
+            <option key={name} value={name}>
+              {iconLabel(name)}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <PhotoField
+        idPrefix={id("photo")}
+        label="Photo"
+        hint="Optional. Sits above the heading in place of the icon."
+        tenantId={photos.tenantId}
+        value={card.image}
+        onChange={(image) => onChange({ image })}
+        library={photos.library}
+        onLibraryChange={photos.onLibraryChange}
+      />
+      <CtaFields idPrefix={id("cta")} cta={card.cta} optional onChange={(cta) => onChange({ cta })} />
+    </li>
   );
 }

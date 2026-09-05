@@ -25,6 +25,7 @@ Once there is a website:
 - **{button:Rewrite the words|ghost}.** Owners only. Writes every page again from your brand kit and details. Your browser asks `Write every page again from your brand kit and details? The current drafts are replaced. What is published stays until you publish again.`
 - **`Pages`.** Under the heading: `Drag to set the menu order. A page's words wait for Publish; its place in the menu shows at once.` One row per page: its title, its address such as `/about`, how many sections it has, and `published` or `draft only`. {button:Preview|ghost} opens that page's draft in a new tab. Owners also see the {icon:grip-vertical} drag handle, {button:Edit|outline|pencil}, which opens the page in the editor (see [Editing a page](page-editor.md)), and {icon:trash} on every page but the home page. Under the list, {button:Add a page|outline|plus} opens a `Title` and an `Address` with {button:Add page|primary} and {button:Cancel|ghost}; the address fills in from the title and the line under it reads `Will be at /services` or says why it cannot be used.
 - **`Details on the site`.** `Name in the header`, `Phone`, `Email`, `Address` and `Hours`, the same fields as when you built the site, with {button:Save|primary} and {button:Discard changes|ghost}. The header name is blank by default, which uses your brand kit's business name. These details show on the live site the moment you save; there is no need to publish again.
+- **`Your own domain`.** Under the heading: `Point a domain you already own at this site. Your free address keeps working alongside it.` One row per connected domain: the domain, a badge reading {badge:Live|success}, {badge:Waiting for DNS|secondary} or {badge:Needs attention|destructive}, a line saying what is happening (`Live. Visitors to this domain see your site.`, `Waiting for the TXT record that proves you own the domain.`, `Waiting for the record that points the domain at your site. DNS changes can take up to an hour.`, or the last error), and `Last checked [time]`. Owners see {button:Check again|outline} and {button:Remove|ghost|trash}. While a domain is not live, a table shows the records to add at your registrar: `Type`, `Name`, `Value`, a line saying what each is for, and {icon:copy} to copy the value. Under the rows, owners see `Domain you own`, a box for the domain, and {button:Connect|primary|globe}; the line under the box says what will happen, or why the domain cannot be connected. When the feature is not switched on for this installation the card reads `Connecting your own domain isn't switched on for this deployment yet. Your free address works in the meantime.`
 - **`Address`** (the last card). Owners only. The address field again, with {button:Change address|outline}. The line under it reads `Changing the address breaks links people already have to the old one.`
 
 ## How to build the website
@@ -57,6 +58,18 @@ To take it down, click {button:Unpublish|outline}; your browser asks `Take the w
 1. In `Details on the site`, change any of the fields. `Hours` takes one line per entry.
 2. Click {button:Save|primary}. You see `Details saved. They show on the site straight away.`
 
+## How to connect your own domain
+
+You need a domain you already own and a login to wherever its DNS is managed, usually the registrar you bought it from. Nothing about your email changes: you add one or two records, and you never change the domain's nameservers.
+
+1. In `Your own domain`, type the domain in `Domain you own`. Use the `www` form, `www.example.com`; a bare domain such as `example.com` works too. The line under the box confirms what will be asked for, or says why the domain cannot be used.
+2. Click {button:Connect|primary|globe}. It reads `Connecting…`, then you see `Connected. Publish the records below at your registrar, then check again.` and the domain appears as {badge:Waiting for DNS|secondary} with a table of records.
+3. At your registrar, add each record in the table exactly as shown: a `TXT` record first if one is listed (it proves you own the domain), then the `CNAME` (for a `www` name) or `A` record (for a bare domain). Use {icon:copy} to copy each value. Leave every other record alone.
+4. Wait a few minutes, then click {button:Check again|outline}. You see `Live. Visitors to this domain see your site.` when it is done, or `Checked. Not there yet.` when the records have not reached the internet; DNS changes can take up to an hour.
+5. Once live, the badge reads {badge:Live|success}, the records table disappears, and search engines are told this domain is the site's real address.
+
+To disconnect, click {button:Remove|ghost|trash}; your browser asks `Disconnect [domain]? Visitors to it stop seeing your site at once. Your free address keeps working.` and you see `Domain disconnected.` The records at your registrar are yours to remove.
+
 ## How to change the address
 
 1. In the last card, type the new address. The line under the box shows what it will be, or why it cannot be.
@@ -82,6 +95,20 @@ To take it down, click {button:Unpublish|outline}; your browser asks `Take the w
 | `Check the fields and try again.` | A field is over its length, or the email address is not one. |
 | `Only an owner can change how the business looks.` | You are signed in as staff. Ask an owner. |
 | `Accountant access is read-only.` | You are signed in as the accountant. |
+| `Connected. Publish the records below at your registrar, then check again.` | The domain is on the site's hosting. It goes live once the records are published and checked. |
+| `Connected and live.` | The domain was already pointing at the site's hosting; nothing else to do. |
+| `Live. Visitors to this domain see your site.` | The domain is verified and pointing at the site. |
+| `Checked. Not there yet.` | The records have not reached the internet, or one is missing. Compare the table with your registrar and try again later. |
+| `Domain disconnected.` | The domain no longer reaches the site. |
+| `Connecting your own domain isn't switched on for this deployment yet.` | This installation of Yosher has no hosting connection for domains. Ask us. |
+| `That doesn't look like a domain. Try www.example.com.` | The box holds something that is not a domain name. |
+| `That address belongs to Yosher. Connect a domain you own.` | You typed a Yosher address rather than your own domain. |
+| `Connect one name, like www.example.com, not a wildcard.` | Wildcards are not supported. |
+| `That domain is already connected to a site on Yosher.` | Another site on Yosher has it. If it is yours, remove it there first. |
+| `A site can have up to five domains. Remove one first.` | The limit. |
+| `Vercel says that domain is already in use elsewhere. Remove it there, or ask us.` | The hosting provider has the domain on another project. |
+| `Vercel no longer has this domain. Remove it here and connect it again.` | The domain was removed on the hosting side. Click {button:Remove|ghost|trash} and connect it again. |
+| `Couldn't copy. Select the value and copy it by hand.` | The browser refused the clipboard. |
 | `Page added. Write it, then publish when it reads right.` | The page exists as a draft and the editor is open. |
 | `Menu order saved.` | The order you dragged into is saved and live. |
 | `Page deleted.` | The page, its published copy and its history are gone. |
@@ -93,7 +120,7 @@ To take it down, click {button:Unpublish|outline}; your browser asks `Take the w
 
 ## Not on this page
 
-Photos on the pages. Your own domain name, such as `oakrowfarm.com`. A contact form that lands in your CRM. An online shop. Visitor counts. Ask us if you need any of these; they are the next things this page grows.
+Photos on the pages. Buying a new domain through Yosher; today you connect one you already own. A contact form that lands in your CRM. An online shop. Visitor counts. Ask us if you need any of these; they are the next things this page grows.
 
 ## Who can do what
 

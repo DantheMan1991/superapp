@@ -1,24 +1,32 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { loadPublishedSite } from "@/lib/sites/read";
+import { loadPublishedSite, loadPublishedSiteByDomain, type PublicSite } from "@/lib/sites/read";
 import { pagePathFromSegments, type SiteMode } from "@/lib/sites/slug";
 import { SitePage } from "./site-page";
 
 /**
- * The public routes share one body. Two route files exist only because a
+ * The public routes share one body. Three route files exist only because a
  * page's LINKS depend on how it was reached — `/sites/<slug>` on the platform
- * host, or root-relative on the site's own hostname — and that has to be
- * static per route for the cache to hold it.
+ * host, root-relative on the site's free address, root-relative on a domain
+ * the business connected — and that has to be static per route for the
+ * cache to hold it.
  */
-export type PublicParams = Promise<{ slug: string; path?: string[] }>;
+export type SiteSource = { by: "slug"; slug: string } | { by: "domain"; host: string };
+
+function load(source: SiteSource): Promise<PublicSite | null> {
+  return source.by === "slug"
+    ? loadPublishedSite(source.slug)
+    : loadPublishedSiteByDomain(source.host);
+}
 
 export async function publicSiteMetadata(
-  params: PublicParams,
+  source: SiteSource,
+  segments: string[] | undefined,
 ): Promise<Metadata> {
-  const { slug, path } = await params;
-  const site = await loadPublishedSite(slug);
+  const site = await load(source);
   if (!site) return { robots: { index: false, follow: false } };
-  const page = site.pages.find((p) => p.path === pagePathFromSegments(path));
+  const pagePath = pagePathFromSegments(segments);
+  const page = site.pages.find((p) => p.path === pagePath);
   if (!page) return { robots: { index: false, follow: false } };
   const description = page.content.description || site.brand.tagline || undefined;
   return {
@@ -28,14 +36,22 @@ export async function publicSiteMetadata(
     description,
     openGraph: { title: site.title, description, type: "website" },
     robots: { index: true, follow: true },
+    // Whichever address the page was reached by, the business's own domain
+    // is the one search engines should keep, once it is live.
+    ...(site.customHost
+      ? { alternates: { canonical: `https://${site.customHost}${pagePath === "/" ? "/" : pagePath}` } }
+      : {}),
   };
 }
 
-export async function renderPublicSite(params: PublicParams, mode: SiteMode) {
-  const { slug, path } = await params;
-  const site = await loadPublishedSite(slug);
+export async function renderPublicSite(
+  source: SiteSource,
+  segments: string[] | undefined,
+  mode: SiteMode,
+) {
+  const site = await load(source);
   if (!site) notFound();
-  const page = site.pages.find((p) => p.path === pagePathFromSegments(path));
+  const page = site.pages.find((p) => p.path === pagePathFromSegments(segments));
   if (!page) notFound();
   return <SitePage site={site} page={page} mode={mode} />;
 }

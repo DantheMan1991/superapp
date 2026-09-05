@@ -24,7 +24,13 @@ export type MarketingErrorCode =
   | "PAGE_PATH_INVALID"
   | "PAGE_IS_HOME"
   | "PAGE_INVALID"
-  | "VERSION_MISSING";
+  | "VERSION_MISSING"
+  | "DOMAINS_UNAVAILABLE"
+  | "DOMAIN_INVALID"
+  | "DOMAIN_TAKEN"
+  | "DOMAIN_MISSING"
+  | "DOMAIN_LIMIT"
+  | "DOMAIN_PROVIDER";
 
 export class MarketingError extends Error {
   constructor(
@@ -81,6 +87,18 @@ export function friendlyMessage(err: unknown): string {
         return err.message;
       case "VERSION_MISSING":
         return "That version is gone.";
+      case "DOMAINS_UNAVAILABLE":
+        return "Connecting your own domain isn't switched on for this deployment yet.";
+      case "DOMAIN_INVALID":
+        return err.message;
+      case "DOMAIN_TAKEN":
+        return "That domain is already connected to a site on Yosher.";
+      case "DOMAIN_MISSING":
+        return "That domain is no longer connected.";
+      case "DOMAIN_LIMIT":
+        return "A site can have up to five domains. Remove one first.";
+      case "DOMAIN_PROVIDER":
+        return err.message;
     }
   }
   return "Something went wrong. Please try again.";

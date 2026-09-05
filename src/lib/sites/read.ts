@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
 import { schema, withSystem, withTenant, type Tx } from "@/db";
-import type { Site, SitePage, SitePageVersion } from "@/db/schema";
+import type { Site, SiteDomain, SitePage, SitePageVersion } from "@/db/schema";
 import type { ResolvedBrand } from "@/lib/brand/core";
 import { resolveBrandFor } from "@/lib/brand/read";
 import {
@@ -15,12 +15,13 @@ import {
  * Reading a site — for the public renderer, the draft preview and the
  * Marketing screen.
  *
- * **`lookupSiteBySlug` is the one `withSystem` read on the public path**, and
- * the reason is the same as for an inbound-mail token: a stranger's request
- * carries no tenant, so something trusted has to turn the address into one.
- * It returns identifiers only. Everything after it runs inside that tenant's
- * context as `staff`, through the ordinary member policies, so the database
- * is still deciding whose rows these are.
+ * **`lookupSiteBySlug` and `lookupSiteByDomain` are the two `withSystem`
+ * reads on the public path**, and the reason is the same as for an
+ * inbound-mail token: a stranger's request carries no tenant, so something
+ * trusted has to turn the address into one. They return identifiers only.
+ * Everything after them runs inside that tenant's context as `staff`,
+ * through the ordinary member policies, so the database is still deciding
+ * whose rows these are.
  */
 export interface PublicSite {
   id: string;
@@ -32,11 +33,21 @@ export interface PublicSite {
   settings: SiteSettings;
   brand: ResolvedBrand;
   pages: SitePageView[];
+  /**
+   * The first domain the business connected and Vercel confirmed, if any:
+   * the address search engines are told is the real one, whatever address
+   * the page was reached by.
+   */
+  customHost: string | null;
 }
 
-export async function lookupSiteBySlug(
-  slug: string,
-): Promise<{ id: string; tenantId: string; status: string } | null> {
+export interface SiteHit {
+  id: string;
+  tenantId: string;
+  status: string;
+}
+
+export async function lookupSiteBySlug(slug: string): Promise<SiteHit | null> {
   const row = await withSystem((tx) =>
     tx.query.sites.findFirst({
       where: eq(schema.sites.slug, slug),
@@ -46,11 +57,37 @@ export async function lookupSiteBySlug(
   return row ?? null;
 }
 
+/** A connected domain routes only while its row is `active` (Vercel's word). */
+export async function lookupSiteByDomain(host: string): Promise<SiteHit | null> {
+  const rows = await withSystem((tx) =>
+    tx
+      .select({
+        id: schema.sites.id,
+        tenantId: schema.sites.tenantId,
+        status: schema.sites.status,
+      })
+      .from(schema.siteDomains)
+      .innerJoin(
+        schema.sites,
+        and(
+          eq(schema.sites.id, schema.siteDomains.siteId),
+          eq(schema.sites.tenantId, schema.siteDomains.tenantId),
+        ),
+      )
+      .where(
+        and(eq(schema.siteDomains.domain, host), eq(schema.siteDomains.status, "active")),
+      )
+      .limit(1),
+  );
+  return rows[0] ?? null;
+}
+
 function toView(
   site: Site,
   brand: ResolvedBrand,
   pages: SitePage[],
   which: "draft" | "published",
+  customHost: string | null,
 ): PublicSite {
   return {
     id: site.id,
@@ -69,13 +106,25 @@ function toView(
         navOrder: p.navOrder,
         content: readPageContent(which === "draft" ? p.draft : p.published),
       })),
+    customHost,
   };
 }
 
-/** The site as the internet sees it: published pages only, or nothing. */
-export async function loadPublishedSite(slug: string): Promise<PublicSite | null> {
-  const hit = await lookupSiteBySlug(slug);
-  if (!hit || hit.status !== "published") return null;
+async function activeHost(tx: Tx, tenantId: string, siteId: string): Promise<string | null> {
+  const row = await tx.query.siteDomains.findFirst({
+    where: and(
+      eq(schema.siteDomains.tenantId, tenantId),
+      eq(schema.siteDomains.siteId, siteId),
+      eq(schema.siteDomains.status, "active"),
+    ),
+    orderBy: asc(schema.siteDomains.createdAt),
+    columns: { domain: true },
+  });
+  return row?.domain ?? null;
+}
+
+async function loadPublishedFromHit(hit: SiteHit): Promise<PublicSite | null> {
+  if (hit.status !== "published") return null;
   return withTenant(hit.tenantId, async (tx) => {
     const site = await tx.query.sites.findFirst({
       where: and(eq(schema.sites.tenantId, hit.tenantId), eq(schema.sites.id, hit.id)),
@@ -90,8 +139,21 @@ export async function loadPublishedSite(slug: string): Promise<PublicSite | null
       orderBy: asc(schema.sitePages.navOrder),
     });
     const brand = await resolveBrandFor(tx, hit.tenantId, null);
-    return toView(site, brand, pages, "published");
+    const customHost = await activeHost(tx, hit.tenantId, site.id);
+    return toView(site, brand, pages, "published", customHost);
   });
+}
+
+/** The site as the internet sees it: published pages only, or nothing. */
+export async function loadPublishedSite(slug: string): Promise<PublicSite | null> {
+  const hit = await lookupSiteBySlug(slug);
+  return hit ? loadPublishedFromHit(hit) : null;
+}
+
+/** The same, reached through a domain the business connected. */
+export async function loadPublishedSiteByDomain(host: string): Promise<PublicSite | null> {
+  const hit = await lookupSiteByDomain(host);
+  return hit ? loadPublishedFromHit(hit) : null;
 }
 
 /** One page and its history, for the editor. Null when it is not this tenant's. */
@@ -128,11 +190,11 @@ export async function loadPageEditor(
   return { site, page, siblings, versions };
 }
 
-/** The tenant's site with its drafts, inside the caller's transaction. Null when none. */
+/** The tenant's site with its drafts and domains, inside the caller's transaction. Null when none. */
 export async function loadSiteDrafts(
   tx: Tx,
   tenantId: string,
-): Promise<{ site: Site; pages: SitePage[]; view: PublicSite } | null> {
+): Promise<{ site: Site; pages: SitePage[]; domains: SiteDomain[]; view: PublicSite } | null> {
   const site = await tx.query.sites.findFirst({
     where: eq(schema.sites.tenantId, tenantId),
   });
@@ -141,6 +203,11 @@ export async function loadSiteDrafts(
     where: and(eq(schema.sitePages.tenantId, tenantId), eq(schema.sitePages.siteId, site.id)),
     orderBy: asc(schema.sitePages.navOrder),
   });
+  const domains = await tx.query.siteDomains.findMany({
+    where: and(eq(schema.siteDomains.tenantId, tenantId), eq(schema.siteDomains.siteId, site.id)),
+    orderBy: asc(schema.siteDomains.createdAt),
+  });
   const brand = await resolveBrandFor(tx, tenantId, null);
-  return { site, pages, view: toView(site, brand, pages, "draft") };
+  const customHost = domains.find((d) => d.status === "active")?.domain ?? null;
+  return { site, pages, domains, view: toView(site, brand, pages, "draft", customHost) };
 }

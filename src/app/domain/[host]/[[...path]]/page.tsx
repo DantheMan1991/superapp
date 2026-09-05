@@ -23,7 +23,7 @@ export async function generateMetadata({ params }: { params: Params }) {
   const { host: raw, path } = await params;
   const host = hostOf(raw);
   if (!host) return { robots: { index: false, follow: false } };
-  return publicSiteMetadata({ by: "domain", host }, path);
+  return publicSiteMetadata({ by: "domain", host }, path, "host");
 }
 
 export default async function DomainSitePage({ params }: { params: Params }) {

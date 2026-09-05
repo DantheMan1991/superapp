@@ -5,6 +5,7 @@ import { lookRadiusVars, resolveLook } from "@/lib/brand/looks";
 import type { PublicSite } from "@/lib/sites/read";
 import { isSafeHref } from "@/lib/sites/links";
 import type { ImageRef, Section, SectionStyle, SitePageView, SiteSettings } from "@/lib/sites/schema";
+import { SECTION_ATTR } from "@/lib/sites/preview";
 import { siteHref, type SiteMode } from "@/lib/sites/slug";
 import type { Slide } from "@/lib/sites/slides";
 import {
@@ -21,6 +22,7 @@ import {
 } from "@/lib/sites/style";
 import { cn } from "@/lib/utils";
 import { CardIcon } from "./card-icons";
+import { DraftSelect } from "./draft-select";
 import { EnquiryForm } from "./enquiry-form";
 import { siteFonts } from "./site-fonts";
 import { Gallery, Slideshow } from "./slideshow";
@@ -104,8 +106,8 @@ export function SitePage({
   return (
     <div style={style} className={cn("site-root flex min-h-screen flex-col bg-white text-neutral-900", fonts.className)}>
       {banner}
-      {/* The draft preview is the owner looking, not a visitor: no count. */}
-      {mode !== "draft" && <ViewBeacon slug={site.slug} path={page.path} />}
+      {/* The draft preview is the owner looking, not a visitor: no count, and a way to point at a section. */}
+      {mode === "draft" ? <DraftSelect /> : <ViewBeacon slug={site.slug} path={page.path} />}
       <Announcement site={site} mode={mode} />
       <SiteHeader site={site} mode={mode} pagePath={page.path} primary={primary} accent={accent} />
 
@@ -317,6 +319,7 @@ function Shell({
   resolved,
   spacing,
   eager,
+  index,
   children,
 }: {
   site: PublicSite;
@@ -326,13 +329,16 @@ function Shell({
   spacing: string;
   /** The hero's background photo loads with the page; every other one waits. */
   eager?: boolean;
+  /** Where on the page this is; the draft marks it so the editor can be told which section was clicked. */
+  index: number;
   children: ReactNode;
 }) {
   const band = backgroundClass(resolved.background);
   const photo =
     resolved.background === "photo" && style?.photo && site.images[style.photo.id] ? style.photo : null;
+  const marker = mode === "draft" ? { [SECTION_ATTR]: index } : {};
   return (
-    <section className={cn(band.className)} style={band.style}>
+    <section className={cn(band.className)} style={band.style} {...marker}>
       {photo && (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -382,7 +388,7 @@ function SectionView({
   const resolved = resolveStyle(section.type, section.style, adjust);
   const tone = toneFor(resolved.background);
   const centred = resolved.align === "center";
-  const shell = { site, mode, style: section.style, resolved };
+  const shell = { site, mode, style: section.style, resolved, index: sectionIndex };
   const room = spacingClass(resolved.spacing);
 
   switch (section.type) {

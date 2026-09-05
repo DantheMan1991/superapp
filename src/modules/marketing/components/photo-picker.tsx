@@ -125,7 +125,12 @@ export function PhotoField({
   );
 }
 
-function PhotoLibraryDialog({
+/**
+ * The library itself, as a dialog: pick a photo, upload one, remove one.
+ * `PhotoField` opens it for a single placement; the gallery's fields open
+ * it to add or change one of several.
+ */
+export function PhotoLibraryDialog({
   open,
   onOpenChange,
   tenantId,

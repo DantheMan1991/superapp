@@ -112,3 +112,23 @@ describe("preparing a photo", () => {
     await expect(preparePhoto(new TextEncoder().encode("hello"))).rejects.toBeInstanceOf(PhotoError);
   });
 });
+
+describe("a gallery", () => {
+  it("holds up to twelve photos with captions, three to a row unless told otherwise", () => {
+    const fresh = newSection("gallery");
+    expect(SectionSchema.safeParse(fresh).success).toBe(true);
+    expect(fresh).toEqual({ type: "gallery", heading: "Photos", items: [], columns: 3 });
+    const parsed = SectionSchema.parse({ type: "gallery", items: [{ image: { id: ID } }], columns: 4 });
+    expect(parsed).toEqual({ type: "gallery", heading: "", items: [{ image: { id: ID, alt: "" }, caption: "" }], columns: 4 });
+    expect(SectionSchema.safeParse({ type: "gallery", columns: 5 }).success).toBe(false);
+    const item = { image: { id: ID, alt: "" }, caption: "" };
+    expect(SectionSchema.safeParse({ type: "gallery", items: Array.from({ length: 13 }, () => item) }).success).toBe(false);
+  });
+
+  it("is summarised by its heading and how many photos it holds", () => {
+    const item = { image: { id: ID, alt: "" }, caption: "" };
+    expect(sectionSummary(newSection("gallery"))).toBe("Photos: no photos yet");
+    expect(sectionSummary({ type: "gallery", heading: "", items: [item], columns: 3 })).toBe("1 photo");
+    expect(sectionSummary({ type: "gallery", heading: "The farm", items: [item, item, item], columns: 2 })).toBe("The farm: 3 photos");
+  });
+});

@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { FORM_FIELD_KINDS, newFormField } from "@/lib/sites/enquiry-schema";
 import { moveItem, paragraphsToText, textToParagraphs } from "@/lib/sites/pages";
 import { FORM_FIELDS_MAX, GALLERY_ITEMS_MAX, type FormField, type FormFieldKind, type Section } from "@/lib/sites/schema";
+import { secondsLabel, SLIDESHOW_SECONDS } from "@/lib/sites/slides";
 import type { SitePhotoView } from "../image-actions";
 import { memberPhotoSrc, PhotoField, PhotoLibraryDialog } from "./photo-picker";
 
@@ -58,6 +59,50 @@ export function SectionForm({
             onChange={(image) => onChange({ ...section, image })}
             library={photos.library}
             onLibraryChange={photos.onLibraryChange}
+          />
+        </div>
+      );
+    case "slideshow":
+      return (
+        <div className="space-y-4">
+          <Field id={id("heading")} label="Heading" hint="Optional.">
+            <Input id={id("heading")} value={section.heading} maxLength={80} onChange={(e) => onChange({ ...section, heading: e.target.value })} />
+          </Field>
+          <div className="space-y-2">
+            <Label>Moves on by itself</Label>
+            <div className="flex flex-wrap gap-2">
+              {SLIDESHOW_SECONDS.map((s) => (
+                <Button
+                  key={s}
+                  type="button"
+                  variant={section.seconds === s ? "default" : "outline"}
+                  size="sm"
+                  aria-pressed={section.seconds === s}
+                  onClick={() => onChange({ ...section, seconds: s })}
+                >
+                  {secondsLabel(s)}
+                </Button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              It pauses while a visitor&apos;s pointer is on it, and never moves for a visitor whose device asks for less motion. Arrows and dots always work.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label>Width</Label>
+            <div className="flex gap-2">
+              <Button type="button" variant={section.layout === "inset" ? "default" : "outline"} size="sm" aria-pressed={section.layout === "inset"} onClick={() => onChange({ ...section, layout: "inset" })}>
+                In the text column
+              </Button>
+              <Button type="button" variant={section.layout === "wide" ? "default" : "outline"} size="sm" aria-pressed={section.layout === "wide"} onClick={() => onChange({ ...section, layout: "wide" })}>
+                Full width
+              </Button>
+            </div>
+          </div>
+          <GalleryFields
+            items={section.items}
+            onChange={(items) => onChange({ ...section, items })}
+            photos={photos}
           />
         </div>
       );

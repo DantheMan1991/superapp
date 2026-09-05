@@ -27,12 +27,64 @@
 | **4b** | **Page views — a first-party beacon, counters per page per day, a `Visitors` panel; and the business's own questions on the form, checked against the published definition.** [ADR 0022](../decisions/0022-page-views-are-a-first-party-beacon.md) | **built 2026-09-04** |
 | **5** | **Photos — a library per site in the private store (one derivative, metadata stripped, ≤ 1,600px), uploaded from the editor's picker, served by the platform on every public route, placed beside the hero, beside the about section, and as a `Photo` section of its own.** [ADR 0023](../decisions/0023-photos-are-one-derivative-in-the-sites-library.md) | **built 2026-09-04** |
 | **5b** | **A `Photo gallery` section: up to twelve photos from the library in a grid of two, three or four, with a heading and a caption each; a photo opens larger in a new tab.** | **built 2026-09-04** |
+| **5c** | **A `Slideshow` section (photos one at a time, arrows and dots, moving on by itself if asked, paused on hover, still under reduced motion) and a lightbox for the gallery's tiles — the public page's one moving part, in one client component with no library.** | **built 2026-09-04** |
 | — | The shop block: `retail` slice 6 (online orders + pickup windows) fills a declared slot; blocked on commitments (retail 3) and web checkout (payments) | not this module's |
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-04 — Slice 5c: the slideshow, and the gallery's lightbox (`claude/marketing-site-slideshow`)
+
+The first client script on a public page beyond the beacon and the form,
+and deliberately the last kind for a while: photos shown one at a time.
+No migration; two sections' JSON.
+
+- **`slideshow` section** (`src/lib/sites/schema.ts`): `heading`
+  (optional), the gallery's `items` (≤ `GALLERY_ITEMS_MAX`, `{ image,
+  caption }`), `seconds` 0–30 (0 = only when pressed; default 6) and
+  `layout` inset | wide (default wide). Catalogue entry `Slideshow`;
+  summarised like the gallery (`<heading>: n photos`).
+- **`src/components/site/slideshow.tsx`** (client): `Slideshow` and
+  `Gallery` (+ its `Lightbox`), plain elements on the site's CSS variables.
+  The server resolves each photo to a `Slide` (`src/lib/sites/slides.ts`:
+  `{ src, alt, caption, width, height }`, `wrapIndex`, `slideLabel`,
+  `SLIDESHOW_SECONDS`, `secondsLabel`) through `toSlides` in
+  `site-page.tsx`, so the component never learns a mode or a row. What a
+  visitor is promised: the first photo is in the server HTML; only the
+  current photo is in the page and the next is fetched ahead; arrows,
+  dots (`aria-current`) and Pause/Play are named buttons; the caption row
+  is `aria-live` with a visually hidden `Photo n of m`; a moving show
+  stops while the pointer or focus is on it and **never moves under
+  `prefers-reduced-motion: reduce`**. The gallery's tiles stay links to the
+  photo's route (no script → new tab) and open the `Lightbox` with a
+  script: `role="dialog"` `aria-modal`, Escape and the arrow keys, focus on
+  Close and back to the tile on close, body scroll locked, a click on the
+  dark closes.
+- **The editor**: the `Slideshow` card has `Heading`, `Moves on by itself`
+  ({button:Only when pressed|outline}, {button:Every 4 seconds|outline},
+  {button:Every 6 seconds|outline}, {button:Every 10 seconds|outline}),
+  `Width` and the gallery's photo rows (`GalleryFields`, shared).
+- Tests: `tests/site-photos.test.ts` (the section's shape and limits,
+  `wrapIndex`, the labels), `sites-pages` catalogue. Guides:
+  `page-editor.md` (the Slideshow kind; the gallery's tiles now open over
+  the page), `website.md`.
+- **Driven on the dev branch (Test tenant, `oak-row-farm`)**: a `Slideshow`
+  added under the home page's hero, headed "Life on the farm", `Every 4
+  seconds`, full width, the library's two photos with captions; saved (the
+  list read `Life on the farm: 2 photos`), published. On the live home page
+  it had already moved to the second photo by the time the checks ran;
+  `Next photo` wrapped to the first with the live caption row reading `The
+  front field Photo 1 of 2`, `Previous photo` went back, 4.6 seconds later
+  the dot had moved on its own, `Pause` became `Play` (`aria-pressed`) and
+  4.6 seconds later nothing had moved. On the about page a gallery tile
+  (still a `target="_blank"` link to the photo's route) opened a
+  `role="dialog" aria-modal` labelled `Photo 1 of 2` with focus on `Close`
+  and the body's scroll locked; ArrowRight read `Photo 2 of 2` with the
+  second photo, ArrowRight again wrapped to the first, Escape closed it
+  with focus back on the tile and the scroll restored; the second tile
+  opened at `Photo 2 of 2` and `Close` closed it.
 
 ### 2026-09-04 — Slice 5b: the gallery (`claude/marketing-site-gallery`)
 
@@ -638,6 +690,13 @@ generated logo re-drawable as a vector.
 
 ## Decisions & gotchas
 
+- **The public page's scripts are three, and each earns its place.** The
+  view beacon (a count), the enquiry form (a pending state and a thank-you)
+  and the slideshow with the gallery's lightbox (photos one at a time).
+  Each is a plain component with no library, each degrades to something
+  that works without it (nothing, a posted form, a link to the photo), and
+  each is written so a visitor who asked for less motion or uses a keyboard
+  loses nothing. A fourth script needs the same three sentences.
 - **A site's free address is decided before a platform host's
   subdomains.** `classifyHost` checks exact platform hosts, then
   `hostToSiteSlug`, then platform subdomains and `.vercel.app`. The order
@@ -827,10 +886,10 @@ generated logo re-drawable as a vector.
   drag is proven; the mouse path is the same sensor set and drop handler,
   but the browser tooling could not produce a real pointer drag. Ten seconds
   with a mouse on the dev branch settles it.
-- **A slideshow or a lightbox** would be the first client script on a
-  public page beyond the beacon and the form; the gallery opens a photo in
-  a new tab instead, on purpose, until somebody misses the other. Alt text
-  is asked for everywhere a photo is placed and never enforced.
+- **The slideshow has no swipe.** A phone's thumbs get the arrows and the
+  dots, which work; a swipe gesture is the next thing a visitor will try
+  and the first thing to add if anybody says so. Alt text is asked for
+  everywhere a photo is placed and never enforced.
 - **A second, smaller derivative** per photo if pages get heavy: the row
   has the room, the route can pick by a query, and the renderer already
   knows every placement's width.
@@ -881,7 +940,8 @@ generated logo re-drawable as a vector.
   needed proving, **CRM and Work switched on** for it. Since slice 5 its
   hero carries a photo (a green canvas reading "Oak Row Farm"); since 5b
   the about page ends in a two-photo gallery and the library holds two
-  rows.
+  rows; since 5c a two-photo slideshow moving every four seconds sits
+  under the home page's hero.
 - **Not yet looked at: dark mode, a phone, and a square mark on the PDF.**
   The screen was driven on the dev branch (build log) but only in the light
   theme on a desktop pane. The colour input on a phone and whether the

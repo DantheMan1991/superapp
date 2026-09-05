@@ -150,7 +150,7 @@ The visitor sees `Message sent.` and the line you set as `After sending`. A visi
 
 ## Not on this page
 
-A slideshow; today a gallery's photos open larger in a new tab. Buying a new domain through Yosher; today you connect one you already own. An online shop. Filing a question's answers into CRM fields; today they stay with the message, the follow-up and the email. Ask us if you need any of these; they are the next things this page grows.
+Video on the pages. Buying a new domain through Yosher; today you connect one you already own. An online shop. Filing a question's answers into CRM fields; today they stay with the message, the follow-up and the email. Ask us if you need any of these; they are the next things this page grows.
 
 ## Who can do what
 

@@ -131,6 +131,17 @@ export const SectionSchema = z.discriminatedUnion("type", [
     /** Photos per row on a wide screen; a phone always shows two. */
     columns: z.union([z.literal(2), z.literal(3), z.literal(4)]).default(3),
   }),
+  z.object({
+    type: z.literal("slideshow"),
+    heading: short(80).default(""),
+    items: z
+      .array(z.object({ image: ImageRefSchema, caption: short(120).default("") }))
+      .max(GALLERY_ITEMS_MAX)
+      .default([]),
+    /** Seconds between photos; 0 moves only when a visitor presses an arrow. */
+    seconds: z.number().int().min(0).max(30).default(6),
+    layout: z.enum(["inset", "wide"]).default("wide"),
+  }),
 ]);
 export type Section = z.infer<typeof SectionSchema>;
 export type SectionType = Section["type"];

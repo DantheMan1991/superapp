@@ -63,3 +63,4 @@ Keep them short — one page. An ADR nobody reads has failed at its only job.
 | [0026](0026-a-map-is-a-picture-the-platform-draws.md) | A map is a picture the platform draws, from public-domain tiles | 2026-09-05 | Accepted |
 | [0027](0027-the-assistant-proposes-words-and-the-owner-saves-them.md) | The assistant proposes words into slots the code chose, and the owner saves them | 2026-09-05 | Accepted |
 | [0028](0028-a-packs-block-is-data-the-site-draws.md) | A pack's block on the website is data the site draws | 2026-09-05 | Accepted |
+| [0029](0029-the-preview-follows-the-editor-not-the-save.md) | The preview follows the editor, not the save | 2026-09-05 | Accepted |

@@ -121,6 +121,22 @@ export async function lookupSiteByDomain(host: string): Promise<SiteHit | null> 
   return rows[0] ?? null;
 }
 
+/**
+ * What these sections would show live, whether or not they are saved: the
+ * blocks' views and the events when one asks for them (the editor's live
+ * preview, slice 13). The same two reads the site makes for a page on show.
+ */
+export async function loadLiveData(
+  tx: Tx,
+  tenantId: string,
+  sections: Section[],
+  now = new Date(),
+): Promise<{ blocks: Record<string, BlockView>; events: LiveEvent[] }> {
+  const blocks = await loadSiteBlocks(tx, tenantId, sections, now);
+  const events = sections.some((s) => s.type === "events") ? await liveEvents(tx, tenantId, now) : [];
+  return { blocks, events };
+}
+
 /** Every section of every page on show, for the slot to pick its blocks from. */
 function sectionsOnShow(pages: SitePage[], which: "draft" | "published"): Section[] {
   return pages.flatMap((p) => readPageContent(which === "draft" ? p.draft : p.published).sections);
@@ -134,7 +150,7 @@ function wantsEvents(pages: SitePage[], which: "draft" | "published"): boolean {
 }
 
 /** The Events calendar's next months, as the renderer takes them; nothing when there is no such calendar. */
-async function liveEvents(tx: Tx, tenantId: string, now = new Date()): Promise<LiveEvent[]> {
+export async function liveEvents(tx: Tx, tenantId: string, now = new Date()): Promise<LiveEvent[]> {
   const calendarId = await findManagedCalendarId(tx, tenantId, "events");
   if (!calendarId) return [];
   const items = await itemsOnCalendar(tx, calendarId, now, new Date(now.getTime() + EVENTS_LOAD_DAYS * 86_400_000));

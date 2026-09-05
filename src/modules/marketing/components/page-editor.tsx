@@ -42,12 +42,14 @@ import {
   undescribedPhotosOnPage,
 } from "@/lib/sites/pages";
 import {
+  draftImages,
   isPreviewDevice,
   PREVIEW_DEVICE_KEY,
   PREVIEW_DEVICES,
   previewWidth,
   readPreviewMessage,
   type PreviewDevice,
+  type PreviewMessage,
 } from "@/lib/sites/preview";
 import { PageContentSchema, type PageContent, type Section } from "@/lib/sites/schema";
 import type { SitePhotoView } from "../image-actions";
@@ -184,6 +186,8 @@ export function PageEditor({
   const [pending, startTransition] = useTransition();
   const device = useSyncExternalStore(subscribeDevice, readDevice, () => "desktop" as PreviewDevice);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  // The draft the preview should be drawing, for when the frame (re)loads and asks (slice 13).
+  const draftRef = useRef<PreviewMessage | null>(null);
   const formRef = useRef<HTMLDivElement>(null);
   // The preview said a section was clicked: bring its form into view.
   const [showForm, setShowForm] = useState(0);
@@ -211,6 +215,7 @@ export function PageEditor({
         setShowForm((n) => n + 1);
       } else if (message.type === "yosher:site-ready") {
         tellPreview(rows.findIndex((r) => r.key === selected));
+        if (draftRef.current) iframeRef.current?.contentWindow?.postMessage(draftRef.current, window.location.origin);
       }
     };
     window.addEventListener("message", onMessage);
@@ -233,6 +238,21 @@ export function PageEditor({
   const current = JSON.stringify({ title, path, inNav, content });
   const dirty = current !== saved;
   const pathCheck = isHome ? ({ ok: true, path: "/" } as const) : normalizePagePath(path);
+  // The live preview (ADR 0029): the page as it stands goes to the frame a
+  // moment after every edit, so a keystroke is one message rather than ten,
+  // and the frame redraws with it. Nothing is saved by looking.
+  const livePath = pathCheck.ok ? pathCheck.path : savedPath;
+  const draftMessage = useMemo<PreviewMessage>(
+    () => ({ type: "yosher:site-draft", page: { title, path: livePath, content }, images: draftImages(library) }),
+    [title, livePath, content, library],
+  );
+  useEffect(() => {
+    draftRef.current = draftMessage;
+    const timer = window.setTimeout(() => {
+      iframeRef.current?.contentWindow?.postMessage(draftMessage, window.location.origin);
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [draftMessage]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -334,7 +354,7 @@ export function PageEditor({
   }
 
   const selectedRow = rows.find((r) => r.key === selected) ?? null;
-  const previewSrc = `/sites/${slug}/draft${savedPath === "/" ? "" : savedPath}`;
+  const previewSrc = `/sites/${slug}/draft${savedPath === "/" ? "" : savedPath}?live=1`;
   // Both DndContexts in the module carry an `id`: without one dnd-kit numbers
   // its accessibility ids from a counter that runs differently on the server
   // and the client, and React reports a hydration mismatch on aria-describedby.
@@ -518,7 +538,7 @@ export function PageEditor({
         <div className="lg:sticky lg:top-4 lg:self-start">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-muted-foreground">
-              Preview of the saved draft{dirty ? " (save to see your changes)" : ""}. Click a section to edit it.
+              Preview of the draft, following your edits as you make them; save to keep them. Click a section to edit it.
             </p>
             <div className="flex items-center gap-1">
               {PREVIEW_DEVICES.map((d) => {

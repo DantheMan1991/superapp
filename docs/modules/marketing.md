@@ -49,6 +49,58 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-05 — Slice 13: the preview follows the editor (`claude/marketing-live-preview`)
+
+The founder: "any changes on the site are not live; you have to hit save
+to see them. I want to see the change immediately." Built the same day.
+No migration. [ADR 0029](../decisions/0029-the-preview-follows-the-editor-not-the-save.md)
+records why the frame stayed and the save did not move.
+
+- **The frame stays; the editor sends it the draft.** The draft route
+  asked for `?live=1` renders the saved draft as before, then hands the
+  page to `LiveDraft` (`src/components/site/live-draft.tsx`, a client
+  component that imports the renderer), which believes one new message
+  from its parent on this origin, `yosher:site-draft` (the page as it
+  stands: title, path, sections, and the photos the editor holds), and
+  redraws the same `SitePage` with it. The editor posts it 120ms after
+  every edit (one message per keystroke burst, not per keystroke) and
+  again whenever the frame says it is ready, so a frame that loads after
+  the owner started typing catches up at once. The renderer now has to
+  stay free of server-only imports, and does.
+- **The shape is checked, the limits are not** (`readPreviewMessage` in
+  `preview.ts`): strings where strings go, sections as objects of a kind in
+  `SECTION_DEFAULTS`, at most `PAGE_SECTIONS_MAX`. A headline being typed
+  is blank for a moment and the preview shows that instead of stopping;
+  the renderer turns anything unsafe into nothing as it does for a stored
+  row, so a draft that could not be saved can still be seen.
+- **Live data for unsaved sections.** A block whose view the page did not
+  load, or an events section when none were loaded, makes the frame ask
+  `POST /api/marketing/sites/live` (member-only, `loadLiveData` in
+  `read.ts`: the same `loadSiteBlocks` and `liveEvents` the draft route
+  runs, over sections parsed through the content model, nothing written,
+  `no-store`), debounced 250ms with the previous ask aborted, and keeps
+  what comes back. `wantsLiveData` (pure) decides when.
+- **The outline survives a redraw**: `LiveDraft` keeps the selected index
+  from the editor's `yosher:site-select` and paints `site-selected` again
+  after every draft, since a re-rendered section can lose a class the
+  click-to-select island added by hand.
+- **Driven on the dev branch** on Test's home page: the frame's `src`
+  carried `?live=1`; a new headline typed in the form reached the frame's
+  `h1` in about 200ms with `Unsaved changes` up and nothing saved; a
+  `Price list` added after the headline drew at once (its rows already
+  loaded for the saved twin), and with its sold-out rule changed to a
+  config the page had not loaded, its rows came through the live route in
+  about three seconds on the route's first compile (the request answered
+  200); the phone width still framed the live page at 390px; a click on a
+  section in the frame still selected its row. Ten sections in the frame,
+  ten rows in the list, and the page was left unsaved, unchanged. Tests:
+  `tests/site-preview.test.ts` (the draft message, the photo sizes, when
+  live data is wanted).
+- **Not built here:** an edit made in the preview itself (the frame is a
+  picture of the draft, the form is where it is written), and a preview of
+  another page than the one being edited (the menu still moves between
+  saved drafts).
+
 ### 2026-09-05 — Slice 9b: a pack's block on the page, and Retail's price list first (`claude/marketing-site-blocks-seam`)
 
 The last roadmap row. No migration. The site can now host a block a pack
@@ -1284,6 +1336,15 @@ feature means for it.
   `public_access_attempts`, keyed by a hash of the tenant id rather than
   `ipKey` (which is `unsalted`, and so no key at all, without
   `INTERVIEW_IP_SALT`).
+- **The preview follows the editor, not the save** (13, [ADR 0029](../decisions/0029-the-preview-follows-the-editor-not-the-save.md)).
+  The frame stays (device widths are the browser's breakpoints, and two
+  stylesheets in one document is the other reason), and the editor posts
+  `yosher:site-draft` to it 120ms after every edit; `LiveDraft` in the
+  frame redraws the same renderer with it. Autosave was refused for the
+  reason ADR 0027 gave the assistant: a save nobody pressed, and a
+  version per keystroke. The frame checks the SHAPE of the draft, not the
+  content model's limits, so a blank required field mid-edit still
+  draws; unsaved sections that need live data ask `/api/marketing/sites/live`.
 - **A pack's block is data the site draws** (9b, [ADR 0028](../decisions/0028-a-packs-block-is-data-the-site-draws.md)).
   The third use of P5: the site names the slot (`src/lib/site-blocks`), the
   registry names the packs, Retail fills it. A provider describes its editor
@@ -1571,6 +1632,11 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
   `TEXT_PATHS`, `assemblePageBlocks`, the tools and user turns);
   `components/assistant-controls.tsx` (`RewriteWords`, `WritePage`,
   `SuggestDescription`); `tests/site-assistant.test.ts`
+- `src/components/site/live-draft.tsx` — the frame's client half (13, ADR 0029):
+  believes `yosher:site-draft`, redraws `SitePage`, fetches live data for
+  unsaved sections from `src/app/api/marketing/sites/live/route.ts`
+  (`loadLiveData` in `read.ts`); `preview.ts` holds the protocol
+  (`readPreviewMessage`, `draftImages`, `wantsLiveData`)
 - `src/lib/site-blocks/` — the declared slot (9b, ADR 0028): `types.ts` (the
   provider shape, types only), `core.ts` (pure: `blockKey`, `newBlockSection`,
   `filterCatalog`, `blockLabel`), `registry.ts` (the one file that names a
@@ -1937,6 +2003,11 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
   will be a client's, or the founder's own test on his site.
 - The `cta` and `hero` buttons point at the contact page; the assembler pins
   that, and the prompt asks for labels that say so.
+- **A dev-only React warning on the draft page**, `Each child in a list
+  should have a unique "key" prop … passed a child from DraftSitePage`,
+  shows on the draft route with or without `?live=1` (seen while driving
+  slice 13; it predates it). The only JSX the route makes is the banner;
+  nothing is wrong on the page. Worth five minutes with React DevTools.
 - **The shop block** is `retail` slice 6's, through the `block` slot 9b made; it needs a client island the site owns and a provider names, the slot's first change. **Only list-shaped blocks** exist today (rows: name, detail, amount, sold out) and only two field kinds (select, switch); both grow by adding a kind to the slot, where every pack gets it. **A price changed in Retail reaches the site on the page cache's clock** (five minutes); nothing in Retail revalidates a site, like Scheduling.
 - **Sitemap and robots per site**, and a `canonical` pointing at the host
   address once one exists.

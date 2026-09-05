@@ -6,6 +6,7 @@ import { loadPageEditor } from "@/lib/sites/read";
 import { mapStatusLine } from "@/lib/sites/map-core";
 import { readPageContent, readSiteSettings } from "@/lib/sites/schema";
 import { PageHeader } from "@/components/app/page-header";
+import { assistantOn } from "@/modules/marketing/assistant";
 import { PageEditor, type VersionView } from "@/modules/marketing/components/page-editor";
 
 export const dynamic = "force-dynamic";
@@ -72,6 +73,7 @@ export default async function PageEditorRoute({
         }))}
         schedulingOn={schedulingOn}
         mapStatus={mapStatusLine(readSiteSettings(data.site.settings))}
+        assistantOn={assistantOn()}
       />
     </div>
   );

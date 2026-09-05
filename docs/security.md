@@ -307,7 +307,7 @@ Paste these into the PR. They are the actual gate.
 | `STRIPE_CONNECT_WEBHOOK_SECRET` | Connect events — the tenant's own connected accounts. A SEPARATE endpoint with a separate secret, because Stripe only delivers `account.updated` to a Connect-enabled one | Stripe dashboard |
 | `SQUARE_APPLICATION_ID`, `SQUARE_APPLICATION_SECRET` | The tenant's own Square account, via OAuth (ADR 0017). The secret is sent to Square at code exchange and on revoke, and never anywhere else. `SQUARE_ENVIRONMENT` picks sandbox (the default) or production | Square Developer Console |
 | `SQUARE_WEBHOOK_SIGNATURE_KEY` | Square events. HMAC-SHA256 over the notification URL plus the raw body, so `NEXT_PUBLIC_APP_URL` must match the URL registered in the console exactly | Square Developer Console |
-| `ANTHROPIC_API_KEY` | Copilot, extraction | Anthropic console |
+| `ANTHROPIC_API_KEY` | Copilot, extraction, the site copywriter and the page editor's assistant (Marketing 1, 12) | Anthropic console |
 | `PLAID_*` | Bank feed | Plaid dashboard |
 | Stalwart / JMAP creds | Mailbox access | Per-deployment |
 
@@ -364,6 +364,7 @@ Every path into the system, and what makes it trustworthy.
 | `/sites/[slug]/robots.txt`, `/sites/[slug]/sitemap.xml`, `/sites/[slug]/icon/[size]` and the `/domain/[host]/` twins | Public | **A PUBLISHED site only**, else 404 (Marketing 11a). Robots and the sitemap are text made from the published pages and the address the request came in by (the connected domain when there is one); the icon is the brand's square logo or a monogram drawn from the initials and the colour. Nothing here reads a session or writes anything; `src/proxy.ts` sends a site host's `/robots.txt`, `/sitemap.xml`, `/favicon.ico` and `/apple-touch-icon.png` here and never the platform's own |
 | `/api/marketing/sites/images/[id]` | Clerk session → `resolveTenantContext()` | A site photo for members: the editor's picker and the draft preview. RLS proves the row is the tenant's; another tenant's id is the same 404 as none |
 | `/api/marketing/sites/upload` | Clerk session, owner, Marketing enabled | The presigned-upload door for photos, the brand logo's twin: a token bounded to the tenant's `sites/<tenant>/photos/` prefix, the photo types and 12MB. Registration (`registerSitePhotoAction`) re-reads the real bytes and keeps only the derivative |
+| The page editor's assistant (`rewriteSectionAction`, `draftPageAction`, `describePhotoAction` in `src/modules/marketing/assistant-actions.ts`) | Clerk session, owner, Marketing enabled, `ANTHROPIC_API_KEY` set | **What leaves the platform** (Marketing 12, ADR 0027): the brief the public page already prints (name, tagline, kind, address, hours) and ONE thing: the words of one section by slot, one sentence about a page, or one photo's pixels. Never a row id, a visitor's message, a booking, a draft, a session or a file path. What comes back is words through one forced tool, cut to size and parsed through the content model, handed to the editor's UNSAVED state: these actions write nothing, the owner saves. A valve of sixty asks per tenant per hour (`site_assistant` in `public_access_attempts`) |
 | Vercel Domains API | `VERCEL_API_TOKEN`, project-scoped | Outbound only, from owner actions; every response Zod-parsed (S5). The token adds and removes domains on THIS project and nothing else |
 | JMAP → Stalwart | Per-mailbox credentials | Outbound; responses are untrusted input → Zod (S5) |
 | AI responses | None | Model output is **never** trusted. Validate, never `eval`, never let it choose a tenant id |
@@ -376,7 +377,10 @@ Two recurring traps:
 - **Untrusted content reaches the model.** Mail bodies and uploaded documents
   flow into Claude prompts. Treat any instruction inside them as data. The model
   may summarize a document; it may never be given authority to act on
-  instructions found inside one.
+  instructions found inside one. A section's words and an owner's
+  instruction reach the page editor's assistant the same way (Marketing 12):
+  the model may only answer with words for the slots it was given, and the
+  code, never the model, decides where they go.
 
 ---
 

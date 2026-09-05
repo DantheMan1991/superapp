@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { ImageRef } from "@/lib/sites/schema";
 import { deleteSitePhotoAction, registerSitePhotoAction, type SitePhotoView } from "../image-actions";
+import { SuggestDescription } from "./assistant-controls";
 
 /**
  * Choosing a photo for a section: the one the section has, its alt text,
@@ -47,6 +48,7 @@ export function PhotoField({
   onChange,
   library,
   onLibraryChange,
+  assistantOn,
 }: {
   idPrefix: string;
   label: string;
@@ -56,6 +58,8 @@ export function PhotoField({
   onChange: (next: ImageRef | null) => void;
   library: SitePhotoView[];
   onLibraryChange: (next: SitePhotoView[]) => void;
+  /** Whether the assistant may suggest the description from the picture itself. */
+  assistantOn?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const current = value ? library.find((p) => p.id === value.id) : undefined;
@@ -77,13 +81,19 @@ export function PhotoField({
             </p>
             <div className="space-y-1">
               <Label htmlFor={`${idPrefix}-alt`}>Describe the photo</Label>
-              <Input
-                id={`${idPrefix}-alt`}
-                value={value.alt}
-                maxLength={160}
-                placeholder="What is in the picture, for people who can't see it"
-                onChange={(e) => onChange({ ...value, alt: e.target.value })}
-              />
+              <div className="flex flex-wrap gap-2">
+                <Input
+                  id={`${idPrefix}-alt`}
+                  value={value.alt}
+                  maxLength={160}
+                  placeholder="What is in the picture, for people who can't see it"
+                  className="min-w-0 flex-1"
+                  onChange={(e) => onChange({ ...value, alt: e.target.value })}
+                />
+                {assistantOn && current && (
+                  <SuggestDescription imageId={value.id} onSuggested={(alt) => onChange({ ...value, alt })} />
+                )}
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>

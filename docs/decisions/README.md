@@ -61,3 +61,4 @@ Keep them short — one page. An ADR nobody reads has failed at its only job.
 | [0024](0024-a-look-is-a-preset-and-its-fonts-are-the-platforms.md) | A look is a preset, and its fonts are the platform's | 2026-09-05 | Accepted |
 | [0025](0025-a-booking-is-an-enquiry-with-a-time.md) | A booking is an enquiry with a time, on a calendar the platform provisions | 2026-09-05 | Accepted |
 | [0026](0026-a-map-is-a-picture-the-platform-draws.md) | A map is a picture the platform draws, from public-domain tiles | 2026-09-05 | Accepted |
+| [0027](0027-the-assistant-proposes-words-and-the-owner-saves-them.md) | The assistant proposes words into slots the code chose, and the owner saves them | 2026-09-05 | Accepted |

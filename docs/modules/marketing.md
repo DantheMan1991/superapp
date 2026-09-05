@@ -41,13 +41,83 @@
 | **10** | **`Find us`: a map of the site's address, a picture the platform draws from public-domain USGS tiles around a pin the Census geocoder placed at save, with the address and a `Get directions` link. No client library, no third-party request from a visitor's browser, United States only.** [ADR 0026](../decisions/0026-a-map-is-a-picture-the-platform-draws.md) | **built 2026-09-05** |
 | **11a** | **What search engines and browsers ask a site for: `robots.txt` and `sitemap.xml` per site on every address it has, LocalBusiness structured data on the home page from the settings (address, phone, email, the map's pin, the logo, the social profiles), and an icon from the brand kit (a square logo as it is, otherwise a monogram in the brand colour) at 32, 180 and 512.** | **built 2026-09-05** |
 | **11b** | **A share image drawn per page (the page's title in the kit's type on the brand colour, the logo or the monogram in a white panel, the address in the corner) as `og:image` and the Twitter card; and an address the site used to have sends people on to the current one, for the same page, on the platform path and on the free address.** | **built 2026-09-05** |
-| 12 | The assistant everywhere: rewrite one section, write a page from a sentence, suggest a photo description from the image | |
+| **12** | **The assistant everywhere: new words for one section with an optional ask, a page from a sentence, a photo's description from its pixels. Each proposes words into slots the code chose, unsaved until the owner saves; nothing else about a section is sent or changed.** [ADR 0027](../decisions/0027-the-assistant-proposes-words-and-the-owner-saves-them.md) | **built 2026-09-05** |
 | — | The shop block: `retail` slice 6 (online orders + pickup windows) fills a declared slot; blocked on commitments (retail 3) and web checkout (payments) | not this module's |
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-05 — Slice 12: the assistant everywhere (`claude/marketing-site-assistant`)
+
+The last row of the elite-builder roadmap but 9b. No migration. Three
+doors in the page editor, one shape ([ADR 0027](../decisions/0027-the-assistant-proposes-words-and-the-owner-saves-them.md)):
+the model is briefed with what the public page already prints (name,
+tagline, kind, address, hours) plus ONE bounded thing, answers through one
+forced tool, and what comes back is parsed through the content model and
+handed to the editor's own unsaved state. The actions write no row; the
+owner reads and presses Save, or does not. Drawn only when
+`ANTHROPIC_API_KEY` is set (`assistantOn()`, passed from the route).
+
+- **New words for one section** (`RewriteWords`, under `Layout and look`):
+  an optional ask (up to 200 characters) and "Rewrite the words".
+  `sectionWords` walks a per-kind path map (`TEXT_PATHS`: hero
+  `headline, subheadline, cta.label`; columns `heading, intro,
+  cards[].heading, cards[].body[], cards[].cta.label`; and so on) and sends
+  the strings that are there, each with its length (`limitFor`, the
+  schema's numbers); `applyWords` puts the same keys back, cuts to size,
+  ignores any other key, and parses the result — so a photo, a link, an
+  icon, a booking's rule or the look cannot change, and an emptied
+  required slot is the one friendly refusal.
+- **A page from a sentence** (`WritePage`, in the Page card): a sentence
+  (up to 400 characters) and "Write the page"; a confirm when sections
+  exist. The tool returns blocks of a fixed kind list (`PAGE_BLOCK_KINDS`:
+  hero, text, offer, columns, cta, form, contact, hours, map, and booking
+  and events while Scheduling is on) with a heading, lines, items and a
+  button; `assemblePageBlocks` makes real sections over `newSection`
+  defaults (buttons to `/contact`, card icon `check`, once-only kinds
+  deduped, calendar kinds dropped without Scheduling, everything cut to
+  size rather than refused) and the meta description with them.
+- **A photo's description** (`SuggestDescription`, beside `Describe the
+  photo` and in gallery rows): the photo's bytes from the private blob,
+  through `normalizeImageForVision`, as one image block with one sentence
+  of instruction; `AltTextSchema` trims a leading "Photo of" and caps at
+  160. Nothing about the site goes with it.
+- **The server half**: `assistant.ts` (`rewriteSectionWords`,
+  `draftPageContent`, `describePhoto`, each with an injectable call over
+  `callAssistantModel`: adaptive thinking, one cached system prompt, a
+  forced tool) and `assistant-actions.ts` (gate → Zod → the brief in one
+  `withTenant` read → the model call OUTSIDE any transaction → parse).
+  Errors `ASSISTANT_OFF`, `ASSISTANT_BUSY`, `ASSISTANT_FAILED` with the
+  reason in the log and one friendly line at the client. The valve is
+  `site_assistant` in `public_access_attempts`, sixty an hour per tenant,
+  keyed by a sha256 of the tenant id: `ipKey` is `unsalted` without
+  `INTERVIEW_IP_SALT`, which `overPublicCap` treats as no key at all.
+- **Driven on the dev branch** on Test, with the laptop's key. The contact
+  page's Contact details note, asked for "shorter and warmer, and say the
+  phone is the quickest way to reach us", came back in five seconds as "A
+  phone call is the quickest way to reach us. Deliveries go out Fridays…",
+  the heading untouched, `Unsaved changes` up, and was saved. The home
+  page's one undescribed photo (a Columns card) was described in four
+  seconds ("White bold text reading "Oak Row Farm" on the left side of a
+  plain green background…", 149 characters), the amber nudge cleared, and
+  was saved. A new page `Tours` at `/tours`, written from one sentence
+  about free Saturday farm tours, came back in thirteen seconds as six
+  sections (Big headline "Come walk the farm with us", Text "What a visit
+  is like", Columns "Who comes out", Hours, Book a time, Call to action)
+  and a 151-character description, and was saved; it is unpublished.
+- **A trap**: after the editor route's file was edited while the dev
+  server was up, Turbopack answered the route with the not-found page
+  (application code ran, 140ms) until a later edit triggered a rebuild.
+  Instrumenting the route proved the data was there; the instrument line
+  was removed. Not a code problem, but ten minutes of one.
+- **Not built here:** a conversation (each press is one ask; "no, shorter"
+  is typed into the box), the assistant on the Website page's details or
+  header and footer, a caption suggestion (a caption is the owner's voice,
+  a description is the picture's), and a rewrite of a whole page's words
+  in one press (one section at a time keeps every answer readable before
+  it is saved). Tests: `tests/site-assistant.test.ts`.
 
 ### 2026-09-05 — Slice 11b: the share image, and an old address that sends people on (`claude/marketing-site-share-redirects`)
 
@@ -1131,6 +1201,21 @@ feature means for it.
   about and contact in a fixed order. Adaptive thinking, on purpose: this is
   the reasoning-shaped task `lib/claude.ts` says new call sites should think
   about, and the owner pressed "Build it" expecting to wait.
+- **The assistant in the editor proposes; the owner saves** (slice 12,
+  [ADR 0027](../decisions/0027-the-assistant-proposes-words-and-the-owner-saves-them.md)).
+  Three doors, one shape: a brief of what the public page already prints,
+  ONE bounded input (a section's words by slot with a length each, a
+  sentence, a photo's pixels), one forced tool, a parse through the content
+  model, and the editor's own unsaved state. `sectionWords`/`applyWords`
+  walk a per-kind path map (`hero: headline, subheadline, cta.label` and so
+  on) so a rewrite can touch nothing but strings that were already there;
+  `assemblePageBlocks` turns blocks of a fixed kind list into real sections
+  with `newSection` defaults, once-only kinds deduped, calendar kinds
+  dropped while Scheduling is off. The actions write no row: a mistake is
+  undone by not saving. The valve is `site_assistant` in
+  `public_access_attempts`, keyed by a hash of the tenant id rather than
+  `ipKey` (which is `unsalted`, and so no key at all, without
+  `INTERVIEW_IP_SALT`).
 - **Two addresses, one renderer.** `/sites/[slug]/[[...path]]` on the platform
   host, always; `/hosted/[slug]/[[...path]]` is where `src/proxy.ts` rewrites
   `<slug>.<SITE_DOMAIN>` (locally `<slug>.localhost:3000`, no hosts-file
@@ -1398,6 +1483,12 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
 - `src/modules/accounting/invoicing/invoice-brand.ts` — Accounting's half of
   the seam; `invoice-pdf-model.ts` (`InvoicePdfBrand`, `INVOICE_INK`,
   `INVOICE_LOGO_BOX`) and `invoice-pdf.tsx` draw it
+- `src/modules/marketing/assistant.ts` (the three model calls, injectable),
+  `assistant-actions.ts` (gate → brief → call → parse; writes nothing),
+  `ai/assistant-prompt.ts` (the pure half: `sectionWords`/`applyWords` over
+  `TEXT_PATHS`, `assemblePageBlocks`, the tools and user turns);
+  `components/assistant-controls.tsx` (`RewriteWords`, `WritePage`,
+  `SuggestDescription`); `tests/site-assistant.test.ts`
 - `docs/help/marketing/overview.md` — the screen's guide
 
 ## Decisions & gotchas
@@ -1724,9 +1815,6 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
 - **A second, smaller derivative** per photo if pages get heavy: the row
   has the room, the route can pick by a query, and the renderer already
   knows every placement's width.
-- **Rewriting one section with the assistant** (rather than the whole site)
-  is the editor-shaped version of "Rewrite the words"; the slot prompt
-  already exists per section kind.
 - **`DndContext` needs an `id`** or its accessibility ids differ between
   server and client and React reports a hydration mismatch — found on the
   first render of the Pages panel and fixed by naming both contexts.

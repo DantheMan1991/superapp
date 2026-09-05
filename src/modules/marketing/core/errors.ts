@@ -35,7 +35,10 @@ export type MarketingErrorCode =
   | "PHOTO_MISSING"
   | "PHOTO_LIMIT"
   | "DOMAIN_LIMIT"
-  | "DOMAIN_PROVIDER";
+  | "DOMAIN_PROVIDER"
+  | "ASSISTANT_OFF"
+  | "ASSISTANT_BUSY"
+  | "ASSISTANT_FAILED";
 
 export class MarketingError extends Error {
   constructor(
@@ -114,6 +117,12 @@ export function friendlyMessage(err: unknown): string {
         return "A site can have up to five domains. Remove one first.";
       case "DOMAIN_PROVIDER":
         return err.message;
+      case "ASSISTANT_OFF":
+        return "The assistant isn't switched on for this deployment.";
+      case "ASSISTANT_BUSY":
+        return "The assistant has been asked a lot this hour. Try again in a little while.";
+      case "ASSISTANT_FAILED":
+        return "The assistant couldn't write that. Try again, or ask for it differently.";
     }
   }
   return "Something went wrong. Please try again.";

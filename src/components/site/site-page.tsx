@@ -205,10 +205,21 @@ function SiteHeader({
   const href = (path: string) => siteHref(mode, site.slug, path);
   const button = site.settings.headerButton;
   const buttonHref = button ? resolveHref(mode, site.slug, button.href) : null;
+  const folds = nav.length > 1;
+  const headerButton =
+    button && buttonHref ? (
+      <Link
+        href={buttonHref}
+        className="inline-block rounded-[var(--site-radius-button)] px-4 py-2 text-sm font-medium shadow-sm"
+        style={LIGHT_TONE.button}
+      >
+        {button.label}
+      </Link>
+    ) : null;
   return (
     <header className="border-b border-neutral-200">
-      <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-x-8 gap-y-3 px-6 py-4">
-        <Link href={href("/")} className="flex items-center gap-3">
+      <div className="mx-auto flex max-w-5xl items-center justify-between gap-x-6 px-6 py-4">
+        <Link href={href("/")} className="flex min-w-0 items-center gap-3">
           {site.brand.logo ? (
             // Our own logo route, public by definition (ADR 0018); the
             // optimiser would only add a hop in front of a cached file.
@@ -219,44 +230,87 @@ function SiteHeader({
               className="h-10 w-auto max-w-[200px] object-contain"
             />
           ) : (
-            <span className="text-lg font-semibold" style={{ color: primary }}>
+            <span className="truncate text-lg font-semibold" style={{ color: primary }}>
               {site.title}
             </span>
           )}
         </Link>
-        {(nav.length > 1 || buttonHref) && (
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-            {nav.length > 1 && (
-              <nav aria-label="Site" className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
-                {nav.map((p) => {
-                  const current = p.path === pagePath;
-                  return (
-                    <Link
-                      key={p.path}
-                      href={href(p.path)}
-                      aria-current={current ? "page" : undefined}
-                      className="border-b-2 py-1 transition-colors hover:text-neutral-900"
-                      style={{
-                        borderColor: current ? accent : "transparent",
-                        color: current ? "#171717" : "#525252",
-                      }}
-                    >
-                      {p.title}
-                    </Link>
-                  );
-                })}
-              </nav>
+        {(folds || headerButton) && (
+          <>
+            {/* A wide screen: the pages in a row and the button at the end, as ever. */}
+            <div className={cn("items-center gap-x-6", folds ? "hidden md:flex" : "flex")}>
+              {folds && (
+                <nav aria-label="Site" className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+                  {nav.map((p) => {
+                    const current = p.path === pagePath;
+                    return (
+                      <Link
+                        key={p.path}
+                        href={href(p.path)}
+                        aria-current={current ? "page" : undefined}
+                        className="border-b-2 py-1 transition-colors hover:text-neutral-900"
+                        style={{
+                          borderColor: current ? accent : "transparent",
+                          color: current ? "#171717" : "#525252",
+                        }}
+                      >
+                        {p.title}
+                      </Link>
+                    );
+                  })}
+                </nav>
+              )}
+              {headerButton}
+            </div>
+            {/*
+             * A phone (slice 14): the button stays in the row and the pages
+             * fold behind a Menu button. A native disclosure, so it needs no
+             * script (ADR 0019 keeps the page's scripts few), opens and
+             * closes from the keyboard, and closes by itself when a page is
+             * chosen, because the next page is a new document.
+             */}
+            {folds && (
+              <div className="flex shrink-0 items-center gap-3 md:hidden">
+                {headerButton}
+                <details className="group relative">
+                  <summary
+                    className="-m-2 flex cursor-pointer list-none items-center rounded-md p-2 text-neutral-700 hover:bg-neutral-100 [&::-webkit-details-marker]:hidden"
+                    aria-label="Menu"
+                  >
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="size-6 group-open:hidden" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                      <path d="M4 7h16M4 12h16M4 17h16" />
+                    </svg>
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="hidden size-6 group-open:block" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                      <path d="M6 6l12 12M18 6L6 18" />
+                    </svg>
+                  </summary>
+                  <nav
+                    aria-label="Site"
+                    className="absolute right-0 top-full z-20 mt-3 min-w-56 rounded-[var(--site-radius)] bg-white p-2 text-sm shadow-lg ring-1 ring-neutral-200"
+                  >
+                    {nav.map((p) => {
+                      const current = p.path === pagePath;
+                      return (
+                        <Link
+                          key={p.path}
+                          href={href(p.path)}
+                          aria-current={current ? "page" : undefined}
+                          className="block rounded-md border-l-2 px-3 py-2 hover:bg-neutral-50"
+                          style={{
+                            borderColor: current ? accent : "transparent",
+                            color: current ? "#171717" : "#525252",
+                            fontWeight: current ? 600 : 400,
+                          }}
+                        >
+                          {p.title}
+                        </Link>
+                      );
+                    })}
+                  </nav>
+                </details>
+              </div>
             )}
-            {button && buttonHref && (
-              <Link
-                href={buttonHref}
-                className="inline-block rounded-[var(--site-radius-button)] px-4 py-2 text-sm font-medium shadow-sm"
-                style={LIGHT_TONE.button}
-              >
-                {button.label}
-              </Link>
-            )}
-          </div>
+          </>
         )}
       </div>
     </header>

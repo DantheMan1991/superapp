@@ -31,7 +31,7 @@
 | **5d** | **A swipe across a slideshow or the lightbox moves between photos (pointer events, vertical scrolling left to the browser); the arrow keys move a focused slideshow.** | **built 2026-09-04** |
 | **5e** | **The alt text nudge: photos without a description are counted per section and per page in the editor's list, and per page on the Website screen's Pages panel.** | **built 2026-09-05** |
 | **6** | **Columns and cards: two to four columns of cards (photo or icon, heading, a few lines, a button), sortable in the editor, in white panels on a band or plain, with a wide-left or wide-right variant for two columns.** | **built 2026-09-05** |
-| 6b | Layout presets on every section (width, hero height, alignment, photo side, spacing) and section backgrounds (a tint, the brand colour as a band, a photo with an overlay) | next |
+| **6b** | **Layout presets on every section (width, spacing, alignment; the hero's height and photo side, the about section's photo side) and backgrounds (none, a tint, the brand colour, dark, a photo with an overlay), with the words' tone following the background.** | **built 2026-09-05** |
 | 6c | Header and footer editing: a header button, social links, footer columns, an announcement bar | |
 | 6d | Fonts and looks: curated font pairings and a warm/modern/classic switch from the brand kit; button shapes | |
 | 7 | Phone and tablet toggle on the preview; click a section in the preview to select it in the editor | |
@@ -46,6 +46,66 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-05 — Slice 6b: layout presets and backgrounds (`claude/marketing-site-layout-presets`)
+
+Everything "resize" was really asking for, as presets that fit a phone. No
+migration: `style` is optional JSON on every section, and a page saved
+before it existed reads exactly as designed.
+
+- **`SectionStyleSchema`** (`src/lib/sites/schema.ts`), optional on all
+  twelve kinds: `width` default | text | page | full, `spacing` default |
+  tight | normal | airy, `align` default | left | center, `background`
+  default | none | tint | brand | dark | photo, and `photo` (an `ImageRef`
+  drawn behind everything when the background is `photo`). The hero gains
+  `height` compact | standard | tall and `imageSide`; the about section
+  `imageSide`; both optional.
+- **`src/lib/sites/style.ts`** (pure, tested): `SECTION_DEFAULTS` per kind
+  (the offer and cards on a tint, the call to action on the brand band,
+  reading kinds in the text column), `resolveStyle(type, style, adjust)`
+  which lets the renderer adjust a default (an about with a photo takes the
+  page column; plain columns lose the band; a wide photo the full width)
+  under the owner's choice, and the classes: `widthClass`, `spacingClass`,
+  `heroHeightClass`, `backgroundClass`. **`toneFor(background)`** is the
+  point: headings and links take the brand colour on a light background,
+  white on dark or a photo, the brand's own foreground on the brand band;
+  quiet text fades rather than changing colour on the brand band; a button
+  is the brand colour on light and white elsewhere. A white card panel keeps
+  the light tone whatever band is behind it.
+- **The renderer** (`site-page.tsx`, rewritten): every section renders
+  through a `Shell` that draws the band (and, for `photo`, the photo as an
+  absolutely placed decorative image under a 55% dark overlay, eager only
+  on the hero), then the column, the room and `text-center` when centred.
+  Each case takes its colours from the tone. The hero's photo may sit left;
+  the about's too; centred heroes centre the headline block and the
+  button. `Gallery` now hands its wrapper to the Shell and takes a caption
+  class; `Slideshow` and the enquiry form take `onDark` and light their
+  captions, labels and dots.
+- **The editor** (`section-forms.tsx`): `SectionForm` is now the kind's
+  fields plus a `Layout and look` block (`StyleFields`) on every card:
+  `Width` (not for a photo or a slideshow, which have their own), `Height`
+  for the hero or `Spacing` for the rest, `Alignment`, `Background` and,
+  for a photo background, a `Background photo` picker; `Photo side` appears
+  under a hero's or an about's placed photo. `Choice` is the shared row of
+  pressed buttons.
+- Tests: `tests/site-style.test.ts` (the schema's defaults and the old
+  page that still parses, resolution order, the classes, the tones, and
+  that a background photo needs no description). Guide: `page-editor.md`.
+- **Driven on the dev branch (Test tenant, `oak-row-farm`)**: the home
+  page's hero set to `Tall`, `Centred`, background `Photo` with the hay
+  barn behind it and its side photo moved `Left`; the Columns section to a
+  `Dark` band; the call to action `Centred` and `Airy`; saved and
+  published. The live home page's hero section read `relative
+  bg-neutral-900 text-white` with the background photo loading eagerly
+  under the `bg-neutral-950/55` overlay, its inner column `py-24 sm:py-40
+  text-center`, the headline computed white and centred, and the side
+  photo first in the grid; the columns band was `bg-neutral-900 text-white`
+  with a white heading while the cards' headings stayed the brand colour
+  inside their white panels; the call to action kept the brand band with
+  `py-24` and a centred row. The editor route answered a stale 404 once
+  after the many edits until any change to its file made Turbopack
+  recompile it — nothing in the code, and worth knowing before chasing a
+  ghost.
 
 ### 2026-09-05 — Slice 6: columns and cards (`claude/marketing-site-columns`)
 

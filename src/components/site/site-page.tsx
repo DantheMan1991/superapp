@@ -2,9 +2,22 @@ import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import { foregroundOn } from "@/lib/brand/core";
 import type { PublicSite } from "@/lib/sites/read";
-import type { ImageRef, Section, SitePageView, SiteSettings } from "@/lib/sites/schema";
+import type { ImageRef, Section, SectionStyle, SitePageView, SiteSettings } from "@/lib/sites/schema";
 import { siteHref, type SiteMode } from "@/lib/sites/slug";
 import type { Slide } from "@/lib/sites/slides";
+import {
+  backgroundClass,
+  heroHeightClass,
+  LIGHT_TONE,
+  resolveStyle,
+  spacingClass,
+  toneFor,
+  widthClass,
+  type ResolvedStyle,
+  type SectionDefaults,
+  type Tone,
+} from "@/lib/sites/style";
+import { cn } from "@/lib/utils";
 import { CardIcon } from "./card-icons";
 import { EnquiryForm } from "./enquiry-form";
 import { Gallery, Slideshow } from "./slideshow";
@@ -19,6 +32,11 @@ import { ViewBeacon } from "./view-beacon";
  * thank-you) and the slideshow and gallery lightbox (`slideshow.tsx`, the
  * page's one moving part). The brand's colours enter as CSS variables on
  * the root so the sections never learn a hex value.
+ *
+ * Every section sits in a `Shell` that resolves its layout presets
+ * (`src/lib/sites/style.ts`): the band behind it, the column its words sit
+ * in, the room around it, and the TONE — the colours its words take so they
+ * stay readable on a tint, the brand colour, a dark band or a photo.
  *
  * `mode` decides what a link looks like: on the site's own hostname links
  * are root-relative, on the platform host they carry `/sites/<slug>`, and in
@@ -142,6 +160,59 @@ export function SitePage({
   );
 }
 
+/**
+ * The band, the column and the room around one section, from its resolved
+ * style. A `photo` background is the photo drawn behind everything,
+ * darkened so the words stay readable; it is decorative, so it carries no
+ * description and is never counted as one that needs it. `spacing` is the
+ * class for the room, which the hero supplies from its own scale.
+ */
+function Shell({
+  site,
+  mode,
+  style,
+  resolved,
+  spacing,
+  eager,
+  children,
+}: {
+  site: PublicSite;
+  mode: SiteMode;
+  style: SectionStyle | undefined;
+  resolved: ResolvedStyle;
+  spacing: string;
+  /** The hero's background photo loads with the page; every other one waits. */
+  eager?: boolean;
+  children: ReactNode;
+}) {
+  const band = backgroundClass(resolved.background);
+  const photo =
+    resolved.background === "photo" && style?.photo && site.images[style.photo.id] ? style.photo : null;
+  return (
+    <section className={cn(band.className)} style={band.style}>
+      {photo && (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={imageSrc(mode, site.slug, photo.id)}
+            alt=""
+            aria-hidden="true"
+            width={site.images[photo.id].width}
+            height={site.images[photo.id].height}
+            loading={eager ? "eager" : "lazy"}
+            decoding="async"
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+          <div className="absolute inset-0 bg-neutral-950/55" aria-hidden="true" />
+        </>
+      )}
+      <div className={cn("relative", widthClass(resolved.width), spacing, resolved.align === "center" && "text-center")}>
+        {children}
+      </div>
+    </section>
+  );
+}
+
 function SectionView({
   section,
   site,
@@ -156,51 +227,76 @@ function SectionView({
   /** Where on the page this is: the form names it so its questions can be read back. */
   sectionIndex: number;
 }) {
+  // The renderer's own adjustments to a kind's defaults, before the owner's choices.
+  const adjust: Partial<SectionDefaults> =
+    section.type === "about" && section.image
+      ? { width: "page" }
+      : section.type === "columns" && section.look === "plain"
+        ? { background: "none" }
+        : section.type === "image" && section.layout === "wide"
+          ? { width: "full" }
+          : {};
+  const resolved = resolveStyle(section.type, section.style, adjust);
+  const tone = toneFor(resolved.background);
+  const centred = resolved.align === "center";
+  const shell = { site, mode, style: section.style, resolved };
+  const room = spacingClass(resolved.spacing);
+
   switch (section.type) {
     case "form":
       return (
-        <section className="mx-auto max-w-3xl px-6 py-14">
+        <Shell {...shell} spacing={room}>
           <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
-          {section.note && <p className="mt-3 text-neutral-600">{section.note}</p>}
-          <EnquiryForm
-            siteSlug={site.slug}
-            pagePath={pagePath}
-            sectionIndex={sectionIndex}
-            buttonLabel={section.buttonLabel}
-            askPhone={section.askPhone}
-            thanks={section.thanks}
-            fields={section.fields}
-            // The preview shows the form; only the live site takes messages.
-            disabled={mode === "draft"}
-          />
-        </section>
+          {section.note && <p className={cn("mt-3", tone.muted)}>{section.note}</p>}
+          <div className={cn(centred && "mx-auto max-w-xl text-left")}>
+            <EnquiryForm
+              siteSlug={site.slug}
+              pagePath={pagePath}
+              sectionIndex={sectionIndex}
+              buttonLabel={section.buttonLabel}
+              askPhone={section.askPhone}
+              thanks={section.thanks}
+              fields={section.fields}
+              // The preview shows the form; only the live site takes messages.
+              disabled={mode === "draft"}
+              onDark={resolved.onDark || resolved.background === "brand"}
+            />
+          </div>
+        </Shell>
       );
     case "hero": {
       const photo = section.image && site.images[section.image.id] ? section.image : null;
-      return (
-        <section className="mx-auto max-w-5xl px-6 py-16 sm:py-24">
-          <div className={photo ? "grid items-center gap-10 md:grid-cols-[3fr_2fr]" : undefined}>
-            <div>
-              <h1
-                className="max-w-3xl text-4xl font-semibold leading-tight tracking-tight sm:text-5xl"
-                style={{ color: "var(--site-primary)" }}
-              >
-                {section.headline}
-              </h1>
-              {section.subheadline && (
-                <p className="mt-4 max-w-2xl text-lg text-neutral-600">{section.subheadline}</p>
-              )}
-              {section.cta && (
-                <div className="mt-8">
-                  <CtaLink href={resolveHref(mode, site.slug, section.cta.href)} label={section.cta.label} />
-                </div>
-              )}
+      const left = (section.imageSide ?? "right") === "left";
+      const words = (
+        <div>
+          <h1
+            className={cn("max-w-3xl text-4xl font-semibold leading-tight tracking-tight sm:text-5xl", centred && "mx-auto")}
+            style={{ color: tone.heading }}
+          >
+            {section.headline}
+          </h1>
+          {section.subheadline && (
+            <p className={cn("mt-4 max-w-2xl text-lg", tone.muted, centred && "mx-auto")}>{section.subheadline}</p>
+          )}
+          {section.cta && (
+            <div className={cn("mt-8", centred && "flex justify-center")}>
+              <CtaLink href={resolveHref(mode, site.slug, section.cta.href)} label={section.cta.label} tone={tone} />
             </div>
-            {photo && (
-              <Photo site={site} mode={mode} image={photo} eager className="w-full rounded-2xl object-cover shadow-sm" />
-            )}
-          </div>
-        </section>
+          )}
+        </div>
+      );
+      return (
+        <Shell {...shell} spacing={heroHeightClass(section.height)} eager>
+          {photo ? (
+            <div className={cn("grid items-center gap-10", left ? "md:grid-cols-[2fr_3fr]" : "md:grid-cols-[3fr_2fr]")}>
+              {left && <Photo site={site} mode={mode} image={photo} eager className="w-full rounded-2xl object-cover shadow-sm" />}
+              {words}
+              {!left && <Photo site={site} mode={mode} image={photo} eager className="w-full rounded-2xl object-cover shadow-sm" />}
+            </div>
+          ) : (
+            words
+          )}
+        </Shell>
       );
     }
     case "columns": {
@@ -216,175 +312,173 @@ function SectionView({
             ? "sm:grid-cols-2 lg:grid-cols-4"
             : "sm:grid-cols-2 lg:grid-cols-3";
       const panels = section.look === "cards";
+      // A white panel keeps the light tone whatever the band behind it.
+      const inner = panels ? LIGHT_TONE : tone;
       return (
-        <section className={panels ? "border-t border-neutral-100 bg-neutral-50" : undefined}>
-          <div className="mx-auto max-w-5xl px-6 py-14">
-            {section.heading && (
-              <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
-            )}
-            {section.intro && <p className="mt-3 max-w-2xl text-neutral-600">{section.intro}</p>}
-            <ul className={`grid gap-6 ${grid} ${section.heading || section.intro ? "mt-8" : ""}`}>
-              {section.cards.map((card) => {
-                const photo = card.image && site.images[card.image.id] ? card.image : null;
-                return (
-                  <li key={card.id} className={panels ? "rounded-2xl bg-white p-6 shadow-sm ring-1 ring-neutral-200" : ""}>
-                    {photo ? (
-                      <Photo site={site} mode={mode} image={photo} className="mb-4 aspect-[4/3] w-full rounded-xl object-cover" />
-                    ) : card.icon ? (
-                      <CardIcon name={card.icon} className="mb-4 size-8" style={{ color: "var(--site-primary)" }} />
-                    ) : null}
-                    {card.heading && (
-                      <h3 className="font-semibold" style={{ color: "var(--site-primary)" }}>
-                        {card.heading}
-                      </h3>
-                    )}
-                    {card.body.length > 0 && (
-                      <div className="mt-2 space-y-2 text-sm text-neutral-600">
-                        {card.body.map((paragraph, i) => (
-                          <p key={i}>{paragraph}</p>
-                        ))}
-                      </div>
-                    )}
-                    {card.cta && (
-                      <Link
-                        href={resolveHref(mode, site.slug, card.cta.href)}
-                        className="mt-4 inline-block text-sm font-medium underline-offset-4 hover:underline"
-                        style={{ color: "var(--site-primary)" }}
-                      >
-                        {card.cta.label}
-                      </Link>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        </section>
+        <Shell {...shell} spacing={room}>
+          {section.heading && <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>}
+          {section.intro && <p className={cn("mt-3 max-w-2xl", tone.muted, centred && "mx-auto")}>{section.intro}</p>}
+          <ul className={cn("grid gap-6", grid, (section.heading || section.intro) && "mt-8", centred && "text-left")}>
+            {section.cards.map((card) => {
+              const photo = card.image && site.images[card.image.id] ? card.image : null;
+              return (
+                <li key={card.id} className={panels ? "rounded-2xl bg-white p-6 text-neutral-900 shadow-sm ring-1 ring-neutral-200" : ""}>
+                  {photo ? (
+                    <Photo site={site} mode={mode} image={photo} className="mb-4 aspect-[4/3] w-full rounded-xl object-cover" />
+                  ) : card.icon ? (
+                    <CardIcon name={card.icon} className="mb-4 size-8" style={{ color: inner.heading }} />
+                  ) : null}
+                  {card.heading && (
+                    <h3 className="font-semibold" style={{ color: inner.heading }}>
+                      {card.heading}
+                    </h3>
+                  )}
+                  {card.body.length > 0 && (
+                    <div className={cn("mt-2 space-y-2 text-sm", inner.muted)}>
+                      {card.body.map((paragraph, i) => (
+                        <p key={i}>{paragraph}</p>
+                      ))}
+                    </div>
+                  )}
+                  {card.cta && (
+                    <Link
+                      href={resolveHref(mode, site.slug, card.cta.href)}
+                      className="mt-4 inline-block text-sm font-medium underline-offset-4 hover:underline"
+                      style={{ color: inner.heading }}
+                    >
+                      {card.cta.label}
+                    </Link>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </Shell>
       );
     }
     case "gallery": {
       const tiles = toSlides(section.items, site, mode);
       if (tiles.length === 0) return null;
-      return <Gallery heading={section.heading} tiles={tiles} columns={section.columns} />;
+      return (
+        <Shell {...shell} spacing={room}>
+          <Gallery heading={section.heading} tiles={tiles} columns={section.columns} captionClass={tone.muted} />
+        </Shell>
+      );
     }
     case "slideshow": {
       const slides = toSlides(section.items, site, mode);
       if (slides.length === 0) return null;
-      if (section.layout === "wide") {
+      if (section.layout === "wide" && resolved.width === "page" && (section.style?.width ?? "default") === "default") {
+        // A wide show runs edge to edge; its heading and caption keep the page column.
         return (
-          <section className="py-6">
-            {section.heading && (
-              <h2 className="mx-auto max-w-5xl px-6 pb-4 text-2xl font-semibold tracking-tight">{section.heading}</h2>
-            )}
-            <Slideshow slides={slides} seconds={section.seconds} layout="wide" />
-          </section>
+          <Shell {...shell} resolved={{ ...resolved, width: "full" }} spacing={room}>
+            <div className="-mx-6">
+              {section.heading && (
+                <h2 className="mx-auto max-w-5xl px-6 pb-4 text-2xl font-semibold tracking-tight">{section.heading}</h2>
+              )}
+              <Slideshow slides={slides} seconds={section.seconds} layout="wide" onDark={resolved.onDark} />
+            </div>
+          </Shell>
         );
       }
       return (
-        <section className="mx-auto max-w-3xl px-6 py-10">
-          {section.heading && (
-            <h2 className="pb-4 text-2xl font-semibold tracking-tight">{section.heading}</h2>
-          )}
-          <Slideshow slides={slides} seconds={section.seconds} layout="inset" />
-        </section>
+        <Shell {...shell} spacing={room}>
+          {section.heading && <h2 className="pb-4 text-2xl font-semibold tracking-tight">{section.heading}</h2>}
+          <Slideshow slides={slides} seconds={section.seconds} layout="inset" onDark={resolved.onDark} />
+        </Shell>
       );
     }
     case "image": {
       const photo = section.image && site.images[section.image.id] ? section.image : null;
       if (!photo) return null;
+      const wide = section.layout === "wide";
       return (
-        <section className={section.layout === "wide" ? "px-0 py-6" : "mx-auto max-w-3xl px-6 py-10"}>
-          <figure>
+        <Shell {...shell} spacing={room}>
+          <figure className={cn(wide && "-mx-6")}>
             <Photo
               site={site}
               mode={mode}
               image={photo}
-              className={
-                section.layout === "wide"
-                  ? "max-h-[70vh] w-full object-cover"
-                  : "w-full rounded-2xl object-cover shadow-sm"
-              }
+              className={wide ? "max-h-[70vh] w-full object-cover" : "w-full rounded-2xl object-cover shadow-sm"}
             />
             {section.caption && (
-              <figcaption className={`mt-3 text-sm text-neutral-600 ${section.layout === "wide" ? "mx-auto max-w-5xl px-6" : ""}`}>
-                {section.caption}
-              </figcaption>
+              <figcaption className={cn("mt-3 text-sm", tone.muted, wide && "mx-auto max-w-5xl px-6")}>{section.caption}</figcaption>
             )}
           </figure>
-        </section>
+        </Shell>
       );
     }
     case "offer":
       return (
-        <section className="border-t border-neutral-100 bg-neutral-50">
-          <div className="mx-auto max-w-5xl px-6 py-14">
-            <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
-            <ul className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-              {section.items.map((item, i) => (
-                <li key={i} className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-neutral-200">
-                  <h3 className="font-semibold" style={{ color: "var(--site-primary)" }}>
-                    {item.name}
-                  </h3>
-                  {item.blurb && <p className="mt-2 text-sm text-neutral-600">{item.blurb}</p>}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </section>
+        <Shell {...shell} spacing={room}>
+          <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
+          <ul className={cn("mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3", centred && "text-left")}>
+            {section.items.map((item, i) => (
+              <li key={i} className="rounded-2xl bg-white p-6 text-neutral-900 shadow-sm ring-1 ring-neutral-200">
+                <h3 className="font-semibold" style={{ color: LIGHT_TONE.heading }}>
+                  {item.name}
+                </h3>
+                {item.blurb && <p className={cn("mt-2 text-sm", LIGHT_TONE.muted)}>{item.blurb}</p>}
+              </li>
+            ))}
+          </ul>
+        </Shell>
       );
     case "about":
     case "text": {
       const photo = section.type === "about" && section.image && site.images[section.image.id] ? section.image : null;
+      const left = section.type === "about" && (section.imageSide ?? "right") === "left";
       const words = (
         <div>
-          {section.heading && (
-            <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
-          )}
-          <div className="mt-4 space-y-4 text-neutral-700 leading-relaxed">
+          {section.heading && <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>}
+          <div className={cn("mt-4 space-y-4 leading-relaxed", tone.body)}>
             {section.body.map((paragraph, i) => (
               <p key={i}>{paragraph}</p>
             ))}
           </div>
         </div>
       );
-      if (!photo) return <section className="mx-auto max-w-3xl px-6 py-14">{words}</section>;
       return (
-        <section className="mx-auto max-w-5xl px-6 py-14">
-          <div className="grid gap-8 md:grid-cols-[3fr_2fr] md:items-start">
-            {words}
-            <Photo site={site} mode={mode} image={photo} className="w-full rounded-2xl object-cover shadow-sm" />
-          </div>
-        </section>
+        <Shell {...shell} spacing={room}>
+          {photo ? (
+            <div className={cn("grid gap-8 md:items-start", left ? "md:grid-cols-[2fr_3fr]" : "md:grid-cols-[3fr_2fr]")}>
+              {left && <Photo site={site} mode={mode} image={photo} className="w-full rounded-2xl object-cover shadow-sm" />}
+              {words}
+              {!left && <Photo site={site} mode={mode} image={photo} className="w-full rounded-2xl object-cover shadow-sm" />}
+            </div>
+          ) : (
+            words
+          )}
+        </Shell>
       );
     }
     case "cta":
       return (
-        <section style={{ backgroundColor: "var(--site-primary)", color: "var(--site-primary-fg)" }}>
-          <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-6 px-6 py-12">
+        <Shell {...shell} spacing={resolved.spacing === "tight" ? "py-12" : room}>
+          <div className={cn("flex flex-wrap items-center gap-6", centred ? "flex-col justify-center" : "justify-between")}>
             <h2 className="text-2xl font-semibold tracking-tight">{section.headline}</h2>
-            <Link
-              href={resolveHref(mode, site.slug, section.cta.href)}
-              className="rounded-full bg-white px-6 py-3 text-sm font-medium text-neutral-900 shadow-sm"
-            >
-              {section.cta.label}
-            </Link>
+            <CtaLink href={resolveHref(mode, site.slug, section.cta.href)} label={section.cta.label} tone={tone} />
           </div>
-        </section>
+        </Shell>
       );
     case "contact":
-      return <ContactSection heading={section.heading} note={section.note} settings={site.settings} />;
+      return (
+        <Shell {...shell} spacing={room}>
+          <ContactSection heading={section.heading} note={section.note} settings={site.settings} tone={tone} centred={centred} />
+        </Shell>
+      );
     case "hours":
       if (site.settings.hoursLines.length === 0) return null;
       return (
-        <section className="mx-auto max-w-3xl px-6 py-14">
+        <Shell {...shell} spacing={room}>
           <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
-          <ul className="mt-4 space-y-1 text-neutral-700">
+          <ul className={cn("mt-4 space-y-1", tone.body)}>
             {site.settings.hoursLines.map((line, i) => (
               <li key={i}>{line}</li>
             ))}
           </ul>
-          {section.note && <p className="mt-3 text-sm text-neutral-600">{section.note}</p>}
-        </section>
+          {section.note && <p className={cn("mt-3 text-sm", tone.muted)}>{section.note}</p>}
+        </Shell>
       );
   }
 }
@@ -448,13 +542,10 @@ function Photo({
   );
 }
 
-function CtaLink({ href, label }: { href: string; label: string }) {
+/** The button: the brand colour on a light background, white where the background is the brand colour or dark. */
+function CtaLink({ href, label, tone }: { href: string; label: string; tone: Tone }) {
   return (
-    <Link
-      href={href}
-      className="inline-block rounded-full px-6 py-3 text-sm font-medium shadow-sm"
-      style={{ backgroundColor: "var(--site-primary)", color: "var(--site-primary-fg)" }}
-    >
+    <Link href={href} className="inline-block rounded-full px-6 py-3 text-sm font-medium shadow-sm" style={tone.button}>
       {label}
     </Link>
   );
@@ -465,23 +556,27 @@ function ContactSection({
   heading,
   note,
   settings,
+  tone,
+  centred,
 }: {
   heading: string;
   note: string;
   settings: SiteSettings;
+  tone: Tone;
+  centred: boolean;
 }) {
   const hasDetails = settings.phone || settings.email || settings.address;
   return (
-    <section className="mx-auto max-w-3xl px-6 py-14">
+    <>
       <h2 className="text-2xl font-semibold tracking-tight">{heading}</h2>
-      {note && <p className="mt-3 text-neutral-600">{note}</p>}
+      {note && <p className={cn("mt-3", tone.muted)}>{note}</p>}
       {hasDetails && (
-        <dl className="mt-6 grid gap-4 sm:grid-cols-3">
+        <dl className={cn("mt-6 grid gap-4 sm:grid-cols-3", centred && "text-left")}>
           {settings.phone && (
             <div>
-              <dt className="text-xs uppercase tracking-wide text-neutral-500">Phone</dt>
+              <dt className={cn("text-xs uppercase tracking-wide", tone.faint)}>Phone</dt>
               <dd className="mt-1">
-                <a href={`tel:${settings.phone}`} style={{ color: "var(--site-primary)" }}>
+                <a href={`tel:${settings.phone}`} style={{ color: tone.heading }}>
                   {settings.phone}
                 </a>
               </dd>
@@ -489,9 +584,9 @@ function ContactSection({
           )}
           {settings.email && (
             <div>
-              <dt className="text-xs uppercase tracking-wide text-neutral-500">Email</dt>
+              <dt className={cn("text-xs uppercase tracking-wide", tone.faint)}>Email</dt>
               <dd className="mt-1">
-                <a href={`mailto:${settings.email}`} style={{ color: "var(--site-primary)" }}>
+                <a href={`mailto:${settings.email}`} style={{ color: tone.heading }}>
                   {settings.email}
                 </a>
               </dd>
@@ -499,12 +594,12 @@ function ContactSection({
           )}
           {settings.address && (
             <div>
-              <dt className="text-xs uppercase tracking-wide text-neutral-500">Address</dt>
+              <dt className={cn("text-xs uppercase tracking-wide", tone.faint)}>Address</dt>
               <dd className="mt-1 whitespace-pre-line">{settings.address}</dd>
             </div>
           )}
         </dl>
       )}
-    </section>
+    </>
   );
 }

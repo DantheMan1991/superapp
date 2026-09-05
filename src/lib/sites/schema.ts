@@ -107,14 +107,45 @@ export const CardSchema = z.object({
 });
 export type Card = z.infer<typeof CardSchema>;
 
+/**
+ * The layout and look an owner may set on ANY section — slice 6b. Every
+ * value has `default`, meaning "as this kind of section is designed", so a
+ * page saved before the field existed reads exactly as it did. The
+ * renderer resolves the rest (`src/lib/sites/style.ts`); nothing here is a
+ * pixel, which is what keeps every choice right on a phone.
+ */
+export const SectionStyleSchema = z.object({
+  /** The reading column, the page column, or the whole width. */
+  width: z.enum(["default", "text", "page", "full"]).default("default"),
+  spacing: z.enum(["default", "tight", "normal", "airy"]).default("default"),
+  align: z.enum(["default", "left", "center"]).default("default"),
+  /** None, a tint, the brand colour as a band, dark, or a photo behind everything. */
+  background: z.enum(["default", "none", "tint", "brand", "dark", "photo"]).default("default"),
+  /** Behind everything when `background` is `photo`; darkened, decorative, never described. */
+  photo: ImageRefSchema.nullable().default(null),
+});
+export type SectionStyle = z.infer<typeof SectionStyleSchema>;
+export const DEFAULT_SECTION_STYLE: SectionStyle = {
+  width: "default",
+  spacing: "default",
+  align: "default",
+  background: "default",
+  photo: null,
+};
+
 export const SectionSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("hero"),
     headline: short(120).min(1),
     subheadline: short(240).default(""),
     cta: CtaSchema.nullable().default(null),
-    /** Beside the headline, on the right. */
+    /** Beside the headline. */
     image: ImageRefSchema.nullable().default(null),
+    /** Which side the photo sits on a wide screen; right when unsaid. */
+    imageSide: z.enum(["right", "left"]).optional(),
+    /** How much room the hero takes; standard when unsaid. */
+    height: z.enum(["compact", "standard", "tall"]).optional(),
+    style: SectionStyleSchema.optional(),
   }),
   z.object({
     type: z.literal("about"),
@@ -122,6 +153,9 @@ export const SectionSchema = z.discriminatedUnion("type", [
     body: paragraphs(6, 800),
     /** Beside the paragraphs. */
     image: ImageRefSchema.nullable().default(null),
+    /** Which side the photo sits on a wide screen; right when unsaid. */
+    imageSide: z.enum(["right", "left"]).optional(),
+    style: SectionStyleSchema.optional(),
   }),
   z.object({
     type: z.literal("offer"),
@@ -130,16 +164,19 @@ export const SectionSchema = z.discriminatedUnion("type", [
       .array(z.object({ name: short(60).min(1), blurb: short(240).default("") }))
       .min(1)
       .max(8),
+    style: SectionStyleSchema.optional(),
   }),
   z.object({
     type: z.literal("hours"),
     heading: short(80).min(1),
     note: short(200).default(""),
+    style: SectionStyleSchema.optional(),
   }),
   z.object({
     type: z.literal("contact"),
     heading: short(80).min(1),
     note: short(300).default(""),
+    style: SectionStyleSchema.optional(),
   }),
   /**
    * The enquiry form: name, email, phone (optional) and a message, fixed.
@@ -157,16 +194,19 @@ export const SectionSchema = z.discriminatedUnion("type", [
     thanks: short(240).default(""),
     /** The business's own questions, asked between the phone and the message. */
     fields: z.array(FormFieldSchema).max(FORM_FIELDS_MAX).default([]),
+    style: SectionStyleSchema.optional(),
   }),
   z.object({
     type: z.literal("text"),
     heading: short(80).default(""),
     body: paragraphs(8, 800),
+    style: SectionStyleSchema.optional(),
   }),
   z.object({
     type: z.literal("cta"),
     headline: short(120).min(1),
     cta: CtaSchema,
+    style: SectionStyleSchema.optional(),
   }),
   z.object({
     type: z.literal("image"),
@@ -174,6 +214,7 @@ export const SectionSchema = z.discriminatedUnion("type", [
     caption: short(240).default(""),
     /** `inset` sits in the text column; `wide` spans the page. */
     layout: z.enum(["inset", "wide"]).default("inset"),
+    style: SectionStyleSchema.optional(),
   }),
   z.object({
     type: z.literal("gallery"),
@@ -184,6 +225,7 @@ export const SectionSchema = z.discriminatedUnion("type", [
       .default([]),
     /** Photos per row on a wide screen; a phone always shows two. */
     columns: z.union([z.literal(2), z.literal(3), z.literal(4)]).default(3),
+    style: SectionStyleSchema.optional(),
   }),
   z.object({
     type: z.literal("slideshow"),
@@ -195,6 +237,7 @@ export const SectionSchema = z.discriminatedUnion("type", [
     /** Seconds between photos; 0 moves only when a visitor presses an arrow. */
     seconds: z.number().int().min(0).max(30).default(6),
     layout: z.enum(["inset", "wide"]).default("wide"),
+    style: SectionStyleSchema.optional(),
   }),
   z.object({
     type: z.literal("columns"),
@@ -207,6 +250,7 @@ export const SectionSchema = z.discriminatedUnion("type", [
     /** `cards` puts each in a white panel on a tinted band; `plain` stacks them on the page. */
     look: z.enum(["cards", "plain"]).default("cards"),
     cards: z.array(CardSchema).max(CARDS_MAX).default([]),
+    style: SectionStyleSchema.optional(),
   }),
 ]);
 export type Section = z.infer<typeof SectionSchema>;

@@ -40,8 +40,8 @@ function FieldError({ id, error }: { id: string; error?: string }) {
   );
 }
 
-function Optional() {
-  return <span className="font-normal text-neutral-500"> (optional)</span>;
+function Optional({ quiet }: { quiet: string }) {
+  return <span className={`font-normal ${quiet}`}> (optional)</span>;
 }
 
 export function EnquiryForm({
@@ -53,6 +53,7 @@ export function EnquiryForm({
   thanks,
   fields,
   disabled,
+  onDark = false,
 }: {
   siteSlug: string;
   pagePath: string;
@@ -63,7 +64,11 @@ export function EnquiryForm({
   fields: FormField[];
   /** The draft preview: the form is shown but takes nothing. */
   disabled?: boolean;
+  /** On a dark band, the brand colour or a photo: labels and notes turn light. */
+  onDark?: boolean;
 }) {
+  const label = onDark ? "block text-sm font-medium text-white" : LABEL;
+  const quiet = onDark ? "text-neutral-200" : "text-neutral-500";
   const [state, formAction, pending] = useActionState(submitSiteEnquiry, INITIAL);
   const id = useId();
   const [values, setValues] = useState({ name: "", email: "", phone: "", message: "" });
@@ -108,7 +113,7 @@ export function EnquiryForm({
       <fieldset disabled={disabled || pending} className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label htmlFor={field("name")} className={LABEL}>
+            <label htmlFor={field("name")} className={label}>
               Name
             </label>
             <input
@@ -127,7 +132,7 @@ export function EnquiryForm({
             <FieldError id={field("name-error")} error={errors.name} />
           </div>
           <div>
-            <label htmlFor={field("email")} className={LABEL}>
+            <label htmlFor={field("email")} className={label}>
               Email
             </label>
             <input
@@ -148,9 +153,9 @@ export function EnquiryForm({
         </div>
         {askPhone && (
           <div>
-            <label htmlFor={field("phone")} className={LABEL}>
+            <label htmlFor={field("phone")} className={label}>
               Phone
-              <Optional />
+              <Optional quiet={quiet} />
             </label>
             <input
               id={field("phone")}
@@ -171,17 +176,17 @@ export function EnquiryForm({
         {fields.map((q) => {
           const name = answerInputName(q.id);
           const value = answers[name] ?? "";
-          const label = (
-            <label htmlFor={field(name)} className={LABEL}>
+          const caption = (
+            <label htmlFor={field(name)} className={label}>
               {q.label}
-              {!q.required && q.kind !== "yesno" && <Optional />}
+              {!q.required && q.kind !== "yesno" && <Optional quiet={quiet} />}
             </label>
           );
           switch (q.kind) {
             case "text":
               return (
                 <div key={q.id}>
-                  {label}
+                  {caption}
                   <input
                     id={field(name)}
                     name={name}
@@ -199,7 +204,7 @@ export function EnquiryForm({
             case "long":
               return (
                 <div key={q.id}>
-                  {label}
+                  {caption}
                   <textarea
                     id={field(name)}
                     name={name}
@@ -217,7 +222,7 @@ export function EnquiryForm({
             case "choice":
               return (
                 <div key={q.id}>
-                  {label}
+                  {caption}
                   <select
                     id={field(name)}
                     name={name}
@@ -261,7 +266,7 @@ export function EnquiryForm({
         })}
 
         <div>
-          <label htmlFor={field("message")} className={LABEL}>
+          <label htmlFor={field("message")} className={label}>
             Message
           </label>
           <textarea
@@ -294,7 +299,7 @@ export function EnquiryForm({
             {pending ? "Sending…" : buttonLabel || "Send"}
           </button>
           {disabled && (
-            <p className="text-sm text-neutral-500">
+            <p className={`text-sm ${quiet}`}>
               Visitors can send this once the site is published.
             </p>
           )}

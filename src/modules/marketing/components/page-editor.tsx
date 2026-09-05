@@ -30,12 +30,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
   SECTION_TYPES,
+  altNudge,
   moveItem,
   newSection,
   normalizePagePath,
   pagePathReasonMessage,
   sectionLabel,
   sectionSummary,
+  undescribedPhotos,
+  undescribedPhotosOnPage,
 } from "@/lib/sites/pages";
 import { PageContentSchema, type PageContent, type Section, type SectionType } from "@/lib/sites/schema";
 import type { SitePhotoView } from "../image-actions";
@@ -98,6 +101,8 @@ export function PageEditor({
   const [inNav, setInNav] = useState(initial.inNav);
   const [description, setDescription] = useState(initial.content.description);
   const [rows, setRows] = useState<Row[]>(() => initial.content.sections.map(keyed));
+  // Follows the unsaved rows, so typing a description clears it at once.
+  const pageNudge = altNudge(undescribedPhotosOnPage({ sections: rows.map((r) => r.section) }));
   const [selected, setSelected] = useState<string | null>(rows[0]?.key ?? null);
   const [saved, setSaved] = useState(() => JSON.stringify({ title: initial.title, path: initial.path, inNav: initial.inNav, content: initial.content }));
   const [previewKey, setPreviewKey] = useState(0);
@@ -258,6 +263,11 @@ export function PageEditor({
 
           <Panel className="space-y-3 p-5">
             <h2 className="font-heading text-base font-semibold tracking-heading">Sections</h2>
+            {pageNudge && (
+              <p className="text-xs text-amber-700">
+                {pageNudge} Screen readers and search engines say the description instead of the picture; add one under each photo.
+              </p>
+            )}
             {rows.length === 0 ? (
               <p className="text-sm text-muted-foreground">No sections yet. Add one below.</p>
             ) : (
@@ -386,6 +396,7 @@ function SortableRow({
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: row.key });
   const style = { transform: CSS.Transform.toString(transform), transition };
+  const nudge = altNudge(undescribedPhotos(row.section));
   return (
     <li
       ref={setNodeRef}
@@ -408,6 +419,7 @@ function SortableRow({
       <button type="button" className="min-w-0 flex-1 text-left" onClick={onSelect}>
         <div className="text-sm font-medium">{sectionLabel(row.section.type)}</div>
         <div className="truncate text-xs text-muted-foreground">{sectionSummary(row.section) || "Empty"}</div>
+        {nudge && <div className="text-xs text-amber-700">{nudge}</div>}
       </button>
       <div className="flex items-center gap-1">
         <Button type="button" variant="ghost" size="sm" aria-label="Move up" disabled={index === 0} onClick={() => onMove(index - 1)}>

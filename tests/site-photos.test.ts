@@ -2,7 +2,7 @@ import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import { imageSrc } from "../src/components/site/site-page";
 import { sitePhotoPathPrefix, isTenantBlobPath } from "../src/lib/blob";
-import { newSection, sectionSummary } from "../src/lib/sites/pages";
+import { altNudge, newSection, sectionSummary, undescribedPhotos, undescribedPhotosOnPage } from "../src/lib/sites/pages";
 import { PHOTO_MAX_EDGE, PhotoError, preparePhoto } from "../src/lib/sites/photo";
 import { ImageRefSchema, SectionSchema } from "../src/lib/sites/schema";
 import { classifyHost, RESERVED_PAGE_PATHS, siteRewrite } from "../src/lib/sites/slug";
@@ -176,5 +176,35 @@ describe("a swipe", () => {
     expect(swipeDirection(-80, 90)).toBe(0);
     expect(swipeDirection(0, 0)).toBe(0);
     expect(swipeDirection(-80, 0, 100)).toBe(0);
+  });
+});
+
+describe("photos without a description", () => {
+  const described = { id: ID, alt: "The barn" };
+  const blank = { id: ID, alt: "   " };
+
+  it("counts every placed photo, in every kind of section that places one", () => {
+    expect(undescribedPhotos({ type: "hero", headline: "x", subheadline: "", cta: null, image: null })).toEqual({ total: 0, missing: 0 });
+    expect(undescribedPhotos({ type: "hero", headline: "x", subheadline: "", cta: null, image: blank })).toEqual({ total: 1, missing: 1 });
+    expect(undescribedPhotos({ type: "about", heading: "x", body: [], image: described })).toEqual({ total: 1, missing: 0 });
+    expect(undescribedPhotos({ type: "image", image: blank, caption: "", layout: "inset" })).toEqual({ total: 1, missing: 1 });
+    expect(undescribedPhotos({ type: "gallery", heading: "", columns: 3, items: [{ image: blank, caption: "" }, { image: described, caption: "" }, { image: blank, caption: "" }] })).toEqual({ total: 3, missing: 2 });
+    expect(undescribedPhotos({ type: "slideshow", heading: "", seconds: 6, layout: "wide", items: [{ image: described, caption: "" }] })).toEqual({ total: 1, missing: 0 });
+    expect(undescribedPhotos({ type: "text", heading: "", body: ["x"] })).toEqual({ total: 0, missing: 0 });
+  });
+
+  it("adds a page up and says it in one line, or nothing when every photo has its words", () => {
+    const page = {
+      sections: [
+        { type: "hero" as const, headline: "x", subheadline: "", cta: null, image: blank },
+        { type: "gallery" as const, heading: "", columns: 3 as const, items: [{ image: described, caption: "" }, { image: blank, caption: "" }] },
+      ],
+    };
+    expect(undescribedPhotosOnPage(page)).toEqual({ total: 3, missing: 2 });
+    expect(altNudge({ total: 3, missing: 2 })).toBe("2 of 3 photos have no description.");
+    expect(altNudge({ total: 2, missing: 2 })).toBe("2 photos have no description.");
+    expect(altNudge({ total: 1, missing: 1 })).toBe("The photo has no description.");
+    expect(altNudge({ total: 4, missing: 0 })).toBeNull();
+    expect(altNudge({ total: 0, missing: 0 })).toBeNull();
   });
 });

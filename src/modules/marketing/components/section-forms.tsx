@@ -43,9 +43,16 @@ import {
 import { secondsLabel, SLIDESHOW_SECONDS } from "@/lib/sites/slides";
 import type { SitePhotoView } from "../image-actions";
 import { memberPhotoSrc, PhotoField, PhotoLibraryDialog } from "./photo-picker";
+import { SuggestDescription } from "./assistant-controls";
 
 type GalleryItem = Extract<Section, { type: "gallery" }>["items"][number];
-type PhotoProps = { tenantId: string; library: SitePhotoView[]; onLibraryChange: (next: SitePhotoView[]) => void };
+type PhotoProps = {
+  tenantId: string;
+  library: SitePhotoView[];
+  onLibraryChange: (next: SitePhotoView[]) => void;
+  /** Whether the assistant may suggest a photo's description. */
+  assistantOn?: boolean;
+};
 
 /**
  * One form per kind of section. Each edits the section it is given and hands
@@ -114,6 +121,7 @@ function SectionFields({
             onChange={(image) => onChange({ ...section, image })}
             library={photos.library}
             onLibraryChange={photos.onLibraryChange}
+            assistantOn={photos.assistantOn}
           />
           {section.image && (
             <Choice label="Photo side" value={section.imageSide ?? "right"} options={SIDES} onChange={(imageSide) => onChange({ ...section, imageSide })} />
@@ -258,6 +266,7 @@ function SectionFields({
             onChange={(image) => onChange({ ...section, image })}
             library={photos.library}
             onLibraryChange={photos.onLibraryChange}
+            assistantOn={photos.assistantOn}
           />
           <Field id={id("caption")} label="Caption" hint="A line under the photo, or blank.">
             <Input id={id("caption")} value={section.caption} maxLength={240} onChange={(e) => onChange({ ...section, caption: e.target.value })} />
@@ -315,6 +324,7 @@ function SectionFields({
                 onChange={(image) => onChange({ ...section, image })}
                 library={photos.library}
                 onLibraryChange={photos.onLibraryChange}
+                assistantOn={photos.assistantOn}
               />
               {section.image && (
                 <Choice label="Photo side" value={section.imageSide ?? "right"} options={SIDES} onChange={(imageSide) => onChange({ ...section, imageSide })} />
@@ -776,13 +786,19 @@ function GalleryFields({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={memberPhotoSrc(item.image.id)} alt="" className="h-20 w-28 rounded-lg object-cover" />
           <div className="min-w-0 flex-1 space-y-2">
-            <Input
-              aria-label={`Photo ${i + 1} description`}
-              value={item.image.alt}
-              maxLength={160}
-              placeholder="What is in the picture, for people who can't see it"
-              onChange={(e) => update(i, { image: { ...item.image, alt: e.target.value } })}
-            />
+            <div className="flex flex-wrap gap-2">
+              <Input
+                aria-label={`Photo ${i + 1} description`}
+                value={item.image.alt}
+                maxLength={160}
+                placeholder="What is in the picture, for people who can't see it"
+                className="min-w-0 flex-1"
+                onChange={(e) => update(i, { image: { ...item.image, alt: e.target.value } })}
+              />
+              {photos.assistantOn && (
+                <SuggestDescription imageId={item.image.id} onSuggested={(alt) => update(i, { image: { ...item.image, alt } })} />
+              )}
+            </div>
             <Input
               aria-label={`Photo ${i + 1} caption`}
               value={item.caption}
@@ -965,6 +981,7 @@ function SortableCard({
         onChange={(image) => onChange({ image })}
         library={photos.library}
         onLibraryChange={photos.onLibraryChange}
+        assistantOn={photos.assistantOn}
       />
       <CtaFields idPrefix={id("cta")} cta={card.cta} optional onChange={(cta) => onChange({ cta })} />
     </li>

@@ -51,6 +51,7 @@ import {
 import { PageContentSchema, type PageContent, type Section, type SectionType } from "@/lib/sites/schema";
 import type { SitePhotoView } from "../image-actions";
 import { restorePageVersionAction, savePageAction } from "../page-actions";
+import { RewriteWords, WritePage } from "./assistant-controls";
 import { SectionForm } from "./section-forms";
 
 /**
@@ -142,6 +143,7 @@ export function PageEditor({
   photos,
   schedulingOn,
   mapStatus,
+  assistantOn,
 }: {
   pageId: string;
   slug: string;
@@ -155,6 +157,8 @@ export function PageEditor({
   schedulingOn: boolean;
   /** Where the site's map stands (`mapStatusLine`), shown on a map section's form. */
   mapStatus: string;
+  /** Whether the assistant is set up on this deployment: its controls are drawn only then. */
+  assistantOn: boolean;
 }) {
   const router = useRouter();
   const [library, setLibrary] = useState(photos);
@@ -364,6 +368,18 @@ export function PageEditor({
               <Textarea id="page-description" value={description} maxLength={200} rows={2} onChange={(e) => setDescription(e.target.value)} />
               <p className="text-xs text-muted-foreground">One or two sentences, up to 200 characters. Blank uses your tagline.</p>
             </div>
+            {assistantOn && (
+              <WritePage
+                pageId={pageId}
+                hasSections={rows.length > 0}
+                onWritten={(next) => {
+                  const list = next.sections.map(keyed);
+                  setRows(list);
+                  setDescription(next.description);
+                  setSelected(list[0]?.key ?? null);
+                }}
+              />
+            )}
           </Panel>
 
           <Panel className="space-y-3 p-5">
@@ -434,10 +450,18 @@ export function PageEditor({
                 idPrefix={selectedRow.key}
                 section={selectedRow.section}
                 onChange={(next) => update(selectedRow.key, next)}
-                photos={{ tenantId, library, onLibraryChange: setLibrary }}
+                photos={{ tenantId, library, onLibraryChange: setLibrary, assistantOn }}
                 schedulingOn={schedulingOn}
                 mapStatus={mapStatus}
               />
+              {assistantOn && (
+                <RewriteWords
+                  key={selectedRow.key}
+                  pageId={pageId}
+                  section={selectedRow.section}
+                  onRewritten={(next) => update(selectedRow.key, next)}
+                />
+              )}
             </Panel>
             </div>
           )}

@@ -49,6 +49,31 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-05 — Slice 14: the header folds on a phone (`claude/marketing-header-folds`)
+
+The first open item every site showed: with four pages and a button the
+menu wrapped under the logo on a phone. No migration.
+
+- **A native disclosure, no script.** Below `md` the pages fold behind a
+  `Menu` button (`<details>`/`<summary>`, the three bars swapping for an X
+  through `group-open:`) at the right of the header, in a white panel
+  anchored under it with the current page marked; the owner's button stays
+  in the row beside it, since it is the one thing a visitor came to press.
+  From `md` up the row is as it was. A page with only the home link folds
+  nothing. ADR 0019 keeps a public page's scripts few, and a disclosure
+  opens and closes from the keyboard by itself; choosing a page closes it
+  because the next page is a new document. Not built: closing on a click
+  outside, which a disclosure cannot do without script.
+- **The draft route's dev-only key warning** ("passed a child from
+  DraftSitePage", an open item since slice 13) is gone: the banner is one
+  string child with a `key`, and a fresh load of the draft logs nothing.
+- **Driven on the dev branch** on Test's draft at 375px: one 73px row —
+  the logo, `Book a visit`, the Menu button — with the wide row hidden;
+  opened, a 224px panel under the button listed Home (marked current),
+  About, Contact and Tours, the icon an X; at the pane's width the row of
+  four and the button showed and the disclosure was hidden. The website
+  guide's header-button line says how it folds.
+
 ### 2026-09-05 — Slice 13: the preview follows the editor (`claude/marketing-live-preview`)
 
 The founder: "any changes on the site are not live; you have to hit save
@@ -1336,6 +1361,12 @@ feature means for it.
   `public_access_attempts`, keyed by a hash of the tenant id rather than
   `ipKey` (which is `unsalted`, and so no key at all, without
   `INTERVIEW_IP_SALT`).
+- **The header folds on a phone with a native disclosure, not a script**
+  (14). `<details>`/`<summary>` below `md`, the owner's button kept in the
+  row, the pages in a panel under a Menu button; ADR 0019 keeps a public
+  page's scripts few and a disclosure needs none, opens from the keyboard
+  and closes when a page is chosen. What it cannot do without script is
+  close on a click outside, accepted.
 - **The preview follows the editor, not the save** (13, [ADR 0029](../decisions/0029-the-preview-follows-the-editor-not-the-save.md)).
   The frame stays (device widths are the browser's breakpoints, and two
   stylesheets in one document is the other reason), and the editor posts
@@ -1950,12 +1981,11 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
   onto the PDF means shipping the same nine families as TTFs for
   `@react-pdf/renderer` and registering them by name; the seam is
   `invoice-brand.ts`, and nothing is asking for it yet.
-- **The header on a phone wraps; it does not fold.** With four menu items
-  and a button, the menu and the button wrap under the logo on a narrow
-  screen, which reads fine at five items and would not at ten. A folding
-  menu (one button, a sheet) is the first thing to build when a site has
-  more pages than a row can hold; the `PAGE_SECTIONS_MAX`-style ceiling on
-  pages in the menu does not exist yet either.
+- **There is no ceiling on pages in the menu.** The header folds on a
+  phone (slice 14) and a row on a wide screen wraps, so twenty pages would
+  read badly rather than break; a `PAGE_SECTIONS_MAX`-style ceiling on pages
+  in the menu, or a "more" fold on wide screens, waits for a site with that
+  many.
 - **Six marks are from memory.** The Facebook, Instagram, YouTube, TikTok,
   LinkedIn, X and Pinterest paths in `social-icons.tsx` were checked by eye
   at 44px on the dev branch, not against the networks' brand files. A mark
@@ -2003,11 +2033,6 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
   will be a client's, or the founder's own test on his site.
 - The `cta` and `hero` buttons point at the contact page; the assembler pins
   that, and the prompt asks for labels that say so.
-- **A dev-only React warning on the draft page**, `Each child in a list
-  should have a unique "key" prop … passed a child from DraftSitePage`,
-  shows on the draft route with or without `?live=1` (seen while driving
-  slice 13; it predates it). The only JSX the route makes is the banner;
-  nothing is wrong on the page. Worth five minutes with React DevTools.
 - **The shop block** is `retail` slice 6's, through the `block` slot 9b made; it needs a client island the site owns and a provider names, the slot's first change. **Only list-shaped blocks** exist today (rows: name, detail, amount, sold out) and only two field kinds (select, switch); both grow by adding a kind to the slot, where every pack gets it. **A price changed in Retail reaches the site on the page cache's clock** (five minutes); nothing in Retail revalidates a site, like Scheduling.
 - **Sitemap and robots per site**, and a `canonical` pointing at the host
   address once one exists.

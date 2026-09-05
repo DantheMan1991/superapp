@@ -41,10 +41,11 @@ export default async function DraftSitePage({
   if (!drafts) notFound();
   const page = drafts.view.pages.find((p) => p.path === pagePathFromSegments(path));
   if (!page) notFound();
+  // Keyed: the renderer places the banner among its root's children, and
+  // React (dev only) asked for a key on it for as long as the banner existed.
   const banner = (
-    <div className="bg-amber-100 px-6 py-2 text-center text-sm text-amber-900">
-      Draft preview. Only people signed in to {ctx.tenant.name} can see this;
-      publish it from Marketing to put it on the internet.
+    <div key="banner" className="bg-amber-100 px-6 py-2 text-center text-sm text-amber-900">
+      {`Draft preview. Only people signed in to ${ctx.tenant.name} can see this; publish it from Marketing to put it on the internet.`}
     </div>
   );
   if (live) return <LiveDraft site={drafts.view} page={page} banner={banner} />;

@@ -20,6 +20,7 @@ export const SECTION_TYPES: ReadonlyArray<{
   { type: "cta", label: "Call to action", hint: "A band in your color with one line and a button." },
   { type: "contact", label: "Contact details", hint: "Your phone, email and address, from the site's details." },
   { type: "hours", label: "Hours", hint: "Your hours, from the site's details." },
+  { type: "form", label: "Enquiry form", hint: "Name, email, phone and a message. Each one lands in your workspace as a contact and a follow-up, and is emailed to you." },
 ];
 
 export function sectionLabel(type: SectionType): string {
@@ -43,6 +44,8 @@ export function newSection(type: SectionType): Section {
       return { type, heading: "Get in touch", note: "" };
     case "hours":
       return { type, heading: "Hours", note: "" };
+    case "form":
+      return { type, heading: "Send us a message", note: "", buttonLabel: "Send", askPhone: true, thanks: "Thanks. We'll be in touch." };
   }
 }
 
@@ -63,6 +66,7 @@ export function sectionSummary(section: Section): string {
       break;
     case "contact":
     case "hours":
+    case "form":
       text = section.heading;
       break;
   }

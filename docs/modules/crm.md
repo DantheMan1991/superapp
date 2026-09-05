@@ -1030,6 +1030,14 @@ values stay readable and the discontinuity is visible.
 
 ## Open items
 
+- **A website enquiry creates the record without firing `record_created`.**
+  Since Marketing slice 4 ([ADR 0021](../decisions/0021-a-website-enquiry-lands-as-a-party.md))
+  `src/lib/sites/enquiries.ts` inserts `crm_party_details` directly
+  (`source = 'website'`, `ON CONFLICT DO NOTHING`, only when CRM is enabled
+  for the tenant) because a shared path may not import this module. A rule
+  meant for website leads therefore does not run; giving the shared path a
+  trigger it can call is the fix, and the automation dossier section is
+  where the shape lives.
 - **Paging drops every filter condition but the first.** `pageHref` in
   `CrmModule.tsx` collapses the repeated `f` params, so `Next` on a
   two-condition filter silently asks a different question.

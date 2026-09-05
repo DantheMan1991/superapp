@@ -47,7 +47,14 @@ export type EmailKind =
    * from the tenant's, and why its recipient always came from `profiles`
    * rather than from anything typed into a form.
    */
-  | "digest";
+  | "digest"
+  /**
+   * A message from the tenant's own website, forwarded to the tenant. Like
+   * the digest it goes to OUR OWN users rather than to a customer: the
+   * recipient is the site's contact email or the owners' profiles, never
+   * anything the visitor typed. Reply-To is the visitor, so answering works.
+   */
+  | "enquiry";
 
 /** Per tenant, per hour. A valve, not accounting. */
 export const TENANT_HOURLY_CAP = 100;

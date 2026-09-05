@@ -2,8 +2,9 @@ import Link from "next/link";
 import { ExternalLink, Globe } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
-import { requireModuleEnabled } from "@/lib/modules";
+import { isModuleEnabled, requireModuleEnabled } from "@/lib/modules";
 import { readDomainRecords } from "@/lib/sites/domains";
+import { listSiteEnquiries } from "@/lib/sites/enquiries";
 import { loadSiteDrafts } from "@/lib/sites/read";
 import { normalizeSiteSlug, platformHostsFromEnv, siteDomainFromEnv } from "@/lib/sites/slug";
 import { isVercelConfigured } from "@/lib/vercel/domains";
@@ -13,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
 import { ConnectDomainForm, DomainRow } from "@/modules/marketing/components/domain-controls";
+import { EnquiriesPanel } from "@/modules/marketing/components/enquiries-panel";
 import { MarketingStrip } from "@/modules/marketing/components/marketing-strip";
 import { PagesPanel } from "@/modules/marketing/components/pages-panel";
 import {
@@ -32,11 +34,17 @@ export const dynamic = "force-dynamic";
 export default async function WebsitePage() {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "marketing");
-  const drafts = await withTenant(
+  const { drafts, enquiries } = await withTenant(
     ctx.tenant.id,
-    (tx) => loadSiteDrafts(tx, ctx.tenant.id),
+    async (tx) => {
+      const drafts = await loadSiteDrafts(tx, ctx.tenant.id);
+      const enquiries = drafts ? await listSiteEnquiries(tx, ctx.tenant.id, drafts.site.id) : [];
+      return { drafts, enquiries };
+    },
     { role: ctx.role },
   );
+  // Where a message's contact lives, if CRM is on: the panel links there.
+  const crmOn = drafts ? await isModuleEnabled(ctx.tenant.id, "crm") : false;
   const canWrite = ctx.role === "owner";
   const siteDomain = siteDomainFromEnv(process.env);
   const appUrl = new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000");
@@ -167,6 +175,36 @@ export default async function WebsitePage() {
                 };
               })}
             />
+          </section>
+
+          <section className="space-y-3">
+            <div>
+              <h2 className="font-heading text-lg font-semibold tracking-heading">Messages</h2>
+              <p className="text-sm text-muted-foreground">
+                What people sent through the form on your site. Each one is a contact and
+                a follow-up in your workspace, and was emailed to you.
+              </p>
+            </div>
+            <Panel>
+              <EnquiriesPanel
+                canWrite={canWrite}
+                crmOn={crmOn}
+                rows={enquiries.map(({ enquiry, partyName, followUp }) => ({
+                  id: enquiry.id,
+                  name: enquiry.name,
+                  email: enquiry.email,
+                  phone: enquiry.phone,
+                  message: enquiry.message,
+                  pagePath: enquiry.pagePath,
+                  receivedOn: dateInTimezone(enquiry.createdAt, ctx.tenant.timezone),
+                  partyId: enquiry.partyId,
+                  partyName,
+                  workItemId: enquiry.workItemId,
+                  followUp,
+                  notifyVia: enquiry.notifyVia,
+                }))}
+              />
+            </Panel>
           </section>
 
           <section className="space-y-3">

@@ -14,7 +14,7 @@ import { PageContentSchema, SectionSchema } from "../src/lib/sites/schema";
 describe("the section catalogue", () => {
   it("offers every kind the model knows, and a fresh one of each is valid", () => {
     const kinds = SECTION_TYPES.map((s) => s.type).sort();
-    expect(kinds).toEqual(["about", "contact", "cta", "hero", "hours", "offer", "text"]);
+    expect(kinds).toEqual(["about", "contact", "cta", "form", "hero", "hours", "offer", "text"]);
     for (const { type } of SECTION_TYPES) {
       expect(SectionSchema.safeParse(newSection(type)).success).toBe(true);
     }

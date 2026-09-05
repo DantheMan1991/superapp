@@ -110,9 +110,9 @@ describe("standard copy and assembly", () => {
     const pages = assembleSite(brief, standardSiteCopy(brief));
     expect(pages.map((p) => p.path)).toEqual(["/", "/about", "/contact"]);
     expect(pages[0].content.sections.map((s) => s.type)).toEqual(["hero", "offer", "about", "cta"]);
-    expect(pages[2].content.sections.map((s) => s.type)).toEqual(["contact", "hours"]);
+    expect(pages[2].content.sections.map((s) => s.type)).toEqual(["contact", "hours", "form"]);
     const noHours = assembleSite({ ...brief, hoursLines: [] }, standardSiteCopy(brief));
-    expect(noHours[2].content.sections.map((s) => s.type)).toEqual(["contact"]);
+    expect(noHours[2].content.sections.map((s) => s.type)).toEqual(["contact", "form"]);
     expect(pages[0].content.description).toContain("Oak Row Farm Co.");
   });
 

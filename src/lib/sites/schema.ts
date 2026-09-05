@@ -50,6 +50,21 @@ export const SectionSchema = z.discriminatedUnion("type", [
     heading: short(80).min(1),
     note: short(300).default(""),
   }),
+  /**
+   * The enquiry form: name, email, phone (optional) and a message, fixed.
+   * What a visitor types lands in the workspace through `receiveSiteEnquiry`;
+   * the section carries only the words around the form.
+   */
+  z.object({
+    type: z.literal("form"),
+    heading: short(80).min(1),
+    note: short(300).default(""),
+    /** The button; blank reads "Send". */
+    buttonLabel: short(40).default(""),
+    askPhone: z.boolean().default(true),
+    /** Replaces the form once a message is sent; blank reads a standard thank-you. */
+    thanks: short(240).default(""),
+  }),
   z.object({
     type: z.literal("text"),
     heading: short(80).default(""),

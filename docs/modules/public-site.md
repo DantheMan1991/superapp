@@ -11,6 +11,16 @@
 Newest first. One entry per session/PR that touched this area. Every PR
 that changes it MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-04 — The contact form's caps move to a shared valve (`claude/marketing-site-forms`)
+
+`src/lib/contact.ts` no longer carries its own `ipKey`/`overCap`: the
+`public_access_attempts` counting lives in `src/lib/public-caps.ts`
+(`ipKey`, `overPublicCap`, a `PublicCap` of kind + hourly-per-IP + daily),
+because the tenant websites' enquiry forms (Marketing slice 4, ADR 0021)
+needed the same valve. The contact form's numbers (`contact_form`, 5 per IP
+per hour, 200 per day) and behaviour are unchanged; only where the code
+lives moved.
+
 ### 2026-07-28 — The whole business, and the three layers (`5f77dc9`, PR #28)
 - Landing page rewritten around the actual positioning: a whole-business
   platform (field crews, shop floors, jobs), not office software. The three

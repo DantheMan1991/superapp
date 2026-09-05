@@ -1,8 +1,6 @@
 import "server-only";
-import { createHash } from "node:crypto";
-import { and, eq, gte, sql } from "drizzle-orm";
-import { schema, withSystem } from "@/db";
 import { applyDevGuard } from "@/lib/email/send";
+import { ipKey, overPublicCap } from "@/lib/public-caps";
 import { getResend } from "@/lib/resend";
 import { CONTACT, SITE } from "@/lib/site";
 
@@ -44,73 +42,15 @@ export type ContactResult =
   | { ok: false; reason: "capped" | "not_configured" | "failed" };
 
 /**
- * The platform's salt for anonymising IPs before they are stored.
- *
- * The env var is named for the health check because that is what first needed
- * it; it is the platform's only anonymous-IP salt and is shared by every public
- * surface. Missing salt does not disable the form — it drops the per-IP key and
- * leans on the global daily cap instead, because "we can't rate limit you" is
- * not a good reason to refuse to hear from a customer.
+ * The caps, counted in `public_access_attempts` by `src/lib/public-caps.ts`
+ * — the platform's one ledger for anonymous public actions, shared with the
+ * tenant websites' enquiry forms since Marketing slice 4.
  */
-function ipKey(ip: string): string {
-  const salt = process.env.INTERVIEW_IP_SALT;
-  if (!salt) return "unsalted";
-  return createHash("sha256").update(`${salt}${ip}`).digest("hex");
-}
-
-function hoursAgo(now: Date, n: number): Date {
-  return new Date(now.getTime() - n * 60 * 60 * 1000);
-}
-
-function startOfUtcDay(now: Date): Date {
-  const day = new Date(now);
-  day.setUTCHours(0, 0, 0, 0);
-  return day;
-}
-
-/**
- * Record the attempt and report whether it is over either cap.
- *
- * Reuses `public_access_attempts` — the platform's existing table for counting
- * anonymous public actions — rather than adding a table for one form. Runs
- * under `withSystem` because the row belongs to no tenant; the only identifier
- * involved is an already-hashed IP.
- *
- * Counting inside the same transaction as the insert means concurrent
- * submissions serialize rather than both slipping through. Races exactly at the
- * boundary are accepted: this is a valve, not accounting.
- */
-async function overCap(ipHash: string): Promise<boolean> {
-  const now = new Date();
-  return withSystem(async (tx) => {
-    await tx
-      .insert(schema.publicAccessAttempts)
-      .values({ kind: ATTEMPT_KIND, ipHash });
-
-    const [perIp] = await tx
-      .select({ n: sql<number>`count(*)::int` })
-      .from(schema.publicAccessAttempts)
-      .where(
-        and(
-          eq(schema.publicAccessAttempts.kind, ATTEMPT_KIND),
-          eq(schema.publicAccessAttempts.ipHash, ipHash),
-          gte(schema.publicAccessAttempts.createdAt, hoursAgo(now, 1)),
-        ),
-      );
-    if (ipHash !== "unsalted" && perIp.n > CONTACT_HOURLY_IP_CAP) return true;
-
-    const [perDay] = await tx
-      .select({ n: sql<number>`count(*)::int` })
-      .from(schema.publicAccessAttempts)
-      .where(
-        and(
-          eq(schema.publicAccessAttempts.kind, ATTEMPT_KIND),
-          gte(schema.publicAccessAttempts.createdAt, startOfUtcDay(now)),
-        ),
-      );
-    return perDay.n > CONTACT_DAILY_CAP;
-  });
-}
+const CAP = {
+  kind: ATTEMPT_KIND,
+  hourlyIpCap: CONTACT_HOURLY_IP_CAP,
+  dailyCap: CONTACT_DAILY_CAP,
+};
 
 /** Where enquiries land. Never derived from the request. */
 function destination(): string {
@@ -135,7 +75,7 @@ export async function submitContactEnquiry(
   sub: ContactSubmission,
   ip: string,
 ): Promise<ContactResult> {
-  if (await overCap(ipKey(ip))) return { ok: false, reason: "capped" };
+  if (await overPublicCap(CAP, ipKey(ip))) return { ok: false, reason: "capped" };
 
   const fromDomain = process.env.EMAIL_FROM_DOMAIN;
   if (!fromDomain || !process.env.RESEND_API_KEY) {

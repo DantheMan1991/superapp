@@ -24,6 +24,7 @@ Once there is a website:
 - **{button:Publish|primary}.** Owners only. Puts every draft page on the internet. Once published it becomes {button:Publish changes|primary}, which puts your latest drafts live, and {button:Unpublish|outline} appears beside it.
 - **{button:Rewrite the words|ghost}.** Owners only. Writes every page again from your brand kit and details. Your browser asks `Write every page again from your brand kit and details? The current drafts are replaced. What is published stays until you publish again.`
 - **`Pages`.** Under the heading: `Drag to set the menu order. A page's words wait for Publish; its place in the menu shows at once.` One row per page: its title, its address such as `/about`, how many sections it has, and `published` or `draft only`. {button:Preview|ghost} opens that page's draft in a new tab. Owners also see the {icon:grip-vertical} drag handle, {button:Edit|outline|pencil}, which opens the page in the editor (see [Editing a page](page-editor.md)), and {icon:trash} on every page but the home page. Under the list, {button:Add a page|outline|plus} opens a `Title` and an `Address` with {button:Add page|primary} and {button:Cancel|ghost}; the address fills in from the title and the line under it reads `Will be at /services` or says why it cannot be used.
+- **`Messages`.** Under the heading: `What people sent through the form on your site. Each one is a contact and a follow-up in your workspace, and was emailed to you.` One row per message, newest first, up to the last thirty: the sender's name, the date it arrived, a badge reading {badge:to reply|outline} while its follow-up is open, {badge:replied|outline} once the follow-up is marked done, or {badge:follow-up removed|outline} if the follow-up was deleted; their email and phone as links you can click to write or call; `from /contact` when the form was on a page other than the home page; and the first line of the message with `Show the whole message` under it (`Show less` folds it again). {button:Follow-up|outline} opens the follow-up in Work. {button:Contact|outline} opens their record in CRM, when CRM is switched on. Owners also see {button:Remove|ghost|trash}; your browser asks `Remove the message from [name]? The contact and the follow-up it made stay where they are.` A line under each row says where the message went: `Contact: [name].` or `Saved as [name] in your contacts.`, `The contact it made has since been removed.`, and `Emailed to the site's email address.`, `Emailed to the owners; add an email to the site's details to send it there instead.` or `Not emailed: the site has no email address and no owner has one.` With no messages yet the card reads `No messages yet. When someone fills in the form on your site, it lands here.`
 - **`Details on the site`.** `Name in the header`, `Phone`, `Email`, `Address` and `Hours`, the same fields as when you built the site, with {button:Save|primary} and {button:Discard changes|ghost}. The header name is blank by default, which uses your brand kit's business name. These details show on the live site the moment you save; there is no need to publish again.
 - **`Your own domain`.** Under the heading: `Point a domain you already own at this site. Your free address keeps working alongside it.` One row per connected domain: the domain, a badge reading {badge:Live|success}, {badge:Waiting for DNS|secondary} or {badge:Needs attention|destructive}, a line saying what is happening (`Live. Visitors to this domain see your site.`, `Waiting for the TXT record that proves you own the domain.`, `Waiting for the record that points the domain at your site. DNS changes can take up to an hour.`, or the last error), and `Last checked [time]`. Owners see {button:Check again|outline} and {button:Remove|ghost|trash}. While a domain is not live, a table shows the records to add at your registrar: `Type`, `Name`, `Value`, a line saying what each is for, and {icon:copy} to copy the value. Under the rows, owners see `Domain you own`, a box for the domain, and {button:Connect|primary|globe}; the line under the box says what will happen, or why the domain cannot be connected. When the feature is not switched on for this installation the card reads `Connecting your own domain isn't switched on for this deployment yet. Your free address works in the meantime.`
 - **`Address`** (the last card). Owners only. The address field again, with {button:Change address|outline}. The line under it reads `Changing the address breaks links people already have to the old one.`
@@ -69,6 +70,19 @@ You need a domain you already own and a login to wherever its DNS is managed, us
 5. Once live, the badge reads {badge:Live|success}, the records table disappears, and search engines are told this domain is the site's real address.
 
 To disconnect, click {button:Remove|ghost|trash}; your browser asks `Disconnect [domain]? Visitors to it stop seeing your site at once. Your free address keeps working.` and you see `Domain disconnected.` The records at your registrar are yours to remove.
+
+## How messages from your site reach you
+
+Your contact page carries an enquiry form: `Name`, `Email`, `Phone (optional)` and `Message`, with a button that reads `Send` unless you changed it in the editor. A site built before the form existed does not have one until you add it: open the contact page in the editor and add an {button:Enquiry form|outline} section (see [Editing a page](page-editor.md)), then publish.
+
+When a visitor presses `Send` on your live site, in the same moment:
+
+1. They become a contact in your workspace, matched by email if you already have them, otherwise added as a person with their email and phone. When CRM is switched on, the record's source reads `website`.
+2. A follow-up called `Reply to [name]` is raised in Work, due today, with the whole message in its notes. It is in that morning's email digest for owners, and on the contact's record when CRM is on.
+3. The message appears under `Messages` on this page.
+4. You are emailed a copy, from the site's email address in `Details on the site` if there is one, otherwise to every owner. Reply to that email and your answer goes to the visitor.
+
+The visitor sees `Message sent.` and the line you set as `After sending`. A visitor who sends more than five messages in an hour, or a site that receives more than a hundred in a day, is asked to try later or use the phone or email on the page. In the draft preview the form is shown grayed out; only the live site takes messages.
 
 ## How to change the address
 
@@ -117,11 +131,20 @@ To disconnect, click {button:Remove|ghost|trash}; your browser asks `Disconnect 
 | `Not on the internet yet.` | The site is a draft. |
 | `On the internet since [date].` | When it was last published. |
 | `draft only` | In `Pages`: this page has never been published. |
+| `Message removed.` | The record of the message is gone from this page. The contact and the follow-up stay. |
+| `That message is already gone.` | Somebody removed it before you did. Reload the page. |
+| `Pick a message and try again.` | The page and the workspace disagree about which message you meant. Reload the page. |
+| `No messages yet. When someone fills in the form on your site, it lands here.` | Nobody has sent a message through the form, or the site has no form yet. |
+| `Message sent.` | What a visitor sees on your site after sending; your `After sending` line follows it. |
+| `Check the highlighted fields and try again.` | On your site: a visitor left a field empty or mistyped their email. |
+| `That's a few messages from here already. Give it an hour, or use the phone or email on this page.` | On your site: the same visitor sent more than five messages in an hour. |
+| `This form isn't taking messages right now. Use the phone or email on this page.` | On your site: the site is unpublished, or the form was reached on a site that no longer exists. |
+| `That didn't go through. Try again, or use the phone or email on this page.` | On your site: the message could not be saved. Ask us if it keeps happening. |
 
 ## Not on this page
 
-Photos on the pages. Buying a new domain through Yosher; today you connect one you already own. A contact form that lands in your CRM. An online shop. Visitor counts. Ask us if you need any of these; they are the next things this page grows.
+Photos on the pages. Buying a new domain through Yosher; today you connect one you already own. A form with your own questions; today it asks for a name, an email, a phone number and a message. An online shop. Visitor counts. Ask us if you need any of these; they are the next things this page grows.
 
 ## Who can do what
 
-Owners can build, publish, unpublish, rewrite, change the details and change the address. Staff can open the page, see the addresses and the details, and open the draft preview and the live site; they cannot change anything. Accountants see the same read-only view.
+Owners can build, publish, unpublish, rewrite, change the details, change the address and remove messages. Staff can open the page, see the addresses, the details and the messages, and open the draft preview and the live site; they cannot change anything. Accountants see the same read-only view. Anyone on the internet can send a message through the form on a published site; nobody needs to sign in for that.

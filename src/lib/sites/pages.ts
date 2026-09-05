@@ -22,6 +22,7 @@ export const SECTION_TYPES: ReadonlyArray<{
   { type: "hours", label: "Hours", hint: "Your hours, from the site's details." },
   { type: "form", label: "Enquiry form", hint: "Name, email, phone and a message. Each one lands in your workspace as a contact and a follow-up, and is emailed to you." },
   { type: "image", label: "Photo", hint: "One photo from your site's library, with a caption if you like." },
+  { type: "gallery", label: "Photo gallery", hint: "Several photos in a grid, with a heading and captions if you like." },
 ];
 
 export function sectionLabel(type: SectionType): string {
@@ -49,6 +50,8 @@ export function newSection(type: SectionType): Section {
       return { type, heading: "Send us a message", note: "", buttonLabel: "Send", askPhone: true, thanks: "Thanks. We'll be in touch.", fields: [] };
     case "image":
       return { type, image: null, caption: "", layout: "inset" };
+    case "gallery":
+      return { type, heading: "Photos", items: [], columns: 3 };
   }
 }
 
@@ -75,6 +78,12 @@ export function sectionSummary(section: Section): string {
     case "image":
       text = section.caption || (section.image ? "A photo" : "No photo chosen yet");
       break;
+    case "gallery": {
+      const n = section.items.length;
+      const count = n === 0 ? "no photos yet" : `${n} ${n === 1 ? "photo" : "photos"}`;
+      text = section.heading ? `${section.heading}: ${count}` : count;
+      break;
+    }
   }
   text = text.trim();
   return text.length > 60 ? `${text.slice(0, 57).trimEnd()}…` : text;

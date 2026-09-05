@@ -1,5 +1,6 @@
 "use client";
-import { Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { ImagePlus, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -7,9 +8,12 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { FORM_FIELD_KINDS, newFormField } from "@/lib/sites/enquiry-schema";
 import { moveItem, paragraphsToText, textToParagraphs } from "@/lib/sites/pages";
-import { FORM_FIELDS_MAX, type FormField, type FormFieldKind, type Section } from "@/lib/sites/schema";
+import { FORM_FIELDS_MAX, GALLERY_ITEMS_MAX, type FormField, type FormFieldKind, type Section } from "@/lib/sites/schema";
 import type { SitePhotoView } from "../image-actions";
-import { PhotoField } from "./photo-picker";
+import { memberPhotoSrc, PhotoField, PhotoLibraryDialog } from "./photo-picker";
+
+type GalleryItem = Extract<Section, { type: "gallery" }>["items"][number];
+type PhotoProps = { tenantId: string; library: SitePhotoView[]; onLibraryChange: (next: SitePhotoView[]) => void };
 
 /**
  * One form per kind of section. Each edits the section it is given and hands
@@ -54,6 +58,37 @@ export function SectionForm({
             onChange={(image) => onChange({ ...section, image })}
             library={photos.library}
             onLibraryChange={photos.onLibraryChange}
+          />
+        </div>
+      );
+    case "gallery":
+      return (
+        <div className="space-y-4">
+          <Field id={id("heading")} label="Heading" hint="Optional.">
+            <Input id={id("heading")} value={section.heading} maxLength={80} onChange={(e) => onChange({ ...section, heading: e.target.value })} />
+          </Field>
+          <div className="space-y-2">
+            <Label>Photos per row</Label>
+            <div className="flex gap-2">
+              {([2, 3, 4] as const).map((n) => (
+                <Button
+                  key={n}
+                  type="button"
+                  variant={section.columns === n ? "default" : "outline"}
+                  size="sm"
+                  aria-pressed={section.columns === n}
+                  onClick={() => onChange({ ...section, columns: n })}
+                >
+                  {n}
+                </Button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">On a wide screen. A phone always shows two.</p>
+          </div>
+          <GalleryFields
+            items={section.items}
+            onChange={(items) => onChange({ ...section, items })}
+            photos={photos}
           />
         </div>
       );
@@ -418,6 +453,86 @@ function CtaFields({
       >
         <Input id={`${idPrefix}-cta-href`} value={cta.href} maxLength={200} className="font-mono" onChange={(e) => onChange({ ...cta, href: e.target.value })} />
       </Field>
+    </div>
+  );
+}
+
+/**
+ * A gallery's photos: one row each with the picture, its description, a
+ * caption, order and removal. Adding or changing one opens the same library
+ * dialog a single placement uses; a pick appends or replaces.
+ */
+function GalleryFields({
+  items,
+  onChange,
+  photos,
+}: {
+  items: GalleryItem[];
+  onChange: (items: GalleryItem[]) => void;
+  photos: PhotoProps;
+}) {
+  // Null: closed. A number: replacing that item. "add": appending.
+  const [picking, setPicking] = useState<number | "add" | null>(null);
+  const update = (i: number, patch: Partial<GalleryItem>) =>
+    onChange(items.map((it, j) => (j === i ? { ...it, ...patch } : it)));
+  return (
+    <div className="space-y-3">
+      <Label>Photos</Label>
+      {items.map((item, i) => (
+        <div key={`${item.image.id}-${i}`} className="flex flex-wrap items-start gap-3 rounded-xl bg-muted/50 p-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={memberPhotoSrc(item.image.id)} alt="" className="h-20 w-28 rounded-lg object-cover" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <Input
+              aria-label={`Photo ${i + 1} description`}
+              value={item.image.alt}
+              maxLength={160}
+              placeholder="What is in the picture, for people who can't see it"
+              onChange={(e) => update(i, { image: { ...item.image, alt: e.target.value } })}
+            />
+            <Input
+              aria-label={`Photo ${i + 1} caption`}
+              value={item.caption}
+              maxLength={120}
+              placeholder="Caption, or blank"
+              onChange={(e) => update(i, { caption: e.target.value })}
+            />
+          </div>
+          <div className="flex items-center gap-1">
+            <Button type="button" variant="ghost" size="sm" aria-label={`Change photo ${i + 1}`} onClick={() => setPicking(i)}>
+              <ImagePlus className="size-4" />
+            </Button>
+            <Button type="button" variant="ghost" size="sm" aria-label={`Move photo ${i + 1} up`} disabled={i === 0} onClick={() => onChange(moveItem(items, i, i - 1))}>
+              ↑
+            </Button>
+            <Button type="button" variant="ghost" size="sm" aria-label={`Move photo ${i + 1} down`} disabled={i === items.length - 1} onClick={() => onChange(moveItem(items, i, i + 1))}>
+              ↓
+            </Button>
+            <Button type="button" variant="ghost" size="sm" aria-label={`Remove photo ${i + 1}`} onClick={() => onChange(items.filter((_, j) => j !== i))}>
+              <Trash2 className="size-4" />
+            </Button>
+          </div>
+        </div>
+      ))}
+      <Button type="button" variant="outline" size="sm" disabled={items.length >= GALLERY_ITEMS_MAX} onClick={() => setPicking("add")}>
+        <Plus className="size-4" />
+        Add a photo
+      </Button>
+      <p className="text-xs text-muted-foreground">Up to twelve. The same photo can appear more than once.</p>
+      <PhotoLibraryDialog
+        open={picking !== null}
+        onOpenChange={(next) => !next && setPicking(null)}
+        tenantId={photos.tenantId}
+        library={photos.library}
+        onLibraryChange={photos.onLibraryChange}
+        selectedId={typeof picking === "number" ? (items[picking]?.image.id ?? null) : null}
+        onPick={(id) => {
+          if (typeof picking === "number") update(picking, { image: { ...items[picking].image, id } });
+          else onChange([...items, { image: { id, alt: "" }, caption: "" }]);
+          setPicking(null);
+        }}
+        onRemoved={(id) => onChange(items.filter((it) => it.image.id !== id))}
+      />
     </div>
   );
 }

@@ -50,6 +50,9 @@ export const ImageRefSchema = z.object({
 });
 export type ImageRef = z.infer<typeof ImageRefSchema>;
 
+/** Photos a gallery holds. A page is not an album. */
+export const GALLERY_ITEMS_MAX = 12;
+
 export const SectionSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("hero"),
@@ -117,6 +120,16 @@ export const SectionSchema = z.discriminatedUnion("type", [
     caption: short(240).default(""),
     /** `inset` sits in the text column; `wide` spans the page. */
     layout: z.enum(["inset", "wide"]).default("inset"),
+  }),
+  z.object({
+    type: z.literal("gallery"),
+    heading: short(80).default(""),
+    items: z
+      .array(z.object({ image: ImageRefSchema, caption: short(120).default("") }))
+      .max(GALLERY_ITEMS_MAX)
+      .default([]),
+    /** Photos per row on a wide screen; a phone always shows two. */
+    columns: z.union([z.literal(2), z.literal(3), z.literal(4)]).default(3),
   }),
 ]);
 export type Section = z.infer<typeof SectionSchema>;

@@ -199,6 +199,44 @@ function SectionView({
         </section>
       );
     }
+    case "gallery": {
+      // A photo whose row is gone is skipped; a gallery with none left draws nothing.
+      const items = section.items.filter((item) => site.images[item.image.id]);
+      if (items.length === 0) return null;
+      const columns =
+        section.columns === 2
+          ? "sm:grid-cols-2"
+          : section.columns === 4
+            ? "sm:grid-cols-3 lg:grid-cols-4"
+            : "sm:grid-cols-3";
+      return (
+        <section className="mx-auto max-w-5xl px-6 py-14">
+          {section.heading && (
+            <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
+          )}
+          <ul className={`mt-6 grid grid-cols-2 gap-4 ${columns}`}>
+            {items.map((item, i) => (
+              <li key={i}>
+                <figure>
+                  {/* The photo itself, larger, in a new tab: a look without any script. */}
+                  <a
+                    href={imageSrc(mode, site.slug, item.image.id)}
+                    target="_blank"
+                    rel="noopener"
+                    className="block overflow-hidden rounded-xl bg-neutral-100"
+                  >
+                    <Photo site={site} mode={mode} image={item.image} className="aspect-[4/3] w-full object-cover" />
+                  </a>
+                  {item.caption && (
+                    <figcaption className="mt-2 text-sm text-neutral-600">{item.caption}</figcaption>
+                  )}
+                </figure>
+              </li>
+            ))}
+          </ul>
+        </section>
+      );
+    }
     case "image": {
       const photo = section.image && site.images[section.image.id] ? section.image : null;
       if (!photo) return null;

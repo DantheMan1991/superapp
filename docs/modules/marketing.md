@@ -55,6 +55,14 @@ The thing a thumb tries first. No migration, no new section.
 - **Arrow keys** on the slideshow: the wrapper's `onKeyDown` moves the show
   while any of its buttons has focus, the way the lightbox already did.
 - Guide: `page-editor.md` (a swipe on a phone, the arrow keys).
+- **Driven on the dev branch** with synthetic pointer events on the
+  published home page's slideshow (paused first): a 100px drag left moved
+  to the next photo, a 100px drag right back, a drag mostly downward and a
+  20px drag changed nothing, and ArrowRight on a focused dot moved on; the
+  frame's computed `touch-action` was `pan-y` and the photo `draggable`
+  `false`. In the about page's lightbox a drag left read `Photo 2 of 2`
+  and the click that followed it did not close the dialog, a drag right
+  read `Photo 1 of 2`, and a plain click on the dark closed it.
 
 ### 2026-09-04 — Slice 5c: the slideshow, and the gallery's lightbox (`claude/marketing-site-slideshow`)
 

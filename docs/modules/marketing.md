@@ -40,7 +40,7 @@
 | 9b | Prices and availability from the retail and inventory packs, through the declared-slot seam the shop block needs (`retail` slice 6): a pack contributes a block kind, its editor fields and its renderer; the site hosts them. A live team block is not planned: Columns already does a team by hand, and a live one raises consent questions a section should not answer | with the shop block |
 | **10** | **`Find us`: a map of the site's address, a picture the platform draws from public-domain USGS tiles around a pin the Census geocoder placed at save, with the address and a `Get directions` link. No client library, no third-party request from a visitor's browser, United States only.** [ADR 0026](../decisions/0026-a-map-is-a-picture-the-platform-draws.md) | **built 2026-09-05** |
 | **11a** | **What search engines and browsers ask a site for: `robots.txt` and `sitemap.xml` per site on every address it has, LocalBusiness structured data on the home page from the settings (address, phone, email, the map's pin, the logo, the social profiles), and an icon from the brand kit (a square logo as it is, otherwise a monogram in the brand colour) at 32, 180 and 512.** | **built 2026-09-05** |
-| 11b | A drawn share image per page (`og:image`, from the kit's colours and type paths) and redirects from an address the site used to have (a `previous_slugs` column) | next |
+| **11b** | **A share image drawn per page (the page's title in the kit's type on the brand colour, the logo or the monogram in a white panel, the address in the corner) as `og:image` and the Twitter card; and an address the site used to have sends people on to the current one, for the same page, on the platform path and on the free address.** | **built 2026-09-05** |
 | 12 | The assistant everywhere: rewrite one section, write a page from a sentence, suggest a photo description from the image | |
 | — | The shop block: `retail` slice 6 (online orders + pickup windows) fills a declared slot; blocked on commitments (retail 3) and web checkout (payments) | not this module's |
 
@@ -48,6 +48,59 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-05 — Slice 11b: the share image, and an old address that sends people on (`claude/marketing-site-share-redirects`)
+
+The second half of the SEO pack. Migration `0260` adds `previous_slugs`
+to `sites` with a GIN index; applied and verified on dev and production
+before the merge.
+
+- **The share image** (`src/lib/sites/share.ts`, `siteShareResponse`): a
+  1200×630 PNG per page — the page's title (the site's on the home page)
+  in the kit's Noto Sans as PATHS (`textPaths`, newly exported from
+  `logo-svg.ts`, so no font is needed at raster time), the site's name (or
+  its tagline on the home page) under it at 85%, the address in the corner
+  at 70%, all on the brand colour in its own foreground; and in a white
+  rounded panel top-left the logo's own pixels or the monogram (`monogramPng`,
+  exported from `icon.ts`). Titles shrink to fit the width down to 34px.
+  Named by `shareKey(shareFacts(site, page, base))`, an FNV hash of the
+  title, the subtitle, the host, the colour and the logo's pathname; the
+  route finds the page by recomputing keys, so a retitled page is a new
+  picture and an old key is a 404. Routes `src/app/sites/[slug]/share/[key]`
+  and the domain twin; `/share` is reserved and `siteRewrite` maps it.
+  `publicSiteMetadata` now sets `openGraph.images` (absolute, through
+  `siteBaseUrlFor`, the connected domain first) and a `summary_large_image`
+  Twitter card.
+- **`siteBaseUrlFor(site, mode, env)`** (`seo.ts`, pure) replaces the
+  renderer's private `siteBase`: the connected domain, else the free
+  address on a host, else the platform path.
+- **An old address sends people on**: `sites.previous_slugs text[]`,
+  written by `changeSiteSlug` through `withPreviousSlug` (the old address
+  first, the new one never in the list, nothing twice, ten at most);
+  `lookupSiteByPreviousSlug` (`withSystem`, identifiers only, `@>`
+  containment on the GIN index); and `sendOnIfMoved` in `public-route.tsx`,
+  which runs only when nothing is at the address and answers a permanent
+  redirect to the same page at the site's current address for the same
+  kind of address (platform path or free address). A current slug elsewhere
+  always wins; a moved site that is unpublished is a 404 like any other.
+- **Not built here:** a redirect from a previous CONNECTED DOMAIN (a domain
+  the business gave up is not the platform's to answer for) and a share
+  image the owner uploads instead of the drawn one.
+- **Driven on the dev branch** on Test: the about page's head carried
+  `og:image` at `/sites/oak-row-farm/share/e5043e08`, `og:image:width`
+  1200, `og:site_name`, and a `summary_large_image` Twitter card; the
+  picture came back as a 38KB PNG with the photo cache headers and a 304
+  on its ETag, a wrong key was 404, and it read: the wordmark in its white
+  panel, `About` in bold, `Oak Row Farm Co.` under it, the address in the
+  corner, on the brand colour. Then the address was changed to
+  `oak-row-farm-co`: `/sites/oak-row-farm/about` landed on
+  `/sites/oak-row-farm-co/about` and `oak-row-farm.localhost:3000/about` on
+  `oak-row-farm-co.localhost:3000/about`; changed back, the
+  `oak-row-farm-co` address sent people to `oak-row-farm` in turn. Note
+  that the absolute addresses (`og:image`, a platform-path redirect) take
+  their host from `NEXT_PUBLIC_APP_URL`, which on the laptop is
+  `127.0.0.1:3000` while the browser says `localhost`; in production the two
+  are the same name. Tests: `tests/site-share.test.ts`.
 
 ### 2026-09-05 — Slice 11a: robots, a sitemap, structured data and an icon (`claude/marketing-site-seo`)
 
@@ -1214,7 +1267,7 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
 
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
-| `sites` | The business's website: its address, live details and status | FORCE RLS. `member_read`; INSERT/UPDATE/DELETE need `app_current_tenant_role() = 'owner'`. Unique on `tenant_id` (one site per tenant, this slice) and on `slug` platform-wide (it is a hostname label). CHECKs: slug shape `^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$`, `status in (draft, published)`, `copy_source in (model, standard)`, title ≤ 80. `settings` is `SiteSettingsSchema`: the details (phone, email, address, hours), since 6c the frame (announcement bar, header button, social links, footer columns, footer line), and since 10 `map`, the geocoded pin kept with the address it was placed from (ADR 0026), all read live by the renderer |
+| `sites` | The business's website: its address, live details and status | FORCE RLS. `member_read`; INSERT/UPDATE/DELETE need `app_current_tenant_role() = 'owner'`. Unique on `tenant_id` (one site per tenant, this slice) and on `slug` platform-wide (it is a hostname label). Since 11b (`0260`): `previous_slugs text[]`, the addresses the site used to have, newest first, at most ten, GIN-indexed for the containment lookup an old address makes. CHECKs: slug shape `^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$`, `status in (draft, published)`, `copy_source in (model, standard)`, title ≤ 80. `settings` is `SiteSettingsSchema`: the details (phone, email, address, hours), since 6c the frame (announcement bar, header button, social links, footer columns, footer line), and since 10 `map`, the geocoded pin kept with the address it was placed from (ADR 0026), all read live by the renderer |
 | `site_pages` | One page: its path, title, nav place, `draft` and `published` content | FORCE RLS, same policies. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. Unique `(site_id, path)`. CHECK: path `^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$`, title 1–80. `draft`/`published` are `PageContentSchema`; `published` null = never published |
 | `site_page_versions` | A page's history: the content at each `save`, `publish` and `restore` | FORCE RLS; `member_read`, owner INSERT and DELETE (no UPDATE — a version is never edited). Composite FK `(tenant_id, page_id) → site_pages` ON DELETE CASCADE. CHECK on `kind`. Trimmed to the newest `PAGE_VERSIONS_KEEP` (30) on every write by `recordVersion` |
 | `site_domains` | A domain the business owns, connected to its site | FORCE RLS; `member_read`, owner INSERT/UPDATE/DELETE. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. **Unique on `domain` platform-wide** (a hostname points at one site); at most five per site (`SITE_DOMAINS_MAX`). CHECKs: hostname shape, `status in (pending, active, error)`. `records` is `DnsRecordToPublish[]`, what the owner was last told to publish; `vercel_verified`/`vercel_configured_by` are Vercel's last words. **Only an `active` row routes**, and only Vercel makes a row active |
@@ -1275,11 +1328,16 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
   `src/app/sites/[slug]/images/[imageId]`,
   `src/app/domain/[host]/images/[imageId]`
 - Search engines and icons: `src/lib/sites/seo.ts` (robots, the sitemap,
-  the structured data, the icon sizes — pure), `seo-routes.ts`
-  (`robotsResponse`, `sitemapResponse`), `icon.ts` (`siteIconResponse`,
-  the monogram), the `robots.txt`, `sitemap.xml` and `icon/[size]` routes
-  under `src/app/sites/[slug]/` and `src/app/domain/[host]/`, `iconsFor` in
-  `public-route.tsx`, `businessFacts` in `site-page.tsx`
+  the structured data, the icon sizes, `siteBaseUrlFor`, `shareFacts` and
+  `shareKey` — pure), `seo-routes.ts` (`robotsResponse`, `sitemapResponse`),
+  `icon.ts` (`siteIconResponse`, `monogramPng`), `share.ts`
+  (`renderShareImage`, `siteShareResponse`), `textPaths` in
+  `src/lib/brand/logo-svg.ts`, the `robots.txt`, `sitemap.xml`,
+  `icon/[size]` and `share/[key]` routes under `src/app/sites/[slug]/` and
+  `src/app/domain/[host]/`, `iconsFor`, `shareImageFor` and `sendOnIfMoved`
+  in `public-route.tsx`, `businessFacts` in `site-page.tsx`,
+  `lookupSiteByPreviousSlug` in `read.ts`, `withPreviousSlug` in `slug.ts`;
+  migration `0260`
 - The map: `src/lib/sites/map-core.ts` (the projection, the key, the
   marker, the geocoder's answer, the status line — pure), `map.ts`
   (`geocodeAddress`, `renderMap`, the two responses), the three `map/[key]`
@@ -1355,6 +1413,14 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
   offer under an advisory lock and refused as "just taken" otherwise. No
   confirmation email goes to the visitor: the platform mails a public
   form's words to the business's own addresses only.
+- **The share image is drawn, not uploaded, and named by what is on it.**
+  Type as paths from the kit's own font, the brand colour, the logo's own
+  pixels: nothing on it is a file a tenant wrote, and a retitled page is a
+  new address every cache forgets by itself. An uploaded share image is a
+  later option, not a replacement.
+- **An old address sends people on for as long as it is remembered**, ten
+  addresses deep, and a current address anywhere wins over a previous one
+  here; the platform never answers for a domain a business gave up.
 - **A wide logo does not become a favicon.** The tab's icon is the logo
   only when it is roughly square; otherwise it is a monogram drawn by the
   kit's own machinery, because a wordmark at 32 pixels is a smudge and a

@@ -34,7 +34,8 @@ async function fromLogo(bytes: Uint8Array, size: IconSize): Promise<Buffer> {
     .toBuffer();
 }
 
-async function monogram(title: string, primary: HexColor, size: IconSize): Promise<Buffer> {
+/** The initials on a rounded square in the brand colour, at `size` px, on nothing: the icon, and the share image's corner. */
+export async function monogramPng(title: string, primary: HexColor, size: number): Promise<Buffer> {
   const spec = normalizeSpec({
     layout: "monogram",
     line1: title,
@@ -82,7 +83,7 @@ export async function siteIconResponse(
     const bytes = await loadLogoBytes(brand.logo.pathname);
     if (bytes) png = await fromLogo(bytes, size);
   }
-  png ??= await monogram(title, primary, size);
+  png ??= await monogramPng(title, primary, size);
   return new Response(new Uint8Array(png), {
     headers: {
       "Content-Type": "image/png",

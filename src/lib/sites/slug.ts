@@ -61,7 +61,7 @@ export const RESERVED_SITE_SLUGS: ReadonlySet<string> = new Set([
 ]);
 
 /** Page paths the platform's routes shadow under `/sites/<slug>/…`. */
-export const RESERVED_PAGE_PATHS: ReadonlySet<string> = new Set(["/draft", "/logo", "/images", "/map", "/icon"]);
+export const RESERVED_PAGE_PATHS: ReadonlySet<string> = new Set(["/draft", "/logo", "/images", "/map", "/icon", "/share"]);
 
 export type SlugCheck =
   | { ok: true; slug: string }
@@ -245,7 +245,13 @@ export function siteRewrite(kind: HostKind, pathname: string): string | null {
   if (pathname.startsWith("/_next/") || pathname.startsWith("/api/")) return null;
   const assetBase = kind.kind === "site" ? `/sites/${kind.slug}` : `/domain/${kind.host}`;
   const pageBase = kind.kind === "site" ? `/hosted/${kind.slug}` : `/domain/${kind.host}`;
-  if (pathname === "/logo" || pathname.startsWith("/images/") || pathname.startsWith("/map/") || pathname.startsWith("/icon/")) {
+  if (
+    pathname === "/logo" ||
+    pathname.startsWith("/images/") ||
+    pathname.startsWith("/map/") ||
+    pathname.startsWith("/icon/") ||
+    pathname.startsWith("/share/")
+  ) {
     return `${assetBase}${pathname}`;
   }
   // What a crawler or a browser asks a host for by name (slice 11).
@@ -255,4 +261,18 @@ export function siteRewrite(kind: HostKind, pathname: string): string | null {
     return `${assetBase}/icon/180`;
   }
   return `${pageBase}${pathname === "/" ? "" : pathname}`;
+}
+
+/** Addresses a site used to have, kept so the old one can send people on. */
+export const PREVIOUS_SLUGS_MAX = 10;
+
+/**
+ * The list after a change: the old address first, the new one never in it
+ * (a site that goes back to an old address is simply at it), nothing twice,
+ * the oldest dropped past the cap.
+ */
+export function withPreviousSlug(previous: readonly string[], old: string, next: string): string[] {
+  return [old, ...previous]
+    .filter((slug, i, all) => slug !== next && all.indexOf(slug) === i)
+    .slice(0, PREVIOUS_SLUGS_MAX);
 }

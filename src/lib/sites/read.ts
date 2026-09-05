@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { schema, withSystem, withTenant, type Tx } from "@/db";
 import type { Site, SiteDomain, SiteImage, SitePage, SitePageVersion } from "@/db/schema";
 import type { ResolvedBrand } from "@/lib/brand/core";
@@ -68,6 +68,23 @@ export async function lookupSiteBySlug(slug: string): Promise<SiteHit | null> {
     }),
   );
   return row ?? null;
+}
+
+/**
+ * A site that USED to be at this address (slice 11b), so the old address
+ * can send people on: the current slug and status, identifiers only, under
+ * `withSystem` like the lookup above. A current slug elsewhere is looked up
+ * first by the caller, so it wins over a previous one here.
+ */
+export async function lookupSiteByPreviousSlug(slug: string): Promise<{ slug: string; status: string } | null> {
+  const rows = await withSystem((tx) =>
+    tx
+      .select({ slug: schema.sites.slug, status: schema.sites.status })
+      .from(schema.sites)
+      .where(sql`${schema.sites.previousSlugs} @> ARRAY[${slug}]::text[]`)
+      .limit(1),
+  );
+  return rows[0] ?? null;
 }
 
 /** A connected domain routes only while its row is `active` (Vercel's word). */

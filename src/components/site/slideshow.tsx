@@ -2,7 +2,7 @@
 /* eslint-disable @next/next/no-img-element -- our own image routes, already sized and cached */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { slideLabel, wrapIndex, type Slide } from "@/lib/sites/slides";
+import { slideLabel, swipeDirection, wrapIndex, type Slide } from "@/lib/sites/slides";
 
 /**
  * The public site's one moving part: photos shown one at a time.
@@ -19,9 +19,10 @@ import { slideLabel, wrapIndex, type Slide } from "@/lib/sites/slides";
  * moves by itself stops while the pointer or the keyboard is on it, has a
  * Pause, and never moves at all for a visitor whose device asks for less
  * motion; the lightbox is a dialog that closes on Escape and hands focus
- * back to the tile it came from. Only the current photo is in the page;
- * the next is fetched ahead, so a twelve-photo show does not load twelve
- * photos at once.
+ * back to the tile it came from; a swipe across either moves it, and the
+ * arrow keys move a slideshow whose buttons have focus. Only the current
+ * photo is in the page; the next is fetched ahead, so a twelve-photo show
+ * does not load twelve photos at once.
  */
 
 const ARROW =
@@ -66,6 +67,54 @@ function usePreloadNext(slides: Slide[], index: number): void {
   }, [slides, index]);
 }
 
+/**
+ * A swipe across the photo. The pointer's start is remembered on press and
+ * judged on release with `swipeDirection`; pointer events cover a finger
+ * and a mouse alike, and `touch-action: pan-y` on the element leaves
+ * vertical scrolling to the browser and takes only the sideways move. A
+ * release that ended a swipe also fires a click, so `consumeSwipe` lets a
+ * click handler ask whether to ignore it.
+ */
+function useSwipe(onSwipe: (dir: -1 | 1) => void): {
+  consumeSwipe: () => boolean;
+  handlers: {
+    onPointerDown: (e: React.PointerEvent<HTMLElement>) => void;
+    onPointerUp: (e: React.PointerEvent<HTMLElement>) => void;
+    onPointerCancel: () => void;
+    style: React.CSSProperties;
+  };
+} {
+  const start = useRef<{ x: number; y: number; id: number } | null>(null);
+  const swiped = useRef(false);
+  return {
+    consumeSwipe: () => {
+      const was = swiped.current;
+      swiped.current = false;
+      return was;
+    },
+    handlers: {
+      onPointerDown: (e) => {
+        if (e.button !== 0) return;
+        start.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
+        swiped.current = false;
+      },
+      onPointerUp: (e) => {
+        const from = start.current;
+        start.current = null;
+        if (!from || from.id !== e.pointerId) return;
+        const dir = swipeDirection(e.clientX - from.x, e.clientY - from.y);
+        if (dir === 0) return;
+        swiped.current = true;
+        onSwipe(dir);
+      },
+      onPointerCancel: () => {
+        start.current = null;
+      },
+      style: { touchAction: "pan-y" },
+    },
+  };
+}
+
 export function Slideshow({
   slides,
   seconds,
@@ -83,6 +132,7 @@ export function Slideshow({
   const reduced = usePrefersReducedMotion();
   const go = useCallback((by: number) => setIndex((i) => wrapIndex(i + by, n)), [n]);
   usePreloadNext(slides, index);
+  const swipe = useSwipe(go);
 
   const moves = seconds > 0 && n > 1 && !reduced;
   useEffect(() => {
@@ -104,8 +154,18 @@ export function Slideshow({
       onMouseLeave={() => setHeld(false)}
       onFocus={() => setHeld(true)}
       onBlur={() => setHeld(false)}
+      onKeyDown={(e) => {
+        if (n < 2) return;
+        if (e.key === "ArrowRight") {
+          e.preventDefault();
+          go(1);
+        } else if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          go(-1);
+        }
+      }}
     >
-      <div className={frame}>
+      <div className={frame} {...swipe.handlers}>
         <img
           key={slide.src}
           src={slide.src}
@@ -114,7 +174,8 @@ export function Slideshow({
           height={slide.height}
           loading={index === 0 ? "eager" : "lazy"}
           decoding="async"
-          className="h-full w-full object-cover"
+          draggable={false}
+          className="h-full w-full select-none object-cover"
         />
         {n > 1 && (
           <>
@@ -244,6 +305,7 @@ function Lightbox({
   const slide = slides[wrapIndex(index, n)];
   const closeRef = useRef<HTMLButtonElement>(null);
   usePreloadNext(slides, index);
+  const swipe = useSwipe((dir) => onIndex(wrapIndex(index + dir, n)));
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -285,10 +347,12 @@ function Lightbox({
           <Cross />
         </button>
       </div>
-      {/* A click on the dark around the photo closes; a click on the photo does not. */}
+      {/* A click on the dark around the photo closes; a click on the photo, or the end of a swipe, does not. */}
       <div
         className="relative flex min-h-0 flex-1 items-center justify-center px-14"
+        {...swipe.handlers}
         onClick={(e) => {
+          if (swipe.consumeSwipe()) return;
           if (e.target === e.currentTarget) onClose();
         }}
       >
@@ -299,7 +363,8 @@ function Lightbox({
           width={slide.width}
           height={slide.height}
           decoding="async"
-          className="max-h-full max-w-full object-contain"
+          draggable={false}
+          className="max-h-full max-w-full select-none object-contain"
         />
         {n > 1 && (
           <>

@@ -6,7 +6,7 @@ import { newSection, sectionSummary } from "../src/lib/sites/pages";
 import { PHOTO_MAX_EDGE, PhotoError, preparePhoto } from "../src/lib/sites/photo";
 import { ImageRefSchema, SectionSchema } from "../src/lib/sites/schema";
 import { classifyHost, RESERVED_PAGE_PATHS, siteRewrite } from "../src/lib/sites/slug";
-import { secondsLabel, slideLabel, SLIDESHOW_SECONDS, wrapIndex } from "../src/lib/sites/slides";
+import { secondsLabel, slideLabel, SLIDESHOW_SECONDS, SWIPE_THRESHOLD, swipeDirection, wrapIndex } from "../src/lib/sites/slides";
 
 const opts = { siteDomain: "yosher.site", platformHosts: ["localhost", "127.0.0.1", "yosherapp.com"] };
 const ID = "6d4c1a2e-9b3f-4c8d-8e7a-1f2b3c4d5e6f";
@@ -164,5 +164,17 @@ describe("a slideshow", () => {
     expect([...SLIDESHOW_SECONDS]).toEqual([0, 4, 6, 10]);
     expect(secondsLabel(0)).toBe("Only when pressed");
     expect(secondsLabel(6)).toBe("Every 6 seconds");
+  });
+});
+
+describe("a swipe", () => {
+  it("reads a sideways drag as next or previous and leaves a scroll alone", () => {
+    expect(swipeDirection(-80, 5)).toBe(1);
+    expect(swipeDirection(80, -5)).toBe(-1);
+    expect(swipeDirection(-SWIPE_THRESHOLD, 0)).toBe(1);
+    expect(swipeDirection(-20, 0)).toBe(0);
+    expect(swipeDirection(-80, 90)).toBe(0);
+    expect(swipeDirection(0, 0)).toBe(0);
+    expect(swipeDirection(-80, 0, 100)).toBe(0);
   });
 });

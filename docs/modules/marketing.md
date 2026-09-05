@@ -28,12 +28,41 @@
 | **5** | **Photos — a library per site in the private store (one derivative, metadata stripped, ≤ 1,600px), uploaded from the editor's picker, served by the platform on every public route, placed beside the hero, beside the about section, and as a `Photo` section of its own.** [ADR 0023](../decisions/0023-photos-are-one-derivative-in-the-sites-library.md) | **built 2026-09-04** |
 | **5b** | **A `Photo gallery` section: up to twelve photos from the library in a grid of two, three or four, with a heading and a caption each; a photo opens larger in a new tab.** | **built 2026-09-04** |
 | **5c** | **A `Slideshow` section (photos one at a time, arrows and dots, moving on by itself if asked, paused on hover, still under reduced motion) and a lightbox for the gallery's tiles — the public page's one moving part, in one client component with no library.** | **built 2026-09-04** |
+| **5d** | **A swipe across a slideshow or the lightbox moves between photos (pointer events, vertical scrolling left to the browser); the arrow keys move a focused slideshow.** | **built 2026-09-04** |
 | — | The shop block: `retail` slice 6 (online orders + pickup windows) fills a declared slot; blocked on commitments (retail 3) and web checkout (payments) | not this module's |
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-04 — Slice 5d: the swipe (`claude/marketing-site-swipe`)
+
+The thing a thumb tries first. No migration, no new section.
+
+- **`swipeDirection(dx, dy)`** (`src/lib/sites/slides.ts`, pure, tested):
+  a drag of at least `SWIPE_THRESHOLD` (40px) that is more across than up
+  or down is `1` (finger left, next) or `-1` (finger right, previous);
+  anything else is `0` and was a scroll the browser already handled.
+- **`useSwipe`** in `slideshow.tsx`: pointer events (a finger and a mouse
+  alike) remember the press and judge the release; `touch-action: pan-y`
+  on the element leaves vertical scrolling to the browser and takes only
+  the sideways move; the photos are `draggable={false}` and `select-none`
+  so a mouse drag does not start a native image drag that would cancel the
+  pointer. Spread on the slideshow's frame and the lightbox's stage. A
+  release that ended a swipe also fires a click, so the lightbox's
+  close-on-backdrop asks `consumeSwipe()` first and ignores that one.
+- **Arrow keys** on the slideshow: the wrapper's `onKeyDown` moves the show
+  while any of its buttons has focus, the way the lightbox already did.
+- Guide: `page-editor.md` (a swipe on a phone, the arrow keys).
+- **Driven on the dev branch** with synthetic pointer events on the
+  published home page's slideshow (paused first): a 100px drag left moved
+  to the next photo, a 100px drag right back, a drag mostly downward and a
+  20px drag changed nothing, and ArrowRight on a focused dot moved on; the
+  frame's computed `touch-action` was `pan-y` and the photo `draggable`
+  `false`. In the about page's lightbox a drag left read `Photo 2 of 2`
+  and the click that followed it did not close the dialog, a drag right
+  read `Photo 1 of 2`, and a plain click on the dark closed it.
 
 ### 2026-09-04 — Slice 5c: the slideshow, and the gallery's lightbox (`claude/marketing-site-slideshow`)
 
@@ -886,10 +915,10 @@ generated logo re-drawable as a vector.
   drag is proven; the mouse path is the same sensor set and drop handler,
   but the browser tooling could not produce a real pointer drag. Ten seconds
   with a mouse on the dev branch settles it.
-- **The slideshow has no swipe.** A phone's thumbs get the arrows and the
-  dots, which work; a swipe gesture is the next thing a visitor will try
-  and the first thing to add if anybody says so. Alt text is asked for
-  everywhere a photo is placed and never enforced.
+- **Alt text is asked for everywhere a photo is placed and never
+  enforced.** A photo with none is an image search engines and screen
+  readers cannot name; a nudge in the editor's list ("2 photos without a
+  description") is the cheap next step.
 - **A second, smaller derivative** per photo if pages get heavy: the row
   has the room, the route can pick by a query, and the renderer already
   knows every placement's width.

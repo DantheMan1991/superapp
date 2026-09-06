@@ -36,6 +36,11 @@ in, then away, then the sign-in screen. Built as two halves.
   should play again. `src/lib/launch.ts`, `tests/launch.test.ts`.
 - The marketing pages are untouched and stay static; the app never opens on
   them.
+- **A committed debug signing key** (`mobile/android/yosher-debug.p12`, a
+  PKCS12 made with openssl, password `android`). Found the hard way: the
+  second build would not install over the first, because each GitHub runner
+  signs with a throwaway key. Debug only; the store's upload key is a secret
+  in GitHub, later.
 
 ### 2026-09-06 — Slice 2b: push, the shell's side for Android (`claude/mobile-app-2b-push-shell`)
 

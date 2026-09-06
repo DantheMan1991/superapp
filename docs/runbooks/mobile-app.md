@@ -30,7 +30,11 @@ APK and attaches it to the run.
 3. On the phone, open the file. Android asks whether to allow installs from
    this source (Files, Gmail, Drive — whichever opened it); allow it, then
    **Install**. A debug build is unsigned for the store, so the phone warns
-   once. That is expected.
+   once. That is expected. Later builds install over it: every build is
+   signed with the same debug key (`mobile/android/yosher-debug.p12`,
+   committed on purpose), so sign-in and the notification permission
+   survive an update. Before that key existed each GitHub build carried a
+   throwaway key and the phone refused the next one.
 4. Open **Yosher**. It shows the site; sign in as usual. The Billing row is
    gone and sign-up is a card — that is the app telling the site it is the
    app, and it means the shell's user-agent marker is working.

@@ -54,3 +54,7 @@ next-env.d.ts
 # MapLibre's worker + its sibling chunk, copied from node_modules by
 # scripts/copy-map-worker.ts on prebuild/predev. Generated, never edited.
 /public/maplibre/
+
+# Clerk instance migration artefacts (scripts/clerk-*.ts): a snapshot names
+# people and a mapping identifies them; the password CSV must never land here.
+/clerk-migration/

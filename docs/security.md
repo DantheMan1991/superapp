@@ -55,6 +55,17 @@ The middleware is **not** a control. It answers "is this person signed in",
 which tells you nothing about which tenant they may read. Never rely on it for
 authorization.
 
+**The Clerk instance is part of the control.** Production signs in against a
+Clerk *production* instance (`pk_live_`, Frontend API on a `yosherapp.com`
+subdomain, Yosher's own OAuth credentials). A development instance shares
+Clerk's OAuth credentials, caps users, and carries sessions in URL tokens
+because its cookies are third-party; laptops and previews use one, production
+must not (found on the live site 2026-09-05). On a production instance the
+proxy also passes Clerk an origin allowlist derived from the app URL
+(`src/lib/authorized-parties.ts`), so a token minted on a customer's site
+subdomain is not honoured on the platform's. Moving between instances changes
+every id the database mirrors — `docs/runbooks/clerk-production-cutover.md`.
+
 ### How RLS actually works here
 
 Four transaction-local settings, read by every policy

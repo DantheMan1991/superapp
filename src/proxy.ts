@@ -1,5 +1,7 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
+import { authorizedPartiesFromEnv } from "@/lib/authorized-parties";
+import { MAINTENANCE_HTML, shouldServeMaintenance } from "@/lib/maintenance";
 import {
   classifyHost,
   platformHostsFromEnv,
@@ -32,18 +34,45 @@ import {
  * the proxy's runtime does not promise module state survives, and the read
  * is cheap. No database here — a host that is not ours becomes a path, and
  * the page does the lookup.
+ *
+ * Two environment switches ride on the same per-request read:
+ *
+ *   - `MAINTENANCE_MODE=1` closes the platform's own hosts with a 503 while
+ *     a cutover rewrites ids underneath them (src/lib/maintenance.ts). A
+ *     business's site never involves a session and stays up; webhooks and
+ *     crons are exempt inside the helper.
+ *   - `authorizedParties`, Clerk's origin allowlist, is derived from the app
+ *     URL for a production instance only (src/lib/authorized-parties.ts).
  */
-export default clerkMiddleware((_auth, req) => {
-  const kind = classifyHost(req.headers.get("host") ?? "", {
-    siteDomain: siteDomainFromEnv(process.env),
-    platformHosts: platformHostsFromEnv(process.env),
-  });
-  const target = siteRewrite(kind, req.nextUrl.pathname);
-  if (target === null) return;
-  const url = req.nextUrl.clone();
-  url.pathname = target;
-  return NextResponse.rewrite(url);
-});
+export default clerkMiddleware(
+  (_auth, req) => {
+    const kind = classifyHost(req.headers.get("host") ?? "", {
+      siteDomain: siteDomainFromEnv(process.env),
+      platformHosts: platformHostsFromEnv(process.env),
+    });
+    if (
+      kind.kind === "platform" &&
+      shouldServeMaintenance(req.nextUrl.pathname, process.env)
+    ) {
+      return new NextResponse(MAINTENANCE_HTML, {
+        status: 503,
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "retry-after": "600",
+          "cache-control": "no-store",
+        },
+      });
+    }
+    const target = siteRewrite(kind, req.nextUrl.pathname);
+    if (target === null) return;
+    const url = req.nextUrl.clone();
+    url.pathname = target;
+    return NextResponse.rewrite(url);
+  },
+  // A callback rather than an object, so the key kind and the app URL are
+  // read per request like everything else here.
+  () => ({ authorizedParties: authorizedPartiesFromEnv(process.env) }),
+);
 
 export const config = {
   matcher: [

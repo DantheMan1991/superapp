@@ -36,6 +36,10 @@ in, then away, then the sign-in screen. Built as two halves.
   should play again. `src/lib/launch.ts`, `tests/launch.test.ts`.
 - The marketing pages are untouched and stay static; the app never opens on
   them.
+- **The iOS job compiled for the first time** (a manual run, 2026-09-06),
+  once the workflow opened `App.xcodeproj`: Capacitor 8 wires plugins with
+  Swift Package Manager and there is no workspace. The Mac half of the
+  pipeline is proven; signing and TestFlight still wait on the Apple account.
 - **A committed debug signing key** (`mobile/android/yosher-debug.p12`, a
   PKCS12 made with openssl, password `android`). Found the hard way: the
   second build would not install over the first, because each GitHub runner

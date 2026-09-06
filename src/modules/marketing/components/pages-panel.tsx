@@ -36,6 +36,8 @@ export interface PageRowView {
   sections: number;
   /** Photos on the page's draft with no description. */
   undescribed: number;
+  /** Places for a photo on the page's draft that hold none, or one of the platform's drawn stand-ins (slice 18). */
+  open: number;
   published: boolean;
 }
 
@@ -220,6 +222,12 @@ function PageRow({
                 {" · "}
                 {page.undescribed} photo{page.undescribed === 1 ? "" : "s"} without a description
               </span>
+            )}
+            {page.open > 0 && (
+              <>
+                {" · "}
+                {page.open} photo{page.open === 1 ? "" : "s"} to take
+              </>
             )}
             {page.published ? " · published" : " · draft only"}
           </div>

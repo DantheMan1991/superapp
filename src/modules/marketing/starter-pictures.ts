@@ -6,6 +6,7 @@ import { blobToken, sitePhotoPathPrefix } from "@/lib/blob";
 import type { ResolvedBrand } from "@/lib/brand/core";
 import { loadSharp } from "@/lib/vision-image";
 import type { StarterScene } from "@/lib/site-templates/types";
+import { STARTER_PREFIX } from "@/lib/sites/shots";
 import { STARTER_HEIGHT, STARTER_WIDTH, starterSceneSvg } from "@/lib/sites/starters";
 import { insertSiteImage } from "./image-ops";
 import type { MarketingCtx } from "./kit-ops";
@@ -24,7 +25,7 @@ import type { StoredPhoto } from "./photo-ingest";
  * A scene already in the library (by its name) is reused rather than made
  * again, which is what a rewrite of the words relies on.
  */
-const PREFIX = "starter-";
+const PREFIX = STARTER_PREFIX;
 
 function starterName(scene: StarterScene): string {
   return `${PREFIX}${scene}`;

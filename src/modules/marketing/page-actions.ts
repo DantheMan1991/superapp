@@ -1,7 +1,8 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { withTenant } from "@/db";
+import { and, eq } from "drizzle-orm";
+import { schema, withTenant } from "@/db";
 import { logAuditInTx } from "@/lib/audit";
 import { isModuleEnabled } from "@/lib/modules";
 import { ensureManagedCalendar, MANAGED_CALENDAR_KEYS, type ManagedCalendarKey } from "@/lib/schedule/managed-calendars";
@@ -10,7 +11,8 @@ import {
   normalizePagePath,
   pagePathReasonMessage,
 } from "@/lib/sites/pages";
-import { PageContentSchema, type PageContent } from "@/lib/sites/schema";
+import { parseSpotKey, placePhoto } from "@/lib/sites/shots";
+import { PageContentSchema, readPageContent, type PageContent } from "@/lib/sites/schema";
 import { MarketingError } from "./core/errors";
 import { fail, gate, type ActionResult } from "./gate";
 import {
@@ -36,6 +38,7 @@ const BASE = "/dashboard/m/marketing/website";
 
 function revalidateAll(): void {
   revalidatePath(BASE);
+  revalidatePath(`${BASE}/photos`);
   revalidatePath(`${BASE}/pages/[pageId]`, "page");
   revalidatePath("/sites/[slug]/[[...path]]", "page");
   revalidatePath("/hosted/[slug]/[[...path]]", "page");
@@ -253,6 +256,70 @@ export async function restorePageVersionAction(input: unknown): Promise<ActionRe
           targetType: "site_page",
           targetId: page.id,
           meta: { versionId: parsed.data.versionId },
+        });
+      },
+      { role: ctx.role },
+    );
+    revalidateAll();
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const placeInput = z.object({
+  pageId: z.string().uuid(),
+  /** A spot key from the shot list, `"<section>:<where>"` (`src/lib/sites/shots.ts`). */
+  spot: z.string().min(1).max(24),
+  imageId: z.string().uuid(),
+  alt: z.string().trim().max(160).default(""),
+});
+
+/**
+ * One photo into one spot on a page, from the shot list (slice 18). The
+ * page's draft is read NOW, the photo put where the key says, and the
+ * result saved the way the editor saves, with a version behind it. A key
+ * the page no longer fits is refused with the reason, never guessed; the
+ * photo must be one of this site's own. The same call with the same photo
+ * and new words is how the list saves a description.
+ */
+export async function placePhotoAction(input: unknown): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const parsed = placeInput.safeParse(input);
+    if (!parsed.success) return { error: "Choose a photo and a place for it, then try again." };
+    const key = parseSpotKey(parsed.data.spot);
+    if (!key) return { error: "That place is not on the page." };
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const page = await tx.query.sitePages.findFirst({
+          where: and(eq(schema.sitePages.tenantId, ctx.tenantId), eq(schema.sitePages.id, parsed.data.pageId)),
+        });
+        if (!page) throw new MarketingError("PAGE_MISSING", "no such page");
+        const image = await tx.query.siteImages.findFirst({
+          where: and(
+            eq(schema.siteImages.tenantId, ctx.tenantId),
+            eq(schema.siteImages.siteId, page.siteId),
+            eq(schema.siteImages.id, parsed.data.imageId),
+          ),
+        });
+        if (!image) throw new MarketingError("PHOTO_MISSING", "no such photo");
+        const placed = placePhoto(readPageContent(page.draft), key, { id: image.id, alt: parsed.data.alt });
+        if (!placed.ok) throw new MarketingError("PAGE_INVALID", placed.reason);
+        const saved = await savePageDraft(tx, ctx, page.id, {
+          title: page.title,
+          path: null,
+          inNav: page.inNav,
+          content: placed.content,
+        });
+        await logAuditInTx(tx, {
+          action: "marketing.site.photo_placed",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "site_page",
+          targetId: saved.id,
+          meta: { path: saved.path, spot: parsed.data.spot, imageId: image.id },
         });
       },
       { role: ctx.role },

@@ -297,10 +297,39 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
     },
   ],
   pictures: [
-    { at: "/#0", where: "background", scene: "hills", alt: "" },
-    { at: "/visit#0", where: "background", scene: "dawn", alt: "" },
-    { at: "/about#0", where: "image", scene: "furrows", alt: "Rows in a field under a wide sky" },
+    {
+      at: "/#0",
+      where: "background",
+      scene: "hills",
+      alt: "",
+      shot: "Your best wide view of the farm: pasture with the animals on it, taken from a little way back, early or late in the day. Leave sky above them; the headline sits over it.",
+    },
+    {
+      at: "/visit#0",
+      where: "background",
+      scene: "dawn",
+      alt: "",
+      shot: "The lane in, the gate or the farm stand, as a visitor first sees it. It is what they will look for when they arrive.",
+    },
+    {
+      at: "/about#0",
+      where: "image",
+      scene: "furrows",
+      alt: "Rows in a field under a wide sky",
+      shot: "You and whoever farms with you, outdoors, with the animals or the land behind. People buy from people.",
+    },
   ],
+  // What to photograph, in a farmer's terms; the shot list reads these where the core's neutral notes would otherwise stand (slice 18).
+  shots: {
+    cover: "Pasture with the animals on it, taken wide from a little way back, early or late in the day, with sky above for the words.",
+    beside: "Something a visitor wants to see at a glance: the herd on grass, the flock, the stand on a market morning.",
+    about: "You and whoever farms with you, outdoors, with the animals or the land behind. People buy from people.",
+    item: "{name} as the customer gets it, close, in daylight, on a plain background: the wrapped pack, the open carton, the full box. Square if you can.",
+    card: "A picture of what the card says, {name}: on a farm that is animals on grass, the chicken tractor, the stand, a box packed for pickup.",
+    picture: "The farm at its best: the herd at dusk, a field after rain, the barn in the morning.",
+    set: "Six to twelve photos across a season: animals, land, product and people, all in daylight.",
+    backdrop: "Grass, soil, a fence line or a wide view of the land. It is darkened behind the words, so texture beats detail.",
+  },
   writerNotes: [
     "This is a homestead farm: a family-scale farm that raises animals on pasture and sells direct, at the farm gate, at farmers markets and by pre-order.",
     "Keep only what the brief supports. If it says what the farm raises, say exactly that and drop the rest of any list; if it does not, keep lists general and never claim a product, a practice, a breed or a certification the brief does not give.",

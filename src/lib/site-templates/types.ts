@@ -1,5 +1,6 @@
 import type { BrandLook, ButtonShape, FontPairing } from "@/lib/brand/looks";
 import type { FooterColumn, PageContent, Section } from "@/lib/sites/schema";
+import type { ShotRole } from "@/lib/sites/shots";
 
 /**
  * A site template — Marketing slice 15,
@@ -51,6 +52,8 @@ export interface TemplatePicture {
   scene: StarterScene;
   /** What is in the picture, for people who cannot see it; blank for a background. */
   alt: string;
+  /** What to take in its place, in the industry's own terms: the shot list says so beside the drawn stand-in (slice 18). */
+  shot?: string;
 }
 
 export interface SiteTemplate {
@@ -69,6 +72,8 @@ export interface SiteTemplate {
   };
   pages: TemplatePage[];
   pictures: TemplatePicture[];
+  /** What to photograph for each kind of spot, in the industry's own terms; the core's neutral notes stand where a role is unsaid (slice 18). */
+  shots?: Partial<Record<ShotRole, string>>;
   /** What the writer is told about this kind of business and this template, one line each. */
   writerNotes: string[];
 }

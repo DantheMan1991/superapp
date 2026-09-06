@@ -8,6 +8,13 @@
 
 ## Build log
 
+### 2026-09-06 — No hour blocks inside the mobile app (`claude/mobile-app-0-app-aware-web`)
+
+- The two block cards are left out when the request comes from the Yosher
+  mobile app (`isNativeApp()`, mobile dossier, ADR 0032): a purchase inside
+  an app must go through the store, and hour blocks do not. The meter and the
+  work log are unchanged everywhere. Nothing on the web changes.
+
 ### 2026-08-08 — The running timer actually ticks (branch `claude/lint-clean`)
 - `TimerControls` read `Date.now()` **during render**. Two bugs in one: the server rendered ITS clock and the client hydrated with a different one, and after that the "Running for ~Xh" figure sat frozen until some unrelated state change happened to re-render the component. It is now state on a 30s interval, so a running timer advances on its own
 - The first reading is scheduled with a zero-delay timer rather than taken inline in the effect. Setting state synchronously inside an effect cascades an extra render before paint — see [conventions.md](../conventions.md) §8

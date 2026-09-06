@@ -27,6 +27,10 @@ export const metadata: Metadata = {
     template: "%s · Yosher",
   },
   description: DESCRIPTION,
+  // Next links /manifest.webmanifest from src/app/manifest.ts on its own;
+  // these are the two things a manifest cannot say to an iPhone.
+  appleWebApp: { capable: true, title: "Yosher", statusBarStyle: "default" },
+  icons: { apple: "/icons/apple-touch-icon.png" },
   openGraph: {
     type: "website",
     siteName: SITE.name,

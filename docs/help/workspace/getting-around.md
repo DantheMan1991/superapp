@@ -21,7 +21,7 @@ Yosher opens on the **Overview** page. The sidebar on the left takes you to ever
 - **The row you are on** is filled in. A tool's row keeps its color whether or not you are on it.
 - **The count on `Mail`.** A number at the right end of the row is your unread mail across every connected mailbox, up to `99+`. A red dot instead of a number means a mailbox needs reconnecting, so the count cannot be trusted. No other row carries a mark, and an accountant never sees one, because that role has no mail.
 - **The business switcher.** At the bottom of the sidebar, showing the business you are in. See how to switch, below.
-- **Your avatar.** Beside the switcher. It opens your own account: profile, email addresses, password, security, and `Sign out`. Your account is the same across every business you belong to, so a change here follows you everywhere.
+- **Your avatar.** Beside the switcher. It opens your own account: profile, email addresses, password, security, and `Sign out`. Your account is the same across every business you belong to, so a change here follows you everywhere. Under `Security` the last item is `Delete account`. It asks you to confirm, then removes your sign-in and your place in every business you belong to. The businesses themselves, and the records that name you, stay.
 - **The search box.** `Jump to…`, under your business name. See how to jump to a page, below.
 
 The switcher and the avatar can appear a moment after the rest of the page on a slow connection. That is normal.

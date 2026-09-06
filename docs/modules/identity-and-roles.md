@@ -11,6 +11,21 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-06 — Account deletion reaches the mirror; the auth pages know the app (`claude/mobile-app-0-app-aware-web`)
+
+Part of the mobile app's slice 0 (see [mobile-app.md](mobile-app.md), ADR 0032).
+
+- **`user.deleted` is handled.** Clerk's account dialog offers "Delete
+  account" once the instance setting is on, and both app stores require that
+  option to exist. The webhook now removes the person's profile row
+  (`removeProfile` in `tenant-sync.ts`); memberships cascade, the tenant and
+  every row that names the person by id stay, and `audit_log` records
+  `user.deleted` with the Clerk id. `tests/identity-account-deletion.test.ts`.
+- **Inside the mobile app, sign-up is a card**, not Clerk's form: businesses
+  join from a web browser. The sign-in card loses its "Sign up" footer there.
+  Decided by the store rules, not by identity — the reasoning is in the
+  mobile dossier.
+
 ### 2026-09-05 — Move to a production Clerk instance: the tooling and the runbook (`claude/clerk-production-instance`)
 
 Found while sizing the store wrapper: yosherapp.com signs in against a Clerk

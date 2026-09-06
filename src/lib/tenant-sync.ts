@@ -195,6 +195,22 @@ export async function removeMembership(params: {
   });
 }
 
+/**
+ * Clerk user deleted (they used "Delete account", or we did) → the profile
+ * row goes, and memberships cascade with it (FK). Rows elsewhere that name
+ * the person by id keep the id, as a record of who acted — the same rule the
+ * instance migration follows. Returns whether a row existed.
+ */
+export async function removeProfile(clerkUserId: string): Promise<boolean> {
+  return withSystem(async (tx) => {
+    const deleted = await tx
+      .delete(schema.profiles)
+      .where(eq(schema.profiles.clerkUserId, clerkUserId))
+      .returning({ id: schema.profiles.id });
+    return deleted.length > 0;
+  });
+}
+
 /** Org deleted in Clerk → mark churned. Data is retained, not dropped. */
 export async function markTenantChurned(clerkOrgId: string) {
   return withSystem((tx) =>

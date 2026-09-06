@@ -146,7 +146,9 @@ members. Then delete the CSV.
 npm run clerk:remap -- --dry-run
 ```
 
-Expect every id-bearing column listed with a count and **0 unmapped**. An
+Expect every id-bearing column listed with a count and **0 unmapped**. The
+audit log is not in the list: it is append-only by trigger and stays as
+written. An
 unmapped id belongs to someone who was deleted from Clerk before the export;
 their rows keep an id no instance resolves, which is harmless, and the real
 run needs `--allow-unmapped` to proceed past them. Anything else unexpected —

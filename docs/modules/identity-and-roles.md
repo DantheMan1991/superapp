@@ -211,8 +211,8 @@ off. `scripts/clerk-remap.ts` keeps the rows and changes the id inside them,
 in one transaction, from a mapping the import wrote. The columns are
 **discovered from the catalogue** (`%clerk_user_id%`, `%clerk_org_id%`, text)
 rather than listed, so a column added after the script was written is
-rewritten too; the JSON in `audit_log.meta` is the one place ids survive
-unchanged, as a record of the time.
+rewritten too. `audit_log` is left entirely as written: it is append-only by
+trigger and a record of the time, and the first real run rolled back on it.
 
 **OAuth links do not move between instances, and do not need to.** Clerk
 cannot recreate a Google or GitHub link without the person consenting again.

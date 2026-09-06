@@ -268,6 +268,7 @@ describe("classifyColumn", () => {
     expect(classifyColumn("work_items", "assignee_clerk_user_id")?.family).toBe("users");
     expect(classifyColumn("tenants", "clerk_org_id")?.family).toBe("organizations");
     expect(classifyColumn("memberships", "clerk_role_synced_at")).toBeNull();
+    expect(classifyColumn("audit_log", "actor_clerk_user_id")).toBeNull();
   });
 });
 

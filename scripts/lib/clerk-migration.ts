@@ -454,10 +454,20 @@ export const CLERK_ID_COLUMNS_SQL = `
   order by table_name, column_name
 `;
 
+/**
+ * Tables whose rows may never change once written. `audit_log` refuses an
+ * UPDATE by trigger (`audit_log_append_only_tg`), and rightly: it is the
+ * record of what happened, and an actor id in it names who acted at the
+ * time. Left as written, like its JSON `meta`. Learned on the real cutover,
+ * where the first run rolled back on it.
+ */
+export const APPEND_ONLY_TABLES: ReadonlySet<string> = new Set(["audit_log"]);
+
 export function classifyColumn(
   table: string,
   column: string,
 ): ClerkIdColumn | null {
+  if (APPEND_ONLY_TABLES.has(table)) return null;
   if (column.includes("clerk_user_id")) return { table, column, family: "users" };
   if (column.includes("clerk_org_id")) {
     return { table, column, family: "organizations" };

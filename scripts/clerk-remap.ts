@@ -126,7 +126,7 @@ async function main() {
       `\n${summary.columns} columns hold Clerk ids; ${summary.columnsTouched} need rewriting (${summary.changes} distinct values across them), ${summary.unmapped} unmapped, ${summary.alreadyNew} already new.`,
     );
     console.log(
-      "audit_log.meta (JSON) is left as written: it records what happened at the time.",
+      "audit_log is left as written (append-only by trigger): it records what happened at the time.",
     );
 
     if (summary.changes === 0) {

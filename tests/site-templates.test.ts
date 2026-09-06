@@ -81,16 +81,17 @@ describe("the homestead farm template", () => {
   it("is five pages in the order a buyer looks, with the pack and calendar sections only where the tenant has them", () => {
     const full = assembleTemplate(homesteadFarmSiteTemplate, brief, { schedulingOn: true, blocks: [prices([{ value: CHANNEL, label: "Market" }])], pictures: null });
     expect(full.map((p) => p.path)).toEqual(["/", "/shop", "/visit", "/about", "/contact"]);
-    expect(full[0].content.sections.map((s) => s.type)).toEqual(["hero", "offer", "columns", "columns", "block", "hours", "cta"]);
+    expect(full[0].content.sections.map((s) => s.type)).toEqual(["hero", "offer", "columns", "columns", "block", "hours", "quotes", "cta"]);
+    expect(full[1].content.sections.map((s) => s.type)).toEqual(["hero", "text", "offer", "block", "faq", "form"]);
     expect(full[2].content.sections.map((s) => s.type)).toEqual(["hero", "text", "booking", "events", "hours", "map"]);
     const block = full[0].content.sections[4];
     expect(block.type === "block" && block.config).toEqual({ channel: CHANNEL, soldOut: "mark" });
     const bare = assembleTemplate(homesteadFarmSiteTemplate, { ...brief, hoursLines: [] }, nothing);
-    expect(bare[0].content.sections.map((s) => s.type)).toEqual(["hero", "offer", "columns", "columns", "cta"]);
+    expect(bare[0].content.sections.map((s) => s.type)).toEqual(["hero", "offer", "columns", "columns", "quotes", "cta"]);
     expect(bare[2].content.sections.map((s) => s.type)).toEqual(["hero", "text", "map"]);
     // Two channels and nobody chose: the block waits for the owner rather than guessing.
     const twoChannels = assembleTemplate(homesteadFarmSiteTemplate, brief, { ...nothing, blocks: [prices([{ value: CHANNEL, label: "A" }, { value: "b", label: "B" }])] });
-    expect(twoChannels[0].content.sections.map((s) => s.type)).toEqual(["hero", "offer", "columns", "columns", "hours", "cta"]);
+    expect(twoChannels[0].content.sections.map((s) => s.type)).toEqual(["hero", "offer", "columns", "columns", "hours", "quotes", "cta"]);
     expect(blockConfigFor("retail.prices", [])).toBeNull();
     expect(homesteadFarmSiteTemplate.frame.headerButton).toEqual({ label: "Order now", href: "/shop" });
     expect(homesteadFarmSiteTemplate.look).toEqual({ look: "warm", fontPairing: "warm", buttonShape: "rounded" });
@@ -133,6 +134,11 @@ describe("the writer's slots and words", () => {
     expect(slots.map((p) => p.path)).toEqual(["/", "/about", "/contact"]);
     expect(slots[0].sections[0]).toMatchObject({ index: 0, kind: "hero", words: { headline: "Oak Row Farm Co.", "cta.label": "Get in touch" }, limits: { headline: 120, "cta.label": 40 } });
     expect(slots[0].seoTitle).toBe("");
+    // A starter question's blank answer is not a slot: the writer is never asked to guess it.
+    const farm = templateSlots(assembleTemplate(homesteadFarmSiteTemplate, brief, nothing));
+    const faq = farm[1].sections.find((s) => s.kind === "faq");
+    expect(faq && Object.keys(faq.words).filter((p) => /answer/.test(p))).toEqual([]);
+    expect(faq && Object.keys(faq.words).filter((p) => /question/.test(p)).length).toBe(6);
     expect(buildSiteCopyUserTurn({ ...brief, about: "We raise Dexter beef and laying hens." }, [], slots)).toContain("In the owner's own words: We raise Dexter beef and laying hens.");
     const turn = buildSiteCopyUserTurn({ ...brief, phone: "", hoursLines: [] }, ["Farm notes."], slots);
     expect(turn).toContain("Oak Row Farm Co.");

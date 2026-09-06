@@ -109,6 +109,8 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
           config: {},
         },
         { type: "hours", heading: "Where to find us", note: "", needs: "hours" },
+        // Shown only once a customer's words are in it: proof is never written for a business.
+        { type: "quotes", heading: "What customers say", items: [] },
         {
           type: "cta",
           headline: "Come and see where your food is raised.",
@@ -156,6 +158,20 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
           note: "",
           emptyText: "Ask us for this week's list.",
           config: {},
+        },
+        {
+          // The questions a farm that sells direct is asked; the answers are the owner's, and a question shows only once it has one.
+          type: "faq",
+          heading: "Common questions",
+          note: "",
+          items: [
+            { question: "How does buying a half or whole animal work?", answer: "" },
+            { question: "Do you deliver?", answer: "" },
+            { question: "Where and when can I pick up?", answer: "" },
+            { question: "How is the meat packaged?", answer: "" },
+            { question: "Do you take cards?", answer: "" },
+            { question: "Can I visit the farm?", answer: "" },
+          ],
         },
         {
           type: "form",

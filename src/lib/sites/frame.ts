@@ -13,6 +13,8 @@ import type { SiteSettings } from "./schema";
 export interface FrameInput {
   announcement: { text: string; href: string; shown: boolean };
   headerButton: { label: string; href: string };
+  /** How big the logo is drawn in the header. */
+  logoSize: SiteSettings["logoSize"];
   social: Array<{ network: SocialNetwork; url: string; label: string }>;
   footerColumns: Array<{
     heading: string;
@@ -24,7 +26,7 @@ export interface FrameInput {
 
 export type Frame = Pick<
   SiteSettings,
-  "announcement" | "headerButton" | "social" | "footerColumns" | "footerNote"
+  "announcement" | "headerButton" | "logoSize" | "social" | "footerColumns" | "footerNote"
 >;
 
 export type FrameCheck = { ok: true; frame: Frame } | { ok: false; message: string };
@@ -36,6 +38,7 @@ export function frameInputFrom(settings: SiteSettings): FrameInput {
     headerButton: settings.headerButton
       ? { label: settings.headerButton.label, href: settings.headerButton.href }
       : { label: "", href: "" },
+    logoSize: settings.logoSize,
     social: settings.social.map((s) => ({ network: s.network, url: s.url, label: s.label })),
     footerColumns: settings.footerColumns.map((c) => ({
       heading: c.heading,
@@ -110,6 +113,7 @@ export function frameFromInput(input: FrameInput): FrameCheck {
     frame: {
       announcement,
       headerButton: button.label ? button : null,
+      logoSize: input.logoSize,
       social,
       footerColumns,
       footerNote: input.footerNote.trim(),

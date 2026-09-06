@@ -5,6 +5,7 @@ import { lookRadiusVars, resolveLook } from "@/lib/brand/looks";
 import type { PublicSite } from "@/lib/sites/read";
 import { eventDate, eventKey, eventWhen, upcomingEvents } from "@/lib/sites/events-core";
 import { blockKey } from "@/lib/site-blocks/core";
+import { completeQuestions, completeQuotes, faqJsonLd, logoSizeClass } from "@/lib/sites/proof";
 import { isSafeHref } from "@/lib/sites/links";
 import { directionsUrl, MAP_ATTRIBUTION, MAP_HEIGHT, MAP_WIDTH, mapKey, pinIsFor } from "@/lib/sites/map-core";
 import type { ImageRef, Section, SectionStyle, SitePageView, SiteSettings } from "@/lib/sites/schema";
@@ -144,6 +145,13 @@ export function SitePage({
           dangerouslySetInnerHTML={{ __html: jsonLdText(localBusinessJsonLd(businessFacts(site, mode))) }}
         />
       )}
+      {/* Answered questions on the page, for search engines (slice 16). */}
+      {mode !== "draft" &&
+        page.content.sections
+          .filter((s) => s.type === "faq")
+          .map((s) => (s.type === "faq" ? faqJsonLd(s.items) : null))
+          .filter((ld): ld is Record<string, unknown> => ld !== null)
+          .map((ld, i) => <script key={`faq-${i}`} type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdText(ld) }} />)}
       <Announcement site={site} mode={mode} />
       <SiteHeader site={site} mode={mode} pagePath={page.path} primary={primary} accent={accent} />
 
@@ -227,7 +235,7 @@ function SiteHeader({
             <img
               src={logoSrc(mode, site.slug)}
               alt={site.title}
-              className="h-10 w-auto max-w-[200px] object-contain"
+              className={cn("w-auto object-contain", logoSizeClass(site.settings.logoSize))}
             />
           ) : (
             <span className="truncate text-lg font-semibold" style={{ color: primary }}>
@@ -616,6 +624,62 @@ function SectionView({
                 );
               })}
             </ol>
+          )}
+        </Shell>
+      );
+    }
+    case "quotes": {
+      // Testimonials (slice 16): only quotes with words and a name, and nothing at all without one.
+      const quotes = completeQuotes(section.items);
+      if (quotes.length === 0 && mode !== "draft") return null;
+      return (
+        <Shell {...shell} spacing={room}>
+          {section.heading && <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>}
+          {quotes.length === 0 ? (
+            <p className={cn("mt-6 text-sm", tone.faint)}>Testimonials show here once one has words and a name.</p>
+          ) : (
+            <ul className={cn("mt-8 grid gap-6", quotes.length > 1 && "sm:grid-cols-2", quotes.length > 2 && "lg:grid-cols-3", centred && "text-left")}>
+              {quotes.map((q, i) => (
+                <li key={i} className="flex flex-col rounded-[var(--site-radius)] bg-white p-6 text-neutral-900 shadow-sm ring-1 ring-neutral-200">
+                  <span aria-hidden="true" className="font-heading text-5xl leading-none" style={{ color: LIGHT_TONE.heading }}>
+                    &ldquo;
+                  </span>
+                  <blockquote className="mt-2 flex-1 leading-relaxed">{q.quote}</blockquote>
+                  <p className="mt-4 text-sm font-semibold" style={{ color: LIGHT_TONE.heading }}>
+                    {q.name}
+                  </p>
+                  {q.detail && <p className={cn("text-sm", LIGHT_TONE.muted)}>{q.detail}</p>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Shell>
+      );
+    }
+    case "faq": {
+      // Questions (slice 16): answered ones only, as native disclosures, and nothing at all without one.
+      const questions = completeQuestions(section.items);
+      if (questions.length === 0 && mode !== "draft") return null;
+      return (
+        <Shell {...shell} spacing={room}>
+          {section.heading && <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>}
+          {section.note && <p className={cn("mt-3", tone.muted)}>{section.note}</p>}
+          {questions.length === 0 ? (
+            <p className={cn("mt-6 text-sm", tone.faint)}>Questions show here once one has an answer.</p>
+          ) : (
+            <div className={cn("mt-6 divide-y", resolved.onDark ? "divide-white/15" : "divide-neutral-200", "text-left")}>
+              {questions.map((q, i) => (
+                <details key={i} className="group py-3">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-medium [&::-webkit-details-marker]:hidden">
+                    <span>{q.question}</span>
+                    <span aria-hidden="true" className={cn("shrink-0 text-xl leading-none transition-transform group-open:rotate-45", tone.faint)}>
+                      +
+                    </span>
+                  </summary>
+                  <p className={cn("mt-2 max-w-2xl whitespace-pre-line leading-relaxed", tone.muted)}>{q.answer}</p>
+                </details>
+              ))}
+            </div>
           )}
         </Shell>
       );

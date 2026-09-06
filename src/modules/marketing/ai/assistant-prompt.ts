@@ -97,6 +97,7 @@ export const PAGE_BLOCK_KINDS = [
   "booking",
   "events",
   "map",
+  "faq",
 ] as const;
 export type PageBlockKind = (typeof PAGE_BLOCK_KINDS)[number];
 
@@ -112,6 +113,7 @@ const BLOCK_HINTS: Record<PageBlockKind, string> = {
   booking: "book a time on the business's calendar: only a heading and a line (lines[0])",
   events: "upcoming events from the business's calendar: only a heading and a line (lines[0])",
   map: "a map of the business's address: only a heading and a line (lines[0])",
+  faq: "questions and answers: a heading and two to eight items, each a question (name) as a customer asks it and its answer (blurb); only questions the brief lets you answer",
 };
 
 export const DRAFT_PAGE_TOOL = {
@@ -202,7 +204,7 @@ const DraftSchema = z.object({
     .transform((a) => a.slice(0, 12)),
 });
 
-const ONCE: ReadonlyArray<PageBlockKind> = ["contact", "hours", "booking", "events", "map", "form"];
+const ONCE: ReadonlyArray<PageBlockKind> = ["contact", "hours", "booking", "events", "map", "form", "faq"];
 
 type Of<K extends PlainSectionType> = Extract<Section, { type: K }>;
 
@@ -290,6 +292,12 @@ export function assemblePageBlocks(raw: unknown, opts: { schedulingOn: boolean }
       case "map":
         sections.push({ ...fresh("map"), heading: heading || "Find us", note: cut(line, 300) });
         break;
+      case "faq": {
+        const items = block.items.filter((i) => i.name && i.blurb).slice(0, 10);
+        if (items.length === 0) break;
+        sections.push({ ...fresh("faq"), heading: heading || "Common questions", note: cut(line, 300), items: items.map((i) => ({ question: cut(i.name, 120), answer: cut(i.blurb, 600) })) });
+        break;
+      }
     }
     if (sections.length >= 12) break;
   }

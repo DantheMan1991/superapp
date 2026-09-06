@@ -50,6 +50,47 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-05 — Slice 16: testimonials, questions, and the logo's size (`claude/marketing-proof-and-logo-size`)
+
+The founder, with his own site open: add testimonials and an FAQ, shown
+only once filled; and "I still don't see a way to resize things. I want to
+make the logo bigger." No migration.
+
+- **Two section kinds that show only once filled** (`src/lib/sites/proof.ts`,
+  pure). `quotes`: a heading and up to six quotes (words ≤400, a name, a
+  word about them); a quote shows only with words AND a name. `faq`: a
+  heading, a note and up to ten questions (≤120) with answers (≤600); a
+  question shows only once answered, drawn as native disclosures (no
+  script, the fold's rule) and told to search engines as an FAQPage from
+  the answered ones alone. With nothing complete a section draws nothing
+  on a public page, a faint line in the draft preview, and the editor's
+  list says `none filled in yet` / `none answered yet`. Both are in the
+  editor's catalogue as `Testimonials` and `Questions`, in the assistant's
+  slot map, and `faq` is a block the page-from-a-sentence writer may
+  choose (only questions the brief lets it answer).
+- **The farm template carries both**: an empty `What customers say` on
+  Home before the call to visit, and six `Common questions` a farm that
+  sells direct is asked (halves and wholes, delivery, pickup, packaging,
+  cards, visits) on the Shop page with BLANK answers, so they wait in the
+  editor until the owner answers and the site writer is never handed a
+  blank answer to guess (`templateSlots` leaves them out).
+- **The logo's size.** `settings.logoSize` (small, medium, large; medium
+  is what every site had): a `Logo size` block on the Header and footer
+  card, three buttons, saved with the frame; the header draws
+  `h-8`/`h-10`/`h-12 sm:h-16` with a ceiling on the width. Where the
+  other sizes live was the founder's real question: every section's
+  `Width` and `Spacing`, the hero's `Height`, a photo section's own
+  `Width`; the guide says so under the logo block.
+- **Driven on the dev branch** on Test's home page, signed in: the editor
+  offered `Testimonials` and `Questions` after `Columns`; a quote with a
+  name and one without, a question with an answer and one without, saved
+  (`What customers say: 1 quote`, `Common questions: 1 answered`); the
+  draft drew the named quote and the answered question only; published,
+  the public page carried the quote and an FAQPage with the one answered
+  question; the logo set to Large drew the header's image at the larger
+  height. Tests: `tests/site-proof.test.ts`, and the frame, style and
+  template suites learned the new kinds.
+
 ### 2026-09-05 — Slice 15b: the farm template, sharpened (`claude/marketing-farm-template-sharpened`)
 
 The founder asked whether the template was top notch and said he wanted
@@ -1485,6 +1526,13 @@ feature means for it.
   `public_access_attempts`, keyed by a hash of the tenant id rather than
   `ipKey` (which is `unsalted`, and so no key at all, without
   `INTERVIEW_IP_SALT`).
+- **Proof is never written for a business** (16). Testimonials and
+  questions are section kinds that show only once filled (a quote needs
+  words and a name, a question an answer), so a template can carry them
+  empty, or with questions and no answers, and nothing invented reaches a
+  visitor; `templateSlots` keeps a blank answer away from the writer.
+  Answered questions are told to search engines as an FAQPage. The logo's
+  size is a frame setting (`settings.logoSize`), not a section's.
 - **A site template is data an industry contributes** (15,
   [ADR 0030](../decisions/0030-a-site-template-is-data-an-industry-contributes.md)).
   The fourth use of P5 and the industry layer's first: pages of the site's
@@ -1804,6 +1852,9 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
   `TEXT_PATHS`, `assemblePageBlocks`, the tools and user turns);
   `components/assistant-controls.tsx` (`RewriteWords`, `WritePage`,
   `SuggestDescription`); `tests/site-assistant.test.ts`
+- `src/lib/sites/proof.ts` — testimonials and questions shown only once
+  filled (`completeQuotes`, `completeQuestions`, `faqJsonLd`) and the
+  logo's sizes (`logoSizeClass`) (16); `tests/site-proof.test.ts`
 - `src/lib/site-templates/` — the templates (15, ADR 0030): `types.ts` (a
   template is data), `core.ts` (pure: `assembleTemplate`, `attachPictures`,
   `templateSlots`, `applySiteWords`, `blockConfigFor`), `general.ts` (the

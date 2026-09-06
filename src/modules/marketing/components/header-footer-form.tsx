@@ -16,6 +16,7 @@ import {
   type FrameInput,
 } from "@/lib/sites/frame";
 import { guessNetwork, LINK_HINT, SOCIAL_NETWORK_LABELS, SOCIAL_NETWORKS, socialLabel } from "@/lib/sites/links";
+import { LOGO_SIZE_LABELS, LOGO_SIZES } from "@/lib/sites/proof";
 import {
   FOOTER_COLUMNS_MAX,
   FOOTER_LINKS_MAX,
@@ -126,6 +127,24 @@ export function HeaderFooterForm({ settings }: { settings: SiteSettings }) {
             <p className="text-xs text-muted-foreground">Optional. Where the line leads when it is clicked.</p>
           </div>
         </div>
+      </Block>
+
+      <Block title="Logo size" lede="How big your logo is drawn at the left of the header, on every page.">
+        <div className="flex flex-wrap gap-2">
+          {LOGO_SIZES.map((size) => (
+            <Button
+              key={size}
+              type="button"
+              variant={values.logoSize === size ? "default" : "outline"}
+              size="sm"
+              aria-pressed={values.logoSize === size}
+              onClick={() => update((v) => ({ ...v, logoSize: size }))}
+            >
+              {LOGO_SIZE_LABELS[size]}
+            </Button>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">Medium is the standard. Large suits a wordmark or a round mark that reads small; the logo never grows past a third of the header on a phone.</p>
       </Block>
 
       <Block title="Header button" lede="A button at the end of the menu on every page. Leave the label blank for no button.">

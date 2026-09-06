@@ -6,7 +6,8 @@ import {
   type NavItem,
 } from "@/components/app-shell";
 import { requireTenant, isSuperAdmin } from "@/lib/auth";
-import { isNativeApp } from "@/lib/native-app";
+import { isNativeApp, launchPending } from "@/lib/native-app";
+import { LaunchOverlay } from "@/components/app/launch-overlay";
 import { getActiveModules } from "@/lib/modules";
 import { getMailBadge } from "@/lib/email/badge";
 import { getRenderableFeature } from "@/lib/features";
@@ -44,13 +45,14 @@ export default async function DashboardLayout({
     enterpriseWord === ENTERPRISE_FALLBACK
       ? ENTERPRISE_FALLBACK_PLURAL
       : `${enterpriseWord}s`;
-  const [active, admin, mail, inApp] = await Promise.all([
+  const [active, admin, mail, inApp, showLaunch] = await Promise.all([
     getActiveModules(ctx.tenant.id),
     isSuperAdmin(),
     // One indexed SELECT against a number sync already wrote. Never a JMAP
     // call — this layout renders on every dashboard page in the product.
     getMailBadge(ctx.tenant.id, ctx.userId, ctx.role),
     isNativeApp(),
+    launchPending(),
   ]);
 
   // Only features that are both switched on AND renderable appear in nav. A
@@ -177,6 +179,9 @@ export default async function DashboardLayout({
   });
 
   return (
+    <>
+    {/* Inside the app, the first page of a launch plays the launch animation over itself. */}
+    {showLaunch && <LaunchOverlay />}
     <AppShell
       contextLabel={ctx.tenant.name}
       navGroups={navGroups}
@@ -217,5 +222,6 @@ export default async function DashboardLayout({
     >
       {children}
     </AppShell>
+    </>
   );
 }

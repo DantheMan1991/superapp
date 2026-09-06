@@ -1,6 +1,7 @@
 import "server-only";
 import { cookies, headers } from "next/headers";
 import { isNativeAppRequest, NATIVE_APP_COOKIE } from "@/lib/native-app-core";
+import { LAUNCH_COOKIE, shouldShowLaunch } from "@/lib/launch";
 
 /**
  * Is this request coming from inside the Yosher mobile app? Server
@@ -8,6 +9,22 @@ import { isNativeAppRequest, NATIVE_APP_COOKIE } from "@/lib/native-app-core";
  * inside an app — see src/lib/native-app-core.ts for how the answer is
  * carried. Cheap: two header reads, no I/O.
  */
+/**
+ * Inside the app, and the launch animation has not played this launch
+ * (src/lib/launch.ts). The layouts that can be the first page of a launch
+ * render the overlay when this is true.
+ */
+export async function launchPending(): Promise<boolean> {
+  const [h, c] = await Promise.all([headers(), cookies()]);
+  return shouldShowLaunch({
+    nativeApp: isNativeAppRequest({
+      userAgent: h.get("user-agent"),
+      cookie: c.get(NATIVE_APP_COOKIE)?.value ?? null,
+    }),
+    launchedCookie: c.get(LAUNCH_COOKIE)?.value ?? null,
+  });
+}
+
 export async function isNativeApp(): Promise<boolean> {
   const [h, c] = await Promise.all([headers(), cookies()]);
   return isNativeAppRequest({

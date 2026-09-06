@@ -119,7 +119,9 @@ device token to Capacitor, per the plugin's iOS instructions — both done when
   never edited there.
 - **Icons and splash.** Sources in `mobile/assets/` (drawn from the mark by
   a sharp one-liner recorded in the dossier); `npm run assets` regenerates
-  every platform size.
+  every platform size. The splash is plain navy on purpose: the site plays
+  the launch animation itself (the mark zooming in on blue) on its first
+  paint inside the app, so the look changes with a web deploy.
 - **Local work** (optional): Android Studio opens `mobile/android`; Xcode
   opens `mobile/ios/App/App.xcworkspace` on a Mac. Neither is needed for the
   workflow to build.

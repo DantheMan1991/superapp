@@ -59,8 +59,11 @@ const config: CapacitorConfig = {
     allowMixedContent: false,
   },
   plugins: {
+    // Plain navy, and brief: the SITE plays the launch animation on its first
+    // paint inside the app (src/components/app/launch-overlay.tsx), so the
+    // native splash only has to be there before any page has loaded.
     SplashScreen: {
-      launchShowDuration: 1500,
+      launchShowDuration: 300,
       launchAutoHide: true,
       backgroundColor: NAVY,
       showSpinner: false,

@@ -1,0 +1,88 @@
+name: Mobile
+
+# The mobile app is a native shell around yosherapp.com (ADR 0032). This
+# builds it — nothing here touches the web app's own CI, and nothing in the
+# web app's CI touches this.
+#
+#   android — a debug APK anyone can put on an Android phone today. Runs on
+#             every pull request that changes mobile/, because the founder's
+#             machine has no Android SDK and a build that only runs after a
+#             merge is a build nobody looked at.
+#   ios     — proves the iOS project generates and compiles, on a macOS
+#             runner, because the founder's machine is Windows and there is
+#             no other Mac. Pushes to main and manual runs only: macOS minutes
+#             cost ten times Linux ones, and a compile that passed yesterday
+#             passes today. Signing and TestFlight come when the Apple
+#             developer account exists (docs/runbooks/mobile-app.md).
+
+on:
+  push:
+    branches: [main]
+    paths: ["mobile/**", ".github/workflows/mobile.yml"]
+  pull_request:
+    paths: ["mobile/**", ".github/workflows/mobile.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Android debug build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: npm ci
+      - run: npx cap sync android
+      - name: Build the debug APK
+        working-directory: mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yosher-android-debug
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+
+  ios:
+    name: iOS simulator build
+    if: github.event_name != 'pull_request'
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      # The iOS project is generated here rather than committed: generating it
+      # needs CocoaPods, which needs macOS. When signing and capabilities
+      # (push, associated domains) are configured, the project gets committed
+      # from a run of this job and this step becomes a no-op.
+      - run: test -d ios || npx cap add ios
+      - run: npx cap sync ios
+      - name: Compile for the simulator
+        run: |
+          xcodebuild -workspace ios/App/App.xcworkspace -scheme App \
+            -configuration Debug -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO -quiet build

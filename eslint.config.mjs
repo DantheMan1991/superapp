@@ -286,6 +286,10 @@ const eslintConfig = defineConfig([
     // node_modules into public/ by scripts/copy-map-worker.ts. Vendor code we
     // do not edit — linting it produced 1,081 warnings and no information.
     "public/maplibre/**",
+    // The mobile shell (mobile/, ADR 0032) is its own npm package with its own
+    // toolchain; its one TypeScript file is checked by that package, and the
+    // generated native projects are not ours to lint.
+    "mobile/**",
     // Default ignores of eslint-config-next:
     ".next/**",
     "out/**",

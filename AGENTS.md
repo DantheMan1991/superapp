@@ -62,6 +62,17 @@ that matter for code:
 Modules stay "coming_soon" empty slots until a paying client pulls them in —
 that discipline is the whole point of the build brief.
 
+## The mobile app
+
+`mobile/` is the native shell around the site — Capacitor, loading
+yosherapp.com, its own `package.json` because the native toolchain has nothing
+to do with the web's dependencies ([ADR 0032](docs/decisions/0032-the-mobile-app-is-the-web-app-in-a-native-shell.md)).
+Read `docs/modules/mobile-app.md` first. The WEB decides what the app shows
+(`isNativeApp()` in `src/lib/native-app.ts`); nothing in `mobile/` is a
+service, and nothing in the web's CI installs or builds it — that is
+`.github/workflows/mobile.yml`, and `docs/runbooks/mobile-app.md` is how a
+build reaches a phone.
+
 ## Build docs (source of truth for humans AND agents)
 
 Everything under `docs/` is the build record, rendered read-only in the

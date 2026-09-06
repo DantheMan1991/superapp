@@ -104,7 +104,7 @@ the PR needs a migration.
 npm run clerk:export
 ```
 
-Reads `CLERK_SECRET_KEY` from `.env` (the development instance) and writes
+Reads `.env.local` then `.env` — `CLERK_SECRET_KEY` there is the development instance — and writes
 `clerk-migration/snapshot.json` (gitignored). Check the printout: the users,
 the organizations, who is in which, the pending invitation.
 

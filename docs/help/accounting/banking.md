@@ -1,6 +1,6 @@
 # Banking
 
-> Your bank and card accounts: the cards and their balances, connecting a feed, adding an account by hand, and recording money in or out without waiting for the feed.
+> Your bank and card accounts: the cards and their balances, connecting a feed, adding an account by hand, and recording money in, out or moved between your accounts without waiting for the feed.
 > **Route:** /dashboard/m/accounting/banking
 > **Order:** 10
 > **Area:** Banking
@@ -33,10 +33,10 @@ To stop the feed, click {button:Disconnect|ghost}. The dialog is `Disconnect [ba
 
 ## How to record money that moved without a feed
 
-1. Click {button:Quick add|outline}. The dialog reads `Record money in or out without waiting for the bank feed.`
-2. Pick `Direction`: `Money out (expense)` or `Money in (income)`. Set `Date` and `Bank account`.
-3. Pick `Category`: an expense account for money out, an income account for money in. Fill in `Amount`, and `Memo (optional)` and `Tags (optional)` if you use them.
-4. Click {button:Add|primary}. You see `Transaction added`. It posts straight to the books, in the account's company.
+1. Click {button:Quick add|outline}. The dialog reads `Record money in or out, or moved between your own accounts, without waiting for the bank feed.`
+2. Pick `Direction`: `Money out (expense)`, `Money in (income)` or `Transfer to another account`. Set `Date` and `Bank account`, the account the money left.
+3. Pick `Category`: an expense account for money out, an income account for money in. For a transfer, pick `To account` instead: one of your other accounts in the same company. Fill in `Amount`, and `Memo (optional)` and `Tags (optional)` if you use them; a transfer takes no tags.
+4. Click {button:Add|primary}. You see `Transaction added`, or `Transfer recorded`. It posts straight to the books, in the account's company. A transfer is one entry, out of one account and into the other; when the bank feed later shows it on either account, match it there rather than posting it again. See [An account's transactions](register.md).
 
 ## Messages
 

@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../src/db";
 import { decryptSecret, encryptSecret } from "../src/lib/crypto";
 import {
@@ -42,6 +42,7 @@ import {
   undoCategorization,
 } from "../src/modules/accounting/banking/review";
 import {
+  findMatchCandidates,
   matchTransactionToEntry,
   unmatchTransaction,
 } from "../src/modules/accounting/banking/match";
@@ -615,6 +616,148 @@ d("banking (DB)", () => {
       categorizeTransaction(tx, owner, { transactionId: txnId, accountId: repairs }),
     );
     expect(again.entry.status).toBe("posted");
+  });
+
+  it("a transfer between two own registers is one entry with a feed row on each side", async () => {
+    const { from, to } = await withTenant(tenantId, async (tx) => ({
+      from: (await createBankAccount(tx, owner, { name: "Xfer Checking", kind: "checking" }))
+        .bankAccount,
+      to: (await createBankAccount(tx, owner, { name: "Xfer Savings", kind: "savings" }))
+        .bankAccount,
+    }));
+    await withTenant(tenantId, (tx) =>
+      importTransactions(tx, owner, {
+        bankAccountId: from.id,
+        txns: [
+          { txnDate: "2026-04-10", description: "ONLINE TRANSFER TO SAVINGS", amountCents: -50_000, raw: [], dupIndex: 0 },
+          { txnDate: "2026-04-10", description: "ONLINE TRANSFER TO SAVINGS", amountCents: -50_000, raw: [], dupIndex: 1 },
+        ],
+      }),
+    );
+    await withTenant(tenantId, (tx) =>
+      importTransactions(tx, owner, {
+        bankAccountId: to.id,
+        txns: [
+          { txnDate: "2026-04-11", description: "TRANSFER FROM CHECKING", amountCents: 50_000, raw: [], dupIndex: 0 },
+        ],
+      }),
+    );
+    const fromTxns = await withTenant(tenantId, (tx) =>
+      tx.query.bankTransactions.findMany({
+        where: and(
+          eq(schema.bankTransactions.tenantId, tenantId),
+          eq(schema.bankTransactions.bankAccountId, from.id),
+        ),
+        orderBy: (t, { asc }) => [asc(t.createdAt)],
+      }),
+    );
+    const [toTxn] = await withTenant(tenantId, (tx) =>
+      tx.query.bankTransactions.findMany({
+        where: and(
+          eq(schema.bankTransactions.tenantId, tenantId),
+          eq(schema.bankTransactions.bankAccountId, to.id),
+        ),
+      }),
+    );
+
+    // 1. The money-out side posts the transfer: Dr savings / Cr checking.
+    const { entry } = await withTenant(tenantId, (tx) =>
+      categorizeTransaction(tx, owner, {
+        transactionId: fromTxns[0].id,
+        accountId: to.accountId,
+        memo: "Transfer to Xfer Savings · ONLINE TRANSFER TO SAVINGS",
+      }),
+    );
+    expect(entry.source).toBe("bank_import");
+
+    // 2. The money-in side is offered that entry, named as a transfer — and the
+    //    checking side is NOT offered its own posting back.
+    const offered = await withTenant(tenantId, (tx) =>
+      findMatchCandidates(tx, tenantId, {
+        bankAccountId: to.id,
+        ledgerAccountId: to.accountId,
+        amountCents: 50_000,
+        txnDate: "2026-04-11",
+      }),
+    );
+    expect(offered.map((c) => [c.entryId, c.label])).toEqual([
+      [entry.id, "Transfer from Xfer Checking"],
+    ]);
+    const own = await withTenant(tenantId, (tx) =>
+      findMatchCandidates(tx, tenantId, {
+        bankAccountId: from.id,
+        ledgerAccountId: from.accountId,
+        amountCents: -50_000,
+        txnDate: "2026-04-10",
+      }),
+    );
+    expect(own.some((c) => c.entryId === entry.id)).toBe(false);
+
+    // 3. Match links the second row to the SAME entry.
+    await withTenant(tenantId, (tx) =>
+      matchTransactionToEntry(tx, owner, {
+        transactionId: toTxn.id,
+        journalEntryId: entry.id,
+      }),
+    );
+    const linked = await withTenant(tenantId, (tx) =>
+      tx.query.bankTransactions.findMany({
+        where: and(
+          eq(schema.bankTransactions.tenantId, tenantId),
+          eq(schema.bankTransactions.journalEntryId, entry.id),
+        ),
+      }),
+    );
+    expect(linked.map((t) => t.bankAccountId).sort()).toEqual([from.id, to.id].sort());
+
+    // 4. A second row on the SAME register cannot point at it — the index.
+    await expectDbReject(
+      withTenant(tenantId, (tx) =>
+        tx
+          .update(schema.bankTransactions)
+          .set({ status: "posted", journalEntryId: entry.id })
+          .where(eq(schema.bankTransactions.id, fromTxns[1].id)),
+      ),
+      /bank_transactions_tenant_acct_entry_idx|duplicate/,
+    );
+
+    // 5. The matched side unlinks with Unmatch; the posting side does not.
+    await withTenant(tenantId, (tx) =>
+      unmatchTransaction(tx, owner, { transactionId: toTxn.id }),
+    );
+    const unlinked = await withTenant(tenantId, (tx) =>
+      tx.query.bankTransactions.findFirst({
+        where: eq(schema.bankTransactions.id, toTxn.id),
+      }),
+    );
+    expect(unlinked).toMatchObject({ status: "unreviewed", journalEntryId: null });
+    await expect(
+      withTenant(tenantId, (tx) =>
+        unmatchTransaction(tx, owner, { transactionId: fromTxns[0].id }),
+      ),
+    ).rejects.toMatchObject({ code: "TXN_POSTED_HERE" });
+
+    // 6. Undo on the posting side voids the entry and sends BOTH rows back.
+    await withTenant(tenantId, (tx) =>
+      matchTransactionToEntry(tx, owner, {
+        transactionId: toTxn.id,
+        journalEntryId: entry.id,
+      }),
+    );
+    const undone = await withTenant(tenantId, (tx) =>
+      undoCategorization(tx, owner, { transactionId: fromTxns[0].id }),
+    );
+    expect(undone.entry.status).toBe("void");
+    const both = await withTenant(tenantId, (tx) =>
+      tx.query.bankTransactions.findMany({
+        where: and(
+          eq(schema.bankTransactions.tenantId, tenantId),
+          inArray(schema.bankTransactions.id, [fromTxns[0].id, toTxn.id]),
+        ),
+      }),
+    );
+    expect(both).toHaveLength(2);
+    expect(both.every((t) => t.status === "unreviewed" && t.journalEntryId === null)).toBe(true);
   });
 
   it("exclude/restore round-trip; excluded cannot be categorized", async () => {

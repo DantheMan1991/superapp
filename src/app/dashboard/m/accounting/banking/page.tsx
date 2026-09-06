@@ -96,7 +96,13 @@ export default async function BankingPage() {
   const isOwner = ctx.role === "owner";
   const bankAccountOptions = data.bankAccounts
     .filter((b) => b.isActive)
-    .map((b) => ({ id: b.id, name: b.name, kind: b.kind }));
+    .map((b) => ({
+      id: b.id,
+      name: b.name,
+      kind: b.kind,
+      accountId: b.accountId,
+      entityId: b.entityId,
+    }));
   const categoryOptions = data.categories.map((a) => ({
     id: a.id,
     code: a.code,

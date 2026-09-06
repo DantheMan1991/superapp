@@ -13,6 +13,61 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-06 — Transfers between your own accounts (`claude/own-account-transfers`)
+
+Third slice of the improvement pass, and the one real accounting gap on its
+list. The register guide said to Exclude a transfer and hand-journal it,
+which every credit-card payment from checking hits, and which left both
+registers wrong until somebody remembered the journal.
+
+- **A transfer is ONE entry, matched from both sides.** On the account the
+  money left, the category picker ends with `Transfer to <register>` (money
+  in: `Transfer from …`), one per open register of the SAME company; posting
+  one is the ordinary `categorizeTransaction` with the other register's
+  ledger account as the category and a memo naming both ends. Other
+  companies' registers are not offered at all — `postEntry` refuses a foreign
+  register and the Companies page records those as a pair — and no register's
+  ledger account is offered as a plain category any more. When the feed shows
+  the same money on the other register, that row is offered the entry under
+  Match, labelled `Transfer from <register>` by `labelTransferEntries`.
+- **Migration `0263` relaxes P12's backstop from one feed row per entry to
+  one per entry PER REGISTER**: `bank_transactions_tenant_entry_idx`
+  (`tenant_id, journal_entry_id`) becomes `bank_transactions_tenant_acct_entry_idx`
+  (`tenant_id, bank_account_id, journal_entry_id`), still partial on non-null.
+  Two rows on the same register pointing at one entry is still the double
+  count the index exists to refuse (pinned by a raw UPDATE in the test).
+  Applied to the dev branch and to production before the merge, per ADR 0014,
+  and verify-rls run on both; the old code never links two rows to one entry,
+  so the swap is safe under the deploy that preceded it.
+- **Candidates no longer test `source`.** `findMatchCandidates` used to
+  exclude `bank_import` entries outright, which was right while an entry
+  could satisfy one row. The rule is now "touches this register's ledger
+  account, sums to the amount, within the window, and is not already linked
+  from a row ON THIS REGISTER" — which admits the other side's posting, still
+  refuses a row's own posting, and admits a hand-written transfer somebody
+  linked from the other register too. Both engines (`findMatchCandidates`,
+  `findMatchCandidatesBatch`) take the asking `bankAccountId`.
+- **Which road back.** A row that POSTED its entry is undone by voiding it —
+  `undoCategorization` resets every row linked to the entry, so both sides of
+  a transfer go back to review together. A row that only MATCHED unlinks with
+  Unmatch and the entry stays, still linked from the register that posted it.
+  `unmatchTransaction` refuses the posting side with `TXN_POSTED_HERE` (new;
+  it was a misleading `TXN_MATCH_INVALID`), and the register page computes
+  `postedHere` per row so `All` offers Unmatch only where it works.
+- **Quick add gained `Transfer to another account`**: the `To account` picker
+  lists the same company's other open registers, the posting is the expense
+  shape with that register's ledger account as the category (`quickAdd…`
+  refuses a closed or same register with `BANK_ACCOUNT_NOT_FOUND`), no tags,
+  memo `Transfer to <name>` unless typed, audited as `quick_add_transfer`.
+
+Verified: `tests/banking.test.ts` gained the transfer case — post from
+checking, offered on savings as `Transfer from Xfer Checking` and not offered
+back on checking, match, the index refusing a second same-register link,
+Unmatch on the matched side and `TXN_POSTED_HERE` on the posting side, Undo
+voiding and returning both rows. Guides: `register.md` (the transfer section
+replaces the Exclude advice; which rows carry Unmatch) and `banking.md`
+(Quick add's third direction).
+
 ### 2026-09-06 — Issue and send, and the row is the link (`claude/issue-and-send`)
 
 Second slice of the improvement pass: money in, in fewer taps.
@@ -3332,7 +3387,7 @@ preview in either state. The change is argued to be inert, not observed to be.
 | `journal_entries` / `journal_lines` | S1 | The ledger; balanced-at-commit trigger. `journal_entries.entity_id` (`0142`) says whose books — **on the ENTRY, never the line**, so an entry still balances on its own. Composite FK `(tenant_id, entity_id)`. NOT NULL since `0144`, which ran after the deploy — `0142` had to add it nullable because migrations precede deploys |
 | `dimension_members` / `line_dimensions` | S1 | Dimension tagging (industry-pack seam); line_dimensions gained invoice_line_id (S4) and bill_line_id (S6) with exactly-one-parent CHECKs |
 | `accounting_settings` | S1 | Per-tenant config (fiscal year, etc.). Gained `reminders_enabled` (default **false**) and `reminder_offsets` jsonb (`0114`) |
-| `bank_accounts`, `bank_transactions`, `reconciliations`, `reconciliation_lines`, `plaid_items` | S3 | Feeds, staging, reconciliation; encrypted Plaid tokens. `bank_accounts.entity_id` (`0145`) — **a register belongs to exactly one company**, chosen at creation and never moved, and `postEntry` refuses any line touching another company's register |
+| `bank_accounts`, `bank_transactions`, `reconciliations`, `reconciliation_lines`, `plaid_items` | S3 | Feeds, staging, reconciliation; encrypted Plaid tokens. `bank_accounts.entity_id` (`0145`) — **a register belongs to exactly one company**, chosen at creation and never moved, and `postEntry` refuses any line touching another company's register. `0263` (2026-09-06) relaxed the one-feed-row-per-entry index to one per entry **per register** (`bank_transactions_tenant_acct_entry_idx`), so a transfer between two own registers is one entry with a row on each side |
 | `bank_rules` | 2026-08-10 | Deterministic feed categorization. Priority-ordered, first match wins; `is_suggested` marks a machine-proposed rule; `auto_post` posts without review but never into a closed period. Gained `set_vendor_id` (`0113`) so a rule can name the payee too. `bank_transactions.rule_suggestion` is a **snapshot**, not an FK — it records what a rule said at match time, so editing the rule later cannot rewrite what the owner was shown |
 | `parties` | 2026-08-03 | **Shared, not this module's.** The identity spine behind `customers` and `vendors`; written through `src/lib/parties/`. See [crm.md](crm.md) |
 | `customers`, `invoices`, `invoice_lines`, `invoice_payments` | S4 | AR. `customers.party_id` (2026-08-03) makes the row a role on a party. Both `customers` and `invoices` gained `reminders_muted` (`0114`) — standing and one-off suppression of automatic chasing. `recurring_invoices` folded into `recurring_entries` (`0121`/`0122`) and was dropped in `0147` |
@@ -3436,6 +3491,7 @@ sentence rather than leaving it aspirational.
 - **Anything that previews an outbound message must share the renderer that sends it.** `reminder-render.ts` exists so the test button and the nightly sweep cannot drift; a preview built by its own code path is worse than none, because it is believed. Apply the same rule to any future preview (invoice, statement, digest).
 - **Reminders overtake, they do not queue.** Only the latest applicable offset can fire, so enabling the feature over an old book sends one email per invoice rather than one per missed offset. Nothing else in the module needs this rule; it exists because the alternative loses a client on the first morning.
 - **A rule never overrides the period lock.** Auto-post skips rows dated in a closed period and leaves them for review; the import still succeeds.
+- **A transfer between two of the business's own accounts is ONE entry, matched from both sides** (`0263`, 2026-09-06). The register the money left posts it as `Transfer to …`; the register it reached matches it. The side that posted is undone by voiding, which returns both rows; the side that matched unlinks with Unmatch alone. A feed row is still satisfied by exactly one entry — P12 — and an entry now satisfies at most one row per register it touches, never two on the same register.
 - **Email-in tokens must be lowercase** — mail infra lowercases local parts (found in production, `8147c2d`).
 - **Blob store is private** — use the presigned upload flow and pass the RW token explicitly server-side.
 - **Managed-source entries** (invoice/bill) can't be voided from the journal; void via their document's lifecycle.
@@ -3469,9 +3525,8 @@ screen shipped without such a session as compiled-and-tested, not seen.
   created from the invoice form** the way the bill form creates a vendor;
   **vendor default terms**, and a control for the `customers.payment_terms_id`
   column that already exists; the `Combobox` on the vendor, customer and
-  line-account pickers; **a Transfer choice in the review queue** — the guide
-  says to Exclude a transfer and hand-journal it, which every credit-card
-  payment from checking hits; **a deposit screen** for Undeposited Funds (the
+  line-account pickers; ~~**a Transfer choice in the review queue**~~ (DONE 2026-09-06,
+  `claude/own-account-transfers`, migration `0263`); **a deposit screen** for Undeposited Funds (the
   `Not deposited` tile has nowhere to go); **search and paging** on every list
   (caps at 200/300, no date filter on the register); **splitting one bank
   transaction** across categories; the bill and invoice line editors as

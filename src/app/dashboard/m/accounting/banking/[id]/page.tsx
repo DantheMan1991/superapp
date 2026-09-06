@@ -96,15 +96,43 @@ export default async function BankRegisterPage({
       orderBy: (a, { asc }) => [asc(a.code)],
     });
     // Existing-entry match candidates for the review tab (P12: a feed row
-    // is satisfied by exactly one entry — categorize OR match).
+    // is satisfied by exactly one entry — categorize OR match — and an entry
+    // by one row per register, which is how the other side of a transfer
+    // gets offered here).
     const unreviewedTxns = txns.filter((t) => t.status === "unreviewed");
     const matchCandidates = await findMatchCandidatesBatch(tx, tenantId, {
+      bankAccountId: bankAccount.id,
       ledgerAccountId: bankAccount.accountId,
       txns: unreviewedTxns.map((t) => ({
         id: t.id,
         amountCents: t.amountCents,
         txnDate: t.txnDate,
       })),
+    });
+    // Which posted rows posted their entry THEMSELVES, as opposed to
+    // matching one: the difference between Undo (void the entry) and Unmatch
+    // (unlink, entry stays), so the list can offer the one that works.
+    const linkedEntryIds = txns
+      .map((t) => t.journalEntryId)
+      .filter((v): v is string => !!v);
+    const linkedEntries =
+      linkedEntryIds.length === 0
+        ? []
+        : await tx.query.journalEntries.findMany({
+            where: and(
+              eq(schema.journalEntries.tenantId, tenantId),
+              inArray(schema.journalEntries.id, linkedEntryIds),
+            ),
+            columns: { id: true, source: true, sourceId: true },
+          });
+    // Every active register: the same company's are offered as transfers,
+    // and none of them is offered as a plain category.
+    const registers = await tx.query.bankAccounts.findMany({
+      where: and(
+        eq(schema.bankAccounts.tenantId, tenantId),
+        eq(schema.bankAccounts.isActive, true),
+      ),
+      columns: { id: true, accountId: true, name: true, entityId: true },
     });
     // Receipt attachment counts (session 5) — one grouped query.
     const attachmentCounts =
@@ -153,6 +181,8 @@ export default async function BankRegisterPage({
       attachmentCounts,
       vendorRows,
       dimensionMembers,
+      registers,
+      linkedEntries,
     };
   });
   if (!data) notFound();
@@ -167,9 +197,11 @@ export default async function BankRegisterPage({
     data.attachmentCounts.map((a) => [a.bankTransactionId, a.n]),
   );
   const vendorName = new Map(data.vendorRows.map((v) => [v.id, v.name]));
+  const entryById = new Map(data.linkedEntries.map((e) => [e.id, e]));
   const rows = txns.map((t) => {
     const suggestion = readAiSuggestion(t);
     const rule = readRuleSuggestion(t);
+    const linked = t.journalEntryId ? entryById.get(t.journalEntryId) : undefined;
     return {
       attachmentCount: attachmentsOf.get(t.id) ?? 0,
       id: t.id,
@@ -178,6 +210,7 @@ export default async function BankRegisterPage({
       amountCents: t.amountCents,
       status: t.status,
       journalEntryId: t.journalEntryId,
+      postedHere: linked?.source === "bank_import" && linked.sourceId === t.id,
       source: t.source,
       suggestion: suggestion
         ? {
@@ -200,9 +233,21 @@ export default async function BankRegisterPage({
   });
   const dimensionTypes = dimensionTypesFrom(data.dimensionMembers);
 
+  /**
+   * A register's ledger account is never a CATEGORY. Coding a feed row to
+   * another bank account is a transfer, so the same company's other
+   * registers are offered as `Transfer to/from …` at the end of the picker
+   * instead, and another company's are not offered at all — `postEntry`
+   * refuses a line on a foreign register, and money between two companies
+   * is recorded from the Companies page as a linked pair.
+   */
+  const registerAccountIds = new Set(data.registers.map((r) => r.accountId));
   const categoryOptions = data.categories
-    .filter((a) => a.id !== bankAccount.accountId)
+    .filter((a) => !registerAccountIds.has(a.id))
     .map((a) => ({ id: a.id, code: a.code, name: a.name, accountType: a.accountType }));
+  const transferTargets = data.registers
+    .filter((r) => r.id !== bankAccount.id && r.entityId === bankAccount.entityId)
+    .map((r) => ({ accountId: r.accountId, name: r.name }));
 
   return (
     <div className="space-y-6">
@@ -297,6 +342,7 @@ export default async function BankRegisterPage({
           tab={tab}
           rows={rows}
           categories={categoryOptions}
+          transferTargets={transferTargets}
           dimensionTypes={dimensionTypes}
           canAct={isOwner}
         />

@@ -1394,6 +1394,7 @@ d("payables (DB)", () => {
 
       const candidates = await withTenant(tenantId, (tx) =>
         findMatchCandidates(tx, tenantId, {
+          bankAccountId: txn.bankAccountId,
           ledgerAccountId: acct.__bankLedger,
           amountCents: -41_218,
           txnDate: "2026-07-03",

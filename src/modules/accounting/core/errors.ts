@@ -75,6 +75,7 @@ export type LedgerErrorCode =
   | "RECURRING_SCHEDULE_BACKWARD"
   | "TXN_MATCH_INVALID"
   | "TXN_NOT_UNDOABLE"
+  | "TXN_POSTED_HERE"
   | "DOCUMENT_NOT_FOUND"
   | "DOCUMENT_TRASHED"
   | "DOCUMENT_HAS_LINKS"
@@ -224,6 +225,8 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   TXN_MATCH_INVALID: "That entry can no longer be matched — refresh and try again.",
   TXN_NOT_UNDOABLE:
     "That row has nothing to undo — it is not a posting made from here. A matched row goes back with Unmatch.",
+  TXN_POSTED_HERE:
+    "This transaction posted the entry itself, so there is nothing to unmatch. Undo it from the Posted message, or void the entry from the journal.",
   DOCUMENT_NOT_FOUND: "That file no longer exists.",
   DOCUMENT_TRASHED: "That file is in the trash — restore it first.",
   DOCUMENT_HAS_LINKS:

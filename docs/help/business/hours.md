@@ -43,4 +43,4 @@ The work log is written by Yosher's team, not by you. There is nothing to add or
 
 ## Who can do what
 
-Everyone sees the meter and the work log. Only owners see the two blocks and can buy hours.
+Everyone sees the meter and the work log. Only owners see the two blocks and can buy hours. In the Yosher app on a phone nobody sees the blocks: the meter and the log are there, and hours are bought from a web browser.

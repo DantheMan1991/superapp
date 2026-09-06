@@ -6,6 +6,7 @@ import {
   type NavItem,
 } from "@/components/app-shell";
 import { requireTenant, isSuperAdmin } from "@/lib/auth";
+import { isNativeApp } from "@/lib/native-app";
 import { getActiveModules } from "@/lib/modules";
 import { getMailBadge } from "@/lib/email/badge";
 import { getRenderableFeature } from "@/lib/features";
@@ -42,12 +43,13 @@ export default async function DashboardLayout({
     enterpriseWord === ENTERPRISE_FALLBACK
       ? ENTERPRISE_FALLBACK_PLURAL
       : `${enterpriseWord}s`;
-  const [active, admin, mail] = await Promise.all([
+  const [active, admin, mail, inApp] = await Promise.all([
     getActiveModules(ctx.tenant.id),
     isSuperAdmin(),
     // One indexed SELECT against a number sync already wrote. Never a JMAP
     // call — this layout renders on every dashboard page in the product.
     getMailBadge(ctx.tenant.id, ctx.userId, ctx.role),
+    isNativeApp(),
   ]);
 
   // Only features that are both switched on AND renderable appear in nav. A
@@ -117,7 +119,12 @@ export default async function DashboardLayout({
         // in this same rail: this one decides what address the business's
         // outbound mail claims to come from, that one is the inbox.
         { href: "/dashboard/email", label: "Email setup", icon: "settings" },
-        { href: "/dashboard/billing", label: "Billing", icon: "billing" },
+        // Not inside the mobile app: the page there would show status and
+        // nothing to do, and a rail row that leads nowhere is worse than none.
+        // Hours stays, because its meter and log are the page. ADR 0032.
+        ...(inApp
+          ? []
+          : [{ href: "/dashboard/billing", label: "Billing", icon: "billing" }]),
         // The OTHER Stripe, and the neighbouring row is exactly why the label
         // spells it out: "Billing" is what this business pays us, "Taking
         // payments" is what its own customers pay it. ADR 0015.

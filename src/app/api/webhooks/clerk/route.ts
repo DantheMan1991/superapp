@@ -4,6 +4,7 @@ import { logAudit } from "@/lib/audit";
 import {
   markTenantChurned,
   removeMembership,
+  removeProfile,
   upsertMembership,
   upsertProfileFromUser,
   upsertTenantFromOrg,
@@ -56,6 +57,20 @@ export async function POST(req: NextRequest) {
           name:
             [data.first_name, data.last_name].filter(Boolean).join(" ") || null,
           imageUrl: data.image_url ?? null,
+        });
+      }
+      break;
+    }
+    case "user.deleted": {
+      // The person deleted their account (the option lives in Clerk's account
+      // dialog, and both app stores require it to exist), or a superadmin did
+      // it in the Clerk dashboard. Either way the mirror follows.
+      if (data.id) {
+        const removed = await removeProfile(data.id);
+        await logAudit({
+          action: "user.deleted",
+          actorLabel: "clerk-webhook",
+          meta: { clerkUserId: data.id, removed },
         });
       }
       break;

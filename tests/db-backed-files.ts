@@ -28,6 +28,7 @@ export const DB_BACKED_TESTS = [
   "tests/documents-dms/versions.test.ts",
   "tests/documents-templates.test.ts",
   "tests/documents.test.ts",
+  "tests/identity-account-deletion.test.ts",
   "tests/email.test.ts",
   "tests/entities-db.test.ts",
   "tests/export.test.ts",

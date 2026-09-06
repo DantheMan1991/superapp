@@ -1,6 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { withTenant, schema } from "@/db";
 import { requireTenant } from "@/lib/auth";
+import { isNativeApp } from "@/lib/native-app";
 import { reconcileHourBlockPurchase } from "@/lib/retainer-billing";
 import { loadRetainerView } from "@/lib/retainer";
 import {
@@ -95,6 +96,10 @@ export default async function HoursPage({
 
   const { usage } = view;
   const isOwner = ctx.role === "owner";
+  // The meter and the log are why the page exists and stay everywhere; the
+  // two blocks are a purchase, which the mobile app may not offer (App Store
+  // rule 3.1.1). ADR 0032.
+  const inApp = await isNativeApp();
   const emphasized = usage.isOver || usage.isNearLimit;
 
   const byMonth = new Map<string, typeof entries>();
@@ -150,7 +155,7 @@ export default async function HoursPage({
         </CardContent>
       </Card>
 
-      {isOwner && (
+      {isOwner && !inApp && (
         <div className="grid gap-4 sm:grid-cols-2">
           {(Object.keys(HOUR_BLOCKS) as HourBlockKey[]).map((key) => {
             const block = HOUR_BLOCKS[key];

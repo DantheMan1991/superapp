@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { Boxes } from "lucide-react";
 import { withTenant, schema } from "@/db";
 import { requireTenant } from "@/lib/auth";
+import { isNativeApp } from "@/lib/native-app";
 import { getActiveModules } from "@/lib/modules";
 import { getRenderableFeature, isRenderable } from "@/lib/features";
 import { PageHeader } from "@/components/app/page-header";
@@ -18,6 +19,10 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const ctx = await requireTenant();
+  // Inside the mobile app the Billing page is status only and has no rail
+  // row, so the subscription card states the plan and does not lead there.
+  // ADR 0032.
+  const inApp = await isNativeApp();
   const [active, subscription, retainerView] = await Promise.all([
     getActiveModules(ctx.tenant.id),
     withTenant(ctx.tenant.id, (tx) =>
@@ -62,7 +67,7 @@ export default async function DashboardPage() {
             <StatCard
               label="Subscription"
               value={subscription?.planName ?? "No plan"}
-              href="/dashboard/billing"
+              href={inApp ? undefined : "/dashboard/billing"}
               footnote={
                 <SubscriptionStatusBadge
                   status={subscription?.status ?? "none"}

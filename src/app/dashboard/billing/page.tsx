@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { CheckCircle2 } from "lucide-react";
 import { withTenant, schema } from "@/db";
 import { requireTenantOwner } from "@/lib/auth";
+import { isNativeApp } from "@/lib/native-app";
 import { reconcileSubscriptionFromStripe } from "@/lib/billing-sync";
 import { PLANS } from "@/lib/stripe";
 import {
@@ -42,6 +43,41 @@ export default async function BillingPage({
     !!subscription?.stripeSubscriptionId &&
     subscription.status !== "canceled" &&
     subscription.status !== "none";
+
+  // Inside the mobile app nothing may be bought or managed through a payment
+  // mechanism of ours (App Store rule 3.1.1, and Play's equivalent), so the
+  // page says where the subscription stands and stops: no plans, no portal,
+  // no pointer elsewhere. ADR 0032.
+  if (await isNativeApp()) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Billing"
+          description={`Subscription for ${ctx.tenant.name}.`}
+        />
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Current subscription</CardTitle>
+            <CardDescription className="flex items-center gap-2">
+              <SubscriptionStatusBadge status={subscription?.status ?? "none"} />
+              {subscription?.planName && <span>{subscription.planName}</span>}
+              {subscription?.cancelAtPeriodEnd && (
+                <Badge variant="outline">cancels at period end</Badge>
+              )}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            <p>
+              {hasSubscription && subscription?.currentPeriodEnd
+                ? `Renews ${subscription.currentPeriodEnd.toLocaleDateString()}. `
+                : ""}
+              Billing isn&apos;t available in the app.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

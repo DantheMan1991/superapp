@@ -37,7 +37,8 @@ happened, and what the runbook had not predicted:
 - Verified after reopening: the sign-in card reads "Sign in to Yosher App",
   no "Development mode" badge, key `pk_live_`, Frontend API
   `clerk.yosherapp.com`, the Sign up link on the application domain. GitHub
-  sign-in was still on at that point — a dashboard toggle for the founder.
+  sign-in was still on at that point; later the same day the founder decided
+  on email and password only, and Google and GitHub went off (Open items).
 - **The first sign-in landed on a blank page.** The server answered every
   request `x-clerk-auth-reason: secret-key-invalid` — the `CLERK_SECRET_KEY`
   pasted into Vercel was not the key. Re-copied and redeployed; the
@@ -304,9 +305,11 @@ the day the development instance is retired, not for the cutover.
   the founder's dashboard steps, the import and the remap are the runbook's
   checklist. Until then production is on the development instance, with every
   consequence the build log describes.
-- **Sign in with Apple, and dropping GitHub,** are dashboard toggles on the
-  production instance. Apple is required by App Store rule 4.8 once an iOS
-  app offers Google sign-in, and needs Apple developer credentials.
+- **Sign-in is email and password only — decided 2026-09-06.** Google and
+  GitHub are switched off on both instances. With no third-party login, App
+  Store rule 4.8 (Sign in with Apple) does not apply, and the store wrapper's
+  sign-in works inside a plain webview. Switching Google back on would need
+  custom credentials and would bring the Apple requirement with it.
 - **No account deletion exists.** Both app stores require an in-app path when
   sign-up is reachable inside the app; the B2B convention (sign up on the web,
   sign in on the app) plus a delete-account action is the likely shape.

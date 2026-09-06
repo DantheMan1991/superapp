@@ -71,12 +71,12 @@ the PR needs a migration.
    Add every record it lists, wherever yosherapp.com's DNS lives. Wait for each
    to verify, then **Deploy certificates**. Usually minutes; Clerk warns up to
    48 hours.
-3. **SSO connections → Google → Use custom credentials.** Create an OAuth
-   client in Google Cloud Console (type *Web application*; authorized
-   redirect URI = the one Clerk shows, on `clerk.yosherapp.com`) and paste the
-   client ID and secret. **Turn GitHub off** — it is a Clerk default nobody
-   running a farm signs in with. Apple comes later with the iOS app; it needs a
-   Services ID and key from the Apple developer account.
+3. **SSO connections: all off.** Sign-in is email and password only (decided
+   2026-09-06), so no Google, no GitHub, and therefore no Sign in with Apple
+   for the iOS app either. If Google is ever switched on, a production
+   instance needs custom credentials from Google Cloud Console (a *Web
+   application* OAuth client whose redirect URI is the one Clerk shows on
+   `clerk.yosherapp.com`), and App Store rule 4.8 then requires Apple too.
 4. **Email, phone, username**: leave as cloned (email address + password).
    **Paths** did not clone either, and need nothing: the app pins sign-in,
    sign-up and after-sign-out in code (`<ClerkProvider>` in

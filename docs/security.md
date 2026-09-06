@@ -57,7 +57,8 @@ authorization.
 
 **The Clerk instance is part of the control.** Production signs in against a
 Clerk *production* instance (`pk_live_`, Frontend API on a `yosherapp.com`
-subdomain, Yosher's own OAuth credentials). A development instance shares
+subdomain; sign-in is email and password only, no third-party login). A
+development instance shares
 Clerk's OAuth credentials, caps users, and carries sessions in URL tokens
 because its cookies are third-party; laptops and previews use one, production
 must not (found on the live site 2026-09-05). On a production instance the

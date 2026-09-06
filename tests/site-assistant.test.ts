@@ -20,6 +20,7 @@ const brief: SiteBrief = {
   email: "hello@oakrow.example",
   address: "17 N Main St\nMount Vernon, OH 43050",
   hoursLines: ["Saturday 8 to 12"],
+  about: "",
 };
 
 describe("rewriting one section", () => {

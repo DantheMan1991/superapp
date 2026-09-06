@@ -95,7 +95,7 @@ export function assembleTemplate(template: SiteTemplate, brief: SiteBrief, ctx: 
       navOrder,
       inNav: page.inNav,
       // Whatever a template says, what leaves here is valid.
-      content: PageContentSchema.parse({ description: fillTokens(page.description, brief), sections }),
+      content: PageContentSchema.parse({ description: fillTokens(page.description, brief), seoTitle: fillTokens(page.seoTitle ?? "", brief), sections }),
     };
   });
 }
@@ -139,6 +139,7 @@ export interface PageSlots {
   path: string;
   title: string;
   description: string;
+  seoTitle: string;
   sections: Array<{ index: number; kind: SectionType; words: Record<string, string>; limits: Record<string, number> }>;
 }
 
@@ -148,6 +149,7 @@ export function templateSlots(pages: AssembledPage[]): PageSlots[] {
     path: page.path,
     title: page.title,
     description: page.content.description,
+    seoTitle: page.content.seoTitle,
     sections: page.content.sections.map((section, index) => {
       const words = sectionWords(section);
       const limits = Object.fromEntries(Object.keys(words).map((path) => [path, limitFor(section.type, path)]));
@@ -157,6 +159,7 @@ export function templateSlots(pages: AssembledPage[]): PageSlots[] {
 }
 
 export const DESCRIPTION_MAX = 160;
+export const SEO_TITLE_MAX = 70;
 
 /**
  * The writer's answer put into the pages, one section at a time. The
@@ -171,12 +174,17 @@ export function applySiteWords(pages: AssembledPage[], raw: unknown): { pages: A
   let filled = 0;
   const next = pages.map((page) => {
     const answer = answers.find((a) => a && typeof a === "object" && (a as { path?: unknown }).path === page.path) as
-      | { description?: unknown; sections?: unknown }
+      | { description?: unknown; seoTitle?: unknown; sections?: unknown }
       | undefined;
     if (!answer) return page;
     let description = page.content.description;
     if (typeof answer.description === "string" && answer.description.trim()) {
       description = answer.description.trim().slice(0, DESCRIPTION_MAX);
+      filled += 1;
+    }
+    let seoTitle = page.content.seoTitle;
+    if (typeof answer.seoTitle === "string" && answer.seoTitle.trim()) {
+      seoTitle = answer.seoTitle.trim().slice(0, SEO_TITLE_MAX);
       filled += 1;
     }
     const sections = page.content.sections.map((section, index) => {
@@ -189,7 +197,7 @@ export function applySiteWords(pages: AssembledPage[], raw: unknown): { pages: A
       filled += 1;
       return applied;
     });
-    return { ...page, content: PageContentSchema.parse({ description, sections }) };
+    return { ...page, content: PageContentSchema.parse({ description, seoTitle, sections }) };
   });
   return { pages: next, filled };
 }

@@ -14,6 +14,8 @@ export interface SiteBrief {
   email: string;
   address: string;
   hoursLines: string[];
+  /** The owner's own lines about the business: what they sell, how, who buys it. The writer's best source. */
+  about: string;
 }
 
 export type { AssembledPage } from "@/lib/site-templates/types";

@@ -34,6 +34,8 @@ export interface TemplatePage {
   inNav: boolean;
   /** The starter meta description; the writer rewrites it. */
   description: string;
+  /** The starter title tag; blank falls back to the page and the site, and the writer fills it. */
+  seoTitle?: string;
   sections: TemplateSection[];
 }
 

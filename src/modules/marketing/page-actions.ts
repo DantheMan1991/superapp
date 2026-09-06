@@ -155,6 +155,7 @@ export async function addPageAction(
     const path = parsePath(parsed.data.path);
     const content: PageContent = {
       description: "",
+      seoTitle: "",
       sections: [{ type: "text", heading: parsed.data.title, body: ["Write this page here."] }],
     };
     const pageId = await withTenant(

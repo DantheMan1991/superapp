@@ -76,5 +76,6 @@ export function siteBriefFor(input: {
     email: input.settings.email,
     address: input.settings.address,
     hoursLines: input.settings.hoursLines,
+    about: input.settings.about,
   };
 }

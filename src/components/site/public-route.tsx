@@ -66,14 +66,16 @@ export async function publicSiteMetadata(
   const page = site.pages.find((p) => p.path === pagePath);
   if (!page) return { robots: { index: false, follow: false } };
   const description = page.content.description || site.brand.tagline || undefined;
+  // The page's own search title when the writer or the owner set one (slice 15b), else the page and the site.
+  const title = page.content.seoTitle || (page.path === "/" ? site.title : `${page.title} · ${site.title}`);
   const image = shareImageFor(site, page, mode);
   return {
     // `absolute`: the root layout's "%s · Yosher" template is the platform's
     // name, and a customer's site must not carry it.
-    title: { absolute: page.path === "/" ? site.title : `${page.title} · ${site.title}` },
+    title: { absolute: title },
     description,
     openGraph: {
-      title: page.path === "/" ? site.title : `${page.title} · ${site.title}`,
+      title,
       description,
       type: "website",
       siteName: site.title,

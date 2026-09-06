@@ -50,6 +50,53 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-05 — Slice 15b: the farm template, sharpened (`claude/marketing-farm-template-sharpened`)
+
+The founder asked whether the template was top notch and said he wanted
+best-in-industry. Against what the best direct-to-consumer farm sites do,
+five things were short, and all five are in. No migration.
+
+- **The writer knows what the farm sells.** `settings.about` (up to 600
+  characters, "About the business" on the build form and under the details
+  card): the owner's own lines about what they raise, how, and who buys it.
+  It rides the brief (`SiteBrief.about`) into the site writer and the
+  editor's assistant as "In the owner's own words", and the farm template's
+  writer notes tell the model to name exactly what the owner names and
+  nothing else. Never shown on the site as written.
+- **Search titles.** `PageContent.seoTitle` (≤70): the title tag and the
+  Open Graph title when set, else the page and the site as before. The
+  page editor has `Title for search engines`; the writer fills it for every
+  page (what the page offers, the town, then the name); the farm template
+  carries starters. The live preview's shape check passes it through.
+- **The home page sells.** A three-step `How to buy` (order ahead, pick a
+  day, take it home; the first card's button goes to the shop) after `How
+  we farm`, and the hours (`Where to find us`) on the home page, since
+  market hours are a farm's best conversion line. `What's on` moved to
+  the Visit page so an empty events box never sits on the landing page.
+  The About story's second starter paragraph is a sentence about the farm,
+  not an instruction to the owner. The shop's order form asks when the
+  order is needed by.
+- **Starter art.** A brand with no accent drew its sun in the primary, a
+  dark disc; the sun is now the accent when there is one and a warm gold
+  when there is none or it equals the primary, and the hills are drawn
+  lighter so the hero's overlay does not crush them.
+- **Driven on the dev branch through the real Build button**, with the
+  pane signed in and the organisation switched to Hilltop Farm (the switch
+  holds within one document, so the build was reached by client-side
+  navigation; a full page load flips the server back to Test, the Clerk
+  dev trap from 9b). About: "We raise grass-fed Dexter beef, pastured pigs,
+  meat chickens and laying hens on 40 acres… families in Knox County…
+  Saturday market… farm store on Fridays." The writer answered with
+  `Grass-fed beef, chicken and eggs in Mount Vernon` over the hills,
+  `What we raise: Grass-fed Dexter beef, Beef by the half, Whole chickens,
+  Eggs by the dozen`, the shop's hero naming Friday at the farm store and
+  Saturday at market, search titles per page (`Grass-fed beef, chicken and
+  eggs, Mount Vernon | Hilltop Farm`, `Shop beef, chicken and eggs |
+  Hilltop Farm`), hours and `How to buy` on the home page, events on the
+  Visit page, three pictures, the warm look, `Order now` in the header.
+  Published by a script (the flipped session cannot publish) and read on
+  the platform path.
+
 ### 2026-09-05 — Slice 15: industry site templates, the homestead farm's first (`claude/marketing-industry-templates`)
 
 The founder: "create an elite website template for the homestead farming
@@ -1621,7 +1668,7 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
 | `sites` | The business's website: its address, live details and status | FORCE RLS. `member_read`; INSERT/UPDATE/DELETE need `app_current_tenant_role() = 'owner'`. Unique on `tenant_id` (one site per tenant, this slice) and on `slug` platform-wide (it is a hostname label). Since 11b (`0260`): `previous_slugs text[]`, the addresses the site used to have, newest first, at most ten, GIN-indexed for the containment lookup an old address makes. CHECKs: slug shape `^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$`, `status in (draft, published)`, `copy_source in (model, standard)`, title ≤ 80. `settings` is `SiteSettingsSchema`: the details (phone, email, address, hours), since 6c the frame (announcement bar, header button, social links, footer columns, footer line), and since 10 `map`, the geocoded pin kept with the address it was placed from (ADR 0026), all read live by the renderer |
-| `site_pages` | One page: its path, title, nav place, `draft` and `published` content | FORCE RLS, same policies. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. Unique `(site_id, path)`. CHECK: path `^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$`, title 1–80. `draft`/`published` are `PageContentSchema`; `published` null = never published. Since 9b a section may be a pack's `block` (`kind` such as `retail.prices`, a `config` its provider's fields set); no table changes, the pack's rows are read at render |
+| `site_pages` | One page: its path, title, nav place, `draft` and `published` content | FORCE RLS, same policies. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. Unique `(site_id, path)`. CHECK: path `^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$`, title 1–80. `draft`/`published` are `PageContentSchema`; `published` null = never published. Since 9b a section may be a pack's `block` (`kind` such as `retail.prices`, a `config` its provider's fields set); no table changes, the pack's rows are read at render. Since 15b the content carries `seoTitle` (≤70, the title tag when set) and the settings carry `about` (≤600, the owner's lines for the writer) |
 | `site_page_versions` | A page's history: the content at each `save`, `publish` and `restore` | FORCE RLS; `member_read`, owner INSERT and DELETE (no UPDATE — a version is never edited). Composite FK `(tenant_id, page_id) → site_pages` ON DELETE CASCADE. CHECK on `kind`. Trimmed to the newest `PAGE_VERSIONS_KEEP` (30) on every write by `recordVersion` |
 | `site_domains` | A domain the business owns, connected to its site | FORCE RLS; `member_read`, owner INSERT/UPDATE/DELETE. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. **Unique on `domain` platform-wide** (a hostname points at one site); at most five per site (`SITE_DOMAINS_MAX`). CHECKs: hostname shape, `status in (pending, active, error)`. `records` is `DnsRecordToPublish[]`, what the owner was last told to publish; `vercel_verified`/`vercel_configured_by` are Vercel's last words. **Only an `active` row routes**, and only Vercel makes a row active |
 | `site_enquiries` | A message sent through the site's form: the record of what was sent | FORCE RLS; `member_read`, **member INSERT** (`owner`/`staff` — the public path writes as `staff`, ADR 0021), owner DELETE, **no UPDATE policy**. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. `party_id` / `work_item_id` are **soft pointers** (no FK): the screen resolves them and says when one is gone. CHECKs: name 1–120, message 1–4000, `notify_via in (none, site_email, owners)`. `ip_hash` is the salted hash the caps use, never the IP. Capped at `ENQUIRY_SITE_DAILY_CAP` (100) per site per UTC day. Since 4b (`0254`): `answers` jsonb, `EnquiryAnswer[]` label snapshots of the business's own questions. Since 8 (`0259`): `booking_starts_at` / `booking_ends_at` (both or neither, CHECK `site_enquiries_booking_whole`), `booking_title`, and `schedule_item_id`, a soft pointer to the item on the Bookings calendar — a booking is an enquiry with a time (ADR 0025), capped at `BOOKING_SITE_DAILY_CAP` (100) bookings per site per day |

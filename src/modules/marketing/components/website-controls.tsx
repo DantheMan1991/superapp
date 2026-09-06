@@ -63,7 +63,7 @@ function DetailFields({
   withTitle,
   mapStatus,
 }: {
-  values: { title: string; phone: string; email: string; address: string; hoursText: string };
+  values: { title: string; phone: string; email: string; address: string; hoursText: string; about: string };
   onChange: (patch: Partial<typeof values>) => void;
   withTitle: boolean;
   /** Where the map stands (`mapStatusLine`); absent before the site exists. */
@@ -113,11 +113,25 @@ function DetailFields({
         />
         <p className="text-xs text-muted-foreground">One line each, up to seven. Blank hides the hours section.</p>
       </div>
+      <div className="space-y-2 sm:col-span-2">
+        <Label htmlFor="site-about">About the business</Label>
+        <Textarea
+          id="site-about"
+          value={values.about}
+          maxLength={600}
+          rows={3}
+          placeholder="What you raise or sell, how you do it, and who buys it. A few lines in your own words."
+          onChange={(e) => onChange({ about: e.target.value })}
+        />
+        <p className="text-xs text-muted-foreground">
+          For the writer, when the site is built or its words rewritten: the more you say here, the more the words are yours. Not shown on the site as written.
+        </p>
+      </div>
     </div>
   );
 }
 
-const EMPTY_DETAILS = { title: "", phone: "", email: "", address: "", hoursText: "" };
+const EMPTY_DETAILS = { title: "", phone: "", email: "", address: "", hoursText: "", about: "" };
 
 /** The first screen: an address and the details, then "Build it". */
 export function BuildSiteForm({
@@ -255,6 +269,7 @@ export function SiteDetailsForm({
     email: settings.email,
     address: settings.address,
     hoursText: settings.hoursLines.join("\n"),
+    about: settings.about,
   };
   const [values, setValues] = useState(initial);
   const dirty = JSON.stringify(values) !== JSON.stringify(initial);

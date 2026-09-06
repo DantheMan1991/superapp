@@ -349,11 +349,13 @@ export const PAGE_SECTIONS_MAX = 12;
 export const PageContentSchema = z.object({
   /** The meta description; empty falls back to the site's tagline. */
   description: short(200).default(""),
+  /** The title tag for search and sharing (slice 15b); empty falls back to the page's title and the site's name. */
+  seoTitle: short(70).default(""),
   sections: z.array(SectionSchema).max(PAGE_SECTIONS_MAX).default([]),
 });
 export type PageContent = z.infer<typeof PageContentSchema>;
 
-export const EMPTY_PAGE: PageContent = { description: "", sections: [] };
+export const EMPTY_PAGE: PageContent = { description: "", seoTitle: "", sections: [] };
 
 /**
  * What the contact and hours sections read live. Everything optional and
@@ -402,6 +404,8 @@ export const SiteSettingsSchema = z.object({
   address: short(240).default(""),
   /** One line each: "Saturday 8–12, at the market". */
   hoursLines: z.array(short(80)).max(7).default([]),
+  /** The owner's own lines about the business, for the writer: what they sell, how, and who buys it. Never shown as written. */
+  about: short(600).default(""),
   /** Above the header on every page, while `shown`. */
   announcement: AnnouncementSchema.default({ text: "", href: "", shown: false }),
   /** The button at the right of the menu; null is no button. */
@@ -434,6 +438,7 @@ export const EMPTY_SETTINGS: SiteSettings = {
   email: "",
   address: "",
   hoursLines: [],
+  about: "",
   announcement: { text: "", href: "", shown: false },
   headerButton: null,
   social: [],

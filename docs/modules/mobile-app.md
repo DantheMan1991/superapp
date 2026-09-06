@@ -35,6 +35,10 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
   shell's package.
 - **iPhone push waits on the Apple account**: an APNs key, the capability on
   the Xcode project and an AppDelegate change, all in the runbook.
+- **The app opens on `/dashboard`** (`startPath` in `app.json`): the sign-in
+  card when signed out, the business when signed in. The first build opened
+  on the marketing landing page, which is for browsers; the founder noticed
+  within a minute of installing it.
 
 ### 2026-09-06 — Slice 2a: push, the web side (`claude/mobile-app-2a-push-web`)
 

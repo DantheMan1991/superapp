@@ -21,6 +21,7 @@ const app = JSON.parse(readFileSync(path.join(here, "app.json"), "utf8")) as {
   appName: string;
   version: string;
   url: string;
+  startPath: string;
   userAgentMarker: string;
 };
 
@@ -38,7 +39,9 @@ const config: CapacitorConfig = {
   // this; the site's own header is the same navy.
   backgroundColor: NAVY,
   server: {
-    url: app.url,
+    // The app opens on the dashboard: the sign-in card when signed out, the
+    // business when signed in. The marketing landing page is for browsers.
+    url: `${app.url}${app.startPath}`,
     // Bundled in www/, shown when the URL cannot be loaded — no network, or
     // the site is down. "Try again" on it reloads the site.
     errorPath: "offline.html",

@@ -3,5 +3,6 @@
   "appName": "Yosher",
   "version": "1.0.0",
   "url": "https://yosherapp.com",
+  "startPath": "/dashboard",
   "userAgentMarker": "YosherApp"
 }

@@ -181,7 +181,7 @@ describe("the form section", () => {
   });
 
   it("is on every assembled contact page, after the details", () => {
-    const brief = { name: "Oak Row Farm", tagline: "", industry: null, phone: "", email: "", address: "", hoursLines: [] };
+    const brief = { name: "Oak Row Farm", tagline: "", industry: null, phone: "", email: "", address: "", hoursLines: [], about: "" };
     const pages = assembleTemplate(generalSiteTemplate, brief, { schedulingOn: false, blocks: [], pictures: null });
     const contact = pages.find((p) => p.path === "/contact");
     expect(contact?.content.sections.map((s) => s.type)).toEqual(["contact", "form"]);

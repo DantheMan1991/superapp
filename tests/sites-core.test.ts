@@ -76,8 +76,8 @@ describe("the content model", () => {
   });
 
   it("degrades a malformed row to empty rather than throwing at render", () => {
-    expect(readPageContent({ sections: [{ type: "nope" }] })).toEqual({ description: "", sections: [] });
-    expect(readPageContent(null)).toEqual({ description: "", sections: [] });
+    expect(readPageContent({ sections: [{ type: "nope" }] })).toEqual({ description: "", seoTitle: "", sections: [] });
+    expect(readPageContent(null)).toEqual({ description: "", seoTitle: "", sections: [] });
     expect(readSiteSettings({ phone: 5 })).toEqual(EMPTY_SETTINGS);
   });
 

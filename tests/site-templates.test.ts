@@ -20,6 +20,7 @@ const brief: SiteBrief = {
   email: "hello@oakrow.example",
   address: "17 Main St\nMount Vernon, OH 43050",
   hoursLines: ["Saturday 8 to 12, at the market"],
+  about: "",
 };
 
 const CHANNEL = "6d4c1a2e-9b3f-4c8d-8e7a-1f2b3c4d5e6f";
@@ -80,16 +81,16 @@ describe("the homestead farm template", () => {
   it("is five pages in the order a buyer looks, with the pack and calendar sections only where the tenant has them", () => {
     const full = assembleTemplate(homesteadFarmSiteTemplate, brief, { schedulingOn: true, blocks: [prices([{ value: CHANNEL, label: "Market" }])], pictures: null });
     expect(full.map((p) => p.path)).toEqual(["/", "/shop", "/visit", "/about", "/contact"]);
-    expect(full[0].content.sections.map((s) => s.type)).toEqual(["hero", "offer", "columns", "block", "events", "cta"]);
-    expect(full[2].content.sections.map((s) => s.type)).toEqual(["hero", "text", "booking", "hours", "map"]);
-    const block = full[0].content.sections[3];
+    expect(full[0].content.sections.map((s) => s.type)).toEqual(["hero", "offer", "columns", "columns", "block", "hours", "cta"]);
+    expect(full[2].content.sections.map((s) => s.type)).toEqual(["hero", "text", "booking", "events", "hours", "map"]);
+    const block = full[0].content.sections[4];
     expect(block.type === "block" && block.config).toEqual({ channel: CHANNEL, soldOut: "mark" });
     const bare = assembleTemplate(homesteadFarmSiteTemplate, { ...brief, hoursLines: [] }, nothing);
-    expect(bare[0].content.sections.map((s) => s.type)).toEqual(["hero", "offer", "columns", "cta"]);
+    expect(bare[0].content.sections.map((s) => s.type)).toEqual(["hero", "offer", "columns", "columns", "cta"]);
     expect(bare[2].content.sections.map((s) => s.type)).toEqual(["hero", "text", "map"]);
     // Two channels and nobody chose: the block waits for the owner rather than guessing.
     const twoChannels = assembleTemplate(homesteadFarmSiteTemplate, brief, { ...nothing, blocks: [prices([{ value: CHANNEL, label: "A" }, { value: "b", label: "B" }])] });
-    expect(twoChannels[0].content.sections.map((s) => s.type)).toEqual(["hero", "offer", "columns", "cta"]);
+    expect(twoChannels[0].content.sections.map((s) => s.type)).toEqual(["hero", "offer", "columns", "columns", "hours", "cta"]);
     expect(blockConfigFor("retail.prices", [])).toBeNull();
     expect(homesteadFarmSiteTemplate.frame.headerButton).toEqual({ label: "Order now", href: "/shop" });
     expect(homesteadFarmSiteTemplate.look).toEqual({ look: "warm", fontPairing: "warm", buttonShape: "rounded" });
@@ -99,6 +100,7 @@ describe("the homestead farm template", () => {
     const pages = assembleTemplate(homesteadFarmSiteTemplate, brief, nothing);
     const hero = pages[0].content.sections[0];
     expect(hero.type === "hero" && hero.headline).toBe("Pasture-raised meat and eggs from Oak Row Farm Co.");
+    expect(pages[0].content.seoTitle).toBe("Pasture-raised meat and eggs sold direct | Oak Row Farm Co.");
     expect(pages[3].content.sections[0].type === "text" && (pages[3].content.sections[0] as { body: string[] }).body[0]).toContain("Oak Row Farm Co. is a working homestead farm");
     expect(scenesFor(homesteadFarmSiteTemplate)).toEqual(["hills", "dawn", "furrows"]);
     expect(homesteadFarmSiteTemplate.pictures.map((p) => p.at)).toEqual([slotAt("/", 0), slotAt("/visit", 0), slotAt("/about", 2)]);
@@ -130,6 +132,8 @@ describe("the writer's slots and words", () => {
     const slots = templateSlots(pages);
     expect(slots.map((p) => p.path)).toEqual(["/", "/about", "/contact"]);
     expect(slots[0].sections[0]).toMatchObject({ index: 0, kind: "hero", words: { headline: "Oak Row Farm Co.", "cta.label": "Get in touch" }, limits: { headline: 120, "cta.label": 40 } });
+    expect(slots[0].seoTitle).toBe("");
+    expect(buildSiteCopyUserTurn({ ...brief, about: "We raise Dexter beef and laying hens." }, [], slots)).toContain("In the owner's own words: We raise Dexter beef and laying hens.");
     const turn = buildSiteCopyUserTurn({ ...brief, phone: "", hoursLines: [] }, ["Farm notes."], slots);
     expect(turn).toContain("Oak Row Farm Co.");
     expect(turn).toContain("No phone number is given.");
@@ -145,6 +149,7 @@ describe("the writer's slots and words", () => {
         {
           path: "/",
           description: "Grass-fed beef in Mount Vernon, delivered Fridays by Oak Row Farm.",
+          seoTitle: "Grass-fed beef in Mount Vernon, OH | Oak Row Farm",
           sections: [
             { index: 0, words: { headline: "Beef you can trust", "cta.label": "Get in touch", "cta.href": "javascript:x" } },
             { index: 1, words: { heading: "" } },
@@ -153,8 +158,9 @@ describe("the writer's slots and words", () => {
         { path: "/nowhere", description: "ignored", sections: [] },
       ],
     });
-    expect(filled).toBe(2);
+    expect(filled).toBe(3);
     const hero = written[0].content.sections[0];
+    expect(written[0].content.seoTitle).toBe("Grass-fed beef in Mount Vernon, OH | Oak Row Farm");
     expect(hero.type === "hero" && hero.headline).toBe("Beef you can trust");
     expect(hero.type === "hero" && hero.cta?.href).toBe("/contact");
     expect(written[0].content.description).toBe("Grass-fed beef in Mount Vernon, delivered Fridays by Oak Row Farm.");

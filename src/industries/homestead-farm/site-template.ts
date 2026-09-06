@@ -52,6 +52,7 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
       title: "Home",
       inNav: true,
       description: "{name}: pasture-raised meat and eggs sold direct from the farm. See what we raise, this week's prices, and how to order or visit.",
+      seoTitle: "Pasture-raised meat and eggs sold direct | {name}",
       sections: [
         {
           type: "hero",
@@ -87,6 +88,19 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
           style: { width: "default", spacing: "default", align: "default", background: "tint", photo: null },
         },
         {
+          type: "columns",
+          heading: "How to buy",
+          intro: "Three steps, no account, no app.",
+          columns: 3,
+          widths: "equal",
+          look: "plain",
+          cards: [
+            { id: "buy01", image: null, icon: "shopping-bag", heading: "Order ahead", body: ["Tell us what you want by the form, by phone or by email, and we set it aside for you."], cta: { label: "Place an order", href: "/shop" } },
+            { id: "buy02", image: null, icon: "calendar", heading: "Pick a day", body: ["Collect at the farm on a day we agree, or find us at market."], cta: null },
+            { id: "buy03", image: null, icon: "package", heading: "Take it home", body: ["Cut, wrapped and frozen, ready for the freezer or the table."], cta: null },
+          ],
+        },
+        {
           type: "block",
           kind: "retail.prices",
           heading: "This week's prices",
@@ -94,15 +108,7 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
           emptyText: "Prices are posted when the season starts.",
           config: {},
         },
-        {
-          type: "events",
-          heading: "What's on at the farm",
-          note: "Open days, market dates and farm events.",
-          count: 3,
-          horizonDays: 90,
-          emptyText: "Nothing scheduled right now. Check back soon.",
-          needs: "scheduling",
-        },
+        { type: "hours", heading: "Where to find us", note: "", needs: "hours" },
         {
           type: "cta",
           headline: "Come and see where your food is raised.",
@@ -115,6 +121,7 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
       title: "Shop",
       inNav: true,
       description: "Pasture-raised meat by the cut or the share, plus eggs, from {name}. Prices and how to order.",
+      seoTitle: "Shop pasture-raised meat and eggs | {name}",
       sections: [
         {
           type: "hero",
@@ -160,6 +167,7 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
           fields: [
             { id: "order01", label: "What would you like?", kind: "long", required: true, options: [] },
             { id: "order02", label: "Pickup or delivery?", kind: "choice", required: false, options: ["Pickup at the farm", "Pickup at market", "Delivery"] },
+            { id: "order03", label: "When do you need it by?", kind: "text", required: false, options: [] },
           ],
         },
       ],
@@ -169,6 +177,7 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
       title: "Visit",
       inNav: true,
       description: "Visit {name}: walk the pastures, meet the animals and see how your food is raised. Book a time and find us.",
+      seoTitle: "Visit the farm | {name}",
       sections: [
         {
           type: "hero",
@@ -203,6 +212,15 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
           thanks: "Thanks. We'll confirm by email.",
           needs: "scheduling",
         },
+        {
+          type: "events",
+          heading: "What's on at the farm",
+          note: "Open days, market dates and farm events.",
+          count: 3,
+          horizonDays: 90,
+          emptyText: "Nothing scheduled right now. Check back soon.",
+          needs: "scheduling",
+        },
         { type: "hours", heading: "When we're here", note: "", needs: "hours" },
         { type: "map", heading: "Find us", note: "", zoom: 15, showAddress: true, directions: true },
       ],
@@ -212,13 +230,14 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
       title: "About",
       inNav: true,
       description: "About {name}: a working homestead farm raising animals on pasture and selling direct.",
+      seoTitle: "About | {name}",
       sections: [
         {
           type: "text",
           heading: "Our story",
           body: [
             "{name} is a working homestead farm. We raise animals on pasture, grow what we can, and sell what we produce directly to the people who eat it.",
-            "This is where the story goes: who is behind the farm, how it started and what it stands for. Say it in your own words.",
+            "We farm the way we do because it makes better food and a better place to live. The rest of the story is best told in person, so come and see us.",
           ],
         },
         {
@@ -243,6 +262,7 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
       title: "Contact",
       inNav: true,
       description: "Contact {name}: phone, email, hours and where to find us.",
+      seoTitle: "Contact | {name}",
       sections: [
         { type: "contact", heading: "Get in touch", note: "Call, email or send a note below. We answer as quickly as we can." },
         { type: "form", heading: "Send us a message", note: "", buttonLabel: "Send", askPhone: true, thanks: "Thanks. We'll be in touch.", fields: [] },
@@ -262,5 +282,6 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
     "Local search matters: put the town or area from the address together with what the farm sells in the home page's headline or the line under it, and in every page's description.",
     "The voice is a farmer talking to a neighbor: plain, warm, concrete. Nothing about passion or journeys. Prices and hours are shown by the site itself; do not write them into the words.",
     "Buttons say where they lead: the shop, a visit, the contact page. A page that asks the reader to do something ends with one clear ask.",
+    "When the owner's own words name what they raise or sell, the What we raise list and the shop page say exactly those things, in the owner's terms, and nothing they do not name.",
   ],
 };

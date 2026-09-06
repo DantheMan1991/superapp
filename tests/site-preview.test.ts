@@ -39,7 +39,7 @@ describe("the editor's preview", () => {
   it("believes the editor's draft when it is page-shaped, and takes only real photo sizes with it", () => {
     const page = { title: "Home", path: "/", content: { description: "", sections: [{ type: "hero", headline: "" }, { type: "block", kind: "retail.prices", config: {} }] } };
     const message = readPreviewMessage({ type: "yosher:site-draft", page, images: { a: { width: 800, height: 600 }, b: { width: "800", height: 600 }, c: null } });
-    expect(message).toEqual({ type: "yosher:site-draft", page, images: { a: { width: 800, height: 600 } } });
+    expect(message).toEqual({ type: "yosher:site-draft", page: { ...page, content: { ...page.content, seoTitle: "" } }, images: { a: { width: 800, height: 600 } } });
     // The shape is checked, the limits are not: a blank headline mid-edit still draws.
     expect(readPreviewMessage({ type: "yosher:site-draft", page: { ...page, content: { description: "", sections: [{ type: "wizard" }] } } })).toBeNull();
     expect(readPreviewMessage({ type: "yosher:site-draft", page: { ...page, content: { description: 1, sections: [] } } })).toBeNull();

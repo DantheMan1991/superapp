@@ -47,7 +47,7 @@ async function existingStarters(tx: Tx, tenantId: string, siteId: string, scenes
 
 async function drawStarter(scene: StarterScene, brand: ResolvedBrand): Promise<Omit<StoredPhoto, "pathname">> {
   const sharp = (await loadSharp()).default;
-  const svg = starterSceneSvg(scene, { primary: brand.primaryColor ?? "#1f2937", accent: brand.accentColor ?? brand.primaryColor ?? "#1f2937" });
+  const svg = starterSceneSvg(scene, { primary: brand.primaryColor ?? "#1f2937", accent: brand.accentColor ?? null });
   const { data, info } = await sharp(Buffer.from(svg), { density: 96 })
     .resize({ width: STARTER_WIDTH, height: STARTER_HEIGHT, fit: "fill" })
     .jpeg({ quality: 82, mozjpeg: true })

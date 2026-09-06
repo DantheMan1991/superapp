@@ -73,6 +73,8 @@ const detailsInput = z.object({
   address: z.string().trim().max(240).default(""),
   /** The textarea, one line per entry. */
   hoursText: z.string().max(800).default(""),
+  /** A few lines about the business, for the writer (slice 15b). */
+  about: z.string().trim().max(600).default(""),
 });
 
 /**
@@ -92,6 +94,7 @@ function settingsFrom(existing: SiteSettings, input: z.infer<typeof detailsInput
     email: input.email,
     address: input.address,
     hoursLines,
+    about: input.about,
   });
   if (!parsed.success) throw new MarketingError("INVALID_INPUT", "settings rejected");
   return parsed.data;

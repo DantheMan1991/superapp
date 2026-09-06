@@ -15,7 +15,14 @@ export const STARTER_HEIGHT = 1000;
 
 export interface StarterPalette {
   primary: string;
-  accent: string;
+  /** The brand's accent, or null: the sun is drawn in it, and in a warm gold when there is none or it is the primary. */
+  accent: string | null;
+}
+
+const SUN = "#e9b949";
+
+function sunOf(p: StarterPalette): string {
+  return p.accent && p.accent.toLowerCase() !== p.primary.toLowerCase() ? p.accent : SUN;
 }
 
 /** A hex colour mixed toward white (t > 0) or black (t < 0), for tints and shades of the brand. */
@@ -35,23 +42,25 @@ const H = STARTER_HEIGHT;
 
 /** Rolling hills under a soft sky, the sun in the brand's accent: a pasture, a valley, open ground. */
 function hills(p: StarterPalette): string {
-  const sky = mix(p.primary, 0.92);
-  const skyLow = mix(p.accent, 0.82);
-  const far = mix(p.primary, 0.55);
-  const mid = mix(p.primary, 0.3);
-  const near = mix(p.primary, 0.05);
-  const nearest = mix(p.primary, -0.2);
+  const sun = sunOf(p);
+  const sky = mix(p.primary, 0.94);
+  const skyLow = mix(sun, 0.78);
+  const far = mix(p.primary, 0.66);
+  const mid = mix(p.primary, 0.46);
+  const near = mix(p.primary, 0.26);
+  const nearest = mix(p.primary, 0.06);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
   <defs>
     <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${sky}"/><stop offset="1" stop-color="${skyLow}"/></linearGradient>
   </defs>
   <rect width="${W}" height="${H}" fill="url(#sky)"/>
-  <circle cx="1180" cy="300" r="110" fill="${p.accent}" opacity="0.9"/>
+  <circle cx="1180" cy="300" r="150" fill="${mix(sun, 0.55)}" opacity="0.6"/>
+  <circle cx="1180" cy="300" r="110" fill="${sun}" opacity="0.95"/>
   <path d="M0 560 C 260 470, 520 470, 780 560 S 1300 650, 1600 540 L1600 1000 L0 1000 Z" fill="${far}"/>
   <path d="M0 680 C 300 590, 560 600, 820 690 S 1320 790, 1600 660 L1600 1000 L0 1000 Z" fill="${mid}"/>
   <path d="M0 800 C 280 730, 600 720, 900 800 S 1360 900, 1600 790 L1600 1000 L0 1000 Z" fill="${near}"/>
   <path d="M0 920 C 400 860, 800 880, 1200 930 S 1500 960, 1600 930 L1600 1000 L0 1000 Z" fill="${nearest}"/>
-  <g fill="${mix(p.primary, -0.35)}" opacity="0.85">
+  <g fill="${mix(p.primary, -0.15)}" opacity="0.8">
     <ellipse cx="420" cy="770" rx="44" ry="60"/><rect x="414" y="800" width="12" height="40"/>
     <ellipse cx="1240" cy="735" rx="36" ry="50"/><rect x="1235" y="760" width="10" height="34"/>
     <ellipse cx="1310" cy="748" rx="28" ry="40"/><rect x="1306" y="770" width="8" height="28"/>
@@ -61,8 +70,9 @@ function hills(p: StarterPalette): string {
 
 /** Furrows drawn to a low horizon: rows in a field, a garden, a planted slope. */
 function furrows(p: StarterPalette): string {
-  const sky = mix(p.accent, 0.88);
-  const skyLow = mix(p.primary, 0.8);
+  const sun = sunOf(p);
+  const sky = mix(sun, 0.9);
+  const skyLow = mix(p.primary, 0.82);
   const soil = mix(p.primary, -0.1);
   const soilLight = mix(p.primary, 0.2);
   const rows: string[] = [];
@@ -81,22 +91,23 @@ function furrows(p: StarterPalette): string {
   <rect y="${horizon - 40}" width="${W}" height="60" fill="${mix(p.primary, 0.45)}"/>
   <rect y="${horizon}" width="${W}" height="${H - horizon}" fill="url(#soil)"/>
   <g stroke-linecap="round">${rows.join("")}</g>
-  <circle cx="330" cy="240" r="90" fill="${p.accent}" opacity="0.85"/>
+  <circle cx="330" cy="240" r="90" fill="${sun}" opacity="0.9"/>
 </svg>`;
 }
 
 /** First light over a ridge with a gable against it: a farmstead, a yard, a place people work early. */
 function dawn(p: StarterPalette): string {
-  const top = mix(p.primary, -0.45);
-  const glow = mix(p.accent, 0.35);
-  const ridge = mix(p.primary, -0.55);
-  const ground = mix(p.primary, -0.65);
+  const sun = sunOf(p);
+  const top = mix(p.primary, -0.35);
+  const glow = mix(sun, 0.35);
+  const ridge = mix(p.primary, -0.5);
+  const ground = mix(p.primary, -0.62);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
   <defs>
-    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${top}"/><stop offset="0.7" stop-color="${glow}"/><stop offset="1" stop-color="${mix(p.accent, 0.1)}"/></linearGradient>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${top}"/><stop offset="0.7" stop-color="${glow}"/><stop offset="1" stop-color="${mix(sun, 0.1)}"/></linearGradient>
   </defs>
   <rect width="${W}" height="${H}" fill="url(#sky)"/>
-  <circle cx="800" cy="700" r="150" fill="${mix(p.accent, 0.6)}" opacity="0.9"/>
+  <circle cx="800" cy="700" r="150" fill="${mix(sun, 0.6)}" opacity="0.9"/>
   <path d="M0 720 C 300 650, 600 660, 900 730 S 1400 790, 1600 700 L1600 1000 L0 1000 Z" fill="${ridge}"/>
   <g fill="${ground}">
     <rect x="1060" y="600" width="220" height="150"/>

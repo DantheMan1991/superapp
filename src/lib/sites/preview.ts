@@ -69,7 +69,7 @@ function readDraftPage(value: unknown): DraftPage | null {
   const { title, path, content } = value as { title?: unknown; path?: unknown; content?: unknown };
   if (typeof title !== "string" || typeof path !== "string") return null;
   if (!content || typeof content !== "object") return null;
-  const { description, sections } = content as { description?: unknown; sections?: unknown };
+  const { description, seoTitle, sections } = content as { description?: unknown; seoTitle?: unknown; sections?: unknown };
   if (typeof description !== "string" || !Array.isArray(sections)) return null;
   if (sections.length > PAGE_SECTIONS_MAX) return null;
   for (const section of sections) {
@@ -77,7 +77,7 @@ function readDraftPage(value: unknown): DraftPage | null {
     const type = (section as { type?: unknown }).type;
     if (typeof type !== "string" || !(type in SECTION_DEFAULTS)) return null;
   }
-  return { title, path, content: { description, sections: sections as PageContent["sections"] } };
+  return { title, path, content: { description, seoTitle: typeof seoTitle === "string" ? seoTitle : "", sections: sections as PageContent["sections"] } };
 }
 
 function readDraftImages(value: unknown): DraftImages {

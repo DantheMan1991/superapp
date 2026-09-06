@@ -174,6 +174,7 @@ export function PageEditor({
   const [path, setPath] = useState(initial.path);
   const [inNav, setInNav] = useState(initial.inNav);
   const [description, setDescription] = useState(initial.content.description);
+  const [seoTitle, setSeoTitle] = useState(initial.content.seoTitle);
   const [rows, setRows] = useState<Row[]>(() => initial.content.sections.map(keyed));
   // Follows the unsaved rows, so typing a description clears it at once.
   const pageNudge = altNudge(undescribedPhotosOnPage({ sections: rows.map((r) => r.section) }));
@@ -232,8 +233,8 @@ export function PageEditor({
   }, [showForm]);
 
   const content: PageContent = useMemo(
-    () => ({ description, sections: rows.map((r) => r.section) }),
-    [description, rows],
+    () => ({ description, seoTitle, sections: rows.map((r) => r.section) }),
+    [description, seoTitle, rows],
   );
   const current = JSON.stringify({ title, path, inNav, content });
   const dirty = current !== saved;
@@ -404,6 +405,11 @@ export function PageEditor({
               <Label htmlFor="page-description">Description for search engines</Label>
               <Textarea id="page-description" value={description} maxLength={200} rows={2} onChange={(e) => setDescription(e.target.value)} />
               <p className="text-xs text-muted-foreground">One or two sentences, up to 200 characters. Blank uses your tagline.</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="page-seo-title">Title for search engines</Label>
+              <Input id="page-seo-title" value={seoTitle} maxLength={70} onChange={(e) => setSeoTitle(e.target.value)} />
+              <p className="text-xs text-muted-foreground">The browser tab and the search result&apos;s heading, up to 70 characters. Blank uses the page&apos;s title and your site&apos;s name. What the page offers, your town, then your name reads best.</p>
             </div>
             {assistantOn && (
               <WritePage

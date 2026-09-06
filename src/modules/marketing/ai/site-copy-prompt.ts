@@ -17,6 +17,7 @@ How to write:
 - Every slot stays the kind of thing it is: a headline stays a headline under ten words, a button label stays two or three words that say where it leads, a paragraph stays a paragraph, a list item's name stays three words or fewer.
 - Keep each slot within its length. Write every slot you are given; leave nothing out and add nothing.
 - A page's description is one or two sentences under 160 characters that name the business, what it offers and, when the brief gives one, the town or area, because that is how people search.
+- A page's seoTitle is its title tag, under 60 characters: what the page offers, the town when the brief gives one, then a vertical bar and the business name. The home page's says what the business sells; every other page's starts with what that page is for.
 - American English. No dashes for asides, no exclamation marks, no emoji.`;
 
 export const WRITE_SITE_TOOL = {
@@ -32,6 +33,7 @@ export const WRITE_SITE_TOOL = {
           properties: {
             path: { type: "string" },
             description: { type: "string", maxLength: 200 },
+            seoTitle: { type: "string", maxLength: 70 },
             sections: {
               type: "array",
               items: {
@@ -44,7 +46,7 @@ export const WRITE_SITE_TOOL = {
               },
             },
           },
-          required: ["path", "description", "sections"],
+          required: ["path", "description", "seoTitle", "sections"],
         },
       },
     },
@@ -61,6 +63,7 @@ function briefLines(brief: SiteBrief): string[] {
     brief.email ? "The site will show an email address." : "No email address is given.",
     brief.address ? `Located at: ${brief.address.replace(/\s*\n\s*/g, ", ")}` : "No address is given.",
     brief.hoursLines.length > 0 ? `Hours: ${brief.hoursLines.join("; ")}` : "No hours are given.",
+    ...(brief.about.trim() ? [`In the owner's own words: ${brief.about.trim()}`, "Those words are the best source you have: name what they name, in their terms."] : []),
   ];
 }
 
@@ -69,7 +72,7 @@ export function buildSiteCopyUserTurn(brief: SiteBrief, notes: string[], pages: 
   if (notes.length > 0) lines.push("About this kind of business and this site:", ...notes.map((n) => `- ${n}`), "");
   lines.push("The pages and their slots. Each slot shows its most characters and its starter words.");
   for (const page of pages) {
-    lines.push("", `Page ${page.path} ("${page.title}")`, `- description (at most 160 characters): ${JSON.stringify(page.description)}`);
+    lines.push("", `Page ${page.path} ("${page.title}")`, `- description (at most 160 characters): ${JSON.stringify(page.description)}`, `- seoTitle (at most 60 characters): ${JSON.stringify(page.seoTitle)}`);
     for (const section of page.sections) {
       const slots = Object.entries(section.words);
       if (slots.length === 0) continue;

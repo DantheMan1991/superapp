@@ -55,6 +55,7 @@ function briefLines(brief: SiteBrief): string[] {
     `Kind of business: ${brief.industry ?? "not stated; a general small business"}`,
     brief.address ? `Located at: ${brief.address.replace(/\s*\n\s*/g, ", ")}` : "No address is given.",
     brief.hoursLines.length > 0 ? `Hours: ${brief.hoursLines.join("; ")}` : "No hours are given.",
+    ...(brief.about.trim() ? [`In the owner's own words: ${brief.about.trim()}`] : []),
   ];
 }
 

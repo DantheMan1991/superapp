@@ -135,6 +135,12 @@ Clerk handles sign-up, sign-in, passwords, and — critically —
 
 ### 2.2 Copy the API keys
 
+> These are **development** keys (`pk_test_` / `sk_test_`), for your laptop
+> and for preview deployments. Production runs on a separate *production*
+> instance with its own keys and its own users — never point yosherapp.com at
+> a development instance. Moving between the two is
+> [a runbook](docs/runbooks/clerk-production-cutover.md).
+
 Right after creating the app, Clerk shows a **quickstart / API keys screen**
 (if you navigated away: left sidebar → **Developers** → **API keys**).
 

@@ -36,7 +36,7 @@ be broken, for a scale problem we do not have.
 | --- | --- |
 | Framework | Next.js App Router (see `node_modules/next/dist/docs/` — this version has breaking changes from what you likely know) |
 | Database | Neon Postgres, Drizzle ORM, RLS FORCE |
-| Identity | Clerk. Organizations are tenants |
+| Identity | Clerk. Organizations are tenants. A *production* instance in production, a development instance for laptops and previews — their ids differ, so moving between them is [a runbook](runbooks/clerk-production-cutover.md) |
 | Billing | Stripe. Webhook + server-side reconcile. **The PLATFORM charging the TENANT** |
 | Taking payments | Stripe Connect, one connected account per legal entity. **The TENANT charging THEIR customer** — opposite direction, same SDK ([ADR 0015](decisions/0015-a-connected-account-belongs-to-a-company.md)) |
 | Files | Vercel Blob |

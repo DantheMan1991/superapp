@@ -6,9 +6,11 @@ import {
   LedgerError,
   postEntry,
   requireOwnerRole,
+  voidEntry,
   type LedgerCtx,
 } from "../core";
 import { loadWritableBankAccount } from "./accounts";
+import { resetBankLinkForEntry } from "./match";
 
 /** Shape of the ai_suggestion jsonb on bank_transactions. */
 export interface StoredAiSuggestion {
@@ -146,6 +148,56 @@ export async function categorizeTransaction(
     fromRule: rule?.accountId === args.accountId,
     confidence: suggestion?.confidence ?? null,
   };
+}
+
+/**
+ * Undo a categorization: void the entry the row posted and put the row back
+ * under review, in one transaction.
+ *
+ * Only for an entry BORN from this row — `source = bank_import` and
+ * `sourceId` the row itself. A row MATCHED to an invoice payment or to a
+ * hand-written entry goes back with `unmatchTransaction`, which leaves that
+ * entry posted, because the money it records is real whether or not the feed
+ * row points at it. `unmatchTransaction` states the same rule from the other
+ * side: a bank-import entry is undone by voiding it, never by unlinking.
+ *
+ * `voidEntry` applies the mutability tiers, so a reconciled line or a closed
+ * period refuses the undo exactly as it refuses a void from the journal. The
+ * Undo on the toast is a shortcut to that void, not a way around it.
+ */
+export async function undoCategorization(
+  tx: Tx,
+  ctx: LedgerCtx,
+  args: { transactionId: string },
+): Promise<{ entry: JournalEntry; bankAccountId: string }> {
+  requireOwnerRole(ctx);
+  const txn = await tx.query.bankTransactions.findFirst({
+    where: and(
+      eq(schema.bankTransactions.tenantId, ctx.tenantId),
+      eq(schema.bankTransactions.id, args.transactionId),
+    ),
+  });
+  if (!txn || txn.status !== "posted" || !txn.journalEntryId) {
+    throw new LedgerError("TXN_NOT_UNDOABLE", "transaction is not posted");
+  }
+  const entry = await tx.query.journalEntries.findFirst({
+    where: and(
+      eq(schema.journalEntries.tenantId, ctx.tenantId),
+      eq(schema.journalEntries.id, txn.journalEntryId),
+    ),
+  });
+  if (!entry || entry.source !== "bank_import" || entry.sourceId !== txn.id) {
+    throw new LedgerError(
+      "TXN_NOT_UNDOABLE",
+      "the entry was matched to this row, not posted from it",
+    );
+  }
+  const voided = await voidEntry(tx, ctx, {
+    entryId: entry.id,
+    expectedVersion: entry.version,
+  });
+  await resetBankLinkForEntry(tx, ctx.tenantId, entry.id);
+  return { entry: voided, bankAccountId: txn.bankAccountId };
 }
 
 /** unreviewed ↔ excluded. Posted rows never move through here. */

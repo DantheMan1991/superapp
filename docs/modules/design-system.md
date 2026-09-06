@@ -21,6 +21,34 @@ tokens and gets its own pass later.
 
 ## Build log
 
+### 2026-09-06 — A select you can type into, and the header wraps (`claude/review-queue-on-a-phone`)
+
+`Combobox` joins the table (`src/components/app/combobox.tsx`, client): a
+`ui/popover` with a search box at the top and a list that narrows on every
+keystroke, matching by `combobox-filter.ts` (pure; `tests/combobox-filter.test.ts`
+pins that every word typed must match, in any order, and that a label starting
+with the query comes first). It is for a picker whose list is a chart of
+accounts, a vendor list, a customer list — anything past a dozen rows, where
+Radix `Select` is a closed list to scroll. Hand-rolled rather than `cmdk`, for
+the reason the palette gives. The trigger copies `SelectTrigger`'s face so a
+form can mix the two. Two touch details: the search box is `text-base` below
+`md`, because iOS zooms into any input under 16px on focus; and an option
+prevents default on mousedown, so choosing one does not blur the box and close
+the popover under the tap. First use: the bank review queue's category picker
+([accounting.md](accounting.md)).
+
+`PageHeader`'s actions container is `min-w-0 flex-wrap` instead of `shrink-0`.
+With four buttons the row ran off the right edge of a phone and the register's
+`Reconcile` and `Close account` could not be reached. A wide screen sees no
+change — the wrapping outer row moves the block to its own line before either
+side shrinks — and on a phone the buttons wrap within that line.
+
+Not a primitive but a pattern worth naming: a list that is a table above `md`
+and a card per row below it, rendered by one component from one set of state
+with CSS choosing (`md:hidden` / `hidden md:block`), so nothing flashes on
+hydration. The review queue is the first; the bill and invoice line editors
+are the next two candidates (accounting.md, Open items).
+
 ### 2026-09-04 — Marketing's accent, and `hello` gives up its hue (`claude/brand-kit-at-layer-0`)
 
 - `--accent-marketing` is 320 in both themes. The fourteen-hue set had no gap
@@ -395,6 +423,7 @@ directory is stock shadcn and stays upgradeable. These compose it.
 | `Markdown` | no | Inline `ReactMarkdown` + hand-copied prose classes (two of seven adopted, 2026-09-02) |
 | `HelpButton` | **yes** | — (new: the "?" in `PageHeader`'s actions row and Mail's bar, and the guide sheet it opens) |
 | `GuideControl` | **yes** | — (new: the real `Button` or `Badge` a guide draws from a `{button:…}` marker; live in the help panel, where it points at the control on the page) |
+| `Combobox` | **yes** | A Radix `Select` over a long list (2026-09-06: the bank review queue's category picker; the vendor, customer and line-account pickers are next) |
 
 ### `DataTable` is a container, not a table
 

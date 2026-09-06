@@ -13,6 +13,57 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-06 — The review queue on a phone (`claude/review-queue-on-a-phone`)
+
+The first slice of the founder's module-by-module pass (the same job in
+fewer clicks, an easier screen, right on a phone, then gaps), which started
+with accounting because the bank feed is the screen people open every day.
+Three things, one screen:
+
+- **Cards below `md`, the table above it.** The review queue rendered a
+  ~700px table into a 375px viewport, so the category picker and the Post
+  button sat off the right edge and were reachable only by dragging sideways —
+  measured in the Browser pane on Hilltop Farm's Farm Checking, not guessed.
+  `ReviewTable` now renders both layouts from one set of state and lets CSS
+  pick: a card per transaction (description and signed amount, date · payee ·
+  receipts, the rule/AI chip, the category, the tag, the buttons) under
+  `md:hidden`, the table under `hidden md:block`. Same handlers, same
+  `chosen`/`tags` maps, so a category picked in one layout is still picked
+  after a rotation into the other. A `matchMedia` hook would render one
+  layout, but its server snapshot has to assume a width and the wrong
+  assumption flashes the table on exactly the device this is for. The table
+  moved onto `DataTable` while it was open, as design-system.md asks.
+- **The category picker is a `Combobox`** (`src/components/app/combobox.tsx`,
+  new, in design-system.md). Forty-nine accounts in a Radix `Select` meant
+  thumbing past the asset section to reach `6300 · Insurance`; now two or
+  three characters find it. `matchOptions` (pure, tested) requires every word
+  typed, in any order, over the label and the account type, and lifts a label
+  that starts with the query.
+- **Undo on Post and on Exclude.** `Posted` and `Excluded` carry an Undo for
+  eight seconds. Exclude's undo is `restore`, which existed. Post's is new:
+  `undoCategorization` (`banking/review.ts`, action
+  `undoCategorizeTransactionAction`) voids the entry the row posted and sends
+  the row back to review in one transaction — the two statements
+  `voidPostedEntry` runs from the journal, reached from where the mistake was
+  made rather than three screens away. It refuses anything that is not a
+  `bank_import` entry born from that row (`TXN_NOT_UNDOABLE`, new): a matched
+  row goes back with Unmatch, because the entry it points at records money
+  that is real whether or not the feed row points at it, which is the rule
+  `unmatchTransaction` already states from the other side. `voidEntry`'s tiers
+  apply, so a reconciled line or a closed period refuses exactly as the
+  journal would. Audited as `banking.txn_post_undone`. Accept-all has no undo:
+  a bulk void is a bigger thing and nothing has asked for it.
+
+Also on this screen: `PageHeader`'s actions row wraps now (`Reconcile` and
+`Close account` were clipped off the right edge of a phone — a one-line
+change in the shared primitive, recorded in design-system.md), and the
+buttons on a row run Match · Exclude · Post, primary last, in both layouts.
+The guide (`docs/help/accounting/register.md`) says all of it. Verified:
+`tests/combobox-filter.test.ts` (six pure cases) and the undo case in
+`tests/banking.test.ts` (owner only; twice is nothing; a row matched to a
+hand-written entry refuses and the entry stays posted; the register is put
+back for the reconciliation cases after it).
+
 ### 2026-09-04 — The invoice PDF carries the brand kit (`claude/brand-kit-at-layer-0`)
 
 The first consumer of the Layer 0 brand kit
@@ -3360,6 +3411,28 @@ only executes behind a Clerk session. The standing rule stays: treat every
 screen shipped without such a session as compiled-and-tested, not seen.
 
 
+- **The 2026-09-06 improvement pass** (fewer clicks, easier UI, a phone that
+  works, then gaps), verified against the code and the real screens at 375px;
+  the review-queue slice in the build log is the first thing built from it.
+  Still open, roughly in value order: an **Issue and send** on the invoice
+  (today Save draft, Issue, confirm, Send, confirm — three dialogs to get an
+  invoice out); **Record payment and Approve as row actions** on the invoice
+  and bill lists and on What needs you, which links only; **the whole list
+  row as the link** (only the number or the vendor cell is); **a customer
+  created from the invoice form** the way the bill form creates a vendor;
+  **vendor default terms**, and a control for the `customers.payment_terms_id`
+  column that already exists; the `Combobox` on the vendor, customer and
+  line-account pickers; **a Transfer choice in the review queue** — the guide
+  says to Exclude a transfer and hand-journal it, which every credit-card
+  payment from checking hits; **a deposit screen** for Undeposited Funds (the
+  `Not deposited` tile has nowhere to go); **search and paging** on every list
+  (caps at 200/300, no date filter on the register); **splitting one bank
+  transaction** across categories; the bill and invoice line editors as
+  stacked blocks on a phone (`min-w-[640px]`/`[700px]` grids scroll sideways
+  inside the form); money tiles and Overview cards two-up under `sm` rather
+  than one column; the three native `window.confirm()` left (bill void,
+  unapply, disable email-in); `loading.tsx` under the accounting routes; an
+  explicit camera control on the Inbox upload for the app
 - **Fixed assets carry a company** (2026-08-17, `0154`) — the last item on ADR 0010's list. `entityForDocument`/`entityOfDocument` are DELETED with it: nothing infers a company from where an entry happened to land any more. **Nothing is owed in the migration lane** — `assets.entity_id` stays NULLABLE, unlike every other one, because the assets pack `requires: []` and a tenant can register equipment with no books at all
 - **An invoice banked into another company's account is RECORDED** (2026-08-17), the mirror of the bill case and the last item ADR 0010 listed as refused. It also closed a live hole in the bill path: unapplying an intercompany payment voided ONE leg, because `assertNotIntercompanyLeg` lived only in the action layer. The guard is in `voidEntry`/`reverseEntry` now and `voidIntercompanyPair` is the undo that takes both
 - **Per-entity close is DONE** (2026-08-17, slice 4 of ADR 0010) — the lock is `entities.closed_through`, the checklist is scoped, and two companies can close different months. **The contract half is DONE too** (`0153`, applied and verified on both databases the same day): `period_closes.entity_id` is NOT NULL and `accounting_settings.closed_through` is dropped. **Nothing is owed in the migration lane.** Two things this slice leaves behind on purpose: a company carrying a lock INHERITED from the tenant-wide scalar has no close row to reopen and can only be closed forward (on production that is Oak Row LLC), and `assets` still has no company, so depreciation reads its lock through `entityForDocument`

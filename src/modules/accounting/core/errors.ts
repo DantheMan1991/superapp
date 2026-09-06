@@ -74,6 +74,7 @@ export type LedgerErrorCode =
   | "RECURRING_TEMPLATE_INVALID"
   | "RECURRING_SCHEDULE_BACKWARD"
   | "TXN_MATCH_INVALID"
+  | "TXN_NOT_UNDOABLE"
   | "DOCUMENT_NOT_FOUND"
   | "DOCUMENT_TRASHED"
   | "DOCUMENT_HAS_LINKS"
@@ -221,6 +222,8 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   RECURRING_SCHEDULE_BACKWARD:
     "The next run cannot move to an earlier month than the schedule has reached.",
   TXN_MATCH_INVALID: "That entry can no longer be matched — refresh and try again.",
+  TXN_NOT_UNDOABLE:
+    "That row has nothing to undo — it is not a posting made from here. A matched row goes back with Unmatch.",
   DOCUMENT_NOT_FOUND: "That file no longer exists.",
   DOCUMENT_TRASHED: "That file is in the trash — restore it first.",
   DOCUMENT_HAS_LINKS:

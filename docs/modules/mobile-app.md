@@ -13,6 +13,29 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-06 — Slice 2b: push, the shell's side for Android (`claude/mobile-app-2b-push-shell`)
+
+- **`@capacitor/push-notifications`** in the shell, with
+  `presentationOptions` so a notification arriving while the app is open still
+  shows. `npx cap sync android` registers it; the Android manifest merge
+  brings the plugin's own permission.
+- **Firebase.** A project *Yosher* (`yosher-60d89`) with the Android app
+  registered under `com.yosherapp.app`; `google-services.json` committed at
+  `mobile/android/app/`, where the Gradle template applies the Google Services
+  plugin on sight. The service account's three values are in Vercel
+  Production as `FCM_*`; the key file stays off the repo. Proven from a
+  laptop before the merge: the account mints a Google token and FCM accepts it
+  (a fake device token is refused as invalid, not the credentials).
+- **`npm run push:probe -- --email …`** (`scripts/push-probe.ts`): one test
+  notification to a person's phones through the digest's own sender, with
+  the credentials from the environment or from the files by flag. The
+  end-to-end check that does not wait for 7am.
+- The getting-around guide gains the permission prompt; the runbook gains
+  §3a. `tests/mobile-shell.test.ts` insists the Firebase config names the
+  shell's package.
+- **iPhone push waits on the Apple account**: an APNs key, the capability on
+  the Xcode project and an AppDelegate change, all in the runbook.
+
 ### 2026-09-06 — Slice 2a: push, the web side (`claude/mobile-app-2a-push-web`)
 
 Everything push needs on the server and the page, mergeable before the shell
@@ -121,6 +144,9 @@ require there. No shell exists yet; this is what it will load.
 - `.github/workflows/mobile.yml` — the Android debug build and the iOS
   simulator compile; `docs/runbooks/mobile-app.md` — getting a build onto a
   phone, and how a shell change ships.
+- `mobile/android/app/google-services.json` — the Android app's Firebase
+  identity; `scripts/push-probe.ts` — a test notification through the real
+  sender.
 
 ## Decisions & gotchas
 
@@ -171,13 +197,13 @@ from `/admin` — the same as any other departure.
   can run under the status bar (`contentInset: "never"`); the site hiding the
   splash on hydration instead of on a timer; Android's back button walking
   the webview's history.
-- **Slice 2b — push, the shell's side.** `@capacitor/push-notifications` in
-  `mobile/`, a Firebase project with `google-services.json` in the Android
-  project (the founder creates the project; FCM needs no Play account), an
-  APNs key and the push capability on the iOS project (needs the Apple
-  account), and the `APNS_*` / `FCM_*` values in Vercel. The web side (2a)
-  is done and waits for it. Also: unregister on sign-out, and a guide line
-  for the permission prompt once it exists.
+- **Push on iPhone** waits on the Apple account: an APNs key (`APNS_*` in
+  Vercel), the Push Notifications capability on the Xcode project, and the
+  AppDelegate forwarding the device token — all when `mobile/ios/` is
+  committed from a CI run. Android push is complete.
+- **Unregister on sign-out** is not done: a phone keeps receiving the previous
+  person's digest until somebody else signs in on it, which re-points the row.
+  Clerk's sign-out has no hook the page owns yet.
 - **Slice 3 — camera, Face ID, universal links, PDF share.** Each a plugin on
   the native side and a small seam here (`/.well-known/apple-app-site-association`
   and `assetlinks.json` as route handlers, driven by env).

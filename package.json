@@ -16,6 +16,7 @@
     "clerk:export": "tsx scripts/clerk-export.ts",
     "clerk:import": "tsx scripts/clerk-import.ts",
     "clerk:remap": "tsx scripts/clerk-remap.ts",
+    "push:probe": "tsx scripts/push-probe.ts",
     "mailbox:probe": "tsx scripts/migadu-probe.ts",
     "jmap:probe": "tsx scripts/jmap-probe.ts",
     "mail:fixture": "tsx scripts/mail-fixture.ts",

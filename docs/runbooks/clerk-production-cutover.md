@@ -78,6 +78,10 @@ the PR needs a migration.
    running a farm signs in with. Apple comes later with the iOS app; it needs a
    Services ID and key from the Apple developer account.
 4. **Email, phone, username**: leave as cloned (email address + password).
+   **Paths** did not clone either, and need nothing: the app pins sign-in,
+   sign-up and after-sign-out in code (`<ClerkProvider>` in
+   `src/app/layout.tsx`), because Clerk is deprecating the dashboard page and
+   an unset production instance sends people to the hosted Account Portal.
 5. **Organizations**: confirm *Enable organizations* is on in the production
    instance. It clones, but the app loops at onboarding without it — verify.
 6. **Configure → Settings → Application name**: `Yosher`, not `SuperApp`. Do

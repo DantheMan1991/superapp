@@ -58,3 +58,10 @@ next-env.d.ts
 # Clerk instance migration artefacts (scripts/clerk-*.ts): a snapshot names
 # people and a mapping identifies them; the password CSV must never land here.
 /clerk-migration/
+
+# The mobile shell (mobile/, ADR 0032) is its own npm package. Its native
+# build outputs are ignored by the .gitignore Capacitor generates inside each
+# platform folder; these are the rest.
+/mobile/node_modules/
+/mobile/ios/App/Pods/
+/mobile/ios/App/App.xcworkspace/xcuserdata/

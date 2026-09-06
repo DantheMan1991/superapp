@@ -13,6 +13,53 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-06 — Issue and send, and the row is the link (`claude/issue-and-send`)
+
+Second slice of the improvement pass: money in, in fewer taps.
+
+- **`Issue and send`** on a draft (`issueAndSendInvoiceAction`). Getting an
+  invoice out was Save draft, Issue, confirm, Send, confirm — three dialogs.
+  Now one: the To address prefilled from the customer, and the action issues
+  then emails. **Two transactions on purpose.** The send is a network call
+  through `sendInvoiceEmail`, and if it ran inside the issue's transaction a
+  provider failure would roll the issue back after the email might already
+  have gone. So the issue commits and is audited first; a send that then
+  fails leaves an ISSUED invoice and says so: `Issued, but the email did not
+  go: <reason> Use Send to try again.` The `To` is required by this action's
+  schema (the dialog will not submit without one), so the one failure the
+  server could have caught before issuing — no recipient — cannot reach the
+  send step. `Issue` alone stays, as the outline button beside it. The
+  `invoice.emailed` audit row moved into `auditInvoiceEmailed`, shared with
+  `sendInvoiceAction`, so the two cannot drift.
+- **Record payment on the list row.** The dialog moved out of
+  `invoice-detail-controls.tsx` into `record-payment-dialog.tsx`, one
+  component for the invoice page and for a button at the end of every open
+  row on the Invoices list; the list mounts it only while it is open. The
+  list now loads registers, the Undeposited Funds account and the payment
+  methods for owners, and `depositOptionsFor` (`lib/deposit-options.ts`,
+  pure, tested) builds each row's options relative to that invoice's company
+  — the same function the page uses, so the intercompany labelling cannot
+  differ between the two.
+- **The row is the link** (`LinkRow`, a new kit primitive in
+  design-system.md). Only the number cell was, a sixty-pixel target on a
+  phone. The number stays a real `<Link>` for the keyboard and middle-click;
+  the row click leaves controls, portalled dialogs and text selections alone.
+
+Driven on Hilltop Farm (dev branch): the row click opens the invoice, the
+row's Record payment dialog opens with today, the balance, Farm Checking and
+Check prefilled and closes without navigating, and Issue and send on INV-0004
+issued it and then took the failure path — the local environment has no
+`EMAIL_FROM_DOMAIN`, so the send stopped at not-configured with no outbound
+row, the invoice stayed issued with Send offered, which is what the message
+promises. Verified: `tests/deposit-options.test.ts` (four pure cases), the
+guide checks, `tsc` cold and lint.
+
+Guides: `invoice.md` (the one-step section, the honest failure message, the
+list's button) and `invoices.md` (row click, Record payment on a row). The
+bills side of the same three — Approve and Record payment on the row, the row
+as the link — is the next slice; What needs you stays links-only until the
+attention item grows an action seam.
+
 ### 2026-09-06 — The review queue on a phone (`claude/review-queue-on-a-phone`)
 
 The first slice of the founder's module-by-module pass (the same job in
@@ -3414,11 +3461,11 @@ screen shipped without such a session as compiled-and-tested, not seen.
 - **The 2026-09-06 improvement pass** (fewer clicks, easier UI, a phone that
   works, then gaps), verified against the code and the real screens at 375px;
   the review-queue slice in the build log is the first thing built from it.
-  Still open, roughly in value order: an **Issue and send** on the invoice
-  (today Save draft, Issue, confirm, Send, confirm — three dialogs to get an
-  invoice out); **Record payment and Approve as row actions** on the invoice
-  and bill lists and on What needs you, which links only; **the whole list
-  row as the link** (only the number or the vendor cell is); **a customer
+  Still open, roughly in value order: ~~an **Issue and send** on the invoice~~
+  (DONE 2026-09-06, `claude/issue-and-send`); **Record payment and Approve as
+  row actions** on the ~~invoice~~ (invoice half DONE the same day) and bill
+  lists and on What needs you, which links only; **the whole list row as the
+  link** (~~invoices~~ DONE; bills still only the vendor cell); **a customer
   created from the invoice form** the way the bill form creates a vendor;
   **vendor default terms**, and a control for the `customers.payment_terms_id`
   column that already exists; the `Combobox` on the vendor, customer and

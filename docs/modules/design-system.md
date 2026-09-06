@@ -21,6 +21,22 @@ tokens and gets its own pass later.
 
 ## Build log
 
+### 2026-09-06 — The row is the link (`claude/issue-and-send`)
+
+`LinkRow` joins the table (`src/components/app/link-row.tsx`, client): a
+`TableRow` that opens a record when clicked anywhere on it. The lists had one
+link per row — the number, the vendor's name — and on a phone that is a
+sixty-pixel target in a row that is the whole screen. The real `<Link>` stays
+inside the row for the keyboard, middle-click and the context menu; the
+handler only adds the surface. Three clicks it leaves alone, in order: a
+control inside the row (`closest("a, button, input, …")`), anything PORTALLED
+out of the row — a dialog a row button opened, the select list inside it —
+which bubbles through React's tree but fails `currentTarget.contains(target)`,
+and the mouse-up that ends a text selection. First use: the Invoices list,
+which also gained a `Record payment` button on every open row ([accounting.md](accounting.md)).
+Row buttons on a phone are ALWAYS visible — `RowActions`' hover-reveal is for
+a desktop mouse, and a button that appears on hover does not exist on touch.
+
 ### 2026-09-06 — A select you can type into, and the header wraps (`claude/review-queue-on-a-phone`)
 
 `Combobox` joins the table (`src/components/app/combobox.tsx`, client): a
@@ -424,6 +440,7 @@ directory is stock shadcn and stays upgradeable. These compose it.
 | `HelpButton` | **yes** | — (new: the "?" in `PageHeader`'s actions row and Mail's bar, and the guide sheet it opens) |
 | `GuideControl` | **yes** | — (new: the real `Button` or `Badge` a guide draws from a `{button:…}` marker; live in the help panel, where it points at the control on the page) |
 | `Combobox` | **yes** | A Radix `Select` over a long list (2026-09-06: the bank review queue's category picker; the vendor, customer and line-account pickers are next) |
+| `LinkRow` | **yes** | A `TableRow` whose only link was one cell (2026-09-06: the Invoices list; the Bills list is next) |
 
 ### `DataTable` is a container, not a table
 

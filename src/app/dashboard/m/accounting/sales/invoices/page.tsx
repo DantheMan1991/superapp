@@ -10,6 +10,10 @@ import { PageHeader } from "@/components/app/page-header";
 import { DataTable } from "@/components/app/data-table";
 import { EmptyState } from "@/components/app/empty-state";
 import { FilterPills } from "@/components/app/filter-pills";
+import { LinkRow } from "@/components/app/link-row";
+import { depositOptionsFor } from "@/modules/accounting/lib/deposit-options";
+import { listPaymentMethods } from "@/modules/accounting/invoicing/catalogue";
+import { RecordPaymentButton } from "./record-payment-dialog";
 import { CompanyPicker } from "@/modules/accounting/components/company-picker";
 import { MoneyBar } from "@/modules/accounting/components/money-bar";
 import {
@@ -211,6 +215,8 @@ export default async function InvoicesPage({
         totalCents: schema.invoices.totalCents,
         customerName: schema.customers.name,
         entityId: schema.invoices.entityId,
+        // The row's Record payment sends it as the CAS version, like the page.
+        version: schema.invoices.version,
         paidCents: sql<string>`coalesce(sum(${schema.invoicePayments.amountCents}), 0)`,
       })
       .from(schema.invoices)
@@ -256,11 +262,58 @@ export default async function InvoicesPage({
         schema.invoices.totalCents,
         schema.customers.name,
         schema.invoices.entityId,
+        schema.invoices.version,
       )
       .orderBy(desc(schema.invoices.issueDate), desc(schema.invoices.createdAt))
       .limit(200);
-    return { invoices, aging, today, tally, inBucket, entityView };
+
+    /**
+     * What the row's Record payment needs: every active register (other
+     * companies' included, labelled per row by `depositOptionsFor`), the
+     * Undeposited Funds account, and the payment methods — the same three
+     * lists the invoice page loads for the same dialog. Owners only, because
+     * only owners get the button.
+     */
+    const registers =
+      ctx.role === "owner"
+        ? await tx.query.bankAccounts.findMany({
+            where: and(
+              eq(schema.bankAccounts.tenantId, ctx.tenant.id),
+              eq(schema.bankAccounts.isActive, true),
+            ),
+            columns: { accountId: true, name: true, entityId: true },
+          })
+        : [];
+    const undeposited =
+      ctx.role === "owner"
+        ? await tx.query.accounts.findFirst({
+            where: and(
+              eq(schema.accounts.tenantId, ctx.tenant.id),
+              eq(schema.accounts.subtype, "undeposited_funds"),
+              eq(schema.accounts.isSystem, true),
+            ),
+            columns: { id: true },
+          })
+        : null;
+    const paymentMethods =
+      ctx.role === "owner"
+        ? (await listPaymentMethods(tx, ctx.tenant.id, { activeOnly: true })).map(
+            (m) => ({ code: m.code, name: m.name }),
+          )
+        : [];
+    return {
+      invoices,
+      aging,
+      today,
+      tally,
+      inBucket,
+      entityView,
+      registers,
+      undepositedAccountId: undeposited?.id ?? null,
+      paymentMethods,
+    };
   });
+  const isOwner = ctx.role === "owner";
 
   // The column appears only for a tenant with more than one company.
   const companyName = new Map(data.entityView.entities.map((e) => [e.id, e.name]));
@@ -384,6 +437,7 @@ export default async function InvoicesPage({
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Total</TableHead>
               <TableHead className="text-right">Balance</TableHead>
+              {isOwner && <TableHead />}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -397,13 +451,14 @@ export default async function InvoicesPage({
                 today: data.today,
               });
               const overdue = obligation.tone === "overdue";
+              const href = `/dashboard/m/accounting/sales/invoices/${inv.id}`;
               return (
-                <TableRow key={inv.id}>
+                // The whole row opens the invoice; the number stays a real
+                // link inside it. See link-row.tsx for what a row click
+                // deliberately leaves alone.
+                <LinkRow key={inv.id} href={href}>
                   <TableCell className="font-mono text-xs">
-                    <Link
-                      className="hover:underline"
-                      href={`/dashboard/m/accounting/sales/invoices/${inv.id}`}
-                    >
+                    <Link className="hover:underline" href={href}>
                       {inv.number}
                     </Link>
                   </TableCell>
@@ -440,7 +495,32 @@ export default async function InvoicesPage({
                   <TableCell className="text-right font-mono text-sm">
                     {formatCentsSigned(balance)}
                   </TableCell>
-                </TableRow>
+                  {isOwner && (
+                    // Always visible, never hover-revealed: on a phone there
+                    // is no hover, and this is the button the phone is for.
+                    <TableCell className="whitespace-nowrap text-right">
+                      {["issued", "partial"].includes(inv.status) && (
+                        <RecordPaymentButton
+                          invoice={{
+                            id: inv.id,
+                            version: inv.version,
+                            number: inv.number,
+                            balanceCents: balance,
+                          }}
+                          depositOptions={depositOptionsFor({
+                            registers: data.registers,
+                            companies: data.entityView.entities,
+                            undepositedAccountId: data.undepositedAccountId,
+                            entityId: inv.entityId,
+                          })}
+                          today={data.today}
+                          paymentMethods={data.paymentMethods}
+                          className="h-7"
+                        />
+                      )}
+                    </TableCell>
+                  )}
+                </LinkRow>
               );
             })}
           </TableBody>

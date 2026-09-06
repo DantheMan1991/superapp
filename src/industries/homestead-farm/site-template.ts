@@ -56,9 +56,11 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
       sections: [
         {
           type: "hero",
+          eyebrow: "Raised here. Sold direct.",
           headline: "Pasture-raised meat and eggs from {name}",
           subheadline: "Raised on our own ground and sold direct to the people who eat it.",
           cta: { label: "See what we sell", href: "/shop" },
+          secondary: { label: "Plan a visit", href: "/visit" },
           image: null,
           height: "tall",
           style: { width: "default", spacing: "default", align: "center", background: "photo", photo: null },
@@ -66,11 +68,12 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
         {
           type: "offer",
           heading: "What we raise",
+          style: { width: "default", spacing: "default", align: "center", background: "default", photo: null },
           items: [
-            { name: "Meat by the cut", blurb: "What we have that week, cut, wrapped and frozen on the farm." },
-            { name: "Whole and half animals", blurb: "Reserve ahead and fill the freezer at a better price per pound." },
-            { name: "Eggs", blurb: "From hens that live on pasture, gathered every day." },
-            { name: "Seasonal extras", blurb: "What the season brings, from the garden and the kitchen." },
+            { name: "Meat by the cut", blurb: "What we have that week, cut, wrapped and frozen on the farm.", image: null },
+            { name: "Whole and half animals", blurb: "Reserve ahead and fill the freezer at a better price per pound.", image: null },
+            { name: "Eggs", blurb: "From hens that live on pasture, gathered every day.", image: null },
+            { name: "Seasonal extras", blurb: "What the season brings, from the garden and the kitchen.", image: null },
           ],
         },
         {
@@ -85,7 +88,7 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
             { id: "farm02", image: null, icon: "sun", heading: "In season", body: ["We raise what the year makes possible and sell it at its best."], cta: null },
             { id: "farm03", image: null, icon: "users", heading: "Known by name", body: ["You can meet the people who raised your food and ask them anything."], cta: null },
           ],
-          style: { width: "default", spacing: "default", align: "default", background: "tint", photo: null },
+          style: { width: "default", spacing: "default", align: "center", background: "tint", photo: null },
         },
         {
           type: "columns",
@@ -110,7 +113,7 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
         },
         { type: "hours", heading: "Where to find us", note: "", needs: "hours" },
         // Shown only once a customer's words are in it: proof is never written for a business.
-        { type: "quotes", heading: "What customers say", items: [] },
+        { type: "quotes", heading: "What customers say", items: [], style: { width: "default", spacing: "default", align: "center", background: "default", photo: null } },
         {
           type: "cta",
           headline: "Come and see where your food is raised.",
@@ -127,9 +130,11 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
       sections: [
         {
           type: "hero",
+          eyebrow: "",
           headline: "What we sell",
           subheadline: "Cut, wrapped and frozen on the farm. Order ahead, or find us at market.",
           cta: null,
+          secondary: null,
           image: null,
           height: "compact",
           style: { width: "default", spacing: "default", align: "default", background: "tint", photo: null },
@@ -146,9 +151,9 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
           type: "offer",
           heading: "By the cut and by the share",
           items: [
-            { name: "By the cut", blurb: "Individual cuts and packs, sold by the pound." },
-            { name: "Halves and wholes", blurb: "Fill a freezer at a better price per pound, cut to your liking." },
-            { name: "Eggs and extras", blurb: "Eggs by the dozen, and whatever else the season brings." },
+            { name: "By the cut", blurb: "Individual cuts and packs, sold by the pound.", image: null },
+            { name: "Halves and wholes", blurb: "Fill a freezer at a better price per pound, cut to your liking.", image: null },
+            { name: "Eggs and extras", blurb: "Eggs by the dozen, and whatever else the season brings.", image: null },
           ],
         },
         {
@@ -197,9 +202,11 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
       sections: [
         {
           type: "hero",
+          eyebrow: "",
           headline: "Come see the farm",
           subheadline: "Walk the pastures, meet the animals and see how your food is raised.",
           cta: null,
+          secondary: null,
           image: null,
           height: "standard",
           style: { width: "default", spacing: "default", align: "center", background: "photo", photo: null },
@@ -249,12 +256,15 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
       seoTitle: "About | {name}",
       sections: [
         {
-          type: "text",
+          // The story beside a picture, the way the best farm sites tell it: words left, a photo right.
+          type: "about",
           heading: "Our story",
           body: [
             "{name} is a working homestead farm. We raise animals on pasture, grow what we can, and sell what we produce directly to the people who eat it.",
             "We farm the way we do because it makes better food and a better place to live. The rest of the story is best told in person, so come and see us.",
           ],
+          image: null,
+          style: { width: "default", spacing: "airy", align: "default", background: "default", photo: null },
         },
         {
           type: "columns",
@@ -268,9 +278,8 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
             { id: "stand02", image: null, icon: "leaf", heading: "Land first", body: ["Grazing that builds soil and leaves every field better than we found it."], cta: null },
             { id: "stand03", image: null, icon: "heart", heading: "Neighbors", body: ["We sell to people we know by name, and we want to keep it that way."], cta: null },
           ],
-          style: { width: "default", spacing: "default", align: "default", background: "tint", photo: null },
+          style: { width: "default", spacing: "default", align: "center", background: "tint", photo: null },
         },
-        { type: "image", image: null, caption: "", layout: "wide" },
       ],
     },
     {
@@ -290,7 +299,7 @@ export const homesteadFarmSiteTemplate: SiteTemplate = {
   pictures: [
     { at: "/#0", where: "background", scene: "hills", alt: "" },
     { at: "/visit#0", where: "background", scene: "dawn", alt: "" },
-    { at: "/about#2", where: "image", scene: "furrows", alt: "Rows in a field under a wide sky" },
+    { at: "/about#0", where: "image", scene: "furrows", alt: "Rows in a field under a wide sky" },
   ],
   writerNotes: [
     "This is a homestead farm: a family-scale farm that raises animals on pasture and sells direct, at the farm gate, at farmers markets and by pre-order.",

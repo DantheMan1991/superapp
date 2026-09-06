@@ -108,6 +108,9 @@ function SectionFields({
     case "hero":
       return (
         <div className="space-y-4">
+          <Field id={id("eyebrow")} label="Line above it" hint="A few words in small capitals above the headline: your town, a promise. Blank for none.">
+            <Input id={id("eyebrow")} value={section.eyebrow} maxLength={60} onChange={(e) => onChange({ ...section, eyebrow: e.target.value })} />
+          </Field>
           <Field id={id("headline")} label="Headline" hint="Under ten words reads best.">
             <Input id={id("headline")} value={section.headline} maxLength={120} onChange={(e) => onChange({ ...section, headline: e.target.value })} />
           </Field>
@@ -119,6 +122,13 @@ function SectionFields({
             cta={section.cta}
             optional
             onChange={(cta) => onChange({ ...section, cta })}
+          />
+          <CtaFields
+            idPrefix={`${idPrefix}-second`}
+            cta={section.secondary}
+            optional
+            title="Second button"
+            onChange={(secondary) => onChange({ ...section, secondary })}
           />
           <PhotoField
             idPrefix={id("photo")}
@@ -383,6 +393,17 @@ function SectionFields({
                     onChange({ ...section, items });
                   }}
                 />
+                <PhotoField
+                  idPrefix={id(`item-${i}-photo`)}
+                  label="Photo"
+                  hint="Optional. With one, the item is a photo tile with its name on it; without, a tinted tile."
+                  tenantId={photos.tenantId}
+                  value={item.image}
+                  onChange={(image) => onChange({ ...section, items: section.items.map((it, j) => (j === i ? { ...it, image } : it)) })}
+                  library={photos.library}
+                  onLibraryChange={photos.onLibraryChange}
+                  assistantOn={photos.assistantOn}
+                />
               </div>
             ))}
             <Button
@@ -390,7 +411,7 @@ function SectionFields({
               variant="outline"
               size="sm"
               disabled={section.items.length >= 8}
-              onClick={() => onChange({ ...section, items: [...section.items, { name: "", blurb: "" }] })}
+              onClick={() => onChange({ ...section, items: [...section.items, { name: "", blurb: "", image: null }] })}
             >
               <Plus className="size-4" />
               Add item
@@ -859,24 +880,27 @@ function CtaFields({
   cta,
   optional,
   onChange,
+  title = "Button",
 }: {
   idPrefix: string;
   cta: { label: string; href: string } | null;
   optional: boolean;
   onChange: (cta: { label: string; href: string } | null) => void;
+  /** What the panel is called: "Button", or "Second button" on a hero. */
+  title?: string;
 }) {
   if (!cta) {
     return (
       <Button type="button" variant="outline" size="sm" onClick={() => onChange({ label: "Get in touch", href: "/contact" })}>
         <Plus className="size-4" />
-        Add a button
+        {title === "Button" ? "Add a button" : `Add a ${title.toLowerCase()}`}
       </Button>
     );
   }
   return (
     <div className="space-y-3 rounded-xl bg-muted/50 p-3">
       <div className="flex items-center justify-between">
-        <Label>Button</Label>
+        <Label>{title}</Label>
         {optional && (
           <Button type="button" variant="ghost" size="sm" onClick={() => onChange(null)}>
             Remove button

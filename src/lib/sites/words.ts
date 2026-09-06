@@ -8,7 +8,7 @@ import { SectionSchema, type Section, type SectionType } from "./schema";
  * link, a rule or the look can never change by way of words.
  */
 const TEXT_PATHS: Record<SectionType, string[]> = {
-  hero: ["headline", "subheadline", "cta.label"],
+  hero: ["eyebrow", "headline", "subheadline", "cta.label", "secondary.label"],
   about: ["heading", "body[]"],
   offer: ["heading", "items[].name", "items[].blurb"],
   hours: ["heading", "note"],
@@ -30,6 +30,7 @@ const TEXT_PATHS: Record<SectionType, string[]> = {
 
 /** How long each slot may be, by its last name; the schema is the law, this is what a writer is told. */
 const LIMITS: Record<string, number> = {
+  eyebrow: 60,
   quote: 400,
   detail: 80,
   question: 120,

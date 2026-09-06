@@ -22,7 +22,7 @@ describe("the section catalogue", () => {
 
   it("summarises a section in one short line", () => {
     expect(sectionSummary(newSection("hero"))).toBe("A headline for this page");
-    expect(sectionSummary({ type: "offer", heading: "What we raise", items: [{ name: "Beef", blurb: "" }, { name: "Pork", blurb: "" }] })).toBe("What we raise: Beef, Pork");
+    expect(sectionSummary({ type: "offer", heading: "What we raise", items: [{ name: "Beef", blurb: "", image: null }, { name: "Pork", blurb: "", image: null }] })).toBe("What we raise: Beef, Pork");
     expect(sectionSummary({ type: "text", heading: "", body: ["Second line first."] })).toBe("Second line first.");
     const long = sectionSummary({ type: "cta", headline: "x".repeat(80), cta: { label: "a", href: "/" } });
     expect(long.length).toBeLessThanOrEqual(60);

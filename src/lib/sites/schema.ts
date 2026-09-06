@@ -151,9 +151,13 @@ const wallClock = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 export const SectionSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("hero"),
+    /** A short line above the headline, in small capitals: a place, a promise (slice 17). */
+    eyebrow: short(60).default(""),
     headline: short(120).min(1),
     subheadline: short(240).default(""),
     cta: CtaSchema.nullable().default(null),
+    /** A second, quieter button beside the first (slice 17). */
+    secondary: CtaSchema.nullable().default(null),
     /** Beside the headline. */
     image: ImageRefSchema.nullable().default(null),
     /** Which side the photo sits on a wide screen; right when unsaid. */
@@ -176,7 +180,7 @@ export const SectionSchema = z.discriminatedUnion("type", [
     type: z.literal("offer"),
     heading: short(80).min(1),
     items: z
-      .array(z.object({ name: short(60).min(1), blurb: short(240).default("") }))
+      .array(z.object({ name: short(60).min(1), blurb: short(240).default(""), image: ImageRefSchema.nullable().default(null) }))
       .min(1)
       .max(8),
     style: SectionStyleSchema.optional(),

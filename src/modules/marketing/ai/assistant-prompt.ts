@@ -245,7 +245,7 @@ export function assemblePageBlocks(raw: unknown, opts: { schedulingOn: boolean }
       case "offer": {
         const items = block.items.filter((i) => i.name).slice(0, 8);
         if (items.length === 0) break;
-        sections.push({ ...fresh("offer"), heading: heading || "What we offer", items });
+        sections.push({ ...fresh("offer"), heading: heading || "What we offer", items: items.map((i) => ({ ...i, image: null })) });
         break;
       }
       case "columns": {

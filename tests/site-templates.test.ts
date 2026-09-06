@@ -102,9 +102,9 @@ describe("the homestead farm template", () => {
     const hero = pages[0].content.sections[0];
     expect(hero.type === "hero" && hero.headline).toBe("Pasture-raised meat and eggs from Oak Row Farm Co.");
     expect(pages[0].content.seoTitle).toBe("Pasture-raised meat and eggs sold direct | Oak Row Farm Co.");
-    expect(pages[3].content.sections[0].type === "text" && (pages[3].content.sections[0] as { body: string[] }).body[0]).toContain("Oak Row Farm Co. is a working homestead farm");
+    expect(pages[3].content.sections[0].type === "about" && (pages[3].content.sections[0] as { body: string[] }).body[0]).toContain("Oak Row Farm Co. is a working homestead farm");
     expect(scenesFor(homesteadFarmSiteTemplate)).toEqual(["hills", "dawn", "furrows"]);
-    expect(homesteadFarmSiteTemplate.pictures.map((p) => p.at)).toEqual([slotAt("/", 0), slotAt("/visit", 0), slotAt("/about", 2)]);
+    expect(homesteadFarmSiteTemplate.pictures.map((p) => p.at)).toEqual([slotAt("/", 0), slotAt("/visit", 0), slotAt("/about", 0)]);
   });
 
   it("takes the starter pictures into the slots that asked for them, on the pages already assembled", () => {
@@ -119,8 +119,8 @@ describe("the homestead farm template", () => {
     const visitHero = withPictures[2].content.sections[0];
     // The dawn scene was not made: the visit hero keeps a photo background with no photo, which draws as the plain band.
     expect(visitHero.style?.photo).toBeNull();
-    const image = withPictures[3].content.sections[2];
-    expect(image.type === "image" && image.image).toEqual({ id: furrows, alt: "Rows in a field under a wide sky" });
+    const image = withPictures[3].content.sections[0];
+    expect(image.type === "about" && image.image).toEqual({ id: furrows, alt: "Rows in a field under a wide sky" });
     // Nothing else moved.
     expect(withPictures[1]).toEqual(pages[1]);
   });

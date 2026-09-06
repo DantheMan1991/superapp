@@ -26,10 +26,10 @@ const brief: SiteBrief = {
 describe("rewriting one section", () => {
   it("sends the words and only the words, by slot, with a length for each", () => {
     const hero = SectionSchema.parse({ type: "hero", headline: "Hay for sale", subheadline: "By the bale", cta: { label: "Call us", href: "/contact" } });
-    expect(sectionWords(hero)).toEqual({ headline: "Hay for sale", subheadline: "By the bale", "cta.label": "Call us" });
+    expect(sectionWords(hero)).toEqual({ eyebrow: "", headline: "Hay for sale", subheadline: "By the bale", "cta.label": "Call us" });
     // No button, no label to rewrite; the photo and the look are never words.
     const plain = SectionSchema.parse({ type: "hero", headline: "Hi", cta: null, image: { id: "6d4c1a2e-9b3f-4c8d-8e7a-1f2b3c4d5e6f", alt: "A barn" }, style: { width: "full", spacing: "airy", align: "center", background: "dark", photo: null } });
-    expect(sectionWords(plain)).toEqual({ headline: "Hi", subheadline: "" });
+    expect(sectionWords(plain)).toEqual({ eyebrow: "", headline: "Hi", subheadline: "" });
     const columns = SectionSchema.parse({
       type: "columns",
       heading: "Why us",

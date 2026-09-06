@@ -50,6 +50,52 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-05 — Slice 17: the visual pass, from the best farm sites (`claude/marketing-site-visual-pass`)
+
+The founder: "the design could use some work; browse some of the best
+websites for ideas, mainly visually." Looked at Seven Sons Farms, White
+Oak Pastures, Polyface Farms and a template gallery at desktop width.
+What the best share: a full-bleed photo hero with a huge display headline,
+a small-capitals line above it and two buttons; product tiles with photos
+and the name on the picture; a three-step "how it works" with icons in
+tinted circles; section headings large enough to carry a band; alternating
+photo-and-words rows; a dark or brand-colour footer; a sticky header. Each
+is now the renderer's, so every site gets it, and the farm template leans
+on all of them. No migration.
+
+- **The hero.** `eyebrow` (≤60, small capitals in the accent on a light
+  band and in white on a photo) and `secondary` (a second button drawn as
+  an outline) join the content model; the headline's scale follows the
+  section's height (up to `text-7xl` on a tall hero); the buttons grow
+  (`size="lg"`). A photo background's flat wash became a gradient, darkest
+  under the words and lightest above, so the picture still reads.
+- **Product tiles.** `offer` items take an optional `image`: with one, the
+  photo with the name on a bottom gradient; without, a band in a tint of
+  the brand colour (`color-mix`) with the item's initial in the corner.
+  Counted by the alt nudge like any placed photo; the editor has a photo
+  picker per item.
+- **Cards, headings, buttons.** A card's icon sits in a circle tinted
+  with the accent; every section heading is one scale (`H2`, `text-3xl
+  sm:text-4xl`); buttons are semibold with a hover shadow.
+- **The frame.** The header is sticky with a blur; the footer is a band in
+  the brand colour with its own foreground, column headings in small
+  capitals, and the social icons inheriting the colour.
+- **The farm template** uses all of it: `Raised here. Sold direct.` above
+  the headline, `See what we sell` and `Plan a visit` side by side, the
+  home page's marketing sections centred, and the About story as an
+  `about` section with the furrows picture beside it rather than a
+  picture on its own.
+- **Driven on the dev branch**: Hilltop Farm rebuilt through the same
+  functions as the button (37 seconds of writing, three pictures) and
+  published; the home page drew `GRASS-FED SINCE 1998` in small capitals
+  over a headline at the largest scale, two buttons, the gold sun on the
+  lighter hills under the gradient, and `What we raise` as four tinted
+  tiles with initials; the cards, headings and the brand-colour footer
+  followed. Tests: the hero's new fields and the offer item's photo in the
+  core, photos, pages, assistant, template and proof suites.
+- **Not built here:** a review-count strip (needs a source of reviews), a
+  press-logo row, and a newsletter band (an outbound-mail decision).
+
 ### 2026-09-05 — Slice 16: testimonials, questions, and the logo's size (`claude/marketing-proof-and-logo-size`)
 
 The founder, with his own site open: add testimonials and an FAQ, shown
@@ -1526,6 +1572,15 @@ feature means for it.
   `public_access_attempts`, keyed by a hash of the tenant id rather than
   `ipKey` (which is `unsalted`, and so no key at all, without
   `INTERVIEW_IP_SALT`).
+- **The look is the platform's, and it follows the best of the kind** (17).
+  The visual pass took its patterns from the best direct-to-consumer farm
+  sites (Seven Sons, White Oak Pastures, Polyface) and put each into the
+  RENDERER rather than the template, so every site gets the hero scale,
+  the gradient wash, the tiles, the tinted icon circles, the heading
+  scale, the sticky header and the brand-colour footer, and a template
+  only chooses among them. A template never carries a pixel; a look that
+  needs a new control gets it in the content model (the hero's eyebrow
+  and second button, an offer item's photo) where every industry can use it.
 - **Proof is never written for a business** (16). Testimonials and
   questions are section kinds that show only once filled (a quote needs
   words and a name, a question an answer), so a template can carry them

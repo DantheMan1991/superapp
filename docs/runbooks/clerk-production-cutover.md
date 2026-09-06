@@ -152,6 +152,13 @@ their rows keep an id no instance resolves, which is harmless, and the real
 run needs `--allow-unmapped` to proceed past them. Anything else unexpected —
 stop here; nothing has been written.
 
+On 2026-09-06 the dry run reported 72 unmapped values and every one was a
+test-suite fixture, not a person: `export-test-…` and `close-test-…` actors in
+`audit_log`, `user-act` on a document share, and two tenants whose
+`clerk_org_id` is `dms-act-…` / `dms-ops-…`. They date from before
+`tests/setup/database-guard.ts` kept the suites off production. The real run
+uses `--allow-unmapped`; cleaning the residue out is a separate job.
+
 ### Step 5 — the cutover (about ten minutes; everyone is signed out)
 
 Pick a quiet hour. Customer marketing sites stay up throughout; only the

@@ -13,6 +13,30 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-06 — Slice 3: the launch (`claude/mobile-app-3-the-launch`)
+
+The founder, a minute after installing: a blue screen with the logo zooming
+in, then away, then the sign-in screen. Built as two halves.
+
+- **The shell's half is a plain navy screen** (`mobile/assets/splash*.png`,
+  `launchShowDuration: 300`): the one thing only a native screen can do is be
+  there before any page has loaded. The mark is gone from it on purpose —
+  it appears once, in motion.
+- **The site's half is `src/components/app/launch-overlay.tsx`**: rendered by
+  the server over the first page of a launch (the `(auth)` layout and the
+  dashboard layout — the two places the app opens), the mark zooms in on a
+  cool blue gradient, holds a beat, and the overlay lifts to reveal the page
+  that loaded behind it. Inline styles, because it must look right before any
+  stylesheet has arrived. About a second and a half; a plain fade for a phone
+  that asked for less motion.
+- **Once per launch:** the overlay sets a session cookie (`yosher_launched`)
+  when it ends; `launchPending()` in `src/lib/native-app.ts` reads it, so a
+  second page load renders no overlay and nothing flashes. A webview forgets
+  session cookies when the app closes, which is exactly when the launch
+  should play again. `src/lib/launch.ts`, `tests/launch.test.ts`.
+- The marketing pages are untouched and stay static; the app never opens on
+  them.
+
 ### 2026-09-06 — Slice 2b: push, the shell's side for Android (`claude/mobile-app-2b-push-shell`)
 
 - **`@capacitor/push-notifications`** in the shell, with
@@ -149,6 +173,13 @@ require there. No shell exists yet; this is what it will load.
   sender.
 
 ## Decisions & gotchas
+
+**The launch animation is the site's, the splash is the shell's.** A native
+splash cannot animate on both platforms (iOS launch screens are static), and
+anything drawn in the shell needs an app release to change. So the shell
+shows plain navy for the instant before the webview has a page, and the site
+plays the mark on its first paint inside the app. The two must not both show
+the mark, or it appears twice — which is why the splash sources are plain.
 
 **The marker is in the user agent, not a header the shell adds.** Capacitor
 sets a custom user agent for the whole webview; every request it makes —

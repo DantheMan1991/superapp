@@ -40,7 +40,7 @@ export function SocialIcon({
 }
 
 const ROUND =
-  "inline-flex items-center justify-center rounded-full border border-neutral-200 text-neutral-600 transition-colors hover:border-neutral-400 hover:text-neutral-900";
+  "inline-flex items-center justify-center rounded-full border border-current/40 text-current opacity-85 transition-opacity hover:opacity-100";
 
 /** The row of profiles: a mark per known network, words for another site. Each opens elsewhere, in a new tab. */
 export function SocialLinks({ links, className }: { links: SocialLink[]; className?: string }) {

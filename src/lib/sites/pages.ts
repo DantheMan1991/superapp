@@ -52,9 +52,9 @@ export function sectionLabel(type: SectionType): string {
 export function newSection(type: PlainSectionType): Section {
   switch (type) {
     case "hero":
-      return { type, headline: "A headline for this page", subheadline: "", cta: { label: "Get in touch", href: "/contact" }, image: null };
+      return { type, eyebrow: "", headline: "A headline for this page", subheadline: "", cta: { label: "Get in touch", href: "/contact" }, secondary: null, image: null };
     case "offer":
-      return { type, heading: "What we offer", items: [{ name: "Something we do", blurb: "" }] };
+      return { type, heading: "What we offer", items: [{ name: "Something we do", blurb: "", image: null }] };
     case "about":
       return { type, heading: "About us", body: ["A paragraph about the business."], image: null };
     case "text":
@@ -193,6 +193,8 @@ function placedPhotos(section: Section): ImageRef[] {
     case "gallery":
     case "slideshow":
       return section.items.map((item) => item.image);
+    case "offer":
+      return section.items.flatMap((item) => (item.image ? [item.image] : []));
     case "columns":
       return section.cards.flatMap((card) => (card.image ? [card.image] : []));
     default:

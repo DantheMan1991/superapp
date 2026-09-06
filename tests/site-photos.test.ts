@@ -184,8 +184,8 @@ describe("photos without a description", () => {
   const blank = { id: ID, alt: "   " };
 
   it("counts every placed photo, in every kind of section that places one", () => {
-    expect(undescribedPhotos({ type: "hero", headline: "x", subheadline: "", cta: null, image: null })).toEqual({ total: 0, missing: 0 });
-    expect(undescribedPhotos({ type: "hero", headline: "x", subheadline: "", cta: null, image: blank })).toEqual({ total: 1, missing: 1 });
+    expect(undescribedPhotos({ type: "hero", eyebrow: "", headline: "x", subheadline: "", cta: null, secondary: null, image: null })).toEqual({ total: 0, missing: 0 });
+    expect(undescribedPhotos({ type: "hero", eyebrow: "", headline: "x", subheadline: "", cta: null, secondary: null, image: blank })).toEqual({ total: 1, missing: 1 });
     expect(undescribedPhotos({ type: "about", heading: "x", body: [], image: described })).toEqual({ total: 1, missing: 0 });
     expect(undescribedPhotos({ type: "image", image: blank, caption: "", layout: "inset" })).toEqual({ total: 1, missing: 1 });
     expect(undescribedPhotos({ type: "gallery", heading: "", columns: 3, items: [{ image: blank, caption: "" }, { image: described, caption: "" }, { image: blank, caption: "" }] })).toEqual({ total: 3, missing: 2 });
@@ -196,7 +196,7 @@ describe("photos without a description", () => {
   it("adds a page up and says it in one line, or nothing when every photo has its words", () => {
     const page = {
       sections: [
-        { type: "hero" as const, headline: "x", subheadline: "", cta: null, image: blank },
+        { type: "hero" as const, eyebrow: "", headline: "x", subheadline: "", cta: null, secondary: null, image: blank },
         { type: "gallery" as const, heading: "", columns: 3 as const, items: [{ image: described, caption: "" }, { image: blank, caption: "" }] },
       ],
     };

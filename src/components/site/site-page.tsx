@@ -55,6 +55,9 @@ import { ViewBeacon } from "./view-beacon";
  * the draft preview `/sites/<slug>/draft`.
  */
 
+/** Every section's heading, one scale (slice 17): large enough to carry a band on its own. */
+const H2 = "text-3xl font-semibold tracking-tight sm:text-4xl";
+
 export function logoSrc(mode: SiteMode, slug: string): string {
   // On a site host the proxy maps `/logo` to the site's logo route; on the
   // platform host the route is addressed directly.
@@ -225,7 +228,7 @@ function SiteHeader({
       </Link>
     ) : null;
   return (
-    <header className="border-b border-neutral-200">
+    <header className="sticky top-0 z-30 border-b border-neutral-200 bg-white/90 backdrop-blur">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-x-6 px-6 py-4">
         <Link href={href("/")} className="flex min-w-0 items-center gap-3">
           {site.brand.logo ? (
@@ -341,13 +344,17 @@ function SiteFooter({ site, mode }: { site: PublicSite; mode: SiteMode }) {
       {settings.email && <a href={`mailto:${settings.email}`}>{settings.email}</a>}
     </>
   );
+  // A band in the brand colour (slice 17), the way the best small-business
+  // sites close a page: the words take the colour's own foreground, and the
+  // rules are that foreground at a fraction.
+  const rule = "color-mix(in srgb, var(--site-primary-fg) 18%, transparent)";
   return (
-    <footer className="border-t border-neutral-200">
-      <div className="mx-auto max-w-5xl px-6 py-8">
+    <footer style={{ backgroundColor: "var(--site-primary)", color: "var(--site-primary-fg)" }}>
+      <div className="mx-auto max-w-5xl px-6 py-12">
         {columns.length === 0 ? (
-          <div className="flex flex-wrap items-center justify-between gap-4 text-sm text-neutral-600">
+          <div className="flex flex-wrap items-center justify-between gap-4 text-sm opacity-90">
             <div>
-              <span className="font-medium text-neutral-900">{brand.displayName}</span>
+              <span className="font-semibold">{brand.displayName}</span>
               {brand.tagline && <span> · {brand.tagline}</span>}
             </div>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -357,9 +364,9 @@ function SiteFooter({ site, mode }: { site: PublicSite; mode: SiteMode }) {
           </div>
         ) : (
           <div className={cn("grid gap-8", FOOTER_GRID[columns.length])}>
-            <div className="space-y-3 text-sm text-neutral-600">
+            <div className="space-y-3 text-sm opacity-90">
               <div>
-                <p className="font-medium text-neutral-900">{brand.displayName}</p>
+                <p className="text-base font-semibold">{brand.displayName}</p>
                 {brand.tagline && <p>{brand.tagline}</p>}
               </div>
               {settings.address && <p className="whitespace-pre-line">{settings.address}</p>}
@@ -368,20 +375,20 @@ function SiteFooter({ site, mode }: { site: PublicSite; mode: SiteMode }) {
             </div>
             {columns.map((column, i) => (
               <div key={i} className="text-sm">
-                {column.heading && <h2 className="font-semibold text-neutral-900">{column.heading}</h2>}
-                {column.text && <p className="mt-2 whitespace-pre-line text-neutral-600">{column.text}</p>}
+                {column.heading && <h2 className="text-xs font-semibold uppercase tracking-[0.15em] opacity-80">{column.heading}</h2>}
+                {column.text && <p className="mt-3 whitespace-pre-line opacity-90">{column.text}</p>}
                 {column.links.length > 0 && (
-                  <ul className="mt-2 space-y-1.5">
+                  <ul className="mt-3 space-y-2">
                     {column.links.map((link, j) => {
                       const to = resolveHref(mode, site.slug, link.href);
                       return (
                         <li key={j}>
                           {to ? (
-                            <Link href={to} className="text-neutral-600 transition-colors hover:text-neutral-900">
+                            <Link href={to} className="opacity-90 transition-opacity hover:opacity-100 hover:underline">
                               {link.label}
                             </Link>
                           ) : (
-                            <span className="text-neutral-600">{link.label}</span>
+                            <span className="opacity-90">{link.label}</span>
                           )}
                         </li>
                       );
@@ -392,7 +399,7 @@ function SiteFooter({ site, mode }: { site: PublicSite; mode: SiteMode }) {
             ))}
           </div>
         )}
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-x-6 gap-y-1 border-t border-neutral-100 pt-4 text-xs text-neutral-500">
+        <div className="mt-10 flex flex-wrap items-center justify-between gap-x-6 gap-y-1 border-t pt-4 text-xs opacity-75" style={{ borderColor: rule }}>
           <p>
             © {new Date().getFullYear()} {brand.displayName}
           </p>
@@ -450,7 +457,8 @@ function Shell({
             decoding="async"
             className="absolute inset-0 h-full w-full object-cover"
           />
-          <div className="absolute inset-0 bg-neutral-950/55" aria-hidden="true" />
+          {/* A gradient rather than a flat wash (slice 17): darkest under the words, lighter above, so the picture still reads. */}
+          <div className="absolute inset-0 bg-gradient-to-t from-neutral-950/75 via-neutral-950/50 to-neutral-950/30" aria-hidden="true" />
         </>
       )}
       <div className={cn("relative", widthClass(resolved.width), spacing, resolved.align === "center" && "text-center")}>
@@ -493,7 +501,7 @@ function SectionView({
     case "form":
       return (
         <Shell {...shell} spacing={room}>
-          <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
+          <h2 className={H2}>{section.heading}</h2>
           {section.note && <p className={cn("mt-3", tone.muted)}>{section.note}</p>}
           <div className={cn(centred && "mx-auto max-w-xl text-left")}>
             <EnquiryForm
@@ -514,7 +522,7 @@ function SectionView({
     case "booking":
       return (
         <Shell {...shell} spacing={room}>
-          <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
+          <h2 className={H2}>{section.heading}</h2>
           {section.note && <p className={cn("mt-3", tone.muted)}>{section.note}</p>}
           <div className={cn(centred && "mx-auto max-w-xl text-left")}>
             <BookingForm
@@ -541,7 +549,7 @@ function SectionView({
       const aside = section.showAddress || section.directions;
       return (
         <Shell {...shell} spacing={room}>
-          <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
+          <h2 className={H2}>{section.heading}</h2>
           {section.note && <p className={cn("mt-3", tone.muted)}>{section.note}</p>}
           <div className={cn("mt-6 grid gap-6", key && aside && "md:grid-cols-[3fr_2fr]", centred && "text-left")}>
             {key && (
@@ -596,7 +604,7 @@ function SectionView({
       const upcoming = upcomingEvents(site.events, new Date(), section.horizonDays, section.count);
       return (
         <Shell {...shell} spacing={room}>
-          <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
+          <h2 className={H2}>{section.heading}</h2>
           {section.note && <p className={cn("mt-3", tone.muted)}>{section.note}</p>}
           {upcoming.length === 0 ? (
             <p className={cn("mt-6", tone.muted)}>{section.emptyText || "Nothing scheduled yet. Check back soon."}</p>
@@ -634,7 +642,7 @@ function SectionView({
       if (quotes.length === 0 && mode !== "draft") return null;
       return (
         <Shell {...shell} spacing={room}>
-          {section.heading && <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>}
+          {section.heading && <h2 className={H2}>{section.heading}</h2>}
           {quotes.length === 0 ? (
             <p className={cn("mt-6 text-sm", tone.faint)}>Testimonials show here once one has words and a name.</p>
           ) : (
@@ -662,7 +670,7 @@ function SectionView({
       if (questions.length === 0 && mode !== "draft") return null;
       return (
         <Shell {...shell} spacing={room}>
-          {section.heading && <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>}
+          {section.heading && <h2 className={H2}>{section.heading}</h2>}
           {section.note && <p className={cn("mt-3", tone.muted)}>{section.note}</p>}
           {questions.length === 0 ? (
             <p className={cn("mt-6 text-sm", tone.faint)}>Questions show here once one has an answer.</p>
@@ -692,7 +700,7 @@ function SectionView({
       if (!view && mode !== "draft") return null;
       return (
         <Shell {...shell} spacing={room}>
-          {section.heading && <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>}
+          {section.heading && <h2 className={H2}>{section.heading}</h2>}
           {section.note && <p className={cn("mt-3", tone.muted)}>{section.note}</p>}
           {!view ? (
             <p className={cn("mt-6 text-sm", tone.faint)}>Nothing to show yet: check this section&apos;s settings, and that its pack is switched on.</p>
@@ -723,20 +731,40 @@ function SectionView({
     case "hero": {
       const photo = section.image && site.images[section.image.id] ? section.image : null;
       const left = (section.imageSide ?? "right") === "left";
+      // The scale of the page's one big statement (slice 17): the taller the
+      // hero, the larger its type; an eyebrow above it in small capitals in
+      // the accent; up to two buttons, the second quieter.
+      const scale =
+        section.height === "tall"
+          ? "text-5xl sm:text-6xl lg:text-7xl"
+          : section.height === "compact"
+            ? "text-3xl sm:text-4xl lg:text-5xl"
+            : "text-4xl sm:text-5xl lg:text-6xl";
       const words = (
         <div>
+          {section.eyebrow && (
+            <p
+              className={cn("mb-4 text-xs font-semibold uppercase tracking-[0.2em] sm:text-sm", centred && "mx-auto")}
+              style={{ color: resolved.onDark ? "rgba(255,255,255,0.85)" : "var(--site-accent)" }}
+            >
+              {section.eyebrow}
+            </p>
+          )}
           <h1
-            className={cn("max-w-3xl text-4xl font-semibold leading-tight tracking-tight sm:text-5xl", centred && "mx-auto")}
+            className={cn("max-w-4xl font-semibold leading-[1.05] tracking-tight", scale, centred && "mx-auto")}
             style={{ color: tone.heading }}
           >
             {section.headline}
           </h1>
           {section.subheadline && (
-            <p className={cn("mt-4 max-w-2xl text-lg", tone.muted, centred && "mx-auto")}>{section.subheadline}</p>
+            <p className={cn("mt-5 max-w-2xl text-lg leading-relaxed sm:text-xl", tone.muted, centred && "mx-auto")}>{section.subheadline}</p>
           )}
-          {section.cta && (
-            <div className={cn("mt-8", centred && "flex justify-center")}>
-              <CtaLink href={resolveHref(mode, site.slug, section.cta.href)} label={section.cta.label} tone={tone} />
+          {(section.cta || section.secondary) && (
+            <div className={cn("mt-9 flex flex-wrap items-center gap-3", centred && "justify-center")}>
+              {section.cta && <CtaLink href={resolveHref(mode, site.slug, section.cta.href)} label={section.cta.label} tone={tone} size="lg" />}
+              {section.secondary && (
+                <CtaLink href={resolveHref(mode, site.slug, section.secondary.href)} label={section.secondary.label} tone={tone} size="lg" quiet />
+              )}
             </div>
           )}
         </div>
@@ -772,7 +800,7 @@ function SectionView({
       const inner = panels ? LIGHT_TONE : tone;
       return (
         <Shell {...shell} spacing={room}>
-          {section.heading && <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>}
+          {section.heading && <h2 className={H2}>{section.heading}</h2>}
           {section.intro && <p className={cn("mt-3 max-w-2xl", tone.muted, centred && "mx-auto")}>{section.intro}</p>}
           <ul className={cn("grid gap-6", grid, (section.heading || section.intro) && "mt-8", centred && "text-left")}>
             {section.cards.map((card) => {
@@ -783,7 +811,9 @@ function SectionView({
                   {photo ? (
                     <Photo site={site} mode={mode} image={photo} className="mb-4 aspect-[4/3] w-full rounded-[calc(var(--site-radius)*0.75)] object-cover" />
                   ) : card.icon ? (
-                    <CardIcon name={card.icon} className="mb-4 size-8" style={{ color: inner.heading }} />
+                    <span className="mb-4 inline-flex size-12 items-center justify-center rounded-full" style={{ backgroundColor: "color-mix(in srgb, var(--site-accent) 16%, white)" }}>
+                      <CardIcon name={card.icon} className="size-6" style={{ color: inner.heading }} />
+                    </span>
                   ) : null}
                   {card.heading && (
                     <h3 className="font-semibold" style={{ color: inner.heading }}>
@@ -868,16 +898,34 @@ function SectionView({
     case "offer":
       return (
         <Shell {...shell} spacing={room}>
-          <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
-          <ul className={cn("mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3", centred && "text-left")}>
-            {section.items.map((item, i) => (
-              <li key={i} className="rounded-[var(--site-radius)] bg-white p-6 text-neutral-900 shadow-sm ring-1 ring-neutral-200">
-                <h3 className="font-semibold" style={{ color: LIGHT_TONE.heading }}>
-                  {item.name}
-                </h3>
-                {item.blurb && <p className={cn("mt-2 text-sm", LIGHT_TONE.muted)}>{item.blurb}</p>}
-              </li>
-            ))}
+          <h2 className={H2}>{section.heading}</h2>
+          {/* Tiles (slice 17): a photo with the name on it where there is one, a tinted band with the initial where there is not. */}
+          <ul className={cn("mt-8 grid gap-6 sm:grid-cols-2", section.items.length >= 3 && "lg:grid-cols-3", section.items.length === 4 && "lg:grid-cols-4", centred && "text-left")}>
+            {section.items.map((item, i) => {
+              const photo = item.image && site.images[item.image.id] ? item.image : null;
+              return (
+                <li key={i} className="overflow-hidden rounded-[var(--site-radius)] bg-white text-neutral-900 shadow-sm ring-1 ring-neutral-200 transition-shadow hover:shadow-md">
+                  {photo ? (
+                    <div className="relative">
+                      <Photo site={site} mode={mode} image={photo} className="aspect-[4/3] w-full object-cover" />
+                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-neutral-950/70 to-transparent px-5 pb-4 pt-12">
+                        <h3 className="text-lg font-semibold text-white">{item.name}</h3>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="relative flex h-28 items-end px-5 pb-4" style={{ backgroundColor: "color-mix(in srgb, var(--site-primary) 12%, white)" }}>
+                      <span aria-hidden="true" className="absolute right-4 top-2 font-heading text-6xl font-semibold leading-none opacity-20" style={{ color: "var(--site-primary)" }}>
+                        {item.name.trim().charAt(0).toUpperCase()}
+                      </span>
+                      <h3 className="text-lg font-semibold" style={{ color: LIGHT_TONE.heading }}>
+                        {item.name}
+                      </h3>
+                    </div>
+                  )}
+                  {item.blurb && <p className={cn("px-5 py-4 text-sm leading-relaxed", LIGHT_TONE.muted)}>{item.blurb}</p>}
+                </li>
+              );
+            })}
           </ul>
         </Shell>
       );
@@ -887,7 +935,7 @@ function SectionView({
       const left = section.type === "about" && (section.imageSide ?? "right") === "left";
       const words = (
         <div>
-          {section.heading && <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>}
+          {section.heading && <h2 className={H2}>{section.heading}</h2>}
           <div className={cn("mt-4 space-y-4 leading-relaxed", tone.body)}>
             {section.body.map((paragraph, i) => (
               <p key={i}>{paragraph}</p>
@@ -913,7 +961,7 @@ function SectionView({
       return (
         <Shell {...shell} spacing={resolved.spacing === "tight" ? "py-12" : room}>
           <div className={cn("flex flex-wrap items-center gap-6", centred ? "flex-col justify-center" : "justify-between")}>
-            <h2 className="text-2xl font-semibold tracking-tight">{section.headline}</h2>
+            <h2 className={H2}>{section.headline}</h2>
             <CtaLink href={resolveHref(mode, site.slug, section.cta.href)} label={section.cta.label} tone={tone} />
           </div>
         </Shell>
@@ -928,7 +976,7 @@ function SectionView({
       if (site.settings.hoursLines.length === 0) return null;
       return (
         <Shell {...shell} spacing={room}>
-          <h2 className="text-2xl font-semibold tracking-tight">{section.heading}</h2>
+          <h2 className={H2}>{section.heading}</h2>
           <ul className={cn("mt-4 space-y-1", tone.body)}>
             {site.settings.hoursLines.map((line, i) => (
               <li key={i}>{line}</li>
@@ -1000,18 +1048,37 @@ function Photo({
 }
 
 /** The button: the brand colour on a light background, white where the background is the brand colour or dark. */
-function CtaLink({ href, label, tone }: { href: string | null; label: string; tone: Tone }) {
-  const className = "inline-block rounded-[var(--site-radius-button)] px-6 py-3 text-sm font-medium shadow-sm";
+function CtaLink({
+  href,
+  label,
+  tone,
+  size = "md",
+  quiet = false,
+}: {
+  href: string | null;
+  label: string;
+  tone: Tone;
+  /** `lg` for the hero's buttons. */
+  size?: "md" | "lg";
+  /** The second button: an outline in the words' colour rather than a filled one. */
+  quiet?: boolean;
+}) {
+  const className = cn(
+    "inline-block rounded-[var(--site-radius-button)] font-semibold transition-shadow hover:shadow-md",
+    size === "lg" ? "px-7 py-3.5 text-base" : "px-6 py-3 text-sm",
+    quiet ? "border-2 border-current bg-transparent" : "shadow-sm",
+  );
+  const style = quiet ? { color: tone.heading } : tone.button;
   // No usable link: the words stay, as a button that goes nowhere is still the owner's words.
   if (!href) {
     return (
-      <span className={className} style={tone.button}>
+      <span className={className} style={style}>
         {label}
       </span>
     );
   }
   return (
-    <Link href={href} className={className} style={tone.button}>
+    <Link href={href} className={className} style={style}>
       {label}
     </Link>
   );
@@ -1034,7 +1101,7 @@ function ContactSection({
   const hasDetails = settings.phone || settings.email || settings.address;
   return (
     <>
-      <h2 className="text-2xl font-semibold tracking-tight">{heading}</h2>
+      <h2 className={H2}>{heading}</h2>
       {note && <p className={cn("mt-3", tone.muted)}>{note}</p>}
       {hasDetails && (
         <dl className={cn("mt-6 grid gap-4 sm:grid-cols-3", centred && "text-left")}>

@@ -21,18 +21,20 @@ export const generalSiteTemplate: SiteTemplate = {
       sections: [
         {
           type: "hero",
+          eyebrow: "",
           headline: "{name}",
           subheadline: "{tagline}",
           cta: { label: "Get in touch", href: "/contact" },
+          secondary: null,
           image: null,
         },
         {
           type: "offer",
           heading: "What we do",
           items: [
-            { name: "What we offer", blurb: "The products and services people come to us for." },
-            { name: "How we work", blurb: "Straightforward, on time and as agreed." },
-            { name: "Where to find us", blurb: "Details and hours are on the contact page." },
+            { name: "What we offer", blurb: "The products and services people come to us for.", image: null },
+            { name: "How we work", blurb: "Straightforward, on time and as agreed.", image: null },
+            { name: "Where to find us", blurb: "Details and hours are on the contact page.", image: null },
           ],
         },
         {

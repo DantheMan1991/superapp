@@ -38,6 +38,13 @@ happened, and what the runbook had not predicted:
   no "Development mode" badge, key `pk_live_`, Frontend API
   `clerk.yosherapp.com`, the Sign up link on the application domain. GitHub
   sign-in was still on at that point — a dashboard toggle for the founder.
+- **The first sign-in landed on a blank page.** The server answered every
+  request `x-clerk-auth-reason: secret-key-invalid` — the `CLERK_SECRET_KEY`
+  pasted into Vercel was not the key. Re-copied and redeployed; the
+  dashboard, Team page and admin view then answered 200 with the founder's
+  session. The origin allowlist was cleared of suspicion the same way: the
+  token's `azp` was `https://yosherapp.com` and the reason header named the
+  key, not the party.
 - The Neon dev branch and `.env` stay on the development instance, untouched.
   The rollback artefacts (snapshot and mapping) live outside the repo.
 

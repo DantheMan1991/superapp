@@ -235,6 +235,14 @@ platform's own hosts close.
 - **`--dev` remaps the dev branch, which is wrong for as long as laptops use
   the development instance.** The flag exists for symmetry with `db:migrate`
   and for the day the development instance is retired.
+- **A blank page after sign-in means the server rejected the session, and
+  it says why.** From the browser console on yosherapp.com run
+  `(await fetch("/sign-in")).headers.get("x-clerk-auth-reason")`. Clerk
+  puts its reason on every signed-out response: `secret-key-invalid` is a
+  wrong `CLERK_SECRET_KEY` in Vercel (on 2026-09-06 a paste error, fixed by
+  re-copying the key and redeploying); `token-invalid-authorized-parties` is
+  the origin allowlist not matching `NEXT_PUBLIC_APP_URL`. Vercel cannot
+  reveal a Secret-type variable, so a Config-type row is easier to check.
 - **Organization slugs may be off on the production instance.** Clerk made
   them optional, and a fresh instance has them disabled. The import drops the
   slug and says so; nothing in the app reads Clerk's slug, because a tenant

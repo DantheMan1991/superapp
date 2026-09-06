@@ -20,6 +20,7 @@ const BASE = "/dashboard/m/marketing/website";
 
 function revalidateSite(): void {
   revalidatePath(BASE);
+  revalidatePath(`${BASE}/photos`);
   revalidatePath(`${BASE}/pages/[pageId]`, "page");
   revalidatePath("/sites/[slug]/[[...path]]", "page");
   revalidatePath("/hosted/[slug]/[[...path]]", "page");

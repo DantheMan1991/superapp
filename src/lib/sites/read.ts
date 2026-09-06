@@ -291,7 +291,7 @@ export async function loadPageEditor(
 export async function loadSiteDrafts(
   tx: Tx,
   tenantId: string,
-): Promise<{ site: Site; pages: SitePage[]; domains: SiteDomain[]; view: PublicSite } | null> {
+): Promise<{ site: Site; pages: SitePage[]; domains: SiteDomain[]; images: SiteImage[]; view: PublicSite } | null> {
   const site = await tx.query.sites.findFirst({
     where: eq(schema.sites.tenantId, tenantId),
   });
@@ -310,7 +310,7 @@ export async function loadSiteDrafts(
   const timezone = await getTenantTimezone(tx, tenantId);
   const events = wantsEvents(pages, "draft") ? await liveEvents(tx, tenantId) : [];
   const blocks = await loadSiteBlocks(tx, tenantId, sectionsOnShow(pages, "draft"));
-  return { site, pages, domains, view: toView(site, brand, pages, "draft", customHost, images, timezone, events, blocks) };
+  return { site, pages, domains, images, view: toView(site, brand, pages, "draft", customHost, images, timezone, events, blocks) };
 }
 
 /** The site's photo library, newest last, inside the caller's transaction. */

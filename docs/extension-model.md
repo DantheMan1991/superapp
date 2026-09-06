@@ -198,7 +198,8 @@ and the site builder is core and knows no industry, yet a homestead farm
 wants a five-page site that a general business does not.
 [src/lib/site-templates/](../src/lib/site-templates/types.ts) holds the slot: a
 template is pages of the site's own typed sections with starter words, a
-frame, a look and picture slots; `registry.ts` names the industries;
+frame, a look, picture slots and, since Marketing 18, what to photograph for each
+kind of spot in the industry's own words; `registry.ts` names the industries;
 `src/industries/homestead-farm/site-template.ts` fills it as data beside the
 profile. The core assembles a template against what the tenant has switched
 on and the writer fills every word slot, so an industry gets a website by

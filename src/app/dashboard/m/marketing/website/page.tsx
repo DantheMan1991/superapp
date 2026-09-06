@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ExternalLink, Globe } from "lucide-react";
+import { Camera, ExternalLink, Globe } from "lucide-react";
 import { withTenant } from "@/db";
 import { templateFor } from "@/lib/site-templates/resolve";
 import { requireTenant } from "@/lib/auth";
@@ -10,6 +10,7 @@ import { readDomainRecords } from "@/lib/sites/domains";
 import { listSiteEnquiries } from "@/lib/sites/enquiries";
 import { readEnquiryAnswers } from "@/lib/sites/enquiry-schema";
 import { undescribedPhotosOnPage } from "@/lib/sites/pages";
+import { isStarterPhoto, pageSpots, shotLine, shotNotesFor, shotSummary } from "@/lib/sites/shots";
 import { loadSiteDrafts } from "@/lib/sites/read";
 import { listSiteViews } from "@/lib/sites/views";
 import { summarizeViews } from "@/lib/sites/views-core";
@@ -61,6 +62,11 @@ export default async function WebsitePage() {
     ? await Promise.all([isModuleEnabled(ctx.tenant.id, "crm"), isModuleEnabled(ctx.tenant.id, "work")])
     : [false, false];
   const canWrite = ctx.role === "owner";
+  // Where a photo belongs on each page, read from the drafts as they are now (slice 18).
+  const starters = new Set(drafts?.images.filter((i) => isStarterPhoto(i.pathname)).map((i) => i.id) ?? []);
+  const notes = shotNotesFor(templateFor(ctx.tenant.industry));
+  const spotsByPath = Object.fromEntries((drafts?.view.pages ?? []).map((p) => [p.path, pageSpots({ path: p.path, content: p.content }, starters, notes)]));
+  const shots = shotSummary(Object.values(spotsByPath).flat());
   const siteDomain = siteDomainFromEnv(process.env);
   const appUrl = new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000");
   const hostUrl = (slug: string) =>
@@ -188,10 +194,29 @@ export default async function WebsitePage() {
                   title: page.title,
                   sections: page.content.sections.length,
                   undescribed: undescribedPhotosOnPage(page.content).missing,
+                  open: (spotsByPath[page.path] ?? []).filter((s) => s.status !== "photo").length,
                   published: row?.published !== null && row?.published !== undefined,
                 };
               })}
             />
+          </section>
+
+          <section className="space-y-3">
+            <div>
+              <h2 className="font-heading text-lg font-semibold tracking-heading">Photos</h2>
+              <p className="text-sm text-muted-foreground">
+                Where a photo belongs on your pages, what to take there, and a way to put it in from your phone.
+              </p>
+            </div>
+            <Panel className="flex flex-wrap items-center justify-between gap-4 p-5">
+              <p className="text-sm">{shotLine(shots)}</p>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/dashboard/m/marketing/website/photos">
+                  <Camera className="size-4" />
+                  Open the shot list
+                </Link>
+              </Button>
+            </Panel>
           </section>
 
           <section className="space-y-3">

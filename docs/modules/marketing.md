@@ -42,13 +42,99 @@
 | **11a** | **What search engines and browsers ask a site for: `robots.txt` and `sitemap.xml` per site on every address it has, LocalBusiness structured data on the home page from the settings (address, phone, email, the map's pin, the logo, the social profiles), and an icon from the brand kit (a square logo as it is, otherwise a monogram in the brand colour) at 32, 180 and 512.** | **built 2026-09-05** |
 | **11b** | **A share image drawn per page (the page's title in the kit's type on the brand colour, the logo or the monogram in a white panel, the address in the corner) as `og:image` and the Twitter card; and an address the site used to have sends people on to the current one, for the same page, on the platform path and on the free address.** | **built 2026-09-05** |
 | **12** | **The assistant everywhere: new words for one section with an optional ask, a page from a sentence, a photo's description from its pixels. Each proposes words into slots the code chose, unsaved until the owner saves; nothing else about a section is sent or changed.** [ADR 0027](../decisions/0027-the-assistant-proposes-words-and-the-owner-saves-them.md) | **built 2026-09-05** |
+| **13** | **The preview follows the editor: the draft frame draws the editor's unsaved page through `postMessage` on the same origin, and the pack blocks and events it needs come from `/api/marketing/sites/live`.** [ADR 0029](../decisions/0029-the-preview-follows-the-editor-not-the-save.md) | **built 2026-09-05** |
+| **14** | **The header folds on a phone: a script-free disclosure behind a `Menu` button, the header button beside it.** | **built 2026-09-05** |
 | **15** | **Industry site templates: a template is data an industry contributes (pages of typed sections with starter words, a frame, a look, picture slots the platform's drawn scenes fill); the core assembles it against what the tenant has switched on and the writer fills every word slot. The homestead farm's is five pages: Home, Shop, Visit, About, Contact.** [ADR 0030](../decisions/0030-a-site-template-is-data-an-industry-contributes.md) | **built 2026-09-05** |
+| **15b** | **The farm template sharpened: the owner's own lines about the business feed the writer, a title tag per page, How to buy and hours on Home.** | **built 2026-09-05** |
+| **16** | **Testimonials and questions, shown only once filled (an FAQPage for search engines), and the logo's size on the header.** | **built 2026-09-05** |
+| **17** | **The visual pass, from the best farm sites: the hero's eyebrow and second button and its scale by height, photo tiles for what is offered, icon circles, larger headings, a sticky header and a brand-colour footer, all in the renderer.** | **built 2026-09-05** |
+| **18** | **The shot list: every place a photo belongs, read from the pages and never stored, with what to take there in the template's own words, filled from a phone through the camera.** [ADR 0031](../decisions/0031-where-a-photo-belongs-is-read-from-the-page.md) | **built 2026-09-05** |
 | — | The shop block: `retail` slice 6 (online orders + pickup windows) fills the slot 9b made, plus a client island the site owns and a provider names; blocked on commitments (retail 3) and web checkout (payments) | not this module's |
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-05 — Slice 18: the shot list (`claude/marketing-shot-list`)
+
+The founder, looking at his own Shop page with three tinted tiles and no
+photos: "I'm assuming this page is supposed to have some photos, but there
+is no way of me knowing that." The pages know where a photo belongs; now
+they say so, and the saying is a list a person can take into the field
+and fill from a phone. No migration.
+[ADR 0031](../decisions/0031-where-a-photo-belongs-is-read-from-the-page.md).
+
+- **The spots are read, never stored** (`src/lib/sites/shots.ts`, pure).
+  `pageSpots` walks a page's sections and lists every place a photo can
+  go: behind a hero whose background is a photo (`cover`), beside a hero
+  otherwise (`beside`, optional), beside an About (`about`), each item of
+  a What you offer (`item`), each card of a Columns (`card`, optional), a
+  Photo section (`picture`), an empty gallery or slideshow (`set`, one
+  spot that appends) or the photos already in one, and behind any other
+  section whose background is a photo (`backdrop`). A spot is `empty`,
+  `starter` (one of the platform's drawn stand-ins, known by the
+  `starter-` name its file carries, `isStarterPhoto`) or `photo`; it has
+  a shape (wide, landscape, square, any) and a note on what to take. Keys
+  are `"<section>:<where>"` (`spotKey`/`parseSpotKey`); `placePhoto` puts
+  one photo into one spot of the content as it is NOW and refuses, with
+  the reason, a key the page no longer fits. `shotSummary`/`shotLine` are
+  the one line on the Website page and at the top of the list;
+  `emptySpotCount` is the editor's line. `tests/site-shots.test.ts`.
+- **The notes are the template's, by role and by slot**
+  (`SiteTemplate.shots`, `TemplatePicture.shot`, read by `shotNotesFor`).
+  The farm says "Beef as the customer gets it, close, in daylight, on a plain
+  background: the wrapped pack, the open carton, the full box"; a picture slot's `shot` wins over
+  the role's note while the section at that index is still of the kind
+  the template put there, so a moved section falls back to its role. The
+  core's `GENERIC_SHOTS` are true of any business and a test keeps them
+  free of farm words.
+- **The screen** (`/dashboard/m/marketing/website/photos`,
+  `components/shot-list.tsx`). A card with the line; a section per page
+  in menu order with `Edit the page`; a row per spot, open ones first,
+  optional after wanted, filled last: the photo or a dashed box in the
+  spot's shape, the name, the section it sits in, the note, and for owners
+  the buttons. `Take a photo` is a file input with `capture="environment"`,
+  offered only where `navigator.maxTouchPoints` says there is likely a
+  camera (read through `useSyncExternalStore`, so the server renders
+  without it); `Choose from your phone` / `Upload a photo` and `From the
+  library` (the picker's own dialog) stand beside it. An upload goes the
+  picker's way (`uploadPresigned` → `registerSitePhotoAction`) and then
+  `placePhotoAction`; a filled row gets `Describe the photo` with the
+  assistant's `Suggest` and `Save description`, the same action with the
+  same photo and new words. A row keeps what it placed as an override
+  over the server's props, so the placement shows at once and the
+  `router.refresh()` that follows agrees with it.
+- **The write** (`placePhotoAction`, `page-actions.ts`): the gate (owner),
+  Zod, the page row and the photo row under RLS (the photo must be this
+  site's), `placePhoto`, then `savePageDraft` with the page's own title,
+  the path left alone and its nav flag, so a version is recorded like any
+  save; audit `marketing.site.photo_placed` with the path, the spot key
+  and the photo id. `page-actions.ts` and `image-actions.ts` revalidate
+  the new route.
+- **Where it shows.** The Website page gains a `Photos` card between Pages
+  and Messages with the line and `Open the shot list`; the Pages rows say
+  `3 photos to take`; the editor's Sections panel says `2 places for a
+  photo on this page are empty.` with `The shot list` as a link.
+  `loadSiteDrafts` now returns the image rows as well, since the page
+  needs a pathname to know a stand-in. `images` joined the guide icons.
+- **Verified on the dev branch.** Hilltop's list read 20 places: 17 to
+  take, 3 stand-ins (the hills, dawn and furrows scenes), the Contact
+  page none; the Pages rows read `11 photos to take` and so on. `From the
+  library` on the Shop hero's `Beside the headline` spot placed the hills
+  scene: `Photo placed.`, the row showed the picture with `A drawn
+  stand-in` under it, the count rose to four, and the draft on the server
+  agreed (`sections[0].image`), then was put back. The upload and the
+  camera are the picker's proven path and the browser's own file input;
+  the pane cannot choose a file, so a phone has not been seen taking one.
+  Two traps: a route added while the dev server ran 404'd without
+  compiling until the server was restarted, and a click on a scrolled
+  page in the pane did not land until the viewport was made tall enough
+  to hold the whole page (`resize_window` 1100×3400).
+- **Guides.** `docs/help/marketing/shot-list.md` is new (route
+  `/dashboard/m/marketing/website/photos`); `website.md` gains the
+  `Photos` card and the Pages row's count; `page-editor.md` the line under
+  Sections. Security rows for the route and the action.
 
 ### 2026-09-05 — Slice 17: the visual pass, from the best farm sites (`claude/marketing-site-visual-pass`)
 
@@ -1572,6 +1658,22 @@ feature means for it.
   `public_access_attempts`, keyed by a hash of the tenant id rather than
   `ipKey` (which is `unsalted`, and so no key at all, without
   `INTERVIEW_IP_SALT`).
+- **Where a photo belongs is read from the page, never kept** (18, ADR
+  0031). A stored checklist would drift from the pages the moment a
+  section was added or moved; the shot list is `pageSpots` over the draft,
+  so it is right by construction and costs no table. The template's notes
+  are keyed by role and by picture slot, with the slot's note taken only
+  while the section there is still of the kind the template put in it, so
+  an owner's edit falls back to the role's words rather than to a sentence
+  about the wrong section. The core's notes speak no industry; a test
+  keeps them so.
+- **The camera is a file input** (18). `capture="environment"` on an
+  `<input type="file">` opens the camera on a phone and is ignored on a
+  computer: no permission prompt of the platform's own, no media API. The
+  button is offered on `navigator.maxTouchPoints`, a guess about a camera,
+  which is why the plain upload button stays beside it everywhere; the
+  guess is read through `useSyncExternalStore` so the server renders the
+  list without it and nothing mismatches on hydration.
 - **The look is the platform's, and it follows the best of the kind** (17).
   The visual pass took its patterns from the best direct-to-consumer farm
   sites (Seven Sons, White Oak Pastures, Polyface) and put each into the
@@ -1934,6 +2036,7 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
   price list provider) over `core/site-prices.ts` (pure presenter);
   `tests/site-blocks.test.ts`
 - `docs/help/marketing/overview.md` — the screen's guide
+- `src/lib/sites/shots.ts` — the shot list (18, ADR 0031): `pageSpots`, `spotKey`/`parseSpotKey`, `placePhoto`, `shotSummary`/`shotLine`, `emptySpotCount`, `isStarterPhoto`, `GENERIC_SHOTS`, `shotNotesFor` (pure); `SiteTemplate.shots` and `TemplatePicture.shot` in `src/lib/site-templates/types.ts`; `placePhotoAction` in `page-actions.ts`; `components/shot-list.tsx` and `src/app/dashboard/m/marketing/website/photos/page.tsx`; the `Photos` card on the Website page; `docs/help/marketing/shot-list.md`; `tests/site-shots.test.ts`
 
 ## Decisions & gotchas
 
@@ -2338,3 +2441,12 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
 - **The Companies section links nowhere.** A company is created on
   Accounting's Companies page; the section could say so when there is one
   company and no books.
+- **The draft preview draws no placeholder where a photo belongs.** The
+  shot list is where the where and the what are said (18); a
+  `mode === "draft"` notice in the renderer, like the map's, is the shape
+  if a preview cue is ever wanted (ADR 0031).
+- **`Take a photo` is offered on a guess.** `navigator.maxTouchPoints > 0`
+  stands in for "has a camera"; a touch laptop gets the button and a file
+  window. A phone has not yet been seen taking a photo into a spot: the
+  upload path is the picker's, proven, and the camera is the browser's own
+  file input with `capture`.

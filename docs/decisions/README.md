@@ -65,3 +65,4 @@ Keep them short — one page. An ADR nobody reads has failed at its only job.
 | [0028](0028-a-packs-block-is-data-the-site-draws.md) | A pack's block on the website is data the site draws | 2026-09-05 | Accepted |
 | [0029](0029-the-preview-follows-the-editor-not-the-save.md) | The preview follows the editor, not the save | 2026-09-05 | Accepted |
 | [0030](0030-a-site-template-is-data-an-industry-contributes.md) | A site template is data an industry contributes; the core assembles it and the writer fills the words | 2026-09-05 | Accepted |
+| [0031](0031-where-a-photo-belongs-is-read-from-the-page.md) | Where a photo belongs is read from the page, never stored; the template says what to take | 2026-09-05 | Accepted |

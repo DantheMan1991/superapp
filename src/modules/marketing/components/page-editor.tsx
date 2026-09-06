@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { emptySpotCount } from "@/lib/sites/shots";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import {
@@ -178,6 +179,7 @@ export function PageEditor({
   const [rows, setRows] = useState<Row[]>(() => initial.content.sections.map(keyed));
   // Follows the unsaved rows, so typing a description clears it at once.
   const pageNudge = altNudge(undescribedPhotosOnPage({ sections: rows.map((r) => r.section) }));
+  const emptySpots = emptySpotCount({ sections: rows.map((r) => r.section) });
   const [selected, setSelected] = useState<string | null>(rows[0]?.key ?? null);
   // A block section is called by its catalogue name; every other kind by its own.
   const labelFor = (section: Section) => (section.type === "block" ? blockLabel(section.kind, blocks) : sectionLabel(section.type));
@@ -430,6 +432,15 @@ export function PageEditor({
             {pageNudge && (
               <p className="text-xs text-amber-700">
                 {pageNudge} Screen readers and search engines say the description instead of the picture; add one under each photo.
+              </p>
+            )}
+            {emptySpots > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {emptySpots === 1 ? "One place for a photo on this page is empty." : `${emptySpots} places for a photo on this page are empty.`}{" "}
+                <Link href="/dashboard/m/marketing/website/photos" className="underline underline-offset-2 hover:text-foreground">
+                  The shot list
+                </Link>{" "}
+                says what to take there.
               </p>
             )}
             {rows.length === 0 ? (

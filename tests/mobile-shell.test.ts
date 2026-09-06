@@ -35,6 +35,16 @@ describe("the shell and the web agree", () => {
     expect(existsSync(shell(path.join("www", "offline.html")))).toBe(true);
   });
 
+  it("is registered with Firebase for push, under its own package name", () => {
+    const services = JSON.parse(
+      readFileSync(shell(path.join("android", "app", "google-services.json")), "utf8"),
+    ) as { client?: Array<{ client_info?: { android_client_info?: { package_name?: string } } }> };
+    const packages = (services.client ?? []).map(
+      (c) => c.client_info?.android_client_info?.package_name,
+    );
+    expect(packages).toContain(app.appId);
+  });
+
   it("keeps one version in one place", () => {
     const pkg = JSON.parse(readFileSync(shell("package.json"), "utf8")) as { version: string };
     expect(pkg.version).toBe(app.version);

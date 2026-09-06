@@ -69,6 +69,11 @@ const config: CapacitorConfig = {
       style: "DARK",
       backgroundColor: NAVY,
     },
+    // A notification that arrives while the app is open still shows, with
+    // sound and badge; the digest is a morning event, not a chat.
+    PushNotifications: {
+      presentationOptions: ["badge", "sound", "alert"],
+    },
   },
 };
 

@@ -66,6 +66,46 @@ Putting it on an iPhone needs:
    commit the generated `mobile/ios/` from a run so the settings stop being
    regenerated.
 
+## 3a. Push notifications
+
+Android push goes through Firebase Cloud Messaging; iPhone push through
+Apple's APNs. The web side (the device table, the senders, the digest sending
+after the email) is built; this is the plumbing around it.
+
+**Firebase, done once (2026-09-06).** A Firebase project *Yosher*
+(`yosher-60d89`) with an Android app registered under `com.yosherapp.app`.
+Two files came out of it:
+
+- `google-services.json` — the app's config, committed at
+  `mobile/android/app/google-services.json`. Not a secret: it identifies the
+  app to Firebase, and the Gradle template applies the Google Services plugin
+  the moment the file exists.
+- A service-account key (`yosher-…-firebase-adminsdk-….json`) — a private
+  key that sends as the project. Never in the repo. Its `project_id`,
+  `client_email` and `private_key` are Vercel Production's
+  `FCM_PROJECT_ID`, `FCM_CLIENT_EMAIL` and `FCM_PRIVATE_KEY`; the key is
+  pasted as the one-line value the file holds, `\n` sequences and all.
+
+**To prove it end to end** once a phone has the app: sign in on the phone,
+allow notifications, then from a laptop with the repo:
+
+```bash
+npm run push:probe -- --email you@example.com --service-account C:/path/to/firebase-adminsdk.json
+```
+
+It sends one test notification through the digest's own sender to every
+phone that person registered and prints counts. The same command with
+`--apns-key`, `--apns-key-id` and `--apns-team-id` covers an iPhone once
+Apple's side exists.
+
+**iPhone, when the Apple account exists.** In the developer account create
+an APNs authentication key (.p8) and note its key id and the team id; those
+are Vercel's `APNS_KEY_ID`, `APNS_TEAM_ID` and `APNS_PRIVATE_KEY` (the
+file's contents), with `APNS_BUNDLE_ID=com.yosherapp.app`. The Xcode project
+needs the Push Notifications capability and an AppDelegate that forwards the
+device token to Capacitor, per the plugin's iOS instructions — both done when
+`mobile/ios/` is committed from a CI run (§3).
+
 ## 4. How a change to the shell ships
 
 - **Version.** `mobile/app.json` holds the version the user agent reports

@@ -26,6 +26,8 @@ Yosher opens on the **Overview** page. The sidebar on the left takes you to ever
 
 The switcher and the avatar can appear a moment after the rest of the page on a slow connection. That is normal.
 
+**In the Yosher app on a phone**, the first time you sign in the phone asks whether Yosher may send you notifications. Allow it, and your morning summary arrives as a notification as well as an email; tap it to open **What needs you**. Say no, and nothing changes except that the phone stays quiet. You can change your mind in the phone's own settings for the Yosher app.
+
 ## How to open a page
 
 1. Click its row in the sidebar. The row fills in and the page opens.

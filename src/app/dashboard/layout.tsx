@@ -18,6 +18,7 @@ import {
   ENTERPRISE_LABEL_KEY,
 } from "@/lib/enterprises/vocabulary";
 import { AfterHydration } from "@/components/app/after-hydration";
+import { PushRegistration } from "@/components/app/push-registration";
 
 export const dynamic = "force-dynamic";
 
@@ -208,6 +209,8 @@ export default async function DashboardLayout({
               afterSelectOrganizationUrl="/dashboard"
             />
             <UserButton />
+            {/* Inside the mobile app: ask for notifications and register the phone. Nothing in a browser. */}
+            <PushRegistration />
           </AfterHydration>
         </div>
       }

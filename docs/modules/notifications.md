@@ -12,6 +12,29 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-06 — Push: the digest's second channel (`claude/mobile-app-2a-push-web`)
+
+The mobile app (ADR 0032) needs a reason to exist beyond the site in a box,
+and reviewers cite notifications first. This is the web side; the shell's
+plugin follows in the mobile dossier's next slice.
+
+- **One digest, two channels.** After the email, the same person's digest goes
+  to every phone they registered, under the same claimed log row — the title
+  is `digestSubject`, the body is the business and the first item, the tap
+  opens `/dashboard/today`. Nothing is stored that was not stored before; an
+  empty, complete digest sends no push (`shouldPush`), because a notification
+  exists to prompt action and "nothing needs you" is not one.
+- **`push_devices`** (`drizzle/0261`, RLS in `0262`): a phone, keyed by person
+  and not tenant, own-rows-only. Registered by `registerPushDeviceAction`
+  when the shell hands the page a token; disabled when a provider says the
+  token is dead.
+- **Two senders behind lazy env** (`push.ts`): APNs over HTTP/2 with an ES256
+  provider token, FCM's HTTP v1 with a service-account OAuth token — both
+  signed with nothing but `node:crypto`, both tested against generated keys
+  (`tests/push-core.test.ts`). Unset, the run counts the phones it could not
+  reach and warns once.
+- `DigestRunResult` gains `pushed`, `pushFailed`, `pushDisabled`.
+
 ### 2026-09-02 — Accounting's third item: a failing recurring template (branch `claude/a-failing-template-is-somebodys-obligation`)
 
 Accounting now contributes a third obligation, still owners only: an ACTIVE,
@@ -143,6 +166,7 @@ No tables yet. That is the design, not an omission — see Decisions.
 | --- | --- | --- |
 | `notification_preferences` | Whether one person wants the digest, in one workspace | Unique on (tenant, profile). **Read and write scoped to the acting person** via `app_current_user()` (`0090`) — not tenant-wide, so an owner cannot change a staff member's. A MISSING ROW MEANS `daily`; the default lives in the read, never a backfill |
 | `notification_digest_log` | One row per person per day sent | **Superadmin-only, no member policy at all.** Unique on (tenant, profile, local_date) — that index IS the idempotency guarantee. `item_keys` holds identifiers only (S9); it exists so the delta has something to compare against |
+| `push_devices` | A phone that asked to be told, keyed by PERSON | Not tenant-scoped, like `profiles`. Superadmin all; otherwise **your own rows only** via `app_current_user()` (`0262`). `token` unique globally; `disabled_at` when the provider declares it dead. Registered and sent under `withSystem` — see the mobile dossier for why registration must be |
 | *(obligations)* | Derived live from each module's own state | Never stored — see Decisions |
 
 ## Key files & seams
@@ -155,6 +179,7 @@ No tables yet. That is the design, not an omission — see Decisions.
   fan-out, and the failure reporting that makes this different from mail's.
 - `src/modules/crm/attention/source.ts`, `src/modules/accounting/attention/source.ts`
 - `src/app/dashboard/today/page.tsx` — the reference copy.
+- `src/lib/notifications/push-core.ts` (pure: the message, the provider tokens, what an answer means) and `push.ts` (the loop over a person's phones); `src/app/dashboard/push-actions.ts` (registration); `src/components/app/push-registration.tsx` + `src/lib/native-bridge.ts` (the page's side of the shell's bridge).
 
 ## Decisions & gotchas
 
@@ -166,6 +191,16 @@ self-clear, so it accumulates and gets muted — and a muted channel is worse th
 no channel. If you want something that can be cleared, you want a discrete
 EVENT (a document shared with you, a mention), which is a different feature with
 its own table, kept separate so it cannot rot the majority.
+
+**Push is a second channel for the digest, not a second product.** The
+obvious mobile feature is "notify me when X happens" — an event stream, the
+exact design the first decision here rejects. Instead a phone gets what the
+email gets, when the email gets it, under the same log row, and the tap opens
+the same page. It inherits every property the digest paid for: one number
+everywhere, a list that clears itself, silence over duplication. The one
+departure is that an empty, complete digest is emailed but not pushed: the
+email is a glance, the push is an interruption, and "nothing needs you" does
+not earn one.
 
 **A failing source is REPORTED, never folded to zero.** The one place this
 knowingly departs from `mail-extensions/resolve.ts`. There, a broken extension

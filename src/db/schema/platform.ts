@@ -274,6 +274,51 @@ export const notificationPreferences = pgTable(
  * (S9). The count is stored alongside rather than derived so a future change to
  * what gets logged cannot silently rewrite history.
  */
+export const pushPlatform = pgEnum("push_platform", ["ios", "android"]);
+
+/**
+ * A phone that asked to be told. One row per device token, keyed by the
+ * PERSON (Clerk id) and not by tenant: a device belongs to whoever is signed
+ * in on it, and a person in two businesses has one phone. The morning digest
+ * is per (tenant, person), so that phone gets one notification per business,
+ * exactly as it gets one email per business.
+ *
+ * Not tenant-scoped, like `profiles`. RLS (`drizzle/0262`): superadmin, and
+ * otherwise YOUR OWN ROWS ONLY through `app_current_user()` — no tier of
+ * membership reaches somebody else's phone, in either direction. The sender
+ * runs under `withSystem`; so does registration, because a phone that
+ * changes hands is a row the new person cannot see (push-actions.ts).
+ *
+ * `token` is unique globally: the provider's token identifies the device, and
+ * a device that changes hands is re-pointed at the new person by the upsert
+ * rather than duplicated. `disabled_at` is set when the provider says the
+ * token is dead (uninstalled, expired); the row stays as a record and is
+ * skipped. Mobile dossier, ADR 0032.
+ */
+export const pushDevices = pgTable(
+  "push_devices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    clerkUserId: text("clerk_user_id").notNull(),
+    platform: pushPlatform("platform").notNull(),
+    token: text("token").notNull(),
+    appVersion: text("app_version").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
+    disabledReason: text("disabled_reason"),
+  },
+  (t) => [
+    uniqueIndex("push_devices_token_idx").on(t.token),
+    index("push_devices_user_idx").on(t.clerkUserId),
+  ],
+);
+export type PushDevice = typeof pushDevices.$inferSelect;
+
 export const notificationDigestLog = pgTable(
   "notification_digest_log",
   {

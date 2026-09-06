@@ -315,6 +315,7 @@ Paste these into the PR. They are the actual gate.
 | `DATABASE_URL_OWNER` | Migrations only | Neon console |
 | `CLERK_SECRET_KEY`, webhook secret | Identity | Clerk dashboard |
 | `STRIPE_SECRET_KEY`, webhook secret | Billing — the platform charging the tenant | Stripe dashboard |
+| `APNS_*`, `FCM_*` | Push notifications — the mobile app's morning digest (`src/lib/notifications/push.ts`). Lazy; unset means no push | Apple developer account (a .p8 key), Firebase console (a service account) |
 | `STRIPE_CONNECT_WEBHOOK_SECRET` | Connect events — the tenant's own connected accounts. A SEPARATE endpoint with a separate secret, because Stripe only delivers `account.updated` to a Connect-enabled one | Stripe dashboard |
 | `SQUARE_APPLICATION_ID`, `SQUARE_APPLICATION_SECRET` | The tenant's own Square account, via OAuth (ADR 0017). The secret is sent to Square at code exchange and on revoke, and never anywhere else. `SQUARE_ENVIRONMENT` picks sandbox (the default) or production | Square Developer Console |
 | `SQUARE_WEBHOOK_SIGNATURE_KEY` | Square events. HMAC-SHA256 over the notification URL plus the raw body, so `NEXT_PUBLIC_APP_URL` must match the URL registered in the console exactly | Square Developer Console |

@@ -151,7 +151,8 @@ export function templateSlots(pages: AssembledPage[]): PageSlots[] {
     description: page.content.description,
     seoTitle: page.content.seoTitle,
     sections: page.content.sections.map((section, index) => {
-      const words = sectionWords(section);
+      // A question's blank answer is the owner's to write, never the writer's to guess.
+      const words = Object.fromEntries(Object.entries(sectionWords(section)).filter(([path, text]) => !(section.type === "faq" && /.answer$/.test(path) && text === "")));
       const limits = Object.fromEntries(Object.keys(words).map((path) => [path, limitFor(section.type, path)]));
       return { index, kind: section.type, words, limits };
     }),

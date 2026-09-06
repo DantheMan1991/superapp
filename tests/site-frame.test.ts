@@ -27,6 +27,7 @@ import {
 const blank: FrameInput = {
   announcement: { text: "", href: "", shown: false },
   headerButton: { label: "", href: "" },
+  logoSize: "medium",
   social: [],
   footerColumns: [],
   footerNote: "",
@@ -151,6 +152,7 @@ describe("the frame around every page", () => {
       frame: {
         announcement: settings.announcement,
         headerButton: settings.headerButton,
+        logoSize: "medium",
         social: settings.social,
         footerColumns: settings.footerColumns,
         footerNote: "Since 1978",
@@ -178,6 +180,7 @@ describe("the frame around every page", () => {
       frame: {
         announcement: { text: "Closed Monday", href: "", shown: false },
         headerButton: null,
+        logoSize: "medium",
         social: [{ network: "instagram", url: "https://instagram.com/x", label: "" }],
         footerColumns: [{ heading: "Visit", text: "", links: [{ label: "Map", href: "/contact" }] }],
         footerNote: "",

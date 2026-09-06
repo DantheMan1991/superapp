@@ -340,6 +340,7 @@ const headerFooterInput = z.object({
       }),
     )
     .max(FOOTER_COLUMNS_MAX),
+  logoSize: z.enum(["small", "medium", "large"]).default("medium"),
   footerNote: z.string().trim().max(160).default(""),
 });
 

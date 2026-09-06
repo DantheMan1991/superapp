@@ -92,6 +92,9 @@ export type CardIconName = (typeof CARD_ICON_NAMES)[number];
 
 /** Cards a Columns section holds: four rows of three is a long page already. */
 export const CARDS_MAX = 12;
+/** Quotes a testimonials section holds, and questions an FAQ holds. */
+export const QUOTES_MAX = 6;
+export const FAQ_MAX = 10;
 
 /**
  * One card in a Columns section: a photo or an icon on top, a heading, a
@@ -323,6 +326,36 @@ export const SectionSchema = z.discriminatedUnion("type", [
     style: SectionStyleSchema.optional(),
   }),
   /**
+   * Testimonials — slice 16. Starts empty in a template and shows only once
+   * a quote has words and a name (`src/lib/sites/proof.ts`): social proof
+   * is the one thing no writer may invent.
+   */
+  z.object({
+    type: z.literal("quotes"),
+    heading: short(80).default(""),
+    items: z
+      .array(z.object({ quote: short(400).default(""), name: short(60).default(""), detail: short(80).default("") }))
+      .max(QUOTES_MAX)
+      .default([]),
+    style: SectionStyleSchema.optional(),
+  }),
+  /**
+   * Questions and answers — slice 16. A question shows only once it has an
+   * answer, so a template may carry the questions a business of its kind
+   * is asked and leave the answers to the owner. Drawn as native
+   * disclosures (no script) and told to search engines as an FAQPage.
+   */
+  z.object({
+    type: z.literal("faq"),
+    heading: short(80).default(""),
+    note: short(300).default(""),
+    items: z
+      .array(z.object({ question: short(120).default(""), answer: short(600).default("") }))
+      .max(FAQ_MAX)
+      .default([]),
+    style: SectionStyleSchema.optional(),
+  }),
+  /**
    * A pack's block — slice 9b, the declared slot (ADR 0028). The site knows
    * the shape and nothing of what fills it: `kind` names a provider a pack
    * registered (`pack.block`, e.g. `retail.prices`), `config` holds what
@@ -406,6 +439,8 @@ export const SiteSettingsSchema = z.object({
   hoursLines: z.array(short(80)).max(7).default([]),
   /** The owner's own lines about the business, for the writer: what they sell, how, and who buys it. Never shown as written. */
   about: short(600).default(""),
+  /** How big the header's logo is drawn (slice 16). */
+  logoSize: z.enum(["small", "medium", "large"]).default("medium"),
   /** Above the header on every page, while `shown`. */
   announcement: AnnouncementSchema.default({ text: "", href: "", shown: false }),
   /** The button at the right of the menu; null is no button. */
@@ -439,6 +474,7 @@ export const EMPTY_SETTINGS: SiteSettings = {
   address: "",
   hoursLines: [],
   about: "",
+  logoSize: "medium",
   announcement: { text: "", href: "", shown: false },
   headerButton: null,
   social: [],

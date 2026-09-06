@@ -24,10 +24,16 @@ const TEXT_PATHS: Record<SectionType, string[]> = {
   slideshow: ["heading"],
   columns: ["heading", "intro", "cards[].heading", "cards[].body[]", "cards[].cta.label"],
   block: ["heading", "note", "emptyText"],
+  quotes: ["heading", "items[].quote", "items[].name", "items[].detail"],
+  faq: ["heading", "note", "items[].question", "items[].answer"],
 };
 
 /** How long each slot may be, by its last name; the schema is the law, this is what a writer is told. */
 const LIMITS: Record<string, number> = {
+  quote: 400,
+  detail: 80,
+  question: 120,
+  answer: 600,
   headline: 120,
   subheadline: 240,
   heading: 80,

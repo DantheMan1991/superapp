@@ -32,8 +32,10 @@ import {
   CARD_ICON_NAMES,
   CARDS_MAX,
   DEFAULT_SECTION_STYLE,
+  FAQ_MAX,
   FORM_FIELDS_MAX,
   GALLERY_ITEMS_MAX,
+  QUOTES_MAX,
   type Card,
   type FormField,
   type FormFieldKind,
@@ -414,6 +416,90 @@ function SectionFields({
           </p>
         </div>
       );
+    case "quotes": {
+      const setItem = (i: number, patch: Partial<(typeof section.items)[number]>) =>
+        onChange({ ...section, items: section.items.map((it, j) => (j === i ? { ...it, ...patch } : it)) });
+      return (
+        <div className="space-y-4">
+          <Field id={id("heading")} label="Heading" hint="Optional.">
+            <Input id={id("heading")} value={section.heading} maxLength={80} onChange={(e) => onChange({ ...section, heading: e.target.value })} />
+          </Field>
+          <div className="space-y-3">
+            <Label>Quotes</Label>
+            {section.items.map((item, i) => (
+              <div key={i} className="space-y-2 rounded-xl bg-muted/50 p-3">
+                <Textarea
+                  aria-label={`Quote ${i + 1}`}
+                  value={item.quote}
+                  maxLength={400}
+                  rows={3}
+                  placeholder="What they said, in their words"
+                  onChange={(e) => setItem(i, { quote: e.target.value })}
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input aria-label={`Quote ${i + 1} name`} value={item.name} maxLength={60} placeholder="Their name" className="min-w-0 flex-1" onChange={(e) => setItem(i, { name: e.target.value })} />
+                  <Input aria-label={`Quote ${i + 1} detail`} value={item.detail} maxLength={80} placeholder="A word about them, or blank" className="min-w-0 flex-1" onChange={(e) => setItem(i, { detail: e.target.value })} />
+                  <Button type="button" variant="ghost" size="sm" aria-label={`Remove quote ${i + 1}`} onClick={() => onChange({ ...section, items: section.items.filter((_, j) => j !== i) })}>
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+            <Button type="button" variant="outline" size="sm" disabled={section.items.length >= QUOTES_MAX} onClick={() => onChange({ ...section, items: [...section.items, { quote: "", name: "", detail: "" }] })}>
+              <Plus className="size-4" />
+              Add a quote
+            </Button>
+            <p className="text-xs text-muted-foreground">Up to six. A quote shows on the site only once it has words and a name; until then the section shows nothing.</p>
+          </div>
+        </div>
+      );
+    }
+    case "faq": {
+      const setItem = (i: number, patch: Partial<(typeof section.items)[number]>) =>
+        onChange({ ...section, items: section.items.map((it, j) => (j === i ? { ...it, ...patch } : it)) });
+      return (
+        <div className="space-y-4">
+          <Field id={id("heading")} label="Heading" hint="Optional.">
+            <Input id={id("heading")} value={section.heading} maxLength={80} onChange={(e) => onChange({ ...section, heading: e.target.value })} />
+          </Field>
+          <Field id={id("note")} label="Note" hint="A line under the heading, or blank.">
+            <Input id={id("note")} value={section.note} maxLength={300} onChange={(e) => onChange({ ...section, note: e.target.value })} />
+          </Field>
+          <div className="space-y-3">
+            <Label>Questions</Label>
+            {section.items.map((item, i) => (
+              <div key={i} className="space-y-2 rounded-xl bg-muted/50 p-3">
+                <div className="flex items-center gap-2">
+                  <Input aria-label={`Question ${i + 1}`} value={item.question} maxLength={120} placeholder="The question, as a customer asks it" className="min-w-0 flex-1" onChange={(e) => setItem(i, { question: e.target.value })} />
+                  <Button type="button" variant="ghost" size="sm" aria-label={`Move question ${i + 1} up`} disabled={i === 0} onClick={() => onChange({ ...section, items: moveItem(section.items, i, i - 1) })}>
+                    ↑
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" aria-label={`Move question ${i + 1} down`} disabled={i === section.items.length - 1} onClick={() => onChange({ ...section, items: moveItem(section.items, i, i + 1) })}>
+                    ↓
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" aria-label={`Remove question ${i + 1}`} onClick={() => onChange({ ...section, items: section.items.filter((_, j) => j !== i) })}>
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
+                <Textarea
+                  aria-label={`Answer ${i + 1}`}
+                  value={item.answer}
+                  maxLength={600}
+                  rows={3}
+                  placeholder="Your answer. A blank one keeps the question off the site."
+                  onChange={(e) => setItem(i, { answer: e.target.value })}
+                />
+              </div>
+            ))}
+            <Button type="button" variant="outline" size="sm" disabled={section.items.length >= FAQ_MAX} onClick={() => onChange({ ...section, items: [...section.items, { question: "", answer: "" }] })}>
+              <Plus className="size-4" />
+              Add a question
+            </Button>
+            <p className="text-xs text-muted-foreground">Up to ten. A question shows on the site only once it has an answer; until one does, the section shows nothing. Answered questions are also told to search engines.</p>
+          </div>
+        </div>
+      );
+    }
     case "block": {
       // A pack's block (slice 9b): the words are the site's, the settings
       // are the provider's fields, drawn here from their descriptions.

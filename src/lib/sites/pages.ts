@@ -1,4 +1,5 @@
 import { MAP_ZOOM_LABELS } from "./map-core";
+import { completeQuestions, completeQuotes } from "./proof";
 import { RESERVED_PAGE_PATHS } from "./slug";
 import type { ImageRef, PageContent, Section, SectionType } from "./schema";
 
@@ -32,6 +33,8 @@ export const SECTION_TYPES: ReadonlyArray<{
   { type: "gallery", label: "Photo gallery", hint: "Several photos in a grid, with a heading and captions if you like." },
   { type: "slideshow", label: "Slideshow", hint: "Photos shown one at a time with arrows, moving on by themselves if you like." },
   { type: "columns", label: "Columns", hint: "Two to four columns of cards, each with a photo or an icon, a heading, a few lines and a button. Services, your team, reasons to choose you." },
+  { type: "quotes", label: "Testimonials", hint: "What customers say, in their words with their names. Shows on the site only once a quote has both." },
+  { type: "faq", label: "Questions", hint: "Common questions with your answers, each opening on a tap. A question shows only once it has an answer." },
 ];
 
 /** "map-pin" → "Map pin"; "" → "None". For the editor's icon list. */
@@ -90,6 +93,10 @@ export function newSection(type: PlainSectionType): Section {
       return { type, heading: "Photos", items: [], columns: 3 };
     case "slideshow":
       return { type, heading: "", items: [], seconds: 6, layout: "wide" };
+    case "quotes":
+      return { type, heading: "What customers say", items: [] };
+    case "faq":
+      return { type, heading: "Common questions", note: "", items: [] };
     case "columns":
       return {
         type,
@@ -149,6 +156,16 @@ export function sectionSummary(section: Section): string {
     case "block":
       text = section.heading || section.kind;
       break;
+    case "quotes": {
+      const n = completeQuotes(section.items).length;
+      text = `${section.heading || "Testimonials"}: ${n === 0 ? "none filled in yet" : `${n} ${n === 1 ? "quote" : "quotes"}`}`;
+      break;
+    }
+    case "faq": {
+      const n = completeQuestions(section.items).length;
+      text = `${section.heading || "Questions"}: ${n === 0 ? "none answered yet" : `${n} answered`}`;
+      break;
+    }
     case "columns": {
       const names = section.cards.map((c) => c.heading.trim()).filter(Boolean).join(", ");
       const n = section.cards.length;

@@ -1,7 +1,7 @@
 import "./lib/load-env";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { ClerkApi } from "./lib/clerk-api";
+import { ClerkApi, ClerkApiError } from "./lib/clerk-api";
 import {
   buildCreateOrganizationBody,
   buildCreateUserBody,
@@ -172,9 +172,23 @@ async function main() {
       say(`  ${org.name}  would create (created_by ${creator ?? "nobody yet"})`);
       continue;
     }
-    const created = await api.request<Json>("POST", "/organizations", {
-      body: buildCreateOrganizationBody(org, creator),
-    });
+    const body = buildCreateOrganizationBody(org, creator);
+    let created: Json;
+    try {
+      created = await api.request<Json>("POST", "/organizations", { body });
+    } catch (err) {
+      // A production instance made after Clerk turned slugs optional has them
+      // switched off (`organization_slugs_disabled`). The platform never read
+      // Clerk's slug — a tenant carries its own — so drop it and carry on.
+      const slugsOff =
+        err instanceof ClerkApiError &&
+        err.body.includes("organization_slugs_disabled") &&
+        "slug" in body;
+      if (!slugsOff) throw err;
+      delete body.slug;
+      say(`    slugs are off on the target; creating without one`);
+      created = await api.request<Json>("POST", "/organizations", { body });
+    }
     mapping.organizations[org.id] = String(created.id);
     say(`  ${org.name}  created → ${created.id}`);
   }

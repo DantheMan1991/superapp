@@ -226,6 +226,10 @@ platform's own hosts close.
 - **`--dev` remaps the dev branch, which is wrong for as long as laptops use
   the development instance.** The flag exists for symmetry with `db:migrate`
   and for the day the development instance is retired.
+- **Organization slugs may be off on the production instance.** Clerk made
+  them optional, and a fresh instance has them disabled. The import drops the
+  slug and says so; nothing in the app reads Clerk's slug, because a tenant
+  carries its own.
 - **The password CSV is the only artefact that must not exist afterwards.**
   Outside the repo, deleted after Step 3.
 

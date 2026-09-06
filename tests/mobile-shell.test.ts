@@ -29,6 +29,8 @@ describe("the shell and the web agree", () => {
 
   it("loads the production site and bundles an offline page", () => {
     expect(app.url).toBe("https://yosherapp.com");
+    expect(app.startPath).toBe("/dashboard");
+    expect(readFileSync(shell("capacitor.config.ts"), "utf8")).toContain("app.startPath");
     const config = readFileSync(shell("capacitor.config.ts"), "utf8");
     expect(config).toContain('errorPath: "offline.html"');
     expect(config).toContain("appendUserAgent");

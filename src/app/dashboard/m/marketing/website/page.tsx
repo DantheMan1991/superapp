@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ExternalLink, Globe } from "lucide-react";
 import { withTenant } from "@/db";
+import { templateFor } from "@/lib/site-templates/resolve";
 import { requireTenant } from "@/lib/auth";
 import { isModuleEnabled, requireModuleEnabled } from "@/lib/modules";
 import { describeBooking } from "@/lib/sites/booking-core";
@@ -127,9 +128,10 @@ export default async function WebsitePage() {
                     ? `On the internet since ${dateInTimezone(drafts.site.publishedAt, ctx.tenant.timezone)}.`
                     : "Not on the internet yet."}
                   {" "}
+                  {`Built from the ${templateFor(ctx.tenant.industry).name} template. `}
                   {drafts.site.copySource === "model"
                     ? "The words were written by Yosher's assistant from your brand kit; read them before you publish."
-                    : "The words are the standard set; read them before you publish."}
+                    : "The words are the template's own; read them before you publish."}
                 </p>
               </div>
               {canWrite && <SiteStatusButtons status={drafts.site.status} />}

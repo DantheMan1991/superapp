@@ -5,7 +5,14 @@ import { z } from "zod";
 import { schema, withTenant } from "@/db";
 import { logAuditInTx } from "@/lib/audit";
 import { resolveBrandFor } from "@/lib/brand/read";
-import { assembleSite } from "@/lib/sites/copy";
+import { isModuleEnabled } from "@/lib/modules";
+import { siteBlockCatalog } from "@/lib/site-blocks/resolve";
+import type { BlockCatalogEntry } from "@/lib/site-blocks/types";
+import { assembleTemplate, attachPictures, scenesFor } from "@/lib/site-templates/core";
+import { templateFor } from "@/lib/site-templates/resolve";
+import type { AssembledPage, SiteTemplate } from "@/lib/site-templates/types";
+import type { ResolvedBrand } from "@/lib/brand/core";
+import type { SiteBrief } from "@/lib/sites/copy";
 import { frameFromInput } from "@/lib/sites/frame";
 import { SOCIAL_NETWORKS } from "@/lib/sites/links";
 import { geocodeAddress } from "@/lib/sites/map";
@@ -23,7 +30,9 @@ import { normalizeSiteSlug, slugReasonMessage } from "@/lib/sites/slug";
 import { MarketingError } from "./core/errors";
 import { fail, gate, type ActionResult } from "./gate";
 import { industryLabel } from "./logo-generate";
-import { siteBriefFor, writeSiteCopy } from "./site-generate";
+import { siteBriefFor, writeSite } from "./site-generate";
+import { ensureStarterPictures } from "./starter-pictures";
+import { saveKitLook } from "./kit-ops";
 import {
   changeSiteSlug,
   createSite,
@@ -104,8 +113,8 @@ export async function createSiteAction(
     const parsed = buildInput.safeParse(input);
     if (!parsed.success) return { error: "Check the fields and try again." };
     const slug = slugFrom(parsed.data.slug);
-    const settings = settingsFrom(EMPTY_SETTINGS, parsed.data);
-    const brief = await withTenant(
+    const schedulingOn = await isModuleEnabled(ctx.tenantId, "scheduling");
+    const start = await withTenant(
       ctx.tenantId,
       async (tx) => {
         if (await findSite(tx, ctx.tenantId)) {
@@ -116,14 +125,28 @@ export async function createSiteAction(
           where: eq(schema.tenants.id, ctx.tenantId),
           columns: { industry: true },
         });
-        return siteBriefFor({ brand, industry: industryLabel(tenant?.industry), settings });
+        // The template is the industry's (slice 15): its frame is the site's
+        // starting frame, and its look goes on the kit only where nobody chose.
+        const template = templateFor(tenant?.industry);
+        const settings = settingsFrom({ ...EMPTY_SETTINGS, ...template.frame }, parsed.data);
+        if (template.look && !brand.look && !brand.fontPairing && !brand.buttonShape) {
+          await saveKitLook(tx, ctx, null, {
+            look: template.look.look ?? "",
+            fontPairing: template.look.fontPairing ?? "",
+            buttonShape: template.look.buttonShape ?? "",
+          });
+        }
+        const brief = siteBriefFor({ brand, industry: industryLabel(tenant?.industry), settings });
+        const blocks = await siteBlockCatalog(tx, ctx.tenantId);
+        return { template, settings, brief, brand, blocks };
       },
       { role: ctx.role },
     );
-    // The assistant, outside any transaction.
-    const { copy, source } = await writeSiteCopy(brief);
-    const pages = assembleSite(brief, copy);
-    await withTenant(
+    const { template, settings, brief, brand, blocks } = start;
+    const assembled = assembleTemplate(template, brief, { schedulingOn, blocks, pictures: null });
+    // The writer, outside any transaction.
+    const { pages, source } = await writeSite(template, brief, assembled);
+    const siteId = await withTenant(
       ctx.tenantId,
       async (tx) => {
         const site = await createSite(tx, ctx, { slug, settings, copySource: source });
@@ -134,11 +157,15 @@ export async function createSiteAction(
           actorClerkUserId: ctx.userId,
           targetType: "site",
           targetId: site.id,
-          meta: { slug, copySource: source, pages: pages.length },
+          meta: { slug, copySource: source, pages: pages.length, template: template.slug },
         });
+        return site.id;
       },
       { role: ctx.role },
     );
+    // The starter pictures, once the site exists: network first, rows second,
+    // and the drafts take them in a second pass. A picture that fails is left out.
+    await placeStarterPictures(ctx, siteId, template, brief, brand, { schedulingOn, blocks }, pages, source);
     if (settings.address) await placeOnMap(ctx, settings.address);
     revalidateSite();
     return { ok: true, data: { slug } };
@@ -151,7 +178,8 @@ export async function createSiteAction(
 export async function rewriteSiteCopyAction(): Promise<ActionResult> {
   try {
     const ctx = await gate();
-    const { siteId, brief } = await withTenant(
+    const schedulingOn = await isModuleEnabled(ctx.tenantId, "scheduling");
+    const { siteId, brief, brand, template, blocks } = await withTenant(
       ctx.tenantId,
       async (tx) => {
         const site = await findSite(tx, ctx.tenantId);
@@ -164,13 +192,16 @@ export async function rewriteSiteCopyAction(): Promise<ActionResult> {
         const settings = SiteSettingsSchema.parse(site.settings);
         return {
           siteId: site.id,
+          brand,
+          template: templateFor(tenant?.industry),
+          blocks: await siteBlockCatalog(tx, ctx.tenantId),
           brief: siteBriefFor({ brand, industry: industryLabel(tenant?.industry), settings }),
         };
       },
       { role: ctx.role },
     );
-    const { copy, source } = await writeSiteCopy(brief);
-    const pages = assembleSite(brief, copy);
+    const assembled = assembleTemplate(template, brief, { schedulingOn, blocks, pictures: null });
+    const { pages, source } = await writeSite(template, brief, assembled);
     await withTenant(
       ctx.tenantId,
       async (tx) => {
@@ -181,11 +212,12 @@ export async function rewriteSiteCopyAction(): Promise<ActionResult> {
           actorClerkUserId: ctx.userId,
           targetType: "site",
           targetId: siteId,
-          meta: { copySource: source },
+          meta: { copySource: source, template: template.slug },
         });
       },
       { role: ctx.role },
     );
+    await placeStarterPictures(ctx, siteId, template, brief, brand, { schedulingOn, blocks }, pages, source);
     revalidateSite();
     return { ok: true };
   } catch (err) {
@@ -234,6 +266,30 @@ export async function saveSiteDetailsAction(input: unknown): Promise<ActionResul
  * address changed again in the meantime, in which case the next save does
  * this over. A miss writes nothing; the Website screen says so.
  */
+/**
+ * The template's starter pictures, after the site and its drafts exist
+ * (slice 15): made or reused in the library (network, outside any
+ * transaction), then put into the drafts' template slots in a second pass.
+ * A site whose pictures fail is a site without pictures, and says nothing.
+ */
+async function placeStarterPictures(
+  ctx: Awaited<ReturnType<typeof gate>>,
+  siteId: string,
+  template: SiteTemplate,
+  brief: SiteBrief,
+  brand: ResolvedBrand,
+  have: { schedulingOn: boolean; blocks: BlockCatalogEntry[] },
+  pages: AssembledPage[],
+  source: "model" | "standard",
+): Promise<void> {
+  const scenes = scenesFor(template);
+  if (scenes.length === 0) return;
+  const pictures = await ensureStarterPictures(ctx, siteId, brand, scenes);
+  if (Object.keys(pictures).length === 0) return;
+  const withPictures = attachPictures(template, brief, have, pages, pictures);
+  await withTenant(ctx.tenantId, (tx) => replaceDrafts(tx, ctx, siteId, withPictures, source), { role: ctx.role });
+}
+
 async function placeOnMap(ctx: Awaited<ReturnType<typeof gate>>, address: string): Promise<void> {
   const pin = await geocodeAddress(address);
   if (!pin) return;

@@ -80,9 +80,18 @@ jobs:
       # from a run of this job and this step becomes a no-op.
       - run: test -d ios || npx cap add ios
       - run: npx cap sync ios
+      # Capacitor 8 wires plugins in with Swift Package Manager, not CocoaPods:
+      # there is no workspace, only the project, and xcodebuild resolves the
+      # packages itself. The workspace form is kept for a project that gains
+      # pods later.
       - name: Compile for the simulator
         run: |
-          xcodebuild -workspace ios/App/App.xcworkspace -scheme App \
+          if [ -d ios/App/App.xcworkspace ]; then
+            TARGET="-workspace ios/App/App.xcworkspace"
+          else
+            TARGET="-project ios/App/App.xcodeproj"
+          fi
+          xcodebuild $TARGET -scheme App \
             -configuration Debug -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO -quiet build

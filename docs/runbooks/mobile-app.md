@@ -127,8 +127,9 @@ device token to Capacitor, per the plugin's iOS instructions — both done when
   the launch animation itself (the mark zooming in on blue) on its first
   paint inside the app, so the look changes with a web deploy.
 - **Local work** (optional): Android Studio opens `mobile/android`; Xcode
-  opens `mobile/ios/App/App.xcworkspace` on a Mac. Neither is needed for the
-  workflow to build.
+  opens `mobile/ios/App/App.xcodeproj` on a Mac. Capacitor 8 uses Swift
+  Package Manager, so there is no workspace and no `pod install`. Neither is
+  needed for the workflow to build.
 
 ## 5. Traps
 

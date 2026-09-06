@@ -5,6 +5,8 @@ import { reconcileTenantMemberships } from "@/lib/membership-sync";
 import { sendEmail } from "@/lib/email/send";
 import { localHourInTimezone, todayInTimezone } from "@/lib/timezone";
 import { buildPersonDigest, claimDigestSend } from "./digest";
+import { digestPushMessage, shouldPush } from "./push-core";
+import { sendPushToPerson } from "./push";
 import { digestSubject, renderDigestHtml, renderDigestText } from "./email";
 
 /**
@@ -30,6 +32,11 @@ export interface DigestRunResult {
   failed: number;
   /** Tenants whose roster could not be confirmed against Clerk. */
   rosterUnconfirmed: number;
+  /** Phones reached with the same digest (the mobile app, ADR 0032). */
+  pushed: number;
+  pushFailed: number;
+  /** Tokens a provider declared dead this run; their rows are now disabled. */
+  pushDisabled: number;
 }
 
 /** Active tenants, with the timezone that decides whether it is their 7am. */
@@ -41,6 +48,7 @@ async function tenantsToConsider() {
     tx
       .select({
         id: schema.tenants.id,
+        name: schema.tenants.name,
         clerkOrgId: schema.tenants.clerkOrgId,
         timezone: schema.tenants.timezone,
       })
@@ -102,6 +110,9 @@ export async function runDigest(now: Date = new Date()): Promise<DigestRunResult
     skippedOptedOut: 0,
     failed: 0,
     rosterUnconfirmed: 0,
+    pushed: 0,
+    pushFailed: 0,
+    pushDisabled: 0,
   };
 
   const tenants = await tenantsToConsider();
@@ -180,6 +191,18 @@ export async function runDigest(now: Date = new Date()): Promise<DigestRunResult
           result.failed += 1;
           // Reason only — never the address or the subject (S9).
           console.error(`digest send failed for tenant ${tenant.id}: ${sent.reason}`);
+        }
+        // The same digest, to the person's phones, under the same claim: a
+        // second channel, not a second stream. An empty and complete digest
+        // is not worth waking a phone for — see shouldPush.
+        if (shouldPush(digest)) {
+          const pushed = await sendPushToPerson(
+            person.clerkUserId,
+            digestPushMessage(digest, tenant.name),
+          );
+          result.pushed += pushed.delivered;
+          result.pushFailed += pushed.failed;
+          result.pushDisabled += pushed.disabled;
         }
       } catch (err) {
         result.failed += 1;

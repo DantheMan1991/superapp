@@ -1828,6 +1828,20 @@
       "when": 1788642872738,
       "tag": "0260_site_previous_slugs",
       "breakpoints": true
+    },
+    {
+      "idx": 261,
+      "version": "7",
+      "when": 1788692917677,
+      "tag": "0261_push_devices",
+      "breakpoints": true
+    },
+    {
+      "idx": 262,
+      "version": "7",
+      "when": 1788692924715,
+      "tag": "0262_push_devices_rls",
+      "breakpoints": true
     }
   ]
 }

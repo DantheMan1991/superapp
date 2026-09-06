@@ -13,6 +13,24 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-06 — Slice 2a: push, the web side (`claude/mobile-app-2a-push-web`)
+
+Everything push needs on the server and the page, mergeable before the shell
+carries the plugin — the page finds no plugin and does nothing.
+
+- **`push_devices`** (`drizzle/0261` + RLS `0262`), `registerPushDeviceAction`,
+  the senders in `src/lib/notifications/push.ts`, and the digest run sending
+  the same digest to a person's phones after the email — the notifications
+  dossier has the reasoning; this dossier owns the phone's side.
+- **`src/lib/native-bridge.ts` + `src/components/app/push-registration.tsx`:**
+  the page reads `window.Capacitor`, which the shell injects into the site,
+  asks for permission, registers, posts the token, and routes a tapped
+  notification to `data.url`. Pure detection, tested with hand-built windows.
+- **Registration is written under `withSystem`**, deliberately: a phone
+  changes hands, and the row for its token then belongs to somebody the new
+  person cannot see. The action binds the row to the verified caller and
+  nothing else.
+
 ### 2026-09-06 — Slice 1: the shell (`claude/mobile-app-1-the-shell`)
 
 The app exists: `mobile/`, a Capacitor 8 project that loads yosherapp.com.
@@ -79,7 +97,7 @@ require there. No shell exists yet; this is what it will load.
 
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
-| — | Nothing yet | Push will add a per-person device-token table, tenant-scoped like everything else |
+| `push_devices` | A phone that asked to be told, keyed by person | Own-rows-only RLS (`0262`); registered and sent under `withSystem`. Notifications dossier for the sending side |
 
 ## Key files & seams
 
@@ -153,10 +171,13 @@ from `/admin` — the same as any other departure.
   can run under the status bar (`contentInset: "never"`); the site hiding the
   splash on hydration instead of on a timer; Android's back button walking
   the webview's history.
-- **Slice 2 — push.** A tenant-scoped device-token table with RLS, a
-  registration action called by the shell, and a sender (APNs token auth,
-  FCM v1) fed by the notifications digest machinery — the feature reviewers
-  cite first under rule 4.2.
+- **Slice 2b — push, the shell's side.** `@capacitor/push-notifications` in
+  `mobile/`, a Firebase project with `google-services.json` in the Android
+  project (the founder creates the project; FCM needs no Play account), an
+  APNs key and the push capability on the iOS project (needs the Apple
+  account), and the `APNS_*` / `FCM_*` values in Vercel. The web side (2a)
+  is done and waits for it. Also: unregister on sign-out, and a guide line
+  for the permission prompt once it exists.
 - **Slice 3 — camera, Face ID, universal links, PDF share.** Each a plugin on
   the native side and a small seam here (`/.well-known/apple-app-site-association`
   and `assetlinks.json` as route handlers, driven by env).

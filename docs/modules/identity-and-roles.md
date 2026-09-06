@@ -11,6 +11,36 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-06 — The cutover: yosherapp.com signs in against the production instance (`claude/clerk-production-instance`, PR #415)
+
+Done with the founder driving the dashboards and this session running the
+scripts, per [the runbook](../runbooks/clerk-production-cutover.md). What
+happened, and what the runbook had not predicted:
+
+- **Order as run:** production instance created (Frontend API
+  `clerk.yosherapp.com`), DNS verified, keys into Vercel Production, users CSV
+  exported; `clerk:export` (2 users, 2 organizations, 1 pending invitation) →
+  `clerk:import` with the CSV → `clerk:remap -- --dry-run` → redeploy behind
+  `MAINTENANCE_MODE=1` → `clerk:remap -- --allow-unmapped` (31 columns, verified
+  no old ids remain) → webhook endpoint and secret → reopen. Closed for about
+  half an hour rather than ten minutes, because of the surprises below.
+- **PR #414 had been merged before the Vercel variables were set,** so the
+  merge deploy was inert and Vercel's Redeploy button became the lever. The
+  four commits pushed after the merge are PR #415.
+- **The production instance had organization slugs off** and refused the
+  import's slugs (`organization_slugs_disabled`). The import now drops the
+  slug; nothing in the platform reads Clerk's slug.
+- **`audit_log` is append-only by trigger**, and the first real remap rolled
+  back on it — cleanly, the whole point of one transaction. The remap now
+  skips that table; its actor ids are a record of the time.
+- **72 unmapped ids were test-suite residue** in production (Open items).
+- Verified after reopening: the sign-in card reads "Sign in to Yosher App",
+  no "Development mode" badge, key `pk_live_`, Frontend API
+  `clerk.yosherapp.com`, the Sign up link on the application domain. GitHub
+  sign-in was still on at that point — a dashboard toggle for the founder.
+- The Neon dev branch and `.env` stay on the development instance, untouched.
+  The rollback artefacts (snapshot and mapping) live outside the repo.
+
 ### 2026-09-05 — Move to a production Clerk instance: the tooling and the runbook (`claude/clerk-production-instance`)
 
 Found while sizing the store wrapper: yosherapp.com signs in against a Clerk

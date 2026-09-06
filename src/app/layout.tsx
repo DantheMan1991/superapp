@@ -48,7 +48,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider>
+    // The component paths, pinned here rather than in the dashboard: Clerk is
+    // deprecating the dashboard setting, and it does not clone from one
+    // instance to the next — the production instance was found sending people
+    // to the hosted Account Portal. Sign-in and sign-up are the app's own
+    // pages, and signing out lands on sign-in.
+    <ClerkProvider
+      signInUrl="/sign-in"
+      signUpUrl="/sign-up"
+      afterSignOutUrl="/sign-in"
+    >
       <html
         lang="en"
         className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}

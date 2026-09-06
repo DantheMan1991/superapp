@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./lib/load-env";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { neonConfig, Pool } from "@neondatabase/serverless";

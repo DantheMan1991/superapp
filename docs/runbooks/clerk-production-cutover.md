@@ -78,6 +78,10 @@ the PR needs a migration.
    running a farm signs in with. Apple comes later with the iOS app; it needs a
    Services ID and key from the Apple developer account.
 4. **Email, phone, username**: leave as cloned (email address + password).
+   **Paths** did not clone either, and need nothing: the app pins sign-in,
+   sign-up and after-sign-out in code (`<ClerkProvider>` in
+   `src/app/layout.tsx`), because Clerk is deprecating the dashboard page and
+   an unset production instance sends people to the hosted Account Portal.
 5. **Organizations**: confirm *Enable organizations* is on in the production
    instance. It clones, but the app loops at onboarding without it — verify.
 6. **Configure → Settings → Application name**: `Yosher`, not `SuperApp`. Do
@@ -100,7 +104,7 @@ the PR needs a migration.
 npm run clerk:export
 ```
 
-Reads `CLERK_SECRET_KEY` from `.env` (the development instance) and writes
+Reads `.env.local` then `.env` — `CLERK_SECRET_KEY` there is the development instance — and writes
 `clerk-migration/snapshot.json` (gitignored). Check the printout: the users,
 the organizations, who is in which, the pending invitation.
 
@@ -147,6 +151,13 @@ unmapped id belongs to someone who was deleted from Clerk before the export;
 their rows keep an id no instance resolves, which is harmless, and the real
 run needs `--allow-unmapped` to proceed past them. Anything else unexpected —
 stop here; nothing has been written.
+
+On 2026-09-06 the dry run reported 72 unmapped values and every one was a
+test-suite fixture, not a person: `export-test-…` and `close-test-…` actors in
+`audit_log`, `user-act` on a document share, and two tenants whose
+`clerk_org_id` is `dms-act-…` / `dms-ops-…`. They date from before
+`tests/setup/database-guard.ts` kept the suites off production. The real run
+uses `--allow-unmapped`; cleaning the residue out is a separate job.
 
 ### Step 5 — the cutover (about ten minutes; everyone is signed out)
 
@@ -222,6 +233,10 @@ platform's own hosts close.
 - **`--dev` remaps the dev branch, which is wrong for as long as laptops use
   the development instance.** The flag exists for symmetry with `db:migrate`
   and for the day the development instance is retired.
+- **Organization slugs may be off on the production instance.** Clerk made
+  them optional, and a fresh instance has them disabled. The import drops the
+  slug and says so; nothing in the app reads Clerk's slug, because a tenant
+  carries its own.
 - **The password CSV is the only artefact that must not exist afterwards.**
   Outside the repo, deleted after Step 3.
 

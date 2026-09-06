@@ -48,6 +48,10 @@ the build log gets a second entry when it has happened.
   (`src/lib/authorized-parties.ts`, `tests/proxy-switches.test.ts`). Clerk's
   production checklist asks for it, and customer sites on subdomains of the
   platform's domain are the exact shape it guards against.
+- **Component paths pinned in code.** `<ClerkProvider signInUrl signUpUrl
+  afterSignOutUrl>` in `src/app/layout.tsx`: the dashboard's Paths settings
+  do not clone between instances and Clerk is deprecating them; the fresh
+  production instance was sending people to the hosted Account Portal.
 - Scope on 2026-09-05: 2 users, 2 organizations, 1 pending invitation.
   `audit_log.meta` (JSON) is left as written — a record of the time.
 - Also found on the live card, for the founder's dashboard list: Google
@@ -269,3 +273,11 @@ the day the development instance is retired, not for the cutover.
 - **No account deletion exists.** Both app stores require an in-app path when
   sign-up is reachable inside the app; the B2B convention (sign up on the web,
   sign in on the app) plus a delete-account action is the likely shape.
+- **Production holds test-suite residue.** The 2026-09-06 remap dry run found
+  72 fake Clerk ids in production: `export-test-…` / `close-test-…` actors in
+  `audit_log`, `user-act` on a document share, and two tenants with
+  `clerk_org_id` of `dms-act-38444` and `dms-ops-28884-share-links`. They
+  predate `tests/setup/database-guard.ts`, which now keeps the suites off
+  production. Harmless to the cutover (the remap leaves them), but two junk
+  tenants in production want deleting under `withSystem`, and the audit rows
+  with them — the founder's call, not a script's.

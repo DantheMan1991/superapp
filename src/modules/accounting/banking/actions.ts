@@ -34,7 +34,12 @@ import {
   type ColumnMapping,
 } from "./csv-parse";
 import { importTransactions } from "./import";
-import { categorizeTransaction, readAiSuggestion, setTransactionExcluded } from "./review";
+import {
+  categorizeTransaction,
+  readAiSuggestion,
+  setTransactionExcluded,
+  undoCategorization,
+} from "./review";
 import {
   applyRulesToUnreviewed,
   confirmSuggestedRule,
@@ -503,6 +508,43 @@ export async function restoreTransactionAction(
       });
     });
     revalidateBanking();
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * The Undo on the "Posted" toast. One transaction: void the entry the row
+ * created and send the row back to review — the same two statements
+ * `voidPostedEntry` runs from the journal, reached from where the mistake was
+ * made rather than three screens away. `undoCategorization` says what it
+ * refuses and why.
+ */
+export async function undoCategorizeTransactionAction(
+  input: z.infer<typeof txnRefSchema>,
+): Promise<ActionResult> {
+  const ctx = await gate();
+  const parsed = txnRefSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    const { entry, bankAccountId } = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const r = await undoCategorization(tx, ctx, parsed.data);
+        await logAuditInTx(tx, {
+          action: "banking.txn_post_undone",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "bank_transaction",
+          targetId: parsed.data.transactionId,
+          meta: { entryId: r.entry.id },
+        });
+        return r;
+      },
+    );
+    revalidateBanking(bankAccountId);
+    revalidatePath(`${BASE}/journal/${entry.id}`);
     return { ok: true };
   } catch (err) {
     return fail(err);

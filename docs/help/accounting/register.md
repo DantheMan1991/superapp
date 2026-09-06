@@ -11,14 +11,16 @@ Open **Banking** in the accounting menu and click an account's card. This is whe
 
 - **The top of the page.** The title is the account's name. The line under it gives its kind, institution, last four digits and today's balance, or `owed` for a card. {badge:connected|success} for a live feed and {badge:closed|outline} for a closed account. Owners see, while the account is open, {button:Import CSV|outline}, {button:Suggest categories|primary|sparkles} and {button:Reconcile|outline}, and always {button:Close account|outline} or {button:Reopen account|outline}.
 - **The three tabs.** `To review (3)`, transactions that have arrived and are not in your books yet. `All (120)`, everything. `Excluded (2)`, transactions you have set aside. The counts are live. The list shows up to 300 transactions, newest first. There is no search or date filter.
-- **Each row.** `Date` and `Description`, as the bank gave them, with a {icon:paperclip} and a count when receipts are attached from the Inbox. Under the description, on a row still to review, a chip with a suggested category: `RULE · 6300` means one of your bank rules matched, and hovering it shows which; `AI · 6100 · 87%` is the assistant's suggestion and how sure it is. When both have an opinion only the rule's chip is shown, because a rule is a decision you wrote down. `Payee`, the vendor, once a rule or a person has set one. `In` and `Out`. On `All`, `Status`: `unreviewed`, `posted` or `excluded`, where `posted` is a link to the entry in the journal. On `To review`, for owners, `Category`, a list of your accounts already set to the suggestion, with {button:Tag|outline} under it when your business has tags.
-- **The buttons on a row.** On `To review`: {button:Match|outline} when the row has something in the books it could be, {button:Post|primary} and {button:Exclude|ghost}. On `All`: {button:Unmatch|ghost} on a matched row. On `Excluded`: {button:Restore|outline}.
+- **Each row.** `Date` and `Description`, as the bank gave them, with a {icon:paperclip} and a count when receipts are attached from the Inbox. Under the description, on a row still to review, a chip with a suggested category: `RULE · 6300` means one of your bank rules matched, and hovering it shows which; `AI · 6100 · 87%` is the assistant's suggestion and how sure it is. When both have an opinion only the rule's chip is shown, because a rule is a decision you wrote down. `Payee`, the vendor, once a rule or a person has set one. `In` and `Out`. On `All`, `Status`: `unreviewed`, `posted` or `excluded`, where `posted` is a link to the entry in the journal. On `To review`, for owners, `Category`, already set to the suggestion. Click it and type part of a code or a name, such as `63` or `insur`, and the list narrows to what matches; click the account, or press Enter for the highlighted one. {button:Tag|outline} sits under it when your business has tags.
+- **On a phone.** Each transaction is a card instead of a row: the description and the amount at the top, money in with a `+` in green and money out with a `−`, then the date, the payee and the receipt count, the chip, the `Category`, the tag and the buttons. Everything works the same as in the table.
+- **The buttons on a row.** On `To review`: {button:Match|outline} when the row has something in the books it could be, {button:Exclude|ghost} and {button:Post|primary}. On `All`: {button:Unmatch|ghost} on a matched row. On `Excluded`: {button:Restore|outline}.
 - **{button:Accept 12 suggestions (≥70%)|outline}.** At the top of `To review`. See how to post many at once, below.
 
 ## How to post a transaction
 
 1. On `To review`, check the `Category`, or change it. Add a tag if you use them.
-2. Click {button:Post|primary}. You see `Posted`. The transaction becomes an entry in your books: the bank account on one side and the category on the other, dated the transaction date, in the account's company.
+2. Click {button:Post|primary}. You see `Posted`, with {button:Undo|link} beside it for a few seconds. The transaction becomes an entry in your books: the bank account on one side and the category on the other, dated the transaction date, in the account's company.
+3. If the category was wrong, click {button:Undo|link} while it shows. You see `Undone — back in review`: the entry is voided and the transaction is back under `To review`, so you can post it again. Once the message has gone, open `posted` on `All` and void the entry there; that sends the transaction back the same way.
 
 Nothing is posted until you press the button, and the assistant never posts by itself. A bank rule set to post automatically can.
 
@@ -36,8 +38,8 @@ On `All`, {button:Unmatch|ghost} sends a matched transaction back to review; the
 
 ## How to exclude a transaction
 
-1. Click {button:Exclude|ghost} on a transfer between your own accounts, or a duplicate. It moves to `Excluded` without being posted.
-2. Click {button:Restore|outline} on `Excluded` to bring it back.
+1. Click {button:Exclude|ghost} on a transfer between your own accounts, or a duplicate. It moves to `Excluded` without being posted, and you see `Excluded` with {button:Undo|link} beside it for a few seconds.
+2. Click {button:Undo|link} while it shows, or {button:Restore|outline} on `Excluded`, to bring it back. You see `Back in review`.
 
 ## How to close the account
 
@@ -52,6 +54,11 @@ On `All`, {button:Unmatch|ghost} sends a matched transaction back to review; the
 | `No transactions here yet.` | The tab is empty. |
 | `Suggestions were just requested — try again in a moment.` | You asked the assistant twice within half a minute. |
 | `Posted 9, skipped 3` | Three suggestions could not be posted. The first reason follows. |
+| `Posted` | The transaction is in your books. {button:Undo|link} beside it voids the entry and brings the transaction back. |
+| `Undone — back in review` | The entry was voided and the transaction is waiting under `To review` again. |
+| `That row has nothing to undo — it is not a posting made from here. A matched row goes back with Unmatch.` | {button:Undo|link} was pressed on a transaction that was matched rather than posted, or that had already been undone. |
+| `Excluded` and `Back in review` | The transaction was set aside, or brought back. |
+| `This entry is locked (closed period, reconciled, or strict mode). Create a reversal instead.` | The entry {button:Undo|link} would void has been reconciled, or its month has been closed. It stays posted. |
 
 ## Not on this page
 

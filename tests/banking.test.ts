@@ -39,7 +39,12 @@ import { plaidTxnToStaging } from "../src/modules/accounting/banking/plaid";
 import {
   categorizeTransaction,
   setTransactionExcluded,
+  undoCategorization,
 } from "../src/modules/accounting/banking/review";
+import {
+  matchTransactionToEntry,
+  unmatchTransaction,
+} from "../src/modules/accounting/banking/match";
 import {
   suggestCategoriesForBankAccount,
 } from "../src/modules/accounting/ai/suggest";
@@ -518,6 +523,98 @@ d("banking (DB)", () => {
       }),
     );
     expect(relinked).toMatchObject({ status: "posted", journalEntryId: res.entry.id });
+  });
+
+  it("undoCategorization voids the posting and returns the row; anything else refuses", async () => {
+    const txnId = acct["__categorizedTxn"];
+    const repairs = await accountId("6400");
+
+    // Owners only, like the posting it undoes.
+    await expect(
+      withTenant(tenantId, (tx) =>
+        undoCategorization(tx, staff, { transactionId: txnId }),
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    const before = await withTenant(tenantId, (tx) =>
+      tx.query.bankTransactions.findFirst({
+        where: eq(schema.bankTransactions.id, txnId),
+      }),
+    );
+    const undone = await withTenant(tenantId, (tx) =>
+      undoCategorization(tx, owner, { transactionId: txnId }),
+    );
+    expect(undone.entry.id).toBe(before!.journalEntryId);
+    expect(undone.entry.status).toBe("void");
+    expect(undone.bankAccountId).toBe(before!.bankAccountId);
+    const after = await withTenant(tenantId, (tx) =>
+      tx.query.bankTransactions.findFirst({
+        where: eq(schema.bankTransactions.id, txnId),
+      }),
+    );
+    expect(after).toMatchObject({ status: "unreviewed", journalEntryId: null });
+
+    // Twice is nothing: the row is back in review, so there is no posting.
+    await expect(
+      withTenant(tenantId, (tx) =>
+        undoCategorization(tx, owner, { transactionId: txnId }),
+      ),
+    ).rejects.toMatchObject({ code: "TXN_NOT_UNDOABLE" });
+
+    // A row MATCHED to an entry that was not born from it is not undone here:
+    // that entry records money that is real whether or not the feed row
+    // points at it, and Unmatch is its road back.
+    const bank = await withTenant(tenantId, (tx) =>
+      tx.query.bankAccounts.findFirst({
+        where: eq(schema.bankAccounts.id, before!.bankAccountId),
+      }),
+    );
+    const { entry: manual } = await withTenant(tenantId, (tx) =>
+      postEntry(tx, owner, {
+        entityId,
+        status: "posted",
+        entryDate: after!.txnDate,
+        memo: "hand-written, then matched",
+        source: "manual",
+        lines: [
+          { accountId: repairs, amountCents: -after!.amountCents },
+          { accountId: bank!.accountId, amountCents: after!.amountCents },
+        ],
+      }),
+    );
+    await withTenant(tenantId, (tx) =>
+      matchTransactionToEntry(tx, owner, {
+        transactionId: txnId,
+        journalEntryId: manual.id,
+      }),
+    );
+    await expect(
+      withTenant(tenantId, (tx) =>
+        undoCategorization(tx, owner, { transactionId: txnId }),
+      ),
+    ).rejects.toMatchObject({ code: "TXN_NOT_UNDOABLE" });
+    const stillPosted = await withTenant(tenantId, (tx) =>
+      tx.query.journalEntries.findFirst({
+        where: eq(schema.journalEntries.id, manual.id),
+      }),
+    );
+    expect(stillPosted?.status).toBe("posted");
+
+    // Leave the register as the cases after this one expect: the hand-written
+    // entry gone, the row posted from the feed again.
+    await withTenant(tenantId, (tx) =>
+      unmatchTransaction(tx, owner, { transactionId: txnId }),
+    );
+    await withTenant(tenantId, async (tx) => {
+      await voidEntry(tx, owner, {
+        entryId: manual.id,
+        expectedVersion: stillPosted!.version,
+      });
+    });
+    const again = await withTenant(tenantId, (tx) =>
+      categorizeTransaction(tx, owner, { transactionId: txnId, accountId: repairs }),
+    );
+    expect(again.entry.status).toBe("posted");
   });
 
   it("exclude/restore round-trip; excluded cannot be categorized", async () => {

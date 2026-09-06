@@ -73,8 +73,15 @@ export function PageHeader({
           page whether or not the page has actions. The button gates itself
           by pathname — nothing outside /dashboard — so this component still
           never learns which page it is on, and on an admin page the row is
-          simply empty. */}
-      <div className="flex shrink-0 items-center gap-2">
+          simply empty.
+
+          `min-w-0 flex-wrap`, not `shrink-0`: with four buttons the row ran
+          off the right edge of a phone, and the register's Reconcile and
+          Close account could not be reached. A wrapping outer row moves the
+          whole block to its own line before either side shrinks, so nothing
+          changes on a wide screen; on a phone the buttons now wrap within
+          that line instead of leaving the viewport. */}
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <HelpButton />
         {actions}
       </div>

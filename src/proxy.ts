@@ -2,6 +2,7 @@ import { clerkMiddleware } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { authorizedPartiesFromEnv } from "@/lib/authorized-parties";
 import { MAINTENANCE_HTML, shouldServeMaintenance } from "@/lib/maintenance";
+import { nativeAppEntryRedirect } from "@/lib/native-app-core";
 import {
   classifyHost,
   platformHostsFromEnv,
@@ -62,6 +63,15 @@ export default clerkMiddleware(
           "cache-control": "no-store",
         },
       });
+    }
+    // The mobile app asking for the front page goes to the dashboard
+    // (src/lib/native-app-core.ts): the landing page is for browsers.
+    if (kind.kind === "platform") {
+      const entry = nativeAppEntryRedirect(
+        req.nextUrl.pathname,
+        req.headers.get("user-agent"),
+      );
+      if (entry) return NextResponse.redirect(new URL(entry, req.url));
     }
     const target = siteRewrite(kind, req.nextUrl.pathname);
     if (target === null) return;

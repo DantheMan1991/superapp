@@ -16,7 +16,24 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // The DEBUG signing key, committed on purpose (docs/runbooks/mobile-app.md):
+    // a GitHub build signs with whatever throwaway key its runner has, and
+    // Android refuses to install a build signed with a different key over an
+    // existing one. With this key every build installs over the last. It is
+    // not, and must never become, the store's upload key.
+    signingConfigs {
+        debug {
+            storeFile file("../yosher-debug.p12")
+            storeType "PKCS12"
+            storePassword "android"
+            keyAlias "yosherdebug"
+            keyPassword "android"
+        }
+    }
     buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'

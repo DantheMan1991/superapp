@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isNativeAppRequest,
   isNativeAppUserAgent,
+  nativeAppEntryRedirect,
   nativeAppInfo,
 } from "@/lib/native-app-core";
 
@@ -37,6 +38,16 @@ describe("nativeAppInfo", () => {
   it("tolerates a marker without a platform, and is null outside the app", () => {
     expect(nativeAppInfo("YosherApp/1.0")).toEqual({ version: "1.0", platform: null });
     expect(nativeAppInfo("Mozilla/5.0")).toBeNull();
+  });
+});
+
+describe("nativeAppEntryRedirect", () => {
+  it("sends the app, and only the app, from the front page to the dashboard", () => {
+    expect(nativeAppEntryRedirect("/", shellUa)).toBe("/dashboard");
+    expect(nativeAppEntryRedirect("/", "Mozilla/5.0 (iPhone) Safari/605.1.15")).toBeNull();
+    expect(nativeAppEntryRedirect("/about", shellUa)).toBeNull();
+    expect(nativeAppEntryRedirect("/dashboard", shellUa)).toBeNull();
+    expect(nativeAppEntryRedirect("/", null)).toBeNull();
   });
 });
 

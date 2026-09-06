@@ -36,6 +36,15 @@ in, then away, then the sign-in screen. Built as two halves.
   should play again. `src/lib/launch.ts`, `tests/launch.test.ts`.
 - The marketing pages are untouched and stay static; the app never opens on
   them.
+- **The iOS job compiled for the first time** (a manual run, 2026-09-06),
+  once the workflow opened `App.xcodeproj`: Capacitor 8 wires plugins with
+  Swift Package Manager and there is no workspace. The Mac half of the
+  pipeline is proven; signing and TestFlight still wait on the Apple account.
+- **A committed debug signing key** (`mobile/android/yosher-debug.p12`, a
+  PKCS12 made with openssl, password `android`). Found the hard way: the
+  second build would not install over the first, because each GitHub runner
+  signs with a throwaway key. Debug only; the store's upload key is a secret
+  in GitHub, later.
 
 ### 2026-09-06 — Slice 2b: push, the shell's side for Android (`claude/mobile-app-2b-push-shell`)
 
@@ -59,6 +68,15 @@ in, then away, then the sign-in screen. Built as two halves.
   shell's package.
 - **iPhone push waits on the Apple account**: an APNs key, the capability on
   the Xcode project and an AppDelegate change, all in the runbook.
+- **The app opens on `/dashboard`**, decided by the SITE: the proxy redirects
+  a request for `/` that carries the app's user agent
+  (`nativeAppEntryRedirect`), so a build already on a phone starts opening in
+  the right place the moment the site deploys, with nothing to reinstall. The
+  shell's `startPath` in `app.json` says the same thing for a fresh build.
+  The first build opened on the marketing landing page, which is for
+  browsers; the founder noticed within a minute of installing it — and then
+  installed twice more before this moved out of the shell, which is the
+  lesson: anything that can be the site's decision should be.
 
 ### 2026-09-06 — Slice 2a: push, the web side (`claude/mobile-app-2a-push-web`)
 

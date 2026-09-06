@@ -41,6 +41,24 @@ export function nativeAppInfo(userAgent: string | null | undefined): NativeAppIn
   };
 }
 
+/**
+ * Where the app lands when it asks for the site's front page. The marketing
+ * landing page is for browsers; the app opens on the dashboard, which is the
+ * sign-in card when signed out and the business when signed in. Decided
+ * HERE, in the site, rather than baked into the shell's start address: a
+ * build the founder already installed starts opening in the right place the
+ * moment the site deploys, with nothing to reinstall.
+ */
+export const NATIVE_APP_ENTRY = "/dashboard";
+
+export function nativeAppEntryRedirect(
+  pathname: string,
+  userAgent: string | null | undefined,
+): string | null {
+  if (!isNativeAppUserAgent(userAgent)) return null;
+  return pathname === "/" ? NATIVE_APP_ENTRY : null;
+}
+
 export function isNativeAppRequest(input: {
   userAgent?: string | null;
   /** The `yosher_app` cookie's value, if present. */

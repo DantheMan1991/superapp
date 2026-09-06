@@ -1,9 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  assembleSite,
-  standardSiteCopy,
-  type SiteBrief,
-} from "../src/lib/sites/copy";
+import { describe, expect, it } from "vitest";
 import {
   EMPTY_SETTINGS,
   PageContentSchema,
@@ -20,19 +15,6 @@ import {
   siteDomainFromEnv,
   siteHref,
 } from "../src/lib/sites/slug";
-import { buildSiteCopyUserTurn } from "../src/modules/marketing/ai/site-copy-prompt";
-import { mergeSiteCopy } from "../src/modules/marketing/ai/site-copy-validate";
-import { writeSiteCopy } from "../src/modules/marketing/site-generate";
-
-const brief: SiteBrief = {
-  name: "Oak Row Farm Co.",
-  tagline: "Pasture-raised, delivered Fridays",
-  industry: "Homestead farm",
-  phone: "740 555 0100",
-  email: "hello@oakrow.example",
-  address: "17 Main St\nMount Vernon, OH 43050",
-  hoursLines: ["Saturday 8 to 12, at the market"],
-};
 
 describe("normalizeSiteSlug", () => {
   it("makes an address out of a name and refuses what cannot be one", () => {
@@ -106,61 +88,3 @@ describe("the content model", () => {
   });
 });
 
-describe("standard copy and assembly", () => {
-  it("builds three valid pages in a fixed order, with hours only when there are hours", () => {
-    const pages = assembleSite(brief, standardSiteCopy(brief));
-    expect(pages.map((p) => p.path)).toEqual(["/", "/about", "/contact"]);
-    expect(pages[0].content.sections.map((s) => s.type)).toEqual(["hero", "offer", "about", "cta"]);
-    expect(pages[2].content.sections.map((s) => s.type)).toEqual(["contact", "hours", "form"]);
-    const noHours = assembleSite({ ...brief, hoursLines: [] }, standardSiteCopy(brief));
-    expect(noHours[2].content.sections.map((s) => s.type)).toEqual(["contact", "form"]);
-    expect(pages[0].content.description).toContain("Oak Row Farm Co.");
-  });
-
-  it("uses the business's own words and never invents facts", () => {
-    const copy = standardSiteCopy({ ...brief, tagline: "" });
-    expect(copy.hero.headline).toBe("Oak Row Farm Co.");
-    expect(copy.about.body[0]).toContain("homestead farm");
-    expect(JSON.stringify(copy)).not.toMatch(/years|award/i);
-  });
-});
-
-describe("the prompt and the merge", () => {
-  it("briefs with facts and flags what is missing", () => {
-    const turn = buildSiteCopyUserTurn({ ...brief, phone: "", hoursLines: [] });
-    expect(turn).toContain("Oak Row Farm Co.");
-    expect(turn).toContain("No phone number is given.");
-    expect(turn).toContain("No hours are given.");
-    expect(turn).toContain("Mount Vernon");
-  });
-
-  it("takes the slots the model filled and keeps the standard copy for the rest", () => {
-    const fallback = standardSiteCopy(brief);
-    const { copy, filled } = mergeSiteCopy(
-      { hero: { headline: "Beef you can trust", subheadline: "From our pasture.", ctaLabel: "Order" }, about: { heading: "x", body: [] } },
-      fallback,
-    );
-    expect(filled).toBe(1); // `about` had an empty body and was dropped whole
-    expect(copy.hero.headline).toBe("Beef you can trust");
-    expect(copy.offer).toEqual(fallback.offer);
-    expect(mergeSiteCopy("garbage", fallback)).toEqual({ copy: fallback, filled: 0 });
-  });
-});
-
-describe("writeSiteCopy", () => {
-  afterEach(() => vi.unstubAllEnvs());
-
-  it("says model when the model wrote anything, standard when it failed or there is no key", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
-    const call = vi.fn(async () => ({ description: "A farm in Mount Vernon selling beef." }));
-    const wrote = await writeSiteCopy(brief, { call });
-    expect(wrote.source).toBe("model");
-    expect(wrote.copy.description).toBe("A farm in Mount Vernon selling beef.");
-    const failed = await writeSiteCopy(brief, { call: async () => { throw new Error("boom"); } });
-    expect(failed.source).toBe("standard");
-    vi.stubEnv("ANTHROPIC_API_KEY", "");
-    const never = vi.fn(async () => ({}));
-    expect((await writeSiteCopy(brief, { call: never })).source).toBe("standard");
-    expect(never).not.toHaveBeenCalled();
-  });
-});

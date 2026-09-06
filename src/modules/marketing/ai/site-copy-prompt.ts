@@ -1,119 +1,82 @@
+import type { PageSlots } from "@/lib/site-templates/core";
 import type { SiteBrief } from "@/lib/sites/copy";
 
 /**
- * The prompt half of writing a site — pure. The assistant writes WORDS for
- * a fixed set of slots; `assembleSite` puts them into pages. It never
- * chooses a layout, a colour or a page, and it never sees a file.
+ * The prompt half of writing a site — pure (slice 1, rebuilt on the
+ * templates in slice 15). The writer is handed every WORD SLOT the
+ * template's pages hold, with what each says today and how long it may
+ * be, and writes the same slots back for this business; `applySiteWords`
+ * puts them in one section at a time. It never chooses a page, a section,
+ * a layout, a colour or a picture, and it never sees a file.
  */
-
-export const SITE_COPY_SYSTEM_PROMPT = `You write the words for a small business's first website. The site has a fixed shape: a home page (a headline and a line under it, a short list of what the business offers, a short "about", and a closing line with a button), an "about" page, and a contact page. You fill in the words; the design is done.
+export const SITE_COPY_SYSTEM_PROMPT = `You write the words for a small business's website. The site is already designed: its pages, its sections and every slot for words are fixed. You are shown each slot with the starter words it holds and the most characters it may take, and you write the same slots for this business.
 
 How to write:
-- Plain, warm, specific. Short sentences. Say what the business does and for whom, the way the owner would say it to a neighbour.
-- Use only what the brief gives you. Never invent services, years in business, awards, prices, staff names or places. If the brief is thin, say less rather than making something up. Do not write "we are passionate" or "solutions".
-- The headline is under ten words and is not the business name on its own unless the name says what the business does. The line under it is one sentence.
-- The offer list has three to six items, each a name of three words or fewer and a blurb of one sentence. Draw them from the kind of business; for a farm that might be "Pasture-raised beef", for a plumber "Water heaters". Keep them general when you are unsure.
-- The "about" on the home page is one or two short paragraphs. The about PAGE is two or three, and may say plainly that the owner should add the story in their own words if the brief gives you nothing to tell.
-- Both buttons on the home page lead to the CONTACT page, so their labels must say so: "Get in touch", "Contact us", "Come and see us". Never a label that promises a different page.
-- The meta description is one or two sentences, under 160 characters, naming the business and what it does.
+- Plain, warm, specific. Short sentences. Say what the business does and for whom, the way the owner would say it to a neighbor.
+- Use only what the brief gives you. Never invent services, years in business, awards, prices, staff names or places. If the brief is thin, keep the starter's meaning and make it true of this business rather than adding anything.
+- Every slot stays the kind of thing it is: a headline stays a headline under ten words, a button label stays two or three words that say where it leads, a paragraph stays a paragraph, a list item's name stays three words or fewer.
+- Keep each slot within its length. Write every slot you are given; leave nothing out and add nothing.
+- A page's description is one or two sentences under 160 characters that name the business, what it offers and, when the brief gives one, the town or area, because that is how people search.
 - American English. No dashes for asides, no exclamation marks, no emoji.`;
 
-export const WRITE_SITE_COPY_TOOL = {
-  name: "write_site_copy",
-  description: "The words for every slot of the business's first website.",
+export const WRITE_SITE_TOOL = {
+  name: "write_site",
+  description: "Every page's description and every section's words, by slot.",
   input_schema: {
     type: "object" as const,
     properties: {
-      description: { type: "string", maxLength: 200 },
-      hero: {
-        type: "object",
-        properties: {
-          headline: { type: "string", maxLength: 120 },
-          subheadline: { type: "string", maxLength: 240 },
-          ctaLabel: { type: "string", maxLength: 40 },
-        },
-        required: ["headline", "subheadline", "ctaLabel"],
-      },
-      offer: {
-        type: "object",
-        properties: {
-          heading: { type: "string", maxLength: 80 },
-          items: {
-            type: "array",
-            minItems: 3,
-            maxItems: 6,
-            items: {
-              type: "object",
-              properties: {
-                name: { type: "string", maxLength: 60 },
-                blurb: { type: "string", maxLength: 240 },
+      pages: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+            description: { type: "string", maxLength: 200 },
+            sections: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  index: { type: "integer", minimum: 0 },
+                  words: { type: "object", additionalProperties: { type: "string" } },
+                },
+                required: ["index", "words"],
               },
-              required: ["name", "blurb"],
             },
           },
+          required: ["path", "description", "sections"],
         },
-        required: ["heading", "items"],
       },
-      about: {
-        type: "object",
-        properties: {
-          heading: { type: "string", maxLength: 80 },
-          body: { type: "array", minItems: 1, maxItems: 3, items: { type: "string", maxLength: 800 } },
-        },
-        required: ["heading", "body"],
-      },
-      closing: {
-        type: "object",
-        properties: {
-          headline: { type: "string", maxLength: 120 },
-          ctaLabel: { type: "string", maxLength: 40 },
-        },
-        required: ["headline", "ctaLabel"],
-      },
-      aboutPage: {
-        type: "object",
-        properties: {
-          heading: { type: "string", maxLength: 80 },
-          body: { type: "array", minItems: 1, maxItems: 4, items: { type: "string", maxLength: 800 } },
-        },
-        required: ["heading", "body"],
-      },
-      contactPage: {
-        type: "object",
-        properties: {
-          heading: { type: "string", maxLength: 80 },
-          note: { type: "string", maxLength: 300 },
-        },
-        required: ["heading", "note"],
-      },
-      hoursHeading: { type: "string", maxLength: 80 },
     },
-    required: [
-      "description",
-      "hero",
-      "offer",
-      "about",
-      "closing",
-      "aboutPage",
-      "contactPage",
-      "hoursHeading",
-    ],
+    required: ["pages"],
   },
 };
 
-export function buildSiteCopyUserTurn(brief: SiteBrief): string {
-  const lines = [
+function briefLines(brief: SiteBrief): string[] {
+  return [
     `Business name: ${brief.name}`,
     brief.tagline ? `Tagline: ${brief.tagline}` : "Tagline: none",
     `Kind of business: ${brief.industry ?? "not stated; a general small business"}`,
     brief.phone ? "The site will show a phone number." : "No phone number is given.",
     brief.email ? "The site will show an email address." : "No email address is given.",
     brief.address ? `Located at: ${brief.address.replace(/\s*\n\s*/g, ", ")}` : "No address is given.",
-    brief.hoursLines.length > 0
-      ? `Hours: ${brief.hoursLines.join("; ")}`
-      : "No hours are given.",
-    "",
-    "Write the site now.",
+    brief.hoursLines.length > 0 ? `Hours: ${brief.hoursLines.join("; ")}` : "No hours are given.",
   ];
+}
+
+export function buildSiteCopyUserTurn(brief: SiteBrief, notes: string[], pages: PageSlots[]): string {
+  const lines = [...briefLines(brief), ""];
+  if (notes.length > 0) lines.push("About this kind of business and this site:", ...notes.map((n) => `- ${n}`), "");
+  lines.push("The pages and their slots. Each slot shows its most characters and its starter words.");
+  for (const page of pages) {
+    lines.push("", `Page ${page.path} ("${page.title}")`, `- description (at most 160 characters): ${JSON.stringify(page.description)}`);
+    for (const section of page.sections) {
+      const slots = Object.entries(section.words);
+      if (slots.length === 0) continue;
+      lines.push(`- section ${section.index} (${section.kind}):`);
+      for (const [path, text] of slots) lines.push(`    ${path} (at most ${section.limits[path]}): ${JSON.stringify(text)}`);
+    }
+  }
+  lines.push("", "Write every page's description and every section's slots now, with the same paths.");
   return lines.join("\n");
 }

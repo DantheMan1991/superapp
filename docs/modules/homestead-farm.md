@@ -116,6 +116,31 @@ What it **does** break:
 
 ## Build log
 
+### 2026-09-05 — The profile brings a website (`claude/marketing-industry-templates`)
+
+The build record is in [marketing.md](marketing.md) (slice 15,
+[ADR 0030](../decisions/0030-a-site-template-is-data-an-industry-contributes.md));
+what belongs here is that the profile now carries a site template beside
+its manifest, as data, in `src/industries/homestead-farm/site-template.ts`.
+
+- **Five pages in the order a buyer looks**: Home (the promise, what we
+  raise, how we farm, this week's prices when Retail is on, what's on when
+  Scheduling is on, a reason to visit), Shop (how to order, by the cut and
+  by the share, the price list, an order form with "what would you like"
+  and "pickup or delivery"), Visit (what a visit is like, a booking when
+  Scheduling is on, hours, the map), About (the story, what we stand for,
+  a picture), Contact. A header button to the shop, footer columns for
+  Shop and Visit, and the warm look suggested for a kit nobody has shaped.
+- **The starter words are true of a homestead farm as a kind**, never of
+  one farm: nothing claims a breed, a practice or a certification, and the
+  writer is told to keep only what the brief supports and to put the town
+  with what the farm sells into the home page and every description, for
+  local search. Prices and hours are the site's own, never written into
+  the words.
+- **The profile still ships no component.** The template is sections the
+  site already draws; the editor, the renderer, the SEO pack and the live
+  blocks apply to it unchanged.
+
 ### 2026-08-23 — Production slice 1b: the processor directory, and two profile keys (`claude/the-processor-and-the-date`)
 
 The build record is in [production.md](production.md); what belongs here is what

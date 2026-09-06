@@ -42,12 +42,89 @@
 | **11a** | **What search engines and browsers ask a site for: `robots.txt` and `sitemap.xml` per site on every address it has, LocalBusiness structured data on the home page from the settings (address, phone, email, the map's pin, the logo, the social profiles), and an icon from the brand kit (a square logo as it is, otherwise a monogram in the brand colour) at 32, 180 and 512.** | **built 2026-09-05** |
 | **11b** | **A share image drawn per page (the page's title in the kit's type on the brand colour, the logo or the monogram in a white panel, the address in the corner) as `og:image` and the Twitter card; and an address the site used to have sends people on to the current one, for the same page, on the platform path and on the free address.** | **built 2026-09-05** |
 | **12** | **The assistant everywhere: new words for one section with an optional ask, a page from a sentence, a photo's description from its pixels. Each proposes words into slots the code chose, unsaved until the owner saves; nothing else about a section is sent or changed.** [ADR 0027](../decisions/0027-the-assistant-proposes-words-and-the-owner-saves-them.md) | **built 2026-09-05** |
+| **15** | **Industry site templates: a template is data an industry contributes (pages of typed sections with starter words, a frame, a look, picture slots the platform's drawn scenes fill); the core assembles it against what the tenant has switched on and the writer fills every word slot. The homestead farm's is five pages: Home, Shop, Visit, About, Contact.** [ADR 0030](../decisions/0030-a-site-template-is-data-an-industry-contributes.md) | **built 2026-09-05** |
 | — | The shop block: `retail` slice 6 (online orders + pickup windows) fills the slot 9b made, plus a client island the site owns and a provider names; blocked on commitments (retail 3) and web checkout (payments) | not this module's |
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-05 — Slice 15: industry site templates, the homestead farm's first (`claude/marketing-industry-templates`)
+
+The founder: "create an elite website template for the homestead farming
+industry. Each industry can have its own templates. Make the farming one
+top notch: visually, SEO, easy navigation and great marketing." No
+migration. [ADR 0030](../decisions/0030-a-site-template-is-data-an-industry-contributes.md)
+records the shape: a template is DATA an industry contributes, the core
+assembles it, the writer fills the words.
+
+- **The slot** (`src/lib/site-templates/`): a template is pages of the
+  site's own typed sections carrying STARTER words (`{name}`, `{what}`,
+  `{tagline}` filled by the assembler), each section optionally conditional
+  (`needs: "scheduling"` for booking and events, `needs: "hours"`), a frame
+  (header button, footer columns, footer note) set on the new site, a look
+  suggestion applied to a kit only where every look field is unset
+  (`saveKitLook`, the `display.currencySymbol` rule), and picture slots
+  naming a platform scene. `assembleTemplate` keeps a pack's block only
+  when the tenant's catalogue offers it with every select chosen for them
+  (one channel: kept; two: left to the owner), and parses every page.
+  `registry.ts` is the one file naming an industry; `general.ts` is the
+  three pages every site was, so nothing about an existing site changed.
+  `templateFor(tenants.industry)` picks.
+- **The writer over every slot**: `templateSlots` hands the model every
+  page's description and every section's words with their limits
+  (`src/lib/sites/words.ts`, the slot walk the assistant already had, now
+  shared); one forced tool `write_site` answers the same paths;
+  `applySiteWords` puts them in one section at a time, a bad section keeps
+  its starter, and `filled > 0` is what "written by the assistant" means.
+  The old fixed slots (`standardSiteCopy`, `assembleSite`, `mergeSiteCopy`)
+  are gone. The system prompt asks for the town with what the business
+  sells in descriptions, for search.
+- **Starter pictures**: three text-free scenes in pure SVG
+  (`src/lib/sites/starters.ts`: hills, furrows, dawn), drawn in the brand's
+  primary and accent, rasterised to 1600×1000 JPEGs by `sharp`, put in the
+  tenant's photo namespace as `starter-<scene>` and rowed like any upload
+  (`starter-pictures.ts`), then attached to the template's slots in a
+  second pass of the drafts (`attachPictures`). Reused by name on a
+  rewrite. No stock photo, no licence; the owner replaces one in a click.
+- **The homestead farm's template** (`src/industries/homestead-farm/site-template.ts`,
+  data beside the profile): Home (hero on the hills, what we raise, how we
+  farm as three icon cards, the price list when Retail offers it, what's
+  on when Scheduling is on, a call to visit), Shop (how to order, by the
+  cut and by the share, the price list, an order form asking what and
+  pickup or delivery), Visit (hero on the dawn, what a visit is like, a
+  booking when Scheduling is on, hours, the map), About (the story, what
+  we stand for, the furrows picture), Contact; `Order now` in the header
+  to the shop, Shop and Visit footer columns, `Raised here. Sold here.`,
+  the warm look. Its starter words are true of a homestead farm as a kind
+  and never of one farm, and its writer notes tell the model to keep only
+  what the brief supports.
+- **The build**: `createSiteAction` picks the template, merges its frame
+  under the typed details, suggests the look, assembles, writes, creates
+  the site and its drafts, then makes the pictures and takes them into the
+  drafts in a second pass; `rewriteSiteCopyAction` re-assembles the same
+  way and reuses the pictures. The Website page says which template the
+  site was built from.
+- **Driven on the dev branch.** The pane's dev session was lost during an
+  organisation switch (the Clerk trap from slice 9b, again), so the build
+  ran as a script calling the same functions in the same order on Hilltop
+  Farm (industry `homestead-farm`, Scheduling on, Retail with two
+  channels), then published: the writer answered in 28 seconds with
+  `Grass-fed meat and eggs from Mount Vernon, Ohio` over the hills scene,
+  every description naming the town, the price list left out for the two
+  channels, the visit page with its booking, hours and map, the shop page
+  with its order form; three starter pictures made in 3 seconds
+  (18–24KB each); the kit took the warm look; the header carried
+  `Order now` and the footer its two columns and line. The public pages
+  answered on the platform path, the hero picture served at 18.5KB. Tests:
+  `tests/site-templates.test.ts` (every template on the registry assembles
+  and parses; the farm's conditions; pictures; the writer's slots and
+  words; the scenes).
+- **Not built here:** a template picker (one template per industry, the
+  general one otherwise), a second template for any industry, an
+  industry's own section kinds (a section the site lacks is added to the
+  site for everyone), and photographs.
 
 ### 2026-09-05 — Slice 14: the header folds on a phone (`claude/marketing-header-folds`)
 
@@ -1361,6 +1438,23 @@ feature means for it.
   `public_access_attempts`, keyed by a hash of the tenant id rather than
   `ipKey` (which is `unsalted`, and so no key at all, without
   `INTERVIEW_IP_SALT`).
+- **A site template is data an industry contributes** (15,
+  [ADR 0030](../decisions/0030-a-site-template-is-data-an-industry-contributes.md)).
+  The fourth use of P5 and the industry layer's first: pages of the site's
+  own typed sections with STARTER words (`{name}`, `{what}` filled by the
+  assembler), a frame, a look suggestion (applied to a kit only where every
+  look field is unset, the `display.currencySymbol` rule) and picture slots
+  the platform's drawn scenes fill. `assembleTemplate` keeps a booking or
+  events section only while Scheduling is on, hours only with hours, and a
+  pack's block only when the tenant's catalogue offers it with every
+  setting chosen for them (one channel: kept; two: left for the owner).
+  The writer is handed EVERY word slot with its starter and its length
+  (`templateSlots`) and writes them back through one forced tool;
+  `applySiteWords` puts them in one section at a time, so a bad section
+  keeps its starter. Without a key the starter words are the site. The old
+  fixed three pages became `general.ts`; `standardSiteCopy`, `assembleSite`
+  and `mergeSiteCopy` are gone. Starter pictures are library rows named
+  `starter-<scene>` in the tenant's photo namespace, reused on a rewrite.
 - **The header folds on a phone with a native disclosure, not a script**
   (14). `<details>`/`<summary>` below `md`, the owner's button kept in the
   row, the pages in a panel under a Menu button; ADR 0019 keeps a public
@@ -1663,6 +1757,16 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
   `TEXT_PATHS`, `assemblePageBlocks`, the tools and user turns);
   `components/assistant-controls.tsx` (`RewriteWords`, `WritePage`,
   `SuggestDescription`); `tests/site-assistant.test.ts`
+- `src/lib/site-templates/` — the templates (15, ADR 0030): `types.ts` (a
+  template is data), `core.ts` (pure: `assembleTemplate`, `attachPictures`,
+  `templateSlots`, `applySiteWords`, `blockConfigFor`), `general.ts` (the
+  platform's own three pages), `registry.ts` (the one file naming an
+  industry), `resolve.ts` (`templateFor`); `src/industries/homestead-farm/site-template.ts`
+  (the farm's five pages); `src/lib/sites/words.ts` (the slot walk, shared
+  with the assistant); `src/lib/sites/starters.ts` (the drawn scenes, pure
+  SVG) and `src/modules/marketing/starter-pictures.ts` (rasterised, stored,
+  rowed); `site-generate.ts` (`writeSite` over every slot);
+  `tests/site-templates.test.ts`
 - `src/components/site/live-draft.tsx` — the frame's client half (13, ADR 0029):
   believes `yosher:site-draft`, redraws `SitePage`, fetches live data for
   unsaved sections from `src/app/api/marketing/sites/live/route.ts`

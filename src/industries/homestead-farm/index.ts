@@ -1,4 +1,4 @@
-import type { IndustryProfile } from "./types";
+import type { IndustryProfile } from "../types";
 
 /**
  * The platform's first industry profile.

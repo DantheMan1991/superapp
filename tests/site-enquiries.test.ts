@@ -15,7 +15,8 @@ import {
   SiteEnquirySchema,
   splitPersonName,
 } from "../src/lib/sites/enquiry-schema";
-import { assembleSite, standardSiteCopy } from "../src/lib/sites/copy";
+import { assembleTemplate } from "../src/lib/site-templates/core";
+import { generalSiteTemplate } from "../src/lib/site-templates/general";
 import { newSection, sectionSummary } from "../src/lib/sites/pages";
 import { FormFieldSchema, PageContentSchema, SectionSchema, type FormField } from "../src/lib/sites/schema";
 
@@ -181,7 +182,7 @@ describe("the form section", () => {
 
   it("is on every assembled contact page, after the details", () => {
     const brief = { name: "Oak Row Farm", tagline: "", industry: null, phone: "", email: "", address: "", hoursLines: [] };
-    const pages = assembleSite(brief, standardSiteCopy(brief));
+    const pages = assembleTemplate(generalSiteTemplate, brief, { schedulingOn: false, blocks: [], pictures: null });
     const contact = pages.find((p) => p.path === "/contact");
     expect(contact?.content.sections.map((s) => s.type)).toEqual(["contact", "form"]);
     expect(PageContentSchema.safeParse(contact?.content).success).toBe(true);

@@ -146,6 +146,21 @@ export async function saveKitFields(
   return updateKit(tx, ctx, kit.id, patch);
 }
 
+/**
+ * The look alone (slice 15): what a site template suggests for a kit whose
+ * owner has chosen none of it. The other fields are not touched, so a
+ * resolved default never lands on the row as if somebody chose it.
+ */
+export async function saveKitLook(
+  tx: Tx,
+  ctx: MarketingCtx,
+  entityId: string | null,
+  look: Pick<KitFieldsPatch, "look" | "fontPairing" | "buttonShape">,
+): Promise<BrandKit> {
+  const kit = await ensureKit(tx, ctx, entityId);
+  return updateKit(tx, ctx, kit.id, look);
+}
+
 /** Returns the pathname the new logo replaced, for the caller to discard AFTER commit. */
 export async function setKitLogo(
   tx: Tx,

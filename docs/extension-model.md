@@ -192,6 +192,19 @@ Gated on the pack being switched on, unlike the basis lens, because a price
 list is a thing the business shows strangers
 ([ADR 0028](decisions/0028-a-packs-block-is-data-the-site-draws.md)).
 
+**Used a fourth time on 2026-09-05, and for the first time by the INDUSTRY
+layer: a site template.** A profile is a manifest and ships no component,
+and the site builder is core and knows no industry, yet a homestead farm
+wants a five-page site that a general business does not.
+[src/lib/site-templates/](../src/lib/site-templates/types.ts) holds the slot: a
+template is pages of the site's own typed sections with starter words, a
+frame, a look and picture slots; `registry.ts` names the industries;
+`src/industries/homestead-farm/site-template.ts` fills it as data beside the
+profile. The core assembles a template against what the tenant has switched
+on and the writer fills every word slot, so an industry gets a website by
+writing one data file and the editor, renderer and SEO pack come for free
+([ADR 0030](decisions/0030-a-site-template-is-data-an-industry-contributes.md)).
+
 What is **not** sanctioned: adding a column to a core table for one industry,
 branching on `tenant.industry` inside core, or a pack reading another pack's
 tables directly.

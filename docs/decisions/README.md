@@ -64,3 +64,4 @@ Keep them short — one page. An ADR nobody reads has failed at its only job.
 | [0027](0027-the-assistant-proposes-words-and-the-owner-saves-them.md) | The assistant proposes words into slots the code chose, and the owner saves them | 2026-09-05 | Accepted |
 | [0028](0028-a-packs-block-is-data-the-site-draws.md) | A pack's block on the website is data the site draws | 2026-09-05 | Accepted |
 | [0029](0029-the-preview-follows-the-editor-not-the-save.md) | The preview follows the editor, not the save | 2026-09-05 | Accepted |
+| [0030](0030-a-site-template-is-data-an-industry-contributes.md) | A site template is data an industry contributes; the core assembles it and the writer fills the words | 2026-09-05 | Accepted |

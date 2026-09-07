@@ -1870,6 +1870,13 @@
       "when": 1788788457783,
       "tag": "0266_deposits_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 267,
+      "version": "7",
+      "when": 1788802500515,
+      "tag": "0267_vendor_terms",
+      "breakpoints": true
     }
   ]
 }

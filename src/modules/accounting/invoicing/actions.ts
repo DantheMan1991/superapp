@@ -82,6 +82,8 @@ const customerInputSchema = z.object({
   phone: z.string().trim().max(50).optional(),
   address: z.string().trim().max(500).optional(),
   notes: z.string().trim().max(2000).optional(),
+  /** Null = the business default. */
+  paymentTermsId: z.string().uuid().nullable().optional(),
 });
 
 export async function createCustomerAction(

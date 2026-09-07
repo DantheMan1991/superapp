@@ -9,7 +9,7 @@ Open **Purchases** in the accounting menu and click the `Vendors` pill. The line
 
 ## What you see
 
-- **The list.** Every vendor, active or not, in name order, fifty to a page. `Name`. `Contact`, the email and phone, or a dash. `Default account`, the account new bill lines for this vendor start on, or a dash. `Status`, `active` or `inactive`. A {icon:pencil} at the end of the row opens the vendor for editing.
+- **The list.** Every vendor, active or not, in name order, fifty to a page. `Name`. `Contact`, the email and phone, or a dash. `Default account`, the account new bill lines for this vendor start on, or a dash. `Terms`, the payment terms this vendor gives you, or a dash. `Status`, `active` or `inactive`. A {icon:pencil} at the end of the row opens the vendor for editing.
 - **No vendor page.** A vendor's name is not a link. Everything about a vendor is in the edit dialog, and their bills are in the Bills list.
 - **Search.** The box beside the pills. Type part of a name, an email or a phone number and the list narrows as you type; press Enter to search at once. A phone number matches with or without its spaces and brackets. Clear the box to see everyone again.
 - **Pages.** When there are more than fifty vendors, `Showing 1–50 of 120 vendors` sits under the list with {button:Previous|outline} and {button:Next|outline}. A search starts again from its first page.
@@ -19,7 +19,8 @@ Open **Purchases** in the accounting menu and click the `Vendors` pill. The line
 1. Click {button:New vendor|primary|plus}.
 2. Fill in `Name`. Required. Add `Email`, the address their invoices come from, `Phone`, and `Address`, one line, if you have them.
 3. Pick `Default expense account (optional)`: `None`, or one of your expense or asset accounts. When a bill is created from a document for this vendor, every line starts on this account. Set it for any vendor you buy the same kind of thing from every time.
-4. Click {button:Save|primary}. You see `Vendor created.`
+4. Pick `Payment terms (optional)`, shown once your catalogue has terms: `None`, or the terms this vendor gives you. The line under the box reads `A new bill from this vendor gets its due date from these terms.` The due date is worked out from the bill date on the bill form, on a bill created from the Inbox, and on one drafted from an email thread. `None` means you type the due date, as before.
+5. Click {button:Save|primary}. You see `Vendor created.`
 
 Two vendors may have the same name. Nothing stops it, so check the list first. A vendor is also created on the spot when you type a new name on a bill, or when {button:Create bill|primary} in the Inbox finds no match. Those get a name only. Come here to add the rest.
 
@@ -44,6 +45,7 @@ A deactivated vendor disappears from the vendor list on the bill form and from t
 | `Nothing matches “…”` and `Try fewer words, or add them now.` | No vendor's name, email or phone contains what you typed. {button:New vendor|primary|plus} is right there. Check the spelling before adding one, because two vendors may share a name. |
 | `That vendor is inactive — reactivate them first.` | A bill names a deactivated vendor. Reactivate them here. |
 | `This entry changed since you opened it — reload and try again.` | Someone else saved the vendor while you had it open. |
+| `That payment term no longer exists.` | The term you picked was deactivated in the catalogue while the dialog was open. Pick another. |
 
 ## Not on this page
 

@@ -147,6 +147,25 @@ export async function listPaymentTerms(
   });
 }
 
+/**
+ * A term a customer or vendor may be given as their usual one: one of this
+ * tenant's, and still active. Null and undefined pass — they mean "the
+ * default" on a customer and "no terms" on a vendor.
+ */
+export async function assertActiveTerm(
+  tx: Tx,
+  tenantId: string,
+  termId: string | null | undefined,
+): Promise<void> {
+  if (!termId) return;
+  const term = await tx.query.paymentTerms.findFirst({
+    where: and(eq(schema.paymentTerms.tenantId, tenantId), eq(schema.paymentTerms.id, termId)),
+  });
+  if (!term || !term.isActive) {
+    throw new LedgerError("TERM_NOT_FOUND", "term missing or inactive");
+  }
+}
+
 export async function createPaymentTerm(
   tx: Tx,
   ctx: LedgerCtx,

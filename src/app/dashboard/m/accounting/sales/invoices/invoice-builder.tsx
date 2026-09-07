@@ -48,6 +48,8 @@ import {
 export interface BuilderCustomer {
   id: string;
   name: string;
+  /** Their usual terms; null or absent means the business default. */
+  paymentTermsId?: string | null;
 }
 
 export interface BuilderAccount {
@@ -204,6 +206,19 @@ export function InvoiceBuilder({
   function applyIssueDate(next: string) {
     setIssueDate(next);
     if (chosenTerm) setDueDate(dueDateFromTerms(next, chosenTerm.dueInDays));
+  }
+
+  /**
+   * Picking a customer applies their usual terms — their own, else the
+   * business default — and the due date with them. On an existing draft
+   * too: changing the customer is a deliberate act, unlike opening the
+   * draft, which keeps the date it was saved with.
+   */
+  function applyCustomer(nextCustomerId: string) {
+    setCustomerId(nextCustomerId);
+    const customer = customers.find((c) => c.id === nextCustomerId);
+    const term = resolveTerm(terms, customer?.paymentTermsId ?? null, defaultTermId);
+    if (term) applyTerm(term.id);
   }
   const [memo, setMemo] = useState(invoice?.memo ?? "");
   // Same rule as terms: an EXISTING draft keeps the rate it was saved with, a
@@ -366,7 +381,7 @@ export function InvoiceBuilder({
         <div className="grid gap-3 sm:grid-cols-4">
           <div className="space-y-1.5 sm:col-span-2">
             <Label>Customer</Label>
-            <Select value={customerId || undefined} onValueChange={setCustomerId}>
+            <Select value={customerId || undefined} onValueChange={applyCustomer}>
               <SelectTrigger>
                 <SelectValue placeholder="Select customer" />
               </SelectTrigger>

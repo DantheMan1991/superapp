@@ -30,7 +30,7 @@ Open **Inbox** in the accounting menu. The line under the title reads `Everythin
 
 1. Click {button:Create bill|primary} on the row. The dialog reads `[vendor] · $42.18 — the draft is prefilled from what was read; the document attaches automatically.`
 2. Check the vendor. If Yosher found matches among your active vendors, `Existing vendor` lists them, and a single match is chosen for you. If it found none: `No existing vendor matches — a new one will be created.`, and `New vendor name` is filled with the name as it was read. Edit it or leave it.
-3. Click {button:Create bill|primary}. You see `Bill created from the document.` and land on the new draft. It carries the vendor's invoice number and date, the email's subject as its memo, and the lines as they were read when they add up to the total, otherwise one line for the whole amount. Every line starts on the vendor's default expense account, if they have one, and the assistant suggests accounts for the rest. The document is attached and moves to `Filed`.
+3. Click {button:Create bill|primary}. You see `Bill created from the document.` and land on the new draft. It carries the vendor's invoice number and date, a due date worked out from the vendor's payment terms when they have some, the email's subject as its memo, and the lines as they were read when they add up to the total, otherwise one line for the whole amount. Every line starts on the vendor's default expense account, if they have one, and the assistant suggests accounts for the rest. The document is attached and moves to `Filed`.
 
 ## How to attach a document to something in the books
 

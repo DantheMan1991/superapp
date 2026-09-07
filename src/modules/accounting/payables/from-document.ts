@@ -10,7 +10,7 @@ import {
 import { loadDocument } from "../documents/documents";
 import { attachDocument } from "../documents/links";
 import { createBillDraft, findPossibleDuplicates, type DuplicateSignal } from "./bills";
-import { createVendor, loadVendor } from "./vendors";
+import { createVendor, dueDateFromVendorTerms, loadVendor } from "./vendors";
 import { billTotalCents, type BillLineInput } from "./lines";
 
 /**
@@ -142,10 +142,16 @@ export async function createBillFromDocument(
     vendor.defaultExpenseAccountId,
   );
 
+  // The vendor's usual terms give the draft its due date, from the bill
+  // date the document carries or today's fallback. No terms, no date — typed
+  // on the draft later, exactly as before.
+  const billDate = prefill.billDate ?? input.billDateFallback;
+  const dueDate = await dueDateFromVendorTerms(tx, ctx.tenantId, vendor, billDate);
   const bill = await createBillDraft(tx, ctx, {
     vendorId: vendor.id,
     billNumber: prefill.billNumber,
-    billDate: prefill.billDate ?? input.billDateFallback,
+    billDate,
+    dueDate,
     memo: doc.emailSubject || "",
     lines: prefill.lines,
   });

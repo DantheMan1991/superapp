@@ -13,6 +13,46 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-07 — Usual payment terms on a customer and a vendor (`claude/default-terms`, migration `0267`)
+
+**What.** The two gaps the catalogue entry of 2026-08-12 recorded. A
+`Payment terms` box on the customer dialog (`Business default (Net 30)` or
+one of the terms) writes the `customers.payment_terms_id` column that had
+resolution logic but no control; the invoice form now passes the customer's
+term through `resolveTerm` when a customer is picked (`applyCustomer`), on a
+new invoice and on an edited draft alike — opening a draft still keeps its
+saved date. A `Payment terms (optional)` box on the vendor dialog writes the
+new `vendors.payment_terms_id` (`0267`, composite tenant FK to the same
+`payment_terms` rows: a term is a term). The bill form grows the invoice
+form's `Terms` box with the same three rules (terms drive the date, a typed
+date clears them, the bill date re-derives), applied when a vendor is picked.
+The two places a bill is drafted without the form read it too:
+`from-document.ts` (the Inbox's Create bill) and `thread-drafters.ts` (both
+the invoice and the bill from an email thread, closing the open item that a
+thread draft never had a due date). `dueDateFromCustomerTerms` /
+`dueDateFromVendorTerms` are the server-side twins of the form's arithmetic.
+`assertActiveTerm` refuses a retired or foreign term (`TERM_NOT_FOUND`).
+
+**Why null differs between the two.** On a customer, null means "the
+business default", so editing the default moves everyone without a special
+arrangement (unchanged). On a vendor, null means NO terms: the tenant's
+default is a SALES default — the one new invoices start on — and a
+supplier's terms are theirs, not ours, so a vendor with none leaves the due
+date typed exactly as before.
+
+**Schema move.** `payment_terms` now lives in `src/db/schema/catalogue.ts`:
+invoicing.ts already imports payables.ts, so a table both point at had to
+sit below both or the two files would import each other. Same table, same
+migration history. `tests/isolation/payables.test.ts` certifies the new
+composite FK from both `vendors` and `customers` (the customer one was
+never certified); `tests/invoicing.test.ts` and `tests/payables.test.ts`
+cover create / patch / clear / retired-term refusal and the drafters' due
+dates. Migration applied to dev and production, verify-rls green, before the
+PR (ADR 0014).
+
+**Guides.** `customers.md`, `vendors.md`, `new-invoice.md`, `new-bill.md`,
+`catalogue.md`, `inbox.md` and `email/records.md`.
+
 ### 2026-09-07 — Bank deposits (`claude/bank-deposits`, migrations `0264`–`0266`)
 
 **What.** The `Not deposited` tile finally has somewhere to go. A `deposits`
@@ -3558,10 +3598,10 @@ preview in either state. The change is argued to be inert, not observed to be.
 | `parties` | 2026-08-03 | **Shared, not this module's.** The identity spine behind `customers` and `vendors`; written through `src/lib/parties/`. See [crm.md](crm.md) |
 | `customers`, `invoices`, `invoice_lines`, `invoice_payments` | S4 | AR. `customers.party_id` (2026-08-03) makes the row a role on a party. Both `customers` and `invoices` gained `reminders_muted` (`0114`) — standing and one-off suppression of automatic chasing. `recurring_invoices` folded into `recurring_entries` (`0121`/`0122`) and was dropped in `0147` |
 | `documents`, `document_links` | S5 | Capture substrate; exactly-one-of link targets |
-| `vendors`, `bills`, `bill_lines`, `bill_payments` | S6 | AP. `vendors.party_id` (2026-08-03) makes the row a role on a party |
+| `vendors`, `bills`, `bill_lines`, `bill_payments` | S6 | AP. `vendors.party_id` (2026-08-03) makes the row a role on a party. `vendors.payment_terms_id` (`0267`, 2026-09-07): the vendor's usual terms, null = none, composite FK to `payment_terms` |
 | `period_closes`, `close_notes` | S7 | Month-end close |
 | `recurring_entries` | 2026-08-12 | **The** recurrence table: invoices, bills and journals. `kind` discriminates the jsonb `template`; two CHECKs pin the shape (`party_shape` — a bill has a vendor, an invoice a customer, a journal neither; and `auto_post_shape` — only a journal may post itself). `invoices.recurring_entry_id` records which template made a row |
-| `products`, `payment_terms`, `payment_methods` | 2026-08-12 | The catalogue: saved invoice lines, named terms (`due_in_days`, one default per tenant by partial unique index), and the tenant-owned payment-method list. `invoice_payments.method` stores a method's CODE with **no FK** — deactivating a method must never rewrite a posted payment. `customers.payment_terms_id` (nullable = use the default) |
+| `products`, `payment_terms`, `payment_methods` | 2026-08-12 | The catalogue: saved invoice lines, named terms (`due_in_days`, one default per tenant by partial unique index), and the tenant-owned payment-method list. `invoice_payments.method` stores a method's CODE with **no FK** — deactivating a method must never rewrite a posted payment. `customers.payment_terms_id` (nullable = use the default). `payment_terms` moved to `src/db/schema/catalogue.ts` (2026-09-07) so `vendors` could point at it without a schema-file cycle |
 | `sales_tax_rates` | 2026-08-13 | The fourth reference list, and the only one **not seeded** — there is no rate that is right anywhere. `rate_ppm` is percent × 10,000 (8.875% = 88,750), because basis points cannot express a real US rate. One default per tenant by partial unique index. `invoices` gained `tax_rate_id` (composite FK, NO ACTION), `tax_rate_ppm` (**a frozen copy**, so a rate change never re-prices an issued invoice), `tax_cents` and `subtotal_cents`; `invoice_lines` gained `is_taxable`. `total_cents` is now the GROSS and still means what it always did — what the customer owes. The `total = subtotal + tax` CHECK landed in `0147` (`0123`'s header says why it had to wait) |
 
 All tables: `tenant_id`, FORCE RLS. Isolation coverage is split by area, one file
@@ -3689,8 +3729,8 @@ screen shipped without such a session as compiled-and-tested, not seen.
   `claude/approve-from-what-needs-you`);
   ~~**the whole list row as the link**~~ (DONE on both lists); **a customer
   created from the invoice form** the way the bill form creates a vendor;
-  **vendor default terms**, and a control for the `customers.payment_terms_id`
-  column that already exists; the `Combobox` on the vendor, customer and
+  ~~**vendor default terms**, and a control for the `customers.payment_terms_id`
+  column that already exists~~ (DONE 2026-09-07, `claude/default-terms`, `0267`); the `Combobox` on the vendor, customer and
   line-account pickers; ~~**a Transfer choice in the review queue**~~ (DONE 2026-09-06,
   `claude/own-account-transfers`, migration `0263`); ~~**a deposit screen** for Undeposited Funds~~ (DONE
   2026-09-07, `claude/bank-deposits`, migrations `0264`–`0266`; the tile now leads to it); ~~**search and paging** on every list~~ (DONE

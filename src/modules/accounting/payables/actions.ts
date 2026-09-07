@@ -83,6 +83,8 @@ const vendorInputSchema = z.object({
   address: z.string().trim().max(500).optional(),
   notes: z.string().trim().max(2000).optional(),
   defaultExpenseAccountId: z.string().uuid().nullable().optional(),
+  /** Null = no terms. */
+  paymentTermsId: z.string().uuid().nullable().optional(),
 });
 
 export async function createVendorAction(

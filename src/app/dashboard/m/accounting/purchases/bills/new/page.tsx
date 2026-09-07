@@ -5,6 +5,7 @@ import { withTenant, schema } from "@/db";
 import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { listVendors } from "@/modules/accounting/payables/vendors";
+import { listPaymentTerms } from "@/modules/accounting/invoicing/catalogue";
 import { todayInTimezone } from "@/modules/accounting/lib/money";
 import { PurchasesNav } from "../../purchases-nav";
 import {
@@ -25,6 +26,12 @@ export default async function NewBillPage() {
 
   const data = await withTenant(tenantId, async (tx) => {
     const vendors = await listVendors(tx, tenantId);
+    // The same terms Sales uses; a vendor's usual one drives the due date.
+    const terms = (await listPaymentTerms(tx, tenantId, { activeOnly: true })).map((t) => ({
+      id: t.id,
+      name: t.name,
+      dueInDays: t.dueInDays,
+    }));
     // Codable accounts: everything active except bank registers and the
     // AR/AP system accounts (mirrors the AI coding eligibility).
     const accounts = await tx.query.accounts.findMany({
@@ -40,6 +47,7 @@ export default async function NewBillPage() {
     const registerIds = new Set(registers.map((r) => r.accountId));
     return {
       vendors,
+      terms,
       entities: await listEntities(tx, tenantId),
       defaultEntityId: await getDefaultEntityId(tx, tenantId),
       today: todayInTimezone(ctx.tenant.timezone),
@@ -58,7 +66,12 @@ export default async function NewBillPage() {
       <AccountingNav />
       <PurchasesNav />
       <BillBuilder
-        vendors={data.vendors.map((v) => ({ id: v.id, name: v.name }))}
+        vendors={data.vendors.map((v) => ({
+          id: v.id,
+          name: v.name,
+          paymentTermsId: v.paymentTermsId,
+        }))}
+        terms={data.terms}
         entities={data.entities.map((e) => ({ id: e.id, name: e.name }))}
         defaultEntityId={data.defaultEntityId}
         accounts={data.accounts.map((a) => ({ id: a.id, code: a.code, name: a.name }))}

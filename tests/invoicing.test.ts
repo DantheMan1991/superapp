@@ -62,6 +62,9 @@ import { loadBillLines } from "../src/modules/accounting/payables/bills";
 import { recordPayment, unapplyPayment } from "../src/modules/accounting/invoicing/payments";
 import { listRecordHistory } from "../src/modules/accounting/history/list";
 import { logAuditInTx } from "../src/lib/audit";
+import { listPaymentTerms } from "../src/modules/accounting/invoicing/catalogue";
+import { dueDateFromCustomerTerms } from "../src/modules/accounting/invoicing/customers";
+import { addDaysIso } from "../src/modules/accounting/lib/dates";
 
 // =====================================================================
 // Pure suite
@@ -337,6 +340,77 @@ d("invoicing (DB)", () => {
       expect(emails[0].isPrimary).toBe(true);
       // And the phone is a different question that nobody asked.
       expect(preferredContactValue(after, "phone")).toBe("555 111 2222");
+    });
+  });
+
+  describe("a customer's usual terms", () => {
+    it("are stored on create, changed and cleared by a patch, and must be an active term", async () => {
+      const terms = await withTenant(tenantId, (tx) =>
+        listPaymentTerms(tx, tenantId, { activeOnly: true }),
+      );
+      const net15 = terms.find((t) => t.name === "Net 15")!;
+      const net60 = terms.find((t) => t.name === "Net 60")!;
+      const created = await withTenant(tenantId, (tx) =>
+        createCustomer(tx, owner, { name: "Terms Co", paymentTermsId: net15.id }),
+      );
+      expect(created.paymentTermsId).toBe(net15.id);
+
+      const changed = await withTenant(tenantId, (tx) =>
+        updateCustomer(tx, owner, {
+          customerId: created.id,
+          expectedVersion: created.version,
+          patch: { paymentTermsId: net60.id },
+        }),
+      );
+      expect(changed.after.paymentTermsId).toBe(net60.id);
+      // A patch that does not mention terms leaves them alone.
+      const renamed = await withTenant(tenantId, (tx) =>
+        updateCustomer(tx, owner, {
+          customerId: created.id,
+          expectedVersion: changed.after.version,
+          patch: { name: "Terms Co Ltd" },
+        }),
+      );
+      expect(renamed.after.paymentTermsId).toBe(net60.id);
+      // Null is "the business default" again.
+      const cleared = await withTenant(tenantId, (tx) =>
+        updateCustomer(tx, owner, {
+          customerId: created.id,
+          expectedVersion: renamed.after.version,
+          patch: { paymentTermsId: null },
+        }),
+      );
+      expect(cleared.after.paymentTermsId).toBeNull();
+
+      await expect(
+        withTenant(tenantId, (tx) =>
+          createCustomer(tx, owner, { name: "Bad Terms Co", paymentTermsId: crypto.randomUUID() }),
+        ),
+      ).rejects.toMatchObject({ code: "TERM_NOT_FOUND" });
+    });
+
+    it("give a drafted invoice its due date: the customer's own, else the default", async () => {
+      const terms = await withTenant(tenantId, (tx) =>
+        listPaymentTerms(tx, tenantId, { activeOnly: true }),
+      );
+      const net15 = terms.find((t) => t.name === "Net 15")!;
+      const fallback = terms.find((t) => t.isDefault)!;
+      const special = await withTenant(tenantId, (tx) =>
+        createCustomer(tx, owner, { name: "Special Terms", paymentTermsId: net15.id }),
+      );
+      const plain = await withTenant(tenantId, (tx) =>
+        createCustomer(tx, owner, { name: "Plain Terms" }),
+      );
+      expect(
+        await withTenant(tenantId, (tx) =>
+          dueDateFromCustomerTerms(tx, tenantId, special, "2026-09-01"),
+        ),
+      ).toBe("2026-09-16");
+      expect(
+        await withTenant(tenantId, (tx) =>
+          dueDateFromCustomerTerms(tx, tenantId, plain, "2026-09-01"),
+        ),
+      ).toBe(addDaysIso("2026-09-01", fallback.dueInDays));
     });
   });
 

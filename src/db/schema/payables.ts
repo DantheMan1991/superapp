@@ -23,6 +23,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
 import { parties } from "./parties";
+import { paymentTerms } from "./catalogue";
 import { accounts, entities, journalEntries } from "./ledger";
 
 export const billStatus = pgEnum("bill_status", [
@@ -54,6 +55,15 @@ export const vendors = pgTable(
     notes: text("notes").notNull().default(""),
     /** AI-free prefill for this vendor's bill lines. */
     defaultExpenseAccountId: uuid("default_expense_account_id"),
+    /**
+     * This vendor's usual terms (2026-09-07): a new bill from them starts
+     * with its due date worked out from the bill date. Null means NO terms —
+     * the due date is typed — rather than "the default", because the
+     * tenant's default term is a SALES default, the one new invoices start
+     * on, and a supplier's terms are theirs, not ours. Same `payment_terms`
+     * rows as customers use: a term is a term.
+     */
+    paymentTermsId: uuid("payment_terms_id"),
     isActive: boolean("is_active").notNull().default(true),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -71,6 +81,11 @@ export const vendors = pgTable(
       name: "vendors_default_account_fk",
       columns: [t.tenantId, t.defaultExpenseAccountId],
       foreignColumns: [accounts.tenantId, accounts.id],
+    }),
+    foreignKey({
+      name: "vendors_payment_terms_fk",
+      columns: [t.tenantId, t.paymentTermsId],
+      foreignColumns: [paymentTerms.tenantId, paymentTerms.id],
     }),
     foreignKey({
       name: "vendors_party_fk",

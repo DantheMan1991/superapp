@@ -100,7 +100,11 @@ export default async function NewInvoicePage() {
         </p>
       ) : (
         <InvoiceBuilder
-          customers={data.customers.map((c) => ({ id: c.id, name: c.name }))}
+          customers={data.customers.map((c) => ({
+            id: c.id,
+            name: c.name,
+            paymentTermsId: c.paymentTermsId,
+          }))}
           entities={data.entities.map((e) => ({ id: e.id, name: e.name }))}
           defaultEntityId={data.defaultEntityId}
           incomeAccounts={data.incomeAccounts.map((a) => ({

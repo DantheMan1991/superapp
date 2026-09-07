@@ -38,14 +38,25 @@ interface VendorData {
   address: string;
   notes: string;
   defaultExpenseAccountId: string | null;
+  paymentTermsId: string | null;
+  isActive: boolean;
+}
+
+/** A payment term as the dialog offers it; a retired one only while it is this vendor's. */
+export interface VendorTermOption {
+  id: string;
+  name: string;
   isActive: boolean;
 }
 
 export function VendorDialogButton({
   accounts,
+  terms = [],
   vendor,
 }: {
   accounts: Array<{ id: string; label: string }>;
+  /** The catalogue's payment terms. Shared with Sales: a term is a term. */
+  terms?: VendorTermOption[];
   /** When set, edits this vendor instead of creating. */
   vendor?: VendorData;
 }) {
@@ -59,6 +70,8 @@ export function VendorDialogButton({
   const [defaultAccount, setDefaultAccount] = useState(
     vendor?.defaultExpenseAccountId ?? NONE,
   );
+  const [termId, setTermId] = useState(vendor?.paymentTermsId ?? NONE);
+  const offeredTerms = terms.filter((t) => t.isActive || t.id === termId);
 
   function submit() {
     if (!name.trim()) {
@@ -72,6 +85,7 @@ export function VendorDialogButton({
         phone: phone.trim() || undefined,
         address: address.trim() || undefined,
         defaultExpenseAccountId: defaultAccount === NONE ? null : defaultAccount,
+        paymentTermsId: termId === NONE ? null : termId,
       };
       const result = vendor
         ? await updateVendorAction({
@@ -157,6 +171,30 @@ export function VendorDialogButton({
                 </SelectContent>
               </Select>
             </div>
+            {/* None means "no terms — the due date is typed": the business
+                default is a SALES default, the one new invoices start on, and
+                a supplier's terms are theirs rather than ours. */}
+            {terms.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Payment terms (optional)</Label>
+                <Select value={termId} onValueChange={setTermId}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE}>None</SelectItem>
+                    {offeredTerms.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.isActive ? t.name : `${t.name} (inactive)`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  A new bill from this vendor gets its due date from these terms.
+                </p>
+              </div>
+            )}
           </div>
           <DialogFooter className="gap-2">
             {vendor && (

@@ -10,10 +10,10 @@ Open **Sales** in the accounting menu and click {button:New invoice|primary}. Th
 ## What you see
 
 - **`Company`.** Only when your books hold more than one company, and only when creating. `Which company is invoicing?` It cannot be changed once the draft is saved.
-- **`Customer`.** One of your active customers. Required. There is no way to add a customer from inside the form.
+- **`Customer`.** One of your active customers. Required. Picking one applies their payment terms, their own or your default, and the due date with them. There is no way to add a customer from inside the form.
 - **`Number`.** Filled in for you with the next number, such as `INV-0009`. You can type your own. A number already used is refused when you save.
 - **`Issue date`.** Starts as today. Changing it moves the due date along with it when terms are set.
-- **`Terms`.** Shown once your catalogue has payment terms. Picking one, such as `Net 30`, sets the due date from the issue date, and a line under the due date reads `Net 30 — due 2026-09-11 (30 days)`. A new invoice starts on your default terms. The box reads `Custom` when the due date was typed by hand.
+- **`Terms`.** Shown once your catalogue has payment terms. Picking one, such as `Net 30`, sets the due date from the issue date, and a line under the due date reads `Net 30 — due 2026-09-11 (30 days)`. A new invoice starts on your default terms, and switches to the customer's own terms the moment you pick a customer who has some. The box reads `Custom` when the due date was typed by hand.
 - **`Due date (optional)`.** Typing a date here clears the terms, because a date you typed is yours, not the terms'.
 - **`Memo`.** `Shown on the printed invoice`.
 - **`Sales tax`.** Shown once your catalogue has a tax rate. `No tax`, or a rate such as `Ohio state and county · 7.25%`. Choosing a rate checks the `Tax` box on every line; switching back to `No tax` leaves the boxes as they are.
@@ -35,7 +35,7 @@ A draft dated in a closed month saves; the refusal comes when you issue it.
 
 ## How to edit a draft
 
-1. On the draft's page, click {button:Edit|outline}. This same form opens on that page. The company cannot be changed. `Terms` reads `Custom` and the saved due date stays until you change it.
+1. On the draft's page, click {button:Edit|outline}. This same form opens on that page. The company cannot be changed. `Terms` reads `Custom` and the saved due date stays until you change it; picking a different customer applies that customer's terms.
 2. Click {button:Save changes|primary}. You see `Draft updated`.
 
 ## Messages

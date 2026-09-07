@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MoreHorizontal, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -300,6 +301,11 @@ export function CustomerRowActions({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          <DropdownMenuItem asChild>
+            <Link href={`/dashboard/m/accounting/sales/customers/${customer.id}/statement`}>
+              Statement
+            </Link>
+          </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => setEditOpen(true)}>Edit</DropdownMenuItem>
           <DropdownMenuItem onSelect={toggleRemindersMuted} disabled={pending}>
             {customer.remindersMuted ? "Resume reminders" : "Never send reminders"}

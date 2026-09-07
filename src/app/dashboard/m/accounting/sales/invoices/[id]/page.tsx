@@ -295,7 +295,17 @@ export default async function InvoiceDetailPage({
         title={invoice.invoiceNumber}
         description={
           <>
-            {customer?.name} · issued {invoice.issueDate}
+            {customer ? (
+              // The name opens the customer's statement: what they owe across
+              // every invoice, which is the question this page cannot answer.
+              <Link
+                href={`/dashboard/m/accounting/sales/customers/${customer.id}/statement`}
+                className="hover:underline"
+              >
+                {customer.name}
+              </Link>
+            ) : null}{" "}
+            · issued {invoice.issueDate}
             {invoice.dueDate ? ` · due ${invoice.dueDate}` : ""}
             {invoice.memo ? ` · ${invoice.memo}` : ""}
           </>

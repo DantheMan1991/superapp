@@ -21,6 +21,21 @@ tokens and gets its own pass later.
 
 ## Build log
 
+### 2026-09-07 — Every long picker is a Combobox (`claude/type-ahead-pickers`)
+
+The five pickers the 2026-09-06 entry named as "next" made the swap: the
+invoice form's customer and line income account, the bill form's vendor and
+line account, the journal editor's line account, and Quick add's category /
+to-account. Each was a Radix `Select` over a list that runs to dozens of rows
+(a chart of accounts, a customer list); each is now a `Combobox` with the
+same three strings (placeholder, `Type a code or a name…`, `No … matches.`)
+and an `aria-label` naming the field, since the label beside it is not
+always a `<label for>`. Options are built once with `useMemo` where the list
+is a prop and inline where it changes with the form. The short lists —
+company, terms, tax, direction, bank account, saved item — stay Radix
+`Select`: five rows is a list to scroll, and the two controls share a face.
+Nothing about the primitive changed.
+
 ### 2026-09-07 — A list you can search and page (`claude/search-and-pages`)
 
 Two primitives and one pure module. `ListSearch`
@@ -478,7 +493,7 @@ directory is stock shadcn and stays upgradeable. These compose it.
 | `Markdown` | no | Inline `ReactMarkdown` + hand-copied prose classes (two of seven adopted, 2026-09-02) |
 | `HelpButton` | **yes** | — (new: the "?" in `PageHeader`'s actions row and Mail's bar, and the guide sheet it opens) |
 | `GuideControl` | **yes** | — (new: the real `Button` or `Badge` a guide draws from a `{button:…}` marker; live in the help panel, where it points at the control on the page) |
-| `Combobox` | **yes** | A Radix `Select` over a long list (2026-09-06: the bank review queue's category picker; the vendor, customer and line-account pickers are next) |
+| `Combobox` | **yes** | A Radix `Select` over a long list (2026-09-06: the bank review queue's category picker; 2026-09-07: the customer and vendor pickers, the invoice and bill line accounts, the journal line account, and Quick add's category) |
 | `LinkRow` | **yes** | A `TableRow` whose only link was one cell (2026-09-06: the Invoices list; 2026-09-07: the Bills list) |
 | `PhoneLabel` | no | A field's name shown only below `md`, for a grid with a header row that stacks on a phone (2026-09-07: the bill and invoice line editors) |
 | `ListSearch` | **yes** | — (new: the box above a list that owns the URL's `q`; 2026-09-07: the six accounting lists) |

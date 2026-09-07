@@ -13,6 +13,25 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-07 — Type-ahead on the customer, vendor and account pickers (`claude/type-ahead-pickers`)
+
+**What.** The `Combobox` the bank review queue got on 2026-09-06 now stands
+on every long picker in the module's forms: the invoice form's `Customer`
+and each line's `Income account`, the bill form's `Vendor` and each line's
+`Account`, the journal editor's line `Account`, and Quick add's `Category`
+(`To account` on a transfer). Click, type `63` or `feed` or `mill`, and the
+list narrows; Enter takes the highlighted row. The Radix `Select`s stay
+where the list is short — company, terms, tax, direction, bank account,
+saved item. No server change; `combobox-filter.ts` is the matching, already
+pinned by its pure test.
+
+**Why.** The review's finding: a chart of forty-nine accounts in a closed
+list, on every line, on a phone. The queue proved the control; the forms
+were the rest of the finding.
+
+**Guides.** `new-invoice.md`, `new-bill.md`, `new-entry.md`, `banking.md`
+(Quick add) — each picker's sentence now says it narrows as you type.
+
 ### 2026-09-07 — A customer from the invoice form (`claude/customer-from-invoice`)
 
 **What.** The invoice form gains the bill form's `…or type a new customer
@@ -3751,8 +3770,8 @@ screen shipped without such a session as compiled-and-tested, not seen.
   ~~**the whole list row as the link**~~ (DONE on both lists); ~~**a customer
   created from the invoice form** the way the bill form creates a vendor~~ (DONE 2026-09-07, `claude/customer-from-invoice`);
   ~~**vendor default terms**, and a control for the `customers.payment_terms_id`
-  column that already exists~~ (DONE 2026-09-07, `claude/default-terms`, `0267`); the `Combobox` on the vendor, customer and
-  line-account pickers; ~~**a Transfer choice in the review queue**~~ (DONE 2026-09-06,
+  column that already exists~~ (DONE 2026-09-07, `claude/default-terms`, `0267`); ~~the `Combobox` on the vendor, customer and
+  line-account pickers~~ (DONE 2026-09-07, `claude/type-ahead-pickers`, plus the journal line and Quick add); ~~**a Transfer choice in the review queue**~~ (DONE 2026-09-06,
   `claude/own-account-transfers`, migration `0263`); ~~**a deposit screen** for Undeposited Funds~~ (DONE
   2026-09-07, `claude/bank-deposits`, migrations `0264`–`0266`; the tile now leads to it); ~~**search and paging** on every list~~ (DONE
   2026-09-07, `claude/search-and-pages`; the register still has no date filter); **splitting one bank

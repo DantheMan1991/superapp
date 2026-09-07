@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  createCustomerAction,
   createInvoiceDraftAction,
   updateInvoiceDraftAction,
 } from "@/modules/accounting/invoicing/actions";
@@ -179,6 +180,13 @@ export function InvoiceBuilder({
   const [pending, startTransition] = useTransition();
   const defaultAccount = incomeAccounts[0]?.id ?? "";
   const [customerId, setCustomerId] = useState(invoice?.customerId ?? "");
+  /**
+   * A customer typed rather than picked — created on save, the way the bill
+   * form creates a vendor. The first invoice to a new customer used to mean
+   * leaving the form, adding them on Customers, and coming back to start
+   * again. Name only: the email and address are added on Customers later.
+   */
+  const [newCustomerName, setNewCustomerName] = useState("");
   const [entityId, setEntityId] = useState(
     invoice?.entityId ?? defaultEntityId ?? "",
   );
@@ -216,6 +224,7 @@ export function InvoiceBuilder({
    */
   function applyCustomer(nextCustomerId: string) {
     setCustomerId(nextCustomerId);
+    setNewCustomerName("");
     const customer = customers.find((c) => c.id === nextCustomerId);
     const term = resolveTerm(terms, customer?.paymentTermsId ?? null, defaultTermId);
     if (term) applyTerm(term.id);
@@ -327,9 +336,22 @@ export function InvoiceBuilder({
       };
     });
     startTransition(async () => {
+      let resolvedCustomerId = customerId;
+      if (!resolvedCustomerId && newCustomerName.trim()) {
+        const created = await createCustomerAction({ name: newCustomerName.trim() });
+        if ("error" in created) {
+          toast.error(created.error);
+          return;
+        }
+        resolvedCustomerId = created.data!.customerId;
+      }
+      if (!resolvedCustomerId) {
+        toast.error("Pick or create a customer.");
+        return;
+      }
       const payload = {
         entityId: entityId || undefined,
-        customerId,
+        customerId: resolvedCustomerId,
         invoiceNumber: number.trim() || undefined,
         issueDate,
         dueDate: dueDate || null,
@@ -393,6 +415,24 @@ export function InvoiceBuilder({
                 ))}
               </SelectContent>
             </Select>
+            {!invoice && (
+              <Input
+                className="h-8"
+                placeholder="…or type a new customer name"
+                value={newCustomerName}
+                onChange={(e) => {
+                  setNewCustomerName(e.target.value);
+                  if (e.target.value && customerId) {
+                    // Typing a name is choosing somebody else: the pick goes,
+                    // and with it that customer's terms — a new customer is
+                    // on the business default.
+                    setCustomerId("");
+                    const term = resolveTerm(terms, null, defaultTermId);
+                    if (term) applyTerm(term.id);
+                  }
+                }}
+              />
+            )}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="inv-number">Number</Label>
@@ -727,7 +767,9 @@ export function InvoiceBuilder({
           </div>
           <Button
             onClick={submit}
-            disabled={pending || !customerId || !allValid || !issueDate}
+            disabled={
+              pending || (!customerId && !newCustomerName.trim()) || !allValid || !issueDate
+            }
           >
             {pending ? "Saving…" : invoice ? "Save changes" : "Save draft"}
           </Button>

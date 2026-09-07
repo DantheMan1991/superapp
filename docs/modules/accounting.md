@@ -13,6 +13,27 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-07 — A customer from the invoice form (`claude/customer-from-invoice`)
+
+**What.** The invoice form gains the bill form's `…or type a new customer
+name` box under the customer picker (creating only — an issued invoice's
+customer is not re-chosen by typing). On save the name goes through
+`createCustomerAction` first and the draft is written with the new id, the
+same two-step the bill form has done for vendors since session 6. Typing a
+name drops the pick and puts the form back on the business default terms,
+because the customer being typed has none of their own yet. The New invoice
+page no longer stops at "Add a customer first" when the list is empty: the
+form creates the first one. Name only, as with vendors; email and address
+come later on Customers.
+
+**Why.** The review's finding: the first invoice to a new customer meant
+leaving the form, adding them on Customers, and starting the invoice again —
+while the bill form had done it in one step all along. Nothing new in the
+core: the action, the party creation and the CRM sync were all there.
+
+**Guides.** `new-invoice.md` (the box, the step), `customers.md` (the
+"also created on the spot" note vendors.md already carried).
+
 ### 2026-09-07 — Usual payment terms on a customer and a vendor (`claude/default-terms`, migration `0267`)
 
 **What.** The two gaps the catalogue entry of 2026-08-12 recorded. A
@@ -3727,8 +3748,8 @@ screen shipped without such a session as compiled-and-tested, not seen.
   (DONE 2026-09-06, `claude/issue-and-send`); ~~**Record payment and Approve as row actions** on the invoice and bill
   lists~~ (DONE 2026-09-06/07) and ~~on What needs you~~ (Approve DONE 2026-09-07,
   `claude/approve-from-what-needs-you`);
-  ~~**the whole list row as the link**~~ (DONE on both lists); **a customer
-  created from the invoice form** the way the bill form creates a vendor;
+  ~~**the whole list row as the link**~~ (DONE on both lists); ~~**a customer
+  created from the invoice form** the way the bill form creates a vendor~~ (DONE 2026-09-07, `claude/customer-from-invoice`);
   ~~**vendor default terms**, and a control for the `customers.payment_terms_id`
   column that already exists~~ (DONE 2026-09-07, `claude/default-terms`, `0267`); the `Combobox` on the vendor, customer and
   line-account pickers; ~~**a Transfer choice in the review queue**~~ (DONE 2026-09-06,

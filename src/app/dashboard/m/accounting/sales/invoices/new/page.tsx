@@ -94,34 +94,29 @@ export default async function NewInvoicePage() {
       />
       <AccountingNav />
       <SalesNav />
-      {data.customers.length === 0 ? (
-        <p className="rounded-md border px-4 py-8 text-center text-sm text-muted-foreground">
-          Add a customer first (Sales → Customers).
-        </p>
-      ) : (
-        <InvoiceBuilder
-          customers={data.customers.map((c) => ({
-            id: c.id,
-            name: c.name,
-            paymentTermsId: c.paymentTermsId,
-          }))}
-          entities={data.entities.map((e) => ({ id: e.id, name: e.name }))}
-          defaultEntityId={data.defaultEntityId}
-          incomeAccounts={data.incomeAccounts.map((a) => ({
-            id: a.id,
-            code: a.code,
-            name: a.name,
-          }))}
-          suggestedNumber={data.suggestedNumber}
-          today={data.today}
-          products={data.products}
-          terms={data.terms}
-          defaultTermId={data.defaultTermId}
-          taxRates={data.taxRates}
-          defaultTaxRateId={data.defaultTaxRateId}
-          dimensionTypes={dimensionTypesFrom(data.dimensionMembers)}
-        />
-      )}
+      {/* No customers yet is not a dead end: the form creates the first one. */}
+      <InvoiceBuilder
+        customers={data.customers.map((c) => ({
+          id: c.id,
+          name: c.name,
+          paymentTermsId: c.paymentTermsId,
+        }))}
+        entities={data.entities.map((e) => ({ id: e.id, name: e.name }))}
+        defaultEntityId={data.defaultEntityId}
+        incomeAccounts={data.incomeAccounts.map((a) => ({
+          id: a.id,
+          code: a.code,
+          name: a.name,
+        }))}
+        suggestedNumber={data.suggestedNumber}
+        today={data.today}
+        products={data.products}
+        terms={data.terms}
+        defaultTermId={data.defaultTermId}
+        taxRates={data.taxRates}
+        defaultTaxRateId={data.defaultTaxRateId}
+        dimensionTypes={dimensionTypesFrom(data.dimensionMembers)}
+      />
     </div>
   );
 }

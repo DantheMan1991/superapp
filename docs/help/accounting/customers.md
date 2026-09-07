@@ -21,6 +21,8 @@ Open **Sales** in the accounting menu and click the `Customers` pill. The line u
 3. Pick `Payment terms`, shown once your catalogue has terms: `Business default (Net 30)`, or one of your terms for a customer with a special arrangement. The line under the box reads `A new invoice for this customer starts on these terms.` Add `Notes` if you want them.
 4. Click {button:Add customer|primary}. You see `Customer added`.
 
+A customer is also created on the spot when you type a new name on an invoice. Those get a name only, on the business default terms. Come here to add the rest.
+
 `Business default` means whatever the default is on the Catalogue page, now and later: change the default there and every customer on it moves with it. A customer's own terms are applied the moment you pick them on an invoice, and the due date follows. Sales tax is set on each invoice.
 
 ## How to edit a customer

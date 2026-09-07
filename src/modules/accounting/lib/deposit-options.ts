@@ -36,6 +36,40 @@ export interface DepositOption {
   otherCompany?: string;
 }
 
+export interface PaidFromRegister {
+  ledgerAccountId: string;
+  name: string;
+  kind: string;
+  /** Set only when the account belongs to another company. */
+  otherCompany?: string;
+}
+
+/**
+ * Where a bill can be paid from: every active register, the other companies'
+ * labelled. The mirror of `depositOptionsFor` for money going OUT — paying
+ * from an affiliate's account is the intercompany pair the bill dialog
+ * warns about before it happens. No Undeposited Funds here: a bill is never
+ * paid from it. Shared by the bill page and the Bills list, which offers the
+ * same dialog on a row.
+ */
+export function paidFromRegistersFor(args: {
+  registers: readonly (DepositRegister & { kind: string })[];
+  companies: readonly DepositCompany[];
+  /** The bill's company. */
+  entityId: string;
+}): PaidFromRegister[] {
+  const companyName = new Map(args.companies.map((c) => [c.id, c.name]));
+  return args.registers.map((r) => ({
+    ledgerAccountId: r.accountId,
+    name: r.name,
+    kind: r.kind,
+    otherCompany:
+      r.entityId === args.entityId
+        ? undefined
+        : (companyName.get(r.entityId) ?? "another company"),
+  }));
+}
+
 export function depositOptionsFor(args: {
   registers: readonly DepositRegister[];
   companies: readonly DepositCompany[];

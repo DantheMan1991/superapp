@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { depositOptionsFor } from "../src/modules/accounting/lib/deposit-options";
+import {
+  depositOptionsFor,
+  paidFromRegistersFor,
+} from "../src/modules/accounting/lib/deposit-options";
 
 const maple = "11111111-1111-1111-1111-111111111111";
 const oak = "22222222-2222-2222-2222-222222222222";
@@ -51,6 +54,20 @@ describe("depositOptionsFor", () => {
         entityId: maple,
       })[1],
     ).toEqual({ id: "acct-oak", label: "Oak Operating", otherCompany: "another company" });
+  });
+
+  it("paidFromRegistersFor mirrors it for a bill: kind carried, affiliate labelled, no Undeposited Funds", () => {
+    const withKinds = [
+      { ...registers[0], kind: "checking" },
+      { ...registers[1], kind: "credit_card" },
+    ];
+    expect(paidFromRegistersFor({ registers: withKinds, companies, entityId: oak })).toEqual([
+      { ledgerAccountId: "acct-maple", name: "Maple Checking", kind: "checking", otherCompany: "Maple Street LLC" },
+      { ledgerAccountId: "acct-oak", name: "Oak Operating", kind: "credit_card", otherCompany: undefined },
+    ]);
+    expect(
+      paidFromRegistersFor({ registers: withKinds, companies: [], entityId: oak })[0].otherCompany,
+    ).toBe("another company");
   });
 
   it("keeps the registers in the caller's order, whichever company the invoice is in", () => {

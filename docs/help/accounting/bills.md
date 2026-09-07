@@ -18,14 +18,15 @@ Open **Purchases** in the accounting menu. This page lists every bill, with the 
   - `Paid recently`. Payments made in the last 30 days.
 - **Status pills.** Above the list, at the right: `All`, `Drafts`, `Awaiting approval`, `Open`, `Paid` and `Void`. `Open` means approved bills with a balance, paid in part or not at all. Clicking a pill clears the tile you chose, and clicking a tile sets the pills back to `All`.
 - **`Company`.** Only when you keep more than one company. Pick one company or `All companies`. Your tile and pill stay as they are.
-- **The list.** Newest bills first, up to 200.
-  - `Vendor`. Click the name to open the bill. Nothing else in the row is a link.
+- **The list.** Newest bills first, up to 200. Click anywhere on a row to open the bill.
+  - `Vendor`. The vendor's name.
   - `Company`. Only when you keep more than one.
   - `Invoice #`. The vendor's own invoice number, or a dash.
   - `Bill date` and `Due`.
   - `Total`.
   - `Balance`. What is still owed. A draft or a bill awaiting approval shows its full total, because nothing has been paid against it. A void bill shows a dash.
   - `Status`. A badge, explained next.
+  - At the end of the row, owners only: {button:Approve|primary} on a draft or a bill awaiting approval, which posts it without opening it, and {button:Record payment|outline} on a bill still owed, the same dialog as on the bill's page. See [A bill](bill.md).
 
 ## What the status badges mean
 
@@ -45,15 +46,20 @@ The bill's own page shows its stage instead, such as `approved` or `partial`. Se
 
 1. Click a status pill, or `All` to see everything.
 2. If you keep more than one company, pick it in `Company`.
-3. Click the vendor's name in the `Vendor` column. The bill opens.
+3. Click the row. The bill opens.
 
 There is no search box on this page. If you have the vendor's name but not the bill, open `Vendors` and pick the vendor.
 
 ## How to see what is overdue
 
 1. Click the `Overdue` tile. The list shows only bills past their due date, and `Filtered to Overdue · show all` appears under the tiles.
-2. Click a vendor's name to open a bill and record a payment.
+2. Click {button:Record payment|outline} at the end of a row to record what was paid without leaving the list, or click the row to open the bill.
 3. Click `show all` to see every bill again.
+
+## How to approve from the list
+
+1. Click the `Awaiting approval` tile, or the `Awaiting approval` or `Drafts` pill.
+2. Click {button:Approve|primary} at the end of the row. You see `Approved and posted.`, and the bill's total posts to Accounts Payable. If a line has no account yet, you see `Every line needs an account before approval.` instead; click the row, code the lines, and approve there.
 
 ## Messages
 
@@ -61,6 +67,9 @@ There is no search box on this page. If you have the vendor's name but not the b
 | --- | --- |
 | `Record your first bill` and `Add one directly, or open the Inbox and use “Create bill” on an emailed one.` | You have no bills yet. Click {button:New bill|primary} here, or open a bill a vendor emailed you from the Inbox. |
 | `Nothing here` and `Another status filter may have what you are after.` | No bill matches the pill or tile you chose. Click `All`. |
+| `Approved and posted.` | {button:Approve|primary} on a row posted the bill. |
+| `Every line needs an account before approval.` | The bill you tried to approve from the list has an uncoded line. Open it and code the lines first. |
+| `Payment recorded.` | {button:Record payment|outline} on a row recorded the payment. The badge changes on its own. |
 
 ## Not on this page
 
@@ -68,4 +77,4 @@ There is no search, no filter by vendor or date, no sorting by column, and nothi
 
 ## Who can do what
 
-Owners, staff and accountants all see the same page, tiles and list, and everyone can click {button:New bill|primary}. What each person can do with a bill is on the bill's own page.
+Owners, staff and accountants all see the same page, tiles and list, and everyone can click {button:New bill|primary}. Only owners see {button:Approve|primary} and {button:Record payment|outline} on the rows. What else each person can do with a bill is on the bill's own page.

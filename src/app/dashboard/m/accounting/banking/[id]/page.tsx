@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, exists, ilike, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -9,11 +9,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/app/page-header";
+import { ListSearch } from "@/components/app/list-search";
+import { Pager } from "@/components/app/pager";
+import { ilikePattern, pageFrom, pageWindow, searchTerm } from "@/lib/list-query";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { getBalances, listDimensionMembers } from "@/modules/accounting/core";
 import { dimensionTypesFrom } from "@/lib/dimension-options";
 import {
   formatCentsSigned,
+  parseMoneyToCents,
   todayInTimezone,
 } from "@/modules/accounting/lib/money";
 import { findMatchCandidatesBatch } from "@/modules/accounting/banking/match";
@@ -28,12 +32,19 @@ import {
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Rows per page. Twice the other lists': a feed row is one line, and a
+ * month of a busy account is about this many. The list used to stop dead at
+ * 300 with no way past.
+ */
+const PAGE_SIZE = 100;
+
 export default async function BankRegisterPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; q?: string; page?: string }>;
 }) {
   const { id } = await params;
   const sp = await searchParams;
@@ -41,6 +52,12 @@ export default async function BankRegisterPage({
   const tab = ["unreviewed", "all", "excluded"].includes(sp.tab ?? "")
     ? (sp.tab as "unreviewed" | "all" | "excluded")
     : "unreviewed";
+  const term = searchTerm(sp.q);
+  const pattern = term ? ilikePattern(term) : null;
+  // `45.10`, `-45.10` or `(45.10)` also finds the rows for exactly that
+  // amount, either direction — the one thing about a bank line everybody
+  // remembers is the figure.
+  const cents = term ? parseMoneyToCents(term.replace(/^[-(]|\)$/g, "")) : null;
 
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
@@ -61,20 +78,56 @@ export default async function BankRegisterPage({
       asOf: today,
       accountIds: [bankAccount.accountId],
     });
-    const txns = await tx.query.bankTransactions.findMany({
-      where: and(
-        eq(schema.bankTransactions.tenantId, tenantId),
-        eq(schema.bankTransactions.bankAccountId, id),
-        ...(tab === "all"
-          ? []
-          : [eq(schema.bankTransactions.status, tab)]),
-      ),
-      orderBy: [
+    // The search reads the description as the bank gave it, the payee a
+    // rule or a person set, and the amount. One predicate for the count and
+    // the page, so "of 312" and the rows can never describe different lists.
+    const rowWhere = and(
+      eq(schema.bankTransactions.tenantId, tenantId),
+      eq(schema.bankTransactions.bankAccountId, id),
+      ...(tab === "all"
+        ? []
+        : [eq(schema.bankTransactions.status, tab)]),
+      pattern
+        ? or(
+            ilike(schema.bankTransactions.description, pattern),
+            exists(
+              tx
+                .select({ one: sql`1` })
+                .from(schema.vendors)
+                .where(
+                  and(
+                    eq(schema.vendors.tenantId, schema.bankTransactions.tenantId),
+                    eq(schema.vendors.id, schema.bankTransactions.vendorId),
+                    ilike(schema.vendors.name, pattern),
+                  ),
+                ),
+            ),
+            ...(cents !== null
+              ? [sql`abs(${schema.bankTransactions.amountCents}) = ${cents}`]
+              : []),
+          )
+        : undefined,
+    );
+    const [{ total }] = await tx
+      .select({ total: sql<number>`count(*)::int` })
+      .from(schema.bankTransactions)
+      .where(rowWhere);
+    const window = pageWindow(pageFrom(sp.page), PAGE_SIZE, total);
+    // The core select, NOT `tx.query.bankTransactions.findMany`: the
+    // relational API aliases the table (`"bankTransactions"`) while the
+    // correlated `exists` above names the real one, and Postgres refuses the
+    // reference ("invalid reference to FROM-clause entry"). The count query
+    // never had the problem, because `select().from()` does not alias.
+    const txns = await tx
+      .select()
+      .from(schema.bankTransactions)
+      .where(rowWhere)
+      .orderBy(
         desc(schema.bankTransactions.txnDate),
         desc(schema.bankTransactions.createdAt),
-      ],
-      limit: 300,
-    });
+      )
+      .limit(PAGE_SIZE)
+      .offset(window.offset);
     const counts = await tx
       .select({
         status: schema.bankTransactions.status,
@@ -183,10 +236,22 @@ export default async function BankRegisterPage({
       dimensionMembers,
       registers,
       linkedEntries,
+      window,
     };
   });
   if (!data) notFound();
   const { bankAccount, txns, counts } = data;
+
+  // The pager keeps the tab and the search term. Only a page past the first
+  // is written, so page one's URL is the plain one the tabs link to.
+  const pageHref = (page: number) => {
+    const p = new URLSearchParams();
+    if (tab !== "unreviewed") p.set("tab", tab);
+    if (term) p.set("q", term);
+    if (page > 1) p.set("page", String(page));
+    const s = p.toString();
+    return `/dashboard/m/accounting/banking/${id}${s ? `?${s}` : ""}`;
+  };
 
   const countOf = (s: string) => counts.find((c) => c.status === s)?.n ?? 0;
   const net = data.balance?.netCents ?? 0;
@@ -319,9 +384,14 @@ export default async function BankRegisterPage({
         </Card>
       )}
 
+      <div className="flex justify-end">
+        <ListSearch placeholder="Search description, payee or amount" />
+      </div>
+
       <RegisterTabs
         bankAccountId={id}
         active={tab}
+        term={term}
         counts={{
           unreviewed: countOf("unreviewed"),
           all: counts.reduce((s, c) => s + c.n, 0),
@@ -332,9 +402,11 @@ export default async function BankRegisterPage({
       {rows.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-sm text-muted-foreground">
-            {tab === "unreviewed"
-              ? "Nothing to review — the feed is clear."
-              : "No transactions here yet."}
+            {term
+              ? `Nothing matches “${term}”. Try fewer words, or clear the search.`
+              : tab === "unreviewed"
+                ? "Nothing to review — the feed is clear."
+                : "No transactions here yet."}
           </CardContent>
         </Card>
       ) : (
@@ -347,6 +419,12 @@ export default async function BankRegisterPage({
           canAct={isOwner}
         />
       )}
+
+      <Pager
+        window={data.window}
+        noun={{ one: "transaction", many: "transactions" }}
+        hrefFor={pageHref}
+      />
     </div>
   );
 }

@@ -153,11 +153,15 @@ export function RegisterTabs({
   bankAccountId,
   active,
   counts,
+  term = "",
 }: {
   bankAccountId: string;
   active: "unreviewed" | "all" | "excluded";
   counts: { unreviewed: number; all: number; excluded: number };
+  /** The search term in force, carried from tab to tab; the page is not. */
+  term?: string;
 }) {
+  const q = term ? `&q=${encodeURIComponent(term)}` : "";
   const tabs = [
     { key: "unreviewed", label: `To review (${counts.unreviewed})` },
     { key: "all", label: `All (${counts.all})` },
@@ -168,7 +172,7 @@ export function RegisterTabs({
       {tabs.map((t) => (
         <Link
           key={t.key}
-          href={`/dashboard/m/accounting/banking/${bankAccountId}?tab=${t.key}`}
+          href={`/dashboard/m/accounting/banking/${bankAccountId}?tab=${t.key}${q}`}
           className={cn(
             "rounded-t-md border-b-2 px-3 py-1.5 text-sm font-medium",
             active === t.key

@@ -21,6 +21,25 @@ tokens and gets its own pass later.
 
 ## Build log
 
+### 2026-09-07 — A list you can search and page (`claude/search-and-pages`)
+
+Two primitives and one pure module. `ListSearch`
+(`src/components/app/list-search.tsx`, client) is a search box that owns
+exactly one thing, the `q` parameter of the current URL: debounced 350 ms,
+Enter commits at once, `router.replace` rather than `push` so Back does not
+walk through the letters, and every commit drops `page`. It tracks the URL
+as well as writing it — the render-time compare from conventions.md, not an
+effect — so a pill that carries the term through, or Back, shows in the box.
+`Pager` (`src/components/app/pager.tsx`, server) is `Showing 51–100 of 312
+invoices` with two links: `Newer`/`Older` by default because these lists are
+newest first, `Previous`/`Next` where a list is in name order; it renders
+nothing while the list fits on a page. `src/lib/list-query.ts` is the
+arithmetic, pure and tested: `searchTerm`, `ilikePattern` (escapes `%`, `_`,
+`\`), `pageFrom`, `pageWindow` (clamps a stale page to the last), and
+`matchesAny` for a list filtered in memory. The rule the six accounting lists
+follow: the term and the scope ride on every href a list builds, the page on
+none of them, and one predicate feeds both the count and the rows.
+
 ### 2026-09-07 — A grid that stacks, with one markup (`claude/forms-on-a-phone`)
 
 The bill and invoice line editors are the second answer to "a table above
@@ -462,6 +481,8 @@ directory is stock shadcn and stays upgradeable. These compose it.
 | `Combobox` | **yes** | A Radix `Select` over a long list (2026-09-06: the bank review queue's category picker; the vendor, customer and line-account pickers are next) |
 | `LinkRow` | **yes** | A `TableRow` whose only link was one cell (2026-09-06: the Invoices list; 2026-09-07: the Bills list) |
 | `PhoneLabel` | no | A field's name shown only below `md`, for a grid with a header row that stacks on a phone (2026-09-07: the bill and invoice line editors) |
+| `ListSearch` | **yes** | — (new: the box above a list that owns the URL's `q`; 2026-09-07: the six accounting lists) |
+| `Pager` | no | `.limit(200)` / `limit: 300` with nothing past the end (2026-09-07: the six accounting lists) |
 
 ### `DataTable` is a container, not a table
 

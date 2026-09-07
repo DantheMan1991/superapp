@@ -10,7 +10,9 @@ Open **Banking** in the accounting menu and click an account's card. This is whe
 ## What you see
 
 - **The top of the page.** The title is the account's name. The line under it gives its kind, institution, last four digits and today's balance, or `owed` for a card. {badge:connected|success} for a live feed and {badge:closed|outline} for a closed account. Owners see, while the account is open, {button:Import CSV|outline}, {button:Suggest categories|primary|sparkles} and {button:Reconcile|outline}, and always {button:Close account|outline} or {button:Reopen account|outline}.
-- **The three tabs.** `To review (3)`, transactions that have arrived and are not in your books yet. `All (120)`, everything. `Excluded (2)`, transactions you have set aside. The counts are live. The list shows up to 300 transactions, newest first. There is no search or date filter.
+- **The three tabs.** `To review (3)`, transactions that have arrived and are not in your books yet. `All (120)`, everything. `Excluded (2)`, transactions you have set aside. The counts are live, and count the whole account whatever you have searched for. The list is newest first, a hundred to a page.
+- **Search.** The box above the tabs. Type part of the description or the payee, or an amount such as `45.10`, and the list narrows as you type; press Enter to search at once. An amount finds the rows for exactly that figure, in or out. What you typed stays as you switch tabs. Clear the box to see everything again.
+- **Pages.** When a tab holds more than a hundred transactions, `Showing 1–100 of 312 transactions` sits under the list with {button:Newer|outline} and {button:Older|outline}. A search, or a different tab, starts again from the first page.
 - **Each row.** `Date` and `Description`, as the bank gave them, with a {icon:paperclip} and a count when receipts are attached from the Inbox. Under the description, on a row still to review, a chip with a suggested category: `RULE · 6300` means one of your bank rules matched, and hovering it shows which; `AI · 6100 · 87%` is the assistant's suggestion and how sure it is. When both have an opinion only the rule's chip is shown, because a rule is a decision you wrote down. `Payee`, the vendor, once a rule or a person has set one. `In` and `Out`. On `All`, `Status`: `unreviewed`, `posted` or `excluded`, where `posted` is a link to the entry in the journal. On `To review`, for owners, `Category`, already set to the suggestion. Click it and type part of a code or a name, such as `63` or `insur`, and the list narrows to what matches; click the account, or press Enter for the highlighted one. {button:Tag|outline} sits under it when your business has tags. At the end of the list, `Transfer to [account]` on money out and `Transfer from [account]` on money in, one for each of your other accounts in the same company, so money you moved between your own accounts is recorded as a transfer rather than as spending or income.
 - **On a phone.** Each transaction is a card instead of a row: the description and the amount at the top, money in with a `+` in green and money out with a `−`, then the date, the payee and the receipt count, the chip, the `Category`, the tag and the buttons. Everything works the same as in the table.
 - **The buttons on a row.** On `To review`: {button:Match|outline} when the row has something in the books it could be, {button:Exclude|ghost} and {button:Post|primary}. On `All`: {button:Unmatch|ghost} on a row that was matched to an entry; a row that posted its own entry has no button, because that entry is undone by voiding it. On `Excluded`: {button:Restore|outline}.
@@ -59,6 +61,7 @@ It works the other way round too: post `Transfer from [account]` on the account 
 | --- | --- |
 | `Nothing to review — the feed is clear.` | Every transaction has been posted, matched or excluded. |
 | `No transactions here yet.` | The tab is empty. |
+| `Nothing matches “…”. Try fewer words, or clear the search.` | Nothing on this tab has what you typed in its description, its payee or its amount. |
 | `Suggestions were just requested — try again in a moment.` | You asked the assistant twice within half a minute. |
 | `Posted 9, skipped 3` | Three suggestions could not be posted. The first reason follows. |
 | `Posted` | The transaction is in your books. {button:Undo|link} beside it voids the entry and brings the transaction back. |
@@ -71,7 +74,7 @@ It works the other way round too: post `Transfer from [account]` on the account 
 
 ## Not on this page
 
-There is no search or date filter, and the list stops at 300. Importing a statement and reconciling have their own pages. See [Import a statement](import-statement.md) and [Reconcile an account](reconcile.md).
+There is no date filter. Importing a statement and reconciling have their own pages. See [Import a statement](import-statement.md) and [Reconcile an account](reconcile.md).
 
 ## Who can do what
 

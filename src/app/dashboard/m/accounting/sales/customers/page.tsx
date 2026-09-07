@@ -9,6 +9,9 @@ import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
 import { EmptyState } from "@/components/app/empty-state";
+import { ListSearch } from "@/components/app/list-search";
+import { Pager } from "@/components/app/pager";
+import { matchesAny, pageFrom, pageWindow, searchTerm } from "@/lib/list-query";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { formatCentsSigned, toSafeCents } from "@/modules/accounting/lib/money";
 import { SalesNav } from "../sales-nav";
@@ -16,9 +19,18 @@ import { AddCustomerButton, CustomerRowActions } from "./customer-dialogs";
 
 export const dynamic = "force-dynamic";
 
-export default async function CustomersPage() {
+/** Rows per page. */
+const PAGE_SIZE = 50;
+
+export default async function CustomersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; page?: string }>;
+}) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
+  const sp = await searchParams;
+  const term = searchTerm(sp.q);
 
   const data = await withTenant(ctx.tenant.id, async (tx) => {
     const customers = await tx.query.customers.findMany({
@@ -86,6 +98,23 @@ export default async function CustomersPage() {
   );
   const isOwnerOrStaff = true; // staff may manage customers (P21)
 
+  // Filtered in memory: every customer is already loaded for the contact
+  // points and the balances, and the search reads what the row shows — the
+  // name, the email and the phone.
+  const matching = data.customers.filter((c) => {
+    const r = reach(c.partyId);
+    return matchesAny(term, [c.name, r.email, r.phone]);
+  });
+  const window = pageWindow(pageFrom(sp.page), PAGE_SIZE, matching.length);
+  const shown = matching.slice(window.offset, window.offset + PAGE_SIZE);
+  const pageHref = (page: number) => {
+    const p = new URLSearchParams();
+    if (term) p.set("q", term);
+    if (page > 1) p.set("page", String(page));
+    const s = p.toString();
+    return `/dashboard/m/accounting/sales/customers${s ? `?${s}` : ""}`;
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -95,21 +124,29 @@ export default async function CustomersPage() {
       />
 
       <AccountingNav />
-      <SalesNav />
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SalesNav />
+        <ListSearch placeholder="Search name, email or phone" />
+      </div>
 
       <Panel
-        isEmpty={data.customers.length === 0}
+        isEmpty={shown.length === 0}
         empty={
           <EmptyState
             icon={<Users />}
-            title="Add your first customer"
-            description="You need somebody to bill before you can raise an invoice."
+            title={term ? `Nothing matches “${term}”` : "Add your first customer"}
+            description={
+              term
+                ? "Try fewer words, or add them now."
+                : "You need somebody to bill before you can raise an invoice."
+            }
             action={isOwnerOrStaff ? <AddCustomerButton /> : undefined}
           />
         }
       >
         <ul className="divide-y divide-divider">
-          {data.customers.map((c) => (
+          {shown.map((c) => (
             <li
               key={c.id}
               className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-muted/60"
@@ -149,6 +186,13 @@ export default async function CustomersPage() {
           ))}
         </ul>
       </Panel>
+
+      <Pager
+        window={window}
+        noun={{ one: "customer", many: "customers" }}
+        hrefFor={pageHref}
+        labels={{ prev: "Previous", next: "Next" }}
+      />
     </div>
   );
 }

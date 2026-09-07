@@ -9,8 +9,10 @@ Open **Purchases** in the accounting menu and click the `Vendors` pill. The line
 
 ## What you see
 
-- **The list.** Every vendor, active or not, in name order. `Name`. `Contact`, the email and phone, or a dash. `Default account`, the account new bill lines for this vendor start on, or a dash. `Status`, `active` or `inactive`. A {icon:pencil} at the end of the row opens the vendor for editing.
+- **The list.** Every vendor, active or not, in name order, fifty to a page. `Name`. `Contact`, the email and phone, or a dash. `Default account`, the account new bill lines for this vendor start on, or a dash. `Status`, `active` or `inactive`. A {icon:pencil} at the end of the row opens the vendor for editing.
 - **No vendor page.** A vendor's name is not a link. Everything about a vendor is in the edit dialog, and their bills are in the Bills list.
+- **Search.** The box beside the pills. Type part of a name, an email or a phone number and the list narrows as you type; press Enter to search at once. A phone number matches with or without its spaces and brackets. Clear the box to see everyone again.
+- **Pages.** When there are more than fifty vendors, `Showing 1–50 of 120 vendors` sits under the list with {button:Previous|outline} and {button:Next|outline}. A search starts again from its first page.
 
 ## How to add a vendor
 
@@ -39,12 +41,13 @@ A deactivated vendor disappears from the vendor list on the bill form and from t
 | Message | What it means |
 | --- | --- |
 | `No vendors yet` and `They are created for you when a bill comes in from an emailed document, or you can add one now.` | The list is empty. |
+| `Nothing matches “…”` and `Try fewer words, or add them now.` | No vendor's name, email or phone contains what you typed. {button:New vendor|primary|plus} is right there. Check the spelling before adding one, because two vendors may share a name. |
 | `That vendor is inactive — reactivate them first.` | A bill names a deactivated vendor. Reactivate them here. |
 | `This entry changed since you opened it — reload and try again.` | Someone else saved the vendor while you had it open. |
 
 ## Not on this page
 
-There is no vendor page and no search. A vendor cannot be deleted, only deactivated.
+There is no vendor page. A vendor cannot be deleted, only deactivated.
 
 ## Who can do what
 

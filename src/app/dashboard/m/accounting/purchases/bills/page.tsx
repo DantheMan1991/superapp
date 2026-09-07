@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
@@ -11,6 +11,9 @@ import { DataTable } from "@/components/app/data-table";
 import { EmptyState } from "@/components/app/empty-state";
 import { FilterPills } from "@/components/app/filter-pills";
 import { LinkRow } from "@/components/app/link-row";
+import { ListSearch } from "@/components/app/list-search";
+import { Pager } from "@/components/app/pager";
+import { ilikePattern, pageFrom, pageWindow, searchTerm } from "@/lib/list-query";
 import { paidFromRegistersFor } from "@/modules/accounting/lib/deposit-options";
 import { ApproveBillButton } from "./approve-bill-button";
 import { RecordBillPaymentButton } from "./record-bill-payment-dialog";
@@ -65,10 +68,19 @@ const TONE_BADGE: Record<ObligationTone, "default" | "secondary" | "destructive"
   settled: "outline",
 };
 
+/** Rows per page. The list used to stop dead at 200 with no way past. */
+const PAGE_SIZE = 50;
+
 export default async function BillsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string; bucket?: string; entity?: string }>;
+  searchParams: Promise<{
+    tab?: string;
+    bucket?: string;
+    entity?: string;
+    q?: string;
+    page?: string;
+  }>;
 }) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
@@ -77,6 +89,8 @@ export default async function BillsPage({
   const bucket = isApBucket(sp.bucket) ? sp.bucket : null;
   // A bucket takes over the list; the status tabs stay visible and clear it.
   const tab = bucket ? "all" : TABS.some((t) => t.key === sp.tab) ? sp.tab! : "all";
+  const term = searchTerm(sp.q);
+  const pattern = term ? ilikePattern(term) : null;
 
   const data = await withTenant(tenantId, async (tx) => {
     const today = todayInTimezone(ctx.tenant.timezone);
@@ -175,6 +189,43 @@ export default async function BillsPage({
         : tab === "open"
           ? ["approved", "partial"]
           : [tab];
+    // One predicate for the count and the page — see the invoice list. The
+    // search reads the vendor's name, the vendor's invoice number and the
+    // memo, which is what somebody remembers about a bill.
+    const vendorJoin = and(
+      eq(schema.vendors.tenantId, schema.bills.tenantId),
+      eq(schema.vendors.id, schema.bills.vendorId),
+    );
+    const rowWhere = and(
+      eq(schema.bills.tenantId, tenantId),
+      inScope,
+      statusFilter
+        ? inArray(
+            schema.bills.status,
+            statusFilter as ("approved" | "partial")[],
+          )
+        : undefined,
+      // An empty bucket becomes `false` rather than `id in ('')`, which
+      // would be a uuid type error at the database.
+      bucket
+        ? (inBucket.get(bucket)?.size ?? 0) > 0
+          ? inArray(schema.bills.id, [...inBucket.get(bucket)!])
+          : sql`false`
+        : undefined,
+      pattern
+        ? or(
+            ilike(schema.vendors.name, pattern),
+            ilike(schema.bills.billNumber, pattern),
+            ilike(schema.bills.memo, pattern),
+          )
+        : undefined,
+    );
+    const [{ total }] = await tx
+      .select({ total: sql<number>`count(*)::int` })
+      .from(schema.bills)
+      .innerJoin(schema.vendors, vendorJoin)
+      .where(rowWhere);
+    const window = pageWindow(pageFrom(sp.page), PAGE_SIZE, total);
     const bills = await tx
       .select({
         bill: schema.bills,
@@ -182,34 +233,11 @@ export default async function BillsPage({
         paidCents: sql<string>`coalesce((select sum(${schema.billPayments.amountCents}) from ${schema.billPayments} where ${schema.billPayments.tenantId} = ${schema.bills.tenantId} and ${schema.billPayments.billId} = ${schema.bills.id}), 0)`,
       })
       .from(schema.bills)
-      .innerJoin(
-        schema.vendors,
-        and(
-          eq(schema.vendors.tenantId, schema.bills.tenantId),
-          eq(schema.vendors.id, schema.bills.vendorId),
-        ),
-      )
-      .where(
-        and(
-          eq(schema.bills.tenantId, tenantId),
-          inScope,
-          statusFilter
-            ? inArray(
-                schema.bills.status,
-                statusFilter as ("approved" | "partial")[],
-              )
-            : undefined,
-          // An empty bucket becomes `false` rather than `id in ('')`, which
-          // would be a uuid type error at the database.
-          bucket
-            ? (inBucket.get(bucket)?.size ?? 0) > 0
-              ? inArray(schema.bills.id, [...inBucket.get(bucket)!])
-              : sql`false`
-            : undefined,
-        ),
-      )
+      .innerJoin(schema.vendors, vendorJoin)
+      .where(rowWhere)
       .orderBy(desc(schema.bills.billDate), desc(schema.bills.createdAt))
-      .limit(200);
+      .limit(PAGE_SIZE)
+      .offset(window.offset);
     const aging = await getApAging(tx, tenantId, today, entityView.scope);
     /**
      * What the row's Record payment needs: every active register, other
@@ -227,18 +255,24 @@ export default async function BillsPage({
             columns: { accountId: true, name: true, kind: true, entityId: true },
           })
         : [];
-    return { bills, aging, today, tally, inBucket, entityView, registers };
+    return { bills, window, aging, today, tally, inBucket, entityView, registers };
   });
   const isOwner = ctx.role === "owner";
 
   const companyName = new Map(data.entityView.entities.map((e) => [e.id, e.name]));
   const showCompany = data.entityView.entities.length > 1;
-  // Every link out keeps the scope — see the invoice list.
-  const q = (extra: Record<string, string> = {}) => {
+  // Every link out keeps the scope and the search term, and drops the page
+  // — see the invoice list.
+  const href = (extra: Record<string, string> = {}) => {
     const p = new URLSearchParams(extra);
     if (sp.entity) p.set("entity", sp.entity);
+    if (term) p.set("q", term);
     const s = p.toString();
     return `/dashboard/m/accounting/purchases/bills${s ? `?${s}` : ""}`;
+  };
+  const keep = {
+    ...(tab !== "all" && !bucket ? { tab } : {}),
+    ...(bucket ? { bucket } : {}),
   };
 
   return (
@@ -277,13 +311,13 @@ export default async function BillsPage({
       <MoneyBar
         noun="bill"
         activeKey={bucket}
-        clearHref={q()}
+        clearHref={href()}
         buckets={AP_BUCKETS.map((key) => ({
           key,
           label: AP_BUCKET_LABEL[key],
           cents: data.tally[key][0],
           count: data.tally[key][1],
-          href: q({ bucket: key }),
+          href: href({ bucket: key }),
           alarm: key === "overdue",
         }))}
       />
@@ -292,6 +326,7 @@ export default async function BillsPage({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <PurchasesNav />
         <div className="flex flex-wrap items-center gap-3">
+        <ListSearch placeholder="Search vendor, invoice # or memo" />
         <CompanyPicker
           entities={data.entityView.entities.map((e) => ({
             id: e.id,
@@ -303,7 +338,7 @@ export default async function BillsPage({
           items={TABS.map((t) => ({
             key: t.key,
             label: t.label,
-            href: q({ tab: t.key }),
+            href: href({ tab: t.key }),
           }))}
           className="print:hidden"
         />
@@ -315,14 +350,22 @@ export default async function BillsPage({
         empty={
           <EmptyState
             icon={<ShoppingCart />}
-            title={tab === "all" ? "Record your first bill" : "Nothing here"}
+            title={
+              term
+                ? `Nothing matches “${term}”`
+                : tab === "all"
+                  ? "Record your first bill"
+                  : "Nothing here"
+            }
             description={
-              tab === "all"
-                ? "Add one directly, or open the Inbox and use “Create bill” on an emailed one."
-                : "Another status filter may have what you are after."
+              term
+                ? "Try fewer words, or clear the search."
+                : tab === "all"
+                  ? "Add one directly, or open the Inbox and use “Create bill” on an emailed one."
+                  : "Another status filter may have what you are after."
             }
             action={
-              tab === "all" ? (
+              !term && tab === "all" ? (
                 <Button asChild size="sm">
                   <Link href="/dashboard/m/accounting/purchases/bills/new">
                     New bill
@@ -435,6 +478,12 @@ export default async function BillsPage({
           </TableBody>
         </Table>
       </DataTable>
+
+      <Pager
+        window={data.window}
+        noun={{ one: "bill", many: "bills" }}
+        hrefFor={(page) => href({ ...keep, ...(page > 1 ? { page: String(page) } : {}) })}
+      />
     </div>
   );
 }

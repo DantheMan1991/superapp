@@ -19,7 +19,9 @@ Open **Sales** in the accounting menu. This page lists every invoice, with what 
   The first two count what is still owed; the last two count what has arrived. One invoice can sit in two tiles, so the counts do not add up to the number of invoices.
 - **Status pills.** Above the list, at the right: `Open`, `Drafts`, `Paid` and `All`. `Open` is the starting view: issued invoices, paid or not, that still have a balance. Clicking a tile sets the pills to `All`, and clicking a pill clears the tile.
 - **`Company`.** Only when you keep more than one company. Pick one company or `All companies`. Your tile and pill stay as they are.
-- **The list.** Newest first, up to 200. Click anywhere on a row to open the invoice. `Number`. `Customer`. `Company`, only when you keep more than one. `Issued` and `Due`, with the due date in red once it has passed. `Status`, a badge, explained next. `Total` and `Balance`. A void invoice's balance is zero. Owners also see {button:Record payment|outline} at the end of every row that is still owed: the same dialog as on the invoice's page, so money that came in can be recorded without leaving the list. See [An invoice's page](invoice.md).
+- **Search.** The box beside the pills. Type part of an invoice number, a customer's name or a memo and the list narrows as you type; press Enter to search at once. Your tile, pill and company stay as they are, and what you typed stays as you change them. Clear the box to see everything again.
+- **Pages.** When there are more than fifty invoices, `Showing 1–50 of 312 invoices` sits under the list with {button:Newer|outline} and {button:Older|outline}. A search, a tile, a pill or a company starts again from the first page.
+- **The list.** Newest first, fifty to a page. Click anywhere on a row to open the invoice. `Number`. `Customer`. `Company`, only when you keep more than one. `Issued` and `Due`, with the due date in red once it has passed. `Status`, a badge, explained next. `Total` and `Balance`. A void invoice's balance is zero. Owners also see {button:Record payment|outline} at the end of every row that is still owed: the same dialog as on the invoice's page, so money that came in can be recorded without leaving the list. See [An invoice's page](invoice.md).
 
 ## What the status badges mean
 
@@ -36,11 +38,12 @@ The invoice's own page shows its stage instead: `draft`, `issued`, `partial`, `p
 
 ## How to find an invoice
 
-1. Click a status pill, or `All` to see everything.
-2. If you keep more than one company, pick it in `Company`.
-3. Click the row. The invoice opens.
+1. Type what you know in the search box: part of the number, the customer's name or a word from the memo. The list narrows as you type.
+2. Or click a status pill, or `All` to see everything.
+3. If you keep more than one company, pick it in `Company`.
+4. Click the row. The invoice opens.
 
-There is no search box on this page. If you have the customer's name but not the invoice, open `Customers` and look at what they owe.
+The search and the pill work together: `Open` with `Millbrook` in the box shows Millbrook's unpaid invoices.
 
 ## How to see what is overdue
 
@@ -54,10 +57,11 @@ There is no search box on this page. If you have the customer's name but not the
 | --- | --- |
 | `Bill your first customer` and `Raise an invoice and the receivable posts to the ledger for you.` | You have no invoices yet. Click {button:New invoice|primary}. An empty tile shows this too, because a tile sets the filter to `All`. |
 | `Nothing under Open` (or `Drafts`, or `Paid`) and `The other filters may have what you are looking for.` | No invoice matches the pill you chose. Click `All`. |
+| `Nothing matches “…”` and `Try fewer words, or clear the search.` | No invoice under the pill, tile and company you have chosen has what you typed in its number, customer or memo. |
 
 ## Not on this page
 
-There is no search box, no date filter, no sorting by column, and nothing you can do to several invoices at once. Open an invoice to act on it. Ask us if you need one of these.
+There is no date filter, no sorting by column, and nothing you can do to several invoices at once. Open an invoice to act on it. Ask us if you need one of these.
 
 ## Who can do what
 

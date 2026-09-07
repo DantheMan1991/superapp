@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
@@ -11,6 +11,9 @@ import { DataTable } from "@/components/app/data-table";
 import { EmptyState } from "@/components/app/empty-state";
 import { FilterPills } from "@/components/app/filter-pills";
 import { LinkRow } from "@/components/app/link-row";
+import { ListSearch } from "@/components/app/list-search";
+import { Pager } from "@/components/app/pager";
+import { ilikePattern, pageFrom, pageWindow, searchTerm } from "@/lib/list-query";
 import { depositOptionsFor } from "@/modules/accounting/lib/deposit-options";
 import { listPaymentMethods } from "@/modules/accounting/invoicing/catalogue";
 import { RecordPaymentButton } from "./record-payment-dialog";
@@ -67,10 +70,19 @@ const FILTERS = [
   { key: "all", label: "All", statuses: [] },
 ] as const;
 
+/** Rows per page. The list used to stop dead at 200 with no way past. */
+const PAGE_SIZE = 50;
+
 export default async function InvoicesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ f?: string; bucket?: string; entity?: string }>;
+  searchParams: Promise<{
+    f?: string;
+    bucket?: string;
+    entity?: string;
+    q?: string;
+    page?: string;
+  }>;
 }) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
@@ -79,6 +91,8 @@ export default async function InvoicesPage({
   // A bucket is a sharper question than a lifecycle status, so choosing one
   // takes over the list; the status pills stay visible and clear it.
   const filter = bucket ? FILTERS[3] : (FILTERS.find((f) => f.key === sp.f) ?? FILTERS[0]);
+  const term = searchTerm(sp.q);
+  const pattern = term ? ilikePattern(term) : null;
 
   const data = await withTenant(ctx.tenant.id, async (tx) => {
     const today = todayInTimezone(ctx.tenant.timezone);
@@ -202,9 +216,52 @@ export default async function InvoicesPage({
 
     /**
      * The displayed page is fetched LAST, so an active bucket can be applied
-     * as a real predicate. Filtering after `limit(200)` would quietly show a
-     * subset of a page rather than the first page of the bucket.
+     * as a real predicate. Filtering after the page's LIMIT would quietly
+     * show a subset of a page rather than the first page of the bucket.
+     *
+     * ONE predicate for the count and the page, built once, so "of 312"
+     * and the rows can never describe different lists. The search reads the
+     * number, the customer's name and the memo — what somebody remembers
+     * about an invoice — as one case-insensitive contains.
      */
+    const rowWhere = and(
+      eq(schema.invoices.tenantId, ctx.tenant.id),
+      inScope,
+      ...(filter.statuses.length > 0
+        ? [inArray(schema.invoices.status, [...filter.statuses])]
+        : []),
+      // An EMPTY bucket becomes `false`, not `id in ('')` — the column is
+      // a uuid, so an empty-string sentinel is a type error at the
+      // database rather than a query that matches nothing.
+      ...(bucket
+        ? [
+            (inBucket.get(bucket)?.size ?? 0) > 0
+              ? inArray(schema.invoices.id, [...inBucket.get(bucket)!])
+              : sql`false`,
+          ]
+        : []),
+      ...(pattern
+        ? [
+            or(
+              ilike(schema.invoices.invoiceNumber, pattern),
+              ilike(schema.customers.name, pattern),
+              ilike(schema.invoices.memo, pattern),
+            ),
+          ]
+        : []),
+    );
+    const [{ total }] = await tx
+      .select({ total: sql<number>`count(*)::int` })
+      .from(schema.invoices)
+      .innerJoin(
+        schema.customers,
+        and(
+          eq(schema.customers.tenantId, schema.invoices.tenantId),
+          eq(schema.customers.id, schema.invoices.customerId),
+        ),
+      )
+      .where(rowWhere);
+    const window = pageWindow(pageFrom(sp.page), PAGE_SIZE, total);
     const invoices = await tx
       .select({
         id: schema.invoices.id,
@@ -234,25 +291,7 @@ export default async function InvoicesPage({
           eq(schema.invoicePayments.invoiceId, schema.invoices.id),
         ),
       )
-      .where(
-        and(
-          eq(schema.invoices.tenantId, ctx.tenant.id),
-          inScope,
-          ...(filter.statuses.length > 0
-            ? [inArray(schema.invoices.status, [...filter.statuses])]
-            : []),
-          // An EMPTY bucket becomes `false`, not `id in ('')` — the column is
-          // a uuid, so an empty-string sentinel is a type error at the
-          // database rather than a query that matches nothing.
-          ...(bucket
-            ? [
-                (inBucket.get(bucket)?.size ?? 0) > 0
-                  ? inArray(schema.invoices.id, [...inBucket.get(bucket)!])
-                  : sql`false`,
-              ]
-            : []),
-        ),
-      )
+      .where(rowWhere)
       .groupBy(
         schema.invoices.id,
         schema.invoices.invoiceNumber,
@@ -265,7 +304,8 @@ export default async function InvoicesPage({
         schema.invoices.version,
       )
       .orderBy(desc(schema.invoices.issueDate), desc(schema.invoices.createdAt))
-      .limit(200);
+      .limit(PAGE_SIZE)
+      .offset(window.offset);
 
     /**
      * What the row's Record payment needs: every active register (other
@@ -303,6 +343,7 @@ export default async function InvoicesPage({
         : [];
     return {
       invoices,
+      window,
       aging,
       today,
       tally,
@@ -319,13 +360,21 @@ export default async function InvoicesPage({
   const companyName = new Map(data.entityView.entities.map((e) => [e.id, e.name]));
   const showCompany = data.entityView.entities.length > 1;
 
-  // Every link out of this page keeps the company scope. A bucket or a status
-  // pill that dropped it would widen the list at the moment it narrowed it.
-  const q = (extra: Record<string, string> = {}) => {
+  // Every link out of this page keeps the company scope and the search term.
+  // A bucket or a status pill that dropped either would widen the list at
+  // the moment it narrowed it. None of them keeps the page: a new filter is
+  // a new list, read from its first page.
+  const href = (extra: Record<string, string> = {}) => {
     const p = new URLSearchParams(extra);
     if (sp.entity) p.set("entity", sp.entity);
+    if (term) p.set("q", term);
     const s = p.toString();
     return `/dashboard/m/accounting/sales/invoices${s ? `?${s}` : ""}`;
+  };
+  // What the pager must carry: the filter and bucket the reader is inside.
+  const keep = {
+    ...(sp.f && !bucket ? { f: sp.f } : {}),
+    ...(bucket ? { bucket } : {}),
   };
 
   return (
@@ -367,13 +416,13 @@ export default async function InvoicesPage({
       <MoneyBar
         noun="invoice"
         activeKey={bucket}
-        clearHref={q()}
+        clearHref={href()}
         buckets={AR_BUCKETS.map((key) => ({
           key,
           label: AR_BUCKET_LABEL[key],
           cents: data.tally[key][0],
           count: data.tally[key][1],
-          href: q({ bucket: key }),
+          href: href({ bucket: key }),
           alarm: key === "overdue",
         }))}
       />
@@ -381,6 +430,7 @@ export default async function InvoicesPage({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <SalesNav />
         <div className="flex flex-wrap items-center gap-3">
+        <ListSearch placeholder="Search number, customer or memo" />
         <CompanyPicker
           entities={data.entityView.entities.map((e) => ({
             id: e.id,
@@ -392,7 +442,7 @@ export default async function InvoicesPage({
           items={FILTERS.map((f) => ({
             key: f.key,
             label: f.label,
-            href: q({ f: f.key }),
+            href: href({ f: f.key }),
           }))}
           className="print:hidden"
         />
@@ -405,17 +455,21 @@ export default async function InvoicesPage({
           <EmptyState
             icon={<Receipt />}
             title={
-              filter.key === "all"
-                ? "Bill your first customer"
-                : `Nothing under ${filter.label}`
+              term
+                ? `Nothing matches “${term}”`
+                : filter.key === "all"
+                  ? "Bill your first customer"
+                  : `Nothing under ${filter.label}`
             }
             description={
-              filter.key === "all"
-                ? "Raise an invoice and the receivable posts to the ledger for you."
-                : "The other filters may have what you are looking for."
+              term
+                ? "Try fewer words, or clear the search."
+                : filter.key === "all"
+                  ? "Raise an invoice and the receivable posts to the ledger for you."
+                  : "The other filters may have what you are looking for."
             }
             action={
-              filter.key === "all" ? (
+              !term && filter.key === "all" ? (
                 <Button asChild size="sm">
                   <Link href="/dashboard/m/accounting/sales/invoices/new">
                     New invoice
@@ -526,6 +580,12 @@ export default async function InvoicesPage({
           </TableBody>
         </Table>
       </DataTable>
+
+      <Pager
+        window={data.window}
+        noun={{ one: "invoice", many: "invoices" }}
+        hrefFor={(page) => href({ ...keep, ...(page > 1 ? { page: String(page) } : {}) })}
+      />
     </div>
   );
 }

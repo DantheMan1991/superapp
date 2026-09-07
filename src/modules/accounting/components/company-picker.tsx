@@ -39,6 +39,9 @@ export function CompanyPicker({
     const next = new URLSearchParams(params.toString());
     if (value) next.set("entity", value);
     else next.delete("entity");
+    // A different company is a different list, and page 4 of the old one is
+    // nowhere in it. The search term and the filter carry through as before.
+    next.delete("page");
     router.push(next.size > 0 ? `${pathname}?${next}` : pathname);
   }
 

@@ -40,7 +40,10 @@ export function MoneyBar({
 }) {
   return (
     <div className="space-y-2 print:hidden">
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Two-up from the narrowest phone: four tiles stacked one per row
+          pushed the list two screens down, and a tile's amount fits at half
+          width. */}
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         {buckets.map((b) => {
           const active = b.key === activeKey;
           return (

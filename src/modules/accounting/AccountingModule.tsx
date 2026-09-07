@@ -176,7 +176,7 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
         inline link; `href` now makes the whole card the target, which is both a
         larger hit area and one less thing to style per card.
       */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
           label="Ledger health"
           value={data.balanced ? "In balance" : "Out of balance"}

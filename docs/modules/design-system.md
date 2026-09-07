@@ -21,6 +21,26 @@ tokens and gets its own pass later.
 
 ## Build log
 
+### 2026-09-07 — A grid that stacks, with one markup (`claude/forms-on-a-phone`)
+
+The bill and invoice line editors are the second answer to "a table above
+`md`, blocks below it", and it is a different answer from the review queue's.
+The queue renders two subtrees and lets CSS pick, which is right for a LIST —
+its state is a map keyed by row id, shared by both. A FORM's state lives in
+its inputs, and two copies of an input is two things to keep in step, so the
+editors keep one markup: the grid classes carry the `md:` prefix, the phone
+adds `grid` wrappers that group fields onto one row and are `md:contents` on
+a wide screen (their children become grid cells again), and `md:order-*` on
+each cell restores the column order the header names. `PhoneLabel`
+(`src/components/app/phone-label.tsx`) joins the table: a field's name shown
+only below `md`, because the header row that names the columns is hidden
+there. Use it wherever a grid with a header row stacks on a phone.
+
+Two smaller rules from the same slice: money tiles and stat cards are two-up
+from the narrowest phone (`grid-cols-2`, four across from `lg`) — one per
+row costs the list two screens; and a module gets a `loading.tsx` at its root
+so page-to-page navigation shows the shape of what is coming.
+
 ### 2026-09-06 — The row is the link (`claude/issue-and-send`)
 
 `LinkRow` joins the table (`src/components/app/link-row.tsx`, client): a
@@ -441,6 +461,7 @@ directory is stock shadcn and stays upgradeable. These compose it.
 | `GuideControl` | **yes** | — (new: the real `Button` or `Badge` a guide draws from a `{button:…}` marker; live in the help panel, where it points at the control on the page) |
 | `Combobox` | **yes** | A Radix `Select` over a long list (2026-09-06: the bank review queue's category picker; the vendor, customer and line-account pickers are next) |
 | `LinkRow` | **yes** | A `TableRow` whose only link was one cell (2026-09-06: the Invoices list; 2026-09-07: the Bills list) |
+| `PhoneLabel` | no | A field's name shown only below `md`, for a grid with a header row that stacks on a phone (2026-09-07: the bill and invoice line editors) |
 
 ### `DataTable` is a container, not a table
 

@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PhoneLabel } from "@/components/app/phone-label";
 import {
   Select,
   SelectContent,
@@ -281,9 +282,10 @@ export function InvoiceBuilder({
   }
   // Both class strings written out in full — Tailwind scans for literals, so a
   // template-built grid template would simply not be generated.
-  const gridCols = showTax
-    ? "grid grid-cols-[1fr_90px_120px_60px_50px_1fr_100px_32px]"
-    : "grid grid-cols-[1fr_90px_120px_60px_1fr_100px_32px]";
+  // Above `md` only. Below it the same cells stack — see the lines below.
+  const gridColsMd = showTax
+    ? "md:grid-cols-[1fr_90px_120px_60px_50px_1fr_100px_32px]"
+    : "md:grid-cols-[1fr_90px_120px_60px_1fr_100px_32px]";
 
   function setRow(key: string, patch: Partial<LineRow>) {
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
@@ -470,9 +472,19 @@ export function InvoiceBuilder({
           )}
         </div>
 
-        <div className="overflow-x-auto">
-          <div className={showTax ? "min-w-[700px] space-y-2" : "min-w-[640px] space-y-2"}>
-            <div className={`${gridCols} items-center gap-2 text-xs font-medium text-muted-foreground`}>
+        {/*
+          ONE MARKUP, TWO SHAPES. Above `md` this is the seven- or eight-column
+          grid the form has always had, scrolling sideways in a narrow window.
+          Below it every line is a stacked block with its own labels, because
+          a 700px grid in a 375px viewport put everything past the description
+          off the right edge of the phone. `md:contents` dissolves the
+          phone-only groupings on a wide screen, so their children become grid
+          cells again, and `md:order-*` puts those cells back in the column
+          order the header names. One set of inputs and handlers either way.
+        */}
+        <div className="md:overflow-x-auto">
+          <div className={showTax ? "space-y-3 md:min-w-[700px] md:space-y-2" : "space-y-3 md:min-w-[640px] md:space-y-2"}>
+            <div className={`hidden text-xs font-medium text-muted-foreground md:grid ${gridColsMd} md:items-center md:gap-2`}>
               <span>Description</span>
               <span className="text-right">Qty</span>
               <span className="text-right">Unit price</span>
@@ -485,80 +497,107 @@ export function InvoiceBuilder({
             {rows.map((row) => {
               const p = parsed.find((x) => x.row.key === row.key)!;
               return (
-                <div key={row.key} className="space-y-1">
                 <div
-                  className={`${gridCols} items-center gap-2`}
+                  key={row.key}
+                  className="space-y-1 rounded-xl border border-divider p-3 md:rounded-none md:border-0 md:p-0"
                 >
-                  <Input
-                    className="h-9"
-                    value={row.description}
-                    placeholder="What was provided"
-                    onChange={(e) => setRow(row.key, { description: e.target.value })}
-                  />
-                  <Input
-                    inputMode="decimal"
-                    className="h-9 text-right font-mono"
-                    value={row.quantity}
-                    onChange={(e) => setRow(row.key, { quantity: e.target.value })}
-                  />
-                  <Input
-                    inputMode="decimal"
-                    className="h-9 text-right font-mono"
-                    placeholder="0.00"
-                    value={row.unitPrice}
-                    onChange={(e) => setRow(row.key, { unitPrice: e.target.value })}
-                  />
-                  <label className="flex justify-center">
-                    <input
-                      type="checkbox"
-                      className="size-4"
-                      checked={row.discount}
-                      title="Discount line (negative)"
-                      onChange={(e) => setRow(row.key, { discount: e.target.checked })}
+                <div className={`grid gap-2 ${gridColsMd} md:items-center`}>
+                  <div className="md:order-1">
+                    <PhoneLabel>Description</PhoneLabel>
+                    <Input
+                      className="h-9"
+                      value={row.description}
+                      placeholder="What was provided"
+                      onChange={(e) => setRow(row.key, { description: e.target.value })}
                     />
-                  </label>
-                  {showTax && (
-                    <label className="flex justify-center">
-                      <input
-                        type="checkbox"
-                        className="size-4"
-                        checked={row.taxable}
-                        aria-label={`Charge sales tax on ${row.description || "this line"}`}
-                        title="Charge sales tax on this line"
-                        onChange={(e) => setRow(row.key, { taxable: e.target.checked })}
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 md:contents">
+                    <div className="md:order-2">
+                      <PhoneLabel>Qty</PhoneLabel>
+                      <Input
+                        inputMode="decimal"
+                        className="h-9 text-right font-mono"
+                        value={row.quantity}
+                        onChange={(e) => setRow(row.key, { quantity: e.target.value })}
                       />
-                    </label>
-                  )}
-                  <Select
-                    value={row.incomeAccountId || undefined}
-                    onValueChange={(v) => setRow(row.key, { incomeAccountId: v })}
-                  >
-                    <SelectTrigger className="h-9">
-                      <SelectValue placeholder="Account" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {incomeAccounts.map((a) => (
-                        <SelectItem key={a.id} value={a.id}>
-                          {a.code} · {a.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <span className="text-right font-mono text-sm">
-                    {p.valid ? formatCentsSigned(p.amountCents) : "—"}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-8 text-muted-foreground"
-                    disabled={rows.length <= 1}
-                    onClick={() =>
-                      setRows((rs) => rs.filter((r) => r.key !== row.key))
-                    }
-                  >
-                    <Trash2 className="size-4" />
-                  </Button>
+                    </div>
+                    <div className="md:order-3">
+                      <PhoneLabel>Unit price</PhoneLabel>
+                      <Input
+                        inputMode="decimal"
+                        className="h-9 text-right font-mono"
+                        placeholder="0.00"
+                        value={row.unitPrice}
+                        onChange={(e) => setRow(row.key, { unitPrice: e.target.value })}
+                      />
+                    </div>
+                    <div className="md:order-7">
+                      <PhoneLabel>Amount</PhoneLabel>
+                      <span className="block h-9 text-right font-mono text-sm leading-9 md:h-auto md:leading-normal">
+                        {p.valid ? formatCentsSigned(p.amountCents) : "—"}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="md:order-6">
+                    <PhoneLabel>Income account</PhoneLabel>
+                    <Select
+                      value={row.incomeAccountId || undefined}
+                      onValueChange={(v) => setRow(row.key, { incomeAccountId: v })}
+                    >
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Account" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {incomeAccounts.map((a) => (
+                          <SelectItem key={a.id} value={a.id}>
+                            {a.code} · {a.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 md:contents">
+                    <div className="flex items-center gap-4 md:contents">
+                      <label className="flex items-center gap-2 text-sm md:order-4 md:justify-center">
+                        <input
+                          type="checkbox"
+                          className="size-4"
+                          checked={row.discount}
+                          title="Discount line (negative)"
+                          onChange={(e) => setRow(row.key, { discount: e.target.checked })}
+                        />
+                        <span className="md:sr-only">Discount</span>
+                      </label>
+                      {showTax && (
+                        <label className="flex items-center gap-2 text-sm md:order-5 md:justify-center">
+                          <input
+                            type="checkbox"
+                            className="size-4"
+                            checked={row.taxable}
+                            aria-label={`Charge sales tax on ${row.description || "this line"}`}
+                            title="Charge sales tax on this line"
+                            onChange={(e) => setRow(row.key, { taxable: e.target.checked })}
+                          />
+                          <span className="md:sr-only">Tax</span>
+                        </label>
+                      )}
+                    </div>
+                    <div className="md:order-8 md:flex md:justify-center">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-8 text-muted-foreground"
+                        disabled={rows.length <= 1}
+                        aria-label="Remove line"
+                        onClick={() =>
+                          setRows((rs) => rs.filter((r) => r.key !== row.key))
+                        }
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
+                  </div>
                 </div>
                 {/*
                   **A SUB-ROW, NOT A NINTH COLUMN.** The grid's two class

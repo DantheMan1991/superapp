@@ -13,6 +13,40 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-07 — Forms on a phone (`claude/forms-on-a-phone`)
+
+Fifth slice of the improvement pass, the phone half of what the review
+found, none of it needing a design decision.
+
+- **The bill and invoice line editors stack below `md`.** Both were
+  `min-w-[640px]`/`[700px]` grids scrolling sideways INSIDE the form, so on
+  a phone everything past the description was off the right edge. One
+  markup now, two shapes: above `md` the grid the forms always had, with
+  its header row; below it every line is a bordered block whose fields carry
+  their own names (`PhoneLabel`, new in `src/components/app/`, shown only
+  below `md`). The phone-only groupings — qty/price/amount on one row,
+  discount/tax beside the remove button — are `md:contents` on a wide
+  screen, so their children become grid cells again, and `md:order-*` puts
+  those cells back in the column order the header names. One set of inputs
+  and handlers either way, which is why this was chosen over the
+  two-layouts approach the review queue took: a form's state lives in its
+  inputs, and two copies of an input is two things to keep in step.
+- **Money tiles and Overview cards are two-up from the narrowest phone**
+  (`grid-cols-2`, four across from `lg`). One per row had pushed the invoice
+  and bill lists two screens down.
+- **A `loading.tsx` under `/dashboard/m/accounting`**: title, strip and a
+  panel of rows, so a page-to-page navigation on a slow connection shows the
+  shape of what is coming instead of nothing.
+- **`Take photo` on the Inbox, below `md`**: a second file input with
+  `capture="environment"`, because an input that carries `capture` never
+  offers the photo library or a PDF, so the general one stays as it was.
+  Same handler, so a photo is read and deduplicated like an upload.
+- **The Inbox's two native `window.confirm()`s — Regenerate and Disable
+  email-in — are `useConfirm` dialogs**, which leaves none in the module.
+
+Guides `new-bill.md`, `new-invoice.md` and `inbox.md`. Driven at 375px on
+Hilltop Farm (dev branch), see the PR.
+
 ### 2026-09-07 — Bills in fewer taps (`claude/bills-in-fewer-taps`)
 
 The bills half of the second slice, now that `LinkRow` and the row-dialog
@@ -3560,12 +3594,11 @@ screen shipped without such a session as compiled-and-tested, not seen.
   `claude/own-account-transfers`, migration `0263`); **a deposit screen** for Undeposited Funds (the
   `Not deposited` tile has nowhere to go); **search and paging** on every list
   (caps at 200/300, no date filter on the register); **splitting one bank
-  transaction** across categories; the bill and invoice line editors as
-  stacked blocks on a phone (`min-w-[640px]`/`[700px]` grids scroll sideways
-  inside the form); money tiles and Overview cards two-up under `sm` rather
-  than one column; the one native `window.confirm()` left (disable email-in; bill
-  void and unapply became dialogs 2026-09-07); `loading.tsx` under the accounting routes; an
-  explicit camera control on the Inbox upload for the app
+  transaction** across categories; ~~the bill and invoice line editors as stacked blocks on a phone~~ (DONE
+  2026-09-07, `claude/forms-on-a-phone`); ~~money tiles and Overview cards two-up~~ (DONE 2026-09-07); ~~the native `window.confirm()`s~~ (bill void and unapply became dialogs
+  2026-09-07 on the bills slice; regenerate and disable email-in the same day,
+  none left); ~~`loading.tsx` under the accounting routes~~ (DONE 2026-09-07); ~~an explicit camera control on the Inbox upload for the app~~ (DONE
+  2026-09-07, `Take photo` below `md`)
 - **Fixed assets carry a company** (2026-08-17, `0154`) — the last item on ADR 0010's list. `entityForDocument`/`entityOfDocument` are DELETED with it: nothing infers a company from where an entry happened to land any more. **Nothing is owed in the migration lane** — `assets.entity_id` stays NULLABLE, unlike every other one, because the assets pack `requires: []` and a tenant can register equipment with no books at all
 - **An invoice banked into another company's account is RECORDED** (2026-08-17), the mirror of the bill case and the last item ADR 0010 listed as refused. It also closed a live hole in the bill path: unapplying an intercompany payment voided ONE leg, because `assertNotIntercompanyLeg` lived only in the action layer. The guard is in `voidEntry`/`reverseEntry` now and `voidIntercompanyPair` is the undo that takes both
 - **Per-entity close is DONE** (2026-08-17, slice 4 of ADR 0010) — the lock is `entities.closed_through`, the checklist is scoped, and two companies can close different months. **The contract half is DONE too** (`0153`, applied and verified on both databases the same day): `period_closes.entity_id` is NOT NULL and `accounting_settings.closed_through` is dropped. **Nothing is owed in the migration lane.** Two things this slice leaves behind on purpose: a company carrying a lock INHERITED from the tenant-wide scalar has no close row to reopen and can only be closed forward (on production that is Oak Row LLC), and `assets` still has no company, so depreciation reads its lock through `entityForDocument`

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 // are rejected by the store; learned in production).
 import { uploadPresigned } from "@vercel/blob/client";
 import {
+  Camera,
   Copy,
   Landmark,
   Link2,
@@ -49,6 +50,7 @@ import {
   UPLOAD_ACCEPT_ATTR,
   isAllowedUpload,
 } from "@/modules/accounting/documents/allowlist";
+import { useConfirm } from "@/components/app/use-confirm";
 import {
   attachDocumentAction,
   disableEmailInAction,
@@ -107,6 +109,7 @@ export interface DocumentRowData {
 export function UploadButton({ tenantId }: { tenantId: string }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
 
   async function handleFiles(files: FileList | null) {
@@ -148,6 +151,7 @@ export function UploadButton({ tenantId }: { tenantId: string }) {
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = "";
+      if (cameraRef.current) cameraRef.current.value = "";
     }
   }
 
@@ -161,6 +165,31 @@ export function UploadButton({ tenantId }: { tenantId: string }) {
         className="hidden"
         onChange={(e) => handleFiles(e.target.files)}
       />
+      {/*
+        A SECOND INPUT FOR THE CAMERA, not a second accept list. `capture`
+        asks the phone for the camera itself, but an input that carries it
+        never offers the photo library or a PDF, so the general one stays as
+        it is and this one exists only below `md` — on a desktop there is no
+        camera worth asking for. Same `handleFiles`, so a photo is read and
+        deduplicated exactly like an upload.
+      */}
+      <input
+        ref={cameraRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => handleFiles(e.target.files)}
+      />
+      <Button
+        variant="outline"
+        className="md:hidden"
+        onClick={() => cameraRef.current?.click()}
+        disabled={busy}
+      >
+        <Camera className="mr-2 h-4 w-4" />
+        Take photo
+      </Button>
       <Button onClick={() => inputRef.current?.click()} disabled={busy}>
         {busy ? (
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -184,6 +213,7 @@ export function EmailInCard({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const { confirm, confirmDialog } = useConfirm();
 
   function run(fn: () => Promise<{ error?: string } | { ok: true }>) {
     startTransition(async () => {
@@ -225,11 +255,14 @@ export function EmailInCard({
               size="sm"
               variant="outline"
               disabled={pending}
-              onClick={() => {
+              onClick={async () => {
                 if (
-                  confirm(
-                    "Generate a new address? The old one stops working immediately.",
-                  )
+                  await confirm({
+                    title: "Generate a new address?",
+                    description:
+                      "The old one stops working immediately. Anyone still forwarding to it bounces until you give them the new address.",
+                    confirmLabel: "Generate new address",
+                  })
                 )
                   run(regenerateEmailInTokenAction);
               }}
@@ -240,8 +273,16 @@ export function EmailInCard({
               size="sm"
               variant="ghost"
               disabled={pending}
-              onClick={() => {
-                if (confirm("Disable email-in? The address stops working."))
+              onClick={async () => {
+                if (
+                  await confirm({
+                    title: "Disable email-in?",
+                    description:
+                      "The address stops working immediately. Everything already received stays in the Inbox.",
+                    confirmLabel: "Disable email-in",
+                    destructive: true,
+                  })
+                )
                   run(disableEmailInAction);
               }}
             >
@@ -257,6 +298,9 @@ export function EmailInCard({
             Enable email-in
           </Button>
         )}
+        {/* The module's last two native confirms lived here. A real dialog
+            now, like every other confirmation in accounting. */}
+        {confirmDialog}
       </CardContent>
     </Card>
   );

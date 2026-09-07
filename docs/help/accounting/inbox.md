@@ -5,7 +5,7 @@
 > **Order:** 60
 > **Area:** Inbox
 
-Open **Inbox** in the accounting menu. The line under the title reads `Everything arrives here — bills and receipts, uploaded or emailed, read automatically and routed to your books.` Two ways in: click {button:Upload|primary|upload}, or forward an email to your business's email-in address. Either way the document is read as soon as it lands, so it usually appears with its vendor, date and total already filled in.
+Open **Inbox** in the accounting menu. The line under the title reads `Everything arrives here — bills and receipts, uploaded or emailed, read automatically and routed to your books.` Three ways in: click {button:Upload|primary|upload}, on a phone click {button:Take photo|outline|camera} to use the camera, or forward an email to your business's email-in address. Either way the document is read as soon as it lands, so it usually appears with its vendor, date and total already filled in.
 
 ## What you see
 
@@ -17,13 +17,14 @@ Open **Inbox** in the accounting menu. The line under the title reads `Everythin
 ## How to upload a document
 
 1. Click {button:Upload|primary|upload} and choose one or more files. JPEG, PNG, WebP, GIF and PDF are accepted, up to 20 MB each. Photos from a phone are fine. Take them straight on and in good light so the text can be read.
-2. Files go up one at a time, and each shows `[file name] uploaded.` A document you already have is accepted with a warning: `[file name] uploaded — looks like a duplicate of a receipt you already have.`
+2. On a phone, click {button:Take photo|outline|camera} instead. The camera opens straight away, and the photo lands here like an upload.
+3. Files go up one at a time, and each shows `[file name] uploaded.` A document you already have is accepted with a warning: `[file name] uploaded — looks like a duplicate of a receipt you already have.`
 
 ## How to set up email-in
 
 1. Click {button:Enable email-in|outline}. The card shows your private address.
 2. Click {button:Copy|outline|copy} and forward bills and receipts to it from any of your own addresses. Copy the vendor in if you like; the attachments are what count. Up to 100 emails an hour are accepted.
-3. To change the address, click {button:Regenerate|outline}. It asks `Generate a new address? The old one stops working immediately.` To turn it off, click {button:Disable|outline}, after `Disable email-in? The address stops working.`
+3. To change the address, click {button:Regenerate|outline}. The dialog is `Generate a new address?` and reads `The old one stops working immediately. Anyone still forwarding to it bounces until you give them the new address.` Click {button:Generate new address|primary}. To turn it off, click {button:Disable|outline}. The dialog is `Disable email-in?` and reads `The address stops working immediately. Everything already received stays in the Inbox.` Click {button:Disable email-in|destructive}.
 
 ## How to turn a document into a bill
 

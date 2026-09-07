@@ -10,7 +10,7 @@ Open **Sales** in the accounting menu and click the `Customers` pill. The line u
 ## What you see
 
 - **The list.** Every customer, active or not, in name order. Each row shows the name, {badge:inactive|outline} where it applies, the email and phone under it, then `Net 45 terms` when the customer has payment terms of their own, and at the right how much they currently owe, `1,240.00 open`, when anything is outstanding. Fifty to a page.
-- **The menu on each row.** The dots at the end open `Edit`, `Never send reminders` or `Resume reminders`, and `Deactivate` or `Reactivate`.
+- **The menu on each row.** The dots at the end open `Statement`, the customer's statement for a period (see [A customer's statement](statement.md)), `Edit`, `Never send reminders` or `Resume reminders`, and `Deactivate` or `Reactivate`.
 - **Search.** The box beside the pills. Type part of a name, an email or a phone number and the list narrows as you type; press Enter to search at once. A phone number matches with or without its spaces and brackets. Clear the box to see everyone again.
 - **Pages.** When there are more than fifty customers, `Showing 1–50 of 120 customers` sits under the list with {button:Previous|outline} and {button:Next|outline}. A search starts again from its first page.
 
@@ -54,7 +54,7 @@ A deactivated customer keeps every invoice and all their history, but cannot be 
 
 ## Not on this page
 
-There is no customer page. A customer cannot be deleted, only deactivated. Sales tax lives on each invoice.
+There is no customer page beyond the statement. A customer cannot be deleted, only deactivated. Sales tax lives on each invoice.
 
 ## Who can do what
 

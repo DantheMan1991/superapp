@@ -13,6 +13,34 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-07 — A customer's statement (`claude/customer-statements`)
+
+**What.** `Statement` on a customer's row menu and on the customer's name
+at the top of an invoice: `/sales/customers/[id]/statement?from&to`. The
+balance forward (everything before `from`), every invoice issued and every
+payment recorded in the period with a running balance, the closing
+balance, and the open invoices that make it up as of `to`, oldest due
+first, with {badge overdue}. `ReportControls` in range mode gives it the
+presets; a print-only business header gives it the shape the printed
+invoice has, so Print → Save as PDF is how it is sent. Drafts and void
+invoices are not on it; a deposit changes nothing on it (the customer paid
+on the payment's date, wherever the money went afterwards). Arithmetic in
+`invoicing/statement.ts` (pure, `tests/statement.test.ts`: forward,
+ordering, running balance, closing = Σ open balances, drafts/void out, a
+later payment in the next period's forward); rows in
+`invoicing/statements.ts`. No schema change.
+
+**Why.** The review's finding: nothing answered "what does this customer
+owe me across everything, and what happened this month" on one page — the
+list showed one figure and each invoice showed itself.
+
+**Not built, on purpose.** Emailing the statement (the invoice send path
+would carry it; nobody has asked) and a statement run for every customer at
+once. Both are open items only when a client wants them.
+
+**Guides.** New `statement.md` (Sales, order 115); `customers.md` (the menu
+item, the "no customer page" line); `invoice.md` (the name is a link).
+
 ### 2026-09-07 — P&L by quarter and by year (`claude/pnl-columns`)
 
 **What.** The `Columns` control on the Profit & Loss gains `By quarter` and

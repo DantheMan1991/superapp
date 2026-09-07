@@ -36,7 +36,7 @@ To stop the feed, click {button:Disconnect|ghost}. The dialog is `Disconnect [ba
 
 1. Click {button:Quick add|outline}. The dialog reads `Record money in or out, or moved between your own accounts, without waiting for the bank feed.`
 2. Pick `Direction`: `Money out (expense)`, `Money in (income)` or `Transfer to another account`. Set `Date` and `Bank account`, the account the money left.
-3. Pick `Category`: an expense account for money out, an income account for money in. For a transfer, pick `To account` instead: one of your other accounts in the same company. Fill in `Amount`, and `Memo (optional)` and `Tags (optional)` if you use them; a transfer takes no tags.
+3. Pick `Category`, typing part of a code or a name to narrow the list: an expense account for money out, an income account for money in. For a transfer, pick `To account` instead: one of your other accounts in the same company. Fill in `Amount`, and `Memo (optional)` and `Tags (optional)` if you use them; a transfer takes no tags.
 4. Click {button:Add|primary}. You see `Transaction added`, or `Transfer recorded`. It posts straight to the books, in the account's company. A transfer is one entry, out of one account and into the other; when the bank feed later shows it on either account, match it there rather than posting it again. See [An account's transactions](register.md).
 
 ## Messages

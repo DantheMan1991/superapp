@@ -11,7 +11,7 @@ Open **Journal** in the accounting menu and click {button:New entry|primary}. Mo
 
 - **`Company`.** Only when you keep more than one. `Which company's books?` Fixed once the entry exists.
 - **`Date`**, today to begin with, and **`Memo`**, `What is this entry for?`
-- **The lines.** Two rows to begin with. Each has `Account`, any active account, including receivables and payables, but not a bank account that belongs to another company; `Debit` or `Credit`, where typing in one clears the other; `Line memo`; {button:Tag|outline} under the row when your business has tags; and {button:Remove line|ghost|trash} once there are more than two rows. {button:Add line|outline|plus} adds a row.
+- **The lines.** Two rows to begin with. Each has `Account`, which narrows as you type a code or a name: any active account, including receivables and payables, but not a bank account that belongs to another company; `Debit` or `Credit`, where typing in one clears the other; `Line memo`; {button:Tag|outline} under the row when your business has tags; and {button:Remove line|ghost|trash} once there are more than two rows. {button:Add line|outline|plus} adds a row.
 - **The balance bar.** Under the lines, the two sides totaled, `Dr 1,250.00` and `Cr 1,250.00`, and `Balanced` or `Off by 250.00`.
 - **{button:Save draft|outline}** and **{button:Post entry|primary}.**
 

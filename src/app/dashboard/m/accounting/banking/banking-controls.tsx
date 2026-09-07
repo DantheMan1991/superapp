@@ -10,6 +10,7 @@ import {
   type DimensionTypeOption,
 } from "@/components/app/dimension-tags";
 import { Badge } from "@/components/ui/badge";
+import { Combobox } from "@/components/app/combobox";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -572,29 +573,22 @@ export function QuickAddButton({
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>{isTransfer ? "To account" : "Category"}</Label>
-                <Select
+                <Combobox
+                  options={
+                    isTransfer
+                      ? transferTargets.map((b) => ({ value: b.accountId, label: b.name }))
+                      : categoryPool.map((c) => ({
+                          value: c.id,
+                          label: `${c.code} · ${c.name}`,
+                        }))
+                  }
                   value={form.categoryAccountId || undefined}
                   onValueChange={(v) => setForm({ ...form, categoryAccountId: v })}
-                >
-                  <SelectTrigger>
-                    <SelectValue
-                      placeholder={isTransfer ? "Select account" : "Select category"}
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {isTransfer
-                      ? transferTargets.map((b) => (
-                          <SelectItem key={b.id} value={b.accountId}>
-                            {b.name}
-                          </SelectItem>
-                        ))
-                      : categoryPool.map((c) => (
-                          <SelectItem key={c.id} value={c.id}>
-                            {c.code} · {c.name}
-                          </SelectItem>
-                        ))}
-                  </SelectContent>
-                </Select>
+                  placeholder={isTransfer ? "Select account" : "Select category"}
+                  searchPlaceholder="Type a code or a name…"
+                  emptyText="Nothing matches."
+                  aria-label={isTransfer ? "To account" : "Category"}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="qa-amount">Amount</Label>

@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { Combobox, type ComboboxOption } from "@/components/app/combobox";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -182,6 +183,12 @@ export function EntryEditor({
   const selectableAccounts = accounts.filter(
     (a) => !a.registerEntityId || !entityId || a.registerEntityId === entityId,
   );
+  // A journal line names any account in the chart, which is exactly the list
+  // a picker should search rather than scroll.
+  const accountOptions: ComboboxOption[] = selectableAccounts.map((a) => ({
+    value: a.id,
+    label: `${a.code} · ${a.name}`,
+  }));
 
   const filled = rows.filter((r) => r.accountId !== "" || r.debit !== "" || r.credit !== "");
   const parsed = filled.map((r) => ({ row: r, cents: rowCents(r) }));
@@ -334,23 +341,16 @@ export function EntryEditor({
                 <div
                   className="grid grid-cols-[1fr_120px_120px_1fr_32px] items-center gap-2"
                 >
-                  <Select
+                  <Combobox
+                    options={accountOptions}
                     value={row.accountId || undefined}
                     onValueChange={(v) => setRow(row.key, { accountId: v })}
-                  >
-                    <SelectTrigger
-                      className={`h-9 ${refused ? "border-destructive" : ""}`}
-                    >
-                      <SelectValue placeholder="Select account" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {selectableAccounts.map((a) => (
-                        <SelectItem key={a.id} value={a.id}>
-                          {a.code} · {a.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Select account"
+                    searchPlaceholder="Type a code or a name…"
+                    emptyText="No account matches."
+                    aria-label="Account"
+                    className={`h-9 ${refused ? "border-destructive" : ""}`}
+                  />
                   <Input
                     inputMode="decimal"
                     className={`h-9 text-right font-mono ${bad && row.debit !== "" ? "border-destructive" : ""}`}

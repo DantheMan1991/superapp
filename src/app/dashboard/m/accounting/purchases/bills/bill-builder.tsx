@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Combobox, type ComboboxOption } from "@/components/app/combobox";
 import { PhoneLabel } from "@/components/app/phone-label";
 import {
   Select,
@@ -171,6 +172,15 @@ export function BillBuilder({
   // Snapshotted at mount and never set — kept as state rather than reading the
   // prop directly so the dropdown does not reorder under the user mid-edit.
   const [vendorList] = useState(vendors);
+  // Type-ahead pickers — see the invoice builder.
+  const vendorOptions = useMemo<ComboboxOption[]>(
+    () => vendorList.map((v) => ({ value: v.id, label: v.name })),
+    [vendorList],
+  );
+  const accountOptions = useMemo<ComboboxOption[]>(
+    () => accounts.map((a) => ({ value: a.id, label: `${a.code} · ${a.name}` })),
+    [accounts],
+  );
   const [vendorId, setVendorId] = useState(bill?.vendorId ?? "");
   const [entityId, setEntityId] = useState(
     bill?.entityId ?? defaultEntityId ?? "",
@@ -366,21 +376,15 @@ export function BillBuilder({
         <div className="grid gap-3 sm:grid-cols-4">
           <div className="space-y-1.5 sm:col-span-2">
             <Label>Vendor</Label>
-            <Select
+            <Combobox
+              options={vendorOptions}
               value={vendorId || undefined}
               onValueChange={applyVendor}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select vendor" />
-              </SelectTrigger>
-              <SelectContent>
-                {vendorList.map((v) => (
-                  <SelectItem key={v.id} value={v.id}>
-                    {v.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              placeholder="Select vendor"
+              searchPlaceholder="Type a name…"
+              emptyText="No vendor matches."
+              aria-label="Vendor"
+            />
             {!bill && (
               <Input
                 className="h-8"
@@ -536,22 +540,17 @@ export function BillBuilder({
                     </div>
                     <div className="md:order-4">
                       <PhoneLabel>Account</PhoneLabel>
-                      <Select
+                      <Combobox
+                        options={accountOptions}
                         value={row.accountId || undefined}
                         disabled={locked}
                         onValueChange={(v) => setRow(row.key, { accountId: v })}
-                      >
-                        <SelectTrigger className="h-9">
-                          <SelectValue placeholder="Uncoded" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {accounts.map((a) => (
-                            <SelectItem key={a.id} value={a.id}>
-                              {a.code} · {a.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Uncoded"
+                        searchPlaceholder="Type a code or a name…"
+                        emptyText="No account matches."
+                        aria-label="Account"
+                        className="h-9"
+                      />
                     </div>
                     <div className="flex justify-end md:order-5 md:justify-center">
                       <Button

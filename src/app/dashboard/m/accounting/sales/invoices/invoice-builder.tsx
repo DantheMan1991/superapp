@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Combobox, type ComboboxOption } from "@/components/app/combobox";
 import {
   createCustomerAction,
   createInvoiceDraftAction,
@@ -179,6 +180,17 @@ export function InvoiceBuilder({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const defaultAccount = incomeAccounts[0]?.id ?? "";
+  // Type-ahead pickers: a customer list and a chart of accounts are the lists
+  // the Combobox was made for — anything past a dozen rows is searched, not
+  // scrolled (design-system.md, 2026-09-06).
+  const customerOptions = useMemo<ComboboxOption[]>(
+    () => customers.map((c) => ({ value: c.id, label: c.name })),
+    [customers],
+  );
+  const accountOptions = useMemo<ComboboxOption[]>(
+    () => incomeAccounts.map((a) => ({ value: a.id, label: `${a.code} · ${a.name}` })),
+    [incomeAccounts],
+  );
   const [customerId, setCustomerId] = useState(invoice?.customerId ?? "");
   /**
    * A customer typed rather than picked — created on save, the way the bill
@@ -403,18 +415,15 @@ export function InvoiceBuilder({
         <div className="grid gap-3 sm:grid-cols-4">
           <div className="space-y-1.5 sm:col-span-2">
             <Label>Customer</Label>
-            <Select value={customerId || undefined} onValueChange={applyCustomer}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select customer" />
-              </SelectTrigger>
-              <SelectContent>
-                {customers.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Combobox
+              options={customerOptions}
+              value={customerId || undefined}
+              onValueChange={applyCustomer}
+              placeholder="Select customer"
+              searchPlaceholder="Type a name…"
+              emptyText="No customer matches."
+              aria-label="Customer"
+            />
             {!invoice && (
               <Input
                 className="h-8"
@@ -595,21 +604,16 @@ export function InvoiceBuilder({
                   </div>
                   <div className="md:order-6">
                     <PhoneLabel>Income account</PhoneLabel>
-                    <Select
+                    <Combobox
+                      options={accountOptions}
                       value={row.incomeAccountId || undefined}
                       onValueChange={(v) => setRow(row.key, { incomeAccountId: v })}
-                    >
-                      <SelectTrigger className="h-9">
-                        <SelectValue placeholder="Account" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {incomeAccounts.map((a) => (
-                          <SelectItem key={a.id} value={a.id}>
-                            {a.code} · {a.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      placeholder="Account"
+                      searchPlaceholder="Type a code or a name…"
+                      emptyText="No account matches."
+                      aria-label="Income account"
+                      className="h-9"
+                    />
                   </div>
                   <div className="flex items-center justify-between gap-3 md:contents">
                     <div className="flex items-center gap-4 md:contents">

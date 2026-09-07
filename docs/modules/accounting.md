@@ -13,6 +13,29 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-07 — Split one bank transaction across categories (`claude/split-transaction`)
+
+**What.** `Split` beside `Post` on a row under review: a dialog with a
+line per category (the queue's Combobox and an amount), `left to assign` /
+`too much` / `Balanced` under the lines, and `Post split`, gray until they
+add up. `categorizeTransaction` grew an optional `splits` argument — several
+positive amounts that sum to the row — and posts ONE entry with a line per
+category on the far side of the bank; `splitFarSide` (`banking/split.ts`,
+pure, `tests/banking-split.test.ts`) does the arithmetic and the refusals
+(`SPLIT_TOO_FEW`, `SPLIT_LINE_INVALID`, `SPLIT_MISMATCH`, and the register's
+own account). `splitTransactionAction` audits `banking.txn_split` and
+proposes no rule — a rule sets one account, and the point of the split was
+that one account did not describe the row. The row's tag goes on every line.
+Undo, void from the journal, `source = bank_import`, the per-attempt
+idempotency key and P12 are untouched: a split is still exactly one entry
+for one row, which is why nothing downstream needed to learn the word.
+
+**Why.** The last of the review's queue findings: a Farm & Fleet run that
+is half repairs and half supplies was posted to one account, or hand-written
+in the journal and matched from the queue.
+
+**Guides.** `register.md`: the button, a how-to section, four messages.
+
 ### 2026-09-07 — Type-ahead on the customer, vendor and account pickers (`claude/type-ahead-pickers`)
 
 **What.** The `Combobox` the bank review queue got on 2026-09-06 now stands
@@ -3774,8 +3797,8 @@ screen shipped without such a session as compiled-and-tested, not seen.
   line-account pickers~~ (DONE 2026-09-07, `claude/type-ahead-pickers`, plus the journal line and Quick add); ~~**a Transfer choice in the review queue**~~ (DONE 2026-09-06,
   `claude/own-account-transfers`, migration `0263`); ~~**a deposit screen** for Undeposited Funds~~ (DONE
   2026-09-07, `claude/bank-deposits`, migrations `0264`–`0266`; the tile now leads to it); ~~**search and paging** on every list~~ (DONE
-  2026-09-07, `claude/search-and-pages`; the register still has no date filter); **splitting one bank
-  transaction** across categories; ~~the bill and invoice line editors as stacked blocks on a phone~~ (DONE
+  2026-09-07, `claude/search-and-pages`; the register still has no date filter); ~~**splitting one bank
+  transaction** across categories~~ (DONE 2026-09-07, `claude/split-transaction`); ~~the bill and invoice line editors as stacked blocks on a phone~~ (DONE
   2026-09-07, `claude/forms-on-a-phone`); ~~money tiles and Overview cards two-up~~ (DONE 2026-09-07); ~~the native `window.confirm()`s~~ (bill void and unapply became dialogs
   2026-09-07 on the bills slice; regenerate and disable email-in the same day,
   none left); ~~`loading.tsx` under the accounting routes~~ (DONE 2026-09-07); ~~an explicit camera control on the Inbox upload for the app~~ (DONE

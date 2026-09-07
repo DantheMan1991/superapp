@@ -483,6 +483,84 @@ d("banking (DB)", () => {
     acct["__categorizedTxn"] = txn.id;
   });
 
+  it("splits one transaction across categories: one entry, one line per category, sums checked", async () => {
+    // Its own register: the reconciliation test further down clears every
+    // line on the shared one and counts them, and a split there would move
+    // its total.
+    const { bankAccount } = await withTenant(tenantId, (tx) =>
+      createBankAccount(tx, owner, { name: "Split Checking", kind: "checking" }),
+    );
+    const bankAccountId = bankAccount.id;
+    const repairs = await accountId("6400");
+    const office = await accountId("6300");
+    await withTenant(tenantId, (tx) =>
+      importTransactions(tx, owner, {
+        bankAccountId,
+        txns: [
+          { txnDate: "2026-02-05", description: "FARM & FLEET", amountCents: -9_000, raw: [], dupIndex: 0 },
+        ],
+      }),
+    );
+    const txn = await withTenant(tenantId, (tx) =>
+      tx.query.bankTransactions.findFirst({
+        where: and(
+          eq(schema.bankTransactions.tenantId, tenantId),
+          eq(schema.bankTransactions.bankAccountId, bankAccountId),
+          eq(schema.bankTransactions.description, "FARM & FLEET"),
+        ),
+      }),
+    );
+    const split = (splits: Array<{ accountId: string; amountCents: number }>) =>
+      withTenant(tenantId, (tx) =>
+        categorizeTransaction(tx, owner, { transactionId: txn!.id, splits }),
+      );
+    // Refusals leave the row under review: each one is its own rolled-back transaction.
+    await expect(split([{ accountId: repairs, amountCents: 9_000 }])).rejects.toMatchObject({
+      code: "SPLIT_TOO_FEW",
+    });
+    await expect(
+      split([
+        { accountId: repairs, amountCents: 6_000 },
+        { accountId: office, amountCents: 2_000 },
+      ]),
+    ).rejects.toMatchObject({ code: "SPLIT_MISMATCH" });
+
+    const { entry, fromSuggestion, fromRule } = await split([
+      { accountId: repairs, amountCents: 6_000 },
+      { accountId: office, amountCents: 3_000 },
+    ]);
+    expect(entry.source).toBe("bank_import");
+    expect(fromSuggestion).toBe(false);
+    expect(fromRule).toBe(false);
+    const lines = await withTenant(tenantId, (tx) =>
+      tx.query.journalLines.findMany({
+        where: and(
+          eq(schema.journalLines.tenantId, tenantId),
+          eq(schema.journalLines.entryId, entry.id),
+        ),
+      }),
+    );
+    expect(lines).toHaveLength(3);
+    expect(lines.reduce((s, l) => s + l.amountCents, 0)).toBe(0);
+    expect(lines.find((l) => l.accountId === repairs)?.amountCents).toBe(6_000);
+    expect(lines.find((l) => l.accountId === office)?.amountCents).toBe(3_000);
+    expect(lines.find((l) => l.amountCents < 0)?.amountCents).toBe(-9_000);
+    const linked = await withTenant(tenantId, (tx) =>
+      tx.query.bankTransactions.findFirst({ where: eq(schema.bankTransactions.id, txn!.id) }),
+    );
+    expect(linked).toMatchObject({ status: "posted", journalEntryId: entry.id });
+
+    // Undo reads a split as any posting: the entry is voided, the row comes back.
+    const undone = await withTenant(tenantId, (tx) =>
+      undoCategorization(tx, owner, { transactionId: txn!.id }),
+    );
+    expect(undone.entry.id).toBe(entry.id);
+    const back = await withTenant(tenantId, (tx) =>
+      tx.query.bankTransactions.findFirst({ where: eq(schema.bankTransactions.id, txn!.id) }),
+    );
+    expect(back).toMatchObject({ status: "unreviewed", journalEntryId: null });
+  });
+
   it("voidEntry via staging reset flow returns the txn to review", async () => {
     // Simulate the action-layer coordination inline (same statements).
     const entryId = acct["__categorizedEntry"];

@@ -15,7 +15,7 @@ Open **Banking** in the accounting menu and click an account's card. This is whe
 - **Pages.** When a tab holds more than a hundred transactions, `Showing 1–100 of 312 transactions` sits under the list with {button:Newer|outline} and {button:Older|outline}. A search, or a different tab, starts again from the first page.
 - **Each row.** `Date` and `Description`, as the bank gave them, with a {icon:paperclip} and a count when receipts are attached from the Inbox. Under the description, on a row still to review, a chip with a suggested category: `RULE · 6300` means one of your bank rules matched, and hovering it shows which; `AI · 6100 · 87%` is the assistant's suggestion and how sure it is. When both have an opinion only the rule's chip is shown, because a rule is a decision you wrote down. `Payee`, the vendor, once a rule or a person has set one. `In` and `Out`. On `All`, `Status`: `unreviewed`, `posted` or `excluded`, where `posted` is a link to the entry in the journal. On `To review`, for owners, `Category`, already set to the suggestion. Click it and type part of a code or a name, such as `63` or `insur`, and the list narrows to what matches; click the account, or press Enter for the highlighted one. {button:Tag|outline} sits under it when your business has tags. At the end of the list, `Transfer to [account]` on money out and `Transfer from [account]` on money in, one for each of your other accounts in the same company, so money you moved between your own accounts is recorded as a transfer rather than as spending or income.
 - **On a phone.** Each transaction is a card instead of a row: the description and the amount at the top, money in with a `+` in green and money out with a `−`, then the date, the payee and the receipt count, the chip, the `Category`, the tag and the buttons. Everything works the same as in the table.
-- **The buttons on a row.** On `To review`: {button:Match|outline} when the row has something in the books it could be, {button:Exclude|ghost} and {button:Post|primary}. On `All`: {button:Unmatch|ghost} on a row that was matched to an entry; a row that posted its own entry has no button, because that entry is undone by voiding it. On `Excluded`: {button:Restore|outline}.
+- **The buttons on a row.** On `To review`: {button:Match|outline} when the row has something in the books it could be, {button:Split|outline}, {button:Exclude|ghost} and {button:Post|primary}. On `All`: {button:Unmatch|ghost} on a row that was matched to an entry; a row that posted its own entry has no button, because that entry is undone by voiding it. On `Excluded`: {button:Restore|outline}.
 - **{button:Accept 12 suggestions (≥70%)|outline}.** At the top of `To review`. See how to post many at once, below.
 
 ## How to post a transaction
@@ -25,6 +25,15 @@ Open **Banking** in the accounting menu and click an account's card. This is whe
 3. If the category was wrong, click {button:Undo|link} while it shows. You see `Undone — back in review`: the entry is voided and the transaction is back under `To review`, so you can post it again. Once the message has gone, open `posted` on `All` and void the entry there; that sends the transaction back the same way.
 
 Nothing is posted until you press the button, and the assistant never posts by itself. A bank rule set to post automatically can.
+
+## How to split a transaction across categories
+
+1. On `To review`, click {button:Split|outline}. The dialog is `Split 90.00 across categories` and reads `One entry posts, with a line per category. The lines must add up to the transaction.` The first line starts as the whole amount on the suggested category, with an empty line under it.
+2. On each line, pick the category the way you would in `Category`, typing part of a code or a name, and type the `Amount`. Change the first line's amount to what belongs there and put the rest on the second. Click {button:Add line|outline|plus} for a third. The {icon:trash} at the end of a line removes it, down to two.
+3. Under the lines, `60.00 left to assign` counts down as you type, `30.00 too much` shows when the lines overshoot, and `Balanced` when they add up. {button:Post split|primary} stays gray until they do.
+4. Click {button:Post split|primary}. You see `Posted — 2 lines`, with {button:Undo|link} beside it for a few seconds. The transaction becomes one entry: the bank account on one side and a line per category on the other, dated the transaction date, in the account's company. A tag on the row goes on every line.
+
+A split is undone the way a posting is: {button:Undo|link} while it shows, or void the entry from the journal afterwards. A split never suggests a bank rule, because a rule sets one category.
 
 ## How to post many at once
 
@@ -65,6 +74,10 @@ It works the other way round too: post `Transfer from [account]` on the account 
 | `Suggestions were just requested — try again in a moment.` | You asked the assistant twice within half a minute. |
 | `Posted 9, skipped 3` | Three suggestions could not be posted. The first reason follows. |
 | `Posted` | The transaction is in your books. {button:Undo|link} beside it voids the entry and brings the transaction back. |
+| `Posted — 2 lines` | A split was posted: one entry with a line per category. {button:Undo|link} works the same. |
+| `The split lines must add up to the transaction amount.` | The lines overshoot or fall short; the dialog says by how much. |
+| `Every split line needs a category and an amount above zero.` | A line is missing its category or its amount. |
+| `A split needs at least two lines — use Post for one category.` | Only one line was sent. |
 | `Posted — match the other account's row when it arrives` | A transfer was posted from this side. On the other account, the same money will offer this entry under {button:Match|outline}. |
 | `This transaction posted the entry itself, so there is nothing to unmatch. Undo it from the Posted message, or void the entry from the journal.` | {button:Unmatch|ghost} was pressed on a row that posted its own entry. |
 | `Undone — back in review` | The entry was voided and the transaction is waiting under `To review` again. |

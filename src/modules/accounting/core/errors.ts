@@ -76,6 +76,9 @@ export type LedgerErrorCode =
   | "TXN_MATCH_INVALID"
   | "TXN_NOT_UNDOABLE"
   | "TXN_POSTED_HERE"
+  | "SPLIT_TOO_FEW"
+  | "SPLIT_LINE_INVALID"
+  | "SPLIT_MISMATCH"
   | "DOCUMENT_NOT_FOUND"
   | "DOCUMENT_TRASHED"
   | "DOCUMENT_HAS_LINKS"
@@ -176,6 +179,9 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
     "Accounting is not fully set up for this business. Toggle the module off and on again.",
   TXN_NOT_UNREVIEWED:
     "That bank transaction was already handled — refresh the page.",
+  SPLIT_TOO_FEW: "A split needs at least two lines — use Post for one category.",
+  SPLIT_LINE_INVALID: "Every split line needs a category and an amount above zero.",
+  SPLIT_MISMATCH: "The split lines must add up to the transaction amount.",
   BANK_ACCOUNT_NOT_FOUND: "That bank account no longer exists.",
   // Distinct from NOT_FOUND on purpose: the account is right there, and the
   // reader needs the way out rather than a message telling them it is gone.

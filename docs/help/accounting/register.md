@@ -33,7 +33,7 @@ Nothing is posted until you press the button, and the assistant never posts by i
 
 ## How to match a transaction to something already in the books
 
-1. When a transaction looks like money already recorded, a payment against an invoice or a bill, or an entry written by hand, click {button:Match|outline}. The dialog is `Match to an existing entry` and lists up to five entries for the same amount within a week, such as `Payment — INV-0009 · Millbrook Restaurant` or `Bill payment — Ridgeline Feed · INV-4471`.
+1. When a transaction looks like money already recorded, a payment against an invoice or a bill, or an entry written by hand, click {button:Match|outline}. The dialog is `Match to an existing entry` and lists up to five entries for the same amount within a week, such as `Payment — INV-0009 · Millbrook Restaurant`, `Bill payment — Ridgeline Feed · INV-4471` or `Deposit — 3 payments`, a deposit recorded on the Deposits page.
 2. Click {button:Match|primary} beside the right one. You see `Matched — nothing new was posted`. The transaction is linked to that entry and nothing is posted twice.
 
 On `All`, {button:Unmatch|ghost} sends a matched transaction back to review; the entry stays posted. Voiding an entry from the journal also sends its transaction back to review.

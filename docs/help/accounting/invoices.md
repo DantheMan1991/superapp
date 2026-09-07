@@ -14,8 +14,8 @@ Open **Sales** in the accounting menu. This page lists every invoice, with what 
 - **Four money tiles.** Always shown, even at zero. Each shows an amount and a count, such as `3 invoices`. Click a tile to show only those invoices. `Filtered to Overdue · show all` appears under the tiles, and `show all` clears it.
   - `Overdue`. Invoices still owed whose due date has passed. The amount turns red when it is above zero.
   - `Not due yet`. Invoices still owed that are due today or later, or have no due date.
-  - `Not deposited`. Payments you have recorded into Undeposited Funds and not yet banked, from any time.
-  - `Deposited`. Payments recorded into a bank account in the last 30 days.
+  - `Not deposited`. Payments you have recorded into Undeposited Funds that no deposit has banked yet, from any time. With this tile chosen, a line under the tiles reads `These payments are waiting in Undeposited Funds.` with `Record a deposit` for owners, which opens the New deposit page. See [Deposits](deposits.md).
+  - `Deposited`. Payments that reached a bank account in the last 30 days: recorded straight into one, or banked by a deposit, counted on the deposit's date.
   The first two count what is still owed; the last two count what has arrived. One invoice can sit in two tiles, so the counts do not add up to the number of invoices.
 - **Status pills.** Above the list, at the right: `Open`, `Drafts`, `Paid` and `All`. `Open` is the starting view: issued invoices, paid or not, that still have a balance. Clicking a tile sets the pills to `All`, and clicking a pill clears the tile.
 - **`Company`.** Only when you keep more than one company. Pick one company or `All companies`. Your tile and pill stay as they are.

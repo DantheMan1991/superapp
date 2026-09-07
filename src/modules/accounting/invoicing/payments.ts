@@ -241,6 +241,15 @@ export async function unapplyPayment(
   if (payment.version !== args.expectedVersion) {
     throw new LedgerError("STALE_VERSION", "payment changed since loaded");
   }
+  // A payment a deposit has banked cannot be unapplied on its own: voiding
+  // its Dr 1250 / Cr AR would leave the deposit's Cr 1250 with nothing to
+  // stand against, and 1250 would go negative by exactly this amount. The
+  // deposit is voided first, from its page, and the payment comes back here.
+  if (payment.depositId) {
+    throw new LedgerError("PAYMENT_DEPOSITED", "payment is in a deposit", {
+      depositId: payment.depositId,
+    });
+  }
   const invoice = await loadInvoice(tx, ctx.tenantId, payment.invoiceId);
 
   const entry = await tx.query.journalEntries.findFirst({

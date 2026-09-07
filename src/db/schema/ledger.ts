@@ -47,6 +47,14 @@ export const journalEntrySource = pgEnum("journal_entry_source", [
   "recurring",
   "reversal",
   /**
+   * A bank deposit: payments held in Undeposited Funds banked together as one
+   * entry, `source_id` the `deposits` row (2026-09-07). Added in drizzle/0264,
+   * alone in its own migration, for the reason 0127 gives below. IN
+   * `MANAGED_SOURCES` (core/guards.ts): the entry is voided from the deposit,
+   * never from the journal, or its payments would stay marked as banked.
+   */
+  "deposit",
+  /**
    * Posted by the `assets` pack from a depreciation schedule. Added in
    * drizzle/0127, alone in its own migration — an enum value cannot be used in
    * the transaction that adds it.

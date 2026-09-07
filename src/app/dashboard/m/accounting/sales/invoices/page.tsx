@@ -152,6 +152,9 @@ export default async function InvoicesPage({
         amountCents: schema.invoicePayments.amountCents,
         paymentDate: schema.invoicePayments.paymentDate,
         subtype: schema.accounts.subtype,
+        // Set once a deposit has banked the payment out of Undeposited Funds
+        // (a voided deposit clears the link, so the row comes back here).
+        depositDate: schema.deposits.depositDate,
       })
       .from(schema.invoicePayments)
       .innerJoin(
@@ -161,18 +164,33 @@ export default async function InvoicesPage({
           eq(schema.accounts.id, schema.invoicePayments.depositAccountId),
         ),
       )
+      .leftJoin(
+        schema.deposits,
+        and(
+          eq(schema.deposits.tenantId, schema.invoicePayments.tenantId),
+          eq(schema.deposits.id, schema.invoicePayments.depositId),
+        ),
+      )
       .where(eq(schema.invoicePayments.tenantId, ctx.tenant.id));
 
+    /**
+     * `Not deposited` is money still in the drawer: recorded into Undeposited
+     * Funds and banked by no deposit. `Deposited` is money that reached the
+     * bank recently, by either road — straight into a register when it was
+     * recorded, or through a deposit, dated the day of the DEPOSIT rather
+     * than the day of the payment, because that is the day it reached the bank.
+     */
     const since = addDaysIso(today, -RECENT_DAYS);
     const undepositedByInvoice = new Map<string, number>();
     const depositedByInvoice = new Map<string, number>();
     for (const p of payments) {
-      const target =
-        p.subtype === "undeposited_funds"
-          ? undepositedByInvoice
-          : p.paymentDate >= since
-            ? depositedByInvoice
-            : null;
+      const bankedOn =
+        p.subtype === "undeposited_funds" ? p.depositDate : p.paymentDate;
+      const target = !bankedOn
+        ? undepositedByInvoice
+        : bankedOn >= since
+          ? depositedByInvoice
+          : null;
       if (!target) continue;
       target.set(p.invoiceId, (target.get(p.invoiceId) ?? 0) + p.amountCents);
     }
@@ -426,6 +444,24 @@ export default async function InvoicesPage({
           alarm: key === "overdue",
         }))}
       />
+
+      {bucket === "not_deposited" && data.tally.not_deposited[1] > 0 && (
+        // The tile filters the list; the deposit itself is made on Banking.
+        // This is the one place the two meet, so the tile has somewhere to go.
+        <p className="text-sm text-muted-foreground print:hidden">
+          These payments are waiting in Undeposited Funds.{" "}
+          {isOwner ? (
+            <Link
+              href="/dashboard/m/accounting/banking/deposits/new"
+              className="underline hover:no-underline"
+            >
+              Record a deposit
+            </Link>
+          ) : (
+            "An owner banks them from Banking → Deposits."
+          )}
+        </p>
+      )}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <SalesNav />

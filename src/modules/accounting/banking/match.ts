@@ -171,16 +171,53 @@ async function labelTransferEntries(
   return labels;
 }
 
+/**
+ * Labels for deposit entries — `Deposit — 3 payments`. A deposit's memo is
+ * whatever the owner typed, which may say nothing about what it was; the
+ * count of payments it banked is what a feed row of that amount is matched
+ * against. Returns sourceId (the deposit id) → label.
+ */
+async function labelDepositEntries(
+  tx: Tx,
+  tenantId: string,
+  rows: Array<{ source: string; sourceId: string | null }>,
+): Promise<Map<string, string>> {
+  const labels = new Map<string, string>();
+  const ids = rows
+    .filter((r) => r.source === "deposit" && r.sourceId)
+    .map((r) => r.sourceId!);
+  if (ids.length === 0) return labels;
+  const counts = await tx
+    .select({
+      depositId: schema.invoicePayments.depositId,
+      n: sql<number>`count(*)::int`,
+    })
+    .from(schema.invoicePayments)
+    .where(
+      and(
+        eq(schema.invoicePayments.tenantId, tenantId),
+        inArray(schema.invoicePayments.depositId, ids),
+      ),
+    )
+    .groupBy(schema.invoicePayments.depositId);
+  for (const c of counts) {
+    if (!c.depositId) continue;
+    labels.set(c.depositId, `Deposit — ${c.n === 1 ? "1 payment" : `${c.n} payments`}`);
+  }
+  return labels;
+}
+
 async function labelCandidates(
   tx: Tx,
   tenantId: string,
   rows: Array<{ source: string; sourceId: string | null }>,
 ): Promise<Map<string, string>> {
-  const [payments, transfers] = await Promise.all([
+  const [payments, transfers, deposits] = await Promise.all([
     labelPaymentEntries(tx, tenantId, rows),
     labelTransferEntries(tx, tenantId, rows),
+    labelDepositEntries(tx, tenantId, rows),
   ]);
-  return new Map([...payments, ...transfers]);
+  return new Map([...payments, ...transfers, ...deposits]);
 }
 
 /**

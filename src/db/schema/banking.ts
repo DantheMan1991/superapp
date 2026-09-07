@@ -448,3 +448,85 @@ export type ReconciliationLine = typeof reconciliationLines.$inferSelect;
  * ---------------------------------------------------------------------- */
 
 export type PlaidItem = typeof plaidItems.$inferSelect;
+
+/* ------------------------------------------------------------------------
+ * Deposits (2026-09-07): payments held in Undeposited Funds, banked together.
+ * ---------------------------------------------------------------------- */
+
+/**
+ * A BANK DEPOSIT: customer payments that were recorded into Undeposited
+ * Funds, banked together as ONE entry (Dr the register's ledger account / Cr
+ * Undeposited Funds) — the way the slip the teller stamps lists several
+ * cheques under one total. The bank feed then shows one line for the whole
+ * deposit, and it is this entry, not the individual payments, that the line
+ * matches.
+ *
+ * Born atomically with its entry, like a payment. Voided from its own page
+ * and never from the journal (`deposit` is in MANAGED_SOURCES): voiding the
+ * entry alone would leave `invoice_payments.deposit_id` pointing at money the
+ * books no longer say was banked. The payments it covers point at it, and a
+ * void clears them back to waiting.
+ *
+ * ONE COMPANY PER DEPOSIT — the register's (ADR 0010). Undeposited Funds has
+ * no owner, and each payment's credit to it was posted in the INVOICE's
+ * company, so a deposit takes only payments of the register's company;
+ * otherwise one company's 1250 would go negative while the other's stayed
+ * full. `recordDeposit` refuses the mix with DEPOSIT_CROSS_COMPANY.
+ */
+export const deposits = pgTable(
+  "deposits",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** The register's company, copied at creation and never changed. */
+    entityId: uuid("entity_id").notNull(),
+    bankAccountId: uuid("bank_account_id").notNull(),
+    depositDate: date("deposit_date", { mode: "string" }).notNull(),
+    memo: text("memo").notNull().default(""),
+    /** The sum of the payments — what the bank's line will read. */
+    totalCents: bigint("total_cents", { mode: "number" }).notNull(),
+    /** `posted` | `void`. Text + CHECK, per the rule in schema/work.ts. */
+    status: text("status").notNull().default("posted"),
+    /** Created atomically with its entry — NOT NULL by design. */
+    journalEntryId: uuid("journal_entry_id").notNull(),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("deposits_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("deposits_tenant_bank_date_idx").on(
+      t.tenantId,
+      t.bankAccountId,
+      t.depositDate,
+    ),
+    // One deposit per entry — DB rule, as for payments.
+    uniqueIndex("deposits_tenant_entry_idx").on(t.tenantId, t.journalEntryId),
+    foreignKey({
+      name: "deposits_entity_fk",
+      columns: [t.tenantId, t.entityId],
+      foreignColumns: [entities.tenantId, entities.id],
+    }),
+    foreignKey({
+      name: "deposits_bank_account_fk",
+      columns: [t.tenantId, t.bankAccountId],
+      foreignColumns: [bankAccounts.tenantId, bankAccounts.id],
+    }),
+    foreignKey({
+      name: "deposits_entry_fk",
+      columns: [t.tenantId, t.journalEntryId],
+      foreignColumns: [journalEntries.tenantId, journalEntries.id],
+    }),
+    check("deposits_total_positive", sql`${t.totalCents} > 0`),
+    check("deposits_status_known", sql`${t.status} in ('posted', 'void')`),
+  ],
+);
+
+export type Deposit = typeof deposits.$inferSelect;

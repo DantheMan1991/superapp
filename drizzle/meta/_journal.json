@@ -1849,6 +1849,27 @@
       "when": 1788721223667,
       "tag": "0263_transfer_two_sides",
       "breakpoints": true
+    },
+    {
+      "idx": 264,
+      "version": "7",
+      "when": 1788788455783,
+      "tag": "0264_deposit_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 265,
+      "version": "7",
+      "when": 1788788456783,
+      "tag": "0265_deposits",
+      "breakpoints": true
+    },
+    {
+      "idx": 266,
+      "version": "7",
+      "when": 1788788457783,
+      "tag": "0266_deposits_rls",
+      "breakpoints": true
     }
   ]
 }

@@ -10,7 +10,9 @@ import type {
 } from "@/lib/mail-extensions/types";
 import { LedgerError, type LedgerCtx } from "../core";
 import { createInvoiceDraft } from "../invoicing/invoices";
+import { dueDateFromCustomerTerms } from "../invoicing/customers";
 import { createBillDraft } from "../payables/bills";
+import { dueDateFromVendorTerms } from "../payables/vendors";
 import { lineAmountCents, parseQuantityHundredths } from "../invoicing/lines";
 import { draftFromThread, resolveDraftParty } from "../ai/thread-draft";
 
@@ -123,7 +125,11 @@ export const invoiceThreadDrafter: MailThreadDrafter = {
     const invoice = await createInvoiceDraft(tx, ledgerCtx(ctx), {
       customerId: customer.id,
       issueDate: record.issueDate,
-      dueDate: record.dueDate,
+      // The thread's own due date when it named one; otherwise the
+      // customer's terms, the way the invoice form would have started.
+      dueDate:
+        record.dueDate ??
+        (await dueDateFromCustomerTerms(tx, ctx.tenantId, customer, record.issueDate)),
       memo: memoFor(record),
       lines: lines.map((l) => ({
         description: l.description,
@@ -165,7 +171,9 @@ export const billThreadDrafter: MailThreadDrafter = {
     const bill = await createBillDraft(tx, ledgerCtx(ctx), {
       vendorId: vendor.id,
       billDate: record.issueDate,
-      dueDate: record.dueDate,
+      dueDate:
+        record.dueDate ??
+        (await dueDateFromVendorTerms(tx, ctx.tenantId, vendor, record.issueDate)),
       memo: memoFor(record),
       // A bill line is amount-only (P10) and UNCODED (P9) — quantity × price
       // collapses to one amount here, and the existing bill-coding AI puts an

@@ -22,6 +22,7 @@ import { listRecordHistory } from "@/modules/accounting/history/list";
 import { RecordHistory } from "@/modules/accounting/components/record-history";
 import { EntityThreads } from "@/modules/email/components/entity-threads";
 import { loadBillLines, findPossibleDuplicates } from "@/modules/accounting/payables/bills";
+import { listPaymentTerms } from "@/modules/accounting/invoicing/catalogue";
 import {
   isCodableAccount,
   listDimensionMembers,
@@ -150,6 +151,11 @@ export default async function BillDetailPage({
       paid,
       registers,
       vendors,
+      terms: (await listPaymentTerms(tx, tenantId, { activeOnly: true })).map((t) => ({
+        id: t.id,
+        name: t.name,
+        dueInDays: t.dueInDays,
+      })),
       duplicates,
       today: todayInTimezone(ctx.tenant.timezone),
     };
@@ -283,7 +289,12 @@ export default async function BillDetailPage({
 
       {isDraft ? (
         <BillBuilder
-          vendors={data.vendors.map((v) => ({ id: v.id, name: v.name }))}
+          vendors={data.vendors.map((v) => ({
+            id: v.id,
+            name: v.name,
+            paymentTermsId: v.paymentTermsId,
+          }))}
+          terms={data.terms}
           accounts={codableAccounts.map((a) => ({
             id: a.id,
             code: a.code,

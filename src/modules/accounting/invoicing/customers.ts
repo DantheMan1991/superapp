@@ -5,6 +5,8 @@ import type { Customer } from "@/db/schema";
 import { createPartyForRole, syncPartyName } from "@/lib/parties/role-sync";
 import { setPreferredContactValue } from "@/lib/parties/contacts";
 import { LedgerError, type LedgerCtx } from "../core";
+import { assertActiveTerm, listPaymentTerms } from "./catalogue";
+import { dueDateFromTerms, resolveTerm } from "./terms";
 
 /**
  * Customers: the tenant's OWN customers. Staff may manage these (P21).
@@ -53,6 +55,11 @@ export interface CustomerInput {
   phone?: string;
   address?: string;
   notes?: string;
+  /**
+   * Their usual terms. Null (or absent on create) means "whatever the default
+   * is" — see the column's comment. Must be one of the tenant's ACTIVE terms.
+   */
+  paymentTermsId?: string | null;
 }
 
 /**
@@ -84,6 +91,7 @@ export async function createCustomer(
   // The identity is born in the same transaction as the role, so a customer
   // without a party is not a state this code can reach. 0061's trigger is the
   // backstop for writers that predate this line, not a substitute for it.
+  await assertActiveTerm(tx, ctx.tenantId, input.paymentTermsId);
   const party = await createPartyForRole(tx, ctx.tenantId, input.name);
   await writeCustomerContacts(tx, ctx.tenantId, party.id, input);
   const [row] = await tx
@@ -94,6 +102,7 @@ export async function createCustomer(
       name: input.name,
       address: input.address ?? "",
       notes: input.notes ?? "",
+      paymentTermsId: input.paymentTermsId ?? null,
     })
     .returning();
   return row;
@@ -105,10 +114,16 @@ export async function updateCustomer(
   args: { customerId: string; expectedVersion: number; patch: Partial<CustomerInput> },
 ): Promise<{ before: Customer; after: Customer }> {
   const before = await loadCustomer(tx, ctx.tenantId, args.customerId);
+  if (args.patch.paymentTermsId !== undefined) {
+    await assertActiveTerm(tx, ctx.tenantId, args.patch.paymentTermsId);
+  }
   const rows = await tx
     .update(schema.customers)
     .set({
       ...(args.patch.name !== undefined ? { name: args.patch.name } : {}),
+      ...(args.patch.paymentTermsId !== undefined
+        ? { paymentTermsId: args.patch.paymentTermsId }
+        : {}),
       ...(args.patch.address !== undefined ? { address: args.patch.address } : {}),
       ...(args.patch.notes !== undefined ? { notes: args.patch.notes } : {}),
       version: args.expectedVersion + 1,
@@ -155,4 +170,30 @@ export async function setCustomerActive(
     throw new LedgerError("STALE_VERSION", "customer changed since loaded");
   }
   return rows[0];
+}
+
+/**
+ * The due date a new invoice for this customer starts with: their usual
+ * terms, else the business default, else none. The server-side twin of what
+ * the invoice form works out as you type, for the drafts nobody types — the
+ * email-thread drafter left the date blank until now because it did not
+ * know terms existed.
+ */
+export async function dueDateFromCustomerTerms(
+  tx: Tx,
+  tenantId: string,
+  customer: { id: string },
+  issueDate: string,
+): Promise<string | null> {
+  const row = await tx.query.customers.findFirst({
+    where: and(eq(schema.customers.tenantId, tenantId), eq(schema.customers.id, customer.id)),
+    columns: { paymentTermsId: true },
+  });
+  const terms = await listPaymentTerms(tx, tenantId, { activeOnly: true });
+  const term = resolveTerm(
+    terms,
+    row?.paymentTermsId ?? null,
+    terms.find((t) => t.isDefault)?.id ?? null,
+  );
+  return term ? dueDateFromTerms(issueDate, term.dueInDays) : null;
 }

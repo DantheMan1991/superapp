@@ -15,6 +15,7 @@ import { matchesAny, pageFrom, pageWindow, searchTerm } from "@/lib/list-query";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { formatCentsSigned, toSafeCents } from "@/modules/accounting/lib/money";
 import { SalesNav } from "../sales-nav";
+import { listPaymentTerms } from "@/modules/accounting/invoicing/catalogue";
 import { AddCustomerButton, CustomerRowActions } from "./customer-dialogs";
 
 export const dynamic = "force-dynamic";
@@ -78,7 +79,10 @@ export default async function CustomersPage({
       ctx.tenant.id,
       customers.map((c) => c.partyId),
     );
-    return { customers, invoiced, paid, contacts };
+    // Every term, active or not: a customer may still carry a retired one,
+    // and the row and the dialog have to name it rather than pretend.
+    const terms = await listPaymentTerms(tx, ctx.tenant.id);
+    return { customers, invoiced, paid, contacts, terms };
   });
 
   const reach = (partyId: string) => {
@@ -97,6 +101,13 @@ export default async function CustomersPage({
     ]),
   );
   const isOwnerOrStaff = true; // staff may manage customers (P21)
+  const termName = new Map(data.terms.map((t) => [t.id, t.name]));
+  const termOptions = data.terms.map((t) => ({
+    id: t.id,
+    name: t.name,
+    isActive: t.isActive,
+    isDefault: t.isDefault,
+  }));
 
   // Filtered in memory: every customer is already loaded for the contact
   // points and the balances, and the search reads what the row shows — the
@@ -120,7 +131,7 @@ export default async function CustomersPage({
       <PageHeader
         title="Customers"
         description={`Who ${ctx.tenant.name} bills.`}
-        actions={isOwnerOrStaff && <AddCustomerButton />}
+        actions={isOwnerOrStaff && <AddCustomerButton terms={termOptions} />}
       />
 
       <AccountingNav />
@@ -141,7 +152,7 @@ export default async function CustomersPage({
                 ? "Try fewer words, or add them now."
                 : "You need somebody to bill before you can raise an invoice."
             }
-            action={isOwnerOrStaff ? <AddCustomerButton /> : undefined}
+            action={isOwnerOrStaff ? <AddCustomerButton terms={termOptions} /> : undefined}
           />
         }
       >
@@ -157,7 +168,15 @@ export default async function CustomersPage({
                   {!c.isActive && <Badge variant="outline">inactive</Badge>}
                 </p>
                 <p className="truncate text-xs text-muted-foreground">
-                  {[reach(c.partyId).email, reach(c.partyId).phone]
+                  {[
+                    reach(c.partyId).email,
+                    reach(c.partyId).phone,
+                    // Only a customer with their OWN terms says so; the rest
+                    // are on the business default, which is not news.
+                    c.paymentTermsId
+                      ? `${termName.get(c.paymentTermsId) ?? "Own"} terms`
+                      : null,
+                  ]
                     .filter(Boolean)
                     .join(" · ") || "—"}
                 </p>
@@ -179,7 +198,9 @@ export default async function CustomersPage({
                     notes: c.notes,
                     isActive: c.isActive,
                     remindersMuted: c.remindersMuted,
+                    paymentTermsId: c.paymentTermsId,
                   }}
+                  terms={termOptions}
                 />
               </div>
             </li>

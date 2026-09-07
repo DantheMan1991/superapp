@@ -28,6 +28,8 @@ interface PayFixture {
    * BOTH party columns, not just the one this file was written for.
    */
   customerId: string;
+  /** A payment term of this tenant — `vendors` and `customers` both point at one (0267 / 0116). */
+  termId: string;
 }
 
 d("payables isolation (RLS + composite tenant FKs)", () => {
@@ -46,10 +48,14 @@ d("payables isolation (RLS + composite tenant FKs)", () => {
         .insert(schema.journalEntries)
         .values({ tenantId, entityId, entryDate: "2026-07-01", memo: `entry ${tag}`, createdByClerkUserId: `user-${tag}` })
         .returning();
+      const [term] = await tx
+        .insert(schema.paymentTerms)
+        .values({ tenantId, name: `Net ${tag}`, dueInDays: 30 })
+        .returning();
       const partyId = await seedParty(tx, tenantId, `Vendor ${tag}`);
       const [vendor] = await tx
         .insert(schema.vendors)
-        .values({ tenantId, partyId, name: `Vendor ${tag}` })
+        .values({ tenantId, partyId, name: `Vendor ${tag}`, paymentTermsId: term.id })
         .returning();
       const [bill] = await tx
         .insert(schema.bills)
@@ -78,6 +84,7 @@ d("payables isolation (RLS + composite tenant FKs)", () => {
         entryId: entry.id,
         documentId: doc.id,
         customerId: customer.id,
+        termId: term.id,
       };
     });
   }
@@ -144,6 +151,50 @@ d("payables isolation (RLS + composite tenant FKs)", () => {
         }),
       ),
     ).rejects.toThrow();
+  });
+
+  it("composite FK: A's vendor and A's customer cannot name B's payment terms", async () => {
+    // Own tenant_id passes RLS; the composite FK is what refuses the
+    // cross-tenant term. A fresh party each time: a party holds a role once.
+    await expect(
+      withTenant(tenantA, async (tx) => {
+        const partyId = await seedParty(tx, tenantA, "Smuggling vendor");
+        await tx.insert(schema.vendors).values({
+          tenantId: tenantA,
+          partyId,
+          name: "Smuggling vendor",
+          paymentTermsId: fx.b.termId,
+        });
+      }),
+    ).rejects.toThrow();
+    await expect(
+      withTenant(tenantA, async (tx) => {
+        const partyId = await seedParty(tx, tenantA, "Smuggling customer");
+        await tx.insert(schema.customers).values({
+          tenantId: tenantA,
+          partyId,
+          name: "Smuggling customer",
+          paymentTermsId: fx.b.termId,
+        });
+      }),
+    ).rejects.toThrow();
+    // The control: A's own term is accepted on both.
+    await withTenant(tenantA, async (tx) => {
+      const vendorParty = await seedParty(tx, tenantA, "Honest vendor");
+      await tx.insert(schema.vendors).values({
+        tenantId: tenantA,
+        partyId: vendorParty,
+        name: "Honest vendor",
+        paymentTermsId: fx.a.termId,
+      });
+      const customerParty = await seedParty(tx, tenantA, "Honest customer");
+      await tx.insert(schema.customers).values({
+        tenantId: tenantA,
+        partyId: customerParty,
+        name: "Honest customer",
+        paymentTermsId: fx.a.termId,
+      });
+    });
   });
 
   it("composite FK: A's bill cannot name B's company", async () => {

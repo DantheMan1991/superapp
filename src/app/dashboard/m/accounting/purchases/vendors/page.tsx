@@ -22,6 +22,7 @@ import { listContactPointsFor } from "@/lib/parties/contacts";
 import { preferredContactValue } from "@/lib/parties/contact-values";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { listVendors } from "@/modules/accounting/payables/vendors";
+import { listPaymentTerms } from "@/modules/accounting/invoicing/catalogue";
 import { PurchasesNav } from "../purchases-nav";
 import { VendorDialogButton } from "./vendor-dialogs";
 
@@ -57,7 +58,9 @@ export default async function VendorsPage({
       tenantId,
       vendors.map((v) => v.partyId),
     );
-    return { vendors, accounts, contacts };
+    // Every term, active or not — see the customers page.
+    const terms = await listPaymentTerms(tx, tenantId);
+    return { vendors, accounts, contacts, terms };
   });
 
   const reach = (partyId: string) => {
@@ -74,6 +77,8 @@ export default async function VendorsPage({
   const accountOptions = data.accounts
     .filter((a) => ["expense", "asset"].includes(a.accountType))
     .map((a) => ({ id: a.id, label: `${a.code} · ${a.name}` }));
+  const termName = new Map(data.terms.map((t) => [t.id, t.name]));
+  const termOptions = data.terms.map((t) => ({ id: t.id, name: t.name, isActive: t.isActive }));
 
   // Filtered in memory, like the customer list: the search reads the name,
   // the email and the phone the row shows.
@@ -96,7 +101,7 @@ export default async function VendorsPage({
       <PageHeader
         title="Vendors"
         description={`Who ${ctx.tenant.name} buys from. A default expense account prefills new bill lines.`}
-        actions={<VendorDialogButton accounts={accountOptions} />}
+        actions={<VendorDialogButton accounts={accountOptions} terms={termOptions} />}
       />
 
       <AccountingNav />
@@ -117,7 +122,7 @@ export default async function VendorsPage({
                 ? "Try fewer words, or add them now."
                 : "They are created for you when a bill comes in from an emailed document, or you can add one now."
             }
-            action={<VendorDialogButton accounts={accountOptions} />}
+            action={<VendorDialogButton accounts={accountOptions} terms={termOptions} />}
           />
         }
       >
@@ -127,6 +132,7 @@ export default async function VendorsPage({
               <TableHead>Name</TableHead>
               <TableHead className="hidden sm:table-cell">Contact</TableHead>
               <TableHead className="hidden md:table-cell">Default account</TableHead>
+              <TableHead className="hidden md:table-cell">Terms</TableHead>
               <TableHead>Status</TableHead>
               <TableHead />
             </TableRow>
@@ -145,6 +151,9 @@ export default async function VendorsPage({
                     ? accountName.get(vendor.defaultExpenseAccountId)
                     : "—"}
                 </TableCell>
+                <TableCell className="hidden text-sm md:table-cell">
+                  {vendor.paymentTermsId ? (termName.get(vendor.paymentTermsId) ?? "—") : "—"}
+                </TableCell>
                 <TableCell>
                   {vendor.isActive ? (
                     <Badge variant="secondary">active</Badge>
@@ -155,6 +164,7 @@ export default async function VendorsPage({
                 <TableCell className="text-right">
                   <VendorDialogButton
                     accounts={accountOptions}
+                    terms={termOptions}
                     vendor={{
                       id: vendor.id,
                       version: vendor.version,
@@ -164,6 +174,7 @@ export default async function VendorsPage({
                       address: vendor.address,
                       notes: vendor.notes,
                       defaultExpenseAccountId: vendor.defaultExpenseAccountId,
+                      paymentTermsId: vendor.paymentTermsId,
                       isActive: vendor.isActive,
                     }}
                   />

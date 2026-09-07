@@ -21,6 +21,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   createCustomerAction,
@@ -29,23 +36,49 @@ import {
   updateCustomerAction,
 } from "@/modules/accounting/invoicing/actions";
 
+/** A payment term as the dialog offers it. Inactive ones are offered only when they are the customer's current one. */
+export interface TermOption {
+  id: string;
+  name: string;
+  isActive: boolean;
+  isDefault: boolean;
+}
+
 interface CustomerForm {
   name: string;
   email: string;
   phone: string;
   address: string;
   notes: string;
+  /** "" means the business default — `customers.payment_terms_id` null. */
+  paymentTermsId: string;
 }
 
-const EMPTY: CustomerForm = { name: "", email: "", phone: "", address: "", notes: "" };
+const EMPTY: CustomerForm = {
+  name: "",
+  email: "",
+  phone: "",
+  address: "",
+  notes: "",
+  paymentTermsId: "",
+};
+
+/** Radix Select cannot carry an empty string as a value, so the default is a sentinel. */
+const DEFAULT_TERMS = "__default__";
 
 function CustomerFields({
   form,
   setForm,
+  terms,
 }: {
   form: CustomerForm;
   setForm: (f: CustomerForm) => void;
+  terms: TermOption[];
 }) {
+  const defaultName = terms.find((t) => t.isDefault)?.name;
+  // Active terms, plus the customer's current one even if it was retired —
+  // the dialog must show what is set, not silently move them to the default.
+  const offered = terms.filter((t) => t.isActive || t.id === form.paymentTermsId);
   return (
     <div className="grid gap-3 py-1">
       <div className="space-y-1.5">
@@ -83,6 +116,38 @@ function CustomerFields({
           onChange={(e) => setForm({ ...form, address: e.target.value })}
         />
       </div>
+      {/* Shown once the catalogue has terms, like the invoice form's own
+          Terms box. Null on the customer means "whatever the default is", so
+          changing the default later moves everyone who never had a special
+          arrangement — which is what editing the default should do. */}
+      {terms.length > 0 && (
+        <div className="space-y-1.5">
+          <Label htmlFor="cust-terms">Payment terms</Label>
+          <Select
+            value={form.paymentTermsId || DEFAULT_TERMS}
+            onValueChange={(v) =>
+              setForm({ ...form, paymentTermsId: v === DEFAULT_TERMS ? "" : v })
+            }
+          >
+            <SelectTrigger id="cust-terms">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={DEFAULT_TERMS}>
+                {defaultName ? `Business default (${defaultName})` : "Business default"}
+              </SelectItem>
+              {offered.map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.isActive ? t.name : `${t.name} (inactive)`}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            A new invoice for this customer starts on these terms.
+          </p>
+        </div>
+      )}
       <div className="space-y-1.5">
         <Label htmlFor="cust-notes">Notes</Label>
         <Textarea
@@ -96,7 +161,7 @@ function CustomerFields({
   );
 }
 
-export function AddCustomerButton() {
+export function AddCustomerButton({ terms = [] }: { terms?: TermOption[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -110,6 +175,7 @@ export function AddCustomerButton() {
         phone: form.phone.trim() || undefined,
         address: form.address.trim() || undefined,
         notes: form.notes.trim() || undefined,
+        paymentTermsId: form.paymentTermsId || null,
       });
       if ("error" in result) toast.error(result.error);
       else {
@@ -132,7 +198,7 @@ export function AddCustomerButton() {
             <DialogTitle>Add customer</DialogTitle>
             <DialogDescription>Someone {`you'll`} invoice.</DialogDescription>
           </DialogHeader>
-          <CustomerFields form={form} setForm={setForm} />
+          <CustomerFields form={form} setForm={setForm} terms={terms} />
           <DialogFooter>
             <Button onClick={submit} disabled={pending || !form.name.trim()}>
               {pending ? "Adding…" : "Add customer"}
@@ -146,13 +212,16 @@ export function AddCustomerButton() {
 
 export function CustomerRowActions({
   customer,
+  terms = [],
 }: {
-  customer: CustomerForm & {
+  customer: Omit<CustomerForm, "paymentTermsId"> & {
     id: string;
     version: number;
     isActive: boolean;
     remindersMuted: boolean;
+    paymentTermsId: string | null;
   };
+  terms?: TermOption[];
 }) {
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
@@ -163,6 +232,7 @@ export function CustomerRowActions({
     phone: customer.phone,
     address: customer.address,
     notes: customer.notes,
+    paymentTermsId: customer.paymentTermsId ?? "",
   });
 
   function saveEdit() {
@@ -176,6 +246,7 @@ export function CustomerRowActions({
           phone: form.phone.trim(),
           address: form.address.trim(),
           notes: form.notes.trim(),
+          paymentTermsId: form.paymentTermsId || null,
         },
       });
       if ("error" in result) toast.error(result.error);
@@ -243,7 +314,7 @@ export function CustomerRowActions({
           <DialogHeader>
             <DialogTitle>Edit customer</DialogTitle>
           </DialogHeader>
-          <CustomerFields form={form} setForm={setForm} />
+          <CustomerFields form={form} setForm={setForm} terms={terms} />
           <DialogFooter>
             <Button onClick={saveEdit} disabled={pending || !form.name.trim()}>
               {pending ? "Saving…" : "Save changes"}

@@ -214,6 +214,9 @@ export default async function InvoiceDetailPage({
         name: t.name,
         dueInDays: t.dueInDays,
       })),
+      // For a customer change on the draft; the saved due date is never
+      // re-derived on open.
+      defaultTermId: termRows.find((t) => t.isDefault)?.id ?? null,
       // The editor offers active rates, plus whichever this draft already
       // holds — otherwise opening a draft would silently drop its rate.
       taxRates: taxRateRows
@@ -353,7 +356,11 @@ export default async function InvoiceDetailPage({
 
       {editing ? (
         <InvoiceBuilder
-          customers={data.customersActive.map((c) => ({ id: c.id, name: c.name }))}
+          customers={data.customersActive.map((c) => ({
+            id: c.id,
+            name: c.name,
+            paymentTermsId: c.paymentTermsId,
+          }))}
           incomeAccounts={data.accounts
             .filter((a) => a.accountType === "income" && a.isActive)
             .map((a) => ({ id: a.id, code: a.code, name: a.name }))}
@@ -361,6 +368,7 @@ export default async function InvoiceDetailPage({
           today={data.today}
           products={data.products}
           terms={data.terms}
+          defaultTermId={data.defaultTermId}
           taxRates={data.taxRates}
           defaultTaxRateId={data.defaultTaxRateId}
           invoice={{

@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { listPaymentTerms } from "../src/modules/accounting/invoicing/catalogue";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../src/db";
@@ -46,7 +47,7 @@ import {
 } from "../src/modules/accounting/payables/from-document";
 import { buildApAging } from "../src/modules/accounting/payables/aging";
 import { getApAging } from "../src/modules/accounting/payables/aging-feed";
-import { createVendor, updateVendor } from "../src/modules/accounting/payables/vendors";
+import { createVendor, updateVendor, dueDateFromVendorTerms } from "../src/modules/accounting/payables/vendors";
 import { listContactPoints } from "../src/lib/parties/contacts";
 import { preferredContactValue } from "../src/lib/parties/contact-values";
 import {
@@ -704,6 +705,46 @@ d("payables (DB)", () => {
         }),
       );
       expect(preferredContactValue(await pointsOf(vendor.id), "email")).toBe("");
+    });
+  });
+
+  describe("a vendor's usual terms", () => {
+    it("are stored, read as a due date by the drafters, sent whole on every save, and must be active", async () => {
+      const terms = await withTenant(tenantId, (tx) =>
+        listPaymentTerms(tx, tenantId, { activeOnly: true }),
+      );
+      const net15 = terms.find((t) => t.name === "Net 15")!;
+      const vendor = await withTenant(tenantId, (tx) =>
+        createVendor(tx, owner, { name: "Terms Supplies", paymentTermsId: net15.id }),
+      );
+      expect(vendor.paymentTermsId).toBe(net15.id);
+      expect(
+        await withTenant(tenantId, (tx) =>
+          dueDateFromVendorTerms(tx, tenantId, vendor, "2026-09-01"),
+        ),
+      ).toBe("2026-09-16");
+
+      // The dialog sends every field on every save, so a save that leaves
+      // the terms out means "none" — the same rule as its email box.
+      const cleared = await withTenant(tenantId, (tx) =>
+        updateVendor(tx, owner, {
+          vendorId: vendor.id,
+          expectedVersion: vendor.version,
+          patch: { name: "Terms Supplies" },
+        }),
+      );
+      expect(cleared.after.paymentTermsId).toBeNull();
+      expect(
+        await withTenant(tenantId, (tx) =>
+          dueDateFromVendorTerms(tx, tenantId, vendor, "2026-09-01"),
+        ),
+      ).toBeNull();
+
+      await expect(
+        withTenant(tenantId, (tx) =>
+          createVendor(tx, owner, { name: "Bad Terms", paymentTermsId: crypto.randomUUID() }),
+        ),
+      ).rejects.toMatchObject({ code: "TERM_NOT_FOUND" });
     });
   });
 

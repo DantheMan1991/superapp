@@ -27,6 +27,12 @@ import {
   parseMoneyToCents,
 } from "@/modules/accounting/lib/money";
 import {
+  describeTerm,
+  dueDateFromTerms,
+  resolveTerm,
+  type TermLike,
+} from "@/modules/accounting/invoicing/terms";
+import {
   DimensionTags,
   type DimensionTypeOption,
 } from "@/components/app/dimension-tags";
@@ -34,6 +40,8 @@ import {
 export interface BuilderVendor {
   id: string;
   name: string;
+  /** Their usual terms; null or absent means none — the due date is typed. */
+  paymentTermsId?: string | null;
 }
 
 export interface BuilderAccount {
@@ -119,8 +127,11 @@ export function BillBuilder({
   initialDuplicates,
   dimensionTypes = [],
   derivedAccountIds = [],
+  terms = [],
 }: {
   vendors: BuilderVendor[];
+  /** The catalogue's active terms. Empty hides the Terms box, as on the invoice. */
+  terms?: TermLike[];
   /**
    * The tenant's companies (ADR 0010) — shown at two or more, fixed once the
    * draft exists. Which company owes this bill decides which balance sheet the
@@ -168,6 +179,29 @@ export function BillBuilder({
   const [number, setNumber] = useState(bill?.billNumber ?? "");
   const [billDate, setBillDate] = useState(bill?.billDate ?? today);
   const [dueDate, setDueDate] = useState(bill?.dueDate ?? "");
+  // Terms drive the due date and a hand-typed date clears them — the invoice
+  // form's rule. An EXISTING draft keeps the date it was saved with (the box
+  // reads `Custom`); a vendor with usual terms sets them the moment they are
+  // picked, on a new bill and an old one alike.
+  const [termId, setTermId] = useState("");
+  const chosenTerm = terms.find((t) => t.id === termId) ?? null;
+  function applyTerm(nextTermId: string) {
+    setTermId(nextTermId);
+    const term = terms.find((t) => t.id === nextTermId);
+    if (term) setDueDate(dueDateFromTerms(billDate, term.dueInDays));
+  }
+  function applyBillDate(next: string) {
+    setBillDate(next);
+    if (chosenTerm) setDueDate(dueDateFromTerms(next, chosenTerm.dueInDays));
+  }
+  function applyVendor(nextVendorId: string) {
+    setVendorId(nextVendorId);
+    setNewVendorName("");
+    const vendor = vendorList.find((v) => v.id === nextVendorId);
+    // No business default for bills: a supplier's terms are theirs or none.
+    const term = resolveTerm(terms, vendor?.paymentTermsId ?? null, null);
+    if (term) applyTerm(term.id);
+  }
   const [memo, setMemo] = useState(bill?.memo ?? "");
   const [duplicates, setDuplicates] = useState<DuplicateWarning[]>(
     initialDuplicates ?? [],
@@ -334,10 +368,7 @@ export function BillBuilder({
             <Label>Vendor</Label>
             <Select
               value={vendorId || undefined}
-              onValueChange={(v) => {
-                setVendorId(v);
-                setNewVendorName("");
-              }}
+              onValueChange={applyVendor}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Select vendor" />
@@ -377,21 +408,52 @@ export function BillBuilder({
               id="bill-date"
               type="date"
               value={billDate}
-              onChange={(e) => setBillDate(e.target.value)}
+              onChange={(e) => applyBillDate(e.target.value)}
             />
           </div>
         </div>
         <div className="grid gap-3 sm:grid-cols-4">
+          {terms.length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="bill-terms">Terms</Label>
+              <Select value={termId} onValueChange={applyTerm}>
+                <SelectTrigger id="bill-terms">
+                  <SelectValue placeholder="Custom" />
+                </SelectTrigger>
+                <SelectContent>
+                  {terms.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="bill-due">Due date (optional)</Label>
             <Input
               id="bill-due"
               type="date"
               value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
+              onChange={(e) => {
+                // A hand-typed date is a deliberate override, so the term
+                // stops claiming to describe it.
+                setTermId("");
+                setDueDate(e.target.value);
+              }}
             />
+            {chosenTerm && (
+              <p className="text-xs text-muted-foreground">
+                {describeTerm(chosenTerm, billDate)}
+              </p>
+            )}
           </div>
-          <div className="space-y-1.5 sm:col-span-3">
+          <div
+            className={
+              terms.length > 0 ? "space-y-1.5 sm:col-span-2" : "space-y-1.5 sm:col-span-3"
+            }
+          >
             <Label htmlFor="bill-memo">Memo</Label>
             <Input
               id="bill-memo"

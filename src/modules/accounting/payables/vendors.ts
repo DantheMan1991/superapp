@@ -5,6 +5,8 @@ import type { Vendor } from "@/db/schema";
 import { createPartyForRole, syncPartyName } from "@/lib/parties/role-sync";
 import { setPreferredContactValue } from "@/lib/parties/contacts";
 import { LedgerError, type LedgerCtx } from "../core";
+import { addDaysIso } from "../lib/dates";
+import { assertActiveTerm } from "../invoicing/catalogue";
 
 /**
  * Vendors mirror customers: duplicate names allowed, deactivate never
@@ -62,6 +64,8 @@ export interface VendorInput {
   address?: string;
   notes?: string;
   defaultExpenseAccountId?: string | null;
+  /** Their usual terms, or null for none (the due date is typed). Must be active. */
+  paymentTermsId?: string | null;
 }
 
 /**
@@ -110,6 +114,7 @@ export async function createVendor(
   input: VendorInput,
 ): Promise<Vendor> {
   await assertDefaultAccount(tx, ctx.tenantId, input.defaultExpenseAccountId);
+  await assertActiveTerm(tx, ctx.tenantId, input.paymentTermsId);
   // Identity and role born in one transaction — see createCustomer.
   const party = await createPartyForRole(tx, ctx.tenantId, input.name);
   await writeVendorContacts(tx, ctx.tenantId, party.id, input);
@@ -122,6 +127,7 @@ export async function createVendor(
       address: input.address ?? "",
       notes: input.notes ?? "",
       defaultExpenseAccountId: input.defaultExpenseAccountId ?? null,
+      paymentTermsId: input.paymentTermsId ?? null,
     })
     .returning();
   return row;
@@ -134,6 +140,7 @@ export async function updateVendor(
 ): Promise<{ before: Vendor; after: Vendor }> {
   const before = await loadVendor(tx, ctx.tenantId, args.vendorId);
   await assertDefaultAccount(tx, ctx.tenantId, args.patch.defaultExpenseAccountId);
+  await assertActiveTerm(tx, ctx.tenantId, args.patch.paymentTermsId);
   const rows = await tx
     .update(schema.vendors)
     .set({
@@ -141,6 +148,7 @@ export async function updateVendor(
       address: args.patch.address ?? "",
       notes: args.patch.notes ?? "",
       defaultExpenseAccountId: args.patch.defaultExpenseAccountId ?? null,
+      paymentTermsId: args.patch.paymentTermsId ?? null,
       version: args.expectedVersion + 1,
       updatedAt: new Date(),
     })
@@ -203,4 +211,31 @@ export async function setVendorActive(
     throw new LedgerError("STALE_VERSION", "vendor changed since loaded");
   }
   return rows[0];
+}
+
+/**
+ * The due date a new bill from this vendor starts with: their usual terms
+ * counted from the bill date, or null when they have none (or the term was
+ * retired — a retired term stops driving dates, it does not throw). Used by
+ * the Inbox's Create bill and the email-thread drafter, the two places a
+ * bill is drafted without the form.
+ */
+export async function dueDateFromVendorTerms(
+  tx: Tx,
+  tenantId: string,
+  vendor: { id: string },
+  billDate: string,
+): Promise<string | null> {
+  const row = await tx.query.vendors.findFirst({
+    where: and(eq(schema.vendors.tenantId, tenantId), eq(schema.vendors.id, vendor.id)),
+    columns: { paymentTermsId: true },
+  });
+  if (!row?.paymentTermsId) return null;
+  const term = await tx.query.paymentTerms.findFirst({
+    where: and(
+      eq(schema.paymentTerms.tenantId, tenantId),
+      eq(schema.paymentTerms.id, row.paymentTermsId),
+    ),
+  });
+  return term && term.isActive ? addDaysIso(billDate, term.dueInDays) : null;
 }

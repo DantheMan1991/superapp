@@ -10,10 +10,11 @@ Open **Purchases** in the accounting menu and click {button:New bill|primary}. U
 ## What you see
 
 - **`Company`.** Only when your books hold more than one company, and only when creating. `Which company owes this?` Once the draft is saved the company cannot change, because it decides whose books the bill lands in.
-- **`Vendor`.** A list of your active vendors, and a box under it, `…or type a new vendor name`, to create one on the spot. Typing clears the pick and picking clears the box. A vendor made this way has a name and nothing else. Add their email or default account later on the Vendors page.
+- **`Vendor`.** A list of your active vendors, and a box under it, `…or type a new vendor name`, to create one on the spot. Typing clears the pick and picking clears the box. Picking a vendor who has payment terms sets `Terms` and the due date. A vendor made this way has a name and nothing else. Add their email or default account later on the Vendors page.
 - **`Vendor invoice #`.** `As printed on the bill`. Optional.
 - **`Bill date`.** Required. Starts as today.
-- **`Due date (optional)`.** Type it. It is not worked out from terms.
+- **`Terms`.** Shown once your catalogue has payment terms. Picking one, such as `Net 30`, sets the due date from the bill date, and a line under the due date reads `Net 30 — due 2026-10-07 (30 days)`. The vendor's usual terms are applied when you pick the vendor; a vendor without any leaves the box reading `Custom`.
+- **`Due date (optional)`.** Typing a date here clears the terms, because a date you typed is yours, not the terms'. Changing `Bill date` moves the due date along with it when terms are set.
 - **`Memo`.** Optional.
 - **The lines.** One row to begin with. Each has `Description` (`What was billed`), `Amount`, a `Credit` check box, and `Account`. Check `Credit` for a vendor credit or a discount, and the amount counts against the bill instead of adding to it. `Account` offers your ordinary expense and asset accounts. It leaves out bank and card accounts, because a bill line is never coded to the bank, and the accounts that only a stock receipt or another company may touch. A line can be left as `Uncoded` in a draft. {button:Add line|outline|plus} adds a row and {button:Remove line|ghost|trash} at the end of a row removes it. The last row cannot be removed. On a phone each line is a block with its fields named, one under the other, instead of a row.
 - **`Tag`.** Under each line, when your business has {{enterprise|plural|lower}} or other tags set up, {button:Tag|outline} opens a small panel with one list per kind of tag. It is not shown otherwise.
@@ -25,7 +26,7 @@ There is no tax field. Purchase tax is part of what you were charged, so it goes
 ## How to record a bill
 
 1. Pick the `Vendor`, or type a new name in the box under the list.
-2. Fill in `Bill date`, and `Vendor invoice #` and `Due date (optional)` if you have them.
+2. Fill in `Bill date`, and `Vendor invoice #` if you have it. Pick `Terms` or type a `Due date (optional)`, unless the vendor's terms have already set it.
 3. On each line, fill in `Description` and `Amount`, and pick the `Account` the line is charged to. Check `Credit` on a credit or a discount. Click {button:Add line|outline|plus} for the next line.
 4. Click {button:Save draft|primary}. It stays gray until there is a vendor, a bill date and an amount on every filled line. Rows with nothing in them are ignored.
 5. You see `Draft saved` and land on the bill's page, where an owner approves it. See [A bill's page](bill.md).

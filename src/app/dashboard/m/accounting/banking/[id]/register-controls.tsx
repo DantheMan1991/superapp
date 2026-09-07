@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Filter, Paperclip, Sparkles } from "lucide-react";
+import { Filter, Paperclip, Plus, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Combobox, type ComboboxOption } from "@/components/app/combobox";
 import { DataTable } from "@/components/app/data-table";
@@ -13,6 +13,7 @@ import {
 } from "@/components/app/dimension-tags";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -26,12 +27,14 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
   acceptSuggestionsAction,
   categorizeTransactionAction,
+  splitTransactionAction,
   excludeTransactionAction,
   matchTransactionToEntryAction,
   restoreTransactionAction,
@@ -40,7 +43,7 @@ import {
   undoCategorizeTransactionAction,
   unmatchTransactionAction,
 } from "@/modules/accounting/banking/actions";
-import { formatCents } from "@/modules/accounting/lib/money";
+import { formatCents, parseMoneyToCents } from "@/modules/accounting/lib/money";
 import { useConfirm } from "@/components/app/use-confirm";
 
 const ACCEPT_THRESHOLD = 0.7;
@@ -193,6 +196,13 @@ interface MatchCandidate {
   memo: string;
   source: string;
   label: string;
+}
+
+/** One line of a split being drafted: the category and the amount as typed. */
+interface SplitDraftLine {
+  key: string;
+  accountId: string;
+  amount: string;
 }
 
 interface ReviewRow {
@@ -480,6 +490,65 @@ export function ReviewTable({
 
   const [matchFor, setMatchFor] = useState<ReviewRow | null>(null);
 
+  // A split: one row, several categories, still one entry (review.ts). The
+  // dialog keeps the lines as typed and the arithmetic below says whether
+  // they add up, so the button is gray until they do rather than red after.
+  const [splitFor, setSplitFor] = useState<ReviewRow | null>(null);
+  const [splitLines, setSplitLines] = useState<SplitDraftLine[]>([]);
+  const splitMagnitude = splitFor ? Math.abs(splitFor.amountCents) : 0;
+  const splitCents = splitLines.map((l) => parseMoneyToCents(l.amount));
+  const splitAssigned = splitCents.reduce<number>((s, c) => s + (c ?? 0), 0);
+  const splitRemaining = splitMagnitude - splitAssigned;
+  const splitValid =
+    splitLines.length >= 2 &&
+    splitRemaining === 0 &&
+    splitLines.every((l, i) => l.accountId !== "" && (splitCents[i] ?? 0) > 0);
+
+  function openSplit(row: ReviewRow) {
+    // The first line starts as the whole row on its suggested category, so
+    // the common split — most of it here, the rest there — is one edit.
+    setSplitLines([
+      {
+        key: crypto.randomUUID(),
+        accountId: chosen[row.id] ?? preferredAccountId(row) ?? "",
+        amount: (Math.abs(row.amountCents) / 100).toFixed(2),
+      },
+      { key: crypto.randomUUID(), accountId: "", amount: "" },
+    ]);
+    setSplitFor(row);
+  }
+
+  function setSplitLine(key: string, patch: Partial<SplitDraftLine>) {
+    setSplitLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  }
+
+  function postSplit() {
+    const row = splitFor;
+    if (!row || !splitValid) return;
+    setBusyId(row.id);
+    startTransition(async () => {
+      const result = await splitTransactionAction({
+        transactionId: row.id,
+        lines: splitLines.map((l) => ({
+          accountId: l.accountId,
+          amountCents: parseMoneyToCents(l.amount)!,
+          // The row's tag goes on every line: one delivery, one enterprise.
+          dimensionMemberIds: tags[row.id]?.length ? tags[row.id] : undefined,
+        })),
+      });
+      if ("error" in result) toast.error(result.error);
+      else {
+        setSplitFor(null);
+        toast.success(`Posted — ${splitLines.length} lines`, {
+          action: { label: "Undo", onClick: () => undoPost(row) },
+          duration: UNDO_WINDOW_MS,
+        });
+      }
+      setBusyId(null);
+      router.refresh();
+    });
+  }
+
   function matchTo(entryId: string) {
     if (!matchFor) return;
     setBusyId(matchFor.id);
@@ -579,6 +648,15 @@ export function ReviewTable({
           )}
           <Button
             size="sm"
+            variant="outline"
+            className="h-8"
+            disabled={busy}
+            onClick={() => openSplit(row)}
+          >
+            Split
+          </Button>
+          <Button
+            size="sm"
             variant="ghost"
             className="h-8"
             disabled={busy}
@@ -666,6 +744,94 @@ export function ReviewTable({
               </li>
             ))}
           </ul>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={splitFor !== null} onOpenChange={(o) => !o && setSplitFor(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              Split {splitFor ? formatCents(Math.abs(splitFor.amountCents)) : ""} across
+              categories
+            </DialogTitle>
+            <DialogDescription>
+              One entry posts, with a line per category. The lines must add up
+              to the transaction.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {splitLines.map((line, index) => (
+              <div
+                key={line.key}
+                className="grid grid-cols-[1fr_110px_32px] items-center gap-2"
+              >
+                <Combobox
+                  options={categoryOptions}
+                  value={line.accountId || undefined}
+                  onValueChange={(v) => setSplitLine(line.key, { accountId: v })}
+                  placeholder="Pick category"
+                  searchPlaceholder="Type a code or a name…"
+                  emptyText="No account matches."
+                  aria-label={`Category for split line ${index + 1}`}
+                  className="h-8"
+                />
+                <Input
+                  inputMode="decimal"
+                  className="h-8 text-right font-mono"
+                  value={line.amount}
+                  placeholder="0.00"
+                  aria-label={`Amount for split line ${index + 1}`}
+                  onChange={(e) => setSplitLine(line.key, { amount: e.target.value })}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 text-muted-foreground"
+                  disabled={splitLines.length <= 2}
+                  aria-label="Remove line"
+                  onClick={() =>
+                    setSplitLines((ls) => ls.filter((l) => l.key !== line.key))
+                  }
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8"
+              onClick={() =>
+                setSplitLines((ls) => [
+                  ...ls,
+                  { key: crypto.randomUUID(), accountId: "", amount: "" },
+                ])
+              }
+            >
+              <Plus className="size-4" /> Add line
+            </Button>
+            <p
+              className={cn(
+                "text-sm tabular-nums",
+                splitRemaining === 0 ? "text-muted-foreground" : "text-destructive",
+              )}
+            >
+              {splitRemaining === 0
+                ? "Balanced"
+                : splitRemaining > 0
+                  ? `${formatCents(splitRemaining)} left to assign`
+                  : `${formatCents(-splitRemaining)} too much`}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button onClick={postSplit} disabled={pending || !splitValid}>
+              Post split
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

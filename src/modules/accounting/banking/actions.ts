@@ -388,6 +388,60 @@ export async function importCsvTransactionsAction(
 
 // ---------------------------------------------------------------- review
 
+const splitSchema = z.object({
+  transactionId: z.string().uuid(),
+  lines: z
+    .array(
+      z.object({
+        accountId: z.string().uuid(),
+        amountCents: z.number().int().positive().max(MAX_AMOUNT_CENTS),
+        dimensionMemberIds: z.array(z.string().uuid()).max(10).optional(),
+      }),
+    )
+    .min(2)
+    .max(20),
+  memo: z.string().trim().max(500).optional(),
+});
+
+/**
+ * One row, several categories, one entry. No rule is proposed from a split:
+ * a rule sets one account, and the whole point of the split was that one
+ * account did not describe the row.
+ */
+export async function splitTransactionAction(
+  input: z.infer<typeof splitSchema>,
+): Promise<ActionResult> {
+  const ctx = await gate();
+  const parsed = splitSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    const { bankAccountId } = await withTenant(ctx.tenantId, async (tx) => {
+      const r = await categorizeTransaction(tx, ctx, {
+        transactionId: parsed.data.transactionId,
+        splits: parsed.data.lines,
+        memo: parsed.data.memo,
+      });
+      await logAuditInTx(tx, {
+        action: "banking.txn_split",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "bank_transaction",
+        targetId: parsed.data.transactionId,
+        meta: {
+          entryId: r.entry.id,
+          lines: parsed.data.lines.length,
+          accountIds: parsed.data.lines.map((l) => l.accountId),
+        },
+      });
+      return r;
+    });
+    revalidateBanking(bankAccountId);
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
 const categorizeSchema = z.object({
   transactionId: z.string().uuid(),
   accountId: z.string().uuid(),

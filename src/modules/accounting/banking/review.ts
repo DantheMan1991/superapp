@@ -9,6 +9,8 @@ import {
   voidEntry,
   type LedgerCtx,
 } from "../core";
+import type { EntryLineInput } from "../core/types";
+import { splitFarSide, type SplitInput } from "./split";
 import { loadWritableBankAccount } from "./accounts";
 import { resetBankLinkForEntry } from "./match";
 
@@ -46,18 +48,26 @@ async function loadUnreviewedTxn(
 }
 
 /**
- * Categorize one staged transaction: post the 2-line entry through the
- * core engine (idempotent per txn) and link the staging row — one
- * transaction, race-guarded by the conditional status update.
+ * Categorize one staged transaction: post the entry through the core engine
+ * (idempotent per txn) and link the staging row — one transaction,
+ * race-guarded by the conditional status update.
+ *
+ * Two lines for one category; with `splits`, one line per category on the
+ * far side of the bank (2026-09-07). Either way it is ONE entry for ONE row,
+ * so P12 and everything built on it — Undo, void from the journal, the
+ * per-attempt idempotency key — read a split exactly as a plain posting.
  */
 export async function categorizeTransaction(
   tx: Tx,
   ctx: LedgerCtx,
   args: {
     transactionId: string;
-    accountId: string;
+    /** The one category. Ignored when `splits` is given. */
+    accountId?: string;
     dimensionMemberIds?: string[];
     memo?: string;
+    /** Several categories, positive amounts adding up to the row — `split.ts`. */
+    splits?: SplitInput[];
   },
 ): Promise<{
   entry: JournalEntry;
@@ -69,30 +79,32 @@ export async function categorizeTransaction(
   requireOwnerRole(ctx);
   const txn = await loadUnreviewedTxn(tx, ctx.tenantId, args.transactionId);
   const bankAccount = await loadWritableBankAccount(tx, ctx.tenantId, txn.bankAccountId);
-  if (args.accountId === bankAccount.accountId) {
-    throw new LedgerError("ACCOUNT_NOT_FOUND", "cannot categorize to the register's own account");
-  }
 
   const a = txn.amountCents;
-  // Inflow: Dr bank / Cr category. Outflow: Dr category / Cr bank.
+  // The far side of the bank: the one category, or the split's several.
+  let far: EntryLineInput[];
+  if (args.splits) {
+    far = splitFarSide(args.splits, Math.abs(a), bankAccount.accountId, a > 0);
+  } else {
+    if (!args.accountId) {
+      throw new LedgerError("ACCOUNT_NOT_FOUND", "no category given");
+    }
+    if (args.accountId === bankAccount.accountId) {
+      throw new LedgerError("ACCOUNT_NOT_FOUND", "cannot categorize to the register's own account");
+    }
+    far = [
+      {
+        accountId: args.accountId,
+        amountCents: -a,
+        dimensionMemberIds: args.dimensionMemberIds,
+      },
+    ];
+  }
+  // Inflow: Dr bank / Cr categories. Outflow: Dr categories / Cr bank.
   const lines =
     a > 0
-      ? [
-          { accountId: bankAccount.accountId, amountCents: a },
-          {
-            accountId: args.accountId,
-            amountCents: -a,
-            dimensionMemberIds: args.dimensionMemberIds,
-          },
-        ]
-      : [
-          {
-            accountId: args.accountId,
-            amountCents: -a,
-            dimensionMemberIds: args.dimensionMemberIds,
-          },
-          { accountId: bankAccount.accountId, amountCents: a },
-        ];
+      ? [{ accountId: bankAccount.accountId, amountCents: a }, ...far]
+      : [...far, { accountId: bankAccount.accountId, amountCents: a }];
 
   // Idempotency key is per-attempt: a voided categorization must be
   // re-categorizable into a FRESH posted entry, so the key counts prior
@@ -138,14 +150,16 @@ export async function categorizeTransaction(
   }
 
   // Which source the human actually agreed with. `fromRule` is what makes a
-  // rule's hit rate measurable; `fromSuggestion` is the AI's.
+  // rule's hit rate measurable; `fromSuggestion` is the AI's. A split agrees
+  // with neither: both suggest one account.
   const suggestion = readAiSuggestion(txn);
   const rule = txn.ruleSuggestion as { accountId?: string } | null;
+  const picked = args.splits ? null : args.accountId;
   return {
     entry,
     bankAccountId: txn.bankAccountId,
-    fromSuggestion: suggestion?.accountId === args.accountId,
-    fromRule: rule?.accountId === args.accountId,
+    fromSuggestion: picked !== null && suggestion?.accountId === picked,
+    fromRule: picked !== null && rule?.accountId === picked,
     confidence: suggestion?.confidence ?? null,
   };
 }

@@ -1,6 +1,6 @@
 # An account's transactions
 
-> One bank or card account: the transactions waiting for review, the suggested categories, posting, matching to something already in the books, excluding, and closing the account.
+> One bank or card account: the transactions waiting for review, the suggested categories, posting, matching to something already in the books, transfers between your own accounts, excluding, and closing the account.
 > **Route:** /dashboard/m/accounting/banking/*
 > **Order:** 20
 > **Area:** Banking
@@ -11,9 +11,9 @@ Open **Banking** in the accounting menu and click an account's card. This is whe
 
 - **The top of the page.** The title is the account's name. The line under it gives its kind, institution, last four digits and today's balance, or `owed` for a card. {badge:connected|success} for a live feed and {badge:closed|outline} for a closed account. Owners see, while the account is open, {button:Import CSV|outline}, {button:Suggest categories|primary|sparkles} and {button:Reconcile|outline}, and always {button:Close account|outline} or {button:Reopen account|outline}.
 - **The three tabs.** `To review (3)`, transactions that have arrived and are not in your books yet. `All (120)`, everything. `Excluded (2)`, transactions you have set aside. The counts are live. The list shows up to 300 transactions, newest first. There is no search or date filter.
-- **Each row.** `Date` and `Description`, as the bank gave them, with a {icon:paperclip} and a count when receipts are attached from the Inbox. Under the description, on a row still to review, a chip with a suggested category: `RULE · 6300` means one of your bank rules matched, and hovering it shows which; `AI · 6100 · 87%` is the assistant's suggestion and how sure it is. When both have an opinion only the rule's chip is shown, because a rule is a decision you wrote down. `Payee`, the vendor, once a rule or a person has set one. `In` and `Out`. On `All`, `Status`: `unreviewed`, `posted` or `excluded`, where `posted` is a link to the entry in the journal. On `To review`, for owners, `Category`, already set to the suggestion. Click it and type part of a code or a name, such as `63` or `insur`, and the list narrows to what matches; click the account, or press Enter for the highlighted one. {button:Tag|outline} sits under it when your business has tags.
+- **Each row.** `Date` and `Description`, as the bank gave them, with a {icon:paperclip} and a count when receipts are attached from the Inbox. Under the description, on a row still to review, a chip with a suggested category: `RULE · 6300` means one of your bank rules matched, and hovering it shows which; `AI · 6100 · 87%` is the assistant's suggestion and how sure it is. When both have an opinion only the rule's chip is shown, because a rule is a decision you wrote down. `Payee`, the vendor, once a rule or a person has set one. `In` and `Out`. On `All`, `Status`: `unreviewed`, `posted` or `excluded`, where `posted` is a link to the entry in the journal. On `To review`, for owners, `Category`, already set to the suggestion. Click it and type part of a code or a name, such as `63` or `insur`, and the list narrows to what matches; click the account, or press Enter for the highlighted one. {button:Tag|outline} sits under it when your business has tags. At the end of the list, `Transfer to [account]` on money out and `Transfer from [account]` on money in, one for each of your other accounts in the same company, so money you moved between your own accounts is recorded as a transfer rather than as spending or income.
 - **On a phone.** Each transaction is a card instead of a row: the description and the amount at the top, money in with a `+` in green and money out with a `−`, then the date, the payee and the receipt count, the chip, the `Category`, the tag and the buttons. Everything works the same as in the table.
-- **The buttons on a row.** On `To review`: {button:Match|outline} when the row has something in the books it could be, {button:Exclude|ghost} and {button:Post|primary}. On `All`: {button:Unmatch|ghost} on a matched row. On `Excluded`: {button:Restore|outline}.
+- **The buttons on a row.** On `To review`: {button:Match|outline} when the row has something in the books it could be, {button:Exclude|ghost} and {button:Post|primary}. On `All`: {button:Unmatch|ghost} on a row that was matched to an entry; a row that posted its own entry has no button, because that entry is undone by voiding it. On `Excluded`: {button:Restore|outline}.
 - **{button:Accept 12 suggestions (≥70%)|outline}.** At the top of `To review`. See how to post many at once, below.
 
 ## How to post a transaction
@@ -36,9 +36,16 @@ Nothing is posted until you press the button, and the assistant never posts by i
 
 On `All`, {button:Unmatch|ghost} sends a matched transaction back to review; the entry stays posted. Voiding an entry from the journal also sends its transaction back to review.
 
+## How to record a transfer between your own accounts
+
+1. On the account the money left, find the transaction under `To review`, click `Category`, type `trans` and pick `Transfer to [account]`. Click {button:Post|primary}. You see `Posted — match the other account's row when it arrives`. One entry is written: out of this account, into the other.
+2. When the same money shows up under `To review` on the other account, click {button:Match|outline}. The dialog lists it as `Transfer from [account]`. Click {button:Match|primary}. You see `Matched — nothing new was posted`. Both transactions now point at the one entry, so the transfer is counted once.
+
+It works the other way round too: post `Transfer from [account]` on the account the money reached, then match on the account it left. A card payment from your checking account is a transfer to the card. To undo a transfer, click {button:Undo|link} on the side that posted it while the message shows, or void its entry from the journal; the other side goes back to review with it. {button:Unmatch|ghost} on the side that only matched sends that side back alone. Money moving between two of your companies is not a transfer here; record it with {button:Move money|outline} on the Companies page. See [Companies](companies.md).
+
 ## How to exclude a transaction
 
-1. Click {button:Exclude|ghost} on a transfer between your own accounts, or a duplicate. It moves to `Excluded` without being posted, and you see `Excluded` with {button:Undo|link} beside it for a few seconds.
+1. Click {button:Exclude|ghost} on a duplicate, or on a row that is not money moving at all. It moves to `Excluded` without being posted, and you see `Excluded` with {button:Undo|link} beside it for a few seconds.
 2. Click {button:Undo|link} while it shows, or {button:Restore|outline} on `Excluded`, to bring it back. You see `Back in review`.
 
 ## How to close the account
@@ -55,6 +62,8 @@ On `All`, {button:Unmatch|ghost} sends a matched transaction back to review; the
 | `Suggestions were just requested — try again in a moment.` | You asked the assistant twice within half a minute. |
 | `Posted 9, skipped 3` | Three suggestions could not be posted. The first reason follows. |
 | `Posted` | The transaction is in your books. {button:Undo|link} beside it voids the entry and brings the transaction back. |
+| `Posted — match the other account's row when it arrives` | A transfer was posted from this side. On the other account, the same money will offer this entry under {button:Match|outline}. |
+| `This transaction posted the entry itself, so there is nothing to unmatch. Undo it from the Posted message, or void the entry from the journal.` | {button:Unmatch|ghost} was pressed on a row that posted its own entry. |
 | `Undone — back in review` | The entry was voided and the transaction is waiting under `To review` again. |
 | `That row has nothing to undo — it is not a posting made from here. A matched row goes back with Unmatch.` | {button:Undo|link} was pressed on a transaction that was matched rather than posted, or that had already been undone. |
 | `Excluded` and `Back in review` | The transaction was set aside, or brought back. |

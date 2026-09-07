@@ -863,6 +863,7 @@ d("invoicing (DB)", () => {
     // Candidates include the payment entry, labeled.
     const candidates = await withTenant(tenantId, (tx) =>
       findMatchCandidates(tx, tenantId, {
+        bankAccountId: txn.bankAccountId,
         ledgerAccountId: acct.__bankLedger,
         amountCents: 30_000,
         txnDate: txn.txnDate,
@@ -901,6 +902,7 @@ d("invoicing (DB)", () => {
     // Candidates now exclude the linked entry.
     const candidates2 = await withTenant(tenantId, (tx) =>
       findMatchCandidates(tx, tenantId, {
+        bankAccountId: txn.bankAccountId,
         ledgerAccountId: acct.__bankLedger,
         amountCents: 30_000,
         txnDate: txn.txnDate,

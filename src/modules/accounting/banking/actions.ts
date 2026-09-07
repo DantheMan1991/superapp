@@ -714,7 +714,13 @@ export async function suggestCategoriesAction(
 
 const quickAddSchema = z.object({
   bankAccountId: z.string().uuid(),
-  direction: z.enum(["expense", "income"]),
+  /**
+   * `transfer` moves money into another of the business's own accounts:
+   * `categoryAccountId` is then that register's LEDGER account, and the
+   * posting is the expense shape — Dr the account the money reached, Cr the
+   * one it left. Same company only; `postEntry` refuses a foreign register.
+   */
+  direction: z.enum(["expense", "income", "transfer"]),
   txnDate: dateStr,
   categoryAccountId: z.string().uuid(),
   amountCents: z
@@ -734,26 +740,46 @@ export async function quickAddTransactionAction(
   if (!parsed.success) return { error: "Invalid input" };
   const p = parsed.data;
   try {
-    await withTenant(ctx.tenantId, async (tx) => {
+    const otherRegisterId = await withTenant(ctx.tenantId, async (tx) => {
       const bankAccount = await loadWritableBankAccount(tx, ctx.tenantId, p.bankAccountId);
       const a = p.amountCents;
+      // A transfer's far end must be one of the business's own OPEN registers,
+      // and not the one the money is leaving. A tag makes no sense on it: a
+      // transfer belongs to no line of business.
+      const other =
+        p.direction === "transfer"
+          ? await tx.query.bankAccounts.findFirst({
+              where: and(
+                eq(schema.bankAccounts.tenantId, ctx.tenantId),
+                eq(schema.bankAccounts.accountId, p.categoryAccountId),
+                eq(schema.bankAccounts.isActive, true),
+              ),
+            })
+          : null;
+      if (p.direction === "transfer" && (!other || other.id === bankAccount.id)) {
+        throw new LedgerError(
+          "BANK_ACCOUNT_NOT_FOUND",
+          "a transfer needs another of the business's own open accounts",
+        );
+      }
+      const dims = p.direction === "transfer" ? undefined : p.dimensionMemberIds;
       const lines =
-        p.direction === "expense"
+        p.direction === "income"
           ? [
-              {
-                accountId: p.categoryAccountId,
-                amountCents: a,
-                dimensionMemberIds: p.dimensionMemberIds,
-              },
-              { accountId: bankAccount.accountId, amountCents: -a },
-            ]
-          : [
               { accountId: bankAccount.accountId, amountCents: a },
               {
                 accountId: p.categoryAccountId,
                 amountCents: -a,
-                dimensionMemberIds: p.dimensionMemberIds,
+                dimensionMemberIds: dims,
               },
+            ]
+          : [
+              {
+                accountId: p.categoryAccountId,
+                amountCents: a,
+                dimensionMemberIds: dims,
+              },
+              { accountId: bankAccount.accountId, amountCents: -a },
             ];
       const status = ctx.role === "owner" ? ("posted" as const) : ("draft" as const);
       const { entry } = await postEntry(tx, ctx, {
@@ -772,10 +798,16 @@ export async function quickAddTransactionAction(
         actorClerkUserId: ctx.userId,
         targetType: "journal_entry",
         targetId: entry.id,
-        meta: { via: "quick_add", bankAccountId: p.bankAccountId },
+        meta: {
+          via: p.direction === "transfer" ? "quick_add_transfer" : "quick_add",
+          bankAccountId: p.bankAccountId,
+          ...(other ? { toBankAccountId: other.id } : {}),
+        },
       });
+      return other?.id ?? null;
     });
     revalidateBanking(p.bankAccountId);
+    if (otherRegisterId) revalidateBanking(otherRegisterId);
     return { ok: true };
   } catch (err) {
     return fail(err);

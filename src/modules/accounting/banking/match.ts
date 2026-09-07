@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, gte, inArray, lte, ne, notExists, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, notExists, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { LedgerError, requireOwnerRole, type LedgerCtx } from "../core";
 import { addDaysIso } from "../lib/dates";
@@ -11,10 +11,15 @@ import { loadWritableBankAccount } from "./accounts";
  * arrives in the feed, MATCH links the staged row to the EXISTING entry
  * instead of posting again.
  *
- * Invariant (P12): a bank transaction is satisfied by exactly one posted
- * entry — newly posted (categorize) or existing (match). DB backstop:
- * the UNIQUE partial index on bank_transactions(tenant_id,
- * journal_entry_id).
+ * Invariant (P12, restated 2026-09-06): a bank transaction is satisfied by
+ * exactly one posted entry — newly posted (categorize) or existing (match) —
+ * and an entry satisfies at most ONE transaction PER REGISTER it touches. The
+ * second half is what makes a transfer between two of the tenant's own
+ * accounts one entry with a feed row on each side: the money-out side posts
+ * it (Dr the other register, Cr this one) and the money-in side MATCHES it.
+ * DB backstop: the UNIQUE partial index on bank_transactions(tenant_id,
+ * bank_account_id, journal_entry_id) — `0263`; before that it was
+ * (tenant_id, journal_entry_id) and a transfer had to be excluded on one side.
  */
 
 const MATCH_WINDOW_DAYS = 7;
@@ -118,17 +123,92 @@ async function labelPaymentEntries(
 }
 
 /**
- * Candidates for ONE unreviewed transaction: posted entries (source ≠
- * bank_import) whose lines on the register's ledger account sum to
- * exactly the transaction amount, dated within ±7 days, not already
- * linked from any bank transaction. Sign alignment: an inflow posts a
- * debit on the register account, so the ledger sum equals the signed
- * amount directly.
+ * Labels for entries a feed row on ANOTHER register posted — transfers.
+ *
+ * Such an entry is `source = bank_import` with `sourceId` the row that
+ * posted it. That row's register is the other side of the transfer, and its
+ * sign says which way the money went: money OUT of there is money in here.
+ * Returns sourceId → label, like `labelPaymentEntries`.
+ */
+async function labelTransferEntries(
+  tx: Tx,
+  tenantId: string,
+  rows: Array<{ source: string; sourceId: string | null }>,
+): Promise<Map<string, string>> {
+  const labels = new Map<string, string>();
+  const ids = rows
+    .filter((r) => r.source === "bank_import" && r.sourceId)
+    .map((r) => r.sourceId!);
+  if (ids.length === 0) return labels;
+  const origins = await tx
+    .select({
+      txnId: schema.bankTransactions.id,
+      amountCents: schema.bankTransactions.amountCents,
+      registerName: schema.bankAccounts.name,
+    })
+    .from(schema.bankTransactions)
+    .innerJoin(
+      schema.bankAccounts,
+      and(
+        eq(schema.bankAccounts.tenantId, schema.bankTransactions.tenantId),
+        eq(schema.bankAccounts.id, schema.bankTransactions.bankAccountId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.bankTransactions.tenantId, tenantId),
+        inArray(schema.bankTransactions.id, ids),
+      ),
+    );
+  for (const o of origins) {
+    labels.set(
+      o.txnId,
+      o.amountCents < 0
+        ? `Transfer from ${o.registerName}`
+        : `Transfer to ${o.registerName}`,
+    );
+  }
+  return labels;
+}
+
+async function labelCandidates(
+  tx: Tx,
+  tenantId: string,
+  rows: Array<{ source: string; sourceId: string | null }>,
+): Promise<Map<string, string>> {
+  const [payments, transfers] = await Promise.all([
+    labelPaymentEntries(tx, tenantId, rows),
+    labelTransferEntries(tx, tenantId, rows),
+  ]);
+  return new Map([...payments, ...transfers]);
+}
+
+/**
+ * Candidates for ONE unreviewed transaction: posted entries whose lines on
+ * the register's ledger account sum to exactly the transaction amount, dated
+ * within ±7 days, not already linked from a bank transaction ON THIS
+ * REGISTER. Sign alignment: an inflow posts a debit on the register account,
+ * so the ledger sum equals the signed amount directly.
+ *
+ * No test on `source` any more. It used to exclude `bank_import` entries
+ * outright, which was right while an entry could satisfy one row: the only
+ * bank_import entry that touched this register was this register's own
+ * posting. A transfer posted from the OTHER register also touches this one,
+ * and that is exactly the entry the row here should be offered. "Not linked
+ * from this register" is the rule that admits it and still refuses a row's
+ * own posting, an entry another row here already matched, and a hand-written
+ * transfer somebody linked from here.
  */
 export async function findMatchCandidates(
   tx: Tx,
   tenantId: string,
-  args: { ledgerAccountId: string; amountCents: number; txnDate: string },
+  args: {
+    /** The register asking — what "already linked from here" is measured against. */
+    bankAccountId: string;
+    ledgerAccountId: string;
+    amountCents: number;
+    txnDate: string;
+  },
 ): Promise<MatchCandidate[]> {
   const je = schema.journalEntries;
   const jl = schema.journalLines;
@@ -148,7 +228,6 @@ export async function findMatchCandidates(
       and(
         eq(je.tenantId, tenantId),
         eq(je.status, "posted"),
-        ne(je.source, "bank_import"),
         eq(jl.accountId, args.ledgerAccountId),
         gte(je.entryDate, addDaysIso(args.txnDate, -MATCH_WINDOW_DAYS)),
         lte(je.entryDate, addDaysIso(args.txnDate, MATCH_WINDOW_DAYS)),
@@ -156,7 +235,13 @@ export async function findMatchCandidates(
           tx
             .select({ one: sql`1` })
             .from(bt)
-            .where(and(eq(bt.tenantId, je.tenantId), eq(bt.journalEntryId, je.id))),
+            .where(
+              and(
+                eq(bt.tenantId, je.tenantId),
+                eq(bt.journalEntryId, je.id),
+                eq(bt.bankAccountId, args.bankAccountId),
+              ),
+            ),
         ),
       ),
     )
@@ -165,7 +250,7 @@ export async function findMatchCandidates(
     .orderBy(sql`abs(${je.entryDate} - ${args.txnDate}::date)`, je.createdAt)
     .limit(5);
 
-  const labels = await labelPaymentEntries(tx, tenantId, rows);
+  const labels = await labelCandidates(tx, tenantId, rows);
 
   return rows.map((r) => ({
     entryId: r.entryId,
@@ -187,6 +272,7 @@ export async function findMatchCandidatesBatch(
   tx: Tx,
   tenantId: string,
   args: {
+    bankAccountId: string;
     ledgerAccountId: string;
     txns: Array<{ id: string; amountCents: number; txnDate: string }>;
   },
@@ -215,7 +301,6 @@ export async function findMatchCandidatesBatch(
       and(
         eq(je.tenantId, tenantId),
         eq(je.status, "posted"),
-        ne(je.source, "bank_import"),
         eq(jl.accountId, args.ledgerAccountId),
         gte(je.entryDate, from),
         lte(je.entryDate, to),
@@ -223,13 +308,19 @@ export async function findMatchCandidatesBatch(
           tx
             .select({ one: sql`1` })
             .from(bt)
-            .where(and(eq(bt.tenantId, je.tenantId), eq(bt.journalEntryId, je.id))),
+            .where(
+              and(
+                eq(bt.tenantId, je.tenantId),
+                eq(bt.journalEntryId, je.id),
+                eq(bt.bankAccountId, args.bankAccountId),
+              ),
+            ),
         ),
       ),
     )
     .groupBy(je.id, je.entryDate, je.memo, je.source, je.sourceId);
 
-  const labels = await labelPaymentEntries(tx, tenantId, entries);
+  const labels = await labelCandidates(tx, tenantId, entries);
 
   const daysApart = (a: string, b: string) => {
     const [ay, am, ad] = a.split("-").map(Number);
@@ -281,6 +372,7 @@ export async function matchTransactionToEntry(
   }
   const bankAccount = await loadWritableBankAccount(tx, ctx.tenantId, txn.bankAccountId);
   const candidates = await findMatchCandidates(tx, ctx.tenantId, {
+    bankAccountId: bankAccount.id,
     ledgerAccountId: bankAccount.accountId,
     amountCents: txn.amountCents,
     txnDate: txn.txnDate,
@@ -310,8 +402,11 @@ export async function matchTransactionToEntry(
 
 /**
  * Unmatch: clear the link, txn back to review; the entry STAYS posted
- * (P14). Blocked for bank_import entries — those un-do by voiding the
- * entry (the existing flow).
+ * (P14). Blocked for the row that POSTED a bank_import entry — that one is
+ * undone by voiding the entry (`undoCategorization`, or the journal). The
+ * other side of a transfer only matched the entry, so it unlinks like any
+ * other match; the entry stays, still linked from the register that posted
+ * it.
  */
 export async function unmatchTransaction(
   tx: Tx,
@@ -334,10 +429,10 @@ export async function unmatchTransaction(
       eq(schema.journalEntries.id, txn.journalEntryId),
     ),
   });
-  if (entry?.source === "bank_import") {
+  if (entry?.source === "bank_import" && entry.sourceId === txn.id) {
     throw new LedgerError(
-      "TXN_MATCH_INVALID",
-      "bank-import entries are undone by voiding the entry",
+      "TXN_POSTED_HERE",
+      "the entry was posted from this row — undo it by voiding the entry",
     );
   }
   await tx

@@ -194,8 +194,16 @@ export const bankTransactions = pgTable(
       t.bankAccountId,
       t.txnDate,
     ),
-    uniqueIndex("bank_transactions_tenant_entry_idx")
-      .on(t.tenantId, t.journalEntryId)
+    /**
+     * One feed row per entry PER REGISTER (`0263`; it was one per entry
+     * before). A transfer between two of the tenant's own accounts is one
+     * entry — Dr the account the money reached, Cr the one it left — and the
+     * feed shows it on both registers, so both rows point at that entry.
+     * Two rows on the SAME register pointing at one entry is still the
+     * double count this index exists to refuse.
+     */
+    uniqueIndex("bank_transactions_tenant_acct_entry_idx")
+      .on(t.tenantId, t.bankAccountId, t.journalEntryId)
       .where(sql`${t.journalEntryId} is not null`),
     foreignKey({
       name: "bank_transactions_bank_account_fk",

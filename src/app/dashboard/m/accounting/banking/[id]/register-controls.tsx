@@ -199,6 +199,13 @@ interface ReviewRow {
   amountCents: number;
   status: string;
   journalEntryId: string | null;
+  /**
+   * True when this row POSTED its entry (a categorization), false when it
+   * only matched one — a payment, a hand-written entry, the other side of a
+   * transfer. Decides which road back is offered: a posting is undone by
+   * voiding, a match by Unmatch.
+   */
+  postedHere: boolean;
   source: string;
   suggestion: {
     accountId: string;
@@ -301,16 +308,30 @@ function statusMark(row: ReviewRow): ReactNode {
  * the viewport, so at 768px the table has the 720px it needs and at 640px it
  * does not.
  */
+interface TransferTarget {
+  /** The other register's LEDGER account — what the transfer line is coded to. */
+  accountId: string;
+  name: string;
+}
+
 export function ReviewTable({
   tab,
   rows,
   categories,
+  transferTargets,
   dimensionTypes,
   canAct,
 }: {
   tab: "unreviewed" | "all" | "excluded";
   rows: ReviewRow[];
   categories: CategoryOption[];
+  /**
+   * The same company's other registers. Offered at the end of the category
+   * list as `Transfer to …` on a money-out row and `Transfer from …` on a
+   * money-in row; posting one writes the transfer entry, and the other
+   * register's row then MATCHES it instead of posting again.
+   */
+  transferTargets: TransferTarget[];
   /** Active members, grouped by type. Empty renders no tag control at all. */
   dimensionTypes: DimensionTypeOption[];
   canAct: boolean;
@@ -341,6 +362,25 @@ export function ReviewTable({
       })),
     [categories],
   );
+  /**
+   * Two lists, one per direction, so the label says what the posting will
+   * mean: money leaving this account and arriving in Savings is "Transfer to
+   * Savings" here and "Transfer from Checking" over there. Last in the list —
+   * the ordinary categories stay first, and "trans" finds these.
+   */
+  const transferOptions = useMemo(() => {
+    const build = (word: string): ComboboxOption[] =>
+      transferTargets.map((t) => ({
+        value: t.accountId,
+        label: `Transfer ${word} ${t.name}`,
+        keywords: "transfer",
+      }));
+    return { out: build("to"), in: build("from") };
+  }, [transferTargets]);
+  const optionsFor = (row: ReviewRow): ComboboxOption[] => [
+    ...categoryOptions,
+    ...(row.amountCents < 0 ? transferOptions.out : transferOptions.in),
+  ];
 
   const acceptable = rows.filter(
     (r) =>
@@ -374,11 +414,18 @@ export function ReviewTable({
       toast.error("Pick a category first");
       return;
     }
+    // A transfer's memo names both ends, because the entry lands in two
+    // registers and the other one's reader did not see this row.
+    const transfer = transferTargets.find((t) => t.accountId === accountId);
+    const memo = transfer
+      ? `Transfer ${row.amountCents < 0 ? "to" : "from"} ${transfer.name} · ${row.description}`.slice(0, 500)
+      : undefined;
     setBusyId(row.id);
     startTransition(async () => {
       const result = await categorizeTransactionAction({
         transactionId: row.id,
         accountId,
+        memo,
         // Undefined rather than an empty array when nothing is tagged: the
         // action's schema treats the field as optional and `postEntry` writes
         // no `line_dimensions` rows for it, which is what "untagged" means.
@@ -386,10 +433,13 @@ export function ReviewTable({
       });
       if ("error" in result) toast.error(result.error);
       else {
-        toast.success("Posted", {
-          action: { label: "Undo", onClick: () => undoPost(row) },
-          duration: UNDO_WINDOW_MS,
-        });
+        toast.success(
+          transfer ? "Posted — match the other account's row when it arrives" : "Posted",
+          {
+            action: { label: "Undo", onClick: () => undoPost(row) },
+            duration: UNDO_WINDOW_MS,
+          },
+        );
       }
       setBusyId(null);
       router.refresh();
@@ -476,7 +526,7 @@ export function ReviewTable({
     return (
       <>
         <Combobox
-          options={categoryOptions}
+          options={optionsFor(row)}
           value={chosen[row.id] ?? preferredAccountId(row)}
           onValueChange={(v) => setChosen((c) => ({ ...c, [row.id]: v }))}
           placeholder="Pick category"
@@ -543,7 +593,7 @@ export function ReviewTable({
         </>
       );
     }
-    if (row.status === "posted" && tab === "all" && row.journalEntryId) {
+    if (row.status === "posted" && tab === "all" && row.journalEntryId && !row.postedHere) {
       return (
         <Button
           size="sm"

@@ -51,6 +51,10 @@ interface BankAccountOption {
   id: string;
   name: string;
   kind: string;
+  /** The register's ledger account — what a transfer INTO it is coded to. */
+  accountId: string;
+  /** Which company owns it; a transfer stays within one. */
+  entityId: string;
 }
 
 interface CategoryOption {
@@ -446,7 +450,7 @@ export function QuickAddButton({
   const [tags, setTags] = useState<string[]>([]);
   const [form, setForm] = useState({
     bankAccountId: bankAccounts[0]?.id ?? "",
-    direction: "expense" as "expense" | "income",
+    direction: "expense" as "expense" | "income" | "transfer",
     date: "",
     categoryAccountId: "",
     amount: "",
@@ -458,6 +462,14 @@ export function QuickAddButton({
       ? c.accountType === "expense"
       : c.accountType === "income",
   );
+  // The far end of a transfer: the same company's other open registers. Its
+  // LEDGER account is what goes in `categoryAccountId`.
+  const from = bankAccounts.find((b) => b.id === form.bankAccountId);
+  const transferTargets = bankAccounts.filter(
+    (b) => b.id !== form.bankAccountId && b.entityId === from?.entityId,
+  );
+  const isTransfer = form.direction === "transfer";
+  const target = transferTargets.find((b) => b.accountId === form.categoryAccountId);
 
   function submit() {
     const cents = parseMoneyToCents(form.amount);
@@ -472,12 +484,14 @@ export function QuickAddButton({
         txnDate: form.date,
         categoryAccountId: form.categoryAccountId,
         amountCents: cents,
-        memo: form.memo.trim() || undefined,
-        dimensionMemberIds: tags.length ? tags : undefined,
+        memo:
+          form.memo.trim() ||
+          (isTransfer && target ? `Transfer to ${target.name}` : undefined),
+        dimensionMemberIds: !isTransfer && tags.length ? tags : undefined,
       });
       if ("error" in result) toast.error(result.error);
       else {
-        toast.success("Transaction added");
+        toast.success(isTransfer ? "Transfer recorded" : "Transaction added");
         setOpen(false);
         setForm((f) => ({ ...f, amount: "", memo: "" }));
         // Cleared with the amount and memo, not kept: the next transaction is
@@ -499,7 +513,8 @@ export function QuickAddButton({
           <DialogHeader>
             <DialogTitle>Quick add</DialogTitle>
             <DialogDescription>
-              Record money in or out without waiting for the bank feed.
+              Record money in or out, or moved between your own accounts,
+              without waiting for the bank feed.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 py-1">
@@ -522,6 +537,7 @@ export function QuickAddButton({
                   <SelectContent>
                     <SelectItem value="expense">Money out (expense)</SelectItem>
                     <SelectItem value="income">Money in (income)</SelectItem>
+                    <SelectItem value="transfer">Transfer to another account</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -555,20 +571,28 @@ export function QuickAddButton({
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>Category</Label>
+                <Label>{isTransfer ? "To account" : "Category"}</Label>
                 <Select
                   value={form.categoryAccountId || undefined}
                   onValueChange={(v) => setForm({ ...form, categoryAccountId: v })}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select category" />
+                    <SelectValue
+                      placeholder={isTransfer ? "Select account" : "Select category"}
+                    />
                   </SelectTrigger>
                   <SelectContent>
-                    {categoryPool.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.code} · {c.name}
-                      </SelectItem>
-                    ))}
+                    {isTransfer
+                      ? transferTargets.map((b) => (
+                          <SelectItem key={b.id} value={b.accountId}>
+                            {b.name}
+                          </SelectItem>
+                        ))
+                      : categoryPool.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.code} · {c.name}
+                          </SelectItem>
+                        ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -599,7 +623,7 @@ export function QuickAddButton({
               itself. The tags are the optional part and must not look like the
               main event.
             */}
-            {dimensionTypes.length > 0 && (
+            {dimensionTypes.length > 0 && !isTransfer && (
               <div className="space-y-1.5">
                 <Label>Tags (optional)</Label>
                 <DimensionTags

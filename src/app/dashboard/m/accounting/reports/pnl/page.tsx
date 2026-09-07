@@ -41,7 +41,10 @@ export default async function PnlPage({
   await requireModuleEnabled(ctx.tenant.id, "accounting");
   const sp = await searchParams;
 
-  const spread = sp.spread === "month" ? ("month" as const) : undefined;
+  const spread =
+    sp.spread === "month" || sp.spread === "quarter" || sp.spread === "year"
+      ? sp.spread
+      : undefined;
   const compare =
     !spread && (sp.compare === "prev-period" || sp.compare === "prev-year")
       ? sp.compare
@@ -124,7 +127,7 @@ export default async function PnlPage({
             {data.to}
             {report?.comparison &&
               ` · vs ${report.comparison.from} to ${report.comparison.to}`}
-            {spread === "month" && " · by month"}
+            {spread && ` · by ${spread}`}
             {` · ${basis === "cash" ? "Cash" : "Accrual"} basis`}
           </>
         }

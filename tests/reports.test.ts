@@ -33,6 +33,8 @@ import {
   previousPeriod,
   previousYear,
   shiftYearsIso,
+  quartersInRange,
+  yearsInRange,
 } from "../src/modules/accounting/lib/dates";
 import {
   centsToCsvAmount,
@@ -172,6 +174,42 @@ describe("dates (P1/P3)", () => {
       ["2026-03", "2026-03-01", "2026-03-20"],
     ]);
     expect(b.map((x) => x.label)).toEqual(["Jan 2026", "Feb 2026", "Mar 2026"]);
+  });
+
+  it("quartersInRange follows the fiscal year, clips both ends and names the FY for the year it ends in", () => {
+    // Calendar year: Q1 is Jan–Mar and the label is the plain year.
+    const cal = quartersInRange("2026-02-10", "2026-08-20");
+    expect(cal.map((x) => [x.key, x.label, x.from, x.to])).toEqual([
+      ["2026-q1", "Q1 2026", "2026-02-10", "2026-03-31"],
+      ["2026-q2", "Q2 2026", "2026-04-01", "2026-06-30"],
+      ["2026-q3", "Q3 2026", "2026-07-01", "2026-08-20"],
+    ]);
+    // A July fiscal year: Q1 is Jul–Sep, and FY2026 runs Jul 2025 – Jun 2026.
+    const fy = quartersInRange("2025-11-01", "2026-08-31", 7);
+    expect(fy.map((x) => [x.key, x.label, x.from, x.to])).toEqual([
+      ["2026-q2", "Q2 FY2026", "2025-11-01", "2025-12-31"],
+      ["2026-q3", "Q3 FY2026", "2026-01-01", "2026-03-31"],
+      ["2026-q4", "Q4 FY2026", "2026-04-01", "2026-06-30"],
+      ["2027-q1", "Q1 FY2027", "2026-07-01", "2026-08-31"],
+    ]);
+    expect(quartersInRange("2026-06-30", "2026-06-01")).toEqual([]);
+  });
+
+  it("yearsInRange follows the fiscal year and clips both ends", () => {
+    expect(yearsInRange("2025-03-15", "2026-02-10").map((x) => [x.key, x.label, x.from, x.to])).toEqual([
+      ["2025", "2025", "2025-03-15", "2025-12-31"],
+      ["2026", "2026", "2026-01-01", "2026-02-10"],
+    ]);
+    expect(yearsInRange("2025-03-15", "2026-02-10", 7).map((x) => [x.key, x.label, x.from, x.to])).toEqual([
+      ["fy2025", "FY2025", "2025-03-15", "2025-06-30"],
+      ["fy2026", "FY2026", "2025-07-01", "2026-02-10"],
+    ]);
+    // A whole fiscal year on a leap year ends on the right day.
+    expect(yearsInRange("2023-03-01", "2024-02-29", 3)[0]).toMatchObject({
+      label: "FY2024",
+      from: "2023-03-01",
+      to: "2024-02-29",
+    });
   });
 
   it("monthsInRange handles year boundaries, leap Februaries and a single day", () => {
@@ -1059,6 +1097,36 @@ d("reports integration (DB)", () => {
       checked += 1;
     }
     expect(checked).toBeGreaterThan(0);
+  });
+
+  it("quarter and year columns add back up to the same P&L, like the months", async () => {
+    const range = { from: "2025-01-01", to: "2026-12-31" };
+    const plain = await withTenant(tenantId, (tx) =>
+      getProfitAndLoss(tx, tenantId, { scope: COMBINED, ...range }),
+    );
+    const plainByAccount = new Map(
+      plain.rows.filter((r) => r.accountId).map((r) => [r.accountId!, r.cents]),
+    );
+    for (const spread of ["quarter", "year"] as const) {
+      const report = await withTenant(tenantId, (tx) =>
+        getProfitAndLoss(tx, tenantId, { scope: COMBINED, ...range, spread }),
+      );
+      expect(report.netIncomeCents).toBe(plain.netIncomeCents);
+      // Eight quarters or two years, plus Total; the fixture's year starts in January.
+      expect(report.columns).toHaveLength(spread === "quarter" ? 9 : 3);
+      expect(report.columns![0].label).toBe(spread === "quarter" ? "Q1 2025" : "2025");
+      expect(report.columns!.at(-1)!.key).toBe("total");
+      let checked = 0;
+      for (const row of report.rows) {
+        if (!row.accountId || !row.perColumnCents) continue;
+        const cols = row.perColumnCents.slice(0, -1);
+        const total = row.perColumnCents.at(-1)!;
+        expect(cols.reduce((s, c) => s + c, 0)).toBe(total);
+        expect(total).toBe(plainByAccount.get(row.accountId));
+        checked += 1;
+      }
+      expect(checked).toBeGreaterThan(0);
+    }
   });
 
   it("refuses an over-long range rather than shortening it silently", async () => {

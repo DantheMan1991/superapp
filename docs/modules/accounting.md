@@ -13,6 +13,29 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-07 — P&L by quarter and by year (`claude/pnl-columns`)
+
+**What.** The `Columns` control on the Profit & Loss gains `By quarter` and
+`By year` beside `By month`. The same `periods` seam the 2026-08-12 entry
+said would carry them does: `quartersInRange` and `yearsInRange`
+(`lib/dates.ts`, pure, pinned in `tests/reports.test.ts`) bucket the range
+the way `monthsInRange` does — clipped at both ends, so the columns add
+back up to the one-total report, which the db test asserts for both units
+exactly as it does for months. Quarters and years follow the tenant's
+FISCAL year (`getSettings().fiscalYearStartMonth`); months stay calendar
+months. Labels: `Q1 2026` / `2026` on a January year, `Q1 FY2026` /
+`FY2026` otherwise, the fiscal year named for the calendar year it ends in
+— the first such label in the product, so it is the convention now.
+`spread` is a `SpreadUnit` end to end (page param, `getProfitAndLoss`, the
+CSV export's schema and filename `-by-quarter` / `-by-year`); the 24-column
+cap applies to any unit, and its message says so.
+
+**Why.** The review's finding, and the 2026-08-12 entry's own "not built"
+line. A farm reads its year in quarters; a landlord compares years.
+
+**Guides.** `profit-and-loss.md`: the control, the header, the export name,
+the message, the "not built" line replaced.
+
 ### 2026-09-07 — Split one bank transaction across categories (`claude/split-transaction`)
 
 **What.** `Split` beside `Post` on a row under review: a dialog with a
@@ -3815,7 +3838,7 @@ screen shipped without such a session as compiled-and-tested, not seen.
 - **Invoice delivery is done** (PDF + email, 2026-08-10). What is NOT built: a `Viewed` signal, which would need a tracked open or a public link — and a public payor view is deliberately not planned, since payment processing for tenants' customers is out of scope by design
 - **Automatic overdue reminders are DONE** (2026-08-11) — see the build log. What is not built: a reminder for **bills we owe** (the AP mirror), and reminder wording an owner can edit, both deliberately left until somebody asks
 - **General Ledger and Transaction Detail by Account are DONE** (2026-08-11) — one report with an account filter, so seven reports now. See the build log for the accrual-only decision
-- **P&L by Month is DONE** (2026-08-12) — the by-dimension column spread generalized to time. What is NOT built: quarter and year columns, which the same `periods` seam would carry with a different bucketer
+- **P&L by Month is DONE** (2026-08-12) — the by-dimension column spread generalized to time. ~~What is NOT built: quarter and year columns, which the same `periods` seam would carry with a different bucketer~~ Quarter and year columns DONE 2026-09-07 (`claude/pnl-columns`), on the fiscal year
 - **Drafting from an email thread is DONE** (2026-08-12) — both directions, with verified citations, and **proven against the real API** (see the build log; `RUN_LIVE_THREAD_DRAFT=1`). Now worth doing: the drafter sets no due date because it does not know `payment_terms` exists — resolving the customer's default term in the accept path would close that. What is NOT built: auto-linking the accepted draft back to the thread (deliberate, see the build log), and drafting from a thread the *reader does not own*, which RLS forbids by design
 - **The per-record History panel is DONE** (2026-08-12) on invoices and bills; journal entries, customers and vendors are a one-line addition each
 - **Products & Services, Terms and Payment Methods are DONE** (2026-08-12) — see the build log for the two deliberate gaps (customer-level default terms have a column and resolution but no control; saved items are invoice-only so far)

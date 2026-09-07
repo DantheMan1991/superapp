@@ -198,3 +198,96 @@ export function monthsInRange(from: string, to: string): MonthBucket[] {
   }
   return buckets;
 }
+
+/** Which calendar a P&L's columns follow. */
+export type SpreadUnit = "month" | "quarter" | "year";
+
+function shiftMonth(y: number, m: number, by: number): { y: number; m: number } {
+  const idx = y * 12 + (m - 1) + by;
+  return { y: Math.floor(idx / 12), m: (idx % 12) + 1 };
+}
+
+/**
+ * The calendar year a fiscal year is named for: the one it ENDS in, the
+ * common convention ("FY2026" runs July 2025 to June 2026). A fiscal year
+ * that starts in January is simply the calendar year.
+ */
+function fiscalLabelYear(startYear: number, fyStartMonth: number): number {
+  return fyStartMonth === 1 ? startYear : startYear + 1;
+}
+
+/**
+ * Split a date range into FISCAL quarters, clipped at both ends the way
+ * `monthsInRange` clips months — and for the same reason: the columns must
+ * add back up to the ungrouped report.
+ *
+ * Quarters follow the tenant's fiscal year start, so a July year has Q1 =
+ * Jul–Sep. Labels read `Q1 2026` on a calendar year and `Q1 FY2026` on a
+ * fiscal one, the FY named for the year it ends in. Keys sort in date order.
+ */
+export function quartersInRange(
+  from: string,
+  to: string,
+  fyStartMonth = 1,
+): MonthBucket[] {
+  if (to < from) return [];
+  const buckets: MonthBucket[] = [];
+  const fy = parts(fiscalYearStart(from, fyStartMonth));
+  const offset = (((parts(from).m - fyStartMonth) % 12) + 12) % 12;
+  let { y, m } = shiftMonth(fy.y, fy.m, Math.floor(offset / 3) * 3);
+  while (iso(y, m, 1) <= to) {
+    const first = iso(y, m, 1);
+    const end = shiftMonth(y, m, 2);
+    const last = iso(end.y, end.m, lastDayOfMonth(end.y, end.m));
+    const startOfYear = parts(fiscalYearStart(first, fyStartMonth));
+    const q = Math.floor(((((m - fyStartMonth) % 12) + 12) % 12) / 3) + 1;
+    const year = fiscalLabelYear(startOfYear.y, fyStartMonth);
+    buckets.push({
+      key: `${year}-q${q}`,
+      label: fyStartMonth === 1 ? `Q${q} ${year}` : `Q${q} FY${year}`,
+      from: first < from ? from : first,
+      to: last > to ? to : last,
+    });
+    ({ y, m } = shiftMonth(y, m, 3));
+  }
+  return buckets;
+}
+
+/** Split a date range into FISCAL years, clipped at both ends — see `quartersInRange`. */
+export function yearsInRange(from: string, to: string, fyStartMonth = 1): MonthBucket[] {
+  if (to < from) return [];
+  const buckets: MonthBucket[] = [];
+  const start = parts(fiscalYearStart(from, fyStartMonth));
+  const m = start.m;
+  let y = start.y;
+  while (iso(y, m, 1) <= to) {
+    const first = iso(y, m, 1);
+    const last = addDaysIso(iso(y + 1, m, 1), -1);
+    const year = fiscalLabelYear(y, fyStartMonth);
+    buckets.push({
+      key: fyStartMonth === 1 ? `${year}` : `fy${year}`,
+      label: fyStartMonth === 1 ? `${year}` : `FY${year}`,
+      from: first < from ? from : first,
+      to: last > to ? to : last,
+    });
+    y += 1;
+  }
+  return buckets;
+}
+
+/** The buckets for a P&L spread, by unit. Months ignore the fiscal year; quarters and years follow it. */
+export function periodsInRange(
+  unit: SpreadUnit,
+  from: string,
+  to: string,
+  fyStartMonth = 1,
+): MonthBucket[] {
+  switch (unit) {
+    case "month":
+      return monthsInRange(from, to);
+    case "quarter":
+      return quartersInRange(from, to, fyStartMonth);
+    case "year":
+      return yearsInRange(from, to, fyStartMonth);
+  }
+}

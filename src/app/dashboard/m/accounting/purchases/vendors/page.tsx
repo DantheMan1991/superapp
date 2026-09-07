@@ -7,6 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/app/page-header";
 import { DataTable } from "@/components/app/data-table";
 import { EmptyState } from "@/components/app/empty-state";
+import { ListSearch } from "@/components/app/list-search";
+import { Pager } from "@/components/app/pager";
+import { matchesAny, pageFrom, pageWindow, searchTerm } from "@/lib/list-query";
 import {
   Table,
   TableBody,
@@ -24,10 +27,19 @@ import { VendorDialogButton } from "./vendor-dialogs";
 
 export const dynamic = "force-dynamic";
 
-export default async function VendorsPage() {
+/** Rows per page. */
+const PAGE_SIZE = 50;
+
+export default async function VendorsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; page?: string }>;
+}) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
   const tenantId = ctx.tenant.id;
+  const sp = await searchParams;
+  const term = searchTerm(sp.q);
 
   const data = await withTenant(tenantId, async (tx) => {
     const vendors = await listVendors(tx, tenantId, { includeInactive: true });
@@ -63,6 +75,22 @@ export default async function VendorsPage() {
     .filter((a) => ["expense", "asset"].includes(a.accountType))
     .map((a) => ({ id: a.id, label: `${a.code} · ${a.name}` }));
 
+  // Filtered in memory, like the customer list: the search reads the name,
+  // the email and the phone the row shows.
+  const matching = data.vendors.filter((v) => {
+    const r = reach(v.partyId);
+    return matchesAny(term, [v.name, r.email, r.phone]);
+  });
+  const window = pageWindow(pageFrom(sp.page), PAGE_SIZE, matching.length);
+  const shown = matching.slice(window.offset, window.offset + PAGE_SIZE);
+  const pageHref = (page: number) => {
+    const p = new URLSearchParams();
+    if (term) p.set("q", term);
+    if (page > 1) p.set("page", String(page));
+    const s = p.toString();
+    return `/dashboard/m/accounting/purchases/vendors${s ? `?${s}` : ""}`;
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -72,15 +100,23 @@ export default async function VendorsPage() {
       />
 
       <AccountingNav />
-      <PurchasesNav />
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <PurchasesNav />
+        <ListSearch placeholder="Search name, email or phone" />
+      </div>
 
       <DataTable
-        isEmpty={data.vendors.length === 0}
+        isEmpty={shown.length === 0}
         empty={
           <EmptyState
             icon={<Building2 />}
-            title="No vendors yet"
-            description="They are created for you when a bill comes in from an emailed document, or you can add one now."
+            title={term ? `Nothing matches “${term}”` : "No vendors yet"}
+            description={
+              term
+                ? "Try fewer words, or add them now."
+                : "They are created for you when a bill comes in from an emailed document, or you can add one now."
+            }
             action={<VendorDialogButton accounts={accountOptions} />}
           />
         }
@@ -96,7 +132,7 @@ export default async function VendorsPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.vendors.map((vendor) => (
+            {shown.map((vendor) => (
               <TableRow key={vendor.id}>
                 <TableCell className="font-medium">{vendor.name}</TableCell>
                 <TableCell className="hidden text-sm text-muted-foreground sm:table-cell">
@@ -137,6 +173,13 @@ export default async function VendorsPage() {
           </TableBody>
         </Table>
       </DataTable>
+
+      <Pager
+        window={window}
+        noun={{ one: "vendor", many: "vendors" }}
+        hrefFor={pageHref}
+        labels={{ prev: "Previous", next: "Next" }}
+      />
     </div>
   );
 }

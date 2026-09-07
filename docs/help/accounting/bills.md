@@ -18,7 +18,9 @@ Open **Purchases** in the accounting menu. This page lists every bill, with the 
   - `Paid recently`. Payments made in the last 30 days.
 - **Status pills.** Above the list, at the right: `All`, `Drafts`, `Awaiting approval`, `Open`, `Paid` and `Void`. `Open` means approved bills with a balance, paid in part or not at all. Clicking a pill clears the tile you chose, and clicking a tile sets the pills back to `All`.
 - **`Company`.** Only when you keep more than one company. Pick one company or `All companies`. Your tile and pill stay as they are.
-- **The list.** Newest bills first, up to 200. Click anywhere on a row to open the bill.
+- **Search.** The box beside the pills. Type part of a vendor's name, their invoice number or a memo and the list narrows as you type; press Enter to search at once. Your tile, pill and company stay as they are, and what you typed stays as you change them. Clear the box to see everything again.
+- **Pages.** When there are more than fifty bills, `Showing 1–50 of 312 bills` sits under the list with {button:Newer|outline} and {button:Older|outline}. A search, a tile, a pill or a company starts again from the first page.
+- **The list.** Newest bills first, fifty to a page. Click anywhere on a row to open the bill.
   - `Vendor`. The vendor's name.
   - `Company`. Only when you keep more than one.
   - `Invoice #`. The vendor's own invoice number, or a dash.
@@ -44,11 +46,12 @@ The bill's own page shows its stage instead, such as `approved` or `partial`. Se
 
 ## How to find a bill
 
-1. Click a status pill, or `All` to see everything.
-2. If you keep more than one company, pick it in `Company`.
-3. Click the row. The bill opens.
+1. Type what you know in the search box: part of the vendor's name, their invoice number or a word from the memo. The list narrows as you type.
+2. Or click a status pill, or `All` to see everything.
+3. If you keep more than one company, pick it in `Company`.
+4. Click the row. The bill opens.
 
-There is no search box on this page. If you have the vendor's name but not the bill, open `Vendors` and pick the vendor.
+The search and the pill work together: `Open` with `Millbrook` in the box shows what you still owe Millbrook.
 
 ## How to see what is overdue
 
@@ -67,13 +70,14 @@ There is no search box on this page. If you have the vendor's name but not the b
 | --- | --- |
 | `Record your first bill` and `Add one directly, or open the Inbox and use “Create bill” on an emailed one.` | You have no bills yet. Click {button:New bill|primary} here, or open a bill a vendor emailed you from the Inbox. |
 | `Nothing here` and `Another status filter may have what you are after.` | No bill matches the pill or tile you chose. Click `All`. |
+| `Nothing matches “…”` and `Try fewer words, or clear the search.` | No bill under the pill, tile and company you have chosen has what you typed in its vendor, invoice number or memo. |
 | `Approved and posted.` | {button:Approve|primary} on a row posted the bill. |
 | `Every line needs an account before approval.` | The bill you tried to approve from the list has an uncoded line. Open it and code the lines first. |
 | `Payment recorded.` | {button:Record payment|outline} on a row recorded the payment. The badge changes on its own. |
 
 ## Not on this page
 
-There is no search, no filter by vendor or date, no sorting by column, and nothing you can do to several bills at once. Open a bill to act on it. Ask us if you need one of these.
+There is no date filter, no sorting by column, and nothing you can do to several bills at once. Open a bill to act on it. Ask us if you need one of these.
 
 ## Who can do what
 

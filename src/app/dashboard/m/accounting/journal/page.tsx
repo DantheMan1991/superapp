@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, sql } from "drizzle-orm";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
@@ -9,6 +9,9 @@ import { BookOpen } from "lucide-react";
 import { PageHeader } from "@/components/app/page-header";
 import { DataTable } from "@/components/app/data-table";
 import { EmptyState } from "@/components/app/empty-state";
+import { ListSearch } from "@/components/app/list-search";
+import { Pager } from "@/components/app/pager";
+import { ilikePattern, pageFrom, pageWindow, searchTerm } from "@/lib/list-query";
 import {
   Table,
   TableBody,
@@ -29,38 +32,69 @@ const STATUS_BADGE: Record<string, "default" | "secondary" | "outline"> = {
   void: "outline",
 };
 
-export default async function JournalPage() {
+/** Rows per page. The list used to stop dead at 200 with no way past. */
+const PAGE_SIZE = 50;
+
+export default async function JournalPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; page?: string }>;
+}) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
+  const sp = await searchParams;
+  const term = searchTerm(sp.q);
+  // The memo is what a journal entry says about itself, so it is what the
+  // search reads. One predicate for the count and the page.
+  const rowWhere = and(
+    eq(schema.journalEntries.tenantId, ctx.tenant.id),
+    term ? ilike(schema.journalEntries.memo, ilikePattern(term)) : undefined,
+  );
 
-  const { entries, entities } = await withTenant(ctx.tenant.id, async (tx) => ({
-    entities: await listEntities(tx, ctx.tenant.id, { includeInactive: true }),
-    entries: await tx
-      .select({
-        id: schema.journalEntries.id,
-        entryDate: schema.journalEntries.entryDate,
-        memo: schema.journalEntries.memo,
-        status: schema.journalEntries.status,
-        source: schema.journalEntries.source,
-        entityId: schema.journalEntries.entityId,
-        totalDebits: sql<string>`coalesce(sum(case when ${schema.journalLines.amountCents} > 0 then ${schema.journalLines.amountCents} else 0 end), 0)`,
-      })
+  const { entries, entities, window } = await withTenant(ctx.tenant.id, async (tx) => {
+    const [{ total }] = await tx
+      .select({ total: sql<number>`count(*)::int` })
       .from(schema.journalEntries)
-      .leftJoin(
-        schema.journalLines,
-        and(
-          eq(schema.journalLines.tenantId, schema.journalEntries.tenantId),
-          eq(schema.journalLines.entryId, schema.journalEntries.id),
-        ),
-      )
-      .where(eq(schema.journalEntries.tenantId, ctx.tenant.id))
-      .groupBy(schema.journalEntries.id)
-      .orderBy(
-        desc(schema.journalEntries.entryDate),
-        desc(schema.journalEntries.createdAt),
-      )
-      .limit(200),
-  }));
+      .where(rowWhere);
+    const window = pageWindow(pageFrom(sp.page), PAGE_SIZE, total);
+    return {
+      window,
+      entities: await listEntities(tx, ctx.tenant.id, { includeInactive: true }),
+      entries: await tx
+        .select({
+          id: schema.journalEntries.id,
+          entryDate: schema.journalEntries.entryDate,
+          memo: schema.journalEntries.memo,
+          status: schema.journalEntries.status,
+          source: schema.journalEntries.source,
+          entityId: schema.journalEntries.entityId,
+          totalDebits: sql<string>`coalesce(sum(case when ${schema.journalLines.amountCents} > 0 then ${schema.journalLines.amountCents} else 0 end), 0)`,
+        })
+        .from(schema.journalEntries)
+        .leftJoin(
+          schema.journalLines,
+          and(
+            eq(schema.journalLines.tenantId, schema.journalEntries.tenantId),
+            eq(schema.journalLines.entryId, schema.journalEntries.id),
+          ),
+        )
+        .where(rowWhere)
+        .groupBy(schema.journalEntries.id)
+        .orderBy(
+          desc(schema.journalEntries.entryDate),
+          desc(schema.journalEntries.createdAt),
+        )
+        .limit(PAGE_SIZE)
+        .offset(window.offset),
+    };
+  });
+  const href = (page: number) => {
+    const p = new URLSearchParams();
+    if (term) p.set("q", term);
+    if (page > 1) p.set("page", String(page));
+    const s = p.toString();
+    return `/dashboard/m/accounting/journal${s ? `?${s}` : ""}`;
+  };
 
   // The column appears only for a tenant with more than one company — ADR 0010:
   // the single-company client never learns the concept exists.
@@ -91,19 +125,29 @@ export default async function JournalPage() {
 
       <AccountingNav />
 
+      <div className="flex justify-end">
+        <ListSearch placeholder="Search memos" />
+      </div>
+
       <DataTable
         isEmpty={entries.length === 0}
         empty={
           <EmptyState
             icon={<BookOpen />}
-            title="Open the books"
-            description="The first entry starts the ledger. Most entries arrive on their own, from invoices, bills and the bank feed."
+            title={term ? `Nothing matches “${term}”` : "Open the books"}
+            description={
+              term
+                ? "Try fewer words, or clear the search."
+                : "The first entry starts the ledger. Most entries arrive on their own, from invoices, bills and the bank feed."
+            }
             action={
-              <Button asChild size="sm">
-                <Link href="/dashboard/m/accounting/journal/new">
-                  New entry
-                </Link>
-              </Button>
+              term ? undefined : (
+                <Button asChild size="sm">
+                  <Link href="/dashboard/m/accounting/journal/new">
+                    New entry
+                  </Link>
+                </Button>
+              )
             }
           />
         }
@@ -161,6 +205,8 @@ export default async function JournalPage() {
           </TableBody>
         </Table>
       </DataTable>
+
+      <Pager window={window} noun={{ one: "entry", many: "entries" }} hrefFor={href} />
     </div>
   );
 }

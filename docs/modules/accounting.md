@@ -13,6 +13,38 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-07 — Search and pages on every list (`claude/search-and-pages`)
+
+**What.** Six lists — invoices, bills, the journal, an account's register,
+customers and vendors — get a search box and pages. The search is URL state
+(`?q=`), read on the server as one case-insensitive `ILIKE` per field with
+`%`, `_` and `\` escaped (`src/lib/list-query.ts`): invoices read the number,
+the customer and the memo; bills the vendor, the vendor's invoice number and
+the memo; the journal the memo; the register the description, the payee (an
+`EXISTS` on vendors) and, when the term parses as money, `abs(amount_cents)`,
+so `45.10` finds the row either direction. Customers and vendors filter in
+memory (`matchesAny`, digits-to-digits when the term is mostly digits, so
+`555 0100` finds `(555) 010-0000`) because every row is already loaded for
+the contact points. Pages replace the dead stops at 200 and 300: fifty a page
+(a hundred on the register), ONE predicate feeding both the `count(*)` and
+the `LIMIT/OFFSET` page so "of 312" and the rows can never describe different
+lists, a page past the end clamped to the last, and a `Pager` that renders
+nothing while the list fits. Every href a list builds keeps `q` and `entity`
+and drops `page`; the `CompanyPicker` drops `page` too; the register tabs
+carry `q`. The register's tab counts stay whole-account, not per-search — a
+tab label that changed as you typed would read as the feed changing.
+
+**Why.** The review's finding: a card feed reaches 300 rows in a few months,
+and somebody hunting one line had no way to it but scrolling — on a phone,
+none at all. The search box is a client component owning exactly one URL
+parameter (`ListSearch`, debounced, `router.replace` so Back does not walk
+through the letters), and the pager is server links, so a filtered page is a
+URL that survives a refresh and can be sent to somebody.
+
+**Guides.** invoices, bills, journal, register, customers, vendors: `Search`
+and `Pages` bullets, the find-it steps rewritten to start from the box, the
+`Nothing matches` rows, and every "no search" / "stops at 200" sentence gone.
+
 ### 2026-09-07 — Approve from What needs you (`claude/approve-from-what-needs-you`)
 
 The last of the row-action items from the improvement pass. A bill waiting
@@ -3608,8 +3640,8 @@ screen shipped without such a session as compiled-and-tested, not seen.
   column that already exists; the `Combobox` on the vendor, customer and
   line-account pickers; ~~**a Transfer choice in the review queue**~~ (DONE 2026-09-06,
   `claude/own-account-transfers`, migration `0263`); **a deposit screen** for Undeposited Funds (the
-  `Not deposited` tile has nowhere to go); **search and paging** on every list
-  (caps at 200/300, no date filter on the register); **splitting one bank
+  `Not deposited` tile has nowhere to go); ~~**search and paging** on every list~~ (DONE
+  2026-09-07, `claude/search-and-pages`; the register still has no date filter); **splitting one bank
   transaction** across categories; ~~the bill and invoice line editors as stacked blocks on a phone~~ (DONE
   2026-09-07, `claude/forms-on-a-phone`); ~~money tiles and Overview cards two-up~~ (DONE 2026-09-07); ~~the native `window.confirm()`s~~ (bill void and unapply became dialogs
   2026-09-07 on the bills slice; regenerate and disable email-in the same day,

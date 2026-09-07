@@ -9,8 +9,10 @@ Open **Sales** in the accounting menu and click the `Customers` pill. The line u
 
 ## What you see
 
-- **The list.** Every customer, active or not, in name order. Each row shows the name, {badge:inactive|outline} where it applies, the email and phone under it, and at the right how much they currently owe, `1,240.00 open`, when anything is outstanding. There is no search box.
+- **The list.** Every customer, active or not, in name order. Each row shows the name, {badge:inactive|outline} where it applies, the email and phone under it, and at the right how much they currently owe, `1,240.00 open`, when anything is outstanding. Fifty to a page.
 - **The menu on each row.** The dots at the end open `Edit`, `Never send reminders` or `Resume reminders`, and `Deactivate` or `Reactivate`.
+- **Search.** The box beside the pills. Type part of a name, an email or a phone number and the list narrows as you type; press Enter to search at once. A phone number matches with or without its spaces and brackets. Clear the box to see everyone again.
+- **Pages.** When there are more than fifty customers, `Showing 1–50 of 120 customers` sits under the list with {button:Previous|outline} and {button:Next|outline}. A search starts again from its first page.
 
 ## How to add a customer
 
@@ -42,12 +44,13 @@ A deactivated customer keeps every invoice and all their history, but cannot be 
 | Message | What it means |
 | --- | --- |
 | `Add your first customer` and `You need somebody to bill before you can raise an invoice.` | The list is empty. Click {button:Add customer|primary}. |
+| `Nothing matches “…”` and `Try fewer words, or add them now.` | No customer's name, email or phone contains what you typed. {button:Add customer|primary} is right there, so a customer you looked for and did not find is one click from existing. |
 | `That customer is inactive — reactivate them first.` | An invoice names a deactivated customer. Reactivate them here. |
 | `This entry changed since you opened it — reload and try again.` | Someone else saved the customer while you had it open. |
 
 ## Not on this page
 
-There is no search box and no customer page. A customer cannot be deleted, only deactivated. Terms and tax live on each invoice.
+There is no customer page. A customer cannot be deleted, only deactivated. Terms and tax live on each invoice.
 
 ## Who can do what
 

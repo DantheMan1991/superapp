@@ -245,11 +245,13 @@ export function ReportControls({
           <select
             id="spread"
             name="spread"
-            defaultValue={spread === "month" ? "month" : ""}
+            defaultValue={spread ?? ""}
             className="border-input h-9 w-36 rounded-md border bg-transparent px-3 text-sm shadow-xs"
           >
             <option value="">One total</option>
             <option value="month">By month</option>
+            <option value="quarter">By quarter</option>
+            <option value="year">By year</option>
           </select>
         </div>
       )}

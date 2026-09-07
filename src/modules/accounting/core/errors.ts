@@ -210,7 +210,7 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
     "This customer has no email address. Add one, or type an address to send to.",
   INVOICE_NUMBER_TAKEN: "That invoice number is already in use.",
   PNL_TOO_MANY_MONTHS:
-    "That's too long a range for monthly columns — pick 24 months or fewer.",
+    "That's too long a range for that many columns — 24 at most. Shorten the range, or pick larger columns.",
   PRODUCT_NAME_TAKEN: "A saved item already has that name.",
   TERM_NAME_TAKEN: "A payment term already has that name.",
   TERM_NOT_FOUND: "That payment term no longer exists.",

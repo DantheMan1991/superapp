@@ -5,10 +5,11 @@ import { toSafeCents } from "../lib/money";
 import {
   addDaysIso,
   fiscalYearStart,
-  monthsInRange,
   previousPeriod,
   previousYear,
   shiftYearsIso,
+  periodsInRange,
+  type SpreadUnit,
 } from "../lib/dates";
 import { LedgerError } from "./errors";
 import { getBalances, type AccountingBasis } from "./balances";
@@ -56,7 +57,7 @@ import {
  */
 
 /**
- * Months one P&L may spread across.
+ * Columns one P&L may spread across — months, quarters or years alike.
  *
  * Each column is its own `getBalances` call, so this is a query budget as much
  * as a legibility one — and thirty-odd columns is past the point where anybody
@@ -76,8 +77,11 @@ export async function getProfitAndLoss(
     compare?: "prev-period" | "prev-year";
     /** Ignored when compare is set (v1 pin: mutually exclusive). */
     dimensionType?: string;
-    /** One column per calendar month. Also mutually exclusive with the above. */
-    spread?: "month";
+    /**
+     * One column per calendar month, fiscal quarter or fiscal year. Also
+     * mutually exclusive with the above.
+     */
+    spread?: SpreadUnit;
     showZero?: boolean;
     basis?: AccountingBasis;
   },
@@ -97,12 +101,16 @@ export async function getProfitAndLoss(
     ...(dimensionType ? { groupByDimensionType: dimensionType } : {}),
   });
   let periods;
-  if (spread === "month") {
-    const buckets = monthsInRange(opts.from, opts.to);
+  if (spread) {
+    // Quarters and years follow the business's fiscal year (2026-09-07);
+    // months are calendar months whatever the year starts on.
+    const fyStartMonth =
+      spread === "month" ? 1 : (await getSettings(tx, tenantId)).fiscalYearStartMonth;
+    const buckets = periodsInRange(spread, opts.from, opts.to, fyStartMonth);
     if (buckets.length > MAX_MONTH_COLUMNS) {
       throw new LedgerError(
         "PNL_TOO_MANY_MONTHS",
-        `a monthly P&L covers at most ${MAX_MONTH_COLUMNS} months`,
+        `a spread P&L covers at most ${MAX_MONTH_COLUMNS} ${spread}s`,
       );
     }
     periods = await Promise.all(

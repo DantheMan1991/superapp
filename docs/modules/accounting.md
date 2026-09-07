@@ -13,6 +13,58 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-07 — Bank deposits (`claude/bank-deposits`, migrations `0264`–`0266`)
+
+**What.** The `Not deposited` tile finally has somewhere to go. A `deposits`
+table (S3's family): payments recorded into Undeposited Funds, banked
+together as ONE posted entry — Dr the register's ledger account / Cr
+Undeposited Funds — `source = deposit` (new enum value, `0264`, alone in its
+own migration per the 0127 rule), `source_id` the deposit. The payments it
+banked point back through `invoice_payments.deposit_id` (`0265`), which a
+void clears. Three screens under Banking → Deposits: the list (waiting
+figure, fifty a page), New deposit (every waiting payment listed and
+ticked, the register, the date, a memo; company pills at two or more
+companies), and a deposit's page (its payments, the entry, Void behind a
+dialog). Entry points: a `Deposits` button and a "waiting in Undeposited
+Funds" line on Banking; `Record a deposit` under the Invoices list's
+`Not deposited` tile; the invoice page's payment row reads `deposited
+<date>` in place of Unapply. The feed row for the deposit matches the
+deposit entry through `findMatchCandidates` as any entry does, labelled
+`Deposit — 3 payments` (`labelDepositEntries`). Core in
+`banking/deposits.ts` (`listUndepositedPayments`, `recordDeposit`,
+`voidDeposit`), actions in `banking/deposit-actions.ts`.
+
+**Rules the code enforces.** ONE COMPANY PER DEPOSIT — the register's:
+Undeposited Funds has no owner and each payment's credit to it was posted in
+the invoice's company, so mixing companies would leave one 1250 negative and
+the other full (`DEPOSIT_CROSS_COMPANY`). A deposited payment cannot be
+unapplied (`PAYMENT_DEPOSITED`) — void the deposit first. `deposit` is in
+`MANAGED_SOURCES`: the journal refuses to void the entry, because its
+payments would stay marked as banked. The claiming `UPDATE ... WHERE
+deposit_id IS NULL` is the race guard: a payment somebody else banked
+meanwhile makes the claim come up short and the whole deposit rolls back
+(`DEPOSIT_PAYMENT_UNAVAILABLE`). The invoice list's money buckets now read
+the deposit: `Not deposited` = in 1250 with no deposit; `Deposited` = reached
+a bank in the last 30 days by either road, counted on the DEPOSIT's date.
+
+**RLS.** `deposits` is the first banking table with owner-only writes at the
+database (`0266`: members read, owners insert/update, nobody deletes,
+superadmin all); the actions pass `{ role }` to `withTenant`, whose default
+is `staff`, so a write that forgets to is refused rather than let through.
+`tests/isolation/deposits.test.ts` certifies each clause and the three
+composite FKs; `tests/deposits.test.ts` drives the whole life: list → record
+→ refusals → unapply refused → feed match → void → deposit again →
+cross-company refusal. Migrations applied to dev and production, verify-rls
+green on both, before the PR (ADR 0014).
+
+**Guides.** New `deposits.md` (Banking, order 25); `banking.md`,
+`invoices.md`, `invoice.md`, `register.md`, `journal.md` updated.
+
+**Not built, on purpose.** Cash back and counter fees on a deposit; a
+deposit of one company's payments into another's register (the intercompany
+pair machinery could do it, nobody has asked); non-customer money on a slip
+(Quick add covers it). Every one is an open item only when a client wants it.
+
 ### 2026-09-07 — Search and pages on every list (`claude/search-and-pages`)
 
 **What.** Six lists — invoices, bills, the journal, an account's register,
@@ -3501,6 +3553,7 @@ preview in either state. The change is argued to be inert, not observed to be.
 | `dimension_members` / `line_dimensions` | S1 | Dimension tagging (industry-pack seam); line_dimensions gained invoice_line_id (S4) and bill_line_id (S6) with exactly-one-parent CHECKs |
 | `accounting_settings` | S1 | Per-tenant config (fiscal year, etc.). Gained `reminders_enabled` (default **false**) and `reminder_offsets` jsonb (`0114`) |
 | `bank_accounts`, `bank_transactions`, `reconciliations`, `reconciliation_lines`, `plaid_items` | S3 | Feeds, staging, reconciliation; encrypted Plaid tokens. `bank_accounts.entity_id` (`0145`) — **a register belongs to exactly one company**, chosen at creation and never moved, and `postEntry` refuses any line touching another company's register. `0263` (2026-09-06) relaxed the one-feed-row-per-entry index to one per entry **per register** (`bank_transactions_tenant_acct_entry_idx`), so a transfer between two own registers is one entry with a row on each side |
+| `deposits` | 2026-09-07 | Payments held in Undeposited Funds banked together as one entry (`0265`; `source = deposit`, `0264`; RLS `0266`, owner-only writes). `invoice_payments.deposit_id` points back, cleared by a void. One company per deposit, the register's; a deposit is voided, never deleted |
 | `bank_rules` | 2026-08-10 | Deterministic feed categorization. Priority-ordered, first match wins; `is_suggested` marks a machine-proposed rule; `auto_post` posts without review but never into a closed period. Gained `set_vendor_id` (`0113`) so a rule can name the payee too. `bank_transactions.rule_suggestion` is a **snapshot**, not an FK — it records what a rule said at match time, so editing the rule later cannot rewrite what the owner was shown |
 | `parties` | 2026-08-03 | **Shared, not this module's.** The identity spine behind `customers` and `vendors`; written through `src/lib/parties/`. See [crm.md](crm.md) |
 | `customers`, `invoices`, `invoice_lines`, `invoice_payments` | S4 | AR. `customers.party_id` (2026-08-03) makes the row a role on a party. Both `customers` and `invoices` gained `reminders_muted` (`0114`) — standing and one-off suppression of automatic chasing. `recurring_invoices` folded into `recurring_entries` (`0121`/`0122`) and was dropped in `0147` |
@@ -3639,8 +3692,8 @@ screen shipped without such a session as compiled-and-tested, not seen.
   **vendor default terms**, and a control for the `customers.payment_terms_id`
   column that already exists; the `Combobox` on the vendor, customer and
   line-account pickers; ~~**a Transfer choice in the review queue**~~ (DONE 2026-09-06,
-  `claude/own-account-transfers`, migration `0263`); **a deposit screen** for Undeposited Funds (the
-  `Not deposited` tile has nowhere to go); ~~**search and paging** on every list~~ (DONE
+  `claude/own-account-transfers`, migration `0263`); ~~**a deposit screen** for Undeposited Funds~~ (DONE
+  2026-09-07, `claude/bank-deposits`, migrations `0264`–`0266`; the tile now leads to it); ~~**search and paging** on every list~~ (DONE
   2026-09-07, `claude/search-and-pages`; the register still has no date filter); **splitting one bank
   transaction** across categories; ~~the bill and invoice line editors as stacked blocks on a phone~~ (DONE
   2026-09-07, `claude/forms-on-a-phone`); ~~money tiles and Overview cards two-up~~ (DONE 2026-09-07); ~~the native `window.confirm()`s~~ (bill void and unapply became dialogs

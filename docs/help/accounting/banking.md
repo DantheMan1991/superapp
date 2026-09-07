@@ -9,7 +9,8 @@ Open **Banking** in the accounting menu. The line under the title reads `Bank fe
 
 ## What you see
 
-- **The buttons.** {button:Rules|outline|filter} opens your bank rules, for everyone. Owners also see {button:Add manually|outline}, {button:Quick add|outline} once at least one account exists, and {button:Connect a bank|primary} when a live bank feed is switched on. Without a live feed, transactions arrive by CSV import. When the feed is running against test banks a line says so: `Plaid is in sandbox mode — bank connections use Plaid's test institutions, not real banks.`
+- **The buttons.** {button:Rules|outline|filter} opens your bank rules, and {button:Deposits|outline|piggy-bank} your deposits, payments held in Undeposited Funds banked as one line at a time, both for everyone. See [Deposits](deposits.md). Owners also see {button:Add manually|outline}, {button:Quick add|outline} once at least one account exists, and {button:Connect a bank|primary} when a live bank feed is switched on. Without a live feed, transactions arrive by CSV import. When the feed is running against test banks a line says so: `Plaid is in sandbox mode — bank connections use Plaid's test institutions, not real banks.`
+- **What is waiting to be banked.** When any customer payment sits in Undeposited Funds, a line under the menu reads `1,240.00 waiting in Undeposited Funds · 3 payments not yet banked.` with {button:Record deposit|outline} for owners, which opens the New deposit page.
 - **An account card.** The name, with {badge:closed|outline} if the account has been closed. A line with the company (when you keep more than one), the kind, `checking`, `savings` or `credit card`, the institution, the last four digits, and {badge:connected|success} when a feed is linked. `Balance`, or `Owed` for a credit card, as of today. Figures carry no currency symbol, and a card you owe on reads as a positive number. `3 to review` when transactions are waiting. Balances here add up every entry that touched the account, whichever company posted it.
 - **A connected bank.** A card of its own with {badge:connected|success}, or {badge:reconnect needed|destructive} when the bank wants you to sign in again, and the buttons {button:Sync now|outline} and {button:Disconnect|ghost}.
 
@@ -45,6 +46,7 @@ To stop the feed, click {button:Disconnect|ghost}. The dialog is `Disconnect [ba
 | `Connect a bank` and `Connect an account or add one manually, and the feed starts filling in.` | No accounts exist yet. The buttons are in the title row. |
 | `Opening balance needs an as-of date` | You entered a balance without its date. |
 | `Plaid is in sandbox mode — bank connections use Plaid's test institutions, not real banks.` | The feed is running against test banks. |
+| `1,240.00 waiting in Undeposited Funds · 3 payments not yet banked.` | Customer payments were recorded into Undeposited Funds and no deposit has banked them yet. See [Deposits](deposits.md). |
 
 ## Not on this page
 
@@ -52,4 +54,4 @@ Transactions, imports, rules and reconciliation are on each account's own page a
 
 ## Who can do what
 
-Everyone sees the cards and {button:Rules|outline|filter}. Only owners add, connect, sync, disconnect and quick add.
+Everyone sees the cards, {button:Rules|outline|filter} and {button:Deposits|outline|piggy-bank}. Only owners add, connect, sync, disconnect, quick add and record deposits.

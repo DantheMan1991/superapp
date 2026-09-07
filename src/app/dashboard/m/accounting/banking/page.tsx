@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { and, eq, sql } from "drizzle-orm";
-import { Filter, Landmark } from "lucide-react";
+import { Filter, Landmark, PiggyBank } from "lucide-react";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { plaidConfigured, plaidEnv } from "@/lib/plaid";
 import { withTenant, schema } from "@/db";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
 import { EmptyState } from "@/components/app/empty-state";
@@ -19,9 +20,11 @@ import {
 } from "@/modules/accounting/core";
 import { dimensionTypesFrom } from "@/lib/dimension-options";
 import {
+  formatCents,
   formatCentsSigned,
   todayInTimezone,
 } from "@/modules/accounting/lib/money";
+import { listUndepositedPayments } from "@/modules/accounting/banking/deposits";
 import {
   BankingHeaderButtons,
   PlaidConnectionCard,
@@ -86,8 +89,12 @@ export default async function BankingPage() {
       dimensionMembers: await listDimensionMembers(tx, tenantId),
       entities: await listEntities(tx, tenantId),
       defaultEntityId: await getDefaultEntityId(tx, tenantId),
+      // Payments in Undeposited Funds that no deposit has banked — the one
+      // figure on this page that is a job rather than a balance.
+      waiting: await listUndepositedPayments(tx, tenantId),
     };
   });
+  const waitingCents = data.waiting.reduce((s, p) => s + p.amountCents, 0);
 
   const companyName = new Map(data.entities.map((e) => [e.id, e.name]));
   const showCompany = data.entities.length > 1;
@@ -125,6 +132,12 @@ export default async function BankingPage() {
                 Rules
               </Link>
             </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/dashboard/m/accounting/banking/deposits">
+                <PiggyBank className="size-4" />
+                Deposits
+              </Link>
+            </Button>
             {isOwner && (
               <BankingHeaderButtons
                 plaidReady={plaidConfigured()}
@@ -140,6 +153,28 @@ export default async function BankingPage() {
       />
 
       <AccountingNav />
+
+      {data.waiting.length > 0 && (
+        <Card className="border-warning/40 bg-warning/8">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
+            <p>
+              <span className="font-mono font-medium tabular-nums">
+                {formatCents(waitingCents)}
+              </span>{" "}
+              waiting in Undeposited Funds ·{" "}
+              {data.waiting.length === 1 ? "1 payment" : `${data.waiting.length} payments`}{" "}
+              not yet banked.
+            </p>
+            {isOwner && (
+              <Button asChild size="sm" variant="outline">
+                <Link href="/dashboard/m/accounting/banking/deposits/new">
+                  Record deposit
+                </Link>
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {plaidConfigured() && plaidEnv() === "sandbox" && (
         <p className="rounded-xl border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-foreground">

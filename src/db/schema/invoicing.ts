@@ -26,6 +26,8 @@ import { tenants } from "./platform";
 import { parties } from "./parties";
 import { accountingBasis, accounts, dimensionMembers, entities, entryEditPolicy, inventoryTreatment, journalEntries, journalLines } from "./ledger";
 import { billLines, vendors } from "./payables";
+// One-way: banking never imports invoicing, so the deposit FK does not cycle.
+import { deposits } from "./banking";
 
 export const invoiceStatus = pgEnum("invoice_status", [
   "draft",
@@ -690,6 +692,14 @@ export const invoicePayments = pgTable(
     memo: text("memo").notNull().default(""),
     /** Created atomically with its entry — NOT NULL by design. */
     journalEntryId: uuid("journal_entry_id").notNull(),
+    /**
+     * The deposit that banked this payment out of Undeposited Funds, once one
+     * has (`deposits`, 2026-09-07). Null while it waits there, and always
+     * null for a payment that went straight into a register. Cleared when the
+     * deposit is voided. NO ACTION on delete: a deposit is voided, never
+     * deleted, so nothing here needs a cascade.
+     */
+    depositId: uuid("deposit_id"),
     createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -702,6 +712,12 @@ export const invoicePayments = pgTable(
   (t) => [
     uniqueIndex("invoice_payments_tenant_id_id_idx").on(t.tenantId, t.id),
     index("invoice_payments_tenant_invoice_idx").on(t.tenantId, t.invoiceId),
+    index("invoice_payments_tenant_deposit_idx").on(t.tenantId, t.depositId),
+    foreignKey({
+      name: "invoice_payments_deposit_fk",
+      columns: [t.tenantId, t.depositId],
+      foreignColumns: [deposits.tenantId, deposits.id],
+    }),
     // One payment row per entry — DB rule.
     uniqueIndex("invoice_payments_tenant_entry_idx").on(
       t.tenantId,

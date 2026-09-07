@@ -12,7 +12,7 @@ Open **Sales** in the accounting menu and click an invoice's row. Everything tha
 - **The top of the page.** The title is the invoice number. The line under it reads `[customer] · issued [date]`, then `· due [date]` and `· [memo]` when they exist. A badge shows the invoice's stage: {badge:draft|secondary}, {badge:issued|primary}, {badge:partial|primary}, {badge:paid|outline} or {badge:void|outline}. Partial means some of it has been paid.
 - **The buttons.** Owners see the full set. Staff and accountants see {button:PDF|outline} and {button:Print|outline|printer} only. {button:PDF|outline} opens the invoice as a PDF in a new tab. The PDF carries your logo, the name customers know you by, your primary color and your tagline once an owner has set them on [Marketing](/dashboard/m/marketing); until then it shows the business name in black. {button:Send|outline|send}, or {button:Send again|outline|send}, once the invoice is issued. {button:Issue and send|primary} on a draft, which issues it and emails it in one step. {button:Issue|outline} on a draft, to issue it without sending. {button:Edit|outline} on a draft, which opens the invoice form on this page. {button:Delete|outline} on a draft. {button:Record payment|outline} once the invoice is issued and until it is paid. {button:Void|outline} on an issued invoice with no payments. {button:Print|outline|printer} prints the page with a header carrying your business name, the number and dates, and `Bill to:` the customer.
 - **The lines.** Each with its `Description`, `Qty`, `Unit price`, `Account` and `Amount`. A small `T` after a description marks a line that carried sales tax. `Subtotal` and the tax line appear when tax was charged, then `Total`, and `Paid` and `Balance due` once anything has been paid.
-- **`Payments`.** Each payment: its date, the method, the account it went into, `· received by Oak Row LLC` when another company's account received it, and the memo, with the amount at the right. Owners see {button:Unapply|outline} on each.
+- **`Payments`.** Each payment: its date, the method, the account it went into, `· received by Oak Row LLC` when another company's account received it, and the memo, with the amount at the right. Owners see {button:Unapply|outline} on each, except a payment a deposit has banked, which reads `deposited 2026-09-05` instead and opens the deposit.
 - **`Reminders`.** Appears once the business has automatic reminders, or once one has been sent for this invoice, with {badge:muted|outline} when this invoice is muted. Its line says where things stand: `Next reminder on [date].`, `The schedule has finished for this invoice.`, `Automatic reminders are off for the business.`, `This customer is never chased automatically.` or `This invoice is not chased automatically.` Each reminder that has gone out is listed with when it was due, the address, the date, and what happened to it, such as `sent` or `bounced`. Owners see {button:Mute|outline} or {button:Resume|outline}. See [Reminders](reminders.md).
 - **`Attachments`.** The documents attached to this invoice, each opening the document in the Inbox, with an {icon:x} to detach, and {button:Attach|outline|paperclip}.
 - **`History`.** What has happened, newest first, with who did it: `Draft created`, `Draft edited`, `Issued`, `Emailed to the customer`, `Payment recorded`, `Payment removed`, `Reminders muted`, `Voided`, `File attached`, and so on. It appears once something has happened.
@@ -52,6 +52,8 @@ The customer receives an email from your business's sending address with the sub
 1. Click {button:Unapply|outline} on the payment. The dialog is `Unapply this payment?` and reads `The deposit entry is voided and the invoice goes back to owing this much. A reconciled deposit cannot be unapplied at all.`
 2. Click {button:Unapply payment|destructive}. You see `Payment unapplied`.
 
+A payment that has been deposited shows `deposited [date]` in place of the button. Open the deposit and void it; the payment goes back to Undeposited Funds and the button comes back. See [Deposits](deposits.md).
+
 ## How to void or delete an invoice
 
 1. On an issued invoice with no payments, click {button:Void|outline}. The dialog is `Void INV-0009?` and reads `Its ledger effect is removed and the invoice stops counting towards what you are owed. The record stays, so the number is never reused.` Click {button:Void invoice|destructive}. You see `Invoice voided`.
@@ -76,6 +78,7 @@ The customer receives an email from your business's sending address with the sub
 | `That payment method is not on this business's list.` | The method was deactivated in the catalogue. |
 | `This entry is locked (closed period, reconciled, or strict mode). Create a reversal instead.` | The payment's deposit has been reconciled in Banking, so it cannot be unapplied. |
 | `Remove the payments first, then void.` | An invoice with payments on it cannot be voided. |
+| `That payment is in a deposit. Void the deposit first, then unapply the payment.` | The payment was banked by a deposit. Void the deposit from its page first. |
 
 ## Not on this page
 

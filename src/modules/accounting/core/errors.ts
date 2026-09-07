@@ -102,6 +102,12 @@ export type LedgerErrorCode =
   | "CLOSE_NOT_LATEST"
   | "CLOSE_NOT_COMPLETED"
   | "CLOSE_ALREADY_SIGNED"
+  | "PAYMENT_DEPOSITED"
+  | "DEPOSIT_NOT_FOUND"
+  | "DEPOSIT_NOT_POSTED"
+  | "DEPOSIT_EMPTY"
+  | "DEPOSIT_PAYMENT_UNAVAILABLE"
+  | "DEPOSIT_CROSS_COMPANY"
   | "EXPORT_COOLDOWN";
 
 /**
@@ -250,7 +256,7 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   BILL_OVERPAYMENT: "That's more than the remaining balance.",
   BILL_PAYMENT_NOT_FOUND: "That payment no longer exists.",
   ENTRY_SOURCE_MANAGED:
-    "This entry belongs to an invoice or bill — manage it from that document instead.",
+    "This entry belongs to an invoice, bill or deposit — manage it from that record instead.",
   FORBIDDEN_EXPERT:
     "Accountant access is read-only — reviews, sign-offs and exports only.",
   CLOSE_NOT_FOUND: "That close no longer exists.",
@@ -259,6 +265,15 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   CLOSE_NOT_LATEST: "Only the most recent close can be reopened.",
   CLOSE_NOT_COMPLETED: "That close was reopened — complete a new close first.",
   CLOSE_ALREADY_SIGNED: "This close is already signed off.",
+  PAYMENT_DEPOSITED:
+    "That payment is in a deposit. Void the deposit first, then unapply the payment.",
+  DEPOSIT_NOT_FOUND: "That deposit no longer exists.",
+  DEPOSIT_NOT_POSTED: "That deposit has already been voided.",
+  DEPOSIT_EMPTY: "Pick at least one payment to deposit.",
+  DEPOSIT_PAYMENT_UNAVAILABLE:
+    "One of those payments is no longer waiting in Undeposited Funds — reload and pick again.",
+  DEPOSIT_CROSS_COMPANY:
+    "Those payments belong to a different company than that account. Deposit them into one of their own company's accounts.",
   EXPORT_COOLDOWN: "An export just ran — try again in a minute.",
 };
 

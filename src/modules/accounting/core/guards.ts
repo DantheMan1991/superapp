@@ -78,6 +78,9 @@ const MANAGED_SOURCES = new Set([
   "invoice_payment",
   "bill",
   "bill_payment",
+  // A deposit's payments point at it; voiding its entry from the journal
+  // would leave them marked as banked. Void it from the deposit instead.
+  "deposit",
 ]);
 
 /**

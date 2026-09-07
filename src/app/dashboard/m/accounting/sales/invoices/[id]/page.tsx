@@ -1,5 +1,6 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { FileText } from "lucide-react";
 import { z } from "zod";
 import { requireTenant } from "@/lib/auth";
@@ -107,6 +108,21 @@ export default async function InvoiceDetailPage({
       ),
       orderBy: asc(schema.invoicePayments.paymentDate),
     });
+    // The deposits that banked any of these payments, for the row's
+    // "deposited 2026-09-07" note and its link.
+    const depositIds = payments
+      .map((p) => p.depositId)
+      .filter((v): v is string => !!v);
+    const deposits =
+      depositIds.length === 0
+        ? []
+        : await tx.query.deposits.findMany({
+            where: and(
+              eq(schema.deposits.tenantId, ctx.tenant.id),
+              inArray(schema.deposits.id, depositIds),
+            ),
+            columns: { id: true, depositDate: true },
+          });
     const paid = await paidCentsFor(tx, ctx.tenant.id, invoice.id);
     /**
      * EVERY active register, including other companies' — and that reverses
@@ -180,6 +196,7 @@ export default async function InvoiceDetailPage({
       dimensionMembers: await listDimensionMembers(tx, ctx.tenant.id),
       accounts,
       payments,
+      deposits,
       paid,
       sends,
       reminders,
@@ -219,6 +236,7 @@ export default async function InvoiceDetailPage({
   const isOwner = ctx.role === "owner";
   const balance = invoice.status === "void" ? 0 : invoice.totalCents - data.paid;
   const accountName = new Map(data.accounts.map((a) => [a.id, `${a.code} · ${a.name}`]));
+  const depositDate = new Map(data.deposits.map((d) => [d.id, d.depositDate]));
   const editing = sp.edit === "1" && invoice.status === "draft";
 
   /**
@@ -504,11 +522,26 @@ export default async function InvoiceDetailPage({
                         <span className="font-mono">
                           {formatCentsSigned(p.amountCents)}
                         </span>
-                        {isOwner && (
-                          <UnapplyPaymentButton
-                            paymentId={p.id}
-                            version={p.version}
-                          />
+                        {p.depositId ? (
+                          // Banked by a deposit: Unapply would be refused, so
+                          // the row says where the money went instead, and
+                          // that is where Void lives.
+                          <Link
+                            href={`/dashboard/m/accounting/banking/deposits/${p.depositId}`}
+                            className="text-xs text-muted-foreground hover:underline"
+                          >
+                            deposited{" "}
+                            <span className="font-mono">
+                              {depositDate.get(p.depositId) ?? ""}
+                            </span>
+                          </Link>
+                        ) : (
+                          isOwner && (
+                            <UnapplyPaymentButton
+                              paymentId={p.id}
+                              version={p.version}
+                            />
+                          )
                         )}
                       </span>
                     </li>

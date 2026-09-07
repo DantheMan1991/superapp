@@ -10,9 +10,13 @@ import {
   collectAttention,
   sortAttention,
 } from "@/lib/attention-sources/resolve";
-import type { AttentionItem } from "@/lib/attention-sources/types";
+import type {
+  AttentionActionHandler,
+  AttentionItem,
+} from "@/lib/attention-sources/types";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { AttentionActionButton } from "./attention-action-button";
 import { DigestToggle } from "./digest-toggle";
 
 export const dynamic = "force-dynamic";
@@ -112,7 +116,9 @@ export default async function TodayPage() {
         />
       ) : (
         <div className="space-y-6">
-          {mine.length > 0 && <ItemList items={mine} today={today} />}
+          {mine.length > 0 && (
+            <ItemList items={mine} today={today} actions={result.actions} />
+          )}
 
           {unassigned.length > 0 && (
             <div className="space-y-3">
@@ -124,7 +130,7 @@ export default async function TodayPage() {
                   business, not because they are yours.
                 </p>
               </div>
-              <ItemList items={unassigned} today={today} />
+              <ItemList items={unassigned} today={today} actions={result.actions} />
             </div>
           )}
         </div>
@@ -136,21 +142,29 @@ export default async function TodayPage() {
 function ItemList({
   items,
   today,
+  actions,
 }: {
   items: AttentionItem[];
   today: string;
+  /** Handlers by kind, from the sources that answered. */
+  actions: Record<string, AttentionActionHandler>;
 }) {
   return (
     <Panel>
       <ul className="divide-y divide-divider">
-      {items.map((item) => (
-        <li key={item.key}>
-          {/* The whole row is the link. Every item is one click from the record
-              it is about — a digest that lands you on a list page has made you
-              do the finding twice. */}
+      {items.map((item) => {
+        // A kind nobody registered renders as a plain row: a button that does
+        // nothing is worse than no button.
+        const handler = item.action ? actions[item.action.kind] : undefined;
+        return (
+        <li key={item.key} className="flex items-stretch">
+          {/* The row is the link. Every item is one click from the record it
+              is about — a digest that lands you on a list page has made you
+              do the finding twice. The verb, when there is one, sits beside
+              the link rather than inside it. */}
           <Link
             href={item.href}
-            className="flex items-start justify-between gap-4 p-4 transition-colors hover:bg-muted/60"
+            className="flex min-w-0 flex-1 items-start justify-between gap-4 p-4 transition-colors hover:bg-muted/60"
           >
             <div className="min-w-0">
               <p className="truncate text-sm font-medium">{item.title}</p>
@@ -162,8 +176,14 @@ function ItemList({
             </div>
             <UrgencyBadge urgency={item.urgency} dueOn={item.dueOn} today={today} />
           </Link>
-          </li>
-        ))}
+          {item.action && handler && (
+            <div className="flex items-center pr-4">
+              <AttentionActionButton handler={handler} action={item.action} />
+            </div>
+          )}
+        </li>
+        );
+      })}
       </ul>
     </Panel>
   );

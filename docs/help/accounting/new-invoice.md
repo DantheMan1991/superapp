@@ -5,12 +5,12 @@
 > **Order:** 90
 > **Area:** Sales
 
-Open **Sales** in the accounting menu and click {button:New invoice|primary}. The line under the title reads `Saved as a draft — nothing posts to the books until you issue it.` Issuing happens on the invoice's page afterwards. The customer has to exist first: with none yet, the form does not appear and the page says `Add a customer first (Sales → Customers).`
+Open **Sales** in the accounting menu and click {button:New invoice|primary}. The line under the title reads `Saved as a draft — nothing posts to the books until you issue it.` Issuing happens on the invoice's page afterwards. A customer who is not on the list yet can be typed into the form and is created when the draft is saved.
 
 ## What you see
 
 - **`Company`.** Only when your books hold more than one company, and only when creating. `Which company is invoicing?` It cannot be changed once the draft is saved.
-- **`Customer`.** One of your active customers. Required. Picking one applies their payment terms, their own or your default, and the due date with them. There is no way to add a customer from inside the form.
+- **`Customer`.** One of your active customers, and a box under it, `…or type a new customer name`, to create one on the spot. Typing clears the pick and picking clears the box. Picking a customer applies their payment terms, their own or your default, and the due date with them; a customer made by typing is on your default terms, and has a name and nothing else. Add their email and address later on the Customers page.
 - **`Number`.** Filled in for you with the next number, such as `INV-0009`. You can type your own. A number already used is refused when you save.
 - **`Issue date`.** Starts as today. Changing it moves the due date along with it when terms are set.
 - **`Terms`.** Shown once your catalogue has payment terms. Picking one, such as `Net 30`, sets the due date from the issue date, and a line under the due date reads `Net 30 — due 2026-09-11 (30 days)`. A new invoice starts on your default terms, and switches to the customer's own terms the moment you pick a customer who has some. The box reads `Custom` when the due date was typed by hand.
@@ -24,7 +24,7 @@ Open **Sales** in the accounting menu and click {button:New invoice|primary}. Th
 
 ## How to write an invoice
 
-1. Pick the `Customer`. Leave `Number` as it is, or type your own.
+1. Pick the `Customer`, or type a new name in the box under the list. Leave `Number` as it is, or type your own.
 2. Set `Issue date`, and either pick `Terms` or type a `Due date (optional)`.
 3. Pick `Sales tax` if you charge it.
 4. On each line, fill in `Description`, `Qty` and `Unit price`, and pick the `Income account`. Or pick `Add a saved item…` and edit the line if the price differs this time. Check `Disc` on a discount and `Tax` on each taxable line. Click {button:Add line|outline|plus} for the next line.
@@ -42,6 +42,7 @@ A draft dated in a closed month saves; the refusal comes when you issue it.
 
 | Message | What it means |
 | --- | --- |
+| `Pick or create a customer.` | The customer is missing. |
 | `That customer is inactive — reactivate them first.` | The customer was deactivated on the Customers page. |
 | `That invoice number is already in use.` | Type a different `Number`. |
 | `That tax rate is inactive or no longer exists — pick another one.` | The rate was deactivated in the catalogue. |

@@ -5,12 +5,12 @@
 > **Order:** 100
 > **Area:** Sales
 
-Open **Sales** in the accounting menu and click an invoice's number. Everything that happens to one invoice happens here: an owner issues it with {button:Issue|outline}, sends it, records payments against it, and voids it if it was wrong.
+Open **Sales** in the accounting menu and click an invoice's row. Everything that happens to one invoice happens here: an owner issues it and emails it with {button:Issue and send|primary}, records payments against it, and voids it if it was wrong.
 
 ## What you see
 
 - **The top of the page.** The title is the invoice number. The line under it reads `[customer] · issued [date]`, then `· due [date]` and `· [memo]` when they exist. A badge shows the invoice's stage: {badge:draft|secondary}, {badge:issued|primary}, {badge:partial|primary}, {badge:paid|outline} or {badge:void|outline}. Partial means some of it has been paid.
-- **The buttons.** Owners see the full set. Staff and accountants see {button:PDF|outline} and {button:Print|outline|printer} only. {button:PDF|outline} opens the invoice as a PDF in a new tab. The PDF carries your logo, the name customers know you by, your primary color and your tagline once an owner has set them on [Marketing](/dashboard/m/marketing); until then it shows the business name in black. {button:Send|outline|send}, or {button:Send again|outline|send}, once the invoice is issued. {button:Issue|outline} on a draft. {button:Edit|outline} on a draft, which opens the invoice form on this page. {button:Delete|outline} on a draft. {button:Record payment|outline} once the invoice is issued and until it is paid. {button:Void|outline} on an issued invoice with no payments. {button:Print|outline|printer} prints the page with a header carrying your business name, the number and dates, and `Bill to:` the customer.
+- **The buttons.** Owners see the full set. Staff and accountants see {button:PDF|outline} and {button:Print|outline|printer} only. {button:PDF|outline} opens the invoice as a PDF in a new tab. The PDF carries your logo, the name customers know you by, your primary color and your tagline once an owner has set them on [Marketing](/dashboard/m/marketing); until then it shows the business name in black. {button:Send|outline|send}, or {button:Send again|outline|send}, once the invoice is issued. {button:Issue and send|primary} on a draft, which issues it and emails it in one step. {button:Issue|outline} on a draft, to issue it without sending. {button:Edit|outline} on a draft, which opens the invoice form on this page. {button:Delete|outline} on a draft. {button:Record payment|outline} once the invoice is issued and until it is paid. {button:Void|outline} on an issued invoice with no payments. {button:Print|outline|printer} prints the page with a header carrying your business name, the number and dates, and `Bill to:` the customer.
 - **The lines.** Each with its `Description`, `Qty`, `Unit price`, `Account` and `Amount`. A small `T` after a description marks a line that carried sales tax. `Subtotal` and the tax line appear when tax was charged, then `Total`, and `Paid` and `Balance due` once anything has been paid.
 - **`Payments`.** Each payment: its date, the method, the account it went into, `· received by Oak Row LLC` when another company's account received it, and the memo, with the amount at the right. Owners see {button:Unapply|outline} on each.
 - **`Reminders`.** Appears once the business has automatic reminders, or once one has been sent for this invoice, with {badge:muted|outline} when this invoice is muted. Its line says where things stand: `Next reminder on [date].`, `The schedule has finished for this invoice.`, `Automatic reminders are off for the business.`, `This customer is never chased automatically.` or `This invoice is not chased automatically.` Each reminder that has gone out is listed with when it was due, the address, the date, and what happened to it, such as `sent` or `bounced`. Owners see {button:Mute|outline} or {button:Resume|outline}. See [Reminders](reminders.md).
@@ -18,7 +18,15 @@ Open **Sales** in the accounting menu and click an invoice's number. Everything 
 - **`History`.** What has happened, newest first, with who did it: `Draft created`, `Draft edited`, `Issued`, `Emailed to the customer`, `Payment recorded`, `Payment removed`, `Reminders muted`, `Voided`, `File attached`, and so on. It appears once something has happened.
 - **`Email`.** When the Mail module is on and an email has been attached: the filed copies.
 
-## How to issue an invoice
+## How to issue and send an invoice in one step
+
+1. Click {button:Issue and send|primary}. The dialog is `Issue INV-0009 and email it?` and reads `This posts it to the books, freezes its lines and starts the clock on getting paid — then the invoice goes to the customer as a PDF attachment.`
+2. Check `To`, filled with the customer's email address. Type one if it is empty or wrong.
+3. Click {button:Issue and send|primary}. You see `Invoice issued and sent to [address]`. The badge changes to {badge:issued|primary}, the total posts to Accounts Receivable, with any tax to Sales Tax Payable, and the customer receives the email described below.
+
+If the email cannot go, you see `Issued, but the email did not go: …` with the reason. The invoice is issued all the same. Fix what the message names and click {button:Send|outline|send}.
+
+## How to issue without sending
 
 1. Click {button:Issue|outline}. The dialog is `Issue INV-0009?` and reads `This posts it to the books and starts the clock on getting paid. Its lines are frozen from then on.`
 2. Click {button:Issue invoice|primary}. You see `Invoice issued`, the badge changes to {badge:issued|primary}, and the total posts to Accounts Receivable, with any tax to Sales Tax Payable.
@@ -33,7 +41,7 @@ The customer receives an email from your business's sending address with the sub
 
 ## How to record a payment
 
-1. Click {button:Record payment|outline}. The dialog is `Record payment — INV-0009` and reads `Balance due 640.00. Recording is bookkeeping only — no money moves through Yosher.`
+1. Click {button:Record payment|outline}, here or at the end of the invoice's row on the Invoices list. The dialog is `Record payment — INV-0009` and reads `Balance due 640.00. Recording is bookkeeping only — no money moves through Yosher.`
 2. Set `Date`, today to begin with. Leave `Amount` as the full balance, or change it for a part payment.
 3. Pick `Deposit to`: the bank account the money went into, or `Undeposited Funds` for a check or cash you have not banked yet. It starts on the first account belonging to this invoice's company. If your books hold more than one company, the other companies' accounts are listed with the company's name, and choosing one shows a sentence first: `The money is going into Oak Row LLC's account. It will be recorded on both sides: Oak Row LLC owes this company the amount until it is settled.`
 4. Pick `Method`, one of your payment methods from the catalogue, and add a `Memo (optional)`.
@@ -61,6 +69,7 @@ The customer receives an email from your business's sending address with the sub
 | `An invoice needs at least one line and a total above zero.` | The invoice is empty or adds up to nothing. |
 | `That date falls in a closed period. Use a reversal, or reopen the period first.` | The issue or payment date is in a month that has been closed for this company. |
 | `Only an issued invoice can be emailed — a draft would go out saying DRAFT, and a void one should not go out at all.` | Issue the invoice first. |
+| `Issued, but the email did not go: …` | {button:Issue and send|primary} issued the invoice and then could not email it, for the reason given. It is in your books; fix the reason and click {button:Send|outline|send}. |
 | `This customer has no email address. Add one, or type an address to send to.` | The customer record has no email. Type one in `To`, or add it on the Customers page. |
 | `That's more than the remaining balance.` | The payment is larger than what is owed. |
 | `That invoice isn't open for payments.` | The invoice is a draft, void or paid. |
@@ -74,4 +83,4 @@ An issued invoice cannot be edited; void it and write another. There is no publi
 
 ## Who can do what
 
-Owners issue, send, edit and delete drafts, record and undo payments, void, and mute reminders. Staff and accountants see {button:PDF|outline} and {button:Print|outline|printer} only.
+Owners issue and send, edit and delete drafts, record and undo payments, void, and mute reminders. Staff and accountants see {button:PDF|outline} and {button:Print|outline|printer} only.

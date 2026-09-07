@@ -29,6 +29,7 @@ import {
 import { dimensionTypesFrom } from "@/lib/dimension-options";
 import { loadInvoiceLines } from "@/modules/accounting/invoicing/invoices";
 import { paidCentsFor } from "@/modules/accounting/invoicing/payments";
+import { depositOptionsFor } from "@/modules/accounting/lib/deposit-options";
 import {
   formatCentsSigned,
   todayInTimezone,
@@ -240,26 +241,14 @@ export default async function InvoiceDetailPage({
     );
   };
 
-  const depositOptions = [
-    ...data.bankAccounts.map((b) => ({
-      id: b.accountId,
-      label: b.name,
-      // Named only when it is somebody ELSE'S account, because that is the only
-      // time the answer changes what gets written — and a label on every row
-      // would be noise for the single-company tenant.
-      otherCompany:
-        b.entityId === invoice.entityId
-          ? undefined
-          : (data.companies.find((c) => c.id === b.entityId)?.name ??
-            "another company"),
-    })),
-    // Undeposited Funds last and never labelled: it is a chart account rather
-    // than a register, so it has no owner and both companies' unbanked cheques
-    // sit in it.
-    ...(data.undeposited
-      ? [{ id: data.undeposited.id, label: "Undeposited Funds" }]
-      : []),
-  ];
+  // One function with the Invoices list, which offers the same dialog on a
+  // row — the intercompany labelling cannot differ between the two.
+  const depositOptions = depositOptionsFor({
+    registers: data.bankAccounts,
+    companies: data.companies,
+    undepositedAccountId: data.undeposited?.id ?? null,
+    entityId: invoice.entityId,
+  });
 
   return (
     <div className="space-y-6">
@@ -329,6 +318,7 @@ export default async function InvoiceDetailPage({
               today={data.today}
               canAct={isOwner}
               paymentMethods={data.paymentMethods}
+              customerEmail={data.customerEmail}
             />
           </>
             )}

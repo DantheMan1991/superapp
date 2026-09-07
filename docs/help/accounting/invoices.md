@@ -19,7 +19,7 @@ Open **Sales** in the accounting menu. This page lists every invoice, with what 
   The first two count what is still owed; the last two count what has arrived. One invoice can sit in two tiles, so the counts do not add up to the number of invoices.
 - **Status pills.** Above the list, at the right: `Open`, `Drafts`, `Paid` and `All`. `Open` is the starting view: issued invoices, paid or not, that still have a balance. Clicking a tile sets the pills to `All`, and clicking a pill clears the tile.
 - **`Company`.** Only when you keep more than one company. Pick one company or `All companies`. Your tile and pill stay as they are.
-- **The list.** Newest first, up to 200. `Number`, which opens the invoice. `Customer`. `Company`, only when you keep more than one. `Issued` and `Due`, with the due date in red once it has passed. `Status`, a badge, explained next. `Total` and `Balance`. A void invoice's balance is zero.
+- **The list.** Newest first, up to 200. Click anywhere on a row to open the invoice. `Number`. `Customer`. `Company`, only when you keep more than one. `Issued` and `Due`, with the due date in red once it has passed. `Status`, a badge, explained next. `Total` and `Balance`. A void invoice's balance is zero. Owners also see {button:Record payment|outline} at the end of every row that is still owed: the same dialog as on the invoice's page, so money that came in can be recorded without leaving the list. See [An invoice's page](invoice.md).
 
 ## What the status badges mean
 
@@ -38,14 +38,14 @@ The invoice's own page shows its stage instead: `draft`, `issued`, `partial`, `p
 
 1. Click a status pill, or `All` to see everything.
 2. If you keep more than one company, pick it in `Company`.
-3. Click the number in the `Number` column. The invoice opens.
+3. Click the row. The invoice opens.
 
 There is no search box on this page. If you have the customer's name but not the invoice, open `Customers` and look at what they owe.
 
 ## How to see what is overdue
 
 1. Click the `Overdue` tile. The list shows only invoices past their due date, and `Filtered to Overdue · show all` appears under the tiles.
-2. Click an invoice to open it and record a payment, or send it again.
+2. Click {button:Record payment|outline} at the end of a row to record what came in without leaving the list, or click the row to open the invoice and send it again.
 3. Click `show all` to see every invoice again.
 
 ## Messages
@@ -61,4 +61,4 @@ There is no search box, no date filter, no sorting by column, and nothing you ca
 
 ## Who can do what
 
-Owners, staff and accountants all see the same page, tiles and list. What each person can do with an invoice is on the invoice's own page.
+Owners, staff and accountants all see the same page, tiles and list. Only owners see {button:Record payment|outline} on the rows. What else each person can do with an invoice is on the invoice's own page.

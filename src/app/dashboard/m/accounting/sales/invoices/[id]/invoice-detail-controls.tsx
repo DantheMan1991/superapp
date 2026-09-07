@@ -16,25 +16,16 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   deleteInvoiceDraftAction,
+  issueAndSendInvoiceAction,
   issueInvoiceAction,
-  recordInvoicePaymentAction,
   sendInvoiceAction,
   unapplyInvoicePaymentAction,
   voidInvoiceAction,
 } from "@/modules/accounting/invoicing/actions";
-import {
-  formatCentsSigned,
-  parseMoneyToCents,
-} from "@/modules/accounting/lib/money";
+import type { DepositOption } from "@/modules/accounting/lib/deposit-options";
 import { useConfirm } from "@/components/app/use-confirm";
+import { RecordPaymentButton } from "../record-payment-dialog";
 
 interface InvoiceRef {
   id: string;
@@ -50,38 +41,29 @@ export function InvoiceActions({
   today,
   canAct,
   paymentMethods,
+  customerEmail,
 }: {
   invoice: InvoiceRef;
   /**
-   * Every active register plus Undeposited Funds. `otherCompany` is set only
-   * when the account belongs to somebody else — depositing into one is an
-   * INTERCOMPANY payment (ADR 0010, the mirror of the bill case), recorded as a
-   * linked pair rather than refused, and the dialog says so before it happens.
+   * Every active register plus Undeposited Funds, from `depositOptionsFor`.
+   * `otherCompany` is set only when the account belongs to somebody else —
+   * depositing into one is an INTERCOMPANY payment (ADR 0010, the mirror of
+   * the bill case), recorded as a linked pair rather than refused, and the
+   * dialog says so before it happens.
    */
-  depositOptions: Array<{ id: string; label: string; otherCompany?: string }>;
+  depositOptions: DepositOption[];
   today: string;
   canAct: boolean;
   /** The tenant's own list. Codes are what get stored on the payment. */
   paymentMethods: Array<{ code: string; name: string }>;
+  /** The customer's stored address; prefills the one-step dialog's To. */
+  customerEmail: string;
 }) {
   const router = useRouter();
   const { confirm, confirmDialog } = useConfirm();
   const [pending, startTransition] = useTransition();
-  const [payOpen, setPayOpen] = useState(false);
-  const [pay, setPay] = useState({
-    date: today,
-    amount: (invoice.balanceCents / 100).toFixed(2),
-    // Default to one of THIS company's own accounts, so the ordinary payment
-    // stays one click and banking it into an affiliate is always deliberate.
-    depositAccountId:
-      (depositOptions.find((o) => !o.otherCompany) ?? depositOptions[0])?.id ?? "",
-    // Whatever the tenant listed first, rather than a hardcoded "check" that
-    // might not be one of their methods at all.
-    method: paymentMethods[0]?.code ?? "other",
-    memo: "",
-  });
-
-  const chosenDeposit = depositOptions.find((o) => o.id === pay.depositAccountId);
+  const [issueOpen, setIssueOpen] = useState(false);
+  const [issueTo, setIssueTo] = useState(customerEmail);
 
   async function run(kind: "issue" | "void" | "delete") {
     const asked =
@@ -128,28 +110,27 @@ export function InvoiceActions({
     });
   }
 
-  function submitPayment() {
-    const cents = parseMoneyToCents(pay.amount);
-    if (cents === null || cents === 0) {
-      toast.error("Enter a valid amount");
-      return;
-    }
+  /**
+   * The one-step version of Issue then Send. The page reloads on failure as
+   * well as success: a send that failed AFTER the issue succeeded has still
+   * changed the invoice, and the error message says so.
+   */
+  function issueAndSend() {
     startTransition(async () => {
-      const result = await recordInvoicePaymentAction({
+      const result = await issueAndSendInvoiceAction({
         invoiceId: invoice.id,
         expectedVersion: invoice.version,
-        paymentDate: pay.date,
-        amountCents: cents,
-        depositAccountId: pay.depositAccountId,
-        method: pay.method,
-        memo: pay.memo.trim() || undefined,
+        to: issueTo.trim(),
       });
-      if ("error" in result) {
-        toast.error(result.error);
-        return;
+      setIssueOpen(false);
+      if ("error" in result) toast.error(result.error);
+      else {
+        toast.success(
+          result.data?.duplicate
+            ? `Invoice issued — already sent to ${result.data.to}`
+            : `Invoice issued and sent to ${result.data?.to}`,
+        );
       }
-      toast.success("Payment recorded");
-      setPayOpen(false);
       router.refresh();
     });
   }
@@ -166,7 +147,11 @@ export function InvoiceActions({
     <div className="flex flex-wrap gap-2">
       {invoice.status === "draft" && (
         <>
-          <Button size="sm" onClick={() => run("issue")} disabled={pending}>
+          <Button size="sm" onClick={() => setIssueOpen(true)} disabled={pending}>
+            <Send className="mr-1.5 size-3.5" />
+            Issue and send
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => run("issue")} disabled={pending}>
             Issue
           </Button>
           <Button
@@ -184,9 +169,18 @@ export function InvoiceActions({
         </>
       )}
       {["issued", "partial"].includes(invoice.status) && (
-        <Button size="sm" onClick={() => setPayOpen(true)} disabled={pending}>
-          Record payment
-        </Button>
+        <RecordPaymentButton
+          variant="default"
+          invoice={{
+            id: invoice.id,
+            version: invoice.version,
+            number: invoice.number,
+            balanceCents: invoice.balanceCents,
+          }}
+          depositOptions={depositOptions}
+          today={today}
+          paymentMethods={paymentMethods}
+        />
       )}
       {invoice.status === "issued" && (
         <Button size="sm" variant="outline" onClick={() => run("void")} disabled={pending}>
@@ -197,100 +191,36 @@ export function InvoiceActions({
         <Printer className="mr-1.5 size-3.5" /> Print
       </Button>
 
-      <Dialog open={payOpen} onOpenChange={setPayOpen}>
+      <Dialog open={issueOpen} onOpenChange={setIssueOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Record payment — {invoice.number}</DialogTitle>
+            <DialogTitle>Issue {invoice.number} and email it?</DialogTitle>
             <DialogDescription>
-              Balance due {formatCentsSigned(invoice.balanceCents)}. Recording is
-              bookkeeping only — no money moves through Yosher.
+              This posts it to the books, freezes its lines and starts the clock
+              on getting paid — then the invoice goes to the customer as a PDF
+              attachment.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-3 py-1">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="pay-date">Date</Label>
-                <Input
-                  id="pay-date"
-                  type="date"
-                  value={pay.date}
-                  onChange={(e) => setPay({ ...pay, date: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="pay-amount">Amount</Label>
-                <Input
-                  id="pay-amount"
-                  inputMode="decimal"
-                  className="text-right font-mono"
-                  value={pay.amount}
-                  onChange={(e) => setPay({ ...pay, amount: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Deposit to</Label>
-                <Select
-                  value={pay.depositAccountId || undefined}
-                  onValueChange={(v) => setPay({ ...pay, depositAccountId: v })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Account" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {depositOptions.map((o) => (
-                      <SelectItem key={o.id} value={o.id}>
-                        {o.label}
-                        {o.otherCompany ? ` — ${o.otherCompany}` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {chosenDeposit?.otherCompany && (
-                  // Said BEFORE it happens, the way the bill dialog says it.
-                  <p className="text-xs text-muted-foreground">
-                    The money is going into {chosenDeposit.otherCompany}&apos;s
-                    account. It will be recorded on both sides:{" "}
-                    {chosenDeposit.otherCompany} owes this company the amount
-                    until it is settled.
-                  </p>
-                )}
-              </div>
-              <div className="space-y-1.5">
-                <Label>Method</Label>
-                <Select
-                  value={pay.method}
-                  onValueChange={(v) => setPay({ ...pay, method: v })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {paymentMethods.map((m) => (
-                      <SelectItem key={m.code} value={m.code}>
-                        {m.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="pay-memo">Memo (optional)</Label>
-              <Input
-                id="pay-memo"
-                value={pay.memo}
-                onChange={(e) => setPay({ ...pay, memo: e.target.value })}
-              />
-            </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="issue-send-to">To</Label>
+            <Input
+              id="issue-send-to"
+              type="email"
+              value={issueTo}
+              onChange={(e) => setIssueTo(e.target.value)}
+              placeholder="customer@example.com"
+            />
+            <p className="text-xs text-muted-foreground">
+              From your business&apos;s sending address, with the invoice
+              attached.
+            </p>
           </div>
           <DialogFooter>
-            <Button
-              onClick={submitPayment}
-              disabled={pending || !pay.date || !pay.depositAccountId}
-            >
-              {pending ? "Recording…" : "Record payment"}
+            <Button variant="outline" onClick={() => setIssueOpen(false)} disabled={pending}>
+              Cancel
+            </Button>
+            <Button onClick={issueAndSend} disabled={pending || issueTo.trim() === ""}>
+              {pending ? "Issuing…" : "Issue and send"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -362,7 +292,7 @@ export function UnapplyPaymentButton({
  * Only offered for a sendable invoice: a draft would go out saying DRAFT and a
  * void one should not go out at all, so the server refuses both — this just
  * keeps the button off screen rather than letting somebody find out by
- * clicking it.
+ * clicking it. A draft's one-step `Issue and send` lives in `InvoiceActions`.
  */
 export function SendInvoiceButton({
   invoiceId,

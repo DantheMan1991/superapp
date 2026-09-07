@@ -518,30 +518,119 @@ export async function sendInvoiceAction(
       }),
     );
     if (!result.ok) return { error: result.message };
-
-    // Audited AFTER the send, and only on success: an audit row saying an
-    // invoice was emailed when it was not is worse than no row at all.
-    await withTenant(ctx.tenantId, (tx) =>
-      logAuditInTx(tx, {
-        action: "invoice.emailed",
-        tenantId: ctx.tenantId,
-        actorClerkUserId: ctx.userId,
-        targetType: "invoice",
-        targetId: parsed.data.invoiceId,
-        // Identifiers and coarse metadata only — the recipient's domain, not
-        // the address, per the audit rule in AGENTS.md.
-        meta: {
-          toDomain: to.split("@")[1] ?? "",
-          duplicate: result.duplicate,
-          sentAs: result.sentAs.kind,
-        },
-      }),
-    );
+    await auditInvoiceEmailed(ctx, parsed.data.invoiceId, to, result);
     revalidateSales(parsed.data.invoiceId);
     return { ok: true, data: { to, duplicate: result.duplicate } };
   } catch (err) {
     return fail(err);
   }
+}
+
+/**
+ * Audited AFTER the send, and only on success: an audit row saying an
+ * invoice was emailed when it was not is worse than no row at all. One
+ * function for the two actions that send, so the row cannot drift between
+ * them. Identifiers and coarse metadata only — the recipient's domain, not
+ * the address, per the audit rule in AGENTS.md.
+ */
+async function auditInvoiceEmailed(
+  ctx: LedgerCtx,
+  invoiceId: string,
+  to: string,
+  result: { duplicate: boolean; sentAs: { kind: string } },
+): Promise<void> {
+  await withTenant(ctx.tenantId, (tx) =>
+    logAuditInTx(tx, {
+      action: "invoice.emailed",
+      tenantId: ctx.tenantId,
+      actorClerkUserId: ctx.userId,
+      targetType: "invoice",
+      targetId: invoiceId,
+      meta: {
+        toDomain: to.split("@")[1] ?? "",
+        duplicate: result.duplicate,
+        sentAs: result.sentAs.kind,
+      },
+    }),
+  );
+}
+
+const issueAndSendSchema = z.object({
+  invoiceId: z.string().uuid(),
+  expectedVersion: z.number().int().min(1),
+  /**
+   * REQUIRED, unlike `sendInvoiceSchema`'s. The dialog will not submit
+   * without one, and requiring it here means the one send failure the server
+   * could have caught before issuing — no recipient at all — cannot reach the
+   * send step after the invoice is already in the books.
+   */
+  to: z.string().trim().email().max(320),
+});
+
+/**
+ * Issue, then email, from one dialog.
+ *
+ * Getting an invoice out was Save draft, Issue, confirm, Send, confirm —
+ * three dialogs for one job. This is the one.
+ *
+ * **TWO TRANSACTIONS, ON PURPOSE.** The send is a network call inside
+ * `sendInvoiceEmail`, and if it ran inside the issue's transaction a provider
+ * failure would roll the issue back after the email might already have gone
+ * — a customer holding an invoice the books do not have. So the issue commits
+ * and is audited first, exactly as `issueInvoiceAction` does it; a send that
+ * then fails leaves an ISSUED invoice and the message says both halves:
+ * issued, not sent, use Send. Nothing is silently half done.
+ */
+export async function issueAndSendInvoiceAction(
+  input: z.infer<typeof issueAndSendSchema>,
+): Promise<ActionResult<{ to: string; duplicate: boolean }>> {
+  const ctx = await gate();
+  const parsed = issueAndSendSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  const { invoiceId, expectedVersion, to } = parsed.data;
+
+  try {
+    await withTenant(ctx.tenantId, async (tx) => {
+      const inv = await issueInvoice(tx, ctx, { invoiceId, expectedVersion });
+      await logAuditInTx(tx, {
+        action: "invoice.issued",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "invoice",
+        targetId: inv.id,
+        meta: {
+          number: inv.invoiceNumber,
+          totalCents: inv.totalCents,
+          entryId: inv.journalEntryId,
+          andSend: true,
+        },
+      });
+    });
+  } catch (err) {
+    return fail(err);
+  }
+
+  try {
+    const { result, to: sentTo } = await withTenant(ctx.tenantId, (tx) =>
+      sendInvoiceEmail(tx, ctx, { invoiceId, toOverride: to }),
+    );
+    if (!result.ok) {
+      revalidateSales(invoiceId);
+      return { error: issuedButNotSent(result.message) };
+    }
+    await auditInvoiceEmailed(ctx, invoiceId, sentTo, result);
+    revalidateSales(invoiceId);
+    return { ok: true, data: { to: sentTo, duplicate: result.duplicate } };
+  } catch (err) {
+    if (!(err instanceof LedgerError)) console.error("invoicing action failed", err);
+    revalidateSales(invoiceId);
+    return { error: issuedButNotSent(friendlyMessage(err)) };
+  }
+}
+
+/** The invoice is in the books; only the email is missing. Say both. */
+function issuedButNotSent(reason: string): string {
+  return `Issued, but the email did not go: ${reason} Use Send to try again.`;
 }
 
 /* ---------------------------------------------------------------- reminders */

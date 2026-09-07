@@ -3,6 +3,7 @@ import type { Tx } from "@/db";
 import { getActiveModules } from "@/lib/modules";
 import { attentionSources } from "./registry";
 import type {
+  AttentionActionHandler,
   AttentionCtx,
   AttentionItem,
   AttentionSource,
@@ -96,6 +97,12 @@ export interface AttentionResult {
    * "nothing needs you today" may be said as a fact rather than a guess.
    */
   complete: boolean;
+  /**
+   * Every answering source's handlers, merged by kind, so the page can put a
+   * button beside an item whose `action.kind` it finds here. A kind with no
+   * handler renders as a plain row — never a button that does nothing.
+   */
+  actions: Record<string, AttentionActionHandler>;
 }
 
 /**
@@ -116,6 +123,7 @@ export async function collectAttention(
 
   const items: AttentionItem[] = [];
   const failed: AttentionResult["failed"] = [];
+  const actions: AttentionResult["actions"] = {};
   for (const outcome of outcomes) {
     if (outcome.status === "failed") {
       failed.push({
@@ -126,9 +134,10 @@ export async function collectAttention(
       continue;
     }
     items.push(...outcome.items);
+    Object.assign(actions, outcome.source.actions ?? {});
   }
 
-  return { items, failed, complete: failed.length === 0 };
+  return { items, failed, complete: failed.length === 0, actions };
 }
 
 /** Ordering weight. Lower sorts first. */

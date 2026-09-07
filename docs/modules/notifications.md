@@ -12,6 +12,48 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-07 — A verb beside the row (`claude/approve-from-what-needs-you`)
+
+The first one-tap action on What needs you, and the seam it needed. A bill
+waiting for approval carried a link to itself; approving it was open, read,
+Approve — three taps for a decision the owner makes from the title and the
+amount. Now the row carries {Approve} and the bill posts without leaving the
+page.
+
+- **`AttentionItem.action?`** (`types.ts`): `{ kind, label, done, args }`. The
+  SOURCE decides which items get a verb, and only obligations that need no
+  form qualify — "record this payment" needs a date, an account and a method,
+  so an overdue invoice stays a link. `args` carries the record's version, the
+  CAS the record page would send, so a bill edited after the list was drawn
+  is refused rather than approved on stale lines.
+- **`AttentionSource.actions?`**: handlers by kind, kinds namespaced by
+  module (`bill.approve`). `collectAttention` merges every ANSWERING source's
+  map into `AttentionResult.actions`, and the page renders a button only for
+  a kind it finds there — a kind with no handler is a plain row, never a
+  button that does nothing.
+- **A handler MUST be a server action.** The page hands it to a client
+  button, and React refuses a plain function at that boundary. So
+  `src/modules/accounting/attention/actions.ts` is `"use server"` and its
+  `approveBillFromAttentionAction` is `approveBillAction` — the bill page's
+  own button — reached from the feed: same gate (owners only, the expert
+  refused), same audit row, same period-lock and uncoded-line refusals. No
+  new authority anywhere; the seam only moves an existing button.
+- **The button sits beside the link, not inside it** (a button inside an
+  anchor is invalid HTML and navigates as well as acts). On success the page
+  refreshes and the row is simply gone, because it was derived; on refusal
+  the server's sentence is the toast and the row stays, because the
+  obligation does.
+- **The email never renders a verb.** A link is the only verb an email has,
+  and the email must not promise a button it cannot draw; `email.ts` reads
+  title, detail and href, as before. The digest's delta compares keys, and a
+  new optional field on the item changes nothing it compares.
+
+The eslint rule holds: the module's action file imports only `types.ts`; the
+page imports `resolve.ts`. Tests: the resolve suite pins that a failed
+source's handlers are not offered; the accounting DB case pins the item's
+`action` on a bill awaiting approval. Guide `what-needs-you.md` says what the
+button does and what an uncoded bill answers.
+
 ### 2026-09-06 — Push: the digest's second channel (`claude/mobile-app-2a-push-web`)
 
 The mobile app (ADR 0032) needs a reason to exist beyond the site in a box,

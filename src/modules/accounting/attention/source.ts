@@ -8,6 +8,7 @@ import type {
   AttentionItem,
   AttentionSource,
 } from "@/lib/attention-sources/types";
+import { approveBillFromAttentionAction } from "./actions";
 
 /**
  * What the books say you still owe: money owed TO the business that is late,
@@ -96,6 +97,9 @@ async function collect(tx: Tx, ctx: AttentionCtx): Promise<AttentionItem[]> {
         number: schema.bills.billNumber,
         dueDate: schema.bills.dueDate,
         totalCents: schema.bills.totalCents,
+        // The CAS the one-tap Approve sends, so the feed cannot approve a bill
+        // somebody edited after the list was drawn.
+        version: schema.bills.version,
       })
       .from(schema.bills)
       .where(
@@ -154,6 +158,15 @@ async function collect(tx: Tx, ctx: AttentionCtx): Promise<AttentionItem[]> {
       urgency: overdue ? "overdue" : "today",
       dueOn: bill.dueDate,
       href: `/dashboard/m/accounting/purchases/bills/${bill.id}`,
+      // The only one-tap verb accounting offers: approval is a decision the
+      // owner makes from the title and the amount. An overdue invoice's verb
+      // is "record the payment", which needs a form, so it stays a link.
+      action: {
+        kind: "bill.approve",
+        label: "Approve",
+        done: "Approved and posted.",
+        args: { billId: bill.id, version: bill.version },
+      },
     });
   }
 
@@ -205,4 +218,5 @@ export const accountingAttentionSource: AttentionSource = {
   moduleSlug: "accounting",
   label: "Accounting",
   collect,
+  actions: { "bill.approve": approveBillFromAttentionAction },
 };

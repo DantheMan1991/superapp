@@ -81,6 +81,41 @@ export interface AttentionCtx {
 /** How much a person is expected to care. Drives ordering, never filtering. */
 export type AttentionUrgency = "overdue" | "today" | "soon";
 
+export type AttentionActionArgs = Record<string, string | number>;
+
+/**
+ * A one-tap verb on an item, for the few obligations that need no form.
+ *
+ * "Approve this bill" is a decision the owner can make from the title and the
+ * amount; "record this payment" is not — it needs a date, an account and a
+ * method, so it stays a link to the record. `kind` names a handler the SOURCE
+ * registers in `AttentionSource.actions`; `args` is what that handler needs,
+ * and carries the record's version so a concurrent edit is refused rather than
+ * approved blind. The email never renders these: a link is the only verb an
+ * email has, and the email must not promise a button it cannot draw.
+ */
+export interface AttentionAction {
+  kind: string;
+  /** The button's label. "Approve". */
+  label: string;
+  /** The toast on success. "Approved and posted." */
+  done: string;
+  args: AttentionActionArgs;
+}
+
+export type AttentionActionResult = { ok: true } | { error: string };
+
+/**
+ * MUST be a server action — a function exported from a `"use server"` file —
+ * because the page hands it straight to a client button. A plain async
+ * function defined in a source module cannot cross that boundary; React
+ * refuses it at render. The handler gates, validates and audits exactly as the
+ * record page's own button would, because it IS that button's action.
+ */
+export type AttentionActionHandler = (
+  args: AttentionActionArgs,
+) => Promise<AttentionActionResult>;
+
 /**
  * One thing a person still owes.
  *
@@ -111,6 +146,8 @@ export interface AttentionItem {
    * different asks. The renderer groups on this.
    */
   unassigned?: boolean;
+  /** A verb the in-app page can offer beside the row. See `AttentionAction`. */
+  action?: AttentionAction;
 }
 
 /**
@@ -129,6 +166,12 @@ export interface AttentionSource {
   /** Shown as the section heading. "Accounting", not "accounting". */
   label: string;
   collect(tx: Tx, ctx: AttentionCtx): Promise<AttentionItem[]>;
+  /**
+   * The handlers behind this source's `AttentionAction.kind`s, keyed by kind.
+   * Namespace the kind with the module ("bill.approve"), because the page
+   * merges every enabled source's map into one.
+   */
+  actions?: Record<string, AttentionActionHandler>;
 }
 
 /**

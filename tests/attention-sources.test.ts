@@ -59,6 +59,28 @@ describe("collectAttention", () => {
     expect(result.failed).toEqual([]);
   });
 
+  it("merges handlers from every ANSWERING source; a failed source's are not offered", async () => {
+    const approve = async () => ({ ok: true as const });
+    const withVerb = source("a", async () => [
+      item("a", {
+        action: { kind: "a.do", label: "Do", done: "Done.", args: { id: "1" } },
+      }),
+    ]);
+    const broken = source("b", async () => {
+      throw new Error("boom");
+    });
+    const result = await collectAttention(TX, CTX, [
+      { ...withVerb, actions: { "a.do": approve } },
+      { ...broken, actions: { "b.do": approve } },
+    ]);
+    // The item carries its verb, and the page can find the handler by kind.
+    expect(result.items[0].action?.kind).toBe("a.do");
+    expect(Object.keys(result.actions)).toEqual(["a.do"]);
+    // A source that could not answer offers no verbs: a button whose source is
+    // down would fail at the tap, after promising it could be done here.
+    expect(result.failed.map((f) => f.slug)).toEqual(["b"]);
+  });
+
   it("REPORTS a throwing source instead of returning an empty list", async () => {
     // The whole point. Folding this to [] would tell somebody they owe nothing
     // when Accounting has seven overdue invoices for them.
@@ -263,6 +285,80 @@ dd("the real sources, against Postgres", () => {
     );
     expect(staff.items).toEqual([]);
     expect(staff.complete).toBe(true);
+  });
+
+  it("a bill awaiting approval carries the one-tap Approve, with the version the page would send", async () => {
+    /**
+     * The verb is data on the item, and the handler is the source's own —
+     * `approveBillAction` behind a `"use server"` wrapper. What this pins is
+     * the contract between them: the kind the page looks up, and the args the
+     * handler validates, including the CAS version after submission bumped it.
+     */
+    const { withTenant, schema } = await import("../src/db");
+    const { and, eq } = await import("drizzle-orm");
+    const { provisionAccounting } = await import(
+      "../src/modules/accounting/templates/apply"
+    );
+    const { createVendor } = await import(
+      "../src/modules/accounting/payables/vendors"
+    );
+    const { createBillDraft, submitBill } = await import(
+      "../src/modules/accounting/payables/bills"
+    );
+    const { accountingAttentionSource } = await import(
+      "../src/modules/accounting/attention/source"
+    );
+    const owner = { tenantId, userId: "user_1", role: "owner" as const };
+    const staff = { tenantId, userId: "user_2", role: "staff" as const };
+
+    await withTenant(tenantId, (tx) => provisionAccounting(tx, tenantId));
+    const expense = await withTenant(tenantId, (tx) =>
+      tx.query.accounts.findFirst({
+        where: and(
+          eq(schema.accounts.tenantId, tenantId),
+          eq(schema.accounts.code, "6400"),
+        ),
+      }),
+    );
+    const vendor = await withTenant(tenantId, (tx) =>
+      createVendor(tx, owner, { name: "Valley Feed" }),
+    );
+    const draft = await withTenant(tenantId, (tx) =>
+      createBillDraft(tx, staff, {
+        vendorId: vendor.id,
+        billDate: "2026-08-01",
+        lines: [{ description: "Feed", amountCents: 9_000, accountId: expense!.id }],
+      }),
+    );
+    const submitted = await withTenant(tenantId, (tx) =>
+      submitBill(tx, staff, { billId: draft.id, expectedVersion: draft.version }),
+    );
+
+    const result = await withTenant(
+      tenantId,
+      (tx) =>
+        collectAttention(
+          tx,
+          { tenantId, userId: "user_1", role: "owner", today: "2026-08-06" },
+          [accountingAttentionSource],
+        ),
+      { role: "owner", userId: "user_1" },
+    );
+    const item = result.items.find((i) => i.key === `bill:${draft.id}`);
+    expect(item?.action).toEqual({
+      kind: "bill.approve",
+      label: "Approve",
+      done: "Approved and posted.",
+      args: { billId: draft.id, version: submitted.version },
+    });
+    // The page finds the handler by the item's kind, and it is the source's.
+    expect(result.actions["bill.approve"]).toBe(
+      accountingAttentionSource.actions!["bill.approve"],
+    );
+    // An overdue invoice would have none; here, nothing else carries a verb.
+    expect(result.items.filter((i) => i.action).map((i) => i.key)).toEqual([
+      `bill:${draft.id}`,
+    ]);
   });
 
   it("A FAILING TEMPLATE reaches the owner as an overdue item; a paused or clean one does not", async () => {

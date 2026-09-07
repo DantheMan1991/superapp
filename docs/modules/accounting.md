@@ -13,6 +13,21 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-07 — Approve from What needs you (`claude/approve-from-what-needs-you`)
+
+The last of the row-action items from the improvement pass. A bill waiting
+for approval reaches the owner on What needs you as a link; approving it was
+open, read, Approve. The row now carries the verb: `attention/source.ts`
+puts `action: { kind: "bill.approve", … args: { billId, version } }` on the
+item, and `attention/actions.ts` (`"use server"`, the first such file under
+a module's attention folder) exposes `approveBillFromAttentionAction`, which
+is `approveBillAction` — the bill page's own button, same gate, same audit,
+same refusals — with the item's `version` as the CAS. The seam itself
+(`AttentionItem.action`, `AttentionSource.actions`, the button beside the
+row) is in [notifications.md](notifications.md). Overdue invoices keep their
+link: recording a payment needs a form, and the feed does not draw forms.
+Guide: `docs/help/workspace/what-needs-you.md`.
+
 ### 2026-09-07 — Forms on a phone (`claude/forms-on-a-phone`)
 
 Fifth slice of the improvement pass, the phone half of what the review
@@ -3585,7 +3600,8 @@ screen shipped without such a session as compiled-and-tested, not seen.
   the review-queue slice in the build log is the first thing built from it.
   Still open, roughly in value order: ~~an **Issue and send** on the invoice~~
   (DONE 2026-09-06, `claude/issue-and-send`); ~~**Record payment and Approve as row actions** on the invoice and bill
-  lists~~ (DONE 2026-09-06/07) and on What needs you, which links only;
+  lists~~ (DONE 2026-09-06/07) and ~~on What needs you~~ (Approve DONE 2026-09-07,
+  `claude/approve-from-what-needs-you`);
   ~~**the whole list row as the link**~~ (DONE on both lists); **a customer
   created from the invoice form** the way the bill form creates a vendor;
   **vendor default terms**, and a control for the `customers.payment_terms_id`

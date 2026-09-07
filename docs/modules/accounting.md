@@ -13,6 +13,38 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-07 — Bills in fewer taps (`claude/bills-in-fewer-taps`)
+
+The bills half of the second slice, now that `LinkRow` and the row-dialog
+pattern are on main.
+
+- **Approve and Record payment at the end of a Bills row** (owners).
+  Approve is the one-tap posting the bill page already had — never
+  confirmed there either, because the owner has read the bill — so a bill
+  waiting on an owner is Purchases → `Awaiting approval` → Approve, three
+  taps where it was five. What the list cannot know is whether every line is
+  coded, so an uncoded bill answers with the server's `Every line needs an
+  account before approval.` and the owner opens it, which they would have
+  done anyway. Record payment is the bill page's dialog, moved out of
+  `bill-detail-controls.tsx` into `record-bill-payment-dialog.tsx` and
+  mounted on a row only while open, as the invoice one is.
+- **`paidFromRegistersFor`** (`lib/deposit-options.ts`, pure, tested beside
+  `depositOptionsFor`) builds each row's paid-from list relative to that
+  bill's company; the bill page uses it too, so the affiliate labelling
+  cannot differ between the two.
+- **The row is the link** (`LinkRow`), the vendor's name still a real link
+  inside it.
+- **Void and Unapply are dialogs.** The bill page still ran `window.confirm()`
+  for both — missed by the 2026-08-12 sweep that made every confirmation a
+  dialog — and inside the app shell that is an OS alert with none of the
+  product's words on it. `useConfirm` now, with copy that says what the
+  void does to a matched bank row. The Inbox's `Disable email-in` is the last
+  native confirm in the module.
+
+Guides `bills.md` (row click, the two buttons, approving from the list) and
+`bill.md` (the two dialogs, the list's button). Not built: Approve on What
+needs you, which stays links-only until `AttentionItem` grows an action seam.
+
 ### 2026-09-06 — Transfers between your own accounts (`claude/own-account-transfers`)
 
 Third slice of the improvement pass, and the one real accounting gap on its
@@ -3518,10 +3550,9 @@ screen shipped without such a session as compiled-and-tested, not seen.
   works, then gaps), verified against the code and the real screens at 375px;
   the review-queue slice in the build log is the first thing built from it.
   Still open, roughly in value order: ~~an **Issue and send** on the invoice~~
-  (DONE 2026-09-06, `claude/issue-and-send`); **Record payment and Approve as
-  row actions** on the ~~invoice~~ (invoice half DONE the same day) and bill
-  lists and on What needs you, which links only; **the whole list row as the
-  link** (~~invoices~~ DONE; bills still only the vendor cell); **a customer
+  (DONE 2026-09-06, `claude/issue-and-send`); ~~**Record payment and Approve as row actions** on the invoice and bill
+  lists~~ (DONE 2026-09-06/07) and on What needs you, which links only;
+  ~~**the whole list row as the link**~~ (DONE on both lists); **a customer
   created from the invoice form** the way the bill form creates a vendor;
   **vendor default terms**, and a control for the `customers.payment_terms_id`
   column that already exists; the `Combobox` on the vendor, customer and
@@ -3532,8 +3563,8 @@ screen shipped without such a session as compiled-and-tested, not seen.
   transaction** across categories; the bill and invoice line editors as
   stacked blocks on a phone (`min-w-[640px]`/`[700px]` grids scroll sideways
   inside the form); money tiles and Overview cards two-up under `sm` rather
-  than one column; the three native `window.confirm()` left (bill void,
-  unapply, disable email-in); `loading.tsx` under the accounting routes; an
+  than one column; the one native `window.confirm()` left (disable email-in; bill
+  void and unapply became dialogs 2026-09-07); `loading.tsx` under the accounting routes; an
   explicit camera control on the Inbox upload for the app
 - **Fixed assets carry a company** (2026-08-17, `0154`) — the last item on ADR 0010's list. `entityForDocument`/`entityOfDocument` are DELETED with it: nothing infers a company from where an entry happened to land any more. **Nothing is owed in the migration lane** — `assets.entity_id` stays NULLABLE, unlike every other one, because the assets pack `requires: []` and a tenant can register equipment with no books at all
 - **An invoice banked into another company's account is RECORDED** (2026-08-17), the mirror of the bill case and the last item ADR 0010 listed as refused. It also closed a live hole in the bill path: unapplying an intercompany payment voided ONE leg, because `assertNotIntercompanyLeg` lived only in the action layer. The guard is in `voidEntry`/`reverseEntry` now and `voidIntercompanyPair` is the undo that takes both

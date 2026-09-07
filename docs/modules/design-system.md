@@ -440,7 +440,7 @@ directory is stock shadcn and stays upgradeable. These compose it.
 | `HelpButton` | **yes** | — (new: the "?" in `PageHeader`'s actions row and Mail's bar, and the guide sheet it opens) |
 | `GuideControl` | **yes** | — (new: the real `Button` or `Badge` a guide draws from a `{button:…}` marker; live in the help panel, where it points at the control on the page) |
 | `Combobox` | **yes** | A Radix `Select` over a long list (2026-09-06: the bank review queue's category picker; the vendor, customer and line-account pickers are next) |
-| `LinkRow` | **yes** | A `TableRow` whose only link was one cell (2026-09-06: the Invoices list; the Bills list is next) |
+| `LinkRow` | **yes** | A `TableRow` whose only link was one cell (2026-09-06: the Invoices list; 2026-09-07: the Bills list) |
 
 ### `DataTable` is a container, not a table
 

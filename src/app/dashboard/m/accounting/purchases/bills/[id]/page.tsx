@@ -36,7 +36,9 @@ import {
 } from "@/modules/accounting/lib/money";
 import { PurchasesNav } from "../../purchases-nav";
 import { BillBuilder } from "../bill-builder";
-import { BillActions, RecordBillPaymentDialogButton, UnapplyBillPaymentButton } from "./bill-detail-controls";
+import { paidFromRegistersFor } from "@/modules/accounting/lib/deposit-options";
+import { BillActions, UnapplyBillPaymentButton } from "./bill-detail-controls";
+import { RecordBillPaymentButton } from "../record-bill-payment-dialog";
 
 export const dynamic = "force-dynamic";
 
@@ -363,25 +365,16 @@ export default async function BillDetailPage({
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <CardTitle className="text-base">Payments</CardTitle>
             {isOwner && ["approved", "partial"].includes(bill.status) && (
-              <RecordBillPaymentDialogButton
-                billId={bill.id}
-                version={bill.version}
-                remainingCents={remaining}
+              <RecordBillPaymentButton
+                bill={{ id: bill.id, version: bill.version, remainingCents: remaining }}
                 today={data.today}
-                registers={data.registers.map((r) => ({
-                  ledgerAccountId: r.accountId,
-                  name: r.name,
-                  kind: r.kind,
-                  // Named only when it is somebody ELSE'S account, because
-                  // that is the only time the answer changes what gets
-                  // written — and a label on every row would be noise for
-                  // the single-company tenant.
-                  otherCompany:
-                    r.entityId === bill.entityId
-                      ? undefined
-                      : (data.companies.find((c) => c.id === r.entityId)?.name ??
-                        "another company"),
-                }))}
+                // One function with the Bills list, which offers the same
+                // dialog on a row — the affiliate labelling cannot differ.
+                registers={paidFromRegistersFor({
+                  registers: data.registers,
+                  companies: data.companies,
+                  entityId: bill.entityId,
+                })}
               />
             )}
           </CardHeader>

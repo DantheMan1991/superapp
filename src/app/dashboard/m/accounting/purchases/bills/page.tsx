@@ -10,6 +10,10 @@ import { PageHeader } from "@/components/app/page-header";
 import { DataTable } from "@/components/app/data-table";
 import { EmptyState } from "@/components/app/empty-state";
 import { FilterPills } from "@/components/app/filter-pills";
+import { LinkRow } from "@/components/app/link-row";
+import { paidFromRegistersFor } from "@/modules/accounting/lib/deposit-options";
+import { ApproveBillButton } from "./approve-bill-button";
+import { RecordBillPaymentButton } from "./record-bill-payment-dialog";
 import {
   Table,
   TableBody,
@@ -207,8 +211,25 @@ export default async function BillsPage({
       .orderBy(desc(schema.bills.billDate), desc(schema.bills.createdAt))
       .limit(200);
     const aging = await getApAging(tx, tenantId, today, entityView.scope);
-    return { bills, aging, today, tally, inBucket, entityView };
+    /**
+     * What the row's Record payment needs: every active register, other
+     * companies' included, labelled per row by `paidFromRegistersFor` — the
+     * same list the bill page loads for the same dialog. Owners only,
+     * because only owners get the button.
+     */
+    const registers =
+      ctx.role === "owner"
+        ? await tx.query.bankAccounts.findMany({
+            where: and(
+              eq(schema.bankAccounts.tenantId, tenantId),
+              eq(schema.bankAccounts.isActive, true),
+            ),
+            columns: { accountId: true, name: true, kind: true, entityId: true },
+          })
+        : [];
+    return { bills, aging, today, tally, inBucket, entityView, registers };
   });
+  const isOwner = ctx.role === "owner";
 
   const companyName = new Map(data.entityView.entities.map((e) => [e.id, e.name]));
   const showCompany = data.entityView.entities.length > 1;
@@ -323,6 +344,7 @@ export default async function BillsPage({
               <TableHead className="text-right">Total</TableHead>
               <TableHead className="text-right">Balance</TableHead>
               <TableHead>Status</TableHead>
+              {isOwner && <TableHead />}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -335,12 +357,16 @@ export default async function BillsPage({
                 today: data.today,
               });
               const awaiting = bill.status === "awaiting_approval";
+              const href = `/dashboard/m/accounting/purchases/bills/${bill.id}`;
               return (
-                <TableRow key={bill.id}>
+                // The whole row opens the bill; the vendor's name stays a real
+                // link inside it. See link-row.tsx for what a row click leaves
+                // alone.
+                <LinkRow key={bill.id} href={href}>
                   <TableCell>
                     <Link
                       className="font-medium underline-offset-2 hover:underline"
-                      href={`/dashboard/m/accounting/purchases/bills/${bill.id}`}
+                      href={href}
                     >
                       {vendorName}
                     </Link>
@@ -377,7 +403,33 @@ export default async function BillsPage({
                       {awaiting ? "Awaiting approval" : obligation.label}
                     </Badge>
                   </TableCell>
-                </TableRow>
+                  {isOwner && (
+                    // Always visible, never hover-revealed: on a phone there
+                    // is no hover, and these are the buttons the phone is for.
+                    <TableCell className="whitespace-nowrap text-right">
+                      {["draft", "awaiting_approval"].includes(bill.status) && (
+                        <ApproveBillButton
+                          billId={bill.id}
+                          version={bill.version}
+                          className="h-7"
+                        />
+                      )}
+                      {["approved", "partial"].includes(bill.status) && (
+                        <RecordBillPaymentButton
+                          variant="outline"
+                          className="h-7"
+                          bill={{ id: bill.id, version: bill.version, remainingCents: balance }}
+                          today={data.today}
+                          registers={paidFromRegistersFor({
+                            registers: data.registers,
+                            companies: data.entityView.entities,
+                            entityId: bill.entityId,
+                          })}
+                        />
+                      )}
+                    </TableCell>
+                  )}
+                </LinkRow>
               );
             })}
           </TableBody>

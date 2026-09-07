@@ -5,7 +5,7 @@
 > **Order:** 160
 > **Area:** Purchases
 
-Open **Purchases** in the accounting menu and click a vendor's name in the list. Everything that happens to one bill happens here: a staff member submits it, an owner approves it with {button:Approve|primary}, records payments against it, and voids it if it was wrong.
+Open **Purchases** in the accounting menu and click a bill's row in the list. Everything that happens to one bill happens here: a staff member submits it, an owner approves it with {button:Approve|primary}, records payments against it, and voids it if it was wrong.
 
 ## What you see
 
@@ -26,7 +26,7 @@ Open **Purchases** in the accounting menu and click a vendor's name in the list.
 
 ## How to record a payment
 
-1. Click {button:Record payment|outline}. The dialog reads `Posts Dr Accounts Payable / Cr the paid-from account. Remaining: $640.00. Record-keeping only — no money moves.`
+1. Click {button:Record payment|outline}, here or at the end of the bill's row on the Bills list. The dialog reads `Posts Dr Accounts Payable / Cr the paid-from account. Remaining: $640.00. Record-keeping only — no money moves.`
 2. Leave `Amount` as the full remaining balance, or change it for a part payment. Set `Date`, today to begin with.
 3. Pick `Paid from`, the bank or card account the money left. It starts on the first account belonging to this bill's company. If your books hold more than one company, the other companies' accounts are listed too, each marked with its company's name, and choosing one shows a sentence first: `Oak Row LLC is paying this. It will be recorded on both sides: this company owes Oak Row LLC the amount until it is settled.`
 4. Pick `Method`: `Check` to begin with, or `Bank transfer`, `Card`, `Cash` or `Other`. Add a `Memo` if you want one.
@@ -34,13 +34,13 @@ Open **Purchases** in the accounting menu and click a vendor's name in the list.
 
 ## How to undo a payment
 
-1. Click the {icon:undo} at the end of the payment. It asks `Unapply this payment? Its ledger entry will be voided.`
-2. Confirm. You see `Payment unapplied.` The payment's entry is voided, both sides if another company paid, the bill's stage is worked out again, and a bank transaction matched to it goes back to review.
+1. Click the {icon:undo} at the end of the payment. The dialog is `Unapply this payment?` and reads `Its ledger entry is voided — both sides if another company paid — and the bill goes back to owing this much. A reconciled payment cannot be unapplied at all.`
+2. Click {button:Unapply payment|destructive}. You see `Payment unapplied.` The payment's entry is voided, both sides if another company paid, the bill's stage is worked out again, and a bank transaction matched to it goes back to review.
 
 ## How to void a bill
 
-1. Click {button:Void|outline}. It asks `Void this bill? Its ledger entry will be voided too.`
-2. Confirm. You see `Bill voided.` A bank transaction that had been matched to the bill goes back to review.
+1. Click {button:Void|outline}. The dialog is `Void this bill?` and reads `Its ledger entry is voided too. A bank transaction matched to it goes back to review.`
+2. Click {button:Void bill|destructive}. You see `Bill voided.` A bank transaction that had been matched to the bill goes back to review.
 
 ## How to attach a document
 

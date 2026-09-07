@@ -13,6 +13,29 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-07 — Bills we owe reach What needs you (`claude/ap-reminders`)
+
+**What.** The AP mirror of the customer reminders, built as attention items
+rather than emails to anybody: the accounting attention source now lists
+every approved or part-paid bill whose due date is within
+`BILL_DUE_SOON_DAYS` (7) or past — `Bill 91 from Valley Feed Co is due in
+3 days` / `is due today` / `is 2 days overdue`, with the BALANCE owed as the
+detail (a part-paid bill is a smaller ask), urgency `soon` / `today` /
+`overdue`, a link to the bill and no one-tap verb, because recording a
+payment needs a form. Owners only, like every accounting item (no assignee
+column). The daily digest carries them for free, since it renders the same
+items. Pinned in `tests/attention-sources.test.ts`: due in 3 days, 2 days
+overdue, a month out absent, a draft absent, no action.
+
+**Why a fixed week and no schedule.** The customer reminders have a
+schedule because they go OUT to somebody and a wrong day costs goodwill;
+this only tells the owner, and a week is what "coming up" means to anyone
+paying bills on a Friday. A setting would be a control with nothing behind
+it until a client asks for a different horizon.
+
+**Guides.** `what-needs-you.md`. Dossier `notifications.md` names the new
+items among the source's.
+
 ### 2026-09-07 — A customer's statement (`claude/customer-statements`)
 
 **What.** `Statement` on a customer's row menu and on the customer's name
@@ -3864,7 +3887,7 @@ screen shipped without such a session as compiled-and-tested, not seen.
 - Recurring-invoice cron (fast-follow; zero schema change needed)
 - Industry-pack dimension packs ("P&L by property" seam live but no pack registered yet — Real Estate pack is the planned next build)
 - **Invoice delivery is done** (PDF + email, 2026-08-10). What is NOT built: a `Viewed` signal, which would need a tracked open or a public link — and a public payor view is deliberately not planned, since payment processing for tenants' customers is out of scope by design
-- **Automatic overdue reminders are DONE** (2026-08-11) — see the build log. What is not built: a reminder for **bills we owe** (the AP mirror), and reminder wording an owner can edit, both deliberately left until somebody asks
+- **Automatic overdue reminders are DONE** (2026-08-11) — see the build log. ~~What is not built: a reminder for **bills we owe** (the AP mirror)~~ (DONE 2026-09-07 as attention items, `claude/ap-reminders`); reminder wording an owner can edit is deliberately left until somebody asks
 - **General Ledger and Transaction Detail by Account are DONE** (2026-08-11) — one report with an account filter, so seven reports now. See the build log for the accrual-only decision
 - **P&L by Month is DONE** (2026-08-12) — the by-dimension column spread generalized to time. ~~What is NOT built: quarter and year columns, which the same `periods` seam would carry with a different bucketer~~ Quarter and year columns DONE 2026-09-07 (`claude/pnl-columns`), on the fiscal year
 - **Drafting from an email thread is DONE** (2026-08-12) — both directions, with verified citations, and **proven against the real API** (see the build log; `RUN_LIVE_THREAD_DRAFT=1`). Now worth doing: the drafter sets no due date because it does not know `payment_terms` exists — resolving the customer's default term in the accept path would close that. What is NOT built: auto-linking the accepted draft back to the thread (deliberate, see the build log), and drafting from a thread the *reader does not own*, which RLS forbids by design

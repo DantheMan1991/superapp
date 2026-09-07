@@ -361,6 +361,87 @@ dd("the real sources, against Postgres", () => {
     ]);
   });
 
+  it("a bill we owe reaches the owner a week before it is due, and after; a draft or a far-off one does not", async () => {
+    const { withTenant, schema } = await import("../src/db");
+    const { and, eq } = await import("drizzle-orm");
+    const { createVendor } = await import(
+      "../src/modules/accounting/payables/vendors"
+    );
+    const { approveBill, createBillDraft } = await import(
+      "../src/modules/accounting/payables/bills"
+    );
+    const { accountingAttentionSource } = await import(
+      "../src/modules/accounting/attention/source"
+    );
+    const owner = { tenantId, userId: "user_1", role: "owner" as const };
+    // Provisioned by the approval test above; the chart is idempotent anyway.
+    const expense = await withTenant(tenantId, (tx) =>
+      tx.query.accounts.findFirst({
+        where: and(
+          eq(schema.accounts.tenantId, tenantId),
+          eq(schema.accounts.code, "6400"),
+        ),
+      }),
+    );
+    const vendor = await withTenant(tenantId, (tx) =>
+      createVendor(tx, owner, { name: "Ridgeline Feed" }),
+    );
+    const approved = async (dueDate: string, amountCents: number) => {
+      const draft = await withTenant(tenantId, (tx) =>
+        createBillDraft(tx, owner, {
+          vendorId: vendor.id,
+          billNumber: `RF-${dueDate}`,
+          billDate: "2026-08-01",
+          dueDate,
+          lines: [{ description: "Feed", amountCents, accountId: expense!.id }],
+        }),
+      );
+      return withTenant(tenantId, (tx) =>
+        approveBill(tx, owner, { billId: draft.id, expectedVersion: draft.version }),
+      );
+    };
+    const soon = await approved("2026-08-09", 12_000);
+    const late = await approved("2026-08-04", 5_000);
+    const farOff = await approved("2026-09-05", 7_000);
+    const draft = await withTenant(tenantId, (tx) =>
+      createBillDraft(tx, owner, {
+        vendorId: vendor.id,
+        billDate: "2026-08-01",
+        dueDate: "2026-08-07",
+        lines: [{ description: "Not yet ours", amountCents: 1_000, accountId: expense!.id }],
+      }),
+    );
+
+    const result = await withTenant(
+      tenantId,
+      (tx) =>
+        collectAttention(
+          tx,
+          { tenantId, userId: "user_1", role: "owner", today: "2026-08-06" },
+          [accountingAttentionSource],
+        ),
+      { role: "owner", userId: "user_1" },
+    );
+    const byKey = new Map(result.items.map((i) => [i.key, i]));
+    expect(byKey.get(`bill-due:${soon.id}`)).toMatchObject({
+      title: "Bill RF-2026-08-09 from Ridgeline Feed is due in 3 days",
+      detail: "120.00 owed",
+      urgency: "soon",
+      dueOn: "2026-08-09",
+      href: `/dashboard/m/accounting/purchases/bills/${soon.id}`,
+    });
+    expect(byKey.get(`bill-due:${late.id}`)).toMatchObject({
+      title: "Bill RF-2026-08-04 from Ridgeline Feed is 2 days overdue",
+      detail: "50.00 owed",
+      urgency: "overdue",
+    });
+    // A month out is not yet a reminder; a draft is not yet a debt.
+    expect(byKey.has(`bill-due:${farOff.id}`)).toBe(false);
+    expect(byKey.has(`bill-due:${draft.id}`)).toBe(false);
+    // No one-tap verb: recording a payment needs a form.
+    expect(byKey.get(`bill-due:${soon.id}`)?.action).toBeUndefined();
+  });
+
   it("A FAILING TEMPLATE reaches the owner as an overdue item; a paused or clean one does not", async () => {
     /**
      * The sweep's note (`last_error`) used to be visible only on the recurring

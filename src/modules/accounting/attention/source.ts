@@ -1,8 +1,9 @@
 import "server-only";
-import { and, eq, inArray, isNotNull, lt, lte, ne } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt, lte, ne, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { failureSentence } from "../core/errors";
 import { formatCents } from "../lib/money";
+import { addDaysIso } from "../lib/dates";
 import type {
   AttentionCtx,
   AttentionItem,
@@ -68,11 +69,24 @@ import { approveBillFromAttentionAction } from "./actions";
 /** Unpaid, from the business's point of view: issued and part-paid both count. */
 const UNPAID_INVOICE_STATUSES = ["issued", "partial"] as const;
 
+/** Owed, from the business's point of view: approved and part-paid both count. */
+const OWED_BILL_STATUSES = ["approved", "partial"] as const;
+
+/**
+ * How far ahead a bill we owe is worth a line (2026-09-07) — the AP mirror
+ * of the customer reminders. A week is the invoice list's own "due soon"
+ * horizon, and a fixed one rather than a setting: the customer reminders
+ * have a schedule because they go OUT to somebody and a wrong day costs
+ * goodwill; this only tells the owner, and seven days is what "coming up"
+ * means to anyone paying bills on a Friday.
+ */
+export const BILL_DUE_SOON_DAYS = 7;
+
 async function collect(tx: Tx, ctx: AttentionCtx): Promise<AttentionItem[]> {
   // See the header: no assignee column means role is the only honest scope.
   if (ctx.role !== "owner") return [];
 
-  const [overdueInvoices, billsToApprove, failingTemplates] = await Promise.all([
+  const [overdueInvoices, billsToApprove, billsDue, failingTemplates] = await Promise.all([
     tx
       .select({
         id: schema.invoices.id,
@@ -106,6 +120,33 @@ async function collect(tx: Tx, ctx: AttentionCtx): Promise<AttentionItem[]> {
         and(
           eq(schema.bills.tenantId, ctx.tenantId),
           eq(schema.bills.status, "awaiting_approval"),
+        ),
+      )
+      .limit(50),
+    // Bills we owe that fall due within the week, or already have. The
+    // balance rather than the total: a part-paid bill is a smaller ask.
+    tx
+      .select({
+        id: schema.bills.id,
+        number: schema.bills.billNumber,
+        dueDate: schema.bills.dueDate,
+        vendorName: schema.vendors.name,
+        balanceCents: sql<string>`(${schema.bills.totalCents} - coalesce((select sum(${schema.billPayments.amountCents}) from ${schema.billPayments} where ${schema.billPayments.tenantId} = ${schema.bills.tenantId} and ${schema.billPayments.billId} = ${schema.bills.id}), 0))`,
+      })
+      .from(schema.bills)
+      .innerJoin(
+        schema.vendors,
+        and(
+          eq(schema.vendors.tenantId, schema.bills.tenantId),
+          eq(schema.vendors.id, schema.bills.vendorId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.bills.tenantId, ctx.tenantId),
+          inArray(schema.bills.status, [...OWED_BILL_STATUSES]),
+          isNotNull(schema.bills.dueDate),
+          lte(schema.bills.dueDate, addDaysIso(ctx.today, BILL_DUE_SOON_DAYS)),
         ),
       )
       .limit(50),
@@ -167,6 +208,27 @@ async function collect(tx: Tx, ctx: AttentionCtx): Promise<AttentionItem[]> {
         done: "Approved and posted.",
         args: { billId: bill.id, version: bill.version },
       },
+    });
+  }
+
+  for (const bill of billsDue) {
+    // The mirror of the overdue invoice, one week early: a bill due Friday is
+    // worth a line on Monday, because the cash has to be there. The verb is
+    // "record the payment", which needs a form, so this stays a link.
+    const days = daysBetween(bill.dueDate!, ctx.today);
+    const name = `Bill ${bill.number || "(no number)"} from ${bill.vendorName}`;
+    items.push({
+      key: `bill-due:${bill.id}`,
+      title:
+        days > 0
+          ? `${name} is ${days === 1 ? "1 day" : `${days} days`} overdue`
+          : days === 0
+            ? `${name} is due today`
+            : `${name} is due in ${days === -1 ? "1 day" : `${-days} days`}`,
+      detail: `${formatCents(Number(bill.balanceCents))} owed`,
+      urgency: days > 0 ? "overdue" : days === 0 ? "today" : "soon",
+      dueOn: bill.dueDate,
+      href: `/dashboard/m/accounting/purchases/bills/${bill.id}`,
     });
   }
 

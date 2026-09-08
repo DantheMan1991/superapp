@@ -127,6 +127,7 @@ export function RemoveTreatmentButton({
 export interface ExistingTreatment {
   id: string;
   treatedOn: string;
+  courseDays: number;
   product: string;
   dose: string;
   route: string;
@@ -277,8 +278,14 @@ export function RecordTreatmentForm({
     }
 
     const quantity = Number(String(formData.get("stockQuantity") ?? "0"));
+    const courseDays = Number(String(formData.get("courseDays") ?? "1"));
+    if (!Number.isInteger(courseDays) || courseDays < 1) {
+      toast.error("A course runs for at least one day.");
+      return;
+    }
     const fields = {
       treatedOn: String(formData.get("treatedOn") ?? today),
+      courseDays,
       product: name,
       dose: String(formData.get("dose") ?? ""),
       route,
@@ -379,6 +386,25 @@ export function RecordTreatmentForm({
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
+                <Label htmlFor={`course-${fieldId}`}>Given for (days)</Label>
+                <Input
+                  id={`course-${fieldId}`}
+                  name="courseDays"
+                  type="number"
+                  min="1"
+                  step="1"
+                  defaultValue={existing?.courseDays ?? 1}
+                  required
+                />
+                {/* The label's own rule, and the reason a course is one
+                    record with a length rather than five: the fifth dose is
+                    the one the clock counts from. */}
+                <p className="text-xs text-muted-foreground">
+                  One for a single dose. A course counts its withdrawal from
+                  the last day.
+                </p>
+              </div>
+              <div className="grid gap-2">
                 <Label htmlFor={`dose-${fieldId}`}>Dose</Label>
                 <Input
                   id={`dose-${fieldId}`}
@@ -388,6 +414,9 @@ export function RecordTreatmentForm({
                   placeholder="e.g. 1 cc per 100 lb"
                 />
               </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label htmlFor={`route-${fieldId}`}>How</Label>
                 <Select value={route} onValueChange={setRoute}>

@@ -141,6 +141,7 @@ import {
   clearsOn,
   describeWithdrawal,
   formatWithdrawal,
+  lastDoseOn,
   lotWithdrawal,
 } from "@/packs/livestock/core/withdrawal";
 import {
@@ -1476,8 +1477,10 @@ export default async function LivestockLotPage({
               in the pack where a wrong figure is a legal problem. */}
           <ul className="space-y-3 md:hidden">
             {treatments.map((t) => {
-              const meatClear = clearsOn(t.treatedOn, t.meatWithdrawalDays);
-              const milkClear = clearsOn(t.treatedOn, t.milkWithdrawalDays);
+              // From the LAST dose: a five-day course clears four days later
+              // than its first day would say.
+              const meatClear = clearsOn(lastDoseOn(t), t.meatWithdrawalDays);
+              const milkClear = clearsOn(lastDoseOn(t), t.milkWithdrawalDays);
               const givenTo =
                 inheritedFrom.get(t.livestockLotId) ?? "the lot it came from";
               return (
@@ -1486,7 +1489,11 @@ export default async function LivestockLotPage({
                     <div className="min-w-0">
                       <p className="font-medium">{t.product}</p>
                       <p className="text-xs text-muted-foreground">
-                        {t.treatedOn} · {treatmentRouteLabel(t.route)}
+                        {t.treatedOn}
+                        {t.courseDays > 1 &&
+                          ` · ${t.courseDays}-day course, last dose ${lastDoseOn(t)}`}
+                        {" · "}
+                        {treatmentRouteLabel(t.route)}
                         {[t.dose, t.administeredBy && `by ${t.administeredBy}`]
                           .filter(Boolean)
                           .map((part) => ` · ${part}`)
@@ -1536,6 +1543,7 @@ export default async function LivestockLotPage({
                             existing={{
                               id: t.id,
                               treatedOn: t.treatedOn,
+                              courseDays: t.courseDays,
                               product: t.product,
                               dose: t.dose,
                               route: t.route,
@@ -1592,6 +1600,12 @@ export default async function LivestockLotPage({
                         .filter(Boolean)
                         .join(" · ") || "—"}
                     </div>
+                    {/* The course, and the day the clock counts from. */}
+                    {t.courseDays > 1 && (
+                      <div className="text-xs text-muted-foreground">
+                        {t.courseDays}-day course, last dose {lastDoseOn(t)}
+                      </div>
+                    )}
                     {/* Said out loud rather than left to be inferred from a
                         missing button: this clock is running because of
                         something that happened before this animal was its own
@@ -1626,12 +1640,12 @@ export default async function LivestockLotPage({
                     </div>
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {clearsOn(t.treatedOn, t.meatWithdrawalDays) ?? (
+                    {clearsOn(lastDoseOn(t), t.meatWithdrawalDays) ?? (
                       <span className="text-muted-foreground">not looked up</span>
                     )}
                   </TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">
-                    {clearsOn(t.treatedOn, t.milkWithdrawalDays) ?? "—"}
+                    {clearsOn(lastDoseOn(t), t.milkWithdrawalDays) ?? "—"}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {t.notes || "—"}
@@ -1661,6 +1675,7 @@ export default async function LivestockLotPage({
                             existing={{
                               id: t.id,
                               treatedOn: t.treatedOn,
+                              courseDays: t.courseDays,
                               product: t.product,
                               dose: t.dose,
                               route: t.route,

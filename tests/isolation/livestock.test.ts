@@ -770,6 +770,21 @@ d("livestock tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
+  it("refuses a course of no days", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockTreatments).values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          treatedOn: "2026-08-20",
+          courseDays: 0,
+          product: "Tylan",
+          route: "water",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
   it("refuses a nameless product and an invented source", async () => {
     await expect(
       withSystem((tx) =>

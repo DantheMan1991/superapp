@@ -759,8 +759,16 @@ export const livestockTreatments = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     livestockLotId: uuid("livestock_lot_id").notNull(),
-    /** The day it was given. The clock counts from here. */
+    /** The day it was given — the FIRST day, for a course. */
     treatedOn: date("treated_on").notNull(),
+    /**
+     * How many days running it was given. `1` is a single dose; a five-day
+     * course of injections is `5`, one row rather than five, and **the
+     * withdrawal counts from the LAST day** (`core/withdrawal.ts`,
+     * `lastDoseOn`). Added 2026-09-08: before this a course was five rows and
+     * the clock was right only if somebody entered all five.
+     */
+    courseDays: integer("course_days").notNull().default(1),
     /** What was given, as written on the bottle. Free text — there is no registry. */
     product: text("product").notNull(),
     /** As the label writes it. Nothing computes on this. */
@@ -859,6 +867,11 @@ export const livestockTreatments = pgTable(
     check(
       "livestock_treatments_meat_days_valid",
       sql`${t.meatWithdrawalDays} is null or ${t.meatWithdrawalDays} >= 0`,
+    ),
+    // A course of nothing is not a treatment.
+    check(
+      "livestock_treatments_course_days_valid",
+      sql`${t.courseDays} >= 1`,
     ),
     check(
       "livestock_treatments_milk_days_valid",

@@ -1912,6 +1912,13 @@
       "when": 1788892346540,
       "tag": "0272_inventory_weight_adjustments_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 273,
+      "version": "7",
+      "when": 1788894031471,
+      "tag": "0273_sudden_martin_li",
+      "breakpoints": true
     }
   ]
 }

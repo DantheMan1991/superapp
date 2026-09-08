@@ -58,6 +58,7 @@ import {
   SendInvoiceButton,
   UnapplyPaymentButton,
 } from "./invoice-detail-controls";
+import { CreditMemoButton } from "./credit-memo-dialog";
 
 export const dynamic = "force-dynamic";
 
@@ -123,6 +124,14 @@ export default async function InvoiceDetailPage({
             ),
             columns: { id: true, depositDate: true },
           });
+    // The credit memos behind any credit rows, for the row's number and link.
+    const creditMemos = await tx.query.creditMemos.findMany({
+      where: and(
+        eq(schema.creditMemos.tenantId, ctx.tenant.id),
+        eq(schema.creditMemos.invoiceId, invoice.id),
+      ),
+      columns: { id: true, number: true, memo: true, paymentId: true },
+    });
     const paid = await paidCentsFor(tx, ctx.tenant.id, invoice.id);
     /**
      * EVERY active register, including other companies' — and that reverses
@@ -162,14 +171,18 @@ export default async function InvoiceDetailPage({
     const reminders = await listInvoiceReminders(tx, ctx.tenant.id, invoice.id);
     const reminderSettings = await getReminderSettings(tx, ctx.tenant.id);
     /**
-     * The invoice, its payments and its posting entry. A payment is audited
-     * against the PAYMENT and the posting against the ENTRY, so filtering on
-     * the invoice alone would show "created, issued" and silently omit the
-     * money — see history/list.ts.
+     * The invoice, its payments, its credit memos and its posting entry. A
+     * payment is audited against the PAYMENT and the posting against the
+     * ENTRY, so filtering on the invoice alone would show "created, issued"
+     * and silently omit the money — see history/list.ts. A credit memo is
+     * audited against the MEMO, and every memo of the invoice is loaded above,
+     * voided ones included, so a credit stays in the invoice's story after its
+     * payment row is gone.
      */
     const history = await listRecordHistory(tx, ctx.tenant.id, [
       { type: "invoice", id: invoice.id },
       ...payments.map((p) => ({ type: "invoice_payment", id: p.id })),
+      ...creditMemos.map((m) => ({ type: "credit_memo", id: m.id })),
       ...(invoice.journalEntryId
         ? [{ type: "journal_entry", id: invoice.journalEntryId }]
         : []),
@@ -197,6 +210,7 @@ export default async function InvoiceDetailPage({
       accounts,
       payments,
       deposits,
+      creditMemos,
       paid,
       sends,
       reminders,
@@ -240,6 +254,12 @@ export default async function InvoiceDetailPage({
   const balance = invoice.status === "void" ? 0 : invoice.totalCents - data.paid;
   const accountName = new Map(data.accounts.map((a) => [a.id, `${a.code} · ${a.name}`]));
   const depositDate = new Map(data.deposits.map((d) => [d.id, d.depositDate]));
+  const creditMemoByPayment = new Map(
+    data.creditMemos.filter((m) => m.paymentId).map((m) => [m.paymentId!, m]),
+  );
+  const incomeAccounts = data.accounts
+    .filter((a) => a.accountType === "income" && a.isActive)
+    .map((a) => ({ id: a.id, code: a.code, name: a.name }));
   const editing = sp.edit === "1" && invoice.status === "draft";
 
   /**
@@ -337,6 +357,19 @@ export default async function InvoiceDetailPage({
               }
               canAct={isOwner}
             />
+            {isOwner && (invoice.status === "issued" || invoice.status === "partial") && (
+              <CreditMemoButton
+                invoice={{
+                  id: invoice.id,
+                  version: invoice.version,
+                  number: invoice.invoiceNumber,
+                  balanceCents: balance,
+                }}
+                incomeAccounts={incomeAccounts}
+                defaultAccountId={lines[0]?.incomeAccountId ?? null}
+                today={data.today}
+              />
+            )}
             <InvoiceActions
               invoice={{
                 id: invoice.id,
@@ -522,20 +555,38 @@ export default async function InvoiceDetailPage({
                       key={p.id}
                       className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm"
                     >
-                      <span>
-                        <span className="font-mono text-xs">{p.paymentDate}</span> ·{" "}
-                        {p.method.replaceAll("_", " ")} →{" "}
-                        {accountName.get(p.depositAccountId) ?? "account"}
-                        {recipientOf(p.depositAccountId) && (
-                          // The same words the ledger entry carries in its
-                          // memo, so the row and the journal agree.
-                          <span className="text-muted-foreground">
-                            {" · received by "}
-                            {recipientOf(p.depositAccountId)}
-                          </span>
-                        )}
-                        {p.memo ? ` · ${p.memo}` : ""}
-                      </span>
+                      {p.method === "credit_memo" ? (
+                        // Settled by a credit, not by money: the row names the
+                        // memo and opens it, and Void lives there.
+                        <span>
+                          <span className="font-mono text-xs">{p.paymentDate}</span> · credit
+                          memo{" "}
+                          <Link
+                            href={`/dashboard/m/accounting/sales/credit-memos/${creditMemoByPayment.get(p.id)?.id ?? ""}`}
+                            className="font-mono text-xs hover:underline"
+                          >
+                            {creditMemoByPayment.get(p.id)?.number ?? p.memo}
+                          </Link>
+                          {creditMemoByPayment.get(p.id)?.memo
+                            ? ` · ${creditMemoByPayment.get(p.id)!.memo}`
+                            : ""}
+                        </span>
+                      ) : (
+                        <span>
+                          <span className="font-mono text-xs">{p.paymentDate}</span> ·{" "}
+                          {p.method.replaceAll("_", " ")} →{" "}
+                          {accountName.get(p.depositAccountId) ?? "account"}
+                          {recipientOf(p.depositAccountId) && (
+                            // The same words the ledger entry carries in its
+                            // memo, so the row and the journal agree.
+                            <span className="text-muted-foreground">
+                              {" · received by "}
+                              {recipientOf(p.depositAccountId)}
+                            </span>
+                          )}
+                          {p.memo ? ` · ${p.memo}` : ""}
+                        </span>
+                      )}
                       <span className="flex items-center gap-3">
                         <span className="font-mono">
                           {formatCentsSigned(p.amountCents)}
@@ -553,7 +604,7 @@ export default async function InvoiceDetailPage({
                               {depositDate.get(p.depositId) ?? ""}
                             </span>
                           </Link>
-                        ) : (
+                        ) : p.method === "credit_memo" ? null : (
                           isOwner && (
                             <UnapplyPaymentButton
                               paymentId={p.id}

@@ -111,7 +111,13 @@ export function buildCustomerStatement(
       invoiceId: invoice.id,
       invoiceNumber: invoice.invoiceNumber,
       entityId: invoice.entityId,
-      detail: `Payment · ${p.method.replaceAll("_", " ")}${p.memo ? ` · ${p.memo}` : ""}`,
+      // A credit memo settles like a payment (see the credit_memos table) but
+      // is not money received, and the statement says which it was. Its
+      // payment memo already carries the memo's number and reason.
+      detail:
+        p.method === "credit_memo"
+          ? `Credit memo${p.memo ? ` · ${p.memo}` : ""}`
+          : `Payment · ${p.method.replaceAll("_", " ")}${p.memo ? ` · ${p.memo}` : ""}`,
       chargeCents: 0,
       paymentCents: p.amountCents,
       order: 1,

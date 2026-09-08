@@ -111,6 +111,11 @@ export type LedgerErrorCode =
   | "DEPOSIT_EMPTY"
   | "DEPOSIT_PAYMENT_UNAVAILABLE"
   | "DEPOSIT_CROSS_COMPANY"
+  | "PAYMENT_IS_CREDIT"
+  | "CREDIT_MEMO_NOT_FOUND"
+  | "CREDIT_MEMO_NOT_ISSUED"
+  | "CREDIT_MEMO_AMOUNT_INVALID"
+  | "CREDIT_MEMO_ACCOUNT_INVALID"
   | "EXPORT_COOLDOWN";
 
 /**
@@ -280,6 +285,11 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
     "One of those payments is no longer waiting in Undeposited Funds — reload and pick again.",
   DEPOSIT_CROSS_COMPANY:
     "Those payments belong to a different company than that account. Deposit them into one of their own company's accounts.",
+  PAYMENT_IS_CREDIT: "That is a credit memo — void it from its own page.",
+  CREDIT_MEMO_NOT_FOUND: "That credit memo no longer exists.",
+  CREDIT_MEMO_NOT_ISSUED: "That credit memo has already been voided.",
+  CREDIT_MEMO_AMOUNT_INVALID: "A credit needs an amount above zero.",
+  CREDIT_MEMO_ACCOUNT_INVALID: "Pick the income account the credit comes off.",
   EXPORT_COOLDOWN: "An export just ran — try again in a minute.",
 };
 

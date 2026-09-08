@@ -81,6 +81,9 @@ const MANAGED_SOURCES = new Set([
   // A deposit's payments point at it; voiding its entry from the journal
   // would leave them marked as banked. Void it from the deposit instead.
   "deposit",
+  // A credit memo's entry is also the entry of the payment row that settles
+  // the invoice; the memo's own void removes both.
+  "credit_memo",
 ]);
 
 /**

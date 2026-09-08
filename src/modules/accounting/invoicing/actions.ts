@@ -24,6 +24,7 @@ import {
   voidInvoice,
 } from "./invoices";
 import { recordPayment, unapplyPayment } from "./payments";
+import { issueCreditMemo, voidCreditMemo } from "./credit-memos";
 import { invoiceLineSchema } from "./lines";
 import { sendInvoiceEmail } from "./send-invoice";
 import {
@@ -785,6 +786,100 @@ export async function sendTestReminderAction(
       }),
     );
     return { ok: true, data: { to, offset } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+// ------------------------------------------------------------ credit memos
+
+const issueCreditMemoSchema = z.object({
+  invoiceId: z.string().uuid(),
+  expectedVersion: z.number().int().min(1),
+  amountCents: z.number().int().positive().max(MAX_AMOUNT_CENTS),
+  incomeAccountId: z.string().uuid(),
+  issueDate: dateStr,
+  memo: z.string().trim().max(500).optional(),
+});
+
+export async function issueCreditMemoAction(
+  input: z.infer<typeof issueCreditMemoSchema>,
+): Promise<ActionResult<{ creditMemoId: string; number: string; invoiceStatus: string }>> {
+  const ctx = await gate();
+  const parsed = issueCreditMemoSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    const { creditMemo, invoice } = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const r = await issueCreditMemo(tx, ctx, parsed.data);
+        await logAuditInTx(tx, {
+          action: "invoice.credit_memo_issued",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "credit_memo",
+          targetId: r.creditMemo.id,
+          meta: {
+            number: r.creditMemo.number,
+            invoiceId: r.invoice.id,
+            invoiceNumber: r.invoice.invoiceNumber,
+            amountCents: r.creditMemo.totalCents,
+            entryId: r.creditMemo.journalEntryId,
+            status: r.invoice.status,
+          },
+        });
+        return r;
+      },
+      // The credit_memos table lets members read and owners write (its RLS).
+      { role: ctx.role },
+    );
+    revalidateSales(invoice.id);
+    revalidatePath(`${BASE}/sales/credit-memos/${creditMemo.id}`);
+    return {
+      ok: true,
+      data: { creditMemoId: creditMemo.id, number: creditMemo.number, invoiceStatus: invoice.status },
+    };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const voidCreditMemoSchema = z.object({
+  creditMemoId: z.string().uuid(),
+  expectedVersion: z.number().int().min(1),
+});
+
+export async function voidCreditMemoAction(
+  input: z.infer<typeof voidCreditMemoSchema>,
+): Promise<ActionResult> {
+  const ctx = await gate();
+  const parsed = voidCreditMemoSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    const { creditMemo, invoice } = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const r = await voidCreditMemo(tx, ctx, parsed.data);
+        await logAuditInTx(tx, {
+          action: "invoice.credit_memo_voided",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "credit_memo",
+          targetId: r.creditMemo.id,
+          meta: {
+            number: r.creditMemo.number,
+            invoiceId: r.creditMemo.invoiceId,
+            voidedEntryId: r.voidedEntryId,
+            status: r.invoice?.status ?? null,
+          },
+        });
+        return r;
+      },
+      { role: ctx.role },
+    );
+    revalidateSales(invoice?.id ?? creditMemo.invoiceId);
+    revalidatePath(`${BASE}/sales/credit-memos/${creditMemo.id}`);
+    return { ok: true };
   } catch (err) {
     return fail(err);
   }

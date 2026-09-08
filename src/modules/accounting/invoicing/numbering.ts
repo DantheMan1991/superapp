@@ -33,3 +33,32 @@ export async function suggestInvoiceNumber(
     .where(eq(schema.invoices.tenantId, tenantId));
   return formatInvoiceNumber(Number(row?.next ?? 1));
 }
+
+/**
+ * Credit memos: "CM-" + the same zero-padded sequence, in a series of their
+ * own. A credit that took an invoice number would read as a sale.
+ */
+export function formatCreditMemoNumber(n: number): string {
+  return `CM-${String(n).padStart(4, "0")}`;
+}
+
+/** "CM-0003" → 3; null for anything else. Pure, exported for tests. */
+export function parseCreditMemoNumberSuffix(number: string): number | null {
+  const m = number.match(/^CM-(\d+)$/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
+export async function suggestCreditMemoNumber(
+  tx: Tx,
+  tenantId: string,
+): Promise<string> {
+  const [row] = await tx
+    .select({
+      next: sql<string>`coalesce(max((substring(${schema.creditMemos.number} from '^CM-(\\d+)$'))::bigint), 0) + 1`,
+    })
+    .from(schema.creditMemos)
+    .where(eq(schema.creditMemos.tenantId, tenantId));
+  return formatCreditMemoNumber(Number(row?.next ?? 1));
+}

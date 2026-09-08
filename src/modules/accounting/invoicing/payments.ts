@@ -229,6 +229,7 @@ export async function unapplyPayment(
   tx: Tx,
   ctx: LedgerCtx,
   args: { paymentId: string; expectedVersion: number },
+  opts: { viaCreditMemo?: boolean } = {},
 ): Promise<{ payment: InvoicePayment; invoice: Invoice; voidedEntryId: string }> {
   requireOwnerRole(ctx);
   const payment = await tx.query.invoicePayments.findFirst({
@@ -240,6 +241,12 @@ export async function unapplyPayment(
   if (!payment) throw new LedgerError("PAYMENT_NOT_FOUND", "payment missing");
   if (payment.version !== args.expectedVersion) {
     throw new LedgerError("STALE_VERSION", "payment changed since loaded");
+  }
+  // A credit memo's settlement row is undone by voiding the memo, which
+  // calls in here itself; from anywhere else, unapplying it would void the
+  // memo's entry and leave the memo saying it is issued.
+  if (payment.method === "credit_memo" && !opts.viaCreditMemo) {
+    throw new LedgerError("PAYMENT_IS_CREDIT", "settled by a credit memo");
   }
   // A payment a deposit has banked cannot be unapplied on its own: voiding
   // its Dr 1250 / Cr AR would leave the deposit's Cr 1250 with nothing to

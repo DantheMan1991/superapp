@@ -151,6 +151,7 @@ export default async function InvoicesPage({
         invoiceId: schema.invoicePayments.invoiceId,
         amountCents: schema.invoicePayments.amountCents,
         paymentDate: schema.invoicePayments.paymentDate,
+        method: schema.invoicePayments.method,
         subtype: schema.accounts.subtype,
         // Set once a deposit has banked the payment out of Undeposited Funds
         // (a voided deposit clears the link, so the row comes back here).
@@ -184,6 +185,9 @@ export default async function InvoicesPage({
     const undepositedByInvoice = new Map<string, number>();
     const depositedByInvoice = new Map<string, number>();
     for (const p of payments) {
+      // A credit memo settles the invoice but is neither in the drawer nor
+      // at the bank: it belongs in neither money bucket.
+      if (p.method === "credit_memo") continue;
       const bankedOn =
         p.subtype === "undeposited_funds" ? p.depositDate : p.paymentDate;
       const target = !bankedOn

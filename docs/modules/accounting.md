@@ -13,6 +13,52 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-07 — Credit memos (`claude/credit-memos`, migrations `0268`–`0270`)
+
+**What.** `Credit` beside `Record payment` on an issued or part-paid
+invoice: a dialog (amount up to the balance, the income account it comes
+off, a date, a reason) that issues a credit memo — `CM-0001`, its own
+series — and a page for the memo with the entry, the invoice and `Void`
+behind a dialog. The last gap on the review's accounting list.
+
+**THE DECISION THAT KEPT IT SMALL.** A credit memo posts its own entry (Dr
+the income account / Cr Accounts Receivable, `source = credit_memo`, new
+enum value in `0268`, alone per the 0127 rule) AND settles the invoice the
+way a payment does: it owns an `invoice_payments` row (`method =
+credit_memo`, the memo's entry as the row's entry, the income account as the
+"deposit" account). Every reader of an invoice's balance — status
+derivation, both lists, aging, reminders, the statement, the PDF, the
+attention feed — sums that table, so a credit is settled everywhere at once
+and none of them learned a new word. The cash-basis lens reads payment rows
+to recognise an invoice's income; the credit's row recognises the credited
+share and the memo's own entry reverses it, and the two net to nothing —
+exactly what cash basis should say about a credit. The db test pins income
+= −8,000 on both bases for a 10,000 invoice with a 2,000 credit and 8,000
+cash, and AR = 0 on cash. Readers that mean CASH by "payment" step round it
+by `method`: the invoice list's deposit buckets skip credit rows, the
+statement and the invoice page word them as credits, and Undeposited Funds
+never sees them because their account is income. `unapplyPayment` refuses a
+credit row (`PAYMENT_IS_CREDIT`) unless the memo's own void is calling —
+which detaches the memo from the row first, because the FK would otherwise
+refuse the delete, then voids the entry and removes the row through the
+same path a payment takes. `credit_memo` is in `MANAGED_SOURCES`.
+
+**Scope, deliberately.** One invoice, one income account, no tax, no lines,
+no credit larger than the balance (that is a refund, which moves money), no
+credit held against future invoices, no list page (the memo is reached from
+the invoice and the statement). Each is an open item only when a client
+asks. RLS `0270`: members read, owners insert/update, nobody deletes — the
+deposits posture; the actions pass `{ role }` to `withTenant`.
+
+**Tests.** `tests/credit-memos.test.ts`: issue (entry, row, status), six
+refusals, the unapply guard, both bases, void and re-issue with the next
+number. `tests/isolation/credit-memos.test.ts`: RLS, the owner-only writes,
+no delete, the smuggled tenant, six composite FKs. Migrations applied to dev
+and production, verify-rls green, before the PR (ADR 0014).
+
+**Guides.** New `credit-memo.md` (Sales, order 105); `invoice.md`,
+`statement.md`, `journal.md`.
+
 ### 2026-09-07 — Bills we owe reach What needs you (`claude/ap-reminders`)
 
 **What.** The AP mirror of the customer reminders, built as attention items
@@ -3730,6 +3776,7 @@ preview in either state. The change is argued to be inert, not observed to be.
 | `dimension_members` / `line_dimensions` | S1 | Dimension tagging (industry-pack seam); line_dimensions gained invoice_line_id (S4) and bill_line_id (S6) with exactly-one-parent CHECKs |
 | `accounting_settings` | S1 | Per-tenant config (fiscal year, etc.). Gained `reminders_enabled` (default **false**) and `reminder_offsets` jsonb (`0114`) |
 | `bank_accounts`, `bank_transactions`, `reconciliations`, `reconciliation_lines`, `plaid_items` | S3 | Feeds, staging, reconciliation; encrypted Plaid tokens. `bank_accounts.entity_id` (`0145`) — **a register belongs to exactly one company**, chosen at creation and never moved, and `postEntry` refuses any line touching another company's register. `0263` (2026-09-06) relaxed the one-feed-row-per-entry index to one per entry **per register** (`bank_transactions_tenant_acct_entry_idx`), so a transfer between two own registers is one entry with a row on each side |
+| `credit_memos` | 2026-09-07 | A credit against one invoice (`0269`; `source = credit_memo`, `0268`; RLS `0270`, owner-only writes). Posts Dr income / Cr AR and settles the invoice through an `invoice_payments` row of `method = credit_memo` (`payment_id`, detached on void) — see the build log for why that one decision is the whole design. Own `CM-####` series |
 | `deposits` | 2026-09-07 | Payments held in Undeposited Funds banked together as one entry (`0265`; `source = deposit`, `0264`; RLS `0266`, owner-only writes). `invoice_payments.deposit_id` points back, cleared by a void. One company per deposit, the register's; a deposit is voided, never deleted |
 | `bank_rules` | 2026-08-10 | Deterministic feed categorization. Priority-ordered, first match wins; `is_suggested` marks a machine-proposed rule; `auto_post` posts without review but never into a closed period. Gained `set_vendor_id` (`0113`) so a rule can name the payee too. `bank_transactions.rule_suggestion` is a **snapshot**, not an FK — it records what a rule said at match time, so editing the rule later cannot rewrite what the owner was shown |
 | `parties` | 2026-08-03 | **Shared, not this module's.** The identity spine behind `customers` and `vendors`; written through `src/lib/parties/`. See [crm.md](crm.md) |

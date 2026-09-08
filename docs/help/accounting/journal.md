@@ -9,7 +9,7 @@ Open **Journal** in the accounting menu. The line under the title reads `Every e
 
 ## What you see
 
-- **The list.** Newest first, fifty to a page. `Date` and `Memo`, which both open the entry. `Company`, only when you keep more than one. `Source`, where it came from: `manual`, `bank import`, `invoice`, `invoice payment`, `bill`, `bill payment`, `deposit`, `opening balance`, `reversal`, `recurring`, `depreciation`, or an inventory movement. `Status`: {badge:posted|primary}, {badge:draft|secondary} or {badge:void|outline}. A reconciled entry still reads {badge:posted|primary}; reconciliation locks it without changing its status. `Amount`, the total of the entry's debits.
+- **The list.** Newest first, fifty to a page. `Date` and `Memo`, which both open the entry. `Company`, only when you keep more than one. `Source`, where it came from: `manual`, `bank import`, `invoice`, `invoice payment`, `bill`, `bill payment`, `deposit`, `credit memo`, `opening balance`, `reversal`, `recurring`, `depreciation`, or an inventory movement. `Status`: {badge:posted|primary}, {badge:draft|secondary} or {badge:void|outline}. A reconciled entry still reads {badge:posted|primary}; reconciliation locks it without changing its status. `Amount`, the total of the entry's debits.
 - **`Company`.** Only when you keep more than one: `All companies`, or one.
 - **Search.** The box above the list. Type part of a memo and the list narrows as you type; press Enter to search at once. Capitals do not matter. Clear the box to see everything again.
 - **Pages.** When there are more than fifty entries, `Showing 1–50 of 312 entries` sits under the list with {button:Newer|outline} and {button:Older|outline}. A search starts again from its first page.

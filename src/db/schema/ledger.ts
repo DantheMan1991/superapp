@@ -55,6 +55,14 @@ export const journalEntrySource = pgEnum("journal_entry_source", [
    */
   "deposit",
   /**
+   * A credit memo against an invoice (2026-09-07): Dr the income it comes off
+   * / Cr Accounts Receivable, `source_id` the `credit_memos` row. Added in
+   * drizzle/0268, alone in its own migration for the 0127 reason. In
+   * `MANAGED_SOURCES`: voided from the memo, which also removes the payment
+   * row that settles the invoice — the journal alone would leave that row.
+   */
+  "credit_memo",
+  /**
    * Posted by the `assets` pack from a depreciation schedule. Added in
    * drizzle/0127, alone in its own migration — an enum value cannot be used in
    * the transaction that adds it.

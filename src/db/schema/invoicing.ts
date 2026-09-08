@@ -906,3 +906,111 @@ export type Product = typeof products.$inferSelect;
 export type PaymentMethod = typeof paymentMethods.$inferSelect;
 
 export type SalesTaxRate = typeof salesTaxRates.$inferSelect;
+
+/* ------------------------------------------------------------------------
+ * Credit memos (2026-09-07): a credit against one invoice.
+ * ---------------------------------------------------------------------- */
+
+/**
+ * A CREDIT MEMO: money taken off what a customer owes on one invoice — a
+ * returned item, a price adjustment, a goodwill credit.
+ *
+ * THE DECISION THAT KEEPS THIS SMALL. A credit memo posts its own entry (Dr
+ * the income account it comes off / Cr Accounts Receivable, `source =
+ * credit_memo`) and settles the invoice THE WAY A PAYMENT DOES: it owns an
+ * `invoice_payments` row (`method = credit_memo`, the memo's entry as the
+ * row's entry, the income account as the "deposit" account). Every reader of
+ * an invoice's balance — status derivation, the lists, aging, reminders, the
+ * statement, the PDF — already sums that table, so a credit is settled
+ * everywhere at once. The cash-basis lens, which reads payment rows to
+ * recognise an invoice's income, recognises the credited share against the
+ * memo's own reversal of it, and the two net to nothing — exactly what cash
+ * basis should say about a credit. Readers that mean CASH by "payment" (the
+ * deposit buckets, the statement's wording) test `method` and step round it.
+ *
+ * One invoice, one income account, no tax and no lines in this version: the
+ * credit memos a small business writes are "two bags came back" and "we
+ * agreed 10% off", and each is one line. Voided from its own page (`credit_memo`
+ * is in MANAGED_SOURCES), never edited: the correction is a new memo.
+ */
+export const creditMemos = pgTable(
+  "credit_memos",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** The invoice's company: the credit reverses that company's income and receivable. */
+    entityId: uuid("entity_id").notNull(),
+    customerId: uuid("customer_id").notNull(),
+    invoiceId: uuid("invoice_id").notNull(),
+    /** The settlement row on the invoice. One per memo; detached and deleted on void. */
+    paymentId: uuid("payment_id"),
+    /** `CM-0001`, its own series per tenant. */
+    number: text("number").notNull(),
+    issueDate: date("issue_date", { mode: "string" }).notNull(),
+    /** Why — "two bags returned". Shown on the invoice and the statement. */
+    memo: text("memo").notNull().default(""),
+    /** The income account the credit comes off. */
+    incomeAccountId: uuid("income_account_id").notNull(),
+    totalCents: bigint("total_cents", { mode: "number" }).notNull(),
+    /** `issued` | `void`. Text + CHECK, per the rule in schema/work.ts. */
+    status: text("status").notNull().default("issued"),
+    /** Created atomically with its entry — NOT NULL by design. */
+    journalEntryId: uuid("journal_entry_id").notNull(),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("credit_memos_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("credit_memos_tenant_number_idx").on(t.tenantId, t.number),
+    index("credit_memos_tenant_invoice_idx").on(t.tenantId, t.invoiceId),
+    index("credit_memos_tenant_customer_idx").on(t.tenantId, t.customerId),
+    // One memo per entry, and one per settlement row — DB rules.
+    uniqueIndex("credit_memos_tenant_entry_idx").on(t.tenantId, t.journalEntryId),
+    uniqueIndex("credit_memos_tenant_payment_idx")
+      .on(t.tenantId, t.paymentId)
+      .where(sql`${t.paymentId} is not null`),
+    foreignKey({
+      name: "credit_memos_entity_fk",
+      columns: [t.tenantId, t.entityId],
+      foreignColumns: [entities.tenantId, entities.id],
+    }),
+    foreignKey({
+      name: "credit_memos_customer_fk",
+      columns: [t.tenantId, t.customerId],
+      foreignColumns: [customers.tenantId, customers.id],
+    }),
+    foreignKey({
+      name: "credit_memos_invoice_fk",
+      columns: [t.tenantId, t.invoiceId],
+      foreignColumns: [invoices.tenantId, invoices.id],
+    }),
+    // NO ACTION: the void detaches the memo from its row before deleting it.
+    foreignKey({
+      name: "credit_memos_payment_fk",
+      columns: [t.tenantId, t.paymentId],
+      foreignColumns: [invoicePayments.tenantId, invoicePayments.id],
+    }),
+    foreignKey({
+      name: "credit_memos_income_account_fk",
+      columns: [t.tenantId, t.incomeAccountId],
+      foreignColumns: [accounts.tenantId, accounts.id],
+    }),
+    foreignKey({
+      name: "credit_memos_entry_fk",
+      columns: [t.tenantId, t.journalEntryId],
+      foreignColumns: [journalEntries.tenantId, journalEntries.id],
+    }),
+    check("credit_memos_total_positive", sql`${t.totalCents} > 0`),
+    check("credit_memos_status_known", sql`${t.status} in ('issued', 'void')`),
+  ],
+);
+
+export type CreditMemo = typeof creditMemos.$inferSelect;

@@ -33,6 +33,66 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-09-08 — Correct weight, and the cost box read the same way (`claude/correct-weight`)
+
+**The receipt form asks ONCE how its figures were read, because the cost box
+was misread exactly as the weight box was.** The entry below fixed the weight
+box that morning; the founder's screenshot the same afternoon showed the cost
+beside it — `$5.00` on a 1-package receipt and `$5.00` on a 5-package one,
+meaning $5 each and stored as $5 in all, so six packages were carried at $10.
+The morning's per-box toggle became ONE toggle above both boxes, `Cost and
+weight are for` → `Each package` / `All together` (`The cost is for` on a
+mass-stocked item, whose weight box is hidden), because a person is in one mode
+for the whole ticket — reading a sticker and a scale, or reading an invoice.
+Each box reads the other figure back live: `5 packages, $25.00 in all.` /
+`5 packages, $1.00 each.` beside the weight's sentence. `deliveryCostCents` in
+`core/costing.ts` is the money twin of `deliveryWeightLb` — cents, rounded
+once, before the action's integer boundary — and `EntryBasis` moved to
+`core/units.ts` so both pure modules and the form share one type. **Baxter's
+cost was not touched by hand**: `Correct cost` exists for exactly this and posts
+properly where posting is on.
+
+**`Correct weight` sits beside `Correct cost`, and is the same shape.**
+`inventory_weight_adjustments` (migrations `0271` table, `0272` RLS): a SIGNED
+`delta_lb` against a lot, with `recorded_lb` and `quantity_weighed` stamped as
+what the batch read when the correction was written, plus reason, date and
+author. Appended, never an edit — the receipt keeps saying what was typed on the
+day, the correction says what was true, and the mistake stays visible.
+`core/weight.ts` folds corrections into the pounds (`weighedTotals`) and leaves
+the denominator alone; `weightRatesForItems` reads them per lot AND per item —
+unlike a cost correction, a weight one does move the item figure, because
+pounds on hand is a shelf estimate nothing was ever stamped from. It also
+returns `byLotDetail` (weighed quantity, recorded pounds) for the dialog.
+
+**The person states the truth, not the difference.** The cost dialog asks "by
+how much" because an invoice arrives as a difference; nobody at a freezer knows
+"+4 lb". `LotWeightForm` takes `What it actually weighs (lb)` with the same
+each/all-together choice, and `weightCorrectionDelta` — pure, and the SAME
+function the server calls — previews `6 packages, 6 lb in all — 1 lb each. +4 lb
+on what is recorded.` `adjustLotWeight` derives the delta against what the
+ledger reads INSIDE the transaction, so a receipt landing between page load and
+click cannot make it restate a stale total. Owner-only; offered on closed and
+empty batches like the cost correction; and ONLY on a weighed batch —
+`LOT_UNWEIGHED` says to record a weight on a delivery, because a correction on
+an unweighed batch would be pounds over nothing, and the fold ignores one for
+the same reason. `WEIGHT_UNCHANGED` refuses a correction that changes nothing.
+A `Weight corrections` section on the item page lists them with what the batch
+read then and what it read `After`.
+
+**RLS takes the newer, stricter posture** (0266/0270) rather than 0181's
+member-wide one: members read, owners insert, nobody updates or deletes — a
+correction is corrected by another correction. The action passes `{ role }`;
+`tests/isolation/inventory.test.ts` asserts each clause and both composite FKs;
+`tests/inventory-ops.test.ts` covers the derivation against earlier
+corrections, both refusals, the owner gate and the fold. Migrations applied to
+dev and production before the merge, per
+[ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md).
+
+Guide: `item.md` — steps 5–7 of *How to record a delivery* describe the one
+toggle and both read-back lines; a new *How to correct what a batch weighs*
+section; the Batches table bullet, three message rows and *Who can do what*
+name the button.
+
 ### 2026-09-08 — A weight typed the way a person reads a scale (`claude/what-the-freezer-holds`)
 
 **Five one-pound packages were recorded as one pound.** The founder received a
@@ -530,10 +590,13 @@ pounds" is one number twice — so `approximate` doubles as the display guard.
 **Somebody has to be able to enter one by hand, or the whole feature is
 reachable only through a production run.** The receipt form has a weight box —
 hidden for a mass-stocked item, because the quantity is already the weight and
-asking twice invites two numbers that disagree. **Since 2026-09-08 the box asks
-which way the scale was read** — `Each package` or `All together` — and reads
-the other figure back as it is typed; the total is still the only thing stored.
-See that day's build-log entry for the mistake that made it necessary.
+asking twice invites two numbers that disagree. **Since 2026-09-08 the form asks
+once, for cost and weight together, how its figures were read** — `Each
+package` or `All together` — and each box reads the other figure back as it is
+typed; the totals are still the only things stored. A recorded weight can be
+corrected since the same day (`inventory_weight_adjustments`, folded into the
+pounds by `weighedTotals`). See that day's two build-log entries for the
+mistakes that made both necessary.
 
 Migration `0212`, two CHECKs, no new table and therefore no RLS migration and no
 new isolation coverage. Applied to dev and to production before the merge, per
@@ -1332,6 +1395,7 @@ with no reason is one whose kind already says why.
 | `inventory_tax_treatments` | **Where an accountant's decision is recorded**, per category — ADR 0013 §A.2 | `item_kind` NULL is the tenant default, and the unique index does NOT hold for it (Postgres nulls are distinct) — `setTaxRule` selects then updates, third time this pack has hit that. Composite FK to `accounts`. Carries `decided_by` and `decided_on`, because it is a record rather than a preference |
 
 | `inventory_cost_adjustments` | **A correction to what a batch COST.** Appended, never an edit — ADR 0012 §A.4 | Composite FKs to the item and the lot, **neither cascading**: erasing the record that somebody re-stated a cost would hide the money. `amount_cents` is SIGNED and CHECKed non-zero, which is the pair of things `inventory_movements` structurally cannot carry. `on_hand_cents + issued_cents = amount_cents` is CHECKed, so a stored split can never fail to account for the whole |
+| `inventory_weight_adjustments` | **A correction to what a batch WEIGHS.** Appended, never an edit — the cost correction's shape, for pounds (2026-09-08) | Composite FKs to the item and the lot, neither cascading, as with cost. `delta_lb` is SIGNED and CHECKed non-zero; `recorded_lb + delta_lb > 0` is CHECKed so a batch cannot be corrected to nothing; `recorded_lb` and `quantity_weighed` are stamped as what the batch read when it was written. Folded into the POUNDS by `core/weight.ts`, never into the quantity, and only where receipts were weighed. RLS: members read, owners insert, nobody updates or deletes |
 
 | `bill_line_stock_allocations` | **Which delivery a bill line is settling** | Composite FKs to `bill_lines` (**CASCADE** — when the LINE goes the settlement goes with it, because a deleted line no longer debits GRNI; it does NOT fire on an ordinary edit, which is what it used to do and what let GRNI be cleared twice) and to the receipt movement (**no cascade** — erasing the record that a bill settled it would hide the money). UNIQUE per (line, movement): a second match is a correction, not a second settlement |
 
@@ -1510,12 +1574,10 @@ commitment against a live animal to delivered without sitting on a shelf.
 
 ## Open items
 
-- **A recorded weight cannot be corrected.** `Correct cost` has no `Correct
-  weight` beside it. The shape is not free: `inventory_movements_weight_inbound`
-  allows a weight only on a row with `quantity > 0`, so a correction cannot be a
-  zero-quantity row, and `inventory_cost_adjustments` is money, not pounds. The
-  2026-09-08 Baxter receipt could only be put right by hand in SQL; the next
-  one should not have to be. See the 2026-09-08 build-log entry.
+- ~~**A recorded weight cannot be corrected.**~~ — **fixed the same day,
+  2026-09-08.** `Correct weight` beside `Correct cost`, over
+  `inventory_weight_adjustments`; the Baxter receipt itself had been put right
+  by hand that morning. See the second 2026-09-08 build-log entry.
 - ~~**Staff cannot record stock in, out or adjusted**~~ — **fixed 2026-09-03.**
   `MovementForm` is out of the header's owner block and asks `allowsWrite`; see
   the build log.

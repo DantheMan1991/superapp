@@ -1064,6 +1064,108 @@ export const inventoryTaxTreatments = pgTable(
   ],
 );
 
+/**
+ * **A CORRECTION TO WHAT A BATCH WEIGHS.** Appended, never an edit — the shape
+ * `inventory_cost_adjustments` settled for money, applied to pounds.
+ *
+ * Why not edit the receipt's `weight_lb`? Because the ledger's rule is that
+ * what happened, happened, and a disagreement is another event; because the
+ * receipt row is what a bill was matched against and what the audit trail
+ * points at; and because the entry that made this table necessary — five
+ * one-pound packages typed as 1 lb on 2026-09-08 — is exactly the kind of
+ * mistake somebody should be able to see was made and put right, dated and
+ * signed, rather than one that vanishes.
+ *
+ * **SIGNED POUNDS, and only ever against a batch that HAS a weight.**
+ * `core/weight.ts` folds these into the numerator beside the receipts' pounds;
+ * the denominator stays the weighed quantity received, so a correction on a
+ * batch nobody weighed would be pounds over nothing. `adjustLotWeight` refuses
+ * that, and the fold ignores corrections where nothing was weighed.
+ *
+ * `recorded_lb` and `quantity_weighed` are what the batch read when this was
+ * written — stamped for the reason a count line stores `expected_quantity`:
+ * so a person can check the correction against what it corrected.
+ */
+export const inventoryWeightAdjustments = pgTable(
+  "inventory_weight_adjustments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id").notNull(),
+    /** Keyed to the lot and NOT NULL — the rate is per batch, so is its correction. */
+    lotId: uuid("lot_id").notNull(),
+    occurredOn: date("occurred_on").notNull(),
+    /** SIGNED total pounds added to, or taken off, what the receipts say. */
+    deltaLb: numeric("delta_lb", {
+      precision: 18,
+      scale: 4,
+      mode: "number",
+    }).notNull(),
+    /** What the batch read before this: the receipts' pounds plus earlier corrections. */
+    recordedLb: numeric("recorded_lb", {
+      precision: 18,
+      scale: 4,
+      mode: "number",
+    }).notNull(),
+    /** The weighed quantity received — the denominator the pounds were spread over. */
+    quantityWeighed: numeric("quantity_weighed", {
+      precision: 18,
+      scale: 4,
+      mode: "number",
+    }).notNull(),
+    /** Why. Open taxonomy — see `WEIGHT_ADJUSTMENT_REASONS`. */
+    reason: text("reason").notNull(),
+    notes: text("notes").notNull().default(""),
+    /** Who said so. Date, reason and author on the record itself. */
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("inventory_weight_adjustments_tenant_id_id_idx").on(
+      t.tenantId,
+      t.id,
+    ),
+    index("inventory_weight_adjustments_tenant_lot_idx").on(
+      t.tenantId,
+      t.lotId,
+      t.occurredOn,
+    ),
+    index("inventory_weight_adjustments_tenant_item_idx").on(
+      t.tenantId,
+      t.itemId,
+      t.occurredOn,
+    ),
+    foreignKey({
+      name: "inventory_weight_adjustments_item_fk",
+      columns: [t.tenantId, t.itemId],
+      foreignColumns: [inventoryItems.tenantId, inventoryItems.id],
+    }),
+    // NO cascade, as with cost: the record that somebody re-stated a weight
+    // does not become untrue when the batch goes.
+    foreignKey({
+      name: "inventory_weight_adjustments_lot_fk",
+      columns: [t.tenantId, t.lotId],
+      foreignColumns: [inventoryLots.tenantId, inventoryLots.id],
+    }),
+    check("inventory_weight_adjustments_delta_nonzero", sql`${t.deltaLb} <> 0`),
+    // A batch corrected to nothing, or below it, has not been weighed — it has
+    // been mis-stated. The op derives the delta from a figure that must be
+    // more than nothing; this is what holds if a later caller does not.
+    check(
+      "inventory_weight_adjustments_stays_positive",
+      sql`${t.recordedLb} + ${t.deltaLb} > 0`,
+    ),
+    check(
+      "inventory_weight_adjustments_reason_format",
+      sql`${t.reason} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+  ],
+);
+
 export type InventoryItem = typeof inventoryItems.$inferSelect;
 export type NewInventoryItem = typeof inventoryItems.$inferInsert;
 export type InventoryLot = typeof inventoryLots.$inferSelect;
@@ -1086,3 +1188,7 @@ export type InventoryCostAdjustment =
   typeof inventoryCostAdjustments.$inferSelect;
 export type NewInventoryCostAdjustment =
   typeof inventoryCostAdjustments.$inferInsert;
+export type InventoryWeightAdjustment =
+  typeof inventoryWeightAdjustments.$inferSelect;
+export type NewInventoryWeightAdjustment =
+  typeof inventoryWeightAdjustments.$inferInsert;

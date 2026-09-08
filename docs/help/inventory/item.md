@@ -30,7 +30,7 @@ When the total is below zero you also see `That is below zero, which usually mea
 - **`Good until`** turns red once the date is past and there is still something on hand. Blank covers both "nobody dated it" and "it does not go off".
 - **`Carrying`** is what that batch cost and has not yet released. `No cost recorded` means nobody ever costed it, which is different from `$0.00`, meaning it was costed and has all been used.
 - **{badge:closed|outline}** and **{badge:split|outline}** mark a batch that has been closed elsewhere, or one cut off another.
-- **{button:Correct cost|ghost}** and **{button:Split|ghost}** sit at the end of each row, for owners.
+- **{button:Correct cost|ghost}**, **{button:Correct weight|ghost}** and **{button:Split|ghost}** sit at the end of each row, for owners. `Correct weight` only appears on a batch that has a weight recorded.
 
 ## The Recent entries table
 
@@ -61,10 +61,11 @@ Cost is shown without a sign in both directions. A row reading `Used · -20 poun
 2. Type the amount into `How much`. The label names the unit.
 3. Pick a `Batch`, or leave it on `No batch`.
 4. Set `When`. It begins on today.
-5. Type `What it cost` if you know it. The help reads `The whole delivery, not the price per pound. Leave it empty if the invoice has not arrived — the stock still counts.`
-6. Type `What it weighed (lb)` if somebody weighed it. Beside the label, say how you read the scale. `Each package` means one was on the scale and the app multiplies by `How much`; `All together` means everything in this entry was weighed at once, the way a plant's ticket reads. `Each package` is picked to start, and the button names your unit, so for something counted in head it reads `Each head`. Once `How much` and the weight are both typed, a line under the box reads back the figure you did not type: `5 packages, 5 lb in all.` under `Each package`, or `5 packages, 0.2 lb each.` under `All together`. If that line looks wrong, the entry is wrong. The help under it changes with your choice and ends `Leave it empty if nobody weighed it — an unweighed batch says nothing rather than nothing-at-all-pounds.` This box is not there for something already counted by weight.
-7. Pick `Where` it went, and add `Notes`.
-8. Click {button:Record|primary}. You see `Stock recorded in`.
+5. Say how you are reading your figures. Beside `Cost and weight are for`, `Each package` means you are typing the price and the weight of one, and the app multiplies both by `How much`; `All together` means you are typing the invoice total and the whole delivery's weight, the way paperwork reads. `Each package` is picked to start, and the button names your unit, so for something counted in head it reads `Each head`. For something counted by weight the line reads `The cost is for`, because there is no weight box.
+6. Type `What it cost` if you know it. Once `How much` and the cost are both typed, a line under the box reads back the figure you did not type: `5 packages, $25.00 in all.` under `Each package`, or `5 packages, $1.00 each.` under `All together`. The help under it changes with your choice and ends `Leave it empty if the invoice has not arrived — the stock still counts.`
+7. Type `What it weighed (lb)` if somebody weighed it. The same kind of line reads back under it: `5 packages, 5 lb in all.` or `5 packages, 0.2 lb each.` If either read-back looks wrong, the entry is wrong. The help ends `Leave it empty if nobody weighed it — an unweighed batch says nothing rather than nothing-at-all-pounds.` This box is not there for something already counted by weight.
+8. Pick `Where` it went, and add `Notes`.
+9. Click {button:Record|primary}. You see `Stock recorded in`.
 
 Leaving the cost blank is fine and normal. The batch then shows `No cost recorded` until you supply one under {button:Correct cost|ghost} or match a bill to it.
 
@@ -113,6 +114,19 @@ This changes what it cost, never how much of it there is. The split follows how 
 
 One of the notes under `Why` says to use a negative amount for a discount. Ignore that. Pick `It cost less` instead.
 
+## How to correct what a batch weighs
+
+1. Click {button:Correct weight|ghost} on the batch. It is only there on a batch that has a weight recorded; a batch nobody weighed gets its first weight when you record a delivery. It is offered on empty and closed batches too, because what the packages weighed stays true after they are sold.
+2. The dialog opens with what the batch reads now, for example `This batch reads 2 lb across the 6 packages that came in weighed — about 0.3333 lb a package. This changes what it weighs, never how much of it there is.`
+3. Say how you are reading the scale. `Each package` means you are typing what one weighs; `All together` means the whole batch. `Each package` is picked to start, and the button names your unit.
+4. Type `What it actually weighs (lb)`. A line under the box reads back exactly what will be recorded: `6 packages, 6 lb in all — 1 lb each. +4 lb on what is recorded.` If the figure is what the batch already reads, the line says `That is what it already reads.` and the button stays off.
+5. Pick a `Why`: `Typed the wrong figure`, `Put it back on the scale`, `The ticket was wrong` or `Correcting an entry`. Or pick `Something else…` and type your own.
+6. Set `When`, add `Notes`, and click {button:Correct weight|primary}. You see `Weight corrected — Baxter now reads 6 lb.`
+
+The delivery entries are left exactly as they were recorded. The correction is a record of its own, dated and with your name on it, and every figure in pounds on this page reads through it: the batch's `about … lb`, the `On hand` card, and the truck load in Retail all move together. A wrong correction is put right with another one.
+
+Once a batch has a correction, a `Weight corrections` table appears above `Recent entries`: `When`, `Batch`, `Why` with your note and what the batch read at the time, the `Correction` with its sign, and `After`, what it read once that correction landed.
+
 ## How to retire something
 
 1. Click {button:Retire|ghost}. You are asked to confirm.
@@ -129,6 +143,9 @@ One of the notes under `Why` says to use a negative amount for a discount. Ignor
 | `Adjusted up` / `Adjusted down` | The correction is in. |
 | `Split — the total is unchanged` | Part of the batch is now a batch of its own. |
 | `Cost corrected.` | The batch is carried at a different figure. |
+| `Weight corrected — Baxter now reads 6 lb.` | The correction is in, and every figure in pounds reads through it. |
+| `nothing in this batch has been weighed yet — record a weight on a delivery first` | The batch has no weight to correct. Record a delivery with a weight instead. |
+| `this batch already reads 6 lb` | The figure you typed is what the batch already reads. Nothing was recorded. |
 | `Saved` | Your changes to the {{item|lower}} are in. |
 | `Retired` / `Back in the list` | It is out of, or back in, the lists. |
 | `No batches yet` | Nothing has been started. An owner starts the first. |
@@ -149,11 +166,11 @@ One of the notes under `Why` says to use a negative amount for a discount. Ignor
 - Only the last twenty five entries are listed, and there is no way to see the rest.
 - The counted unit is locked the moment anything moves, even if the balance is back to zero.
 - Nothing traces a batch back through its splits, although the record is kept.
-- A cost correction cannot be undone. The remedy is an equal and opposite one.
+- A cost correction cannot be undone. The remedy is an equal and opposite one. A weight correction cannot be undone either; state the right figure again.
 - If you need any of this, ask us.
 
 ## Who can do what
 
-Only an owner can start a batch, split one, correct what one cost, edit the {{item|lower}}, or retire it. Each of those either creates something the accounts group by, or changes what it costs.
+Only an owner can start a batch, split one, correct what one cost or weighs, edit the {{item|lower}}, or retire it. Each of those either creates something the accounts group by, or changes what it costs or what the till sells it by.
 
 Recording stock in, out or adjusted is open to everyone, an accountant included. It is what the person unloading the pallet does, and it has to be recorded then rather than reported to somebody who can.

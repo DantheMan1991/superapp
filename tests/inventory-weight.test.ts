@@ -5,8 +5,11 @@ import {
   describeWeightEntry,
   formatWeight,
   hasRecordedWeight,
+  weighedTotals,
+  weightCorrectionDelta,
   weightOf,
 } from "../src/packs/inventory/core/weight";
+import { deliveryCostCents } from "../src/packs/inventory/core/costing";
 
 /**
  * What a package weighs. PURE — no database, so this lives on the `pure` side
@@ -190,5 +193,93 @@ describe("describeWeightEntry", () => {
     expect(
       describeWeightEntry({ basis: "total", typed: 10, quantity: 3, unit: "pkg" }),
     ).toBe("3 packages, 3.3333 lb each.");
+  });
+});
+
+/**
+ * Corrections. An owner says what a batch really weighs; the fold adds the
+ * difference to the pounds and leaves the denominator alone. 2026-09-08.
+ */
+describe("averagePackageWeight with corrections", () => {
+  it("folds a correction into the pounds, not the quantity", () => {
+    // Six packages received as 2 lb in all, corrected by +4: one pound each.
+    expect(
+      averagePackageWeight([receipt(1, 1), receipt(5, 1)], [{ deltaLb: 4 }]),
+    ).toBe(1);
+  });
+
+  it("IGNORES a correction against a batch nobody weighed", () => {
+    // Pounds over nothing is not a rate. The op refuses to write one; this is
+    // what keeps the fold honest if a row exists anyway.
+    expect(averagePackageWeight([receipt(6, null)], [{ deltaLb: 4 }])).toBeNull();
+    expect(hasRecordedWeight([receipt(6, null)], [{ deltaLb: 4 }])).toBe(false);
+    expect(weighedTotals([receipt(6, null)], [{ deltaLb: 4 }])).toEqual({
+      quantity: 0,
+      lb: 0,
+    });
+  });
+
+  it("sums several corrections, either sign", () => {
+    expect(
+      weighedTotals([receipt(6, 2)], [{ deltaLb: 4 }, { deltaLb: -1.5 }]),
+    ).toEqual({ quantity: 6, lb: 4.5 });
+  });
+});
+
+describe("weightCorrectionDelta", () => {
+  const baxter = { quantityWeighed: 6, recordedLb: 2 };
+
+  it("turns 'a pound each' into the difference the ledger needs", () => {
+    expect(
+      weightCorrectionDelta({ basis: "each", typed: 1, ...baxter }),
+    ).toEqual({ targetLb: 6, deltaLb: 4 });
+  });
+
+  it("turns '6 lb in all' into the same difference", () => {
+    expect(
+      weightCorrectionDelta({ basis: "total", typed: 6, ...baxter }),
+    ).toEqual({ targetLb: 6, deltaLb: 4 });
+  });
+
+  it("is zero when the batch already reads that — which the op refuses", () => {
+    expect(
+      weightCorrectionDelta({ basis: "total", typed: 2, ...baxter }).deltaLb,
+    ).toBe(0);
+  });
+
+  it("goes negative when the ticket said too much, and rounds to the column", () => {
+    expect(
+      weightCorrectionDelta({
+        basis: "each",
+        typed: 1 / 3,
+        quantityWeighed: 6,
+        recordedLb: 2.5,
+      }),
+    ).toEqual({ targetLb: 2, deltaLb: -0.5 });
+  });
+});
+
+describe("deliveryCostCents", () => {
+  it("multiplies a per-package price by how many arrived, in cents, rounded once", () => {
+    // 2026-09-08: `5` typed for five packages meant $5 each and landed as $5.
+    expect(
+      deliveryCostCents({ basis: "each", typedDollars: 5, quantity: 5 }),
+    ).toBe(2500);
+    // Rounded once, on the total: 0.333 × 3 is 0.999, which is $1.00, not 3 × $0.33.
+    expect(
+      deliveryCostCents({ basis: "each", typedDollars: 0.333, quantity: 3 }),
+    ).toBe(100);
+  });
+
+  it("passes an invoice total through, the way the box always worked", () => {
+    expect(
+      deliveryCostCents({ basis: "total", typedDollars: 340, quantity: 12 }),
+    ).toBe(34000);
+  });
+
+  it("keeps an empty box empty — no invoice is not a free delivery", () => {
+    expect(
+      deliveryCostCents({ basis: "each", typedDollars: null, quantity: 5 }),
+    ).toBeNull();
   });
 });

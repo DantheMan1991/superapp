@@ -155,6 +155,15 @@ export function roundQuantity(value: number): number {
  * unmeasured area and `assets` to an unknown cost. "None on hand" and "never
  * counted" are different facts.
  */
+/**
+ * How a figure typed against a delivery was meant: for ONE stocking unit, or
+ * for everything in the entry. The ledger stores totals; the box a person types
+ * into can be read either way, and on 2026-09-08 it was — $5 and 1 lb typed for
+ * five packages meant each and landed as all. Cost and weight share the type
+ * because a person is in one mode or the other for the whole ticket.
+ */
+export type EntryBasis = "each" | "total";
+
 export function formatQuantity(value: number | null, unitCode: string): string {
   if (value === null) return "—";
   const unit = getUnit(unitCode);

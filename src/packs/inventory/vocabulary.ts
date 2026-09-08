@@ -195,6 +195,37 @@ export function costAdjustmentReasonLabel(reason: string): string {
 }
 
 /**
+ * Why a batch's weight is being re-stated. Open taxonomy, the cost reasons'
+ * shape. **`mistyped` is first because it is the one that happened**: on
+ * 2026-09-08 one package's weight was typed where the whole delivery's went.
+ */
+export const WEIGHT_ADJUSTMENT_REASONS = [
+  "mistyped",
+  "reweighed",
+  "ticket_wrong",
+  "correction",
+] as const;
+
+export const WEIGHT_ADJUSTMENT_REASON_LABELS: Record<string, string> = {
+  mistyped: "Typed the wrong figure",
+  reweighed: "Put it back on the scale",
+  ticket_wrong: "The ticket was wrong",
+  correction: "Correcting an entry",
+};
+
+export const WEIGHT_ADJUSTMENT_REASON_NOTES: Record<string, string> = {
+  mistyped:
+    "One package's weight typed where the whole delivery's went, or the other way round. The commonest one.",
+  reweighed: "The batch went back on the scale and it said something else.",
+  ticket_wrong: "The plant's figure was not what arrived.",
+  correction: "Putting an earlier correction right.",
+};
+
+export function weightAdjustmentReasonLabel(reason: string): string {
+  return WEIGHT_ADJUSTMENT_REASON_LABELS[reason] ?? slugLabel(reason);
+}
+
+/**
  * The reason a posted count writes. **Separate from `shrinkage` on purpose**: a
  * count variance means the record drifted, while shrinkage means stock actually
  * went missing, and one number covering both would hide each of them.

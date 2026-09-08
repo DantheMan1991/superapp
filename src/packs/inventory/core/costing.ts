@@ -1,5 +1,5 @@
 /**
- * What a lot cost. PURE — no imports, no database.
+ * What a lot cost. PURE — no runtime imports, no database.
  *
  * **COST IS A LEDGER, NOT A COLUMN**, exactly as quantity is. Nothing stores an
  * average, a valuation or a running total; every figure here is a fold over the
@@ -19,12 +19,41 @@
  * stated rather than hidden.
  */
 
+import type { EntryBasis } from "./units";
+
 export interface CostedMovement {
   /** Signed, in the item's stocking unit. */
   quantity: number;
   /** Total money for this movement, not a rate. Null when it carried no cost. */
   costCents: number | null;
   movementKind: string;
+}
+
+/**
+ * The total the ledger stores, from a price typed either per stocking unit or
+ * for the whole delivery.
+ *
+ * **CENTS, ROUNDED ONCE, HERE.** `receiveStockAction` takes an integer and
+ * refuses anything else — money that arrives as 12.5 cents has already been
+ * divided somewhere it should not have been — so the multiplication and the
+ * one rounding both happen before the boundary. Null only when nothing was
+ * typed: an empty box means "the invoice has not arrived", never $0.
+ *
+ * The cost twin of `deliveryWeightLb`. On 2026-09-08 `5` was typed for five
+ * packages, meant $5 each, and landed as $5 in all — the same misreading of
+ * the same form, on the box directly above the weight.
+ */
+export function deliveryCostCents(input: {
+  basis: EntryBasis;
+  typedDollars: number | null;
+  quantity: number;
+}): number | null {
+  if (input.typedDollars === null) return null;
+  const dollars =
+    input.basis === "each"
+      ? input.typedDollars * input.quantity
+      : input.typedDollars;
+  return Math.round(dollars * 100);
 }
 
 /**

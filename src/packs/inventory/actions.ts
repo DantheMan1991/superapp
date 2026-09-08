@@ -9,6 +9,7 @@ import { logAudit } from "@/lib/audit";
 import {
   InventoryError,
   adjustLotCost,
+  adjustLotWeight,
   adjustStock,
   clearTaxRule,
   setTaxRule,
@@ -79,6 +80,11 @@ function toResult(err: unknown): { error: string } {
       // "not more than nothing" and the other is "only stock arriving is
       // weighed here", and flattening the two would hide which rule was hit.
       case "INVALID_WEIGHT":
+        return { error: err.message };
+      // Both say what to do instead — weigh a delivery, or nothing, because it
+      // already reads that — and neither is a typo on the person's part.
+      case "LOT_UNWEIGHED":
+      case "WEIGHT_UNCHANGED":
         return { error: err.message };
       case "ZERO_QUANTITY":
         return { error: "Enter a quantity other than zero." };
@@ -479,6 +485,62 @@ export async function receiveStockAction(input: unknown) {
     });
     revalidatePath(BASE, "layout");
     return { ok: true, lotId: result.lotId };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Re-state what a batch weighs. Owner-only one layer down, in `adjustLotWeight`.
+ *
+ * Takes the figure AND how it was read, never a difference: the op derives the
+ * delta against what the ledger reads inside its own transaction, which is what
+ * makes the correction safe against a receipt landing between the page load and
+ * the click. The audit row carries the derived figures — identifiers and
+ * pounds, nothing personal.
+ */
+export async function adjustLotWeightAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      lotId: z.string().uuid(),
+      basis: z.enum(["each", "total"]),
+      weightLb: quantity.positive(),
+      reason: z.string().min(1).max(63),
+      occurredOn: requiredDate,
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const row = await withTenant(
+      ctx.tenant.id,
+      (tx) => adjustLotWeight(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "inventory.lot_weight_corrected",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "inventory_lot",
+      targetId: parsed.data.lotId,
+      meta: {
+        deltaLb: row.deltaLb,
+        recordedLb: row.recordedLb,
+        quantityWeighed: row.quantityWeighed,
+        reason: row.reason,
+        occurredOn: row.occurredOn,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return {
+      ok: true,
+      deltaLb: row.deltaLb,
+      nowLb: row.recordedLb + row.deltaLb,
+      quantityWeighed: row.quantityWeighed,
+    };
   } catch (err) {
     return toResult(err);
   }

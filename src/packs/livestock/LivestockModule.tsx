@@ -216,10 +216,13 @@ export async function LivestockModule({
         movementKindsForLots(tx, ctx.tenant.id, headLotIds),
         // A LOT UNDER WITHDRAWAL HAS TO BE VISIBLE WHERE SOMEBODY IS ALREADY
         // LOOKING, not only on a page they would have to think to open.
+        // The pens AND the animals living in them: a cow dosed on her own
+        // is not clear while her pen is, and the pen's row is the only
+        // place on this page she is visible.
         withdrawalByLot(
           tx,
           ctx.tenant.id,
-          lots.map((l) => l.id),
+          [...lots.map((l) => l.id), ...lots.flatMap((l) => membersOf.get(l.id) ?? [])],
           today,
         ),
         /**
@@ -390,6 +393,13 @@ export async function LivestockModule({
       total,
       inside,
       heldCount: held.length,
+      // Animals living in here whose OWN clock is running. A dose given to
+      // one of them is hers alone and never the pen's, but she is standing
+      // in the pen somebody is about to load from.
+      insideNotClear: held.filter((memberId) => {
+        const mw = withdrawals.get(memberId);
+        return Boolean(mw && mw.treatmentCount > 0 && blocksProcessing(mw.meat));
+      }).length,
       portraitId: portraits.get(lot.id)?.id ?? null,
       inCode: parent ? (byId.get(parent.inventoryLotId)?.code ?? null) : null,
       inHref: parent ? `${BASE}/${parent.id}` : null,
@@ -403,6 +413,18 @@ export async function LivestockModule({
         title={describeWithdrawal(row.withdrawal)}
       >
         {formatWithdrawal(row.withdrawal)}
+      </Badge>
+    ) : null;
+
+  // Only while the pen's own clock is clear — under a pen dose every animal
+  // inside is covered by the pen's badge, and a second one would double it.
+  const insideBadge = (row: (typeof rows)[number]) =>
+    row.insideNotClear > 0 && !(row.withdrawal && blocksProcessing(row.withdrawal)) ? (
+      <Badge
+        variant="default"
+        title="An animal living in this lot was treated on her own and is not clear. Open the lot to see which."
+      >
+        {row.insideNotClear} inside not clear
       </Badge>
     ) : null;
 
@@ -540,6 +562,7 @@ export async function LivestockModule({
                       {row.age !== "—" && <span>{row.age}</span>}
                       {row.rate !== "—" && <span>{row.rate} lost</span>}
                       {withdrawalBadge(row)}
+                      {insideBadge(row)}
                     </div>
                   </div>
                 </Link>
@@ -609,7 +632,12 @@ export async function LivestockModule({
                         {row.rate}
                       </TableCell>
                       <TableCell>
-                        {withdrawalBadge(row) ?? (
+                        {withdrawalBadge(row) || insideBadge(row) ? (
+                          <div className="flex flex-wrap gap-1">
+                            {withdrawalBadge(row)}
+                            {insideBadge(row)}
+                          </div>
+                        ) : (
                           <span className="text-muted-foreground">—</span>
                         )}
                       </TableCell>

@@ -165,6 +165,28 @@ export function withdrawalStatus(
   };
 }
 
+/**
+ * Whether a dose given to a pen on `treatedOn` was given to an animal that
+ * lived in it from `startedOn` until `endedOn` (null while she is still there).
+ *
+ * **BOTH ENDS INCLUSIVE, DELIBERATELY.** The day she went in she was there for
+ * the afternoon water; the day she came out she may have been there for the
+ * morning's. `livestock_lot_members.ended_on` is exclusive for membership —
+ * a cow taken out today is out today — but for a DOSE the question is whether
+ * she could have had it, and this file errs toward saying she did. Being
+ * wrong that way holds a clear animal back a few days; being wrong the other
+ * way puts medicated meat in a freezer.
+ */
+export function givenWhileThere(
+  treatedOn: string,
+  startedOn: string,
+  endedOn: string | null,
+): boolean {
+  if (treatedOn < startedOn) return false;
+  if (endedOn !== null && treatedOn > endedOn) return false;
+  return true;
+}
+
 /** Both clocks at once — the shape every screen wants. */
 export interface LotWithdrawal {
   meat: WithdrawalStatus;

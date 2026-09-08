@@ -4,6 +4,7 @@ import {
   clearsOn,
   describeWithdrawal,
   formatWithdrawal,
+  givenWhileThere,
   lastEnteredFor,
   lotWithdrawal,
   withdrawalStatus,
@@ -203,6 +204,26 @@ describe("wording", () => {
   it("says which sale the milk clock is about", () => {
     const status = withdrawalStatus([t()], "milk", "2026-08-02");
     expect(describeWithdrawal(status)).toContain("sold for milk");
+  });
+});
+
+describe("givenWhileThere", () => {
+  it("covers a dose given while she lived in the pen", () => {
+    expect(givenWhileThere("2026-08-15", "2026-08-10", null)).toBe(true);
+    expect(givenWhileThere("2026-08-15", "2026-08-10", "2026-08-20")).toBe(true);
+  });
+
+  it("does not cover a dose given before she went in, or after she came out", () => {
+    expect(givenWhileThere("2026-08-05", "2026-08-10", null)).toBe(false);
+    expect(givenWhileThere("2026-08-25", "2026-08-10", "2026-08-20")).toBe(false);
+  });
+
+  it("COUNTS BOTH THE DAY SHE WENT IN AND THE DAY SHE CAME OUT", () => {
+    // Membership's `ended_on` is exclusive — out today is out today — but a
+    // dose is a different question: could she have had it? She could have,
+    // in the morning's water, and this file errs toward saying she did.
+    expect(givenWhileThere("2026-08-10", "2026-08-10", "2026-08-20")).toBe(true);
+    expect(givenWhileThere("2026-08-20", "2026-08-10", "2026-08-20")).toBe(true);
   });
 });
 

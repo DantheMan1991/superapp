@@ -38,6 +38,8 @@ When you treat animals, the app records how long until they can be processed and
 
 If nobody looks the period up, the animals read as **not clear**, not as clear. An unknown is not a zero. That state shows on the list, on the {{livestockLot|lower}}'s page and on the daily round until somebody reads the label.
 
+A treatment given to a {{livestockLot|lower}} counts for every named animal living in it, from the day she went in to the day she came out, and shows on her own page. A treatment given to one animal is hers alone: her {{livestockLot|lower}} stays clear, and its row says `1 inside not clear` so nobody loads her by mistake.
+
 ## Not on this page
 
 - Nothing tracks individual animals inside a {{livestockLot|lower}} unless you name them. Naming one makes it a record of its own that stays in the {{livestockLot|lower}}.

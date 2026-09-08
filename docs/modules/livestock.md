@@ -133,6 +133,51 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-09-07 — A withdrawal follows the animal into and out of a pen (`claude/a-withdrawal-follows-the-animal`)
+
+**Livestock slice 4 of the improvement review, and the safety gap the review
+found by reading the code.** The withdrawal clock was inherited down the
+SPLIT chain only, bounded by the day each branch separated — the right rule
+when a split animal LEFT the pen, which is what a split did until 8b. Since
+8b a named animal STAYS in her pen. So a pen medicated in the water the day
+after four cows were named out of it left all four reading Clear on their
+pages, on the hub and on the round, because `treatmentsByLot` never asked
+`livestock_lot_members`.
+
+**`membershipTreatmentSources`** asks it: every span an animal has ever had
+in a pen (not only the open one — a dose given during a stay she has since
+ended still runs its clock on her), and a dose given to the pen inside the
+span reaches her. **Both ends of the span count** (`givenWhileThere` in
+`core/withdrawal.ts`, pure): the day she went in she was there for the
+afternoon water; the day she came out she may have been there for the
+morning's. Membership's `ended_on` is exclusive because a cow taken out today
+is out today; for a DOSE the question is whether she could have had it, and
+the file errs toward saying she did. One level deep, like membership.
+
+**The reverse never happens.** A dose given to one cow is hers alone; her
+pen's clock is untouched. What changes on the pen's side is visibility: the
+hub row reads `1 inside not clear` beside the pen's own badge, the pen's
+Withdrawal panel says how many inside are not clear on clocks of their own,
+and the `In this lot` table badges the animal — somebody loading a trailer
+from the pen needs to know she is standing in it, and the pen's row was the
+only place on the hub she was visible at all.
+
+**A dose can arrive by both routes** — the pen treated on the day a cow was
+named out of it is inside the split bound AND inside her membership — so a
+row is kept once, by id, and every returned row now carries `via`
+(`own | split | pen`); the page words the two inherited kinds differently
+(*before this one was split out* / *while she lived in it*) and offers
+Correct on neither. `run-handler.ts` needed no change: it reads
+`withdrawalByLot`, the funnel this lives in, which is the reason the funnel
+exists.
+
+Tests: `givenWhileThere` in `tests/livestock-withdrawal.test.ts`; in
+`tests/livestock-ops.test.ts` a pen dose reaches the cow living in it and
+hers never reaches the pen, the span starts the day she was put in and stops
+the day she was taken out, and a same-day dose arrives once. Guides
+`overview`, `lots`, `lot`, `daily-round` swept. Driven on Hilltop Farm (dev).
+No migration.
+
 ### 2026-09-07 — A pen counted once (`claude/a-pen-counted-once`)
 
 **Livestock slice 3 of the improvement review, and the counting bug the
@@ -2195,7 +2240,12 @@ This pack is the one that forced the change; the full reasoning is in
   null` means every row**, because a running balance cannot start in the middle
   of a ledger. A cap is right for a digest and wrong for arithmetic
 - `src/packs/livestock/core/withdrawal.ts` — pure. **The clock, and the file
-  where being quietly wrong is a legal problem.** Read this before changing
+  where being quietly wrong is a legal problem.** `givenWhileThere` is the
+  membership half of inheritance: both ends of a stay count.
+- `src/packs/livestock/ops.ts` → `treatmentsByLot`, `membershipTreatmentSources`
+  — the one funnel every clock reader uses; a row reaches an animal by her own
+  record, down the split chain, or through the pen she lived in, and says
+  which (`via`) Read this before changing
   anything about treatments; every function in it errs toward saying an animal is
   still under a period
 - `src/packs/livestock/components/treatment-controls.tsx` — the form whose job is
@@ -2347,6 +2397,13 @@ This pack is the one that forced the change; the full reasoning is in
   makes a correction reach the pen and miss the animals, which is the quiet
   wrongness the correction paths exist to remove. `treatmentsByLot` is the only
   place this happens, because it is the funnel every clock reader already used.
+- **AND ALONG MEMBERSHIP, from 2026-09-07.** A dose given to the pen an animal
+  LIVES in, on a day inside her stay, was given to her — the split bound alone
+  was the rule for an animal that had left, and since 8b she has not. Both
+  ends of the stay count (`givenWhileThere`), erring toward under. A dose
+  given to her alone never reaches the pen; the pen says `1 inside not clear`
+  instead. Never fold a member's own clock into the pen's reading — the pen's
+  loose head were not dosed.
 - **The withdrawal applies to the whole lot however many head were treated.**
   `head_treated` is recorded, but nothing here can tell the three that were
   injected from the thirty-seven that were not, and the form says so.

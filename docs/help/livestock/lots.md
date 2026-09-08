@@ -25,7 +25,7 @@ Only the first hundred rows are shown. When there are more you see `Showing 100 
 - **`Where`.** The paddock, and the pen or barn after it. A dash means they are on no paddock. On a phone it reads `No paddock` instead.
 - **`Age`.** Reads in the largest sensible unit: `9 days`, `6 weeks`, `4 months`, `2 years`. `not yet` means the birth date is in the future. A card leaves it out when the birth date is not recorded.
 - **`Lost`.** The share of everything placed that has died, to one decimal. A dash means nothing has arrived yet. A card reads `4.8% lost`, and leaves it out when nothing has arrived.
-- **`Withdrawal`.** A dash when nothing has been given. Otherwise `Clear`, `Not looked up`, or `7 days left`. **`Not looked up` counts as not clear.** Rest on the badge for the full sentence.
+- **`Withdrawal`.** A dash when nothing has been given. Otherwise `Clear`, `Not looked up`, or `7 days left`. **`Not looked up` counts as not clear.** Rest on the badge for the full sentence. A group that is clear itself but holds a named animal that is not reads {badge:1 inside not clear|primary} as well. Open the group to see which animal.
 - **`Head`.** How many there are. `100 (4 in)` means a hundred loose in the group plus four named animals counted on top. A card reads `100 head` with `4 in` beneath it, or `nothing placed` before anything has arrived.
 
 `Head` and `Lost` are over the same animals: a group's loose head plus every named animal living in it. A cow named out of a group is never counted twice, and a death recorded on her page counts against the group she lives in.

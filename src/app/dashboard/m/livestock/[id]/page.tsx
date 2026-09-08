@@ -85,6 +85,7 @@ import {
   pedigreeIndex,
   productsInUse,
   toWeighIns,
+  withdrawalByLot,
 } from "@/packs/livestock/ops";
 import {
   COMPOSITION_SOURCE_LABELS,
@@ -369,6 +370,15 @@ export default async function LivestockLotPage({
       // are questions about a DATE, so today is passed rather than assumed —
       // the same rule the herd and the paddock reads follow.
       const members = await lotMemberSummaries(tx, ctx.tenant.id, lot.id, today);
+      // Each animal living here on her own clock. A dose given to HER alone
+      // is hers and never the pen's, so the pen's panel says how many inside
+      // are not clear rather than folding them into its own reading.
+      const memberWithdrawals = await withdrawalByLot(
+        tx,
+        ctx.tenant.id,
+        members.map((m) => m.livestockLotId),
+        today,
+      );
       const insideOf = (await parentByLot(tx, ctx.tenant.id, [lot.id], today)).get(
         lot.id,
       );
@@ -411,6 +421,7 @@ export default async function LivestockLotPage({
         feedableItems,
         deliveriesByItem,
         members,
+        memberWithdrawals,
         insideOf: insideOf ?? null,
         insideOfCode: insideOfCode ?? null,
         joinable,
@@ -481,6 +492,7 @@ export default async function LivestockLotPage({
     feedableItems,
     deliveriesByItem,
     members,
+    memberWithdrawals,
     insideOf,
     insideOfCode,
     joinable,
@@ -631,6 +643,11 @@ export default async function LivestockLotPage({
     })),
   );
   const rate = mortalityRate(population);
+  /** Animals living here whose OWN clock is running — a dose given to one of them is hers alone. */
+  const insideNotClear = members.filter((m) => {
+    const w = memberWithdrawals.get(m.livestockLotId);
+    return Boolean(w && w.treatmentCount > 0 && blocksProcessing(w.meat));
+  }).length;
   const preferred = preferredIdentifier(identifiers);
   /**
    * What this animal is made of, and who it came from. Both are folds over the
@@ -1077,6 +1094,20 @@ export default async function LivestockLotPage({
                 {describeWithdrawal(withdrawal.milk)}
               </p>
             )}
+            {/* A dose given to ONE animal in here is hers alone, so it cannot
+                be in this card's figure — but somebody loading a trailer from
+                this pen needs to know she is standing in it. */}
+            {/* Only while the pen's OWN clock is clear: under a pen dose every
+                animal inside is covered by the figure above, and a line
+                counting them would read as five more problems. */}
+            {!blocksProcessing(withdrawal.meat) && insideNotClear > 0 && (
+              <p className="mt-1 text-xs font-medium">
+                {insideNotClear === 1
+                  ? "1 animal living in this lot is not clear on a clock of her own"
+                  : `${insideNotClear} animals living in this lot are not clear on clocks of their own`}{" "}
+                — see In this {lotWord.toLowerCase()}.
+              </p>
+            )}
           </div>
         </Panel>
 
@@ -1210,6 +1241,20 @@ export default async function LivestockLotPage({
                       >
                         {m.code}
                       </Link>
+                      {/* Her own clock, when it is running: which cow in here
+                          cannot go on the trailer. */}
+                      {(() => {
+                        const w = memberWithdrawals.get(m.livestockLotId);
+                        return w && w.treatmentCount > 0 && blocksProcessing(w.meat) ? (
+                          <Badge
+                            variant="default"
+                            className="ml-2"
+                            title={describeWithdrawal(w.meat)}
+                          >
+                            {formatWithdrawal(w.meat)}
+                          </Badge>
+                        ) : null;
+                      })()}
                       {/* One head is one animal. Said out loud because the
                           whole point of the slice is that the two are not the
                           same kind of thing. */}
@@ -1592,11 +1637,20 @@ export default async function LivestockLotPage({
                         missing button: this clock is running because of
                         something that happened before this animal was its own
                         record. */}
-                    {t.livestockLotId !== lot.id && (
+                    {t.via === "split" && (
                       <div className="text-xs text-muted-foreground">
                         Given to{" "}
                         {inheritedFrom.get(t.livestockLotId) ?? "the lot it came from"}
                         , before this one was split out
+                      </div>
+                    )}
+                    {/* The other way a dose reaches an animal: the pen she
+                        LIVES in was medicated while she was in it. */}
+                    {t.via === "pen" && (
+                      <div className="text-xs text-muted-foreground">
+                        Given to{" "}
+                        {inheritedFrom.get(t.livestockLotId) ?? "the lot it lives in"}{" "}
+                        while {isAnimal ? "she" : "it"} lived in it
                       </div>
                     )}
                   </TableCell>

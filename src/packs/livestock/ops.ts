@@ -95,6 +95,7 @@ import {
   WITHDRAWAL_SOURCES,
   lotWithdrawal,
   type LotWithdrawal,
+  givenWhileThere,
 } from "./core/withdrawal";
 import {
   averageWeightLb,
@@ -3084,7 +3085,7 @@ export async function listTreatmentsForLot(
   tx: Tx,
   tenantId: string,
   livestockLotId: string,
-): Promise<LivestockTreatment[]> {
+): Promise<TreatmentForLot[]> {
   const byLot = await treatmentsByLot(tx, tenantId, [livestockLotId]);
   return byLot.get(livestockLotId) ?? [];
 }
@@ -3211,8 +3212,61 @@ async function inheritedTreatmentSources(
 }
 
 /**
+ * **A TREATMENT FOLLOWS THE ANIMAL INTO AND OUT OF A PEN.**
+ *
+ * The split chain above answers "what was she given before she became her own
+ * record". Since slice 8b a named animal STAYS in her pen, so the other half
+ * of the question is "what was the pen given while she lived in it" — and
+ * until 2026-09-07 nothing asked it. A pen medicated in the water the day
+ * after four cows were named out of it left all four reading Clear: the split
+ * bound stopped at the day they were named, which was the right rule for an
+ * animal that had LEFT and the wrong one for an animal that had only been
+ * given a page.
+ *
+ * Every membership span an animal has ever had, not only the open one: a dose
+ * given during a stay she has since ended still runs its clock on her.
+ * One level deep, like membership itself.
+ */
+async function membershipTreatmentSources(
+  tx: Tx,
+  tenantId: string,
+  livestockLotIds: string[],
+): Promise<Map<string, { livestockLotId: string; startedOn: string; endedOn: string | null }[]>> {
+  const out = new Map<
+    string,
+    { livestockLotId: string; startedOn: string; endedOn: string | null }[]
+  >();
+  if (livestockLotIds.length === 0) return out;
+  const rows = await tx.query.livestockLotMembers.findMany({
+    where: and(
+      eq(schema.livestockLotMembers.tenantId, tenantId),
+      inArray(schema.livestockLotMembers.memberLotId, livestockLotIds),
+    ),
+  });
+  for (const row of rows) {
+    const list = out.get(row.memberLotId) ?? [];
+    list.push({
+      livestockLotId: row.parentLotId,
+      startedOn: row.startedOn,
+      endedOn: row.endedOn ?? null,
+    });
+    out.set(row.memberLotId, list);
+  }
+  return out;
+}
+
+/**
+ * How a treatment reached a lot: its own row, inherited down the split chain
+ * from the pen it was cut out of, or given to the pen it lived in at the time.
+ * The page words the last two differently and offers Correct on neither.
+ */
+export type TreatmentVia = "own" | "split" | "pen";
+export type TreatmentForLot = LivestockTreatment & { via: TreatmentVia };
+
+/**
  * Every treatment across a set of lots, keyed by lot — **including the ones
- * inherited from the pen each animal was split out of.**
+ * inherited from the pen each animal was split out of, and the ones given to
+ * the pen she lived in while she lived in it.**
  *
  * The single funnel for the withdrawal clock, which is why the inheritance
  * lives here rather than at each call site: `withdrawalByLot` feeds the hub, the
@@ -3221,23 +3275,31 @@ async function inheritedTreatmentSources(
  *
  * **An inherited row keeps its OWN `livestock_lot_id`**, so a caller can always
  * tell whose treatment it is — that is what lets the detail page show it without
- * offering to correct another lot's record.
+ * offering to correct another lot's record. `via` says which route it took.
+ *
+ * **A dose can arrive by both routes** — the pen treated on the very day a cow
+ * was named out of it is inside the split bound AND inside her membership —
+ * and it is one dose, so a row is kept once, by id, its own row first.
  */
 export async function treatmentsByLot(
   tx: Tx,
   tenantId: string,
   lotIds: string[],
-): Promise<Map<string, LivestockTreatment[]>> {
-  const out = new Map<string, LivestockTreatment[]>();
+): Promise<Map<string, TreatmentForLot[]>> {
+  const out = new Map<string, TreatmentForLot[]>();
   if (lotIds.length === 0) return out;
 
-  const inherited = await inheritedTreatmentSources(tx, tenantId, lotIds);
+  const [inherited, lived] = await Promise.all([
+    inheritedTreatmentSources(tx, tenantId, lotIds),
+    membershipTreatmentSources(tx, tenantId, lotIds),
+  ]);
   const wanted = [
     ...new Set([
       ...lotIds,
       ...[...inherited.values()].flatMap((rows) =>
         rows.map((r) => r.livestockLotId),
       ),
+      ...[...lived.values()].flatMap((rows) => rows.map((r) => r.livestockLotId)),
     ]),
   ];
   const rows = await tx.query.livestockTreatments.findMany({
@@ -3256,15 +3318,28 @@ export async function treatmentsByLot(
   }
 
   for (const lotId of lotIds) {
-    const own = byOwner.get(lotId) ?? [];
+    const own = (byOwner.get(lotId) ?? []).map((t) => ({ ...t, via: "own" as const }));
     const fromAbove = (inherited.get(lotId) ?? []).flatMap((source) =>
-      (byOwner.get(source.livestockLotId) ?? []).filter(
-        // A null bound cannot rule anything out, and this file errs toward
-        // saying an animal is still under a period.
-        (t) => !source.onOrBefore || t.treatedOn <= source.onOrBefore,
-      ),
+      (byOwner.get(source.livestockLotId) ?? [])
+        .filter(
+          // A null bound cannot rule anything out, and this file errs toward
+          // saying an animal is still under a period.
+          (t) => !source.onOrBefore || t.treatedOn <= source.onOrBefore,
+        )
+        .map((t) => ({ ...t, via: "split" as const })),
     );
-    const all = [...own, ...fromAbove];
+    const fromPens = (lived.get(lotId) ?? []).flatMap((span) =>
+      (byOwner.get(span.livestockLotId) ?? [])
+        .filter((t) => givenWhileThere(t.treatedOn, span.startedOn, span.endedOn))
+        .map((t) => ({ ...t, via: "pen" as const })),
+    );
+    const seen = new Set<string>();
+    const all: TreatmentForLot[] = [];
+    for (const t of [...own, ...fromAbove, ...fromPens]) {
+      if (seen.has(t.id)) continue;
+      seen.add(t.id);
+      all.push(t);
+    }
     if (all.length > 0) {
       all.sort((a, b) => (a.treatedOn < b.treatedOn ? 1 : -1));
       out.set(lotId, all);

@@ -29,7 +29,7 @@ Everyone can use the first six. Only an owner sees the last three.
 - **`Age`.** From the birth date, or `Birth date not recorded.`
 - **`Fed`.** What feed has cost, with a badge saying how it is known: {badge:Measured|outline} for feed issued to this one by name, {badge:Allocated|primary} for a share of a shared feeder. Rest on the badge to see what that means.
 - **`Weight`.** The latest weighing with a badge for how it was taken: {badge:Scale|outline}, {badge:Sampled|outline}, {badge:Tape|primary} or {badge:Eye|primary}. Underneath, the daily gain once there are two weighings.
-- **`Withdrawal`.** `Clear`, a date, or `Not looked up`. Milk is shown separately when its clock differs.
+- **`Withdrawal`.** `Clear`, a date, or `Not looked up`. Milk is shown separately when its clock differs. A treatment given to the group she lives in counts for her from the day she went in until the day she came out. On a group, a line underneath reads `1 animal living in this lot is not clear on a clock of her own` when an animal inside was treated on her own; the group's own clock stays as it is.
 - **`Where`.** The paddock and since when. Off a paddock it reads `Not on a paddock. Moving them off is what starts a paddock's rest clock.`
 - **`On the books as`.** Whether they are stock or a capital asset. Only when Assets is switched on.
 
@@ -58,7 +58,7 @@ You see `Recorded`, or `Recorded — look the withdrawal up before these go anyw
 
 To fix a wrong figure, click {button:Correct|ghost} on the row. Use {button:Remove|ghost} only for a treatment that never happened. Removing one does not put the medicine back on the shelf.
 
-A treatment inherited from a group this was split out of cannot be changed here. The row tells you which one to correct it on.
+A treatment given to the group this was split out of, or to the group she lives in, shows here too, with `Given to Cows, before this one was split out` or `Given to Cows while she lived in it` under the product. It cannot be changed here. The row tells you which group to correct it on.
 
 ## How to weigh
 
@@ -92,9 +92,9 @@ Moving them off is what starts the old paddock's rest clock. The button is missi
 3. Pick what `These are`: `Name`, `Visual tag`, `Official tag`, `EID / RFID` or `Tattoo`.
 4. Set `When`. Click {button:Record 4|primary}.
 
-**They stay in this group** and keep eating from the same feeders. Fifty at a time is the limit.
+**They stay in this group** and keep eating from the same feeders, and a treatment given to the group afterwards counts for them. Fifty at a time is the limit.
 
-To put an existing animal in, or start a new one inside, use {button:Add animals|outline} in the `In this {{livestockLot|lower}}` section. {button:Take out|ghost} takes one back out, and it stays on the farm. Both are open to everyone: which pen an animal is in tonight is a record of where she is, not a decision about the herd.
+To put an existing animal in, or start a new one inside, use {button:Add animals|outline} in the `In this {{livestockLot|lower}}` section. {button:Take out|ghost} takes one back out, and it stays on the farm. Both are open to everyone: which pen an animal is in tonight is a record of where she is, not a decision about the herd. An animal in the list who is not clear on a clock of her own wears a {badge:7 days left|primary} badge beside her name.
 
 ## How to record breeding and births
 

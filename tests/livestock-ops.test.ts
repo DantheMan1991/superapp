@@ -3112,6 +3112,11 @@ d("livestock ops", () => {
     // A dose given to the pen on the 25th was not given to the pig that left
     // on the 20th, and reading it as though it were would hold a clear animal
     // back — the opposite error, and still an error.
+    //
+    // **LEFT, not merely named.** Since 8b naming a pig out of a pen keeps her
+    // in it, and since 2026-09-07 a dose given to the pen while she lives
+    // there reaches her — so this test takes her OUT before the dose, which
+    // is what "left the pen" has meant all along.
     const { lot, inventoryLotId } = await newLot("LATER-DOSE", "swine");
     await asOwner((tx) =>
       placeHead(tx, ctx(), {
@@ -3130,6 +3135,12 @@ d("livestock ops", () => {
       }),
     );
     await asOwner((tx) =>
+      removeLotFromParent(tx, ctx(), {
+        memberLotId: made[0].lot.id,
+        endedOn: "2026-08-21",
+      }),
+    );
+    await asOwner((tx) =>
       recordTreatment(tx, ctx(), {
         livestockLotId: lot.id,
         treatedOn: "2026-08-25",
@@ -3145,6 +3156,188 @@ d("livestock ops", () => {
     );
     expect(blocksProcessing(clocks.get(lot.id)!.meat)).toBe(true);
     expect(clocks.get(made[0].lot.id)).toBeUndefined();
+  });
+
+  // ---- a withdrawal follows the animal into and out of a pen ------------
+
+  /**
+   * **THE OTHER HALF OF THE CLOCK, 2026-09-07.** Since 8b a named animal
+   * STAYS in her pen, and the split bound above stops at the day she was
+   * named — right for an animal that had left, wrong for one that had only
+   * been given a page. A pen medicated in the water the day after four cows
+   * were named out of it left all four reading Clear.
+   */
+  it("A TREATMENT GIVEN TO THE PEN REACHES THE COW LIVING IN IT", async () => {
+    const { lot, inventoryLotId } = await newLot("WATER-PEN", "cattle");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId,
+        head: 6,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    const [rosie] = await asOwner((tx) =>
+      splitIntoIndividuals(tx, ctx(), {
+        livestockLotId: lot.id,
+        names: ["Rosie"],
+        identifierKind: "name",
+        occurredOn: "2026-08-10",
+      }),
+    );
+    // Five days after she was named, the whole pen goes on medicated water.
+    await asOwner((tx) =>
+      recordTreatment(tx, ctx(), {
+        livestockLotId: lot.id,
+        treatedOn: "2026-08-15",
+        product: "Tylan",
+        route: "water",
+        meatWithdrawalDays: 30,
+        withdrawalSource: "label",
+      }),
+    );
+
+    const clocks = await asOwner((tx) =>
+      withdrawalByLot(tx, tenantId, [lot.id, rosie.lot.id], "2026-08-20"),
+    );
+    expect(clocks.get(rosie.lot.id)?.meat.clearsOn).toBe("2026-09-14");
+    expect(blocksProcessing(clocks.get(rosie.lot.id)!.meat)).toBe(true);
+
+    // Her page shows the pen's row, says which way it reached her, and does
+    // not claim it as hers.
+    const rows = await asOwner((tx) =>
+      listTreatmentsForLot(tx, tenantId, rosie.lot.id),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].livestockLotId).toBe(lot.id);
+    expect(rows[0].via).toBe("pen");
+
+    // And never the other way round: a dose given to HER is hers alone.
+    await asOwner((tx) =>
+      recordTreatment(tx, ctx(), {
+        livestockLotId: rosie.lot.id,
+        treatedOn: "2026-08-16",
+        product: "Penicillin G",
+        route: "injection",
+        meatWithdrawalDays: 60,
+        withdrawalSource: "label",
+      }),
+    );
+    const after = await asOwner((tx) =>
+      withdrawalByLot(tx, tenantId, [lot.id, rosie.lot.id], "2026-08-20"),
+    );
+    expect(after.get(lot.id)?.meat.clearsOn).toBe("2026-09-14");
+    expect(after.get(rosie.lot.id)?.meat.clearsOn).toBe("2026-10-15");
+  });
+
+  it("starts the day she was put in, and stops the day she was taken out", async () => {
+    const { lot, inventoryLotId } = await newLot("IN-AND-OUT", "cattle");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId,
+        head: 4,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    // Dosed before she arrived: not dosed on her.
+    await asOwner((tx) =>
+      recordTreatment(tx, ctx(), {
+        livestockLotId: lot.id,
+        treatedOn: "2026-08-05",
+        product: "Tylan",
+        route: "water",
+        meatWithdrawalDays: 30,
+        withdrawalSource: "label",
+      }),
+    );
+    const cow = await asOwner((tx) =>
+      startIndividual(tx, ctx(), {
+        itemId,
+        name: "Visitor",
+        species: "cattle",
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      addLotToParent(tx, ctx(), {
+        parentLotId: lot.id,
+        memberLotId: cow.lot.id,
+        startedOn: "2026-08-10",
+      }),
+    );
+    expect(
+      (await asOwner((tx) => withdrawalByLot(tx, tenantId, [cow.lot.id], "2026-08-11"))).get(
+        cow.lot.id,
+      ),
+    ).toBeUndefined();
+
+    // Dosed while she was there: hers.
+    await asOwner((tx) =>
+      recordTreatment(tx, ctx(), {
+        livestockLotId: lot.id,
+        treatedOn: "2026-08-12",
+        product: "Tylan",
+        route: "water",
+        meatWithdrawalDays: 30,
+        withdrawalSource: "label",
+      }),
+    );
+    // Taken out on the 18th and the pen dosed again on the 25th: not hers.
+    await asOwner((tx) =>
+      removeLotFromParent(tx, ctx(), { memberLotId: cow.lot.id, endedOn: "2026-08-18" }),
+    );
+    await asOwner((tx) =>
+      recordTreatment(tx, ctx(), {
+        livestockLotId: lot.id,
+        treatedOn: "2026-08-25",
+        product: "Tylan",
+        route: "water",
+        meatWithdrawalDays: 90,
+        withdrawalSource: "label",
+      }),
+    );
+
+    const rows = await asOwner((tx) => listTreatmentsForLot(tx, tenantId, cow.lot.id));
+    expect(rows.map((r) => r.treatedOn)).toEqual(["2026-08-12"]);
+    const clock = (
+      await asOwner((tx) => withdrawalByLot(tx, tenantId, [cow.lot.id], "2026-08-27"))
+    ).get(cow.lot.id);
+    expect(clock?.meat.clearsOn).toBe("2026-09-11");
+  });
+
+  it("a dose on the day she was named out arrives once, not twice", async () => {
+    // Inside the split bound AND inside her membership — one dose, one row.
+    const { lot, inventoryLotId } = await newLot("SAME-DAY", "swine");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId,
+        head: 3,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    const [pig] = await asOwner((tx) =>
+      splitIntoIndividuals(tx, ctx(), {
+        livestockLotId: lot.id,
+        names: ["Twice"],
+        identifierKind: "name",
+        occurredOn: "2026-08-10",
+      }),
+    );
+    await asOwner((tx) =>
+      recordTreatment(tx, ctx(), {
+        livestockLotId: lot.id,
+        treatedOn: "2026-08-10",
+        product: "Penicillin G",
+        route: "injection",
+        meatWithdrawalDays: 10,
+        withdrawalSource: "label",
+      }),
+    );
+    const rows = await asOwner((tx) => listTreatmentsForLot(tx, tenantId, pig.lot.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].via).toBe("split");
   });
 
   it("inherits through TWO splits, and the bound tightens as it climbs", async () => {

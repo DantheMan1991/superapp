@@ -133,6 +133,54 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-09-07 — The hub on a phone, and an animal found by her tag (`claude/the-hub-on-a-phone`)
+
+**Livestock slice 2 of the improvement review.** The hub's table measured
+655px in a 343px phone column, and the two columns off its right edge —
+Withdrawal and Head — are the two a farmer opens the page for. And **finding
+an animal by her tag was impossible**: the search matched the code and the
+species, while `livestock_identifiers` has carried a value index since slice
+0 "because finding an animal by its tag happens in a chute". Nothing read it.
+
+**A card per lot below `md`, the table above it**, both from one `rows`
+array folded once (head, members, breeding, zone, age, loss, withdrawal), so
+the two shapes cannot disagree about a lot. The whole card is the link, and
+above `md` the whole row is (`LinkRow`, its second use after accounting).
+The thumbnail is bigger on the card, because a thumb is what a phone is for.
+
+**`lotIdsByTag`** — one indexed query, only when there is a term:
+case-insensitive, partial, wildcards escaped, and digits-to-digits when the
+term is mostly digits (`840 9917` finds `USA-840-9917`, and so does
+`8409917`). `numericTerm` in `src/lib/list-query.ts` is that rule, lifted out
+of `matchesAny` so memory and SQL decide the same way. **Retired tags
+count**: the number off a tag found in a fence is the only thing anybody has
+to go on, the same reason `preferredIdentifier` falls back to one.
+
+**A search reaches inside lots.** A cow named into `Cows` is no top-level row,
+so "find Bluebell" found nothing — the one question the box exists for. Under
+a search the pool is every lot, and a member that matches is shown with `in
+Cows` beside her (a link on the row; plain text on the card, which is itself
+a link). With no search the membership narrowing stands as before.
+
+**Species pills.** `?species=` had been read by the page since slice 0 and was
+reachable from nowhere. `All` plus one pill per species on the farm, only
+when there is more than one; every href on the bar carries the other two
+filters (`LotFilters.href` is the one place a URL is built). The species
+filter moved from the query into the in-memory narrowing, so the pills can
+list the species you are not looking at.
+
+**Every dialog in the product scrolls on a phone now** — a Layer 0 fix found
+here: `Add animals` measured 885px tall in an 812px viewport with `overflow:
+visible`, its title clipped off the top and its Start button off the bottom,
+and only the Treat form had set its own `max-h`. `DialogContent` carries
+`max-h-[calc(100dvh-2rem)] overflow-y-auto` for everyone; see
+[design-system.md](design-system.md).
+
+Tests: `lotIdsByTag` in `tests/livestock-ops.test.ts` (partial, case, digits,
+escaped wildcard, retired tag), `numericTerm` in `tests/list-query.test.ts`.
+Guide `docs/help/livestock/lots.md` rewritten for both shapes, the tag
+search and the pills. Driven at 375px and desktop on Hilltop Farm (dev).
+
 ### 2026-09-07 — The round on a phone (`claude/the-round-on-a-phone`)
 
 **The founder's improvement review reached this pack** (the same four
@@ -2129,6 +2177,10 @@ This pack is the one that forced the change; the full reasoning is in
   generation, so a ten-deep pedigree is ten queries and not a thousand. Bounded
   twice, and a bound that bites shows up as `truncated` rather than as an
   unknown parent
+- `src/packs/livestock/ops.ts` → `lotIdsByTag` — **the read the value index on
+  `livestock_identifiers` exists for**: who is wearing (or wore) a tag that
+  matches what somebody typed in a chute. Shares `numericTerm` with
+  `matchesAny` so memory and SQL agree on when digits compare with digits
 - `src/packs/livestock/ops.ts` → `setParents` — every refusal it makes, and the
   one it deliberately does not (another species: a mule is real)
 - `src/packs/livestock/ops.ts` → `recordBirth` — the lot, both parents and the

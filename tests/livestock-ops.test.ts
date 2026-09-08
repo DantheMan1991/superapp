@@ -44,6 +44,7 @@ import {
   lastCheckedByLot,
   listChecksForLot,
   listIdentifiers,
+  lotIdsByTag,
   markRoundNormal,
   moveLotToZone,
   moveLotsToZone,
@@ -670,6 +671,53 @@ d("livestock ops", () => {
     // The official one is untouched, which is the whole reason they are
     // separate rows rather than one column.
     expect(all.find((i) => i.identifierKind === "official")?.removedOn).toBeNull();
+  });
+
+  it("finds a lot by any tag it has ever worn", async () => {
+    // The read the value index exists for: somebody in a chute reading a
+    // number off an ear. Case-insensitive, partial, and digits-to-digits
+    // when the term is mostly digits, because the punctuation on a tag is
+    // the printer's.
+    const { lot } = await newLot("EWE-9", "sheep");
+    const other = await newLot("EWE-10", "sheep");
+    const visual = await asOwner((tx) =>
+      addIdentifier(tx, ctx(), {
+        livestockLotId: lot.id,
+        identifierKind: "visual",
+        value: "Blue 47",
+        appliedOn: "2026-04-15",
+      }),
+    );
+    await asOwner((tx) =>
+      addIdentifier(tx, ctx(), {
+        livestockLotId: lot.id,
+        identifierKind: "official",
+        value: "USA-840-9917",
+        appliedOn: "2026-04-15",
+      }),
+    );
+    await asOwner((tx) =>
+      addIdentifier(tx, ctx(), {
+        livestockLotId: other.lot.id,
+        identifierKind: "visual",
+        value: "Red 12",
+        appliedOn: "2026-04-15",
+      }),
+    );
+    const find = (term: string) => asOwner((tx) => lotIdsByTag(tx, tenantId, term));
+
+    expect(await find("blue")).toEqual(new Set([lot.id]));
+    expect(await find("840 9917")).toEqual(new Set([lot.id]));
+    expect(await find("8409917")).toEqual(new Set([lot.id]));
+    expect(await find("red")).toEqual(new Set([other.lot.id]));
+    // A wildcard typed by hand is a character, not a wildcard.
+    expect(await find("%")).toEqual(new Set());
+    expect(await find("")).toEqual(new Set());
+
+    // A retired tag still finds her: the number off a tag found in a fence
+    // is the only thing anybody has to go on.
+    await asOwner((tx) => retireIdentifier(tx, ctx(), visual.id, "2026-07-01"));
+    expect(await find("blue 47")).toEqual(new Set([lot.id]));
   });
 
   // ---- validation and role ----------------------------------------------

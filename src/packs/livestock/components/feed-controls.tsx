@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { formatMoney } from "@/lib/money";
+import { useConfirm } from "@/components/app/use-confirm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -184,7 +185,17 @@ export function AddLotToFeederForm({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" disabled={lots.length === 0}>
+        {/* Says why when it cannot: it greyed out with no explanation. */}
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={lots.length === 0}
+          title={
+            lots.length === 0
+              ? "Every lot with animals in it is already on this feeder"
+              : undefined
+          }
+        >
           Add a lot
         </Button>
       </DialogTrigger>
@@ -248,15 +259,19 @@ export function EndMembershipForm({
   lotCode,
   startedOn,
   today,
+  idPrefix = "",
 }: {
   memberId: string;
   lotCode: string;
   startedOn: string;
   today: string;
+  /** Unique per layout: the feed page renders each row as a card below `md` and a table row above it. */
+  idPrefix?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  const fieldId = `${idPrefix}${memberId}`;
 
   function submit(formData: FormData) {
     startTransition(async () => {
@@ -293,9 +308,9 @@ export function EndMembershipForm({
 
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor={`off-${memberId}`}>Last day on it</Label>
+              <Label htmlFor={`off-${fieldId}`}>Last day on it</Label>
               <Input
-                id={`off-${memberId}`}
+                id={`off-${fieldId}`}
                 name="endedOn"
                 type="date"
                 defaultValue={today}
@@ -315,7 +330,14 @@ export function EndMembershipForm({
   );
 }
 
-/** Close a feeder. Its history keeps reporting. */
+/**
+ * Close a feeder. Its history keeps reporting.
+ *
+ * **BEHIND A CONFIRMATION**, because there is no way back from this screen:
+ * a closed feeder stops being offered and nothing reopens it. It was a bare
+ * ghost button beside `Add a lot`, one slip from closing the bin fifteen
+ * pens eat from — and the guide had to say so.
+ */
 export function CloseFeederButton({
   feedGroupId,
   feederName,
@@ -325,8 +347,20 @@ export function CloseFeederButton({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const { confirm, confirmDialog } = useConfirm();
 
-  function submit() {
+  async function submit() {
+    // Ask first, then start the transition — never await inside it.
+    if (
+      !(await confirm({
+        title: `Close ${feederName}?`,
+        description:
+          "Nothing more can be drawn for it or put on it, and there is no way to reopen it from here. What was drawn and who ate it still report.",
+        confirmLabel: "Close feeder",
+      }))
+    ) {
+      return;
+    }
     startTransition(async () => {
       const result = await closeFeedGroupAction({ id: feedGroupId });
       if ("error" in result) {
@@ -339,9 +373,12 @@ export function CloseFeederButton({
   }
 
   return (
-    <Button variant="ghost" size="sm" onClick={submit} disabled={pending}>
-      Close
-    </Button>
+    <>
+      <Button variant="ghost" size="sm" onClick={submit} disabled={pending}>
+        Close
+      </Button>
+      {confirmDialog}
+    </>
   );
 }
 

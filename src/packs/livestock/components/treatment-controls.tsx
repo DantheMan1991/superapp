@@ -164,6 +164,7 @@ export function RecordTreatmentForm({
   products,
   existing,
   trigger,
+  idPrefix,
 }: {
   livestockLotId: string;
   lotCode: string;
@@ -182,6 +183,12 @@ export function RecordTreatmentForm({
    */
   existing?: ExistingTreatment;
   trigger?: React.ReactNode;
+  /**
+   * The lot page renders each correction twice — a card below `md` and a
+   * table row above it, with CSS choosing — and a duplicate field id points
+   * every label at the first copy. Each layout passes its own prefix.
+   */
+  idPrefix?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -207,7 +214,7 @@ export function RecordTreatmentForm({
   const [suggestion, setSuggestion] = useState<string | null>(null);
   // Unique per dialog: the lot page carries the header's form and one correction
   // form per row, and duplicate ids would point every label at the first.
-  const fieldId = existing ? existing.id : livestockLotId;
+  const fieldId = `${idPrefix ?? ""}${existing ? existing.id : livestockLotId}`;
 
   /**
    * When the product loses focus, offer what this farm entered last time.

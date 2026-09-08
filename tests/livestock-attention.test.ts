@@ -6,9 +6,13 @@ import { livestockAttentionSource } from "../src/packs/livestock/attention/sourc
 import {
   createLivestockLot,
   placeHead,
+  recordBirth,
+  recordBreeding,
   recordDailyCheck,
   recordTreatment,
   splitIntoIndividuals,
+  startIndividual,
+  updateLivestockLot,
   updateTreatment,
   type LivestockCtx,
 } from "../src/packs/livestock/ops";
@@ -181,4 +185,63 @@ d("livestock attention source", () => {
     ).toBe("TREATED clears withdrawal tomorrow");
     expect((await collect("2026-09-09")).find((i) => i.key.includes(pen.lot.id))).toBeUndefined();
   });
+
+  it("a due window is raised the week before, on the day, and once it has shut — never in the middle, and never after the birth", async () => {
+    // A hand service 130 days ago: the window is one day, and it is today.
+    const daisy = await asOwner(async (tx) => {
+      const made = await startIndividual(tx, ctx(), {
+        itemId,
+        name: "Daisy",
+        species: "swine",
+        occurredOn: "2026-01-01",
+      });
+      await updateLivestockLot(tx, ctx(), made.lot.id, { sex: "female" });
+      await recordDailyCheck(tx, ctx(), { livestockLotId: made.lot.id, loggedOn: TODAY });
+      return made;
+    });
+    await asOwner((tx) =>
+      recordBreeding(tx, ctx(), {
+        livestockLotId: daisy.lot.id,
+        exposedFrom: "2026-05-01",
+        exposedTo: "2026-05-01",
+        gestationDays: 130,
+      }),
+    );
+    const hers = async (today: string) =>
+      (await collect(today)).filter((i) => i.href.endsWith(daisy.lot.id));
+
+    expect(await hers("2026-08-31")).toEqual([]);
+    expect(await hers("2026-09-01")).toMatchObject([
+      { key: `livestock_due:${daisy.lot.id}`, title: "Daisy is due in 7 days", urgency: "soon" },
+    ]);
+    expect(await hers(TODAY)).toMatchObject([
+      {
+        key: `livestock_due:${daisy.lot.id}`,
+        title: "Daisy is due from today",
+        urgency: "today",
+        dueOn: TODAY,
+        href: `/dashboard/m/livestock/${daisy.lot.id}`,
+      },
+    ]);
+    expect(await hers("2026-09-10")).toMatchObject([
+      {
+        key: `livestock_due_past:${daisy.lot.id}`,
+        title: "Daisy is 2 days past the due window",
+        urgency: "overdue",
+      },
+    ]);
+
+    // The birth, recorded the way the form records it, clears the line.
+    await asOwner((tx) =>
+      recordBirth(tx, ctx(), {
+        itemId,
+        code: "Daisy's litter",
+        damLotId: daisy.lot.id,
+        head: 8,
+        bornOn: "2026-09-09",
+      }),
+    );
+    expect(await hers("2026-09-10")).toEqual([]);
+  });
+
 });

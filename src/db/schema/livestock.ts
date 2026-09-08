@@ -1193,6 +1193,190 @@ export const livestockBreedParts = pgTable(
   ],
 );
 
+/**
+ * **A SIRE WAS PUT WITH HER, AND THAT IS A WINDOW, NOT A DATE.**
+ *
+ * Slice 4c, the breeding calendar. With a bull running with the cows there
+ * is no service date to write down; what a person knows is the day he went
+ * in and the day he came out, and the calving window is that span pushed
+ * forward by the gestation. `in May 1, out Aug 1` means calves from about
+ * Feb 7 to May 10. Evidence then narrows it — a preg check
+ * (`livestock_breeding_checks`) — and the calving fixes it, which is a row
+ * in `livestock_lots` with `dam_lot_id` set and `born_on` filled, the record
+ * the birth form already writes. **Nothing here stores a due date**: the
+ * window is a fold over this row, the checks and the births in
+ * `core/breeding.ts`, for the same reason the head count is a fold over
+ * movements — correct the out date and every due date moves with it.
+ *
+ * **ON A LOT OR ON AN ANIMAL.** A bull turned in with the whole pen is ONE
+ * row on the pen, and it reaches every female living in it during the
+ * window through `livestock_lot_members`, exactly as a treatment given in
+ * the water does (`treatmentsByLot`). One row to correct when he came out a
+ * week later than somebody remembered, not thirty. A cow bred by hand, or by
+ * AI, is one row on her with the same date in both columns.
+ *
+ * **THE GESTATION IS ON THE ROW.** The figure comes from the installed
+ * profile's `packConfig` (`gestationDays` per species — the pack names no
+ * species and so knows no gestation, ADR 0004), and the form lets a person
+ * change it. It is copied here rather than read live so the calendar stays
+ * reproducible: a tenant who settles on 285 for their Brahmans next year does
+ * not move this year's due dates.
+ *
+ * **NO `status` COLUMN.** Exposed, in calf, open, lost or calved is a fold
+ * over the evidence, newest first, never a flag — a flag stops agreeing with
+ * the rows the moment somebody corrects a check.
+ */
+export const livestockBreedings = pgTable(
+  "livestock_breedings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** The DAM side: one cow, or the pen the bull was turned in with. */
+    livestockLotId: uuid("livestock_lot_id").notNull(),
+    /**
+     * The bull or the boar. Nullable: AI, a borrowed bull nobody made a
+     * record for, or a service nobody saw. Composite self-FK into
+     * `livestock_lots` like `sire_lot_id` there, and RESTRICT for the same
+     * reason — deleting him must not take the herd's calendar with him.
+     */
+    sireLotId: uuid("sire_lot_id"),
+    /** The day he went in — or the service date, for AI. */
+    exposedFrom: date("exposed_from").notNull(),
+    /** The day he came out. NULL while he is still in there. */
+    exposedTo: date("exposed_to"),
+    /** Days from conception to birth, as used for THIS record. */
+    gestationDays: integer("gestation_days").notNull(),
+    notes: text("notes").notNull().default(""),
+    /** Clerk user id of whoever recorded it. Not an FK — the platform has no users table. */
+    recordedBy: text("recorded_by").notNull().default(""),
+    /** P2 extension bag: `NOT NULL DEFAULT '{}'` so `metadata->>'x'` is always safe. */
+    metadata: jsonb("metadata").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("livestock_breedings_tenant_id_id_idx").on(t.tenantId, t.id),
+    // "When is she due" is the read, and it is by lot and by when he went in.
+    index("livestock_breedings_tenant_lot_from_idx").on(
+      t.tenantId,
+      t.livestockLotId,
+      t.exposedFrom,
+    ),
+    // "Which cows did this bull cover" — slice 4d's sire performance walks
+    // this direction.
+    index("livestock_breedings_tenant_sire_idx").on(t.tenantId, t.sireLotId),
+    foreignKey({
+      name: "livestock_breedings_lot_fk",
+      columns: [t.tenantId, t.livestockLotId],
+      foreignColumns: [livestockLots.tenantId, livestockLots.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "livestock_breedings_sire_fk",
+      columns: [t.tenantId, t.sireLotId],
+      foreignColumns: [livestockLots.tenantId, livestockLots.id],
+    }),
+    // He cannot come out before he went in.
+    check(
+      "livestock_breedings_window_forward",
+      sql`${t.exposedTo} is null or ${t.exposedTo} >= ${t.exposedFrom}`,
+    ),
+    // A gestation of nothing is not a pregnancy; two years covers an elephant.
+    check(
+      "livestock_breedings_gestation_valid",
+      sql`${t.gestationDays} >= 1 and ${t.gestationDays} <= 730`,
+    ),
+    // An animal is not bred to itself.
+    check(
+      "livestock_breedings_sire_not_self",
+      sql`${t.sireLotId} is null or ${t.sireLotId} <> ${t.livestockLotId}`,
+    ),
+  ],
+);
+
+/**
+ * **WHAT A PERSON FOUND ON A DAY: in calf, open, or lost.**
+ *
+ * The vet's arm, an ultrasound, or a cow that came back into heat. Each is a
+ * dated fact about one animal (or, for a pen nobody has named out of, about
+ * the pen as a group), and the calendar folds them:
+ *
+ *   - **`bred`** confirms the cycle. With `days_bred` — "she is about 90
+ *     days" — it NARROWS the window to a date, give or take a week; without,
+ *     the window stands as the exposure set it.
+ *   - **`open`** closes the cycle: she did not settle, and there is no due
+ *     date. The cull signal the design names.
+ *   - **`lost`** closes it too: she was in calf and is not now.
+ *
+ * **NO FOREIGN KEY TO THE EXPOSURE.** A check belongs to whichever cycle was
+ * running on the day it was made, and that pairing is a fold by date in
+ * `core/breeding.ts`. A check recorded with no exposure on file at all — a
+ * farm that only writes down what the vet said — still makes a cycle of its
+ * own, because "90 days bred on the 1st" is a due date whether or not anybody
+ * wrote down when the bull went in.
+ */
+export const livestockBreedingChecks = pgTable(
+  "livestock_breeding_checks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    livestockLotId: uuid("livestock_lot_id").notNull(),
+    checkedOn: date("checked_on").notNull(),
+    /** 'bred' | 'open' | 'lost'. CLOSED — the calendar branches on it. */
+    result: text("result").notNull(),
+    /**
+     * How many days in calf the vet reckoned, on the day. Only with `bred`,
+     * and optional there: a confirmation with no estimate is still worth
+     * having.
+     */
+    daysBred: integer("days_bred"),
+    notes: text("notes").notNull().default(""),
+    /** Clerk user id of whoever recorded it. Not an FK — the platform has no users table. */
+    recordedBy: text("recorded_by").notNull().default(""),
+    /** P2 extension bag: `NOT NULL DEFAULT '{}'` so `metadata->>'x'` is always safe. */
+    metadata: jsonb("metadata").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("livestock_breeding_checks_tenant_id_id_idx").on(
+      t.tenantId,
+      t.id,
+    ),
+    index("livestock_breeding_checks_tenant_lot_day_idx").on(
+      t.tenantId,
+      t.livestockLotId,
+      t.checkedOn,
+    ),
+    foreignKey({
+      name: "livestock_breeding_checks_lot_fk",
+      columns: [t.tenantId, t.livestockLotId],
+      foreignColumns: [livestockLots.tenantId, livestockLots.id],
+    }).onDelete("cascade"),
+    check(
+      "livestock_breeding_checks_result_valid",
+      sql`${t.result} in ('bred', 'open', 'lost')`,
+    ),
+    // An estimate of days in calf only makes sense for an animal in calf,
+    // and a negative one is a pregnancy that has not started.
+    check(
+      "livestock_breeding_checks_days_valid",
+      sql`${t.daysBred} is null or (${t.result} = 'bred' and ${t.daysBred} >= 0 and ${t.daysBred} <= 730)`,
+    ),
+  ],
+);
+
 export type LivestockLot = typeof livestockLots.$inferSelect;
 export type NewLivestockLot = typeof livestockLots.$inferInsert;
 export type LivestockIdentifier = typeof livestockIdentifiers.$inferSelect;
@@ -1207,3 +1391,6 @@ export type LivestockBreedPart = typeof livestockBreedParts.$inferSelect;
 export type LivestockLotMember = typeof livestockLotMembers.$inferSelect;
 export type LivestockCapitalTransfer =
   typeof livestockCapitalTransfers.$inferSelect;
+export type LivestockBreeding = typeof livestockBreedings.$inferSelect;
+export type LivestockBreedingCheck =
+  typeof livestockBreedingChecks.$inferSelect;

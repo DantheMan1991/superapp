@@ -12,7 +12,7 @@ The page runs in this order: the buttons, the panels, what is on the books, `In 
 
 ## Finding your way on a phone
 
-- **`On this page`.** A row of chips under the four tabs, on a phone only: `In this {{livestockLot|lower}}`, `Checks`, `Treatments`, `Weighings`, `Breeding`, `Photos`, `Tags`, `Fed`, `Head events`. Tap one and the page jumps to that section. A chip is only there when its section is, so a group with no weighings has no `Weighings` chip.
+- **`On this page`.** A row of chips under the five tabs, on a phone only: `In this {{livestockLot|lower}}`, `Checks`, `Treatments`, `Weighings`, `Breeding`, `Photos`, `Tags`, `Fed`, `Head events`. Tap one and the page jumps to that section. A chip is only there when its section is, so a group with no weighings has no `Weighings` chip.
 - **The panels sit two to a row** on a phone. `Fed` and `Withdrawal` take a whole row each, because they carry a sentence.
 - **Treatments, weighings and the animals in a group are cards** on a phone rather than tables, with {button:Correct|ghost}, {button:Remove|ghost} and {button:Take out|ghost} on the card itself. On a wide screen they are tables with the same buttons at the right of each row.
 
@@ -131,6 +131,22 @@ All three are owners only, and the last two are for named animals.
 
 Breeding you enter beats breeding worked out from parents, and the panel says which you are looking at.
 
+## The due window
+
+The `Due` panel in `Breeding` is the calendar for this animal, or for the loose head of this group. It is not shown for a male. The big line reads where she stands: `Due 2027-02-08 to 2027-05-11 · in 153 days`, `Due about 2027-03-13 · in 179 days` once a check has narrowed it, `Due now`, `12 days past the window · was due by 2027-05-11`, `Gave birth 2027-03-01 · 21 days into the window`, `Found open 2026-10-01` or `Lost the pregnancy 2026-11-05`. Before anything is recorded it reads `—` with `No breeding on record` under it. The badge beside `Due` reads {badge:Exposed|outline}, {badge:Pregnant|outline}, {badge:Due now|primary}, {badge:Past the window|destructive}, {badge:Gave birth|outline}, {badge:Open|outline} or {badge:Lost|outline}. Under the line: who she was bred to, `in with Cows` when the breeding was recorded on the group she lives in, the dates, and the gestation used.
+
+**A breeding recorded on a group reaches every female living in it** from the day the sire went in to the day he came out, the way a treatment in the water does. Record it once on the group; each animal inside reads it on her own page as `recorded on Cows`, and cannot correct it there. The bull himself, and any male living in the group, reads nothing.
+
+- **{button:Record breeding|outline}.** The dialog is headed `Who was in with Rosie?` Pick the `Sire` from the animals of this species that are not recorded as female, or leave `Not recorded` for AI or a bull nobody made a record for. Enter `In`, the day he went in, and `Out`, the day he came out. Leave `Out` blank while he is still in. For AI or a hand service, put the same day in both. `Gestation (days)` is set for the species, 283 for cattle and 114 for swine on a farm profile. Change it if your breed runs long; the figure stays on this record whatever is changed later. Click {button:Record breeding|primary}. You see `Breeding recorded`, or `Breeding recorded — say when he comes out` if `Out` was blank.
+- **{button:He’s out|outline}.** On a breeding with no `Out` date. Enter `Came out` and click {button:Record it|primary}. You see `Out date recorded — the due window is set`. Until then the far end of the window grows by a day every day.
+- **{button:Preg check|outline}.** The dialog is headed `What did you find with Rosie?` Enter `Checked` and pick what was `Found`: `Pregnant`, `Open` or `Lost the pregnancy`. For `Pregnant`, `Days pregnant` takes the vet's estimate and narrows the window to that date give or take a week. Leave it blank and the window stays as it was. Click {button:Record check|primary}. You see `Pregnancy recorded`, `Open recorded — no due date until she is bred again` or `Loss recorded`.
+- **The record under the panel.** One line per breeding: the sire, `in 2026-05-01, out 2026-08-01` or `still in`, and under it the due window with the gestation. One line per check: what was found, when, and the days. {button:Correct|ghost} opens every field of a breeding. {button:Remove|ghost} asks first and takes a breeding or a check off; any birth recorded stays, and the calendar is worked out again without it.
+- **`Inside`.** On a group, one line per animal living in it with where she stands, or `Nothing recorded`. A male reads `—`. Click a name to open her page.
+
+A birth recorded with {button:Record a birth|outline} closes the cycle on its own: nothing on the calendar has to be told. A birth more than a month before the window opened is not counted against it, because it came from a breeding nobody recorded.
+
+The [Breeding](breeding.md) page lists everyone who is due across the farm.
+
 ## How to move an animal to breeding stock
 
 Owners only, on a single animal, and only when Assets is switched on.
@@ -159,6 +175,11 @@ She stops being stock and becomes something the business owns. What she cost mov
 | `that lot is already inside another one, and lots only nest one deep` | Groups nest one level, not two. |
 | `Only an owner can change animal records.` | You are signed in as staff. Ask an owner. |
 | `A course runs for at least one day.` | `Given for (days)` has to be a whole number of one or more. |
+| `Breeding recorded — say when he comes out` | The sire is still in. Click {button:He’s out|outline} when he leaves. |
+| `he cannot come out before he went in — check the two dates` | `Out` is before `In`. |
+| `that animal is recorded as female and cannot be the sire` | Pick a male, or one whose sex is not recorded. |
+| `this animal is recorded as male — record the breeding on the female, or on the pen he was in with` | A male has no due window. |
+| `days pregnant only go with an animal found pregnant` | `Days pregnant` was filled in for an animal found open or lost. |
 | `47 taken off — still on the record` | The tag is no longer current. It still finds the animal in a search. |
 | `Photo added` | The picture is on the record. |
 
@@ -168,12 +189,14 @@ She stops being stock and becomes something the business owns. What she cost mov
 - `Head events`, `Fed in by name` and `Daily checks` show the last 25, 10 and 14 rows, and a line under the list says so when they are full.
 - A treatment inherited from a parent group cannot be corrected here.
 - A course is one record with a length. It cannot skip days, and each day's dose is not recorded separately.
+- A breeding recorded on a group cannot be corrected from an animal's page. Open the group.
+- Nothing warns about a heifer being bred to her own sire yet.
 - Nothing here gives you a dose or a withdrawal period. Read the label.
 - If you need any of this, ask us.
 
 ## Who can do what
 
-Everyone can place head, record a loss, treat, weigh, feed, move to a paddock, add a tag, record a daily check, and correct or remove a treatment or weighing.
+Everyone can place head, record a loss, treat, weigh, feed, move to a paddock, add a tag, record a daily check, record breeding and a preg check, and correct or remove a treatment, a weighing, a breeding or a check.
 
 Putting an animal into a {{livestockLot|lower}} and taking it out are open to everyone too.
 

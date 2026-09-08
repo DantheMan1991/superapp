@@ -204,3 +204,35 @@ export function tapeDivisorFrom(
   const value = (divisors as Record<string, unknown>)[key];
   return typeof value === "number" && value > 0 ? value : null;
 }
+
+/**
+ * Days from conception to birth for one species, from the installed profile's
+ * `packConfig` — the figure the breeding calendar pushes an exposure window
+ * forward by.
+ *
+ * IN CONFIG FOR THE SAME REASON THE TAPE DIVISOR IS: a cow carries for 283
+ * days and a sow for 114, and a pack that knew that would know what a cow is
+ * (ADR 0004). A breed that runs long — Brahmans go past 290 — is an argument a
+ * tenant settles in `tenant_modules.config`, or on the form, which lets a
+ * person change the number and copies what was used onto the record.
+ *
+ * **Null for a species the profile says nothing about**, and null means the
+ * form asks rather than guesses. The homestead profile leaves poultry out on
+ * purpose: a hen does not gestate.
+ *
+ * Total by construction, like `speciesFrom`: anything unreadable is "no
+ * figure", never a crash.
+ */
+export function gestationDaysFrom(
+  config: unknown,
+  species: string,
+): number | null {
+  if (!config || typeof config !== "object" || Array.isArray(config)) return null;
+  const days = (config as Record<string, unknown>).gestationDays;
+  if (!days || typeof days !== "object" || Array.isArray(days)) return null;
+  const key = species.trim().toLowerCase().replace(/\s+/g, "_");
+  const value = (days as Record<string, unknown>)[key];
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? value
+    : null;
+}

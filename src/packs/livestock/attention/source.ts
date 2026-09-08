@@ -1,28 +1,25 @@
 import "server-only";
-import type { Tx } from "@/db";
+import { eq } from "drizzle-orm";
+import { schema, type Tx } from "@/db";
 import type {
   AttentionCtx,
   AttentionItem,
   AttentionSource,
 } from "@/lib/attention-sources/types";
-import { listLots, movementKindsForLots } from "@/packs/inventory/ops";
-import {
-  lastCheckedByLot,
-  listLivestockLots,
-  parentByLot,
-  withdrawalByLot,
-} from "../ops";
-import { splitInHead, summariseHead, summarisePen } from "../core/herd";
+import { packContext } from "@/lib/packs/tenant-context";
+import { lastCheckedByLot, standingHerd, whoIsDue, withdrawalByLot } from "../ops";
 import { roundAttention, withdrawalAttention } from "../core/attention";
+import { breedingAttention } from "../core/breeding";
 
 /**
- * What `livestock` says you still owe: the round you have not walked, and the
- * clocks that need a person — never looked up, or clearing now.
+ * What `livestock` says you still owe: the round you have not walked, the
+ * clocks that need a person — never looked up, or clearing now — and the
+ * calving windows about to open or already shut.
  *
  * The second pack source after `production`'s, and the same rules: it imports
  * `@/lib/attention-sources/types` and its own pack, never the registry and
- * never another module. The arithmetic is in `core/attention.ts`, pure and
- * tested; this file only reads.
+ * never another module. The arithmetic is in `core/attention.ts` and
+ * `core/breeding.ts`, pure and tested; this file only reads.
  *
  * ── IT GOES TO EVERYBODY ────────────────────────────────────────────────────
  *
@@ -45,7 +42,11 @@ import { roundAttention, withdrawalAttention } from "../core/attention";
  *  4. **A closed lot, or one with nothing standing in it.** Nothing to look
  *     at and nothing to process. A pen whose head are all named animals still
  *     counts — its population is what is loose plus what lives in it, the
- *     fold every other screen makes (`summarisePen`).
+ *     fold every other screen makes (`standingHerd`).
+ *  5. **The middle of a calving window.** A herd's window is three months
+ *     long; the breeding page carries who is due now. The digest raises the
+ *     week before it opens, the day it opens, and a window that has closed
+ *     with nothing recorded — `breedingAttention`.
  */
 export const livestockAttentionSource: AttentionSource = {
   slug: "livestock-barn",
@@ -53,63 +54,36 @@ export const livestockAttentionSource: AttentionSource = {
   label: "Livestock",
 
   async collect(tx: Tx, ctx: AttentionCtx): Promise<AttentionItem[]> {
-    const lots = await listLivestockLots(tx, ctx.tenantId);
-    if (lots.length === 0) return [];
-    const ids = lots.map((l) => l.id);
-    const inventoryLotIds = lots.map((l) => l.inventoryLotId);
-    const [inventoryLots, movements, lotParents, lastChecked, withdrawals] =
-      await Promise.all([
-        listLots(tx, ctx.tenantId),
-        movementKindsForLots(tx, ctx.tenantId, inventoryLotIds),
-        parentByLot(tx, ctx.tenantId, ids, ctx.today),
-        lastCheckedByLot(tx, ctx.tenantId),
-        withdrawalByLot(tx, ctx.tenantId, ids, ctx.today),
-      ]);
-    const byInv = new Map(inventoryLots.map((l) => [l.id, l]));
-    const byId = new Map(lots.map((l) => [l.id, l]));
-    const membersOf = new Map<string, string[]>();
-    for (const [memberId, parentId] of lotParents) {
-      const list = membersOf.get(parentId) ?? [];
-      list.push(memberId);
-      membersOf.set(parentId, list);
-    }
-    const open = lots.filter((l) => byInv.get(l.inventoryLotId)?.status !== "closed");
-    const codeOf = (lotId: string) => {
-      const lot = byId.get(lotId);
-      return (lot && byInv.get(lot.inventoryLotId)?.code) ?? "—";
-    };
-
-    // Head standing in each open record: a pen's population, an animal's own.
-    const standing = new Map<string, number>();
-    for (const lot of open) {
-      const own = summariseHead(movements.get(lot.inventoryLotId) ?? []);
-      if (lotParents.has(lot.id)) {
-        standing.set(lot.id, own.balance);
-        continue;
-      }
-      const members = (membersOf.get(lot.id) ?? []).flatMap((memberId) => {
-        const m = byId.get(memberId);
-        if (!m) return [];
-        const rows = movements.get(m.inventoryLotId) ?? [];
-        return [
-          {
-            summary: summariseHead(rows),
-            splitInHead: splitInHead(rows),
-            splitFromHere: byInv.get(m.inventoryLotId)?.parentLotId === lot.inventoryLotId,
-          },
-        ];
-      });
-      standing.set(lot.id, summarisePen(own, members).balance);
-    }
+    const herd = await standingHerd(tx, ctx.tenantId, ctx.today);
+    if (herd.lots.length === 0) return [];
+    const [lastChecked, withdrawals, tenant] = await Promise.all([
+      lastCheckedByLot(tx, ctx.tenantId),
+      withdrawalByLot(
+        tx,
+        ctx.tenantId,
+        herd.open.map((l) => l.id),
+        ctx.today,
+      ),
+      // The digest is not a request, so nothing has resolved the tenant's
+      // industry for us; the row is readable under the caller's own tx, the
+      // same way `packContext` reads its labels.
+      tx.query.tenants.findFirst({
+        where: eq(schema.tenants.id, ctx.tenantId),
+        columns: { industry: true },
+      }),
+    ]);
+    // The gestation for a cycle a check opened on its own comes from the
+    // profile; an exposure carries its own figure.
+    const pack = await packContext(tx, ctx.tenantId, tenant?.industry ?? "", "livestock");
 
     // The round is walked by pen: a member is looked at with the pen she
     // lives in, so only top-level lots with animals in them can be stale.
     const round = roundAttention(
-      open
-        .filter((l) => !lotParents.has(l.id) && (standing.get(l.id) ?? 0) > 0)
+      herd.open
+        .filter((l) => !herd.parentOf.has(l.id) && (herd.standing.get(l.id) ?? 0) > 0)
         .map((l) => ({
           id: l.id,
-          code: codeOf(l.id),
+          code: herd.codeOf(l.id),
           lastCheckedOn: lastChecked.get(l.id) ?? null,
         })),
       ctx.today,
@@ -119,8 +93,8 @@ export const livestockAttentionSource: AttentionSource = {
     // a pen's own, or an animal's (which includes what her pen was given
     // while she lived in it: `withdrawalByLot` already folds that in).
     const clocks = withdrawalAttention(
-      open
-        .filter((l) => (standing.get(l.id) ?? 0) > 0)
+      herd.open
+        .filter((l) => (herd.standing.get(l.id) ?? 0) > 0)
         .flatMap((l) => {
           const w = withdrawals.get(l.id);
           if (!w || w.treatmentCount === 0) return [];
@@ -133,7 +107,7 @@ export const livestockAttentionSource: AttentionSource = {
           return [
             {
               id: l.id,
-              code: codeOf(l.id),
+              code: herd.codeOf(l.id),
               state: w.meat.state,
               clearsOn: w.meat.clearsOn,
               product: binding?.product ?? null,
@@ -145,6 +119,17 @@ export const livestockAttentionSource: AttentionSource = {
       ctx.today,
     );
 
-    return [...(round ? [round] : []), ...clocks];
+    // Who is due — the same funnel the breeding page reads, one line per
+    // female with a running cycle at the edge of her window.
+    const due = breedingAttention(
+      (await whoIsDue(tx, ctx.tenantId, ctx.today, pack.config)).map((line) => ({
+        id: line.lotId,
+        code: line.code,
+        cycle: line.cycle,
+      })),
+      ctx.today,
+    );
+
+    return [...(round ? [round] : []), ...clocks, ...due];
   },
 };

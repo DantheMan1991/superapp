@@ -1,6 +1,12 @@
 "use client";
 
-import { ClipboardCheck, LayoutDashboard, Scale, Sparkles } from "lucide-react";
+import {
+  CalendarHeart,
+  ClipboardCheck,
+  LayoutDashboard,
+  Scale,
+  Sparkles,
+} from "lucide-react";
 import {
   CategoryStrip,
   type CategoryItem,
@@ -21,7 +27,7 @@ const BASE = "/dashboard/m/livestock";
  * at when one lot is being judged against the last, and Ask is the only
  * screen in the pack that works with nothing recorded at all.
  *
- * No props, unlike `ProductionNav`: none of these four names is a word the
+ * No props, unlike `ProductionNav`: none of these five names is a word the
  * tenant owns. `lotWord` is, and it is deliberately not in the strip — the hub
  * tab is "Overview" for the same pluralisation reason production's is.
  */
@@ -29,6 +35,10 @@ const ITEMS: CategoryItem[] = [
   { href: BASE, label: "Overview", icon: LayoutDashboard, exact: true },
   { href: `${BASE}/log`, label: "Daily round", icon: ClipboardCheck },
   { href: `${BASE}/feed`, label: "Feed", icon: Scale },
+  // Slice 4c. Between feed and Ask: looked at when a season is being
+  // planned, which is less often than the round and more often than a
+  // question.
+  { href: `${BASE}/breeding`, label: "Breeding", icon: CalendarHeart },
   { href: `${BASE}/ask`, label: "Ask", icon: Sparkles },
 ];
 

@@ -133,6 +133,37 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-09-08 — Small chores in the barn (`claude/small-chores-in-the-barn`)
+
+**Livestock slice 8 of the improvement review**: the short things the guides
+had been apologising for, in one PR. No migration.
+
+- **A tag can be taken off.** `retireIdentifierAction` had existed since
+  slice 0 with no caller, so the Tags table rendered a `Removed` column and a
+  `current` badge no screen could change. `RetireIdentifierButton` (a date
+  dialog, `member` like adding one) sits beside the badge; the row stays,
+  `preferredIdentifier` still falls back to it and `lotIdsByTag` still finds
+  her by it. `Applied` hides below `md` so the control fits the row.
+- **A camera button on photos.** `RecordPhotos` (Documents, Layer 0 — assets
+  gets it too) gained the Inbox's second input with `capture="environment"`
+  and a `Take photo` button below `md`; `Add a photo` takes the `ImagePlus`
+  icon so the two read apart.
+- **A lot can start with its head.** `How many arrived` and `Arrived` on the
+  lot form, optional; `createLivestockLot` places them in the same
+  transaction through `placeHead`. Blank still places nothing — the recorded
+  asymmetry stands: how many actually came is a fact somebody checks. Test
+  in `tests/livestock-ops.test.ts`.
+- **`ITEM_REQUIRED` is mapped** — starting a lot with no stock line read
+  *Something went wrong saving that* since slice 0.
+- **`Name for the new lot` and `Name`** on the split and birth dialogs, which
+  still said *lot code* against the pack's own ruling.
+- **The three caps say so**: `Head events` (25), `Fed in by name` (10) and
+  `Daily checks` (14) carry a line when full.
+
+Guides `lot.md` (tags, photos, split and birth labels, the caps), `lots.md`
+(the count on the form, the mapped error) and `assets/asset.md` (the camera)
+swept. Driven on Hilltop Farm (dev) at 375px and desktop.
+
 ### 2026-09-08 — Feed without a feeder, and on a phone (`claude/feed-without-a-feeder`)
 
 **Livestock slice 7 of the improvement review.** The Feed page mounted
@@ -2705,13 +2736,14 @@ This pack is the one that forced the change; the full reasoning is in
 - ~~`Sold live` never appears under `Lost today`~~ — **closed 2026-09-07**: read
   back by `soldOn` and named beneath the loss, on the tile and on the card,
   never counted as one.
-- **`moveLotsToZoneAction` and `retireIdentifierAction` are dead**; the second
-  leaves a `Removed` column and a `current` badge no screen can produce.
-- **`ITEM_REQUIRED` has no case in the error mapper.**
+- **`moveLotsToZoneAction` is dead** (no caller). ~~`retireIdentifierAction`~~
+  gained its button on 2026-09-08.
+- ~~**`ITEM_REQUIRED` has no case in the error mapper.**~~ — mapped 2026-09-08.
 - ~~**The accountant is read-only in a comment and a member everywhere else.**~~
   — **settled 2026-09-03: a member.** The comment was wrong and is gone, and the
   photo panel's UI-only `!== "expert"` with it.
-- **Three silent truncations** (head events 25, fed-in 10, checks 14).
+- ~~**Three silent truncations** (head events 25, fed-in 10, checks 14).~~ — each
+  says so when full, 2026-09-08. The caps themselves stand.
 - **`livestockLot` is hardcoded in about 24 strings, four of them as `pen`**, and
   `structure` reaches the reader once, as `In a pen or barn`. Article agreement
   breaks on any renamed word. Fixing any of it sweeps `docs/help/livestock/*.md`.

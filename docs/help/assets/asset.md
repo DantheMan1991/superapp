@@ -97,7 +97,7 @@ Only schedules that count months get a due date on the job. A meter schedule rai
 
 ## How to add photos
 
-1. Click {button:Add a photo|outline|camera}. Pick one or more files.
+1. Click {button:Add a photo|outline|image-plus}. Pick one or more files. On a phone, {button:Take photo|outline|camera} sits beside it and opens the camera instead.
 2. You see `Photo added`, or `3 photos added`.
 3. The first one becomes the picture of this asset, and shows beside its name in the list. To choose a different one, rest on it and click the {icon:star} button. You see `Picture set`.
 4. To take one off, rest on it and click the {icon:x} button. You see `Photo removed — the file is still in Documents`.

@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Camera, Star, X } from "lucide-react";
+import { Camera, ImagePlus, Star, X } from "lucide-react";
 // uploadPresigned, NOT upload — the store is PRIVATE and rejects classic client
 // tokens outright. Same trap document-controls.tsx records at its own import.
 import { uploadPresigned } from "@vercel/blob/client";
@@ -72,6 +72,7 @@ export function RecordPhotos({
 }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [pending, startTransition] = useTransition();
 
@@ -142,15 +143,41 @@ export function RecordPhotos({
             className="hidden"
             onChange={(e) => void onFiles(e.target.files)}
           />
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={working}
-            onClick={() => inputRef.current?.click()}
-          >
-            <Camera className="size-4" />
-            {busy ? "Uploading…" : "Add a photo"}
-          </Button>
+          {/* A SECOND INPUT FOR THE CAMERA, the Inbox's pattern: `capture`
+              asks the phone for the camera itself, but an input that carries
+              it never offers the photo library, so the general one stays as
+              it is and this one exists only below `md` — on a desk there is
+              no camera worth asking for. Same `onFiles`, so a photo taken is
+              registered exactly like one uploaded. */}
+          <input
+            ref={cameraRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => void onFiles(e.target.files)}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="md:hidden"
+              disabled={working}
+              onClick={() => cameraRef.current?.click()}
+            >
+              <Camera className="size-4" />
+              Take photo
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={working}
+              onClick={() => inputRef.current?.click()}
+            >
+              <ImagePlus className="size-4" />
+              {busy ? "Uploading…" : "Add a photo"}
+            </Button>
+          </div>
         </>
       )}
 

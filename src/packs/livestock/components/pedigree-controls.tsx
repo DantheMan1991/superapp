@@ -453,7 +453,10 @@ export function RecordBirthForm({
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="birth-code">Lot code</Label>
+              {/* A NAME, not a code — the same ruling the lot form follows.
+                  "Lot code" over this box told a farmer to invent a barcode
+                  for a calf. */}
+              <Label htmlFor="birth-code">Name</Label>
               <Input
                 id="birth-code"
                 name="code"

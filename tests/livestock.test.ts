@@ -27,6 +27,13 @@ import {
 } from "../src/packs/livestock/core/digest";
 import { breedHint } from "../src/packs/livestock/vocabulary";
 import {
+  ADVISOR_DAILY_CAP,
+  THREAD_TITLE_MAX,
+  capMessage,
+  historyForModel,
+  threadTitle,
+} from "../src/packs/livestock/core/threads";
+import {
   ROUND_STALE_AFTER_DAYS,
   roundAttention,
   withdrawalAttention,
@@ -802,5 +809,45 @@ describe("starterQuestions", () => {
         hasZones: true,
       }),
     ).toHaveLength(4);
+  });
+});
+describe("the advisor's threads", () => {
+  it("titles a thread from its first question, cut to a line on a word", () => {
+    expect(threadTitle("  Is the loss rate\non PEN-1   normal? ")).toBe(
+      "Is the loss rate on PEN-1 normal?",
+    );
+    const long =
+      "How much should a three month old pig be eating each day if it is on pasture and getting whey as well as a grower ration";
+    const title = threadTitle(long);
+    expect(title.length).toBeLessThanOrEqual(THREAD_TITLE_MAX + 1);
+    expect(title.endsWith("…")).toBe(true);
+    expect(title).toBe("How much should a three month old pig be eating each day if it is on pasture…");
+    expect(threadTitle("   ")).toBe("Untitled");
+    // A single unbroken word longer than the line is cut hard.
+    expect(threadTitle("x".repeat(200))).toBe(`${"x".repeat(THREAD_TITLE_MAX)}…`);
+  });
+
+  it("hands the model the last turns, starting on a question", () => {
+    const turns = [
+      { role: "user" as const, content: "q1" },
+      { role: "assistant" as const, content: "a1" },
+      { role: "user" as const, content: "q2" },
+      { role: "assistant" as const, content: "a2" },
+      { role: "user" as const, content: "q3" },
+      { role: "assistant" as const, content: "a3" },
+    ];
+    expect(historyForModel(turns, 20)).toEqual(turns);
+    // Four back would open on a1; it opens on q2 instead.
+    expect(historyForModel(turns, 5).map((t) => t.content)).toEqual(["q2", "a2", "q3", "a3"]);
+    expect(historyForModel(turns, 2).map((t) => t.content)).toEqual(["q3", "a3"]);
+    expect(historyForModel(turns, 0)).toEqual([]);
+    expect(historyForModel([], 20)).toEqual([]);
+    // A window that is all answers hands over nothing rather than a reply to nothing.
+    expect(historyForModel([{ role: "assistant" as const, content: "a" }], 5)).toEqual([]);
+  });
+
+  it("says what the cap is, and how big", () => {
+    expect(ADVISOR_DAILY_CAP).toBe(100);
+    expect(capMessage(ADVISOR_DAILY_CAP)).toContain("100 questions");
   });
 });

@@ -36,9 +36,11 @@ import {
 import { summariseHead } from "@/packs/livestock/core/herd";
 import {
   checkStreak,
+  describeLeft,
   formatLastChecked,
   lossesOn,
   roundProgress,
+  soldOn,
 } from "@/packs/livestock/core/daily";
 import {
   LotCheckForm,
@@ -68,6 +70,16 @@ const STREAK_WINDOW_DAYS = 90;
  * this pack, the head count from `inventory`'s ledger, the paddock from `land`,
  * and the losses recorded today are read back out of the ledger rather than
  * stored here a second time.
+ *
+ * **A TABLE ON A WIDE SCREEN, A CARD PER LOT ON A PHONE.** The table is 733px
+ * with its two buttons, and the phone this is walked on is 375px — so `Mark
+ * normal` and `Something's up` sat at x=516–736 on every row, off the right
+ * edge, and the one screen in the pack built to be used in a barn could not be
+ * used there without dragging each row sideways. Measured in the Browser pane
+ * on 2026-09-07, not guessed. Both layouts render from the same `round` array
+ * and CSS picks (`md:hidden` / `hidden md:block`), the review queue's pattern:
+ * a `matchMedia` hook would have to guess a width on the server and flash the
+ * table on exactly the device this exists for.
  */
 export default async function DailyRoundPage() {
   const ctx = await requireTenant();
@@ -155,6 +167,9 @@ export default async function DailyRoundPage() {
         code: inv?.code ?? "—",
         balance: summary.balance,
         lost: lossesOn(dated, today),
+        // A live sale is off the count and is not a loss. It used to be
+        // neither — read back so the row can say so.
+        sold: soldOn(dated, today),
         zone: zones.get(lot.inventoryLotId) ?? null,
         check: checks.get(lot.id) ?? null,
         lastCheckedOn: lastChecked.get(lot.id) ?? null,
@@ -169,6 +184,27 @@ export default async function DailyRoundPage() {
   );
   const streak = checkStreak(checkedDays, today);
   const lostTotal = round.reduce((sum, r) => sum + r.lost, 0);
+  const soldTotal = round.reduce((sum, r) => sum + r.sold, 0);
+
+  /** The check's state, once there is one. The same badge in both layouts. */
+  const checkBadge = (row: (typeof round)[number]) =>
+    row.check ? (
+      <Badge variant={row.check.status === "attention" ? "default" : "outline"}>
+        {row.check.status === "attention" ? "Noted" : "Normal"}
+      </Badge>
+    ) : null;
+
+  /** The withdrawal, only when it BLOCKS. A "clear" badge on every row would be the noise that hides this one. */
+  const withdrawalBadge = (row: (typeof round)[number]) =>
+    row.withdrawal && blocksProcessing(row.withdrawal.meat) ? (
+      <Badge
+        variant="default"
+        className="mt-1"
+        title={describeWithdrawal(row.withdrawal.meat)}
+      >
+        Withdrawal · {formatWithdrawal(row.withdrawal.meat)}
+      </Badge>
+    ) : null;
 
   return (
     <div className="space-y-6">
@@ -197,7 +233,9 @@ export default async function DailyRoundPage() {
         />
       ) : (
         <>
-          <div className="grid gap-3 md:grid-cols-3">
+          {/* Two-up from the narrowest phone, three across from `md`. One per
+              row cost the list three screens before the first lot appeared. */}
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
             <StatCard
               label="Checked"
               value={`${progress.checked} of ${progress.total}`}
@@ -227,85 +265,84 @@ export default async function DailyRoundPage() {
               }
             />
 
-            {/* Read back out of inventory's ledger. Not a column here. */}
+            {/* Read back out of inventory's ledger. Not a column here. The
+                third card takes the whole row on a phone rather than sitting
+                alone beside a gap. */}
             <StatCard
+              className="col-span-2 md:col-span-1"
               label="Lost today"
               value={lostTotal}
               tone={lostTotal === 0 ? "default" : "destructive"}
               footnote={
                 lostTotal === 0
-                  ? "Nothing recorded against today."
-                  : "Head, already off the count."
+                  ? soldTotal > 0
+                    ? `Nothing lost. ${soldTotal} sold live, already off the count.`
+                    : "Nothing recorded against today."
+                  : soldTotal > 0
+                    ? `Head, already off the count — and ${soldTotal} sold live.`
+                    : "Head, already off the count."
               }
             />
           </div>
 
-          <DataTable>
-            <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Lot</TableHead>
-                <TableHead>Where</TableHead>
-                <TableHead className="text-right">Head</TableHead>
-                <TableHead className="text-right">Lost today</TableHead>
-                <TableHead>Last checked</TableHead>
-                <TableHead className="text-right">Today</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {round.map((row) => (
-                <TableRow key={row.lot.id}>
-                  <TableCell>
-                    <div className="font-medium">
+          {/* Phone: one card per lot. What a person walking the pens needs to
+              see, then the two buttons — and nothing off the edge. */}
+          <ul className="space-y-3 md:hidden">
+            {round.map((row) => {
+              const left = describeLeft(row.lost, row.sold);
+              return (
+                <li
+                  key={row.lot.id}
+                  className="rounded-2xl bg-card p-4 shadow-elevation-1"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
                       <Link
                         href={`${BASE}/${row.lot.id}`}
-                        className="hover:underline"
+                        className="font-medium hover:underline"
                       >
                         {row.code}
                       </Link>
+                      <p className="text-xs text-muted-foreground">
+                        {slugLabel(row.lot.species)}
+                        {row.zone && (
+                          <>
+                            {" · "}
+                            {row.zone.zoneName}
+                            {row.zone.structureName &&
+                              ` · ${row.zone.structureName}`}
+                          </>
+                        )}
+                      </p>
+                      {withdrawalBadge(row)}
                     </div>
-                    <div className="text-xs text-muted-foreground">
-                      {slugLabel(row.lot.species)}
-                    </div>
-                    {row.withdrawal &&
-                      blocksProcessing(row.withdrawal.meat) && (
-                        <Badge
-                          variant="default"
-                          className="mt-1"
-                          title={describeWithdrawal(row.withdrawal.meat)}
-                        >
-                          {/* Only when it BLOCKS. A "clear" badge on every row
-                              would be the noise that hides this one. */}
-                          Withdrawal · {formatWithdrawal(row.withdrawal.meat)}
-                        </Badge>
-                      )}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {row.zone ? row.zone.zoneName : "—"}
-                    {row.zone?.structureName && (
-                      <span className="text-xs"> · {row.zone.structureName}</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {row.balance}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">
-                    {row.lost === 0 ? "—" : row.lost}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatLastChecked(row.lastCheckedOn, today)}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center justify-end gap-2">
-                      {row.check ? (
-                        <Badge
-                          variant={
-                            row.check.status === "attention" ? "default" : "outline"
+                    <div className="shrink-0 text-right">
+                      <p className="font-medium tabular-nums">
+                        {row.balance}
+                        <span className="ml-1 text-xs font-normal text-muted-foreground">
+                          head
+                        </span>
+                      </p>
+                      {left && (
+                        <p
+                          className={
+                            row.lost > 0
+                              ? "text-xs text-destructive"
+                              : "text-xs text-muted-foreground"
                           }
                         >
-                          {row.check.status === "attention" ? "Noted" : "Normal"}
-                        </Badge>
-                      ) : (
+                          {left} today
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      Last checked ·{" "}
+                      {formatLastChecked(row.lastCheckedOn, today).toLowerCase()}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {checkBadge(row) ?? (
                         <QuickNormalButton
                           livestockLotId={row.lot.id}
                           today={today}
@@ -317,14 +354,90 @@ export default async function DailyRoundPage() {
                         today={today}
                         balance={row.balance}
                         hasEntry={row.check !== null}
+                        idPrefix="card-"
                       />
                     </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-            </Table>
-          </DataTable>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+
+          {/* Wide screen: the table. */}
+          <div className="hidden md:block">
+            <DataTable>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Lot</TableHead>
+                    <TableHead>Where</TableHead>
+                    <TableHead className="text-right">Head</TableHead>
+                    <TableHead className="text-right">Lost today</TableHead>
+                    <TableHead>Last checked</TableHead>
+                    <TableHead className="text-right">Today</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {round.map((row) => (
+                    <TableRow key={row.lot.id}>
+                      <TableCell>
+                        <div className="font-medium">
+                          <Link
+                            href={`${BASE}/${row.lot.id}`}
+                            className="hover:underline"
+                          >
+                            {row.code}
+                          </Link>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {slugLabel(row.lot.species)}
+                        </div>
+                        {withdrawalBadge(row)}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {row.zone ? row.zone.zoneName : "—"}
+                        {row.zone?.structureName && (
+                          <span className="text-xs"> · {row.zone.structureName}</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {row.balance}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">
+                        {row.lost === 0 ? "—" : row.lost}
+                        {/* Under the loss, not in it: sold is off the count
+                            and is not a death. */}
+                        {row.sold > 0 && (
+                          <div className="text-xs">{row.sold} sold live</div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatLastChecked(row.lastCheckedOn, today)}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center justify-end gap-2">
+                          {checkBadge(row) ?? (
+                            <QuickNormalButton
+                              livestockLotId={row.lot.id}
+                              today={today}
+                            />
+                          )}
+                          <LotCheckForm
+                            livestockLotId={row.lot.id}
+                            lotCode={row.code}
+                            today={today}
+                            balance={row.balance}
+                            hasEntry={row.check !== null}
+                            idPrefix="row-"
+                          />
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </DataTable>
+          </div>
 
           {progress.needsAttention.length > 0 && (
             <section>
@@ -333,30 +446,33 @@ export default async function DailyRoundPage() {
               </h2>
               <DataTable>
                 <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Lot</TableHead>
-                    <TableHead>What was seen</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {round
-                    .filter((row) => row.check?.status === "attention")
-                    .map((row) => (
-                      <TableRow key={row.lot.id}>
-                        <TableCell className="font-medium">{row.code}</TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {row.check?.notes || (
-                            <span>
-                              {row.lost > 0
-                                ? `${row.lost} lost, no note left.`
-                                : "Flagged with no note."}
-                            </span>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                </TableBody>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Lot</TableHead>
+                      <TableHead>What was seen</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {round
+                      .filter((row) => row.check?.status === "attention")
+                      .map((row) => {
+                        const left = describeLeft(row.lost, row.sold);
+                        return (
+                          <TableRow key={row.lot.id}>
+                            <TableCell className="font-medium">{row.code}</TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {row.check?.notes || (
+                                <span>
+                                  {left
+                                    ? `${left}, no note left.`
+                                    : "Flagged with no note."}
+                                </span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                  </TableBody>
                 </Table>
               </DataTable>
             </section>

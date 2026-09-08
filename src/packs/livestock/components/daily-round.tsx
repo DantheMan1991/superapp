@@ -132,23 +132,32 @@ export function LotCheckForm({
   today,
   balance,
   hasEntry,
+  idPrefix = "",
 }: {
   livestockLotId: string;
   lotCode: string;
   today: string;
   balance: number;
   hasEntry: boolean;
+  /**
+   * The round renders every row twice — a card below `md` and a table row
+   * above it, with CSS choosing — so the same lot's dialog exists twice in the
+   * DOM. Field ids are unique per lot, not per copy, and a duplicate id points
+   * every label at the first copy. Each layout passes its own prefix.
+   */
+  idPrefix?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [reason, setReason] = useState<string>(HAND_REMOVAL_REASONS[0]);
+  const fieldId = `${idPrefix}${livestockLotId}`;
 
   function submit(formData: FormData) {
     const lost = Number(formData.get("lost") ?? NO_LOSS);
     const notes = String(formData.get("notes") ?? "");
     if (Number.isNaN(lost) || lost < 0) {
-      toast.error("Head lost has to be a number.");
+      toast.error("Head leaving has to be a number.");
       return;
     }
     if (lost > balance) {
@@ -196,9 +205,12 @@ export function LotCheckForm({
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor={`lost-${livestockLotId}`}>Head lost</Label>
+                {/* "Head leaving", not "Head lost": the picker beside it
+                    offers Sold live, and an animal sold is not an animal
+                    lost. The same heading the lot page's dialog uses. */}
+                <Label htmlFor={`lost-${fieldId}`}>Head leaving</Label>
                 <Input
-                  id={`lost-${livestockLotId}`}
+                  id={`lost-${fieldId}`}
                   name="lost"
                   type="number"
                   min={0}
@@ -209,9 +221,9 @@ export function LotCheckForm({
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor={`reason-${livestockLotId}`}>What happened</Label>
+                <Label htmlFor={`reason-${fieldId}`}>What happened</Label>
                 <Select value={reason} onValueChange={setReason}>
-                  <SelectTrigger id={`reason-${livestockLotId}`}>
+                  <SelectTrigger id={`reason-${fieldId}`}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -226,9 +238,9 @@ export function LotCheckForm({
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor={`notes-${livestockLotId}`}>Notes</Label>
+              <Label htmlFor={`notes-${fieldId}`}>Notes</Label>
               <Textarea
-                id={`notes-${livestockLotId}`}
+                id={`notes-${fieldId}`}
                 name="notes"
                 rows={3}
                 maxLength={2000}

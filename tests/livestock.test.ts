@@ -11,9 +11,11 @@ import {
 import {
   checkStreak,
   daysSinceCheck,
+  describeLeft,
   formatLastChecked,
   lossesOn,
   roundProgress,
+  soldOn,
 } from "../src/packs/livestock/core/daily";
 import {
   formatSnapshot,
@@ -376,6 +378,44 @@ describe("lossesOn", () => {
 
   it("is zero on a day nothing was recorded", () => {
     expect(lossesOn([mv("2026-08-18", "death", -3)], "2026-08-19")).toBe(0);
+  });
+});
+
+describe("soldOn", () => {
+  const mv = (occurredOn: string, movementKind: string, quantity: number) => ({
+    occurredOn,
+    movementKind,
+    quantity,
+  });
+
+  it("counts a live sale, which lossesOn deliberately does not", () => {
+    // Recorded on the round as `Sold live`, the head left the count and then
+    // showed nowhere — not under Lost today, because it is not a loss, and not
+    // anywhere else, because nothing read it back. This is the other half.
+    const day = [
+      mv("2026-08-19", "sold_live", -2),
+      mv("2026-08-19", "death", -3),
+      mv("2026-08-18", "sold_live", -5),
+    ];
+    expect(soldOn(day, "2026-08-19")).toBe(2);
+    expect(lossesOn(day, "2026-08-19")).toBe(3);
+  });
+
+  it("is zero when nothing was sold that day", () => {
+    expect(soldOn([mv("2026-08-19", "death", -3)], "2026-08-19")).toBe(0);
+    expect(soldOn([mv("2026-08-18", "sold_live", -3)], "2026-08-19")).toBe(0);
+  });
+});
+
+describe("describeLeft", () => {
+  it("says what left in the round's own words", () => {
+    expect(describeLeft(3, 0)).toBe("3 lost");
+    expect(describeLeft(0, 2)).toBe("2 sold live");
+    expect(describeLeft(3, 2)).toBe("3 lost, 2 sold live");
+  });
+
+  it("is empty when nothing left, so a caller can say its own sentence", () => {
+    expect(describeLeft(0, 0)).toBe("");
   });
 });
 

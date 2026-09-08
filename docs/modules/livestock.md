@@ -133,6 +133,46 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-09-08 — The lot page in a phone's order (`claude/the-lot-page-on-a-phone`)
+
+**Livestock slice 6 of the improvement review.** The largest screen in the
+product measured 3,895px tall at 375px with its eleven sections in one
+column, the daily check 2,850px down, eight panels one per row before the
+first section, and three tables — members 473px, treatments 711px, weighings
+641px — whose `Take out`, `Correct` and `Remove` sat off the right edge. On
+the treatments table that is the one control in the pack whose absence is a
+legal problem.
+
+**The order changed for every screen, not only the phone.** The working
+records now come before the identity ones: panels, the books, `In this lot`,
+`Daily checks`, `Treatments`, `Weighings`, then `Breeding`, `Photos`, `Tags`,
+`Fed in by name`, `Head events`. A check, a dose and a weight are what a
+person came to the page to do; parents and papers are what they came to
+look up. One order rather than one per device, so the guide describes one
+page.
+
+**`On this page`**, a row of anchor chips under the tabs, phone only: eleven
+sections is four thousand pixels and the one somebody came for is rarely the
+first. Anchors rather than tabs, so the page stays one page and a link into
+it still lands on everything; each section carries `id` and `scroll-mt-24`
+for the sticky bar. A chip appears only when its section does.
+
+**Panels two-up** from the narrowest phone, the product's stat-row rule;
+`Fed` and `Withdrawal` take a whole row because they carry a sentence.
+
+**Treatments, weighings and members are a card each below `md`**, the table
+above it, the round's pattern. `RecordTreatmentForm` and `RecordWeightForm`
+gained `idPrefix` for the same reason `LotCheckForm` did: each correction now
+renders twice and a duplicate field id points every label at the first copy.
+
+Done by a script over the file rather than by hand (the page is 1,900
+lines): section ids, the strip, the grid, three card lists, then the blocks
+cut and reordered by their id'd wrapper lines with every anchor asserted
+unique. No logic changed and no tests were added; guide tests, lint and a
+cold `tsc` cover the rewrite, and it was driven at 375px and desktop on
+Hilltop Farm (dev). Guide `lot.md` gained *Finding your way on a phone* and
+the page order. No migration.
+
 ### 2026-09-08 — The barn reaches What needs you (`claude/the-barn-reaches-what-needs-you`)
 
 **Livestock slice 5 of the improvement review, and the pack's first attention

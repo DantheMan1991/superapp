@@ -134,6 +134,7 @@ export function RecordWeightForm({
   tapeAvailable,
   existing,
   trigger,
+  idPrefix,
 }: {
   livestockLotId: string;
   lotCode: string;
@@ -155,6 +156,8 @@ export function RecordWeightForm({
    */
   existing?: ExistingWeight;
   trigger?: React.ReactNode;
+  /** Unique per layout when a page renders the same correction twice. See the treatment form. */
+  idPrefix?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -166,7 +169,7 @@ export function RecordWeightForm({
   // Unique per dialog: a lot page carries the header's "Weigh" form and one
   // "Correct" form per row, and duplicate ids would point every label at the
   // first of them.
-  const fieldId = existing ? existing.id : livestockLotId;
+  const fieldId = `${idPrefix ?? ""}${existing ? existing.id : livestockLotId}`;
   const methods = ["scale", "sample", ...(tapeAvailable ? ["tape"] : []), "visual"];
   const isTape = method === "tape";
   const isVisual = method === "visual";

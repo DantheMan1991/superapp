@@ -871,7 +871,47 @@ export default async function LivestockLotPage({
 
       <LivestockNav />
 
-      <div className="grid gap-6 md:grid-cols-3 xl:grid-cols-4">
+      {/* **WHERE TO, ON A PHONE.** Eleven sections in one column is four
+          thousand pixels, and the one somebody came for is rarely the first.
+          Anchors, not tabs: the page stays one page, so a link into it still
+          lands on everything. Hidden from `md` up, where the column is
+          short enough to read. In the page's own order. */}
+      <nav
+        aria-label="On this page"
+        className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:hidden"
+      >
+        {[
+          {
+            id: "in-this-lot",
+            label: `In this ${lotWord.toLowerCase()}`,
+            show: !isAnimal && (members.length > 0 || (!insideOf && canRecord)),
+          },
+          { id: "checks", label: "Checks", show: true },
+          { id: "treatments", label: "Treatments", show: treatments.length > 0 },
+          { id: "weighings", label: "Weighings", show: weights.length > 0 },
+          { id: "breeding", label: "Breeding", show: true },
+          { id: "photos", label: "Photos", show: documentsOn },
+          { id: "tags", label: "Tags", show: true },
+          { id: "fed", label: "Fed", show: fedIn.length > 0 },
+          { id: "events", label: "Head events", show: entries.length > 0 },
+        ]
+          .filter((jump) => jump.show)
+          .map((jump) => (
+            <a
+              key={jump.id}
+              href={`#${jump.id}`}
+              className="shrink-0 rounded-full bg-muted px-3 py-1.5 text-sm font-medium text-muted-foreground"
+            >
+              {jump.label}
+            </a>
+          ))}
+      </nav>
+
+      {/* Two-up from the narrowest phone, like every stat row in the product:
+          eight panels one per row was 1,200px before the first section. The
+          two that carry a sentence — Fed and Withdrawal — take the whole row
+          there, because a legal fact does not belong in a half-width box. */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-6 xl:grid-cols-4">
         <Panel className="p-5">
           <h2 className="font-heading text-base font-semibold tracking-heading">
             Head
@@ -921,7 +961,7 @@ export default async function LivestockLotPage({
           </div>
         </Panel>
 
-        <Panel className="p-5">
+        <Panel className="col-span-2 p-5 md:col-span-1">
           <h2 className="font-heading text-base font-semibold tracking-heading">
               <span className="flex items-center gap-2">
                 <Link href={`${BASE}/feed`} className="hover:underline">
@@ -1053,7 +1093,7 @@ export default async function LivestockLotPage({
           </div>
         </Panel>
 
-        <Panel className="p-5">
+        <Panel className="col-span-2 p-5 md:col-span-1">
           <h2 className="font-heading text-base font-semibold tracking-heading">
               <span className="flex items-center gap-2">
                 Withdrawal
@@ -1195,7 +1235,7 @@ export default async function LivestockLotPage({
       {/* An ANIMAL holds nothing, so it is not offered the section at all —
           only a lot can contain things (slice 8c). */}
       {!isAnimal && (members.length > 0 || (!insideOf && canRecord)) && (
-        <div className="space-y-3">
+        <div id="in-this-lot" className="scroll-mt-24 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="font-heading text-xl font-semibold tracking-heading">
               In this {lotWord.toLowerCase()}
@@ -1212,6 +1252,61 @@ export default async function LivestockLotPage({
               />
             )}
           </div>
+          {/* Phone: a card per animal, with Take out on it. The table had
+              Take out off the right edge. */}
+          <div className="md:hidden">
+            {members.length === 0 ? (
+              <EmptyState
+                panel
+                title={`Nothing in this ${lotWord.toLowerCase()} yet`}
+                description={`The head counted above is loose in it — that is right for animals nobody names. Use Add animals to start a named one in here, put an existing one in, or name animals out of this ${lotWord.toLowerCase()} — they stay in it.`}
+              />
+            ) : (
+              <ul className="space-y-3">
+                {members.map((m) => {
+                  const w = memberWithdrawals.get(m.livestockLotId);
+                  const blocked = Boolean(w && w.treatmentCount > 0 && blocksProcessing(w.meat));
+                  return (
+                    <li
+                      key={m.livestockLotId}
+                      className="rounded-2xl bg-card p-4 shadow-elevation-1"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 font-medium">
+                            <Link
+                              href={`${BASE}/${m.livestockLotId}`}
+                              className="hover:underline"
+                            >
+                              {m.code}
+                            </Link>
+                            {blocked && w && (
+                              <Badge variant="default" title={describeWithdrawal(w.meat)}>
+                                {formatWithdrawal(w.meat)}
+                              </Badge>
+                            )}
+                            {m.isIndividual && <Badge variant="outline">animal</Badge>}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {m.species.charAt(0).toUpperCase() + m.species.slice(1)} · in
+                            since {m.startedOn} · {m.head} head
+                          </p>
+                        </div>
+                        {canRecord && (
+                          <TakeOutOfLotButton
+                            memberLotId={m.livestockLotId}
+                            code={m.code}
+                            today={today}
+                          />
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+          <div className="hidden md:block">
           <DataTable
             isEmpty={members.length === 0}
             empty={
@@ -1287,6 +1382,7 @@ export default async function LivestockLotPage({
               </TableBody>
             </Table>
           </DataTable>
+          </div>
           {members.length > 0 && (
             <p className="text-xs text-muted-foreground">
               The head at the top of this page counts these in: what is loose in
@@ -1296,7 +1392,471 @@ export default async function LivestockLotPage({
         </div>
       )}
 
-      <div className="space-y-3">
+      <div id="checks" className="scroll-mt-24 space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="font-heading text-xl font-semibold tracking-heading">
+            Daily checks{" "}
+            <span className="font-normal text-muted-foreground">
+              {/* The lot's own answer to "when did anyone last look at these
+                  animals", which is the question the round screen asks about
+                  the whole farm. */}
+              · last {formatLastChecked(checks[0]?.loggedOn ?? null, today).toLowerCase()}
+            </span>
+          </h2>
+          {population.balance > 0 && (
+            <LotCheckForm
+              livestockLotId={lot.id}
+              lotCode={inventoryLot.code}
+              today={today}
+              balance={summary.balance}
+              namedInside={members.length}
+              hasEntry={checks[0]?.loggedOn === today}
+            />
+          )}
+        </div>
+        <DataTable
+          isEmpty={checks.length === 0}
+          empty={
+            <EmptyState
+              title="No checks recorded"
+              description="A day with no entry is a day nobody looked — which is a different fact from a day when nothing happened, and it is the difference the mortality rate above depends on."
+            />
+          }
+        >
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Day</TableHead>
+                <TableHead>How it was</TableHead>
+                <TableHead>Noted</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {checks.map((check) => (
+                <TableRow key={check.id}>
+                  <TableCell className="tabular-nums text-muted-foreground">
+                    {check.loggedOn}
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={
+                        check.status === "attention" ? "default" : "outline"
+                      }
+                    >
+                      {check.status === "attention" ? "Noted" : "Normal"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {check.notes || "—"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </DataTable>
+      </div>
+
+      {treatments.length > 0 && (
+        <div id="treatments" className="scroll-mt-24 space-y-3">
+          <h2 className="font-heading text-xl font-semibold tracking-heading">
+            Treatments{" "}
+            <span className="font-normal text-muted-foreground">
+              {/* The sentence as written. Lowercasing it mangled the product
+                  name — "penicillin g was given…" — which is the one word in it
+                  somebody needs to recognise. */}
+              · {formatWithdrawal(withdrawal.meat)} for meat
+            </span>
+          </h2>
+          {/* Phone: a card per treatment. The table is 711px wide and its
+              Correct and Remove sat off the right edge — on the one record
+              in the pack where a wrong figure is a legal problem. */}
+          <ul className="space-y-3 md:hidden">
+            {treatments.map((t) => {
+              const meatClear = clearsOn(t.treatedOn, t.meatWithdrawalDays);
+              const milkClear = clearsOn(t.treatedOn, t.milkWithdrawalDays);
+              const givenTo =
+                inheritedFrom.get(t.livestockLotId) ?? "the lot it came from";
+              return (
+                <li key={t.id} className="rounded-2xl bg-card p-4 shadow-elevation-1">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-medium">{t.product}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {t.treatedOn} · {treatmentRouteLabel(t.route)}
+                        {[t.dose, t.administeredBy && `by ${t.administeredBy}`]
+                          .filter(Boolean)
+                          .map((part) => ` · ${part}`)
+                          .join("")}
+                      </p>
+                      {t.via === "split" && (
+                        <p className="text-xs text-muted-foreground">
+                          Given to {givenTo}, before this one was split out
+                        </p>
+                      )}
+                      {t.via === "pen" && (
+                        <p className="text-xs text-muted-foreground">
+                          Given to {givenTo} while {isAnimal ? "she" : "it"} lived in it
+                        </p>
+                      )}
+                    </div>
+                    <div className="shrink-0 text-right text-sm">
+                      <p className="tabular-nums">
+                        {meatClear ?? (
+                          <span className="text-muted-foreground">not looked up</span>
+                        )}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        meat{milkClear ? ` · milk ${milkClear}` : ""}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                    <span
+                      className="text-xs text-muted-foreground"
+                      title={WITHDRAWAL_SOURCE_NOTES[t.withdrawalSource] ?? ""}
+                    >
+                      {WITHDRAWAL_SOURCE_LABELS[t.withdrawalSource] ?? t.withdrawalSource}
+                      {t.notes ? ` · ${t.notes}` : ""}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      {t.livestockLotId === lot.id ? (
+                        <>
+                          <RecordTreatmentForm
+                            livestockLotId={lot.id}
+                            lotCode={inventoryLot.code}
+                            head={population.balance}
+                            today={today}
+                            medicines={[]}
+                            products={products}
+                            idPrefix="card-"
+                            existing={{
+                              id: t.id,
+                              treatedOn: t.treatedOn,
+                              product: t.product,
+                              dose: t.dose,
+                              route: t.route,
+                              headTreated: t.headTreated,
+                              meatWithdrawalDays: t.meatWithdrawalDays,
+                              milkWithdrawalDays: t.milkWithdrawalDays,
+                              withdrawalSource: t.withdrawalSource,
+                              administeredBy: t.administeredBy,
+                              notes: t.notes,
+                            }}
+                          />
+                          <RemoveTreatmentButton
+                            treatmentId={t.id}
+                            product={t.product}
+                            treatedOn={t.treatedOn}
+                            fromStock={t.inventoryMovementId !== null}
+                          />
+                        </>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          Correct it on {givenTo}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="hidden md:block">
+          <DataTable>
+            <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>When</TableHead>
+                <TableHead>What</TableHead>
+                <TableHead>How</TableHead>
+                <TableHead className="text-right">Meat clear</TableHead>
+                <TableHead className="text-right">Milk clear</TableHead>
+                <TableHead>Noted</TableHead>
+                <TableHead className="text-right"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {treatments.map((t) => (
+                <TableRow key={t.id}>
+                  <TableCell className="tabular-nums text-muted-foreground">
+                    {t.treatedOn}
+                  </TableCell>
+                  <TableCell>
+                    <div className="font-medium">{t.product}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {[t.dose, t.administeredBy && `by ${t.administeredBy}`]
+                        .filter(Boolean)
+                        .join(" · ") || "—"}
+                    </div>
+                    {/* Said out loud rather than left to be inferred from a
+                        missing button: this clock is running because of
+                        something that happened before this animal was its own
+                        record. */}
+                    {t.via === "split" && (
+                      <div className="text-xs text-muted-foreground">
+                        Given to{" "}
+                        {inheritedFrom.get(t.livestockLotId) ?? "the lot it came from"}
+                        , before this one was split out
+                      </div>
+                    )}
+                    {/* The other way a dose reaches an animal: the pen she
+                        LIVES in was medicated while she was in it. */}
+                    {t.via === "pen" && (
+                      <div className="text-xs text-muted-foreground">
+                        Given to{" "}
+                        {inheritedFrom.get(t.livestockLotId) ?? "the lot it lives in"}{" "}
+                        while {isAnimal ? "she" : "it"} lived in it
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {treatmentRouteLabel(t.route)}
+                    <div className="text-xs">
+                      {/* Provenance, as everywhere else in this pack. */}
+                      <span
+                        title={WITHDRAWAL_SOURCE_NOTES[t.withdrawalSource] ?? ""}
+                      >
+                        {WITHDRAWAL_SOURCE_LABELS[t.withdrawalSource] ??
+                          t.withdrawalSource}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {clearsOn(t.treatedOn, t.meatWithdrawalDays) ?? (
+                      <span className="text-muted-foreground">not looked up</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {clearsOn(t.treatedOn, t.milkWithdrawalDays) ?? "—"}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {t.notes || "—"}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {/* CORRECT for a period or a date typed wrong, REMOVE for a
+                        treatment that never happened. Both move the clock, and
+                        the clock is what decides whether these can be
+                        processed. */}
+                    <div className="flex items-center justify-end">
+                      {/* AN INHERITED TREATMENT IS ANOTHER RECORD'S ROW. It
+                          reaches this animal because it was in the pen when the
+                          dose was given — see `treatmentsByLot` — and offering
+                          to correct it here would edit the pen's history from
+                          an animal's page, silently changing the clock for
+                          every other animal that came out of it. */}
+                      {t.livestockLotId === lot.id ? (
+                        <>
+                          <RecordTreatmentForm
+                            livestockLotId={lot.id}
+                            lotCode={inventoryLot.code}
+                            head={population.balance}
+                            today={today}
+                            medicines={[]}
+                            products={products}
+                            idPrefix="row-"
+                            existing={{
+                              id: t.id,
+                              treatedOn: t.treatedOn,
+                              product: t.product,
+                              dose: t.dose,
+                              route: t.route,
+                              headTreated: t.headTreated,
+                              meatWithdrawalDays: t.meatWithdrawalDays,
+                              milkWithdrawalDays: t.milkWithdrawalDays,
+                              withdrawalSource: t.withdrawalSource,
+                              administeredBy: t.administeredBy,
+                              notes: t.notes,
+                            }}
+                          />
+                          <RemoveTreatmentButton
+                            treatmentId={t.id}
+                            product={t.product}
+                            treatedOn={t.treatedOn}
+                            fromStock={t.inventoryMovementId !== null}
+                          />
+                        </>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          Correct it on {inheritedFrom.get(t.livestockLotId) ?? "the lot it came from"}
+                        </span>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+            </Table>
+          </DataTable>
+          </div>
+        </div>
+      )}
+
+      {weights.length > 0 && (
+        <div id="weighings" className="scroll-mt-24 space-y-3">
+          <h2 className="font-heading text-xl font-semibold tracking-heading">
+            Weighings{" "}
+            <span className="font-normal text-muted-foreground">
+              {feed?.weight.conversion
+                ? `· ${feed.weight.conversion.ratio} lb of feed per lb of gain`
+                : feed?.weight.conversionBlockedBy
+                  ? `· ${feed.weight.conversionBlockedBy}`
+                  : ""}
+            </span>
+          </h2>
+          {/* Phone: a card per weighing, Correct and Remove on it. */}
+          <ul className="space-y-3 md:hidden">
+            {[...weighIns].reverse().map((w) => {
+              const row = weights.find((x) => x.id === w.id)!;
+              const whole =
+                w.averageLb === null || population.balance <= 0
+                  ? null
+                  : formatLb(Math.round(w.averageLb * population.balance * 10) / 10);
+              return (
+                <li key={w.id} className="rounded-2xl bg-card p-4 shadow-elevation-1">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-medium tabular-nums">
+                        {formatLb(w.averageLb)}
+                        <span className="ml-1 text-xs font-normal text-muted-foreground">
+                          a head
+                        </span>
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {w.weighedOn} ·{" "}
+                        {describeSample(w.method, row.sampleSize, population.balance)}
+                        {w.shrinkAffected && " · near a haul"}
+                      </p>
+                      {row.notes && (
+                        <p className="text-xs text-muted-foreground">{row.notes}</p>
+                      )}
+                    </div>
+                    {whole && (
+                      <p className="shrink-0 text-right text-xs text-muted-foreground">
+                        {whole}
+                        <span className="block">the whole lot</span>
+                      </p>
+                    )}
+                  </div>
+                  <div className="mt-2 flex items-center justify-end gap-1">
+                    <RecordWeightForm
+                      livestockLotId={lot.id}
+                      lotCode={inventoryLot.code}
+                      head={population.balance}
+                      today={today}
+                      tapeAvailable={tapeDivisor !== null}
+                      idPrefix="card-"
+                      existing={{
+                        id: row.id,
+                        weighedOn: row.weighedOn,
+                        method: row.method,
+                        sampleSize: row.sampleSize,
+                        sampleWeightLb: row.sampleWeightLb,
+                        heartGirthIn: row.heartGirthIn,
+                        bodyLengthIn: row.bodyLengthIn,
+                        notes: row.notes,
+                      }}
+                    />
+                    <RemoveWeightButton weightId={row.id} weighedOn={row.weighedOn} />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="hidden md:block">
+          <DataTable>
+            <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>When</TableHead>
+                <TableHead>How</TableHead>
+                <TableHead className="text-right">A head</TableHead>
+                <TableHead className="text-right">The whole lot</TableHead>
+                <TableHead>Noted</TableHead>
+                <TableHead className="text-right"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {[...weighIns].reverse().map((w) => {
+                const row = weights.find((x) => x.id === w.id)!;
+                return (
+                  <TableRow key={w.id}>
+                    <TableCell className="tabular-nums text-muted-foreground">
+                      {w.weighedOn}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {/* The sample size, in words, because the design asks for
+                          it to be recorded so somebody knows how far to trust
+                          the number — which only pays off if it is shown. */}
+                      {describeSample(w.method, row.sampleSize, population.balance)}
+                      {w.shrinkAffected && (
+                        <Badge variant="outline" className="ml-2">
+                          near a haul
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatLb(w.averageLb)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {w.averageLb === null || population.balance <= 0
+                        ? "—"
+                        : formatLb(
+                            Math.round(w.averageLb * population.balance * 10) / 10,
+                          )}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {row.notes || "—"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {/* CORRECT for a number typed wrong, REMOVE for a
+                          weighing that never happened. A measurement is not a
+                          ledger entry, so neither is a compensating row. */}
+                      <div className="flex items-center justify-end">
+                        <RecordWeightForm
+                          livestockLotId={lot.id}
+                          lotCode={inventoryLot.code}
+                          head={population.balance}
+                          today={today}
+                          tapeAvailable={tapeDivisor !== null}
+                          idPrefix="row-"
+                          existing={{
+                            id: row.id,
+                            weighedOn: row.weighedOn,
+                            method: row.method,
+                            sampleSize: row.sampleSize,
+                            sampleWeightLb: row.sampleWeightLb,
+                            heartGirthIn: row.heartGirthIn,
+                            bodyLengthIn: row.bodyLengthIn,
+                            notes: row.notes,
+                          }}
+                        />
+                        <RemoveWeightButton
+                          weightId={row.id}
+                          weighedOn={row.weighedOn}
+                        />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+            </Table>
+          </DataTable>
+          </div>
+          {feed?.weight.conversion && (
+            <p className="text-xs text-muted-foreground">
+              {/* The confidence, said out loud. Feed measured against a scale is
+                  a number to act on; anything with an estimate at either end is
+                  a trend to watch. */}
+              {feed.weight.conversion.confidence === "measured"
+                ? "Feed issued to this lot by name, against weights off a scale. A number to act on."
+                : "Some part of this is an estimate — a share of a shared feeder, or a weight from a tape or an eye. A trend to watch rather than a figure to price against."}
+            </p>
+          )}
+        </div>
+      )}
+
+      <div id="breeding" className="scroll-mt-24 space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="font-heading text-xl font-semibold tracking-heading">
             Breeding
@@ -1454,7 +2014,7 @@ export default async function LivestockLotPage({
       </div>
 
       {documentsOn && (
-        <div className="space-y-3">
+        <div id="photos" className="scroll-mt-24 space-y-3">
           <h2 className="font-heading text-xl font-semibold tracking-heading">
             Photos {photos.length > 0 && `(${photos.length})`}
           </h2>
@@ -1481,7 +2041,7 @@ export default async function LivestockLotPage({
         </div>
       )}
 
-      <div className="space-y-3">
+      <div id="tags" className="scroll-mt-24 space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="font-heading text-xl font-semibold tracking-heading">
             Tags {identifiers.length > 0 && `(${identifiers.length})`}
@@ -1532,313 +2092,8 @@ export default async function LivestockLotPage({
         </DataTable>
       </div>
 
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="font-heading text-xl font-semibold tracking-heading">
-            Daily checks{" "}
-            <span className="font-normal text-muted-foreground">
-              {/* The lot's own answer to "when did anyone last look at these
-                  animals", which is the question the round screen asks about
-                  the whole farm. */}
-              · last {formatLastChecked(checks[0]?.loggedOn ?? null, today).toLowerCase()}
-            </span>
-          </h2>
-          {population.balance > 0 && (
-            <LotCheckForm
-              livestockLotId={lot.id}
-              lotCode={inventoryLot.code}
-              today={today}
-              balance={summary.balance}
-              namedInside={members.length}
-              hasEntry={checks[0]?.loggedOn === today}
-            />
-          )}
-        </div>
-        <DataTable
-          isEmpty={checks.length === 0}
-          empty={
-            <EmptyState
-              title="No checks recorded"
-              description="A day with no entry is a day nobody looked — which is a different fact from a day when nothing happened, and it is the difference the mortality rate above depends on."
-            />
-          }
-        >
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Day</TableHead>
-                <TableHead>How it was</TableHead>
-                <TableHead>Noted</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {checks.map((check) => (
-                <TableRow key={check.id}>
-                  <TableCell className="tabular-nums text-muted-foreground">
-                    {check.loggedOn}
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={
-                        check.status === "attention" ? "default" : "outline"
-                      }
-                    >
-                      {check.status === "attention" ? "Noted" : "Normal"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {check.notes || "—"}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </DataTable>
-      </div>
-
-      {treatments.length > 0 && (
-        <div className="space-y-3">
-          <h2 className="font-heading text-xl font-semibold tracking-heading">
-            Treatments{" "}
-            <span className="font-normal text-muted-foreground">
-              {/* The sentence as written. Lowercasing it mangled the product
-                  name — "penicillin g was given…" — which is the one word in it
-                  somebody needs to recognise. */}
-              · {formatWithdrawal(withdrawal.meat)} for meat
-            </span>
-          </h2>
-          <DataTable>
-            <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>When</TableHead>
-                <TableHead>What</TableHead>
-                <TableHead>How</TableHead>
-                <TableHead className="text-right">Meat clear</TableHead>
-                <TableHead className="text-right">Milk clear</TableHead>
-                <TableHead>Noted</TableHead>
-                <TableHead className="text-right"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {treatments.map((t) => (
-                <TableRow key={t.id}>
-                  <TableCell className="tabular-nums text-muted-foreground">
-                    {t.treatedOn}
-                  </TableCell>
-                  <TableCell>
-                    <div className="font-medium">{t.product}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {[t.dose, t.administeredBy && `by ${t.administeredBy}`]
-                        .filter(Boolean)
-                        .join(" · ") || "—"}
-                    </div>
-                    {/* Said out loud rather than left to be inferred from a
-                        missing button: this clock is running because of
-                        something that happened before this animal was its own
-                        record. */}
-                    {t.via === "split" && (
-                      <div className="text-xs text-muted-foreground">
-                        Given to{" "}
-                        {inheritedFrom.get(t.livestockLotId) ?? "the lot it came from"}
-                        , before this one was split out
-                      </div>
-                    )}
-                    {/* The other way a dose reaches an animal: the pen she
-                        LIVES in was medicated while she was in it. */}
-                    {t.via === "pen" && (
-                      <div className="text-xs text-muted-foreground">
-                        Given to{" "}
-                        {inheritedFrom.get(t.livestockLotId) ?? "the lot it lives in"}{" "}
-                        while {isAnimal ? "she" : "it"} lived in it
-                      </div>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {treatmentRouteLabel(t.route)}
-                    <div className="text-xs">
-                      {/* Provenance, as everywhere else in this pack. */}
-                      <span
-                        title={WITHDRAWAL_SOURCE_NOTES[t.withdrawalSource] ?? ""}
-                      >
-                        {WITHDRAWAL_SOURCE_LABELS[t.withdrawalSource] ??
-                          t.withdrawalSource}
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {clearsOn(t.treatedOn, t.meatWithdrawalDays) ?? (
-                      <span className="text-muted-foreground">not looked up</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">
-                    {clearsOn(t.treatedOn, t.milkWithdrawalDays) ?? "—"}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {t.notes || "—"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {/* CORRECT for a period or a date typed wrong, REMOVE for a
-                        treatment that never happened. Both move the clock, and
-                        the clock is what decides whether these can be
-                        processed. */}
-                    <div className="flex items-center justify-end">
-                      {/* AN INHERITED TREATMENT IS ANOTHER RECORD'S ROW. It
-                          reaches this animal because it was in the pen when the
-                          dose was given — see `treatmentsByLot` — and offering
-                          to correct it here would edit the pen's history from
-                          an animal's page, silently changing the clock for
-                          every other animal that came out of it. */}
-                      {t.livestockLotId === lot.id ? (
-                        <>
-                          <RecordTreatmentForm
-                            livestockLotId={lot.id}
-                            lotCode={inventoryLot.code}
-                            head={population.balance}
-                            today={today}
-                            medicines={[]}
-                            products={products}
-                            existing={{
-                              id: t.id,
-                              treatedOn: t.treatedOn,
-                              product: t.product,
-                              dose: t.dose,
-                              route: t.route,
-                              headTreated: t.headTreated,
-                              meatWithdrawalDays: t.meatWithdrawalDays,
-                              milkWithdrawalDays: t.milkWithdrawalDays,
-                              withdrawalSource: t.withdrawalSource,
-                              administeredBy: t.administeredBy,
-                              notes: t.notes,
-                            }}
-                          />
-                          <RemoveTreatmentButton
-                            treatmentId={t.id}
-                            product={t.product}
-                            treatedOn={t.treatedOn}
-                            fromStock={t.inventoryMovementId !== null}
-                          />
-                        </>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">
-                          Correct it on {inheritedFrom.get(t.livestockLotId) ?? "the lot it came from"}
-                        </span>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-            </Table>
-          </DataTable>
-        </div>
-      )}
-
-      {weights.length > 0 && (
-        <div className="space-y-3">
-          <h2 className="font-heading text-xl font-semibold tracking-heading">
-            Weighings{" "}
-            <span className="font-normal text-muted-foreground">
-              {feed?.weight.conversion
-                ? `· ${feed.weight.conversion.ratio} lb of feed per lb of gain`
-                : feed?.weight.conversionBlockedBy
-                  ? `· ${feed.weight.conversionBlockedBy}`
-                  : ""}
-            </span>
-          </h2>
-          <DataTable>
-            <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>When</TableHead>
-                <TableHead>How</TableHead>
-                <TableHead className="text-right">A head</TableHead>
-                <TableHead className="text-right">The whole lot</TableHead>
-                <TableHead>Noted</TableHead>
-                <TableHead className="text-right"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {[...weighIns].reverse().map((w) => {
-                const row = weights.find((x) => x.id === w.id)!;
-                return (
-                  <TableRow key={w.id}>
-                    <TableCell className="tabular-nums text-muted-foreground">
-                      {w.weighedOn}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {/* The sample size, in words, because the design asks for
-                          it to be recorded so somebody knows how far to trust
-                          the number — which only pays off if it is shown. */}
-                      {describeSample(w.method, row.sampleSize, population.balance)}
-                      {w.shrinkAffected && (
-                        <Badge variant="outline" className="ml-2">
-                          near a haul
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatLb(w.averageLb)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums text-muted-foreground">
-                      {w.averageLb === null || population.balance <= 0
-                        ? "—"
-                        : formatLb(
-                            Math.round(w.averageLb * population.balance * 10) / 10,
-                          )}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {row.notes || "—"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {/* CORRECT for a number typed wrong, REMOVE for a
-                          weighing that never happened. A measurement is not a
-                          ledger entry, so neither is a compensating row. */}
-                      <div className="flex items-center justify-end">
-                        <RecordWeightForm
-                          livestockLotId={lot.id}
-                          lotCode={inventoryLot.code}
-                          head={population.balance}
-                          today={today}
-                          tapeAvailable={tapeDivisor !== null}
-                          existing={{
-                            id: row.id,
-                            weighedOn: row.weighedOn,
-                            method: row.method,
-                            sampleSize: row.sampleSize,
-                            sampleWeightLb: row.sampleWeightLb,
-                            heartGirthIn: row.heartGirthIn,
-                            bodyLengthIn: row.bodyLengthIn,
-                            notes: row.notes,
-                          }}
-                        />
-                        <RemoveWeightButton
-                          weightId={row.id}
-                          weighedOn={row.weighedOn}
-                        />
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-            </Table>
-          </DataTable>
-          {feed?.weight.conversion && (
-            <p className="text-xs text-muted-foreground">
-              {/* The confidence, said out loud. Feed measured against a scale is
-                  a number to act on; anything with an estimate at either end is
-                  a trend to watch. */}
-              {feed.weight.conversion.confidence === "measured"
-                ? "Feed issued to this lot by name, against weights off a scale. A number to act on."
-                : "Some part of this is an estimate — a share of a shared feeder, or a weight from a tape or an eye. A trend to watch rather than a figure to price against."}
-            </p>
-          )}
-        </div>
-      )}
-
       {fedIn.length > 0 && (
-        <div className="space-y-3">
+        <div id="fed" className="scroll-mt-24 space-y-3">
           <h2 className="font-heading text-xl font-semibold tracking-heading">
             Fed in by name{" "}
             <span className="font-normal text-muted-foreground">
@@ -1884,7 +2139,7 @@ export default async function LivestockLotPage({
       )}
 
       {entries.length > 0 && (
-        <div className="space-y-3">
+        <div id="events" className="scroll-mt-24 space-y-3">
           <h2 className="font-heading text-xl font-semibold tracking-heading">Head events</h2>
           <DataTable>
             <Table>
@@ -1920,6 +2175,7 @@ export default async function LivestockLotPage({
           </DataTable>
         </div>
       )}
+
     </div>
   );
 }

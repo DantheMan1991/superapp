@@ -8,6 +8,14 @@ Open **Livestock** and click a name. The heading is the name, with the species, 
 
 A named animal and a group share this page. Where they differ, the page says so.
 
+The page runs in this order: the buttons, the panels, what is on the books, `In this {{livestockLot|lower}}`, `Daily checks`, `Treatments`, `Weighings`, `Breeding`, `Photos`, `Tags`, `Fed in by name` and `Head events`. The working records come before the identity ones, because a check, a dose and a weight are what you came to the page to do.
+
+## Finding your way on a phone
+
+- **`On this page`.** A row of chips under the four tabs, on a phone only: `In this {{livestockLot|lower}}`, `Checks`, `Treatments`, `Weighings`, `Breeding`, `Photos`, `Tags`, `Fed`, `Head events`. Tap one and the page jumps to that section. A chip is only there when its section is, so a group with no weighings has no `Weighings` chip.
+- **The panels sit two to a row** on a phone. `Fed` and `Withdrawal` take a whole row each, because they carry a sentence.
+- **Treatments, weighings and the animals in a group are cards** on a phone rather than tables, with {button:Correct|ghost}, {button:Remove|ghost} and {button:Take out|ghost} on the card itself. On a wide screen they are tables with the same buttons at the right of each row.
+
 ## What you can do from the top
 
 - **{button:Place head|primary}.** Records animals arriving. Hatched, bought in, or born.

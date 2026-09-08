@@ -284,9 +284,11 @@ d("livestock ops", () => {
     // One dialog for the ordinary case — a box of chicks counted at the door.
     // Blank still places nothing: how many actually arrived is a fact
     // somebody checks, and assuming it would invent the mortality denominator.
+    // Its own stock line: the head placed here must not reach the shared
+    // item's total, which a later test reconciles placement by placement.
     const counted = await asOwner((tx) =>
       createLivestockLot(tx, ctx(), {
-        itemId,
+        newItemName: "Counted at the door",
         code: "COUNTED-AT-THE-DOOR",
         species: "poultry",
         head: 100,

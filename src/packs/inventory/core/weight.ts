@@ -34,7 +34,13 @@
  * quietly drop it.
  */
 
-import { convert, formatQuantity, getUnit, roundQuantity } from "./units";
+import {
+  convert,
+  formatQuantity,
+  getUnit,
+  roundQuantity,
+  type EntryBasis,
+} from "./units";
 
 /** A movement, as the weight fold sees it. */
 export interface WeighedMovement {
@@ -45,21 +51,32 @@ export interface WeighedMovement {
 }
 
 /**
- * Pounds per stocking unit, unrounded, from what actually arrived weighed.
+ * A correction to a batch's pounds — one row of `inventory_weight_adjustments`.
+ * Signed, total, and only meaningful beside receipts that were weighed.
+ */
+export interface WeightCorrection {
+  deltaLb: number;
+}
+
+/**
+ * What a batch's receipts say it weighs, and how much of it they weighed.
  *
  * **ONLY WHAT CAME IN WITH A WEIGHT COUNTS**, which is `averageCostRate`'s rule
  * and is load-bearing for the same reason: an outbound movement's pounds are
- * this rate applied to a quantity, so folding one back in would be circular.
+ * the rate applied to a quantity, so folding one back in would be circular.
  * The database refuses an outbound weight outright
  * (`inventory_movements_weight_inbound`); the skip here is what makes this
- * function correct on its own, without depending on that.
+ * correct on its own, without depending on that.
  *
- * Unrounded on purpose — rounding belongs at the moment a number is shown or
- * stored, once, not at every step of a fold.
+ * **CORRECTIONS LAND IN THE POUNDS AND ONLY WHERE SOMETHING WAS WEIGHED.** A
+ * correction cannot weigh a batch nobody weighed — there would be nothing to
+ * divide by — so `adjustLotWeight` refuses one, and this ignores any that
+ * exist against an unweighed batch rather than inventing a denominator.
  */
-export function averagePackageWeight(
+export function weighedTotals(
   movements: WeighedMovement[],
-): number | null {
+  corrections: WeightCorrection[] = [],
+): { quantity: number; lb: number } {
   let quantity = 0;
   let lb = 0;
   for (const movement of movements) {
@@ -68,6 +85,23 @@ export function averagePackageWeight(
     quantity += movement.quantity;
     lb += movement.weightLb;
   }
+  if (quantity <= 0) return { quantity: 0, lb: 0 };
+  for (const correction of corrections) lb += correction.deltaLb;
+  return { quantity, lb };
+}
+
+/**
+ * Pounds per stocking unit, unrounded, from what actually arrived weighed —
+ * plus whatever an owner has since said it really weighed.
+ *
+ * Unrounded on purpose — rounding belongs at the moment a number is shown or
+ * stored, once, not at every step of a fold.
+ */
+export function averagePackageWeight(
+  movements: WeighedMovement[],
+  corrections: WeightCorrection[] = [],
+): number | null {
+  const { quantity, lb } = weighedTotals(movements, corrections);
   if (quantity <= 0) return null;
   return lb / quantity;
 }
@@ -79,10 +113,42 @@ export function averagePackageWeight(
  * this rule the hard way — it was two independent expressions of two different
  * shapes in two files, and when cost corrections arrived neither counted one.
  * Anything that adds a second way for a weight to reach a batch changes this
- * predicate, and every caller is fixed at once.
+ * predicate, and every caller is fixed at once. Corrections arrived 2026-09-08
+ * and changed nothing here, because they cannot weigh an unweighed batch.
  */
-export function hasRecordedWeight(movements: WeighedMovement[]): boolean {
-  return averagePackageWeight(movements) !== null;
+export function hasRecordedWeight(
+  movements: WeighedMovement[],
+  corrections: WeightCorrection[] = [],
+): boolean {
+  return averagePackageWeight(movements, corrections) !== null;
+}
+
+/**
+ * What a correction has to add for a batch to read the figure somebody just
+ * gave — "they weigh a pound each", or "6 lb in all".
+ *
+ * **THE PERSON STATES THE TRUTH, NOT THE DIFFERENCE.** Nobody at a freezer
+ * knows "+4 lb"; they know what the packages weigh. So the caller hands over a
+ * figure and how it was read, and the delta is derived — and **THIS IS THE
+ * SAME FUNCTION THE SERVER CALLS**, so the dialog's preview and the stored
+ * row cannot disagree, exactly as `splitCostAdjustment` is shared.
+ *
+ * Both figures rounded to the quantity column's scale, once, here: the delta
+ * is what gets stored, and the target is what gets shown.
+ */
+export function weightCorrectionDelta(input: {
+  basis: EntryBasis;
+  /** What was typed. Must be more than nothing. */
+  typed: number;
+  /** The weighed quantity received — the rate's denominator. */
+  quantityWeighed: number;
+  /** What the batch reads now: the receipts' pounds plus earlier corrections. */
+  recordedLb: number;
+}): { targetLb: number; deltaLb: number } {
+  const target =
+    input.basis === "each" ? input.typed * input.quantityWeighed : input.typed;
+  const targetLb = roundQuantity(target);
+  return { targetLb, deltaLb: roundQuantity(targetLb - input.recordedLb) };
 }
 
 export interface WeightReading {
@@ -141,30 +207,24 @@ export function weightOf(input: {
  */
 export function formatWeight(reading: WeightReading): string | null {
   if (reading.lb === null) return null;
-  return `${reading.approximate ? "about " : ""}${lbText(reading.lb)}`;
+  return `${reading.approximate ? "about " : ""}${formatLb(reading.lb)}`;
 }
 
 /** "47.5 lb" — the one place pounds are turned into text. */
-function lbText(lb: number): string {
+export function formatLb(lb: number): string {
   return `${Number(roundQuantity(lb).toFixed(4)).toString()} lb`;
 }
 
 // ────────────────────────────────────────────────────────── typing one in ───
 
 /**
- * How somebody read the scale: one package on it, or everything in the entry.
- *
  * **THE LEDGER ONLY EVER STORES THE TOTAL** — `weight_lb` is a total on the
  * receipt (ADR 0016) and that does not change here. What changed is the box.
  * On 2026-09-08 five one-pound packages were recorded by typing `1` into a box
  * labelled "What it weighed", which meant the whole delivery, and the batch
  * read "about 2 lb" for six packages. A box that can be read two ways will be,
- * so the form now asks which way, and this is the answer's type.
- */
-export type WeightEntryBasis = "each" | "total";
-
-/**
- * The total the ledger stores, from what was typed and how it was meant.
+ * so the form now asks which way (`EntryBasis`, shared with the cost box, which
+ * was misread the same way the same day) and this converts the answer.
  *
  * Unrounded, like `averagePackageWeight` — `receiveStock` rounds once when it
  * stores. Null only when nothing was typed: an empty box means "nobody weighed
@@ -172,7 +232,7 @@ export type WeightEntryBasis = "each" | "total";
  * sentence, rather than being swallowed into "unweighed" here.
  */
 export function deliveryWeightLb(input: {
-  basis: WeightEntryBasis;
+  basis: EntryBasis;
   typed: number | null;
   quantity: number;
 }): number | null {
@@ -191,7 +251,7 @@ export function deliveryWeightLb(input: {
  * figure nobody standing at a chest freezer believes for a second.
  */
 export function describeWeightEntry(input: {
-  basis: WeightEntryBasis;
+  basis: EntryBasis;
   typed: number | null;
   quantity: number;
   /** The stocking unit's code, so "1 package" and "5 packages" come out right. */
@@ -203,7 +263,7 @@ export function describeWeightEntry(input: {
   if (!Number.isFinite(input.quantity) || input.quantity <= 0) return null;
   const count = formatQuantity(input.quantity, input.unit);
   if (input.basis === "each") {
-    return `${count}, ${lbText(input.typed * input.quantity)} in all.`;
+    return `${count}, ${formatLb(input.typed * input.quantity)} in all.`;
   }
-  return `${count}, ${lbText(input.typed / input.quantity)} each.`;
+  return `${count}, ${formatLb(input.typed / input.quantity)} each.`;
 }

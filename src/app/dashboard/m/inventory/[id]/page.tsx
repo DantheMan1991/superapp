@@ -23,6 +23,7 @@ import {
 import {
   carriedCostByLot,
   costAdjustmentsForLots,
+  weightAdjustmentsForLots,
   getItem,
   listLocations,
   itemCostRate,
@@ -38,18 +39,20 @@ import {
 } from "@/packs/inventory/core/balances";
 import { carriedValue } from "@/packs/inventory/core/valuation";
 import { formatQuantity, getUnit } from "@/packs/inventory/core/units";
-import { formatWeight, weightOf } from "@/packs/inventory/core/weight";
+import { formatLb, formatWeight, weightOf } from "@/packs/inventory/core/weight";
 import {
   LOT_SOURCE_LABELS,
   isLotSource,
   adjustmentReasonLabel,
   costAdjustmentReasonLabel,
+  weightAdjustmentReasonLabel,
   movementKindLabel,
   slugLabel,
 } from "@/packs/inventory/vocabulary";
 import {
   LotCostForm,
   LotForm,
+  LotWeightForm,
   MovementForm,
   SplitLotForm,
 } from "@/packs/inventory/components/stock-controls";
@@ -125,9 +128,10 @@ export default async function InventoryItemPage({
        * twenty-one queries.
        */
       const lotIds = lots.map((l) => l.id);
-      const [carried, corrections] = await Promise.all([
+      const [carried, corrections, weightCorrections] = await Promise.all([
         carriedCostByLot(tx, ctx.tenant.id, lotIds),
         costAdjustmentsForLots(tx, ctx.tenant.id, lotIds),
+        weightAdjustmentsForLots(tx, ctx.tenant.id, lotIds),
       ]);
       return {
         item,
@@ -143,6 +147,7 @@ export default async function InventoryItemPage({
         costRate,
         carried,
         corrections,
+        weightCorrections,
       };
     },
     { role: ctx.role },
@@ -163,6 +168,7 @@ export default async function InventoryItemPage({
     costRate,
     carried,
     corrections,
+    weightCorrections,
   } = data;
 
   /**
@@ -443,7 +449,7 @@ export default async function InventoryItemPage({
                 <TableHead>Good until</TableHead>
                 <TableHead className="text-right">On hand</TableHead>
                 <TableHead className="text-right">Carrying</TableHead>
-                <TableHead className="w-36" />
+                <TableHead className="w-72" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -466,6 +472,9 @@ export default async function InventoryItemPage({
                   quantity: balance,
                   rate: weights.byLot.get(lot.id) ?? null,
                 });
+                // Present only for a batch that has been weighed — which is
+                // the only kind that can be corrected.
+                const weightDetail = weights.byLotDetail.get(lot.id);
                 const weightLabel = reading.approximate
                   ? formatWeight(reading)
                   : null;
@@ -547,6 +556,25 @@ export default async function InventoryItemPage({
                             receivedLabel: formatQuantity(received, unit),
                           }}
                           currencySymbol={currencySymbol}
+                          today={today}
+                        />
+                      )}
+                      {/* **CORRECT WEIGHT, ONLY WHERE THERE IS ONE.** A batch
+                          nobody weighed gets its first weight on a delivery,
+                          the way it always has; a correction needs a figure to
+                          correct. Offered on a closed or empty batch too, like
+                          the cost correction — what the packages weighed is
+                          true after they are sold. */}
+                      {isOwner && weightDetail && (
+                        <LotWeightForm
+                          lot={{
+                            id: lot.id,
+                            code: lot.code,
+                            quantityWeighed: weightDetail.quantityWeighed,
+                            recordedLb: weightDetail.recordedLb,
+                            unit,
+                            unitSingular,
+                          }}
                           today={today}
                         />
                       )}
@@ -638,6 +666,62 @@ export default async function InventoryItemPage({
                       ? "—"
                       : (c.issuedCents > 0 ? "+" : "−") +
                         formatMoney(Math.abs(c.issuedCents), currencySymbol)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          </DataTable>
+        </section>
+      )}
+
+      {weightCorrections.length > 0 && (
+        <section>
+          <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
+            Weight corrections
+          </h2>
+          {/**
+           * Its own section, as the cost corrections are: nothing here moved
+           * stock. What the batch read when each was written is stamped on the
+           * row, so a person can check the correction against what it
+           * corrected — and `After` is what it read once this one landed.
+           */}
+          <DataTable>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>When</TableHead>
+                <TableHead>Batch</TableHead>
+                <TableHead>Why</TableHead>
+                <TableHead className="text-right">Correction</TableHead>
+                <TableHead className="text-right">After</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {weightCorrections.map((c) => (
+                <TableRow key={c.id}>
+                  <TableCell className="tabular-nums text-muted-foreground">
+                    {c.occurredOn}
+                  </TableCell>
+                  <TableCell>{lotCodes.get(c.lotId) ?? "—"}</TableCell>
+                  <TableCell>
+                    {weightAdjustmentReasonLabel(c.reason)}
+                    {c.notes && (
+                      <div className="text-xs text-muted-foreground">
+                        {c.notes}
+                      </div>
+                    )}
+                    <div className="text-xs text-muted-foreground">
+                      Read {formatLb(c.recordedLb)} across{" "}
+                      {formatQuantity(c.quantityWeighed, unit)} then
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {c.deltaLb > 0 ? "+" : "−"}
+                    {formatLb(Math.abs(c.deltaLb))}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {formatLb(c.recordedLb + c.deltaLb)}
                   </TableCell>
                 </TableRow>
               ))}

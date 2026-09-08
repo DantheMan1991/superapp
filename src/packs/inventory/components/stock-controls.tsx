@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/select";
 import {
   adjustLotCostAction,
+  adjustLotWeightAction,
   adjustStockAction,
   createLotAction,
   issueStockAction,
@@ -46,6 +47,9 @@ import {
   LOT_SOURCES,
   LOT_SOURCE_LABELS,
   SUGGESTED_ADJUSTMENT_REASONS,
+  WEIGHT_ADJUSTMENT_REASONS,
+  WEIGHT_ADJUSTMENT_REASON_LABELS,
+  WEIGHT_ADJUSTMENT_REASON_NOTES,
 } from "../vocabulary";
 /**
  * PURE, and that is what makes it importable here. `core/costing.ts` has no
@@ -57,8 +61,11 @@ import { splitCostAdjustment } from "../core/costing";
 import {
   deliveryWeightLb,
   describeWeightEntry,
-  type WeightEntryBasis,
+  formatLb,
+  weightCorrectionDelta,
 } from "../core/weight";
+import { deliveryCostCents } from "../core/costing";
+import { formatQuantity, type EntryBasis } from "../core/units";
 
 const NO_LOT = "__none__";
 const CUSTOM_REASON = "__custom__";
@@ -323,18 +330,22 @@ export function MovementForm({
   // the same act against the same column in opposite directions.
   const [adjustUp, setAdjustUp] = useState(false);
   /**
-   * **THE WEIGHT BOX CAN BE READ TWO WAYS, SO THE FORM ASKS WHICH.** On
-   * 2026-09-08 five one-pound packages were recorded by typing `1` into a box
-   * that meant the whole delivery, and six packages then read "about 2 lb".
-   * The ledger still stores the total (ADR 0016); this decides how the typed
-   * figure becomes one. Per package is the default because that is how a
-   * person counting into a freezer reads a scale — a plant's ticket, which
-   * gives the total, flips it. The two `Typed` strings exist only so the OTHER
-   * reading can sit under the box while it is typed: "5 packages, 0.2 lb each."
-   * is the sentence that would have stopped the mistake.
+   * **THE COST AND WEIGHT BOXES CAN EACH BE READ TWO WAYS, SO THE FORM ASKS
+   * ONCE.** On 2026-09-08 five one-pound, five-dollar packages were recorded
+   * by typing `5` and `1` into boxes that meant the whole delivery, and six
+   * packages then read "about 2 lb" carried at $10. The ledger still stores
+   * totals (ADR 0016 for the pounds, the receipt's `cost_cents` for the
+   * money); this decides how the typed figures become them. ONE toggle for
+   * both, because a person is in one mode for the whole ticket — reading a
+   * sticker and a scale, or reading an invoice. Per package is the default
+   * because that is how somebody counting into a freezer reads both. The
+   * `Typed` strings exist only so the OTHER reading can sit under each box
+   * while it is typed: "5 packages, 0.2 lb each." and "5 packages, $1.00
+   * each." are the two sentences that would have stopped the mistake.
    */
-  const [weightBasis, setWeightBasis] = useState<WeightEntryBasis>("each");
+  const [entryBasis, setEntryBasis] = useState<EntryBasis>("each");
   const [quantityTyped, setQuantityTyped] = useState("");
+  const [costTyped, setCostTyped] = useState("");
   const [weightTyped, setWeightTyped] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -385,15 +396,19 @@ export function MovementForm({
               itemId,
               lotId: lotId === NO_LOT ? undefined : lotId,
               quantity: Math.abs(raw),
-              // Dollars in, cents stored. Rounding here rather than in the
-              // action keeps the boundary integer-only.
-              costCents: money ? Math.round(Number(money) * 100) : null,
+              // Dollars in, cents stored, and a per-package price multiplied
+              // out HERE — the action takes an integer total and nothing else.
+              costCents: deliveryCostCents({
+                basis: entryBasis,
+                typedDollars: money ? Number(money) : null,
+                quantity: Math.abs(raw),
+              }),
               // Blank stays blank. "Nobody weighed it" and "it weighed
               // nothing" are different facts and the ledger keeps them apart.
               // A per-package figure is multiplied out HERE, because the
               // ledger stores the total and only the total (ADR 0016).
               weightLb: deliveryWeightLb({
-                basis: weightBasis,
+                basis: entryBasis,
                 typed: weighed ? Number(weighed) : null,
                 quantity: Math.abs(raw),
               }),
@@ -437,16 +452,40 @@ export function MovementForm({
     });
   }
 
-  // The reading somebody did not type, from the two they did. Pure, and the
-  // same function the tests pin — see `core/weight.ts`.
+  // The readings somebody did not type, from the ones they did. The weight
+  // sentence is pure and pinned in tests — see `core/weight.ts`; the money one
+  // is built here from the same `deliveryCostCents` the submit uses.
+  const quantityNow = Math.abs(Number(quantityTyped));
   const weightReadBack =
     direction === "in" && !stockedByMass
       ? describeWeightEntry({
-          basis: weightBasis,
+          basis: entryBasis,
           typed: weightTyped.trim() ? Number(weightTyped) : null,
-          quantity: Math.abs(Number(quantityTyped)),
+          quantity: quantityNow,
           unit,
         })
+      : null;
+  const costTypedNumber = costTyped.trim() ? Number(costTyped) : null;
+  const costReadBack =
+    direction === "in" &&
+    costTypedNumber !== null &&
+    Number.isFinite(costTypedNumber) &&
+    costTypedNumber > 0 &&
+    Number.isFinite(quantityNow) &&
+    quantityNow > 0
+      ? entryBasis === "each"
+        ? `${formatQuantity(quantityNow, unit)}, ${formatMoney(
+            deliveryCostCents({
+              basis: "each",
+              typedDollars: costTypedNumber,
+              quantity: quantityNow,
+            }) ?? 0,
+            currencySymbol,
+          )} in all.`
+        : `${formatQuantity(quantityNow, unit)}, ${formatMoney(
+            Math.round((costTypedNumber * 100) / quantityNow),
+            currencySymbol,
+          )} each.`
       : null;
 
   return (
@@ -584,22 +623,62 @@ export function MovementForm({
 
             {direction === "in" ? (
               <>
+                {/* ONE QUESTION FOR BOTH FIGURES. Two buttons like the door
+                    above, not a checkbox: "each package" and "all together"
+                    are two answers, not one answer switched off. Asked once,
+                    because a person is in one mode for the whole ticket. */}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-sm font-medium">
+                    {stockedByMass ? "The cost is for" : "Cost and weight are for"}
+                  </span>
+                  <div className="flex gap-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={entryBasis === "each" ? "default" : "outline"}
+                      onClick={() => setEntryBasis("each")}
+                    >
+                      Each {unitSingular}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={entryBasis === "total" ? "default" : "outline"}
+                      onClick={() => setEntryBasis("total")}
+                    >
+                      All together
+                    </Button>
+                  </div>
+                </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="cost">What it cost</Label>
+                  <Label htmlFor="cost">
+                    What it cost{currencySymbol ? ` (${currencySymbol})` : ""}
+                  </Label>
                   <Input
                     id="cost"
                     name="cost"
                     type="number"
                     min="0"
                     step="0.01"
-                    placeholder="340.00"
+                    placeholder={entryBasis === "each" ? "5.00" : "340.00"}
+                    onChange={(e) => setCostTyped(e.target.value)}
                   />
+                  {/* The other reading, live. "5 packages, $1.00 each." is the
+                      line that would have caught the 2026-09-08 entry. */}
+                  {costReadBack && (
+                    <p className="text-xs font-medium tabular-nums">
+                      {costReadBack}
+                    </p>
+                  )}
                   <p className="text-xs text-muted-foreground">
-                    {/* The total on the ticket, not a rate. The per-unit figure
-                        is derived from it and never stored. */}
-                    The whole delivery, not the price per {unitSingular}. Leave
-                    it empty if the invoice has not arrived — the stock still
-                    counts.
+                    {/* The total on the ticket is what is stored, whichever way
+                        it was typed. The per-unit figure is derived from it and
+                        never stored. */}
+                    {entryBasis === "each"
+                      ? `The price of one ${unitSingular} — the app multiplies by how many arrived. `
+                      : "The whole delivery, the way the invoice reads. "}
+                    Leave it empty if the invoice has not arrived — the stock
+                    still counts.
                   </p>
                 </div>
                 {/**
@@ -614,38 +693,14 @@ export function MovementForm({
                  */}
                 {!stockedByMass && (
                   <div className="grid gap-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <Label htmlFor="weightLb">What it weighed (lb)</Label>
-                      {/* Which way the box is read. Two buttons like the door
-                          above, not a checkbox: "each package" and "all
-                          together" are two answers, not one answer switched
-                          off. */}
-                      <div className="flex gap-1">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant={weightBasis === "each" ? "default" : "outline"}
-                          onClick={() => setWeightBasis("each")}
-                        >
-                          Each {unitSingular}
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant={weightBasis === "total" ? "default" : "outline"}
-                          onClick={() => setWeightBasis("total")}
-                        >
-                          All together
-                        </Button>
-                      </div>
-                    </div>
+                    <Label htmlFor="weightLb">What it weighed (lb)</Label>
                     <Input
                       id="weightLb"
                       name="weightLb"
                       type="number"
                       min="0"
                       step="0.0001"
-                      placeholder={weightBasis === "each" ? "1.25" : "47.5"}
+                      placeholder={entryBasis === "each" ? "1.25" : "47.5"}
                       onChange={(e) => setWeightTyped(e.target.value)}
                     />
                     {/* The other reading, live. "5 packages, 0.2 lb each." is
@@ -657,7 +712,7 @@ export function MovementForm({
                       </p>
                     )}
                     <p className="text-xs text-muted-foreground">
-                      {weightBasis === "each"
+                      {entryBasis === "each"
                         ? `One ${unitSingular} on the scale — the app multiplies by how many arrived. `
                         : "Everything in this entry on the scale together, the way a plant's ticket reads. "}
                       This is what lets the app say roughly what a freezer holds
@@ -877,6 +932,227 @@ export function SplitLotForm({
  * Everything the correction dialog needs is computed on the server and handed
  * over, so the client does no arithmetic it cannot show its working for.
  */
+export interface WeightCorrectionLot {
+  id: string;
+  code: string;
+  /** The weighed quantity received — the rate's denominator. */
+  quantityWeighed: number;
+  /** What the batch reads now: the receipts' pounds plus earlier corrections. */
+  recordedLb: number;
+  /** The stocking unit's code, for "6 packages". */
+  unit: string;
+  unitSingular: string;
+}
+
+/**
+ * **CORRECT WHAT A BATCH WEIGHS.** The weight twin of `LotCostForm`, and
+ * offered only on a batch that HAS a weight — an unweighed batch gets its
+ * first one the way it always has, on a delivery, because a correction needs
+ * a figure to correct.
+ *
+ * **THE PERSON STATES THE TRUTH, NOT THE DIFFERENCE.** The cost dialog asks
+ * "by how much" because an invoice arrives as a difference. Nobody at a
+ * freezer knows "+4 lb"; they know the packages weigh a pound each, or that
+ * the six of them weigh 6 lb. So the box takes the figure, the same
+ * each/all-together choice the receipt form makes says how it was read, and
+ * the preview under it — `weightCorrectionDelta`, the SAME pure function the
+ * server calls — says what will be recorded. Built after the 2026-09-08 entry
+ * that recorded five one-pound packages as 1 lb and could not be put right.
+ */
+export function LotWeightForm({
+  lot,
+  today,
+}: {
+  lot: WeightCorrectionLot;
+  today: string;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [reason, setReason] = useState<string>(WEIGHT_ADJUSTMENT_REASONS[0]);
+  const [basis, setBasis] = useState<EntryBasis>("each");
+  const [typed, setTyped] = useState("");
+
+  const typedLb = Number(typed);
+  const preview =
+    typed.trim() && Number.isFinite(typedLb) && typedLb > 0
+      ? weightCorrectionDelta({
+          basis,
+          typed: typedLb,
+          quantityWeighed: lot.quantityWeighed,
+          recordedLb: lot.recordedLb,
+        })
+      : null;
+
+  function submit(formData: FormData) {
+    if (!preview || preview.deltaLb === 0) return;
+    const chosenReason =
+      reason === CUSTOM_REASON
+        ? String(formData.get("customReason") ?? "")
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, "_")
+        : reason;
+    startTransition(async () => {
+      const result = await adjustLotWeightAction({
+        lotId: lot.id,
+        basis,
+        weightLb: typedLb,
+        reason: chosenReason,
+        occurredOn: String(formData.get("occurredOn") ?? today),
+        notes: String(formData.get("notes") ?? ""),
+      });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(
+        `Weight corrected — ${lot.code} now reads ${formatLb(result.nowLb)}.`,
+      );
+      setOpen(false);
+      setTyped("");
+      router.refresh();
+    });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm">
+          Correct weight
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <form action={submit}>
+          <DialogHeader>
+            <DialogTitle>Correct what {lot.code} weighs</DialogTitle>
+            <DialogDescription>
+              This batch reads {formatLb(lot.recordedLb)} across the{" "}
+              {formatQuantity(lot.quantityWeighed, lot.unit)} that came in
+              weighed — about {formatLb(lot.recordedLb / lot.quantityWeighed)} a{" "}
+              {lot.unitSingular}. This changes what it weighs, never how much of
+              it there is.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Label htmlFor="weight-correct">What it actually weighs (lb)</Label>
+                <div className="flex gap-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={basis === "each" ? "default" : "outline"}
+                    onClick={() => setBasis("each")}
+                  >
+                    Each {lot.unitSingular}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={basis === "total" ? "default" : "outline"}
+                    onClick={() => setBasis("total")}
+                  >
+                    All together
+                  </Button>
+                </div>
+              </div>
+              <Input
+                id="weight-correct"
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+                type="number"
+                min="0"
+                step="0.0001"
+                required
+                autoFocus
+                placeholder={basis === "each" ? "1" : "6"}
+              />
+              {/* THE PREVIEW IS THE STORED FIGURE, not an illustration of it:
+                  the same function, the same rounding, so what this says is
+                  what the row will say. */}
+              {preview && (
+                <p className="text-xs font-medium tabular-nums">
+                  {preview.deltaLb === 0
+                    ? "That is what it already reads."
+                    : `${formatQuantity(lot.quantityWeighed, lot.unit)}, ${formatLb(
+                        preview.targetLb,
+                      )} in all — ${formatLb(
+                        preview.targetLb / lot.quantityWeighed,
+                      )} each. ${preview.deltaLb > 0 ? "+" : "−"}${formatLb(
+                        Math.abs(preview.deltaLb),
+                      )} on what is recorded.`}
+                </p>
+              )}
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="weight-reason">Why</Label>
+              <Select value={reason} onValueChange={setReason}>
+                <SelectTrigger id="weight-reason">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {WEIGHT_ADJUSTMENT_REASONS.map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {WEIGHT_ADJUSTMENT_REASON_LABELS[r]}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value={CUSTOM_REASON}>Something else…</SelectItem>
+                </SelectContent>
+              </Select>
+              {reason === CUSTOM_REASON ? (
+                <Input
+                  name="customReason"
+                  maxLength={63}
+                  required
+                  placeholder="e.g. scale was in kilograms"
+                />
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  {WEIGHT_ADJUSTMENT_REASON_NOTES[reason]}
+                </p>
+              )}
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="weight-when">When</Label>
+              <Input
+                id="weight-when"
+                name="occurredOn"
+                type="date"
+                defaultValue={today}
+                required
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="weight-notes">Notes</Label>
+              <Textarea id="weight-notes" name="notes" rows={2} />
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              The delivery entries stay exactly as they were recorded. The
+              correction is a record of its own, dated and with your name on it,
+              and every figure in pounds on this page reads through it.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="submit"
+              disabled={pending || !preview || preview.deltaLb === 0}
+            >
+              {pending ? "Correcting…" : "Correct weight"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export interface CostCorrectionLot {
   id: string;
   code: string;

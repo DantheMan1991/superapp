@@ -22,6 +22,7 @@ import type {
   InventoryItem,
   InventoryLot,
   InventoryMovement,
+  InventoryWeightAdjustment,
 } from "@/db/schema";
 import {
   archiveDimensionMember,
@@ -33,7 +34,7 @@ import {
   isLotSource,
   isValidSlug,
 } from "./vocabulary";
-import { isKnownUnit, roundQuantity } from "./core/units";
+import { isKnownUnit, roundQuantity, type EntryBasis } from "./core/units";
 import { enterpriseForMovement } from "./core/enterprise";
 import type { MovementRow } from "./core/balances";
 import {
@@ -47,7 +48,10 @@ import {
 } from "./core/costing";
 import {
   averagePackageWeight,
+  weighedTotals,
+  weightCorrectionDelta,
   type WeighedMovement,
+  type WeightCorrection,
 } from "./core/weight";
 import {
   carriedValue,
@@ -106,6 +110,8 @@ export class InventoryError extends Error {
       | "ZERO_QUANTITY"
       | "INVALID_COST"
       | "INVALID_WEIGHT"
+      | "LOT_UNWEIGHED"
+      | "WEIGHT_UNCHANGED"
       | "INVALID_REASON"
       | "COUNT_CLOSED"
       | "COUNT_INVALID"
@@ -2372,6 +2378,154 @@ export async function costAdjustmentsForLots(
   });
 }
 
+// ------------------------------------------ correcting what it weighs ---
+
+/**
+ * **PUT RIGHT WHAT A BATCH WEIGHS, WITHOUT REWRITING WHAT HAPPENED.**
+ *
+ * The weight twin of `adjustLotCost`, and the same shape for the same reasons:
+ * a new record, dated, with a reason and an author, that `core/weight.ts`
+ * folds in beside the receipts' pounds. The receipt keeps saying what was
+ * typed on the day; this says what was true. Built after the 2026-09-08 entry
+ * in which five one-pound packages were recorded as 1 lb and nothing on any
+ * screen could put it right.
+ *
+ * **THE CALLER STATES THE TRUTH, NOT THE DIFFERENCE.** Somebody at a freezer
+ * knows "these weigh a pound each" or "6 lb in all"; nobody knows "+4 lb". So
+ * the input is a figure and how it was read (`basis`), and the delta is
+ * derived here — against what the ledger reads NOW, inside the transaction, so
+ * a receipt landing between the page load and the click cannot make the
+ * correction restate a total that had already moved. `weightCorrectionDelta`
+ * is the same pure function the dialog previews with.
+ *
+ * **ONLY A WEIGHED BATCH CAN BE CORRECTED.** The rate's denominator is the
+ * quantity that arrived WITH a weight; a correction against a batch nobody
+ * weighed would be pounds over nothing. `LOT_UNWEIGHED` says to record a
+ * weight on a delivery instead — the door that has always existed.
+ *
+ * **OWNER ONLY**, as the cost correction is. The weight is what the till sells
+ * by the pound against and what the freezer's contents are stated in; re-stating
+ * it is a decision, not a chore.
+ */
+export async function adjustLotWeight(
+  tx: Tx,
+  ctx: InventoryCtx,
+  input: {
+    lotId: string;
+    /** How `weightLb` was read: one stocking unit, or the whole batch. */
+    basis: EntryBasis;
+    /** What it actually weighs, in the sense `basis` gives. More than nothing. */
+    weightLb: number;
+    /** Open taxonomy. See `WEIGHT_ADJUSTMENT_REASONS`. */
+    reason: string;
+    occurredOn: string;
+    notes?: string;
+  },
+): Promise<InventoryWeightAdjustment> {
+  requireWrite(ctx, "owner");
+
+  if (!Number.isFinite(input.weightLb) || input.weightLb <= 0) {
+    throw new InventoryError("INVALID_WEIGHT", "a weight has to be more than nothing");
+  }
+  if (!isValidSlug(input.reason)) {
+    throw new InventoryError("INVALID_REASON", input.reason);
+  }
+
+  const lot = await getLot(tx, ctx.tenantId, input.lotId);
+  if (!lot) throw new InventoryError("NOT_FOUND", "that batch no longer exists");
+
+  /**
+   * **BOTH FIGURES COME FROM THE LEDGER NOW, AND ARE STAMPED.** The weighed
+   * quantity is the denominator; the pounds against it are the receipts' plus
+   * every earlier correction. Read here rather than trusted from the caller,
+   * then written onto the row, so the correction can be checked against what it
+   * corrected — the same discipline `adjustLotCost` applies to its split.
+   */
+  const [weighed] = await tx
+    .select({
+      quantity: sql<string>`coalesce(sum(${schema.inventoryMovements.quantity}) filter (where ${schema.inventoryMovements.weightLb} is not null and ${schema.inventoryMovements.quantity} > 0), 0)`,
+      lb: sql<string>`coalesce(sum(${schema.inventoryMovements.weightLb}) filter (where ${schema.inventoryMovements.quantity} > 0), 0)`,
+    })
+    .from(schema.inventoryMovements)
+    .where(
+      and(
+        eq(schema.inventoryMovements.tenantId, ctx.tenantId),
+        eq(schema.inventoryMovements.lotId, input.lotId),
+      ),
+    );
+  const quantityWeighed = roundQuantity(Number(weighed?.quantity ?? 0));
+  if (quantityWeighed <= 0) {
+    throw new InventoryError(
+      "LOT_UNWEIGHED",
+      "nothing in this batch has been weighed yet — record a weight on a delivery first",
+    );
+  }
+  const [earlier] = await tx
+    .select({
+      lb: sql<string>`coalesce(sum(${schema.inventoryWeightAdjustments.deltaLb}), 0)`,
+    })
+    .from(schema.inventoryWeightAdjustments)
+    .where(
+      and(
+        eq(schema.inventoryWeightAdjustments.tenantId, ctx.tenantId),
+        eq(schema.inventoryWeightAdjustments.lotId, input.lotId),
+      ),
+    );
+  const recordedLb = roundQuantity(
+    Number(weighed?.lb ?? 0) + Number(earlier?.lb ?? 0),
+  );
+
+  const { targetLb, deltaLb } = weightCorrectionDelta({
+    basis: input.basis,
+    typed: input.weightLb,
+    quantityWeighed,
+    recordedLb,
+  });
+  if (deltaLb === 0) {
+    throw new InventoryError(
+      "WEIGHT_UNCHANGED",
+      `this batch already reads ${targetLb} lb`,
+    );
+  }
+
+  const [row] = await tx
+    .insert(schema.inventoryWeightAdjustments)
+    .values({
+      tenantId: ctx.tenantId,
+      itemId: lot.itemId,
+      lotId: lot.id,
+      occurredOn: input.occurredOn,
+      deltaLb,
+      recordedLb,
+      quantityWeighed,
+      reason: input.reason,
+      notes: input.notes?.trim() ?? "",
+      createdByClerkUserId: ctx.userId,
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * Every weight correction against these batches, newest first. A list for the
+ * same reason `costAdjustmentsForLots` is one: the caller is always a page of
+ * batches, not a batch.
+ */
+export async function weightAdjustmentsForLots(
+  tx: Tx,
+  tenantId: string,
+  lotIds: string[],
+): Promise<InventoryWeightAdjustment[]> {
+  if (lotIds.length === 0) return [];
+  return tx.query.inventoryWeightAdjustments.findMany({
+    where: and(
+      eq(schema.inventoryWeightAdjustments.tenantId, tenantId),
+      inArray(schema.inventoryWeightAdjustments.lotId, lotIds),
+    ),
+    orderBy: (a, { desc: byDesc }) => [byDesc(a.occurredOn), byDesc(a.createdAt)],
+  });
+}
+
 
 // ------------------------------------------- adjustments, counts, expiry ---
 
@@ -3288,27 +3442,56 @@ export async function weightRatesForItems(
   tx: Tx,
   tenantId: string,
   itemIds: string[],
-): Promise<{ byItem: Map<string, number>; byLot: Map<string, number> }> {
+): Promise<{
+  byItem: Map<string, number>;
+  byLot: Map<string, number>;
+  /**
+   * What each weighed batch reads, for the correction dialog: the weighed
+   * quantity received and the pounds against it, corrections included. Absent
+   * for a batch nobody weighed, like `byLot`.
+   */
+  byLotDetail: Map<string, LotWeightDetail>;
+}> {
   const byItem = new Map<string, number>();
   const byLot = new Map<string, number>();
-  if (itemIds.length === 0) return { byItem, byLot };
-  const rows = await tx
-    .select({
-      itemId: schema.inventoryMovements.itemId,
-      lotId: schema.inventoryMovements.lotId,
-      quantity: schema.inventoryMovements.quantity,
-      weightLb: schema.inventoryMovements.weightLb,
-    })
-    .from(schema.inventoryMovements)
-    .where(
-      and(
-        eq(schema.inventoryMovements.tenantId, tenantId),
-        inArray(schema.inventoryMovements.itemId, itemIds),
-        // Only weighed rows can contribute, and on a farm holding feed and
-        // animals that is a small minority of the ledger.
-        isNotNull(schema.inventoryMovements.weightLb),
+  const byLotDetail = new Map<string, LotWeightDetail>();
+  if (itemIds.length === 0) return { byItem, byLot, byLotDetail };
+  const [rows, corrections] = await Promise.all([
+    tx
+      .select({
+        itemId: schema.inventoryMovements.itemId,
+        lotId: schema.inventoryMovements.lotId,
+        quantity: schema.inventoryMovements.quantity,
+        weightLb: schema.inventoryMovements.weightLb,
+      })
+      .from(schema.inventoryMovements)
+      .where(
+        and(
+          eq(schema.inventoryMovements.tenantId, tenantId),
+          inArray(schema.inventoryMovements.itemId, itemIds),
+          // Only weighed rows can contribute, and on a farm holding feed and
+          // animals that is a small minority of the ledger.
+          isNotNull(schema.inventoryMovements.weightLb),
+        ),
       ),
-    );
+    // **AND WHAT AN OWNER HAS SINCE SAID IT REALLY WEIGHED.** Folded in beside
+    // the receipts by `core/weight.ts`, per lot AND per item — unlike a cost
+    // correction, which stays out of the item average, because pounds on hand
+    // is a shelf estimate that nothing was ever stamped from.
+    tx
+      .select({
+        itemId: schema.inventoryWeightAdjustments.itemId,
+        lotId: schema.inventoryWeightAdjustments.lotId,
+        deltaLb: schema.inventoryWeightAdjustments.deltaLb,
+      })
+      .from(schema.inventoryWeightAdjustments)
+      .where(
+        and(
+          eq(schema.inventoryWeightAdjustments.tenantId, tenantId),
+          inArray(schema.inventoryWeightAdjustments.itemId, itemIds),
+        ),
+      ),
+  ]);
   const perItem = new Map<string, WeighedMovement[]>();
   const perLot = new Map<string, WeighedMovement[]>();
   for (const row of rows) {
@@ -3321,15 +3504,37 @@ export async function weightRatesForItems(
       else perLot.set(row.lotId, [row]);
     }
   }
+  const correctionsPerItem = new Map<string, WeightCorrection[]>();
+  const correctionsPerLot = new Map<string, WeightCorrection[]>();
+  for (const row of corrections) {
+    const list = correctionsPerItem.get(row.itemId);
+    if (list) list.push(row);
+    else correctionsPerItem.set(row.itemId, [row]);
+    const lotList = correctionsPerLot.get(row.lotId);
+    if (lotList) lotList.push(row);
+    else correctionsPerLot.set(row.lotId, [row]);
+  }
   for (const [itemId, movements] of perItem) {
-    const rate = averagePackageWeight(movements);
+    const rate = averagePackageWeight(movements, correctionsPerItem.get(itemId));
     if (rate !== null) byItem.set(itemId, rate);
   }
   for (const [lotId, movements] of perLot) {
-    const rate = averagePackageWeight(movements);
-    if (rate !== null) byLot.set(lotId, rate);
+    const totals = weighedTotals(movements, correctionsPerLot.get(lotId));
+    if (totals.quantity <= 0) continue;
+    byLot.set(lotId, totals.lb / totals.quantity);
+    byLotDetail.set(lotId, {
+      quantityWeighed: roundQuantity(totals.quantity),
+      recordedLb: roundQuantity(totals.lb),
+    });
   }
-  return { byItem, byLot };
+  return { byItem, byLot, byLotDetail };
+}
+
+export interface LotWeightDetail {
+  /** The weighed quantity received into the batch — the rate's denominator. */
+  quantityWeighed: number;
+  /** The receipts' pounds plus every correction — what the batch reads now. */
+  recordedLb: number;
 }
 
 /** Everything issued into one lot, newest first — the "what has this pen eaten" list. */

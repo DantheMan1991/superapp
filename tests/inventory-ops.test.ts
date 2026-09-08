@@ -47,6 +47,8 @@ import {
   valueStock,
   averageRatesForItems,
   weightRatesForItems,
+  adjustLotWeight,
+  weightAdjustmentsForLots,
 } from "../src/packs/inventory/ops";
 
 const RUN = !!process.env.DATABASE_URL;
@@ -2064,6 +2066,148 @@ d("inventory ops", () => {
         expenseAccountId: r.expenseAccountId,
       }));
       expect(resolveTaxRule("seed", stored).source).toBe("tenant_default");
+    });
+  });
+
+  /**
+   * Correcting what a batch weighs — 2026-09-08. The person states the truth
+   * and the op stores the difference, derived against what the ledger reads at
+   * that moment.
+   */
+  describe("correcting what a batch weighs", () => {
+    const receive = (
+      itemId: string,
+      lotId: string,
+      quantity: number,
+      weightLb: number | null,
+    ) =>
+      asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId,
+          lotId,
+          quantity,
+          weightLb,
+          occurredOn: "2026-09-08",
+        }),
+      );
+
+    it("states the truth, stores the difference, and the fold reads through it", async () => {
+      const item = await newItem("Ground beef (weights)", "pkg");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: item.id, code: "BAXTER", source: "raised" }),
+      );
+      // The founder's two receipts, as they were typed: 1 lb in all, twice.
+      await receive(item.id, lot.id, 1, 1);
+      await receive(item.id, lot.id, 5, 1);
+      const before = await asOwner((tx) => weightRatesForItems(tx, tenantId, [item.id]));
+      expect(before.byLot.get(lot.id)).toBeCloseTo(2 / 6, 10);
+      expect(before.byLotDetail.get(lot.id)).toEqual({ quantityWeighed: 6, recordedLb: 2 });
+
+      const row = await asOwner((tx) =>
+        adjustLotWeight(tx, ownerCtx(), {
+          lotId: lot.id,
+          basis: "each",
+          weightLb: 1,
+          reason: "mistyped",
+          occurredOn: "2026-09-08",
+        }),
+      );
+      expect(row.deltaLb).toBe(4);
+      expect(row.recordedLb).toBe(2);
+      expect(row.quantityWeighed).toBe(6);
+
+      const after = await asOwner((tx) => weightRatesForItems(tx, tenantId, [item.id]));
+      expect(after.byLot.get(lot.id)).toBe(1);
+      // Unlike a cost correction, a weight correction DOES move the item
+      // figure: pounds on hand is a shelf estimate nothing was stamped from.
+      expect(after.byItem.get(item.id)).toBe(1);
+      expect(after.byLotDetail.get(lot.id)).toEqual({ quantityWeighed: 6, recordedLb: 6 });
+
+      const listed = await asOwner((tx) => weightAdjustmentsForLots(tx, tenantId, [lot.id]));
+      expect(listed.map((c) => c.id)).toEqual([row.id]);
+    });
+
+    it("derives the delta against what the ledger reads NOW, earlier corrections included", async () => {
+      const item = await newItem("Sausage (weights)", "pkg");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: item.id, code: "SAUS", source: "raised" }),
+      );
+      await receive(item.id, lot.id, 4, 2);
+      await asOwner((tx) =>
+        adjustLotWeight(tx, ownerCtx(), {
+          lotId: lot.id,
+          basis: "total",
+          weightLb: 4,
+          reason: "reweighed",
+          occurredOn: "2026-09-08",
+        }),
+      );
+      // Reads 4 lb now. "1.5 lb each" is 6 lb: +2 on 4, not +4 on the receipt's 2.
+      const second = await asOwner((tx) =>
+        adjustLotWeight(tx, ownerCtx(), {
+          lotId: lot.id,
+          basis: "each",
+          weightLb: 1.5,
+          reason: "reweighed",
+          occurredOn: "2026-09-08",
+        }),
+      );
+      expect(second.recordedLb).toBe(4);
+      expect(second.deltaLb).toBe(2);
+    });
+
+    it("REFUSES a batch nobody weighed, and a correction that changes nothing", async () => {
+      const item = await newItem("Bacon (weights)", "pkg");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: item.id, code: "BACON", source: "raised" }),
+      );
+      await receive(item.id, lot.id, 3, null);
+      await expect(
+        asOwner((tx) =>
+          adjustLotWeight(tx, ownerCtx(), {
+            lotId: lot.id,
+            basis: "each",
+            weightLb: 1,
+            reason: "mistyped",
+            occurredOn: "2026-09-08",
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "LOT_UNWEIGHED" });
+
+      await receive(item.id, lot.id, 2, 3);
+      await expect(
+        asOwner((tx) =>
+          adjustLotWeight(tx, ownerCtx(), {
+            lotId: lot.id,
+            basis: "total",
+            weightLb: 3,
+            reason: "mistyped",
+            occurredOn: "2026-09-08",
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "WEIGHT_UNCHANGED" });
+      // Only the two weighed packages count: 3 lb over 2, not over 5.
+      const rates = await asOwner((tx) => weightRatesForItems(tx, tenantId, [item.id]));
+      expect(rates.byLotDetail.get(lot.id)).toEqual({ quantityWeighed: 2, recordedLb: 3 });
+    });
+
+    it("is the owner's to do", async () => {
+      const item = await newItem("Chops (weights)", "pkg");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: item.id, code: "CHOPS", source: "raised" }),
+      );
+      await receive(item.id, lot.id, 2, 2);
+      await expect(
+        asOwner((tx) =>
+          adjustLotWeight(tx, staffCtx(), {
+            lotId: lot.id,
+            basis: "each",
+            weightLb: 1.5,
+            reason: "mistyped",
+            occurredOn: "2026-09-08",
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
     });
   });
 });

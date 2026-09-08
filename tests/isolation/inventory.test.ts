@@ -44,6 +44,7 @@ d("inventory tables (RLS)", () => {
   let billLineB: string;
   let allocationA: string;
   let costAdjustmentA: string;
+  let weightAdjustmentA: string;
   let taxRuleA: string;
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
@@ -281,6 +282,36 @@ d("inventory tables (RLS)", () => {
         ])
         .returning();
       costAdjustmentA = corrections[0].id;
+
+      // 2026-09-08. The weight twin of the rows above, built the same way and
+      // for the same reason: a bug in `adjustLotWeight` cannot make these
+      // tests agree with it.
+      const weightCorrections = await tx
+        .insert(schema.inventoryWeightAdjustments)
+        .values([
+          {
+            tenantId: tenantA,
+            itemId: feedA,
+            lotId: lotA,
+            occurredOn: "2026-09-08",
+            deltaLb: 4,
+            recordedLb: 2,
+            quantityWeighed: 6,
+            reason: "mistyped",
+          },
+          {
+            tenantId: tenantB,
+            itemId: itemB,
+            lotId: lotB,
+            occurredOn: "2026-09-08",
+            deltaLb: -0.5,
+            recordedLb: 34,
+            quantityWeighed: 34,
+            reason: "reweighed",
+          },
+        ])
+        .returning();
+      weightAdjustmentA = weightCorrections[0].id;
 
       // Slice 3d stage 1. A recorded tax election, which is a different shape
       // of sensitive from a figure: leaking one would not move a number today,
@@ -908,6 +939,133 @@ d("inventory tables (RLS)", () => {
           quantityOnHand: 60,
           quantityReceived: 100,
           reason: "ticket_wrong",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+// ---- 2026-09-08: weight corrections ---------------------------------------
+
+  it("a tenant sees only its own weight corrections", async () => {
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.inventoryWeightAdjustments),
+    );
+    expect(mine).toHaveLength(1);
+    expect(mine[0].id).toBe(weightAdjustmentA);
+    expect(
+      await asOtherTenant((tx) =>
+        tx.select().from(schema.inventoryWeightAdjustments),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("CANNOT RE-WEIGH ANOTHER TENANT'S BATCH", async () => {
+    /**
+     * These rows feed the weight fold — `weightRatesForItems` reads them beside
+     * the receipts — so one pointing across the boundary would change what
+     * another business's freezer reads in pounds. Unrepresentable rather than
+     * merely refused: the composite FK fails even under `withSystem`.
+     */
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.inventoryWeightAdjustments).values({
+          tenantId: tenantA,
+          itemId: feedA,
+          lotId: lotB,
+          occurredOn: "2026-09-08",
+          deltaLb: 1,
+          recordedLb: 1,
+          quantityWeighed: 1,
+          reason: "mistyped",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot point a weight correction at another tenant's item", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.inventoryWeightAdjustments).values({
+          tenantId: tenantA,
+          itemId: itemB,
+          lotId: lotA,
+          occurredOn: "2026-09-08",
+          deltaLb: 1,
+          recordedLb: 1,
+          quantityWeighed: 1,
+          reason: "mistyped",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("STAFF READ WEIGHT CORRECTIONS BUT CANNOT WRITE ONE; an owner can; nobody deletes", async () => {
+    /**
+     * The 0266/0270 posture, asserted clause by clause. The op is owner-only
+     * in its own layer; this is the database agreeing, so an action that
+     * forgets `{ role }` is refused rather than quietly writing as staff.
+     */
+    const correction = {
+      tenantId: tenantA,
+      itemId: feedA,
+      lotId: lotA,
+      occurredOn: "2026-09-08",
+      deltaLb: 1,
+      recordedLb: 6,
+      quantityWeighed: 6,
+      reason: "reweighed",
+    };
+    await expect(
+      asStaff((tx) => tx.insert(schema.inventoryWeightAdjustments).values(correction)),
+    ).rejects.toThrow();
+    const [mine] = await asOwner((tx) =>
+      tx.insert(schema.inventoryWeightAdjustments).values(correction).returning(),
+    );
+    expect(mine.id).toBeTruthy();
+    // No DELETE policy: under RLS the row is simply not there to delete, and it
+    // stays. A correction is put right by another correction.
+    await asOwner((tx) =>
+      tx
+        .delete(schema.inventoryWeightAdjustments)
+        .where(eq(schema.inventoryWeightAdjustments.id, mine.id)),
+    );
+    const still = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.inventoryWeightAdjustments)
+        .where(eq(schema.inventoryWeightAdjustments.id, mine.id)),
+    );
+    expect(still).toHaveLength(1);
+  });
+
+  it("refuses a weight correction of nothing, and one that takes the batch to nothing", async () => {
+    // A correction of zero is not a correction; a batch corrected to no pounds
+    // has not been weighed, it has been mis-stated.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.inventoryWeightAdjustments).values({
+          tenantId: tenantA,
+          itemId: feedA,
+          lotId: lotA,
+          occurredOn: "2026-09-08",
+          deltaLb: 0,
+          recordedLb: 2,
+          quantityWeighed: 6,
+          reason: "mistyped",
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.inventoryWeightAdjustments).values({
+          tenantId: tenantA,
+          itemId: feedA,
+          lotId: lotA,
+          occurredOn: "2026-09-08",
+          deltaLb: -2,
+          recordedLb: 2,
+          quantityWeighed: 6,
+          reason: "mistyped",
         }),
       ),
     ).rejects.toThrow();

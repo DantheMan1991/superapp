@@ -86,6 +86,19 @@ runbook called that the likely project-killer. With a relay it mostly evaporates
 
 So no unblock request is needed. Do not go asking for one.
 
+**On 587 the SES route must use STARTTLS, i.e. Implicit TLS OFF.** This is the
+setting that was wrong on the first real send (2026-09-07) and it stops mail
+dead: SES greets in plaintext and upgrades on `STARTTLS`, so an implicit-TLS
+client handshakes against the `220` banner and every attempt fails with
+`Handshake failed: received corrupt message of type InvalidContentType` and an
+empty SMTP command (the tell that it broke in the handshake, not at AUTH). Off
+does **not** mean unencrypted — SES refuses `AUTH` before the STARTTLS upgrade.
+Do not switch to 465 to get implicit TLS: Hetzner blocks outbound 465 as well as
+25. SES's open implicit-TLS port is 2465, but STARTTLS on 587 is the working
+setting. After changing any outbound setting, run **Actions → Reload → Server
+settings** — the running server keeps the old settings in memory until reloaded,
+so a change that looks saved can keep failing identically.
+
 ---
 
 ## 2. Domains

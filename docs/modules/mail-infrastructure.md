@@ -6,12 +6,38 @@
 > on. Operational steps live in
 > [runbooks/mail-server.md](../runbooks/mail-server.md); the reasoning for
 > self-hosting at all is [ADR 0003](../decisions/0003-self-hosted-mail-over-provider-apis.md).
-> Status: live (single server, no redundancy) · Scope: `platform`
+> Status: live (single server, no redundancy; outbound relay proven
+> end-to-end 2026-09-07 but still SES-sandboxed) · Scope: `platform`
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this area. Every PR
 that changes it MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-07 — The SES relay actually delivered, and the one setting that stopped it
+- **First message ever through the relay.** It was configured on 2026-08-01
+  and never once exercised — every "relay" claim in these docs until now was
+  assumed, not proven. A test send from Yosher to a verified Gmail identity
+  travelled the full path (Yosher → Stalwart → SES → the internet) and arrived.
+- **The block was a single toggle: the SES route had Implicit TLS ON.** SES on
+  **587 speaks plaintext first and upgrades with STARTTLS**; implicit TLS makes
+  the client force a TLS handshake against that plaintext greeting. Stalwart's
+  rustls read SES's `220` banner as a TLS record and failed every attempt with
+  `TLS handshake or encryption failed — Handshake failed: received corrupt
+  message of type InvalidContentType`, against `email-smtp.us-east-2.amazonaws.com`,
+  with an **empty SMTP Command** — the tell that it broke *before* any command,
+  i.e. in the handshake, not at AUTH. The message sat in the queue retrying.
+- **Fix:** Settings → the SES route → **Implicit TLS OFF** (STARTTLS, not
+  unencrypted — SES refuses AUTH before the upgrade), then **Actions → Reload →
+  Server settings** (the running server keeps the old settings in memory until
+  reloaded), then clear the queued message's Next Retry to force an attempt.
+- **Do NOT "fix" this by moving to port 465.** SES speaks implicit TLS there,
+  but Hetzner blocks outbound 465 as well as 25, so it would time out. SES's
+  other implicit-TLS port is **2465**, which Hetzner leaves open — but STARTTLS
+  on 587 is the setting that works and is what the route now uses.
+- **Still sandboxed.** This delivered only because the recipient is a verified
+  SES identity. Real client mail needs SES production access (still denied as of
+  today) — the plumbing is no longer in the way.
 
 ### 2026-08-01 — What it actually took to get Stalwart serving (`3463a13`)
 - The install log written up in the runbook §3.3 so the next one is an hour,
@@ -92,6 +118,12 @@ No tables. This is infrastructure — the module's tables are in
 - Relaying human correspondence is neither transactional nor marketing mail,
   which is why a relay service was the right category and a transactional API
   was not.
+- **The SES relay route uses STARTTLS on 587, so Implicit TLS is OFF.** Turning
+  it on makes Stalwart handshake against SES's plaintext `220` and fail with
+  `InvalidContentType` before any SMTP command. 465 is not the escape hatch —
+  Hetzner blocks outbound 465 too; 2465 is SES's open implicit-TLS port. After
+  changing any outbound setting, **Actions → Reload → Server settings** or the
+  running server keeps the old one.
 
 ## Open items
 
@@ -105,5 +137,9 @@ No tables. This is infrastructure — the module's tables are in
   nothing in this repo backs it up.
 - **Token refresh has never been exercised** — the first token has not
   expired. Force it before relying on it.
-- Everything is proven against one account and one message: no multi-account
-  switching, no delegation.
+- **Outbound is proven but sandboxed.** The relay delivered end-to-end on
+  2026-09-07, but SES production access is still denied, so only verified
+  identities receive. This is the one gate between the relay and real client
+  mail. See the build log.
+- Everything is proven against one account: no multi-account switching, no
+  delegation.

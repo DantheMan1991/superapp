@@ -60,11 +60,50 @@ export const WITHDRAWAL_SOURCE_NOTES: Record<string, string> = {
 
 export interface TreatmentLike {
   id: string;
+  /** The first day it was given. */
   treatedOn: string;
+  /** How many days running. Absent or null means one. */
+  courseDays?: number | null;
   product: string;
   meatWithdrawalDays: number | null;
   milkWithdrawalDays: number | null;
   withdrawalSource: string;
+}
+
+/**
+ * The last day a treatment was given: the first day for a single dose, four
+ * days later for a five-day course.
+ *
+ * **THE WITHDRAWAL COUNTS FROM HERE**, which is the label's own rule — "ten
+ * days after the last treatment" — and the reason a course is one row with
+ * a length rather than five rows: five rows kept the clock right only if
+ * somebody typed all five, and the fifth is the one that decides.
+ */
+export function lastDoseOn(treatment: {
+  treatedOn: string;
+  courseDays?: number | null;
+}): string {
+  const days = Math.max(1, Math.floor(treatment.courseDays ?? 1));
+  return fromEpochDay(toEpochDay(treatment.treatedOn) + days - 1);
+}
+
+/**
+ * Whether any day of a course fell inside an animal's stay in a pen.
+ *
+ * `givenWhileThere` with a length: a course that started before she went in
+ * and ran past the day she arrived was still going into the water she drank.
+ * Both ends of the stay count, for the reason `givenWhileThere` gives.
+ */
+export function courseTouchesStay(
+  treatedOn: string,
+  courseDays: number | null | undefined,
+  startedOn: string,
+  endedOn: string | null,
+): boolean {
+  const last = lastDoseOn({ treatedOn, courseDays });
+  if (last < startedOn) return false;
+  if (endedOn !== null && treatedOn > endedOn) return false;
+  return true;
 }
 
 /**
@@ -137,7 +176,8 @@ export function withdrawalStatus(
       }
       continue;
     }
-    const clears = toEpochDay(treatment.treatedOn) + days;
+    // From the LAST dose. A single dose's last day is its first.
+    const clears = toEpochDay(lastDoseOn(treatment)) + days;
     if (clears > latest) {
       latest = clears;
       binding = treatment;

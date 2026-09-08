@@ -1920,6 +1920,59 @@ d("livestock ops", () => {
       expect(rows).toHaveLength(1);
     });
 
+    it("A COURSE IS ONE ROW, AND THE CLOCK COUNTS FROM ITS LAST DAY", async () => {
+      // Five days of Tylan in the water from the 1st, ten days' withdrawal:
+      // the last dose is the 5th, and the pen clears on the 15th — not the
+      // 11th, which is what a single row dated the 1st would have said.
+      const { lot } = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: tItemId,
+          code: "COURSE-PEN",
+          species: "poultry",
+          head: 20,
+          arrivedOn: "2026-07-01",
+        }),
+      );
+      const course = await asOwner((tx) =>
+        recordTreatment(tx, ctx(), {
+          livestockLotId: lot.id,
+          treatedOn: "2026-08-01",
+          courseDays: 5,
+          product: "Tylan",
+          route: "water",
+          meatWithdrawalDays: 10,
+          withdrawalSource: "label",
+        }),
+      );
+      expect(course.courseDays).toBe(5);
+      const clock = (
+        await asOwner((tx) => withdrawalByLot(tx, tenantId, [lot.id], "2026-08-12"))
+      ).get(lot.id);
+      expect(clock?.meat.clearsOn).toBe("2026-08-15");
+
+      // Corrected to three days, the clock moves back with the last dose.
+      await asOwner((tx) => updateTreatment(tx, ctx(), course.id, { courseDays: 3 }));
+      const shorter = (
+        await asOwner((tx) => withdrawalByLot(tx, tenantId, [lot.id], "2026-08-12"))
+      ).get(lot.id);
+      expect(shorter?.meat.clearsOn).toBe("2026-08-13");
+
+      // A course of nothing is refused, not rounded.
+      await expect(
+        asOwner((tx) =>
+          recordTreatment(tx, ctx(), {
+            livestockLotId: lot.id,
+            treatedOn: "2026-08-01",
+            courseDays: 0,
+            product: "Tylan",
+            route: "water",
+            meatWithdrawalDays: 10,
+            withdrawalSource: "label",
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "INVALID_TREATMENT" });
+    });
+
     it("VALIDATES THE MERGED ROW, not the patch", async () => {
       // Clearing the only period a treatment had, while its source still says
       // "off the label", produces exactly the row that reads as clear to

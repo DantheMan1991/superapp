@@ -95,7 +95,7 @@ import {
   WITHDRAWAL_SOURCES,
   lotWithdrawal,
   type LotWithdrawal,
-  givenWhileThere,
+  courseTouchesStay,
 } from "./core/withdrawal";
 import {
   averageWeightLb,
@@ -2831,6 +2831,17 @@ export async function listChecksForLot(
 
 // ------------------------------------------------------------ treatments ---
 
+/** A course runs for a whole number of days, and at least one. Refused, not rounded. */
+function validCourseDays(days: number): number {
+  if (!Number.isInteger(days) || days < 1) {
+    throw new LivestockError(
+      "INVALID_TREATMENT",
+      "a course runs for at least one day",
+    );
+  }
+  return days;
+}
+
 /**
  * Record a treatment, and start its clock.
  *
@@ -2850,6 +2861,8 @@ export async function recordTreatment(
   input: {
     livestockLotId: string;
     treatedOn: string;
+    /** Days running. One unless said otherwise; the clock counts from the last. */
+    courseDays?: number;
     product: string;
     dose?: string;
     route: string;
@@ -2868,6 +2881,7 @@ export async function recordTreatment(
   if (!lot) {
     throw new LivestockError("NOT_FOUND", `lot ${input.livestockLotId} not found`);
   }
+  const courseDays = validCourseDays(input.courseDays ?? 1);
   const product = input.product.trim();
   if (!product) {
     throw new LivestockError("INVALID_TREATMENT", "say what was given");
@@ -2922,6 +2936,7 @@ export async function recordTreatment(
       tenantId: ctx.tenantId,
       livestockLotId: input.livestockLotId,
       treatedOn: input.treatedOn,
+      courseDays,
       product,
       dose: input.dose?.trim() ?? "",
       route,
@@ -2964,6 +2979,7 @@ export async function updateTreatment(
   id: string,
   input: {
     treatedOn?: string;
+    courseDays?: number;
     product?: string;
     dose?: string;
     route?: string;
@@ -2988,6 +3004,9 @@ export async function updateTreatment(
 
   const patch: Record<string, unknown> = { updatedAt: new Date() };
   if (input.treatedOn !== undefined) patch.treatedOn = input.treatedOn;
+  // Moves the clock: a course corrected from three days to five clears two
+  // days later, because the last dose does.
+  if (input.courseDays !== undefined) patch.courseDays = validCourseDays(input.courseDays);
   if (input.dose !== undefined) patch.dose = input.dose.trim();
   if (input.administeredBy !== undefined) {
     patch.administeredBy = input.administeredBy.trim();
@@ -3351,7 +3370,11 @@ export async function treatmentsByLot(
     );
     const fromPens = (lived.get(lotId) ?? []).flatMap((span) =>
       (byOwner.get(span.livestockLotId) ?? [])
-        .filter((t) => givenWhileThere(t.treatedOn, span.startedOn, span.endedOn))
+        // Any day of a course inside her stay: a five-day course that
+        // started before she went in was still in the water she drank.
+        .filter((t) =>
+          courseTouchesStay(t.treatedOn, t.courseDays, span.startedOn, span.endedOn),
+        )
         .map((t) => ({ ...t, via: "pen" as const })),
     );
     const seen = new Set<string>();

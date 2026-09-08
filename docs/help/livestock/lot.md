@@ -53,12 +53,15 @@ Everyone can use the first six. Only an owner sees the last three.
 
 1. Click {button:Treat|outline}. The dialog says `The withdrawal is the point of this record: until it clears, these cannot be processed and their milk cannot be sold. Read the periods off the label in front of you — this app does not know them and will not guess.`
 2. Type `What was given`. Products you have used before are suggested.
-3. Set `When`, the `Dose`, and `How` it was given.
-4. **Fill in `Meat withdrawal (days)` and `Milk withdrawal (days)` from the label.** Both start empty.
-5. Set `Where those came from`: `From the label`, `From the vet`, or `Not looked up`. Each choice shows a note. `Not looked up` warns you these will read as not clear.
-6. Set `How many treated`, and `Given by`.
-7. If the medicine came out of your own stock, pick it under `Out of stock` and say how much.
-8. Add `Notes`. Click {button:Record|primary}.
+3. Set `When`, the first day it was given. For a course, set `Given for (days)`: five days of injections is one record with `5` here, and its withdrawal counts from the last day, as the label says. Leave it at `1` for a single dose.
+4. Set the `Dose`, and `How` it was given.
+5. **Fill in `Meat withdrawal (days)` and `Milk withdrawal (days)` from the label.** Both start empty.
+6. Set `Where those came from`: `From the label`, `From the vet`, or `Not looked up`. Each choice shows a note. `Not looked up` warns you these will read as not clear.
+7. Set `How many treated`, and `Given by`.
+8. If the medicine came out of your own stock, pick it under `Out of stock` and say how much.
+9. Add `Notes`. Click {button:Record|primary}.
+
+A course shows in the list as `5-day course, last dose 2026-08-05` under the product, and `Meat clear` counts from that last day. Correcting the days moves the clock with it.
 
 You see `Recorded`, or `Recorded — look the withdrawal up before these go anywhere` when you left the period blank.
 
@@ -155,6 +158,7 @@ She stops being stock and becomes something the business owns. What she cost mov
 | `Every animal in this lot is named. A loss is recorded on the animal, under it` | The daily check on a group with nothing loose has no `Head leaving` box. Open the animal's page, or her line on the round, to record her loss. |
 | `that lot is already inside another one, and lots only nest one deep` | Groups nest one level, not two. |
 | `Only an owner can change animal records.` | You are signed in as staff. Ask an owner. |
+| `A course runs for at least one day.` | `Given for (days)` has to be a whole number of one or more. |
 | `47 taken off — still on the record` | The tag is no longer current. It still finds the animal in a search. |
 | `Photo added` | The picture is on the record. |
 
@@ -163,6 +167,7 @@ She stops being stock and becomes something the business owns. What she cost mov
 - Nothing tracks individual animals inside a group unless you name them.
 - `Head events`, `Fed in by name` and `Daily checks` show the last 25, 10 and 14 rows, and a line under the list says so when they are full.
 - A treatment inherited from a parent group cannot be corrected here.
+- A course is one record with a length. It cannot skip days, and each day's dose is not recorded separately.
 - Nothing here gives you a dose or a withdrawal period. Read the label.
 - If you need any of this, ask us.
 

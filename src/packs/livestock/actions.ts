@@ -1228,6 +1228,8 @@ export async function recordTreatmentAction(input: unknown) {
     .object({
       livestockLotId: z.string().uuid(),
       treatedOn: requiredDate,
+      // Days running; the clock counts from the last. A year is past any course.
+      courseDays: z.number().int().min(1).max(365).optional(),
       product: z.string().trim().min(1).max(200),
       dose: z.string().max(200).optional(),
       route: z.string().min(1).max(63),
@@ -1304,6 +1306,7 @@ export async function updateTreatmentAction(input: unknown) {
     .object({
       id: z.string().uuid(),
       treatedOn: requiredDate.optional(),
+      courseDays: z.number().int().min(1).max(365).optional(),
       product: z.string().trim().min(1).max(200).optional(),
       dose: z.string().max(200).optional(),
       route: z.string().min(1).max(63).optional(),

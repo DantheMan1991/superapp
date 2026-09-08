@@ -133,6 +133,37 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-09-08 — A course of treatment (`claude/a-course-of-treatment`)
+
+**Livestock slice 9 of the improvement review, and the pack's first migration
+since the herd tables went.** `0273` adds `livestock_treatments.course_days`
+(integer, NOT NULL DEFAULT 1, CHECK ≥ 1) — applied to the dev branch and to
+production, RLS verified on both (167 tables), before this PR was opened,
+per [ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md).
+Additive with a default, so the code that was live while it landed never
+noticed it.
+
+**A COURSE IS ONE ROW, AND THE CLOCK COUNTS FROM ITS LAST DAY.** A five-day
+course of injections was five rows, and the withdrawal was right only if
+somebody typed all five — the fifth being the one that decides. Now the form
+asks `Given for (days)` (one for a single dose), the row says `5-day course,
+last dose 2026-08-05`, and every clock reader gets the right day through the
+one funnel: `lastDoseOn` in `core/withdrawal.ts` is `treatedOn + courseDays −
+1`, `withdrawalStatus` counts from it, and the page's per-row `Meat clear` and
+`Milk clear` read it too. Corrected from three days to five, the clock moves
+two days later, because the last dose does.
+
+**Membership inheritance sees the whole course.** `courseTouchesStay`
+replaces `givenWhileThere` in `treatmentsByLot`'s pen walk: a course that
+started before she went in and ran past that day was still in the water she
+drank. Same ends-inclusive rule.
+
+Tests: `lastDoseOn`, a five-day course's clock and `courseTouchesStay` in
+`tests/livestock-withdrawal.test.ts`; the course row, its corrected clock and
+the refused zero in `tests/livestock-ops.test.ts`; the CHECK in
+`tests/isolation/livestock.test.ts`. Guide `lot.md` swept. Driven on Hilltop
+Farm (dev).
+
 ### 2026-09-08 — Small chores in the barn (`claude/small-chores-in-the-barn`)
 
 **Livestock slice 8 of the improvement review**: the short things the guides
@@ -2314,7 +2345,7 @@ This pack is the one that forced the change; the full reasoning is in
 | `livestock_daily_logs` | **Somebody looked.** One row per lot per day | UNIQUE on `(tenant_id, livestock_lot_id, logged_on)` — one look is one fact, and the constraint is what lets the one-tap round insert ON CONFLICT DO NOTHING. `status` in `normal\|attention`. **No deaths column**: losses are movements, joined by lot and date |
 | `livestock_feed_groups` | **A shared feeder** — a bin, a bulk bag, a trough | Holds the FEEDER, not the feed: no quantity, no cost, no balance. `status` in `active\|closed`; closed keeps reporting. Deliberately not an asset — a feeding group is a set of animals sharing a cost, so two bins feeding one flock are one group |
 | `livestock_feed_group_members` | Which lots eat from it, **between which dates** | The dates are the whole reason this is a table: head on any day is already in the ledger, but *when a pen went onto the bin* is not. `ended_on` INCLUSIVE, matching `land_occupancy` |
-| `livestock_treatments` | **What went into an animal, and when it is safe to eat** | TWO clocks — `meat_withdrawal_days` and `milk_withdrawal_days`, both nullable and never merged. `withdrawal_source` in `label\|vet\|none_stated` carries where the number came from; `none_stated` BLOCKS. `dose` is free text and nothing computes on it. Optional `inventory_movement_id` puts the cost on the pen |
+| `livestock_treatments` | **What went into an animal, and when it is safe to eat** | **`course_days`** (`0273`, NOT NULL DEFAULT 1, CHECK ≥ 1): how many days running it was given; **the clock counts from the last day** (`lastDoseOn`). TWO clocks — `meat_withdrawal_days` and `milk_withdrawal_days`, both nullable and never merged. `withdrawal_source` in `label\|vet\|none_stated` carries where the number came from; `none_stated` BLOCKS. `dose` is free text and nothing computes on it. Optional `inventory_movement_id` puts the cost on the pen |
 | `livestock_weights` | **What they weighed, and how anybody knows** | `method` open taxonomy (`scale`, `sample`, `tape`, `visual`). `sample_size` head went on the scale and together weighed `sample_weight_lb` — the AVERAGE is a division at read time and is never stored. A tape stores `heart_girth_in` + `body_length_in` and no pounds at all. CHECK: something must have been measured |
 | `livestock_feed_draws` | **This movement was feed drawn for that feeder** | A JOIN, not a second ledger. Composite FK to `inventory_movements`, which holds the quantity and the stamped cost. UNIQUE per movement — two rows would put one cost in two pots |
 
@@ -2477,6 +2508,7 @@ This pack is the one that forced the change; the full reasoning is in
   · `drizzle/0222_*.sql` (**hand-reordered**) · `drizzle/0223_livestock_groups_rls.sql`
   · `drizzle/0224_*.sql` · `drizzle/0225_livestock_capital_transfers_rls.sql`
   · `drizzle/0226_*.sql` (`inventory_lots.capitalised_on`)
+  · `drizzle/0273_*.sql` (`livestock_treatments.course_days`)
 
 ## Decisions & gotchas
 
@@ -2501,6 +2533,9 @@ This pack is the one that forced the change; the full reasoning is in
   empty is refused — that row would later read as clear.
 - **The binding treatment clears LAST, not most recently.** A long-withdrawal
   product given first outlasts a short one given after it.
+- **A COURSE COUNTS FROM ITS LAST DOSE.** `course_days` is a length, never a
+  set of rows, and every clock reader goes through `lastDoseOn`. Never read
+  `treated_on` as "the day the clock starts" again — it is the first day.
 - **THE MEAT CLOCK NOW REFUSES A PRODUCTION RUN, and that is its only
   enforcement point.** `livestock/run-handler.ts` consults `blocksProcessing`
   before a run may consume a pen, exactly as this section promised it would.
@@ -2882,8 +2917,8 @@ on the dev branch, 2026-08-27** — the terminology review that produced
 - **`head_treated` is recorded and nothing reads it.** Written because the design
   asks for it and because a partial treatment is a real thing; no screen or fold
   uses it yet.
-- **No repeat or course support.** A five-day course of injections is five rows,
-  and the clock counts from the last of them only if somebody enters all five.
+- ~~**No repeat or course support.**~~ — **closed 2026-09-08**: `course_days`,
+  one row, the clock from the last dose.
 - ~~**Nothing warns that a withdrawal is about to expire**, or that one has just
   cleared.~~ — **closed 2026-09-08**: the clearing day and the day before reach
   What needs you and the digest through the pack's attention source, as does

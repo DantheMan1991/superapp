@@ -1,0 +1,2 @@
+ALTER TABLE "livestock_treatments" ADD COLUMN "course_days" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
+ALTER TABLE "livestock_treatments" ADD CONSTRAINT "livestock_treatments_course_days_valid" CHECK ("livestock_treatments"."course_days" >= 1);

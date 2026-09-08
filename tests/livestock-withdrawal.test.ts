@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   blocksProcessing,
   clearsOn,
+  courseTouchesStay,
   describeWithdrawal,
   formatWithdrawal,
   givenWhileThere,
+  lastDoseOn,
   lastEnteredFor,
   lotWithdrawal,
   withdrawalStatus,
@@ -204,6 +206,40 @@ describe("wording", () => {
   it("says which sale the milk clock is about", () => {
     const status = withdrawalStatus([t()], "milk", "2026-08-02");
     expect(describeWithdrawal(status)).toContain("sold for milk");
+  });
+});
+
+describe("a course of treatment", () => {
+  it("counts the withdrawal from the LAST dose, which is the label's own rule", () => {
+    // Five days of injections from the 1st: the last is the 5th, and ten
+    // days must elapse from THAT. Five rows kept this right only if somebody
+    // typed all five.
+    expect(lastDoseOn({ treatedOn: "2026-08-01", courseDays: 5 })).toBe("2026-08-05");
+    const course = t({ courseDays: 5, meatWithdrawalDays: 10 });
+    expect(withdrawalStatus([course], "meat", "2026-08-12")).toMatchObject({
+      state: "under",
+      clearsOn: "2026-08-15",
+      daysLeft: 3,
+    });
+  });
+
+  it("a single dose is a course of one, and reads exactly as before", () => {
+    expect(lastDoseOn({ treatedOn: "2026-08-01" })).toBe("2026-08-01");
+    expect(lastDoseOn({ treatedOn: "2026-08-01", courseDays: null })).toBe("2026-08-01");
+    expect(withdrawalStatus([t({ courseDays: 1, meatWithdrawalDays: 10 })], "meat", "2026-08-05").clearsOn).toBe(
+      "2026-08-11",
+    );
+  });
+
+  it("a course that started before she went in and ran past that day still reached her", () => {
+    // Started the 1st, five days, she went in on the 3rd: she drank it.
+    expect(courseTouchesStay("2026-08-01", 5, "2026-08-03", null)).toBe(true);
+    // Ended on the 5th; she went in on the 6th: she did not.
+    expect(courseTouchesStay("2026-08-01", 5, "2026-08-06", null)).toBe(false);
+    // Started after she left: not hers.
+    expect(courseTouchesStay("2026-08-10", 3, "2026-08-01", "2026-08-08")).toBe(false);
+    // Started the day she left: hers, erring toward under.
+    expect(courseTouchesStay("2026-08-08", 3, "2026-08-01", "2026-08-08")).toBe(true);
   });
 });
 

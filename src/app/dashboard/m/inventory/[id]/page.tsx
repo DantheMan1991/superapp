@@ -287,6 +287,7 @@ export default async function InventoryItemPage({
                       locations={locationOptions}
                       consumers={consumerOptions}
                       unitSingular={unitSingular}
+                      unit={unit}
                       stockedByMass={getUnit(unit)?.dimension === "mass"}
                       currencySymbol={currencySymbol}
                       today={today}

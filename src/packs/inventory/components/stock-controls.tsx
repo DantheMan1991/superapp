@@ -54,6 +54,11 @@ import {
  * arithmetic that could drift from it.
  */
 import { splitCostAdjustment } from "../core/costing";
+import {
+  deliveryWeightLb,
+  describeWeightEntry,
+  type WeightEntryBasis,
+} from "../core/weight";
 
 const NO_LOT = "__none__";
 const CUSTOM_REASON = "__custom__";
@@ -274,6 +279,7 @@ export function MovementForm({
   locations,
   consumers,
   unitSingular,
+  unit,
   stockedByMass,
   currencySymbol,
   today,
@@ -282,6 +288,8 @@ export function MovementForm({
   unitLabel: string;
   /** "pound", not "pounds" — a price is per one of them. */
   unitSingular: string;
+  /** The stocking unit's code — `pkg`, `head` — for the weight box's read-back. */
+  unit: string;
   /**
    * True when the stocking unit measures mass. The weight box is then hidden,
    * because the quantity already IS the weight and asking twice invites two
@@ -314,6 +322,20 @@ export function MovementForm({
   // Which way an adjustment goes. Both are ordinary: a rat and a miscount are
   // the same act against the same column in opposite directions.
   const [adjustUp, setAdjustUp] = useState(false);
+  /**
+   * **THE WEIGHT BOX CAN BE READ TWO WAYS, SO THE FORM ASKS WHICH.** On
+   * 2026-09-08 five one-pound packages were recorded by typing `1` into a box
+   * that meant the whole delivery, and six packages then read "about 2 lb".
+   * The ledger still stores the total (ADR 0016); this decides how the typed
+   * figure becomes one. Per package is the default because that is how a
+   * person counting into a freezer reads a scale — a plant's ticket, which
+   * gives the total, flips it. The two `Typed` strings exist only so the OTHER
+   * reading can sit under the box while it is typed: "5 packages, 0.2 lb each."
+   * is the sentence that would have stopped the mistake.
+   */
+  const [weightBasis, setWeightBasis] = useState<WeightEntryBasis>("each");
+  const [quantityTyped, setQuantityTyped] = useState("");
+  const [weightTyped, setWeightTyped] = useState("");
   const [pending, startTransition] = useTransition();
 
   function submit(formData: FormData) {
@@ -368,7 +390,13 @@ export function MovementForm({
               costCents: money ? Math.round(Number(money) * 100) : null,
               // Blank stays blank. "Nobody weighed it" and "it weighed
               // nothing" are different facts and the ledger keeps them apart.
-              weightLb: weighed ? Number(weighed) : null,
+              // A per-package figure is multiplied out HERE, because the
+              // ledger stores the total and only the total (ADR 0016).
+              weightLb: deliveryWeightLb({
+                basis: weightBasis,
+                typed: weighed ? Number(weighed) : null,
+                quantity: Math.abs(raw),
+              }),
               occurredOn: String(formData.get("occurredOn") ?? today),
               locationAssetId: locationId === NO_LOCATION ? null : locationId,
               notes: String(formData.get("notes") ?? ""),
@@ -408,6 +436,18 @@ export function MovementForm({
       router.refresh();
     });
   }
+
+  // The reading somebody did not type, from the two they did. Pure, and the
+  // same function the tests pin — see `core/weight.ts`.
+  const weightReadBack =
+    direction === "in" && !stockedByMass
+      ? describeWeightEntry({
+          basis: weightBasis,
+          typed: weightTyped.trim() ? Number(weightTyped) : null,
+          quantity: Math.abs(Number(quantityTyped)),
+          unit,
+        })
+      : null;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -463,6 +503,7 @@ export function MovementForm({
                   step="0.0001"
                   required
                   autoFocus
+                  onChange={(e) => setQuantityTyped(e.target.value)}
                 />
               </div>
               <div className="grid gap-2">
@@ -573,20 +614,56 @@ export function MovementForm({
                  */}
                 {!stockedByMass && (
                   <div className="grid gap-2">
-                    <Label htmlFor="weightLb">What it weighed (lb)</Label>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <Label htmlFor="weightLb">What it weighed (lb)</Label>
+                      {/* Which way the box is read. Two buttons like the door
+                          above, not a checkbox: "each package" and "all
+                          together" are two answers, not one answer switched
+                          off. */}
+                      <div className="flex gap-1">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={weightBasis === "each" ? "default" : "outline"}
+                          onClick={() => setWeightBasis("each")}
+                        >
+                          Each {unitSingular}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={weightBasis === "total" ? "default" : "outline"}
+                          onClick={() => setWeightBasis("total")}
+                        >
+                          All together
+                        </Button>
+                      </div>
+                    </div>
                     <Input
                       id="weightLb"
                       name="weightLb"
                       type="number"
                       min="0"
                       step="0.0001"
-                      placeholder="47.5"
+                      placeholder={weightBasis === "each" ? "1.25" : "47.5"}
+                      onChange={(e) => setWeightTyped(e.target.value)}
                     />
+                    {/* The other reading, live. "5 packages, 0.2 lb each." is
+                        the line that would have caught the 2026-09-08 entry
+                        before Record was pressed. */}
+                    {weightReadBack && (
+                      <p className="text-xs font-medium tabular-nums">
+                        {weightReadBack}
+                      </p>
+                    )}
                     <p className="text-xs text-muted-foreground">
-                      The whole delivery again, not one {unitSingular}. This is
-                      what lets the app say roughly what a freezer holds in
-                      pounds. Leave it empty if nobody weighed it — an unweighed
-                      batch says nothing rather than nothing-at-all-pounds.
+                      {weightBasis === "each"
+                        ? `One ${unitSingular} on the scale — the app multiplies by how many arrived. `
+                        : "Everything in this entry on the scale together, the way a plant's ticket reads. "}
+                      This is what lets the app say roughly what a freezer holds
+                      in pounds. Leave it empty if nobody weighed it — an
+                      unweighed batch says nothing rather than
+                      nothing-at-all-pounds.
                     </p>
                   </div>
                 )}

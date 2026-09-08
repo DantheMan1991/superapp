@@ -15,6 +15,33 @@ to be listed by a trades profile unchanged.
 
 ## Build log
 
+### 2026-09-08 — A freezer says what it holds (`claude/what-the-freezer-holds`)
+
+**`Contains` listed other assets and nothing else.** The panel was built from
+`Kept in` — assets whose parent is this one — and had never read the inventory
+ledger, so Chest Freezer 1 on the live Hilltop Farm tenant said `Nothing is kept
+in this one.` while the Ground Beef page said `Chest Freezer 1 · 6 packages`. The
+founder found it on 2026-09-08 with the two screens open side by side.
+
+**The panel now shows both kinds of thing a freezer holds.** When the inventory
+pack is on, the page calls `stockAtLocation` — inventory's own query, written
+for the market truck and used by the till — and lists each item and batch kept
+here with what is on hand, the item's name linking to its page. The count
+beside the heading covers assets and stock lines together, and `Nothing is kept
+in this one.` appears only when both are empty. The query drops lines that net
+to zero, so stock that came and went is not listed at nothing.
+
+**Not gated on `is_storage_location`.** The ledger is the evidence: if stock was
+ever recorded into this asset it is a place things are kept, whatever the
+switch says — the rule the 2026-08-19 backfill applied. Not gated on the asset
+being open either: a disposed freezer still showing stock is telling the truth
+about a ledger nobody moved.
+
+**Where inventory is off, the panel is unchanged** — assets only, and it never
+says "no stock" about a ledger the business does not keep. `asset.md`'s
+`Contains` bullet and its message row describe the new shape. The inventory
+side of the same day's work is in [inventory.md](inventory.md).
+
 ### 2026-09-04 — Photos answer to Documents too (`claude/a-photo-is-still-the-dms-s`)
 
 The photo half of yesterday's entry was wrong and is reverted. `canEdit` on the

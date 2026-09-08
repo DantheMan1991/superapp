@@ -2,6 +2,7 @@ import "server-only";
 import { accountingAttentionSource } from "@/modules/accounting/attention/source";
 import { schedulingAttentionSource } from "@/modules/scheduling/attention/source";
 import { workAttentionSource } from "@/modules/work/attention/source";
+import { livestockAttentionSource } from "@/packs/livestock/attention/source";
 import { productionAttentionSource } from "@/packs/production/attention/source";
 import type { AttentionSource } from "./types";
 
@@ -54,6 +55,12 @@ import type { AttentionSource } from "./types";
  * processing day recorded against it — is the strongest single line this list
  * carries, since the alternative to being told is a kill day nobody wrote down.
  *
+ * LIVESTOCK IS FOURTH, from 2026-09-08 — the second pack source. It reaches
+ * everybody, like production's, and sits below it because production's
+ * overdue line is a kill date nobody wrote down while livestock's is a
+ * missed round or a clock that needs a label read: daily chores, not dated
+ * money. Above accounting for the reason production is.
+ *
  * Accounting is last because it reaches owners only and has no per-record
  * assignee at all.
  */
@@ -61,6 +68,7 @@ export const attentionSources: readonly AttentionSource[] = [
   schedulingAttentionSource,
   workAttentionSource,
   productionAttentionSource,
+  livestockAttentionSource,
   accountingAttentionSource,
 ];
 

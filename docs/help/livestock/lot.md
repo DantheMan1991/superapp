@@ -54,6 +54,8 @@ Everyone can use the first six. Only an owner sees the last three.
 
 You see `Recorded`, or `Recorded — look the withdrawal up before these go anywhere` when you left the period blank.
 
+A period left blank reaches [What needs you](/dashboard/today) and the morning email as `PEN-1's withdrawal was never looked up` until you correct the treatment with the period off the label. The day a withdrawal clears, and the day before, reach it too, as `PEN-1 clears withdrawal today` or `tomorrow`.
+
 **The withdrawal applies to the whole group however many were treated.** Nothing can tell the three that were injected from the thirty-seven that were not.
 
 To fix a wrong figure, click {button:Correct|ghost} on the row. Use {button:Remove|ghost} only for a treatment that never happened. Removing one does not put the medicine back on the shelf.

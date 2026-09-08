@@ -12,6 +12,20 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-08 — Livestock joins the digest, fourth (`claude/the-barn-reaches-what-needs-you`)
+
+The second pack source, `livestock-barn` (`src/packs/livestock/attention/source.ts`),
+registered below production and above accounting: it reaches everybody like
+production's, and its overdue line is a missed round or a clock that needs a
+label read — a daily chore, not dated money. Three items, all derived and
+all self-clearing: a lot nobody has looked at for two days or more (one line
+for the farm, naming up to four lots; yesterday is not raised, because a 7am
+digest would raise every lot every day), a withdrawal recorded `none_stated`
+until it is corrected, and a withdrawal clearing today or tomorrow. The
+arithmetic is pure in `src/packs/livestock/core/attention.ts`; the source
+reads only. No new machinery here — the seam took a fifth source without
+changing. Details in [livestock.md](livestock.md).
+
 ### 2026-09-07 — A verb beside the row (`claude/approve-from-what-needs-you`)
 
 The first one-tap action on What needs you, and the seam it needed. A bill

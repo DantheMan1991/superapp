@@ -133,6 +133,46 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-09-08 — The barn reaches What needs you (`claude/the-barn-reaches-what-needs-you`)
+
+**Livestock slice 5 of the improvement review, and the pack's first attention
+source.** Two open items had sat here for a month — *"nothing warns that a
+withdrawal is about to expire, or that one has just cleared"*, and the round's
+own argument that a day nobody looked is a fact, with no way to learn one had
+gone by except to open the round and read `3 days ago`. `notifications.md`
+has the seam for exactly this, and `production` had already shown a pack
+could use it.
+
+**`src/packs/livestock/attention/source.ts`** (`livestock-barn`, label
+`Livestock`, registered fourth — below production, above accounting) reads
+and nothing else; **`core/attention.ts`** is the arithmetic, pure and tested:
+
+- **A missed round.** One line for the farm, never one per lot: `PEN-1 has
+  not been looked at for 3 days`, `PEN-1 has never been looked at`, or `4
+  lots have not been looked at for 2 days or more` naming four. Overdue, due
+  the day the round was first missed. `ROUND_STALE_AFTER_DAYS` is two:
+  yesterday is an ordinary morning and a 7am digest that raised it would
+  raise every lot every day. Walked by pen — a member is looked at with the
+  pen she lives in — over the population fold (`summarisePen`), so a pen
+  whose head are all named is still a pen to look at.
+- **A withdrawal nobody looked up.** Overdue, no date, until the treatment
+  is corrected with a period — the one item here that does not clear by
+  waiting.
+- **A withdrawal clearing today or tomorrow.** `today` / `soon`; read off
+  `state: "clear"` with `clearsOn` today, because `withdrawalStatus` clears
+  ON the day. A clock with days to run, or one that cleared last week, is
+  not raised.
+
+Everybody gets the lines, like production's, for the same reason and at the
+same cost. Closed lots and lots with nothing standing in them are skipped.
+The digest carries the section for free; the What needs you guide names it.
+
+Tests: `roundAttention` and `withdrawalAttention` in `tests/livestock.test.ts`;
+`tests/livestock-attention.test.ts` (db) runs `collect` through RLS and pins
+that each item clears itself — the round when walked, the unknown clock when
+the label is read, the clearing line the day after. Guides `overview`,
+`daily-round`, `lot` and `workspace/what-needs-you` swept. No migration.
+
 ### 2026-09-07 — A withdrawal follows the animal into and out of a pen (`claude/a-withdrawal-follows-the-animal`)
 
 **Livestock slice 4 of the improvement review, and the safety gap the review
@@ -2203,6 +2243,12 @@ This pack is the one that forced the change; the full reasoning is in
   death from a transfer needs the kinds too
 - `src/packs/land/ops.ts` → `currentZoneForOccupants` — added for this pack, and
   it lives in `land` because `land` owns that table
+- `src/packs/livestock/core/attention.ts` — pure. **What the barn owes a
+  person**: the missed round as one line, the clock nobody looked up, the
+  clock clearing today or tomorrow. `ROUND_STALE_AFTER_DAYS` lives here
+- `src/packs/livestock/attention/source.ts` — the pack's attention source,
+  reads only; registered in `src/lib/attention-sources/registry.ts`. See
+  [notifications.md](notifications.md) for the seam's rules
 - `src/packs/livestock/core/daily.ts` — pure. The round's arithmetic: streak,
   progress, last-checked, and the losses read back out of the ledger
 - `src/packs/livestock/components/daily-round.tsx` — the one-tap button, the
@@ -2735,9 +2781,10 @@ on the dev branch, 2026-08-27** — the terminology review that produced
   uses it yet.
 - **No repeat or course support.** A five-day course of injections is five rows,
   and the clock counts from the last of them only if somebody enters all five.
-- **Nothing warns that a withdrawal is about to expire**, or that one has just
-  cleared. Both are the deviation-surfacing the design wants and neither is a
-  rule anybody is asked about yet.
+- ~~**Nothing warns that a withdrawal is about to expire**, or that one has just
+  cleared.~~ — **closed 2026-09-08**: the clearing day and the day before reach
+  What needs you and the digest through the pack's attention source, as does
+  a period nobody looked up and a round nobody walked.
 
 - ~~Nobody has driven slice 0 yet~~ — **closed 2026-08-16.** Driven on
   production: record a loss (201 → 200, mortality 4.3% → 4.8%), add a visual

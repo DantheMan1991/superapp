@@ -153,6 +153,7 @@ import {
   MoveToZoneForm,
   PlaceHeadForm,
   RemoveHeadForm,
+  RetireIdentifierButton,
   SplitHerdForm,
 } from "@/packs/livestock/components/lot-controls";
 import { LotCheckForm } from "@/packs/livestock/components/daily-round";
@@ -1454,6 +1455,9 @@ export default async function LivestockLotPage({
             </TableBody>
           </Table>
         </DataTable>
+        {checks.length >= 14 && (
+          <p className="text-xs text-muted-foreground">The last 14 days looked at.</p>
+        )}
       </div>
 
       {treatments.length > 0 && (
@@ -2066,7 +2070,8 @@ export default async function LivestockLotPage({
               <TableRow>
                 <TableHead>Kind</TableHead>
                 <TableHead>Value</TableHead>
-                <TableHead>Applied</TableHead>
+                {/* Hidden on a phone so the Take off control fits on the row. */}
+                <TableHead className="hidden md:table-cell">Applied</TableHead>
                 <TableHead>Removed</TableHead>
               </TableRow>
             </TableHeader>
@@ -2077,12 +2082,23 @@ export default async function LivestockLotPage({
                     {identifierKindLabel(i.identifierKind)}
                   </TableCell>
                   <TableCell className="font-medium">{i.value}</TableCell>
-                  <TableCell className="tabular-nums text-muted-foreground">
+                  <TableCell className="hidden tabular-nums text-muted-foreground md:table-cell">
                     {i.appliedOn ?? "—"}
                   </TableCell>
                   <TableCell className="tabular-nums text-muted-foreground">
                     {i.removedOn ?? (
-                      <Badge variant="outline">current</Badge>
+                      <span className="flex items-center gap-2">
+                        <Badge variant="outline">current</Badge>
+                        {/* A tag comes out in a fence; taking it off is a
+                            chore, like putting it on. */}
+                        {canRecord && (
+                          <RetireIdentifierButton
+                            identifierId={i.id}
+                            value={i.value}
+                            today={today}
+                          />
+                        )}
+                      </span>
                     )}
                   </TableCell>
                 </TableRow>
@@ -2135,6 +2151,12 @@ export default async function LivestockLotPage({
             </TableBody>
             </Table>
           </DataTable>
+          {fedIn.length >= 10 && (
+            <p className="text-xs text-muted-foreground">
+              The last 10 issues by name. The total above, and the Feed page,
+              carry every one.
+            </p>
+          )}
         </div>
       )}
 
@@ -2173,6 +2195,14 @@ export default async function LivestockLotPage({
             </TableBody>
             </Table>
           </DataTable>
+          {/* The cap, said out loud — a list that quietly stops is a list
+              somebody trusts to be complete. */}
+          {entries.length >= 25 && (
+            <p className="text-xs text-muted-foreground">
+              The last 25 events. The whole ledger is on this{" "}
+              {lotWord.toLowerCase()}&rsquo;s stock record in Inventory.
+            </p>
+          )}
         </div>
       )}
 

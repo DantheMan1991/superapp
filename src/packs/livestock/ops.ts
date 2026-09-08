@@ -248,6 +248,16 @@ export interface LivestockLotInput {
   /** Where they came from, in inventory's terms. */
   source?: string;
   notes?: string;
+  /**
+   * How many arrived, when somebody has counted the box. OPTIONAL, and the
+   * asymmetry with `startIndividual` is deliberate: an animal is one head by
+   * definition, while a hundred chicks is a claim somebody checks — so a lot
+   * started without a count places nothing, and `Place head` is the second
+   * step it always was. Given, the head is placed here in the same
+   * transaction, on `arrivedOn`.
+   */
+  head?: number;
+  arrivedOn?: string;
 }
 
 /**
@@ -322,6 +332,17 @@ export async function createLivestockLot(
   const breed = input.breed?.trim();
   if (breed) {
     await setBreedParts(tx, ctx, rows[0].id, [{ breed, parts: 1 }]);
+  }
+
+  // The head that arrived, when it was counted: one dialog rather than two
+  // for the ordinary case of a box of chicks that was counted at the door.
+  if (input.head && input.head > 0) {
+    await placeHead(tx, ctx, {
+      itemId,
+      inventoryLotId: inventoryLot.id,
+      head: input.head,
+      occurredOn: input.arrivedOn ?? input.bornOn ?? new Date().toISOString().slice(0, 10),
+    });
   }
 
   return { lot: rows[0], inventoryLotId: inventoryLot.id };

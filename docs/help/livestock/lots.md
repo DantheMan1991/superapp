@@ -49,10 +49,11 @@ A tag that has been taken off her still finds her. The number off a tag found in
 5. Pick `Counted as`. This is the stock line the head are counted in. The help reads `One per kind you want costed separately: beef and dairy are two, even though both are cattle.`
 6. Set `Sex` if you know it.
 7. Set `Born or hatched`. For a group this is only for head that all share a date, such as a box of chicks. Leave it blank for a group you will put named animals in, because they carry their own.
-8. For one animal, set `On the farm from`. The help reads `The day she joins the count — the same as her birth date only if she was born here.`
-9. Type a `Breed` if it is all one breed. Anything crossed is entered on the animal's own page.
-10. Add `Notes` if you want.
-11. Click {button:Start lot|primary} or {button:Add animal|primary}. You see `{{livestockLot}} started` or `Animal recorded`.
+8. For a group, type `How many arrived` if you counted them, and set `Arrived`. Leave the count blank to place them later with {button:Place head|primary} on the group's page. How many actually came is a fact somebody checks, so nothing is assumed.
+9. For one animal, set `On the farm from`. The help reads `The day she joins the count — the same as her birth date only if she was born here.`
+10. Type a `Breed` if it is all one breed. Anything crossed is entered on the animal's own page.
+11. Add `Notes` if you want.
+12. Click {button:Start lot|primary} or {button:Add animal|primary}. You see `{{livestockLot}} started`, `{{livestockLot}} started · 100 head placed`, or `Animal recorded`.
 
 ## Messages
 
@@ -64,6 +65,7 @@ A tag that has been taken off her still finds her. The number off a tag found in
 | `Showing 100 of 240 — narrow it to see the rest` | Search or filter to see the others. |
 | `Not looked up` | Somebody gave a treatment and never read the label. Treat these as not clear. |
 | `Only an owner can change animal records.` | You are signed in as staff. Ask an owner. |
+| `Say what these animals are counted as — pick a stock line, or name a new one.` | `Counted as` was left empty. |
 | `Check the details and try again.` | Something in the dialog is not filled in the way it needs to be. |
 | `Something went wrong saving that.` | Something unexpected. Try again, and tell us if it keeps happening. |
 

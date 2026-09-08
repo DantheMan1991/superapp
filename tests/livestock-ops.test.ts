@@ -280,6 +280,57 @@ d("livestock ops", () => {
     );
   });
 
+  it("places the head that arrived in the same transaction, when told how many", async () => {
+    // One dialog for the ordinary case — a box of chicks counted at the door.
+    // Blank still places nothing: how many actually arrived is a fact
+    // somebody checks, and assuming it would invent the mortality denominator.
+    // Its own stock line: the head placed here must not reach the shared
+    // item's total, which a later test reconciles placement by placement.
+    const counted = await asOwner((tx) =>
+      createLivestockLot(tx, ctx(), {
+        newItemName: "Counted at the door",
+        code: "COUNTED-AT-THE-DOOR",
+        species: "poultry",
+        head: 100,
+        arrivedOn: "2026-08-01",
+      }),
+    );
+    const later = await asOwner((tx) =>
+      createLivestockLot(tx, ctx(), {
+        itemId,
+        code: "COUNT-LATER",
+        species: "poultry",
+      }),
+    );
+    const placed = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.inventoryMovements)
+        .where(
+          and(
+            eq(schema.inventoryMovements.tenantId, tenantId),
+            eq(schema.inventoryMovements.lotId, counted.inventoryLotId),
+          ),
+        ),
+    );
+    expect(placed).toHaveLength(1);
+    expect(placed[0].movementKind).toBe("placement");
+    expect(Number(placed[0].quantity)).toBe(100);
+    expect(placed[0].occurredOn).toBe("2026-08-01");
+    const none = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.inventoryMovements)
+        .where(
+          and(
+            eq(schema.inventoryMovements.tenantId, tenantId),
+            eq(schema.inventoryMovements.lotId, later.inventoryLotId),
+          ),
+        ),
+    );
+    expect(none).toHaveLength(0);
+  });
+
   it("refuses both an item and a new name, and refuses neither", async () => {
     // Both would leave it ambiguous which stock line the head landed in.
     // Neither is the caller forgetting the field, not meaning "any".

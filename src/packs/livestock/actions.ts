@@ -96,6 +96,12 @@ function toResult(err: unknown): { error: string } {
         return { error: "Pick male, female or mixed." };
       case "INVALID_IDENTIFIER":
         return { error: "A tag kind must be lowercase letters and underscores." };
+      // Thrown since slice 0 and never mapped, so starting a lot with no
+      // stock line read "Something went wrong saving that."
+      case "ITEM_REQUIRED":
+        return {
+          error: "Say what these animals are counted as — pick a stock line, or name a new one.",
+        };
       case "LOT_INVALID":
       // Every one of these already says what is wrong in a sentence — "8 head
       // here — record the one animal on its own first" is the whole answer.
@@ -320,6 +326,10 @@ export async function createLivestockLotAction(input: unknown) {
       bornOn: optionalDate.nullable(),
       source: z.enum(["purchased", "raised", "produced"]).optional(),
       notes: z.string().max(5000).optional(),
+      // How many arrived, if they were counted — placed in the same
+      // transaction. Blank means "count them later", which is a real answer.
+      head: z.number().int().min(1).max(1_000_000).optional(),
+      arrivedOn: requiredDate.optional(),
     })
     .safeParse(input);
   if (!parsed.success) return { error: "Check the details and try again." };
@@ -336,7 +346,11 @@ export async function createLivestockLotAction(input: unknown) {
       actorClerkUserId: ctx.userId,
       targetType: "livestock_lot",
       targetId: result.lot.id,
-      meta: { species: result.lot.species, inventoryLotId: result.inventoryLotId },
+      meta: {
+        species: result.lot.species,
+        inventoryLotId: result.inventoryLotId,
+        headPlaced: parsed.data.head ?? 0,
+      },
     });
     revalidatePath(BASE, "layout");
     return { ok: true, id: result.lot.id };

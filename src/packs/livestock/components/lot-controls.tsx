@@ -30,6 +30,7 @@ import {
   moveLotToZoneAction,
   placeHeadAction,
   removeHeadAction,
+  retireIdentifierAction,
   splitLivestockLotAction,
 } from "../actions";
 import { WhereAmIButton } from "@/packs/land/components/where-am-i";
@@ -127,12 +128,22 @@ export function LivestockLotForm({
         : await createLivestockLotAction({
             ...shared,
             code: String(formData.get("code") ?? ""),
+            // Blank means "count them later" and places nothing.
+            head: Number(String(formData.get("head") ?? "")) || undefined,
+            arrivedOn: String(formData.get("arrivedOn") ?? today) || today,
           });
       if ("error" in result) {
         toast.error(result.error);
         return;
       }
-      toast.success(individual ? "Animal recorded" : `${word} started`);
+      const placed = individual ? 0 : Number(String(formData.get("head") ?? "")) || 0;
+      toast.success(
+        individual
+          ? "Animal recorded"
+          : placed > 0
+            ? `${word} started · ${placed} head placed`
+            : `${word} started`,
+      );
       setOpen(false);
       router.refresh();
     });
@@ -317,6 +328,42 @@ export function LivestockLotForm({
                 )}
               </div>
             </div>
+
+            {/* **THE HEAD, IF IT WAS COUNTED.** A lot used to be two dialogs
+                — start it, then Place head — for the ordinary case of a box
+                of chicks counted at the door. Blank still means "count them
+                later": how many actually arrived is a fact somebody checks,
+                and assuming it would invent the mortality denominator. */}
+            {!individual && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="lot-head">
+                    How many arrived
+                    <span className="ml-1 font-normal text-muted-foreground">
+                      · optional
+                    </span>
+                  </Label>
+                  <Input
+                    id="lot-head"
+                    name="head"
+                    type="number"
+                    min="1"
+                    step="1"
+                    placeholder="Count them later"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="lot-arrived">Arrived</Label>
+                  <Input
+                    id="lot-arrived"
+                    name="arrivedOn"
+                    type="date"
+                    defaultValue={today}
+                    max={today}
+                  />
+                </div>
+              </div>
+            )}
 
             {individual && (
               <div className="grid gap-2">
@@ -659,7 +706,8 @@ export function SplitHerdForm({
               </div>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="split-code">New lot code</Label>
+              {/* A NAME, not a code — the lot form's own ruling. */}
+              <Label htmlFor="split-code">Name for the new lot</Label>
               <Input
                 id="split-code"
                 name="newCode"
@@ -960,6 +1008,84 @@ export function IdentifierForm({
           <DialogFooter>
             <Button type="submit" disabled={pending || !kind}>
               {pending ? "Saving…" : "Add tag"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Take a tag off the record, on a date.
+ *
+ * **NOT A DELETE.** `retireIdentifier` sets `removed_on` and the row stays:
+ * `preferredIdentifier` still falls back to it when nothing else is current,
+ * and `lotIdsByTag` still finds her by it — the number off a tag found in a
+ * fence is the only thing anybody has. `retireIdentifierAction` had existed
+ * since slice 0 with no caller, so the Tags table rendered a `Removed`
+ * column and a `current` badge no screen could ever change.
+ */
+export function RetireIdentifierButton({
+  identifierId,
+  value,
+  today,
+}: {
+  identifierId: string;
+  value: string;
+  today: string;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+
+  function submit(formData: FormData) {
+    startTransition(async () => {
+      const result = await retireIdentifierAction({
+        id: identifierId,
+        removedOn: String(formData.get("removedOn") ?? today),
+      });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(`${value} taken off — still on the record`);
+      setOpen(false);
+      router.refresh();
+    });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm" aria-label={`Take tag ${value} off`}>
+          Take off
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-sm">
+        <form action={submit}>
+          <DialogHeader>
+            <DialogTitle>Take {value} off?</DialogTitle>
+            <DialogDescription>
+              For a tag that has come out or been replaced. It stays on the
+              record and still finds this animal in a search &mdash; it just
+              stops being the current one.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2 py-4">
+            <Label htmlFor={`retire-${identifierId}`}>Removed on</Label>
+            <Input
+              id={`retire-${identifierId}`}
+              name="removedOn"
+              type="date"
+              defaultValue={today}
+              max={today}
+              required
+            />
+          </div>
+          <DialogFooter>
+            <Button type="submit" disabled={pending}>
+              {pending ? "Saving…" : "Take off"}
             </Button>
           </DialogFooter>
         </form>

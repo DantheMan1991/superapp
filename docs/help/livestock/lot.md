@@ -24,7 +24,7 @@ The page runs in this order: the buttons, the panels, what is on the books, `In 
 - **{button:Weigh|outline}.** Records a weighing. Only when there are animals in it, loose or named.
 - **{button:Feed|outline}.** Issues feed to this one by name.
 - **{button:Move to a paddock|outline}.** Moves them, and starts the old paddock's rest clock.
-- **{button:Split|outline}.** Cuts head into a new group inside this one. Owners only.
+- **{button:Split|outline}.** Cuts head into a new group inside this one. Owners only. The dialog asks `How many`, `When` and `Name for the new lot`.
 - **{button:Record as individuals|outline}.** Names animals out of a group. Owners only.
 - **{button:Close this lot|outline}.** Finishes a group. Owners only, and only when it is empty.
 
@@ -106,11 +106,23 @@ Moving them off is what starts the old paddock's rest clock. The button is missi
 
 To put an existing animal in, or start a new one inside, use {button:Add animals|outline} in the `In this {{livestockLot|lower}}` section. {button:Take out|ghost} takes one back out, and it stays on the farm. Both are open to everyone: which pen an animal is in tonight is a record of where she is, not a decision about the herd. An animal in the list who is not clear on a clock of her own wears a {badge:7 days left|primary} badge beside her name.
 
+## How to add and take off a tag
+
+1. Click {button:Add a tag|outline} in the `Tags` section. Pick a `Kind`: `Name`, `Visual tag`, `Official tag`, `EID / RFID` or `Tattoo`.
+2. Type the `Value` and set `Applied`. Click {button:Add tag|primary}. You see `Tag added`.
+3. When a tag comes out or is replaced, click {button:Take off|ghost} beside its {badge:current|outline} badge. You are asked `Take 47 off?` Set `Removed on` and click {button:Take off|primary}. You see `47 taken off — still on the record`.
+
+A tag taken off stays in the list with its removed date, and searching for its number still finds this animal. The `Applied` column is hidden on a phone to make room for the button.
+
+## How to add a photo
+
+Click {button:Add a photo|outline|image-plus} in the `Photos` section and pick one or more files. On a phone, {button:Take photo|outline|camera} sits beside it and opens the camera instead. You see `Photo added`. The first one becomes the picture of this {{livestockLot|lower}}; rest on another photo and click its star to make that one the picture shown on the list. Your accountant cannot add or remove photos.
+
 ## How to record breeding and births
 
 - {button:Set breeding|outline} records what an animal is made of, in parts. `Two parts Angus beside one Hereford and one Simmental is ½, ¼ and ¼`.
 - {button:Set parents|outline} records the dam and the sire. Either one alone is worth recording, because a parent nobody knows is half the animal.
-- {button:Record a birth|outline} starts a record with both parents on it, places the head, and puts it in the same group as its mother.
+- {button:Record a birth|outline} starts a record with both parents on it, places the head, and puts it in the same group as its mother. It asks for the `Name`, `How many`, `Born`, `Sex` and `Counted as`.
 
 All three are owners only, and the last two are for named animals.
 
@@ -143,11 +155,13 @@ She stops being stock and becomes something the business owns. What she cost mov
 | `Every animal in this lot is named. A loss is recorded on the animal, under it` | The daily check on a group with nothing loose has no `Head leaving` box. Open the animal's page, or her line on the round, to record her loss. |
 | `that lot is already inside another one, and lots only nest one deep` | Groups nest one level, not two. |
 | `Only an owner can change animal records.` | You are signed in as staff. Ask an owner. |
+| `47 taken off — still on the record` | The tag is no longer current. It still finds the animal in a search. |
+| `Photo added` | The picture is on the record. |
 
 ## Not on this page
 
 - Nothing tracks individual animals inside a group unless you name them.
-- `Head events`, `Fed in by name` and `Daily checks` stop at 25, 10 and 14 rows without saying so.
+- `Head events`, `Fed in by name` and `Daily checks` show the last 25, 10 and 14 rows, and a line under the list says so when they are full.
 - A treatment inherited from a parent group cannot be corrected here.
 - Nothing here gives you a dose or a withdrawal period. Read the label.
 - If you need any of this, ask us.

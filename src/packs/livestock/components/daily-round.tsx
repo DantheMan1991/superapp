@@ -76,19 +76,26 @@ export function MarkRoundNormalButton({
 }
 
 /**
- * The same confirmation for a single lot, without opening anything.
+ * The same confirmation for a single pen, without opening anything.
  *
  * **OUTLINED AND VERB-LABELLED, and both were found by driving it.** It was a
  * ghost button reading "Normal", which sat in the same cell that shows a
  * "Normal" BADGE once the lot has been checked — so the control you press and
  * the state you reached looked nearly identical, and the row gave no clue which
  * one you were looking at. "Mark normal" is an instruction; "Normal" is a fact.
+ *
+ * **ONE TAP FOR THE PEN AND EVERYTHING IN IT.** A pen holding five named cows
+ * is looked at once, so the ids are the pen's and its members', and the
+ * server's ON CONFLICT DO NOTHING is what keeps a cow somebody already flagged
+ * this morning flagged. Each animal still gets a row of her own, so "when was
+ * Bluebell last looked at" answers from her own history.
  */
 export function QuickNormalButton({
-  livestockLotId,
+  livestockLotIds,
   today,
 }: {
-  livestockLotId: string;
+  /** The pen first, then whatever lives in it. */
+  livestockLotIds: string[];
   today: string;
 }) {
   const router = useRouter();
@@ -96,15 +103,18 @@ export function QuickNormalButton({
 
   function submit() {
     startTransition(async () => {
-      const result = await recordDailyCheckAction({
-        livestockLotId,
+      const result = await markRoundNormalAction({
+        livestockLotIds,
         loggedOn: today,
-        status: "normal",
       });
       if ("error" in result) {
         toast.error(result.error);
         return;
       }
+      // Said, at last: this was the one write on the round that toasted
+      // nothing, and on a slow connection the row looked stuck.
+      const n = result.recorded ?? 0;
+      toast.success(n <= 1 ? "Marked normal" : `${n} marked normal`);
       router.refresh();
     });
   }
@@ -133,10 +143,16 @@ export function LotCheckForm({
   balance,
   hasEntry,
   idPrefix = "",
+  namedInside = 0,
 }: {
   livestockLotId: string;
   lotCode: string;
   today: string;
+  /**
+   * Head LOOSE in this record — the pen's own, not its population. A loss
+   * recorded here leaves the pen's own ledger, so it can only be head that is
+   * actually loose in it; a named cow that died is recorded on her own page.
+   */
   balance: number;
   hasEntry: boolean;
   /**
@@ -146,12 +162,19 @@ export function LotCheckForm({
    * every label at the first copy. Each layout passes its own prefix.
    */
   idPrefix?: string;
+  /**
+   * How many named animals live in this pen. With nothing loose and animals
+   * inside, the loss fields are replaced by the sentence that says where a
+   * loss goes — otherwise the dialog would offer to take the pen negative.
+   */
+  namedInside?: number;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [reason, setReason] = useState<string>(HAND_REMOVAL_REASONS[0]);
   const fieldId = `${idPrefix}${livestockLotId}`;
+  const allNamed = balance <= 0 && namedInside > 0;
 
   function submit(formData: FormData) {
     const lost = Number(formData.get("lost") ?? NO_LOSS);
@@ -203,6 +226,12 @@ export function LotCheckForm({
           </DialogHeader>
 
           <div className="grid gap-4 py-4">
+            {allNamed ? (
+              <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+                Every animal in this lot is named. A loss is recorded on the
+                animal, under it — this records what you saw of the lot.
+              </p>
+            ) : (
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 {/* "Head leaving", not "Head lost": the picker beside it
@@ -236,6 +265,7 @@ export function LotCheckForm({
                 </Select>
               </div>
             </div>
+            )}
 
             <div className="grid gap-2">
               <Label htmlFor={`notes-${fieldId}`}>Notes</Label>

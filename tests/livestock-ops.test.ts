@@ -3576,6 +3576,11 @@ d("livestock ops", () => {
     expect(summaries[0].code).toBe("Bluebell");
     expect(summaries[0].head).toBe(1);
     expect(summaries[0].isIndividual).toBe(true);
+    // What the pen's own fold needs to count her ONCE: her whole summary,
+    // the head that arrived by split, and which pen it was split out of.
+    expect(summaries[0].summary.balance).toBe(1);
+    expect(summaries[0].splitInHead).toBe(1);
+    expect(summaries[0].parentInventoryLotId).toBe(lot.inventoryLotId);
   });
 
   it("SHE KEEPS EATING — a split carries feeder membership across", async () => {

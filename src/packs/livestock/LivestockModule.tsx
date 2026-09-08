@@ -37,7 +37,15 @@ import {
   describeWithdrawal,
   formatWithdrawal,
 } from "./core/withdrawal";
-import { ageInDays, formatAge, formatRate, mortalityRate, summariseHead } from "./core/herd";
+import {
+  ageInDays,
+  formatAge,
+  formatRate,
+  mortalityRate,
+  splitInHead,
+  summariseHead,
+  summarisePen,
+} from "./core/herd";
 import { labelFor } from "@/lib/packs/resolve";
 import { breedLabel, breedsFrom, speciesFrom } from "./vocabulary";
 import { LivestockLotForm } from "./components/lot-controls";
@@ -330,16 +338,28 @@ export async function LivestockModule({
      * yet" are different facts.
      */
     const held = membersOf.get(lot.id) ?? [];
-    const inside = held.reduce((sum, memberId) => {
-      const mLot = allById.get(memberId);
-      if (!mLot) return sum;
-      const mv = movements.get(mLot.inventoryLotId) ?? [];
-      return sum + summariseHead(mv).balance;
-    }, 0);
+    // **THE SAME FOLD THE LOT PAGE MAKES** — `summarisePen`, so the list and
+    // the page cannot disagree about a pen, and `Lost` is over the same
+    // population as `Head` at last.
+    const population = summarisePen(
+      summary,
+      held.flatMap((memberId) => {
+        const mLot = allById.get(memberId);
+        if (!mLot) return [];
+        const mv = movements.get(mLot.inventoryLotId) ?? [];
+        return [
+          {
+            summary: summariseHead(mv),
+            splitInHead: splitInHead(mv),
+            splitFromHere:
+              byId.get(mLot.inventoryLotId)?.parentLotId === lot.inventoryLotId,
+          },
+        ];
+      }),
+    );
+    const inside = population.balance - summary.balance;
     const total =
-      lotMovements.length === 0 && held.length === 0
-        ? null
-        : summary.balance + inside;
+      lotMovements.length === 0 && held.length === 0 ? null : population.balance;
     // The lot this one lives IN, named only for a member a search reached.
     const parentId = lotParents.get(lot.id);
     const parent = parentId ? allById.get(parentId) : undefined;
@@ -362,7 +382,7 @@ export async function LivestockModule({
       // land_occupancy directly.
       zone: zones.get(lot.inventoryLotId) ?? null,
       age: formatAge(ageInDays(lot.bornOn, today)),
-      rate: formatRate(mortalityRate(summary)),
+      rate: formatRate(mortalityRate(population)),
       // Nothing at all when nothing has been given — a column of "Clear" on a
       // farm that has never treated anything is noise, and noise is what
       // makes a real one invisible.

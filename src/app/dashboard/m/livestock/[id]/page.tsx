@@ -123,6 +123,7 @@ import {
   mortalityRate,
   preferredIdentifier,
   summariseHead,
+  summarisePen,
 } from "@/packs/livestock/core/herd";
 import {
   SEX_LABELS,
@@ -608,7 +609,28 @@ export default async function LivestockLotPage({
   const shrinkCount = feed?.weight.shrinkAffectedCount ?? 0;
   const weighedOnLabel = latest ? `weighed ${latest.weighedOn}` : "";
   const summary = summariseHead(movements);
-  const rate = mortalityRate(summary);
+  /**
+   * **A PEN IS COUNTED ONCE** (2026-09-07). `summary` is what is loose in this
+   * record's own ledger; `population` folds in every named animal living in
+   * it, with a split between the two treated as internal — see
+   * `summarisePen`. The hub had folded the members in since 8b and this page
+   * had not: `Cows` read `Nothing placed yet` while holding five cows, and the
+   * count gated Treat, Weigh and the daily check off its own page.
+   *
+   * Which one a control reads is the point. A LOSS, a SPLIT and a name-out
+   * take head that is loose, so they read `summary`; a treatment, a weighing,
+   * a check and the headline are about the animals standing in the pen, so
+   * they read `population`.
+   */
+  const population = summarisePen(
+    summary,
+    members.map((m) => ({
+      summary: m.summary,
+      splitInHead: m.splitInHead,
+      splitFromHere: m.parentInventoryLotId === inventoryLot.id,
+    })),
+  );
+  const rate = mortalityRate(population);
   const preferred = preferredIdentifier(identifiers);
   /**
    * What this animal is made of, and who it came from. Both are folds over the
@@ -703,16 +725,22 @@ export default async function LivestockLotPage({
                 today={today}
               />
             )}
-            <RemoveHeadForm
-              itemId={inventoryLot.itemId}
-              inventoryLotId={inventoryLot.id}
-              today={today}
-            />
-            {summary.balance > 0 && (
+            {/* Only while there is loose head to lose. On an emptied or
+                closed lot the dialog was offered and then refused; on a pen
+                whose animals are all named it would have taken the pen's own
+                ledger negative — a cow that died is recorded on her page. */}
+            {summary.balance > 0 && !isClosed && (
+              <RemoveHeadForm
+                itemId={inventoryLot.itemId}
+                inventoryLotId={inventoryLot.id}
+                today={today}
+              />
+            )}
+            {population.balance > 0 && (
               <RecordTreatmentForm
                 livestockLotId={lot.id}
                 lotCode={inventoryLot.code}
-                head={summary.balance}
+                head={population.balance}
                 today={today}
                 medicines={medicines.map((m) => ({
                   id: m.id,
@@ -722,11 +750,11 @@ export default async function LivestockLotPage({
                 products={products}
               />
             )}
-            {summary.balance > 0 && (
+            {population.balance > 0 && (
               <RecordWeightForm
                 livestockLotId={lot.id}
                 lotCode={inventoryLot.code}
-                head={summary.balance}
+                head={population.balance}
                 today={today}
                 // No divisor for this species means a tape produces no weight,
                 // so the method is not offered rather than offered and useless.
@@ -833,12 +861,19 @@ export default async function LivestockLotPage({
           </h2>
           <div className="mt-1">
             <p className="text-2xl font-medium tabular-nums">
-              {movements.length === 0 ? "—" : summary.balance}
+              {movements.length === 0 && members.length === 0
+                ? "—"
+                : population.balance}
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              {movements.length === 0
+              {/* The population, and how it is made up. A pen of named cows
+                  reads `5 · 0 loose, 5 named inside`, not `Nothing placed
+                  yet` — the same number the hub shows for it. */}
+              {movements.length === 0 && members.length === 0
                 ? "Nothing placed yet."
-                : `${summary.intake} in, ${summary.died + summary.removed} out.`}
+                : members.length > 0
+                  ? `${summary.balance} loose, ${members.length} named inside · ${population.intake} in, ${population.died + population.removed} out.`
+                  : `${summary.intake} in, ${summary.died + summary.removed} out.`}
             </p>
           </div>
         </Panel>
@@ -852,7 +887,7 @@ export default async function LivestockLotPage({
             <p className="mt-1 text-sm text-muted-foreground">
               {/* Visible while it can still be acted on — at 1,000 birds the
                   gap between 5% and 12% is most of the margin. */}
-              {summary.died} died of {summary.intake} placed.
+              {population.died} died of {population.intake} placed.
             </p>
           </div>
         </Panel>
@@ -1209,8 +1244,8 @@ export default async function LivestockLotPage({
           </DataTable>
           {members.length > 0 && (
             <p className="text-xs text-muted-foreground">
-              The head shown at the top of this page is what is loose in the{" "}
-              {lotWord.toLowerCase()} itself. These are counted on top of it.
+              The head at the top of this page counts these in: what is loose in
+              the {lotWord.toLowerCase()} itself, plus every animal here.
             </p>
           )}
         </div>
@@ -1463,12 +1498,13 @@ export default async function LivestockLotPage({
               · last {formatLastChecked(checks[0]?.loggedOn ?? null, today).toLowerCase()}
             </span>
           </h2>
-          {summary.balance > 0 && (
+          {population.balance > 0 && (
             <LotCheckForm
               livestockLotId={lot.id}
               lotCode={inventoryLot.code}
               today={today}
               balance={summary.balance}
+              namedInside={members.length}
               hasEntry={checks[0]?.loggedOn === today}
             />
           )}
@@ -1604,7 +1640,7 @@ export default async function LivestockLotPage({
                           <RecordTreatmentForm
                             livestockLotId={lot.id}
                             lotCode={inventoryLot.code}
-                            head={summary.balance}
+                            head={population.balance}
                             today={today}
                             medicines={[]}
                             products={products}
@@ -1680,7 +1716,7 @@ export default async function LivestockLotPage({
                       {/* The sample size, in words, because the design asks for
                           it to be recorded so somebody knows how far to trust
                           the number — which only pays off if it is shown. */}
-                      {describeSample(w.method, row.sampleSize, summary.balance)}
+                      {describeSample(w.method, row.sampleSize, population.balance)}
                       {w.shrinkAffected && (
                         <Badge variant="outline" className="ml-2">
                           near a haul
@@ -1691,10 +1727,10 @@ export default async function LivestockLotPage({
                       {formatLb(w.averageLb)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">
-                      {w.averageLb === null || summary.balance <= 0
+                      {w.averageLb === null || population.balance <= 0
                         ? "—"
                         : formatLb(
-                            Math.round(w.averageLb * summary.balance * 10) / 10,
+                            Math.round(w.averageLb * population.balance * 10) / 10,
                           )}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
@@ -1708,7 +1744,7 @@ export default async function LivestockLotPage({
                         <RecordWeightForm
                           livestockLotId={lot.id}
                           lotCode={inventoryLot.code}
-                          head={summary.balance}
+                          head={population.balance}
                           today={today}
                           tapeAvailable={tapeDivisor !== null}
                           existing={{

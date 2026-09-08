@@ -104,6 +104,63 @@ export function summariseHead(movements: HeadMovement[]): HeadSummary {
   };
 }
 
+/** One named animal, or smaller lot, living INSIDE a pen — as the pen's fold needs it. */
+export interface PenMember {
+  summary: HeadSummary;
+  /** Head that arrived in this member by `split_in`. */
+  splitInHead: number;
+  /** True when this member was split OUT OF the pen it now lives in. */
+  splitFromHere: boolean;
+}
+
+/** Head that arrived by a split. Positive `split_in` only. */
+export function splitInHead(movements: HeadMovement[]): number {
+  let total = 0;
+  for (const m of movements) {
+    if (m.movementKind === "split_in" && m.quantity > 0) total += m.quantity;
+  }
+  return round(total);
+}
+
+/**
+ * **A PEN IS COUNTED ONCE.** A pen's population is what is loose in it plus
+ * every named animal living in it, and its mortality is over that whole
+ * population. Until 2026-09-07 the hub folded the members in and the pen's
+ * own page did not: `Cows` read `5 (5 in)` on the list and `Nothing placed
+ * yet` on its page, hid Treat, Weigh and the daily check, and was missing
+ * from the round — two screens folding different things about one pen.
+ *
+ * **A SPLIT BETWEEN THE PEN AND A MEMBER IS INTERNAL.** Naming four cows out
+ * of a pen of a hundred writes `split_out` −4 on the pen and `split_in` +1
+ * on each cow, and `summariseHead` counts a transfer IN as intake so that a
+ * lot split off another has a mortality denominator of its own. Summed
+ * naively, the pen's population would have taken in 104 head. A member split
+ * out of THIS pen therefore has her split-in taken back out of the intake; a
+ * member split out of some OTHER pen and put in here later genuinely
+ * arrived, and keeps it.
+ */
+export function summarisePen(own: HeadSummary, members: PenMember[]): HeadSummary {
+  let intake = own.intake;
+  let died = own.died;
+  let removed = own.removed;
+  let transferred = own.transferred;
+  let balance = own.balance;
+  for (const m of members) {
+    intake += m.summary.intake - (m.splitFromHere ? m.splitInHead : 0);
+    died += m.summary.died;
+    removed += m.summary.removed;
+    transferred += m.summary.transferred;
+    balance += m.summary.balance;
+  }
+  return {
+    intake: round(intake),
+    died: round(died),
+    removed: round(removed),
+    transferred: round(transferred),
+    balance: round(balance),
+  };
+}
+
 /**
  * Deaths over everything that arrived, as a fraction.
  *

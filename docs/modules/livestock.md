@@ -133,6 +133,46 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-09-07 — The round on a phone (`claude/the-round-on-a-phone`)
+
+**The founder's improvement review reached this pack** (the same four
+questions accounting got: fewer clicks, easier UI, phone, gaps). Every screen
+was measured at 375px in the Browser pane on Hilltop Farm. The round — the
+one screen built to be used in a barn — rendered a 733px table, and `Mark
+normal` and `Something's up` sat at x=516–736 on every row: off the right
+edge of the phone, reachable only by dragging each row sideways. The three
+stat cards stacked one per row and pushed the first lot to y≈1080.
+
+**A card per lot below `md`, the table above it**, both rendered from the same
+`round` array with CSS choosing — the review queue's pattern, because a
+`matchMedia` hook has to guess a width on the server and would flash the table
+on exactly the device this exists for. The card carries the name, species and
+paddock, the withdrawal badge when it blocks, the head, what left today, when
+it was last checked, and the same two buttons along its bottom. Stat cards go
+two-up from the narrowest phone, the third taking the whole row.
+
+**`LotCheckForm` takes an `idPrefix`**, because rendering every row twice put
+the same lot's dialog in the DOM twice and a duplicate field id points every
+label at the first copy. Each layout passes its own.
+
+**`Sold live` is finally read back.** The dialog has offered it beside `Died`
+and `Culled` since slice 1a, and `LOSS_KINDS` in `core/daily.ts` omitted it —
+correctly, a sale is not a loss — so the head left the count and then showed
+nowhere. `soldOn` is the other half of `lossesOn`; the table says `2 sold
+live` under the loss column, the card says `3 lost, 2 sold live today`
+(`describeLeft`), the `Lost today` tile names it in its footnote and the
+`Noted today` list no longer reads *"Flagged with no note"* about a sale. The
+box in the dialog reads **`Head leaving`** — the lot page's dialog has been
+headed that since slice 0 — because `Head lost` beside a `Sold live` option
+was the label the guide had to apologise for. Tests in `tests/livestock.test.ts`.
+
+Driven at 375px and desktop on Hilltop Farm (dev). `docs/help/livestock/daily-round.md`
+rewritten for both shapes. Findings for the rest of the pack, and the slice
+list they became, are in the session's memory rather than here: the next
+slices are the hub on a phone with search by tag, a pen counted once (the
+head fold below), a withdrawal that follows membership, and a livestock
+attention source.
+
 ### 2026-09-04 — Photos answer to Documents too (`claude/a-photo-is-still-the-dms-s`)
 
 The photo half of yesterday's entry was wrong and is reverted. `canEdit` on the
@@ -2384,7 +2424,9 @@ This pack is the one that forced the change; the full reasoning is in
   fixing the fold is what closes this.
 - **The Feed screen cannot record feed without a shared feeder**, and is entirely
   inert for staff on a farm that has none.
-- **`Sold live` never appears under `Lost today`**, though it moves the head count.
+- ~~`Sold live` never appears under `Lost today`~~ — **closed 2026-09-07**: read
+  back by `soldOn` and named beneath the loss, on the tile and on the card,
+  never counted as one.
 - **`moveLotsToZoneAction` and `retireIdentifierAction` are dead**; the second
   leaves a `Removed` column and a `current` badge no screen can produce.
 - **`ITEM_REQUIRED` has no case in the error mapper.**

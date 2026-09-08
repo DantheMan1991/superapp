@@ -151,12 +151,47 @@ export interface DatedLossLike {
 
 const LOSS_KINDS = new Set(["death", "died", "mortality", "cull"]);
 
-export function lossesOn(movements: DatedLossLike[], date: string): number {
+/**
+ * **A LIVE SALE IS NOT A LOSS, AND IT IS NOT NOTHING EITHER.** The round's
+ * dialog offers `Sold live` beside `Died` and `Culled`, and for a year the
+ * head it recorded left the count and then vanished from the screen: not in
+ * `Lost today`, because it is not a loss, and nowhere else, because nothing
+ * read it back. `soldOn` is the other half, so the day's row can say "2 sold
+ * live" under a dash instead of a dash alone.
+ */
+const SALE_KINDS = new Set(["sold_live"]);
+
+function headOn(
+  movements: DatedLossLike[],
+  date: string,
+  kinds: Set<string>,
+): number {
   let total = 0;
   for (const m of movements) {
-    if (m.occurredOn === date && LOSS_KINDS.has(m.movementKind)) {
+    if (m.occurredOn === date && kinds.has(m.movementKind)) {
       total += Math.abs(m.quantity);
     }
   }
   return Math.round(total * 10_000) / 10_000;
+}
+
+export function lossesOn(movements: DatedLossLike[], date: string): number {
+  return headOn(movements, date, LOSS_KINDS);
+}
+
+/** Head sold live on one day — off the count, and deliberately not a loss. */
+export function soldOn(movements: DatedLossLike[], date: string): number {
+  return headOn(movements, date, SALE_KINDS);
+}
+
+/**
+ * "3 lost", "2 sold live", "3 lost, 2 sold live" — what left a lot today, in
+ * the words the round uses. Empty when nothing did, so a caller can fall back
+ * to its own sentence rather than printing "0 lost".
+ */
+export function describeLeft(lost: number, sold: number): string {
+  const parts: string[] = [];
+  if (lost > 0) parts.push(`${lost} lost`);
+  if (sold > 0) parts.push(`${sold} sold live`);
+  return parts.join(", ");
 }

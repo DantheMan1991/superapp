@@ -55,6 +55,23 @@ arithmetic, pure and tested: `searchTerm`, `ilikePattern` (escapes `%`, `_`,
 follow: the term and the scope ride on every href a list builds, the page on
 none of them, and one predicate feeds both the count and the rows.
 
+### 2026-09-07 — A dialog taller than the phone scrolls (`claude/the-hub-on-a-phone`)
+
+`DialogContent` carries `max-h-[calc(100dvh-2rem)] overflow-y-auto`. A
+fixed, centred dialog with no maximum height overflows BOTH edges of a short
+viewport, and nothing can reach the overflow: livestock's `Add animals` form
+measured 885px tall in an 812px phone viewport, top at −36, bottom at 848,
+title clipped and Start button unreachable. One dialog in the product (the
+treatment form) had set its own `max-h-[85vh] overflow-y-auto`; the rule is
+now the kit's, so no form has to remember it. `dvh` rather than `vh` because
+a phone browser's chrome comes and goes and the dynamic unit follows it; the
+`2rem` matches the width rule beside it. Popovers and selects are portalled,
+so a scrolling dialog clips none of them.
+
+Second use of `LinkRow`: the livestock hub's table. Its phone shape is a
+card that is itself a `Link`, so anything inside it that would have been a
+link is plain text — a link inside a link is not a thing.
+
 ### 2026-09-07 — A grid that stacks, with one markup (`claude/forms-on-a-phone`)
 
 The bill and invoice line editors are the second answer to "a table above

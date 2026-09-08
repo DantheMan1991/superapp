@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { numericTerm } from "../src/lib/list-query";
 import {
   MAX_SEARCH_CHARS,
   ilikePattern,
@@ -48,6 +49,21 @@ describe("matchesAny", () => {
 
   it("does not let the digits of a mostly-text term reach into a phone number", () => {
     expect(matchesAny("acme 010", fields)).toBe(false);
+  });
+});
+
+describe("numericTerm", () => {
+  it("gives the digits of a term that is mostly digits", () => {
+    expect(numericTerm("840 1234")).toBe("8401234");
+    expect(numericTerm("(555) 010-0000")).toBe("5550100000");
+  });
+
+  it("is null for a short number or a mostly-text term", () => {
+    // Two digits would match half the farm; `acme 12` is a name with a
+    // number in it, not a number.
+    expect(numericTerm("47")).toBeNull();
+    expect(numericTerm("acme 12")).toBeNull();
+    expect(numericTerm("blue")).toBeNull();
   });
 });
 

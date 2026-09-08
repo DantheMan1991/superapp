@@ -39,13 +39,26 @@ export function ilikePattern(term: string): string {
 export function matchesAny(term: string, fields: Array<string | null | undefined>): boolean {
   if (!term) return true;
   const needle = term.toLowerCase();
-  const digits = term.replace(/\D/g, "");
-  const numeric = digits.length >= 3 && digits.length * 2 >= term.length;
+  const digits = numericTerm(term);
   return fields.some((f) => {
     if (!f) return false;
     if (f.toLowerCase().includes(needle)) return true;
-    return numeric && f.replace(/\D/g, "").includes(digits);
+    return digits !== null && f.replace(/\D/g, "").includes(digits);
   });
+}
+
+/**
+ * The digits of a term that is MOSTLY digits, else null.
+ *
+ * `555 0100` is a phone number typed by hand and `840 1234` is an ear tag;
+ * `acme 12` is neither, and its `12` must not pull in every number with a 12
+ * in it. One rule, shared by `matchesAny` and by any SQL search that wants
+ * the same answer — livestock's tag search compares digits to digits in
+ * Postgres with exactly this test deciding whether to.
+ */
+export function numericTerm(term: string): string | null {
+  const digits = term.replace(/\D/g, "");
+  return digits.length >= 3 && digits.length * 2 >= term.length ? digits : null;
 }
 
 /** The page number a URL asked for: a positive whole number, or 1. */

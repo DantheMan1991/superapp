@@ -1,6 +1,7 @@
 import "server-only";
-import { and, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, eq, gte, ilike, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
+import { ilikePattern, numericTerm, searchTerm } from "@/lib/list-query";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
   InventoryMovement,
@@ -1908,6 +1909,47 @@ export async function identifiersByLot(
     else out.set(row.livestockLotId, [row]);
   }
   return out;
+}
+
+/**
+ * Every lot wearing a tag that matches what somebody typed.
+ *
+ * **FINDING AN ANIMAL BY HER TAG IS THE READ THE VALUE INDEX EXISTS FOR**, and
+ * until 2026-09-07 nothing performed it: the hub's search box matched the code
+ * and the species, so a person in a chute reading `840 9917` off an ear had
+ * no way to ask the app who that was. Case-insensitive and partial, with the
+ * wildcards escaped. When the term is mostly digits it is also compared
+ * digits-to-digits — `numericTerm` is the same rule `matchesAny` applies in
+ * memory — because the punctuation on a tag is the printer's, not the reader's.
+ *
+ * **Retired tags count.** The number somebody reads off a tag found in a fence
+ * is still the only thing they have to go on, and `preferredIdentifier` already
+ * falls back to a removed tag rather than nothing for the same reason.
+ */
+export async function lotIdsByTag(
+  tx: Tx,
+  tenantId: string,
+  term: string,
+): Promise<Set<string>> {
+  const trimmed = searchTerm(term);
+  if (!trimmed) return new Set();
+  const byText = ilike(schema.livestockIdentifiers.value, ilikePattern(trimmed));
+  const digits = numericTerm(trimmed);
+  const rows = await tx
+    .select({ livestockLotId: schema.livestockIdentifiers.livestockLotId })
+    .from(schema.livestockIdentifiers)
+    .where(
+      and(
+        eq(schema.livestockIdentifiers.tenantId, tenantId),
+        digits === null
+          ? byText
+          : or(
+              byText,
+              sql`regexp_replace(${schema.livestockIdentifiers.value}, '[^0-9]', '', 'g') like ${`%${digits}%`}`,
+            ),
+      ),
+    );
+  return new Set(rows.map((row) => row.livestockLotId));
 }
 
 export async function addIdentifier(

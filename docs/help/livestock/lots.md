@@ -4,32 +4,45 @@
 > **Route:** /dashboard/m/livestock
 > **Order:** 10
 
-Open **Livestock** in the sidebar. The heading reads `A {{livestockLot|lower}} is a group of animals. An animal you name has a page of its own.` To start one, click {button:Add animals|primary}.
+Open **Livestock** in the sidebar. The heading reads `A {{livestockLot|lower}} is a group of animals. An animal you name has a page of its own.` To start one, click {button:Add animals|primary}. To open one, click anywhere on its row, or on its card on a phone.
 
 ## What you see
 
 - **{button:Add animals|primary}.** Starts a {{livestockLot|lower}} or adds one named animal. Owners only.
 - **The four tabs.** `Overview` is this page. The others are the daily round, feed and ask.
-- **The search box.** Finds by name or by species. Type and press Enter, or click {button:Find|outline}.
+- **The search box.** Finds by name, by species, or by any tag an animal wears or has worn. Type and press Enter, or click {button:Find|outline}. {button:Clear|ghost} appears beside it while a search is on.
+- **The species pills.** `All`, then one pill per species on the farm, such as `Cattle`, `Poultry` and `Swine`. Click one to see only that species. They only appear when the farm has more than one species.
 - **{button:Show closed|outline}.** Brings finished groups back into the list. It then reads {button:Hiding nothing|primary}.
-- **The table.** `{{livestockLot}}`, `Species`, `Where`, `Age`, `Lost`, `Withdrawal` and `Head`.
+- **The list.** On a wide screen, a table with the columns `{{livestockLot}}`, `Species`, `Where`, `Age`, `Lost`, `Withdrawal` and `Head`. On a phone, one card per group or animal carrying the same facts, so nothing sits off the edge of the screen.
+
+A search, a species pill and {button:Show closed|outline} all work together. Picking a species keeps your search, and searching keeps the species.
 
 Only the first hundred rows are shown. When there are more you see `Showing 100 of 240 — narrow it to see the rest`.
 
-## The columns
+## The columns, and the card
 
 - **`{{livestockLot}}`.** A photo if there is one, the name, then badges. {badge:animal|outline} means one named animal. {badge:split|outline} means it was cut off another. {badge:breeding stock|outline} means it is on the books as a capital asset. Underneath, the breed you entered, such as `½ Angus · ¼ Hereford · ¼ unknown`. Breeding worked out from parents rather than entered does not show here.
-- **`Where`.** The paddock, and the pen or barn after it. A dash means they are on no paddock.
-- **`Age`.** Reads in the largest sensible unit: `9 days`, `6 weeks`, `4 months`, `2 years`. `not yet` means the birth date is in the future.
-- **`Lost`.** The share of everything placed that has died, to one decimal. A dash means nothing has arrived yet.
+- **`Where`.** The paddock, and the pen or barn after it. A dash means they are on no paddock. On a phone it reads `No paddock` instead.
+- **`Age`.** Reads in the largest sensible unit: `9 days`, `6 weeks`, `4 months`, `2 years`. `not yet` means the birth date is in the future. A card leaves it out when the birth date is not recorded.
+- **`Lost`.** The share of everything placed that has died, to one decimal. A dash means nothing has arrived yet. A card reads `4.8% lost`, and leaves it out when nothing has arrived.
 - **`Withdrawal`.** A dash when nothing has been given. Otherwise `Clear`, `Not looked up`, or `7 days left`. **`Not looked up` counts as not clear.** Rest on the badge for the full sentence.
-- **`Head`.** How many there are. `100 (4 in)` means a hundred loose in the group plus four named animals counted on top.
+- **`Head`.** How many there are. `100 (4 in)` means a hundred loose in the group plus four named animals counted on top. A card reads `100 head` with `4 in` beneath it, or `nothing placed` before anything has arrived.
 
 **One thing to know about `Head` and `Lost`.** `Head` counts the named animals inside; `Lost` does not. So in a row with named members the two are over different populations. We are fixing that.
 
+## How to find an animal
+
+1. Type part of her name, her species, or a number off her tag into the search box. `840 9917` finds the tag `USA-840-9917`, and so does `8409917`.
+2. Press Enter, or click {button:Find|outline}.
+3. Click her row, or her card on a phone.
+
+A search reaches inside groups. A named animal living in a group is not listed on this page on her own, but searching for her finds her, with `in Cows` under her name to say where she lives. Click the group's name to open it instead.
+
+A tag that has been taken off her still finds her. The number off a tag found in a fence is the only thing you have to go on, so it keeps working.
+
 ## How to start a group or add an animal
 
-1. Click {button:Add animals|primary}.
+1. Click {button:Add animals|primary}. On a phone the dialog scrolls, so the button at the bottom is always reachable.
 2. Choose `One animal` or `A {{livestockLot|lower}}`. An animal gets a page of her own with her weights, treatments, photos and calves on it.
 3. Type a `Name`. For an animal this is kept as her name too, so she is findable by it in a chute.
 4. Pick a `Species`, or `Something else…` to type your own.
@@ -47,6 +60,7 @@ Only the first hundred rows are shown. When there are more you see `Showing 100 
 | --- | --- |
 | `Animal recorded` | She has a page of her own now. |
 | `No animals recorded yet` | Nothing has been started. An owner starts the first. |
+| `Nothing matches` | No name, species or tag on the farm answers to what you typed or picked. Clear the search or pick `All`. |
 | `Showing 100 of 240 — narrow it to see the rest` | Search or filter to see the others. |
 | `Not looked up` | Somebody gave a treatment and never read the label. Treat these as not clear. |
 | `Only an owner can change animal records.` | You are signed in as staff. Ask an owner. |
@@ -55,7 +69,7 @@ Only the first hundred rows are shown. When there are more you see `Showing 100 
 
 ## Not on this page
 
-- The list cannot be sorted, and cannot be filtered by species.
+- The list cannot be sorted.
 - Nothing can be edited from a row. Open it first.
 - Only a hundred rows are shown at a time.
 - A group and an animal look the same here apart from the badge, which is deliberate. They are the same kind of record.

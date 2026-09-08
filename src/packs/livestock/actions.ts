@@ -27,7 +27,13 @@ import {
 import { speciesFrom } from "./vocabulary";
 import {
   LivestockError,
+  GESTATION_DAYS_MAX,
   MAX_BREED_PARTS,
+  deleteBreeding,
+  deleteBreedingCheck,
+  recordBreeding,
+  recordBreedingCheck,
+  updateBreeding,
   addLotToParent,
   closeLivestockLot,
   reopenLivestockLot,
@@ -114,6 +120,9 @@ function toResult(err: unknown): { error: string } {
       case "INVALID_METHOD":
         return { error: "Pick how it was weighed." };
       case "INVALID_BREED":
+        return { error: err.message };
+      // Already a sentence about the two dates or the two animals.
+      case "INVALID_BREEDING":
         return { error: err.message };
       // Every one of these already says which animal and why — "that animal is
       // already descended from this one" is the whole explanation, and a
@@ -1926,6 +1935,193 @@ export async function askAdvisorAction(input: unknown) {
     if (err instanceof Error && err.message.includes("ANTHROPIC_API_KEY")) {
       return { error: "The advisor is not configured on this deployment yet." };
     }
+    return toResult(err);
+  }
+}
+
+// ── Slice 4c: the breeding calendar ──────────────────────────────────────────
+
+const breedingResult = z.enum(["bred", "open", "lost"]);
+const gestation = z.number().int().min(1).max(GESTATION_DAYS_MAX);
+
+/**
+ * **THE BULL WENT IN.** One row on the pen or the cow; the window is a fold.
+ * `member`, like a treatment: whoever opened the gate writes it down.
+ */
+export async function recordBreedingAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      livestockLotId: z.string().uuid(),
+      sireLotId: z.string().uuid().nullable().optional(),
+      exposedFrom: requiredDate,
+      exposedTo: requiredDate.nullable().optional(),
+      gestationDays: gestation,
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const row = await withTenant(
+      ctx.tenant.id,
+      (tx) => recordBreeding(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.breeding.recorded",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_lot",
+      targetId: parsed.data.livestockLotId,
+      meta: {
+        breedingId: row.id,
+        sireLotId: row.sireLotId ?? "",
+        exposedFrom: row.exposedFrom,
+        exposedTo: row.exposedTo ?? "",
+        gestationDays: row.gestationDays,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true, id: row.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** Correct an exposure — most often the day he came out. */
+export async function updateBreedingAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      id: z.string().uuid(),
+      sireLotId: z.string().uuid().nullable().optional(),
+      exposedFrom: requiredDate.optional(),
+      exposedTo: requiredDate.nullable().optional(),
+      gestationDays: gestation.optional(),
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const { id, ...patch } = parsed.data;
+    const row = await withTenant(
+      ctx.tenant.id,
+      (tx) => updateBreeding(tx, ctxOf(ctx), id, patch),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.breeding.updated",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_lot",
+      targetId: row.livestockLotId,
+      meta: {
+        breedingId: row.id,
+        exposedFrom: row.exposedFrom,
+        exposedTo: row.exposedTo ?? "",
+        gestationDays: row.gestationDays,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function removeBreedingAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => deleteBreeding(tx, ctxOf(ctx), parsed.data.id),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.breeding.removed",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_breeding",
+      targetId: parsed.data.id,
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** What the vet found: in calf, open, or lost. */
+export async function recordBreedingCheckAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      livestockLotId: z.string().uuid(),
+      checkedOn: requiredDate,
+      result: breedingResult,
+      daysBred: z.number().int().min(0).max(GESTATION_DAYS_MAX).nullable().optional(),
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const row = await withTenant(
+      ctx.tenant.id,
+      (tx) => recordBreedingCheck(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.breeding.checked",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_lot",
+      targetId: parsed.data.livestockLotId,
+      meta: {
+        checkId: row.id,
+        checkedOn: row.checkedOn,
+        result: row.result,
+        daysBred: row.daysBred ?? "",
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true, id: row.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function removeBreedingCheckAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => deleteBreedingCheck(tx, ctxOf(ctx), parsed.data.id),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.breeding.check_removed",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_breeding_check",
+      targetId: parsed.data.id,
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
     return toResult(err);
   }
 }

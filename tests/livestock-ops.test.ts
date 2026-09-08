@@ -19,7 +19,14 @@ import {
   withdrawalByLot,
   checksOn,
   breedPartsByLot,
+  breedingByLot,
   compositionFor,
+  deleteBreeding,
+  deleteBreedingCheck,
+  recordBreeding,
+  recordBreedingCheck,
+  updateBreeding,
+  whoIsDue,
   createLivestockLot,
   farmSnapshot,
   offspringOf,
@@ -88,6 +95,7 @@ import {
 } from "../src/packs/land/ops";
 import { summariseHead, mortalityRate } from "../src/packs/livestock/core/herd";
 import { formatComposition } from "../src/packs/livestock/core/pedigree";
+import { describeCycle } from "../src/packs/livestock/core/breeding";
 import { getAsset } from "../src/packs/assets/ops";
 import { slugLabel } from "../src/packs/inventory/vocabulary";
 import { gainBetween } from "../src/packs/livestock/core/weights";
@@ -4762,4 +4770,304 @@ d("livestock ops", () => {
     );
     expect(offered.map((o) => o.livestockLotId)).not.toContain(lot.id);
   });
+
+  // ---- slice 4c: the breeding calendar ------------------------------------
+  //
+  // A bull means windows, not dates. What these certify is the COMPOSITION:
+  // one row on the pen reaching every cow living in it through membership,
+  // the vet's check narrowing it, the birth (a row the birth form already
+  // writes) fixing it — and none of it stored.
+  describe("the breeding calendar", () => {
+    const CONFIG = { gestationDays: { cattle: 283, swine: 114 } };
+    const TODAY = "2026-09-08";
+
+    const cow = (name: string, occurredOn: string, parentLotId?: string) =>
+      asOwner(async (tx) => {
+        const made = await startIndividual(tx, ctx(), {
+          itemId,
+          name,
+          species: "cattle",
+          occurredOn,
+          parentLotId,
+        });
+        await updateLivestockLot(tx, ctx(), made.lot.id, { sex: "female" });
+        return made;
+      });
+
+    it("A BULL IN WITH THE PEN PUTS A WINDOW ON EVERY COW LIVING IN IT — and not on him", async () => {
+      const pen = await newLot("SPRING-HERD", "cattle");
+      await asOwner((tx) =>
+        placeHead(tx, ctx(), {
+          itemId,
+          inventoryLotId: pen.inventoryLotId,
+          head: 6,
+          occurredOn: "2026-04-01",
+        }),
+      );
+      const [rosie, hazel] = await asOwner((tx) =>
+        splitIntoIndividuals(tx, ctx(), {
+          livestockLotId: pen.lot.id,
+          names: ["Rosie", "Hazel"],
+          identifierKind: "name",
+          occurredOn: "2026-04-10",
+        }),
+      );
+      // Mabel lived there in April and left before he went in.
+      const mabel = await cow("Mabel", "2026-04-15", pen.lot.id);
+      await asOwner((tx) =>
+        removeLotFromParent(tx, ctx(), { memberLotId: mabel.lot.id, endedOn: "2026-04-20" }),
+      );
+      // The bull, turned in with them on May 1: he lives in the pen too.
+      const duke = await asOwner((tx) =>
+        startIndividual(tx, ctx(), {
+          itemId,
+          name: "Duke",
+          species: "cattle",
+          occurredOn: "2026-05-01",
+          parentLotId: pen.lot.id,
+        }),
+      );
+      await asOwner((tx) => updateLivestockLot(tx, ctx(), duke.lot.id, { sex: "male" }));
+
+      const row = await asOwner((tx) =>
+        recordBreeding(tx, ctx(), {
+          livestockLotId: pen.lot.id,
+          sireLotId: duke.lot.id,
+          exposedFrom: "2026-05-01",
+          exposedTo: "2026-08-01",
+          gestationDays: 283,
+        }),
+      );
+      expect(row.livestockLotId).toBe(pen.lot.id);
+
+      const calendars = await asOwner((tx) =>
+        breedingByLot(
+          tx,
+          tenantId,
+          [pen.lot.id, rosie.lot.id, hazel.lot.id, mabel.lot.id, duke.lot.id],
+          TODAY,
+          CONFIG,
+        ),
+      );
+      const window = { from: "2027-02-08", to: "2027-05-11" };
+      // The pen's own line, for its loose head.
+      expect(calendars.get(pen.lot.id)?.cycles[0]).toMatchObject({ state: "exposed", due: window });
+      expect(calendars.get(pen.lot.id)?.exposures[0].via).toBe("own");
+      // Each cow living in it reads the pen's row, marked as the pen's.
+      expect(calendars.get(rosie.lot.id)?.cycles[0].due).toEqual(window);
+      expect(calendars.get(rosie.lot.id)?.exposures[0]).toMatchObject({
+        id: row.id,
+        livestockLotId: pen.lot.id,
+        via: "pen",
+      });
+      expect(calendars.get(hazel.lot.id)?.cycles[0].due).toEqual(window);
+      // Not the cow who left before he went in, and not the bull himself.
+      expect(calendars.has(mabel.lot.id)).toBe(false);
+      expect(calendars.has(duke.lot.id)).toBe(false);
+      expect(
+        describeCycle(calendars.get(rosie.lot.id)!.cycles[0], TODAY),
+      ).toBe("Due 2027-02-08 to 2027-05-11 · in 153 days");
+    });
+
+    it("a check narrows the window, and the birth the form already records fixes it", async () => {
+      const clover = await cow("Clover", "2026-01-01");
+      await asOwner((tx) =>
+        recordBreeding(tx, ctx(), {
+          livestockLotId: clover.lot.id,
+          exposedFrom: "2026-05-01",
+          exposedTo: "2026-08-01",
+          gestationDays: 283,
+        }),
+      );
+      await asOwner((tx) =>
+        recordBreedingCheck(tx, ctx(), {
+          livestockLotId: clover.lot.id,
+          checkedOn: "2026-09-01",
+          result: "bred",
+          daysBred: 90,
+        }),
+      );
+      let calendar = (
+        await asOwner((tx) => breedingByLot(tx, tenantId, [clover.lot.id], TODAY, CONFIG))
+      ).get(clover.lot.id)!;
+      expect(calendar.cycles[0]).toMatchObject({
+        state: "bred",
+        due: { from: "2027-03-06", to: "2027-03-20" },
+        conceivedOn: "2026-06-03",
+      });
+      expect(calendar.checks).toHaveLength(1);
+
+      // Nothing on the calendar is touched by the birth: `recordBirth` writes
+      // the offspring row, and the fold reads it.
+      await asOwner((tx) =>
+        recordBirth(tx, ctx(), {
+          itemId,
+          code: "Clover's calf",
+          damLotId: clover.lot.id,
+          head: 1,
+          bornOn: "2027-03-10",
+        }),
+      );
+      calendar = (
+        await asOwner((tx) => breedingByLot(tx, tenantId, [clover.lot.id], "2027-03-12", CONFIG))
+      ).get(clover.lot.id)!;
+      expect(calendar.cycles[0]).toMatchObject({
+        state: "born",
+        due: { from: "2027-03-10", to: "2027-03-10" },
+        // 2027-03-10 is 30 days after the window opened on 2027-02-08.
+        daysIntoWindow: 30,
+      });
+      expect(describeCycle(calendar.cycles[0], "2027-03-12")).toBe(
+        "Gave birth 2027-03-10 · 30 days into the window",
+      );
+    });
+
+    it("HE'S OUT: the out date fixes the window, and removing the row leaves the check standing", async () => {
+      const bess = await cow("Bess", "2026-01-01");
+      const row = await asOwner((tx) =>
+        recordBreeding(tx, ctx(), {
+          livestockLotId: bess.lot.id,
+          exposedFrom: "2026-06-01",
+          gestationDays: 283,
+        }),
+      );
+      // Still in: the far end is today pushed forward, and grows with it.
+      const open = (
+        await asOwner((tx) => breedingByLot(tx, tenantId, [bess.lot.id], TODAY, CONFIG))
+      ).get(bess.lot.id)!;
+      expect(open.cycles[0].due).toEqual({ from: "2027-03-11", to: "2027-06-18" });
+
+      await asOwner((tx) => updateBreeding(tx, ctx(), row.id, { exposedTo: "2026-07-01" }));
+      const fixed = (
+        await asOwner((tx) => breedingByLot(tx, tenantId, [bess.lot.id], TODAY, CONFIG))
+      ).get(bess.lot.id)!;
+      expect(fixed.cycles[0].due).toEqual({ from: "2027-03-11", to: "2027-04-10" });
+
+      // A check recorded, then the exposure removed: the check makes a cycle
+      // of its own, with the species' gestation from the profile.
+      await asOwner((tx) =>
+        recordBreedingCheck(tx, ctx(), {
+          livestockLotId: bess.lot.id,
+          checkedOn: "2026-09-01",
+          result: "bred",
+          daysBred: 60,
+        }),
+      );
+      await asOwner((tx) => deleteBreeding(tx, ctx(), row.id));
+      const alone = (
+        await asOwner((tx) => breedingByLot(tx, tenantId, [bess.lot.id], TODAY, CONFIG))
+      ).get(bess.lot.id)!;
+      expect(alone.exposures).toHaveLength(0);
+      expect(alone.cycles[0]).toMatchObject({
+        exposure: null,
+        state: "bred",
+        // 2026-07-03 + 283 = 2027-04-12, a week either side.
+        due: { from: "2027-04-05", to: "2027-04-19" },
+      });
+      // And with the check gone too, no calendar at all.
+      await asOwner((tx) => deleteBreedingCheck(tx, ctx(), alone.checks[0].id));
+      expect(
+        (await asOwner((tx) => breedingByLot(tx, tenantId, [bess.lot.id], TODAY, CONFIG))).has(
+          bess.lot.id,
+        ),
+      ).toBe(false);
+    });
+
+    it("refuses the dates backwards, a female sire, a bull as the dam side, a gestation of nothing, and days on an open check", async () => {
+      const daisy = await cow("Daisy", "2026-01-01");
+      const ewe = await cow("Not-a-bull", "2026-01-01");
+      const bull = await asOwner((tx) =>
+        startIndividual(tx, ctx(), {
+          itemId,
+          name: "Rex",
+          species: "cattle",
+          occurredOn: "2026-01-01",
+        }),
+      );
+      await asOwner((tx) => updateLivestockLot(tx, ctx(), bull.lot.id, { sex: "male" }));
+      const base = { livestockLotId: daisy.lot.id, exposedFrom: "2026-05-01", gestationDays: 283 };
+
+      await expect(
+        asOwner((tx) => recordBreeding(tx, ctx(), { ...base, exposedTo: "2026-04-01" })),
+      ).rejects.toMatchObject({ code: "INVALID_BREEDING" });
+      await expect(
+        asOwner((tx) => recordBreeding(tx, ctx(), { ...base, sireLotId: ewe.lot.id })),
+      ).rejects.toMatchObject({ code: "INVALID_BREEDING" });
+      await expect(
+        asOwner((tx) => recordBreeding(tx, ctx(), { ...base, livestockLotId: bull.lot.id })),
+      ).rejects.toMatchObject({ code: "INVALID_BREEDING" });
+      await expect(
+        asOwner((tx) => recordBreeding(tx, ctx(), { ...base, gestationDays: 0 })),
+      ).rejects.toMatchObject({ code: "INVALID_BREEDING" });
+      await expect(
+        asOwner((tx) => recordBreeding(tx, ctx(), { ...base, sireLotId: daisy.lot.id })),
+      ).rejects.toMatchObject({ code: "INVALID_BREEDING" });
+      await expect(
+        asOwner((tx) =>
+          recordBreedingCheck(tx, ctx(), {
+            livestockLotId: daisy.lot.id,
+            checkedOn: "2026-09-01",
+            result: "open",
+            daysBred: 30,
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "INVALID_BREEDING" });
+      // A sire with no sex on file is not a contradiction.
+      const unknown = await asOwner((tx) =>
+        startIndividual(tx, ctx(), {
+          itemId,
+          name: "Stranger",
+          species: "cattle",
+          occurredOn: "2026-01-01",
+        }),
+      );
+      const ok = await asOwner((tx) =>
+        recordBreeding(tx, ctx(), { ...base, sireLotId: unknown.lot.id, exposedTo: "2026-05-01" }),
+      );
+      expect(ok.sireLotId).toBe(unknown.lot.id);
+    });
+
+    it("staff record breeding and what the vet found — opening the gate is a chore", async () => {
+      const pearl = await cow("Pearl", "2026-01-01");
+      const row = await asOwner((tx) =>
+        recordBreeding(tx, staffCtx(), {
+          livestockLotId: pearl.lot.id,
+          exposedFrom: "2026-06-10",
+          exposedTo: "2026-06-10",
+          gestationDays: 283,
+        }),
+      );
+      expect(row.recordedBy).toBe(STAFF);
+      const check = await asOwner((tx) =>
+        recordBreedingCheck(tx, staffCtx(), {
+          livestockLotId: pearl.lot.id,
+          checkedOn: "2026-09-01",
+          result: "bred",
+        }),
+      );
+      expect(check.recordedBy).toBe(STAFF);
+    });
+
+    it("WHO IS DUE lists each cow once, the pen for its loose head, and never the bull", async () => {
+      const lines = await asOwner((tx) => whoIsDue(tx, tenantId, TODAY, CONFIG));
+      const byCode = new Map(lines.map((l) => [l.code, l]));
+      // The pen, for the four head nobody has named.
+      expect(byCode.get("SPRING-HERD")).toMatchObject({ isAnimal: false, head: 4 });
+      expect(byCode.get("Rosie")).toMatchObject({
+        isAnimal: true,
+        head: 1,
+        insideOf: { code: "SPRING-HERD" },
+      });
+      expect(byCode.get("Rosie")?.cycle.exposure?.via).toBe("pen");
+      expect(byCode.has("Hazel")).toBe(true);
+      expect(byCode.has("Duke")).toBe(false);
+      expect(byCode.has("Mabel")).toBe(false);
+      // Soonest window first: the herd's window opens 2027-02-08, and Pearl's
+      // hand service on June 10 is due 2027-03-20, so she comes after it.
+      const running = lines.filter((l) => l.cycle.state === "exposed" || l.cycle.state === "bred");
+      const order = running.map((l) => l.cycle.due?.from ?? "9999");
+      expect([...order].sort()).toEqual(order);
+    });
+  });
+
 });

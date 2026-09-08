@@ -68,6 +68,7 @@ import { structureKindsFrom } from "@/packs/land/vocabulary";
 import {
   LEDGER_EPOCH,
   breedPartsByLot,
+  breedingByLot,
   codesByLivestockLot,
   feedReport,
   getLivestockLot,
@@ -102,6 +103,23 @@ import {
   SetParentsForm,
 } from "@/packs/livestock/components/pedigree-controls";
 import {
+  CorrectBreedingForm,
+  RecordBreedingForm,
+  RecordCheckForm,
+  RemoveBreedingButton,
+  RemoveCheckButton,
+  SireOutForm,
+} from "@/packs/livestock/components/breeding-controls";
+import {
+  BREEDING_RESULT_LABELS,
+  currentCycle,
+  describeCycle,
+  dueStanding,
+  dueWindow,
+  type BreedingResult,
+  type CycleState,
+} from "@/packs/livestock/core/breeding";
+import {
   PROVENANCE_LABELS,
   PROVENANCE_NOTES,
   formatQuantities,
@@ -130,6 +148,7 @@ import {
   SEX_LABELS,
   breedLabel,
   breedsFrom,
+  gestationDaysFrom,
   identifierKindLabel,
   tapeDivisorFrom,
   treatmentRouteLabel,
@@ -162,6 +181,15 @@ import { LotCheckForm } from "@/packs/livestock/components/daily-round";
 export const dynamic = "force-dynamic";
 
 const BASE = "/dashboard/m/livestock";
+
+/** Where a cycle stands, as the Due panel's badge says it. */
+const CYCLE_BADGES: Record<CycleState, string> = {
+  exposed: "Exposed",
+  bred: "Pregnant",
+  open: "Open",
+  lost: "Lost",
+  born: "Gave birth",
+};
 
 /**
  * One animal lot.
@@ -372,6 +400,26 @@ export default async function LivestockLotPage({
       // are questions about a DATE, so today is passed rather than assumed —
       // the same rule the herd and the paddock reads follow.
       const members = await lotMemberSummaries(tx, ctx.tenant.id, lot.id, today);
+      // SLICE 4C: the calendar of this record and of every animal living
+      // in it, from the one funnel the breeding page and What needs you
+      // read. A pen exposure reaches each member through her stay.
+      const calendars = await breedingByLot(
+        tx,
+        ctx.tenant.id,
+        [lot.id, ...members.map((m) => m.livestockLotId)],
+        today,
+        pack.config,
+      );
+      const breeding = calendars.get(lot.id) ?? null;
+      // The names the calendar needs: the sires, and the pen an exposure
+      // was recorded on when it was not this one.
+      const breedingNames = await codesByLivestockLot(tx, ctx.tenant.id, [
+        ...new Set(
+          [...calendars.values()]
+            .flatMap((c) => c.exposures.flatMap((b) => [b.livestockLotId, b.sireLotId ?? ""]))
+            .filter((id) => id !== "" && id !== lot.id),
+        ),
+      ]);
       // Each animal living here on her own clock. A dose given to HER alone
       // is hers and never the pen's, so the pen's panel says how many inside
       // are not clear rather than folding them into its own reading.
@@ -424,6 +472,10 @@ export default async function LivestockLotPage({
         deliveriesByItem,
         members,
         memberWithdrawals,
+        breeding,
+        memberBreeding: calendars,
+        breedingNames,
+        gestation: gestationDaysFrom(pack.config, lot.species),
         insideOf: insideOf ?? null,
         insideOfCode: insideOfCode ?? null,
         joinable,
@@ -495,6 +547,10 @@ export default async function LivestockLotPage({
     deliveriesByItem,
     members,
     memberWithdrawals,
+    breeding,
+    memberBreeding,
+    breedingNames,
+    gestation,
     insideOf,
     insideOfCode,
     joinable,
@@ -687,6 +743,13 @@ export default async function LivestockLotPage({
       bornOn: lot.bornOn,
     },
   ].sort((a, b) => a.code.localeCompare(b.code));
+  /**
+   * SLICE 4C. The newest cycle leads the Due panel; the sires on offer are
+   * the same-species candidates the parents form uses, less the females.
+   */
+  const cycle = breeding ? currentCycle(breeding.cycles) : null;
+  const cycleStanding = cycle ? dueStanding(cycle, today) : "undated";
+  const sires = candidates.filter((c) => c.sex !== "female");
   const breedingLabel =
     composition.source === "unknown"
       ? null
@@ -1926,6 +1989,201 @@ export default async function LivestockLotPage({
             </div>
           )}
         </div>
+
+        {/* THE CALENDAR — slice 4c. A bull means windows, not dates: the day
+            he went in and the day he came out give the window, a check
+            narrows it and the birth fixes it, and nothing here is stored
+            (`core/breeding.ts`). A male has no calendar of his own; a pen's
+            is about its LOOSE head, and every named animal inside it has her
+            own line underneath. */}
+        {lot.sex !== "male" && (
+          <Panel className="p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="font-heading text-base font-semibold tracking-heading">
+                  <span className="flex items-center gap-2">
+                    Due
+                    {cycle && (
+                      <Badge
+                        variant={
+                          cycleStanding === "past"
+                            ? "destructive"
+                            : cycleStanding === "now"
+                              ? "default"
+                              : "outline"
+                        }
+                      >
+                        {CYCLE_BADGES[cycle.state]}
+                      </Badge>
+                    )}
+                  </span>
+                </h3>
+                <p className="mt-1 text-2xl font-medium">
+                  {cycle ? describeCycle(cycle, today) : "—"}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {cycle
+                    ? [
+                        cycle.exposure
+                          ? cycle.exposure.sireLotId
+                            ? `Bred to ${breedingNames.get(cycle.exposure.sireLotId) ?? "—"}`
+                            : "Sire not recorded"
+                          : "From a check, with no breeding on record",
+                        cycle.exposure?.via === "pen"
+                          ? `in with ${breedingNames.get(cycle.exposure.livestockLotId) ?? "the pen"}`
+                          : null,
+                        cycle.exposure
+                          ? `in ${cycle.exposure.exposedFrom}, ${
+                              cycle.exposure.exposedTo ? `out ${cycle.exposure.exposedTo}` : "still in"
+                            } · ${cycle.exposure.gestationDays} days`
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")
+                    : isAnimal
+                      ? "No breeding on record. Record when the sire went in, or what the vet found."
+                      : `No breeding on record. Record when the sire went in with the ${subjectWord}, and every female inside reads the window.`}
+                </p>
+              </div>
+              {canRecord && !isClosed && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <RecordBreedingForm
+                    livestockLotId={lot.id}
+                    subject={isAnimal ? inventoryLot.code : `the ${subjectWord}`}
+                    sires={sires}
+                    defaultGestation={gestation}
+                    today={today}
+                  />
+                  <RecordCheckForm
+                    livestockLotId={lot.id}
+                    subject={isAnimal ? inventoryLot.code : `the ${subjectWord}`}
+                    today={today}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* The record itself: every exposure that reaches this one, and
+                every check made on it. A pen's row shows on the cow with
+                where it was recorded, and offers no Correct — it is the
+                pen's row. */}
+            {breeding && (breeding.exposures.length > 0 || breeding.checks.length > 0) && (
+              <ul className="mt-4 divide-y text-sm">
+                {breeding.exposures.map((b) => {
+                  const window = dueWindow(b, today);
+                  const own = b.via === "own";
+                  const sireCode = b.sireLotId ? (breedingNames.get(b.sireLotId) ?? null) : null;
+                  return (
+                    <li
+                      key={b.id}
+                      className="flex flex-wrap items-center justify-between gap-2 py-2"
+                    >
+                      <div className="min-w-0">
+                        <p>
+                          <span className="font-medium">{sireCode ?? "Sire not recorded"}</span>
+                          {" · "}in {b.exposedFrom}
+                          {b.exposedTo ? `, out ${b.exposedTo}` : ", still in"}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Due{" "}
+                          {window.from === window.to
+                            ? window.from
+                            : `${window.from} to ${window.to}`}{" "}
+                          · {b.gestationDays} days
+                          {!own &&
+                            ` · recorded on ${breedingNames.get(b.livestockLotId) ?? "the pen"}`}
+                          {b.notes && ` · ${b.notes}`}
+                        </p>
+                      </div>
+                      {own && canRecord && !isClosed && (
+                        <div className="flex items-center gap-1">
+                          {!b.exposedTo && (
+                            <SireOutForm
+                              breedingId={b.id}
+                              sireCode={sireCode}
+                              exposedFrom={b.exposedFrom}
+                              today={today}
+                              idPrefix={`out-${b.id}`}
+                            />
+                          )}
+                          <CorrectBreedingForm
+                            breeding={b}
+                            sires={sires}
+                            today={today}
+                            idPrefix={`fix-${b.id}`}
+                          />
+                          <RemoveBreedingButton
+                            breedingId={b.id}
+                            label={`the breeding from ${b.exposedFrom}`}
+                          />
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+                {breeding.checks.map((c) => (
+                  <li
+                    key={c.id}
+                    className="flex flex-wrap items-center justify-between gap-2 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p>
+                        <span className="font-medium">
+                          {BREEDING_RESULT_LABELS[c.result as BreedingResult] ?? c.result}
+                        </span>
+                        {" · "}checked {c.checkedOn}
+                        {c.daysBred !== null && ` · ${c.daysBred} days pregnant`}
+                      </p>
+                      {c.notes && (
+                        <p className="text-xs text-muted-foreground">{c.notes}</p>
+                      )}
+                    </div>
+                    {canRecord && !isClosed && (
+                      <RemoveCheckButton
+                        checkId={c.id}
+                        label={`the check from ${c.checkedOn}`}
+                      />
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {/* Who is due in this pen: each named animal's own line, read
+                from the same funnel the breeding page uses. */}
+            {!isAnimal && members.length > 0 && (
+              <div className="mt-4">
+                <h4 className="text-sm font-medium">Inside</h4>
+                <ul className="mt-1 divide-y text-sm">
+                  {members.map((m) => {
+                    const calendar = memberBreeding.get(m.livestockLotId);
+                    const hers = calendar ? currentCycle(calendar.cycles) : null;
+                    return (
+                      <li
+                        key={m.livestockLotId}
+                        className="flex flex-wrap items-center justify-between gap-2 py-2"
+                      >
+                        <Link
+                          href={`${BASE}/${m.livestockLotId}`}
+                          className="font-medium underline-offset-4 hover:underline"
+                        >
+                          {m.code}
+                        </Link>
+                        <span className={hers ? "" : "text-muted-foreground"}>
+                          {m.sex === "male"
+                            ? "—"
+                            : hers
+                              ? describeCycle(hers, today)
+                              : "Nothing recorded"}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+          </Panel>
+        )}
 
         <div className="grid gap-6 md:grid-cols-2">
           <Panel className="p-5">

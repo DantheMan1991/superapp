@@ -25,7 +25,7 @@ and [land.md](land.md) before changing anything about where animals are.
 | **3** | **Health + the withdrawal clock** | **shipped 2026-08-20** |
 | **4a** | **Pedigree + breed as fractions** — dam and sire, composition computed from the parents, a birth that creates a lot | **shipped 2026-08-27** |
 | **4b** | **Photos — a profile picture and a gallery.** Layer 0, and `assets` got it in the same PR | **shipped 2026-08-27** |
-| 4c | The breeding calendar — bull exposure → calving window, preg check narrows it, calving fixes it, a "who is due" list | |
+| **4c** | **The breeding calendar — bull exposure → calving window, preg check narrows it, calving fixes it, a "who is due" list** | **shipped 2026-09-08** |
 | 4d | Traits scored 1–5, sire performance across years, **the inbreeding warning at turn-in** | |
 | 4e | Registry — number, association, registered name, papers in Documents. Needs 4b | |
 | **4f** | **The capital transfer** — market herd ↔ breeding herd, and it POSTS | **shipped 2026-08-27** |
@@ -132,6 +132,75 @@ alternative — the bar `docs/decisions/` exists for. Recorded here so the next
 session raises one rather than discovering the reversal in a build log.
 
 ## Build log
+
+### 2026-09-08 — The breeding calendar (`claude/the-breeding-calendar`)
+
+**Livestock slice 10 of the improvement review, and slice 4c of the pack's own
+table — the half of the founder's 2026-08-27 ask that 4a did not reach.**
+Migrations `0274` (two tables) and `0275` (RLS) — applied to the dev branch and
+to production, RLS verified on both (169 tables), before this PR was opened,
+per [ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md).
+
+**A BULL MEANS WINDOWS, NOT DATES.** The 2026-08-13 design said it in one line
+— *in May 1, out Aug 1 means calves arrive roughly Feb 7 – May 10; a preg check
+narrows it, the actual calving fixes it* — and that line is the whole model.
+`livestock_breedings` is the exposure: the dam side (a cow, or the pen the
+bull was turned in with), the sire, `exposed_from`, `exposed_to` (NULL while he
+is still in), and the gestation used. `livestock_breeding_checks` is what the
+vet found: `bred` | `open` | `lost`, with the vet's `days_bred` when there is
+one. **The calving is not a third table** — it is the row `recordBirth` already
+writes (`dam_lot_id` + `born_on`), read by the fold.
+
+**THE CALENDAR IS A FOLD, NOT A COLUMN.** `core/breeding.ts` — `breedingCycles`
+— folds an animal's exposures, checks and births into cycles, newest first:
+an exposure opens one (`due = [from + g, (to ?? today) + g]`, and the far end
+GROWS while he is still in); a `bred` check confirms it and, with days,
+narrows it to the vet's date ± `PREG_CHECK_SLACK_DAYS` (kept inside the
+exposure's window when the two overlap, trusted over it when they do not —
+the arm beats a remembered date); `open` and `lost` close it with no due
+date; a birth fixes it and reports `daysIntoWindow`, the cull signal. A birth
+more than `EARLY_BIRTH_SLACK_DAYS` before the window opened is NOT this
+cycle's — it belongs to an exposure nobody recorded — and the cycle stays
+running. A check with no exposure on file still makes a cycle, with the
+species' gestation from the profile, because "90 days bred on the 1st" is a
+due date whether or not anybody wrote down when the bull went in. Nothing is
+stored; correct the out date and every due date moves.
+
+**ONE ROW ON THE PEN REACHES EVERY FEMALE IN IT** — `exposuresByLot` walks
+`livestock_lot_members` exactly as `treatmentsByLot` does for a dose in the
+water, both ends of a stay inclusive, one row to correct when he came out a
+week later than somebody remembered. The bull himself and any male living in
+the pen read nothing; a cow who left before he went in reads nothing. A row
+keeps its own `livestock_lot_id`, so her page says `recorded on Cows` and
+offers no Correct. `breedingByLot` is the single funnel; `whoIsDue` sits on it
+and on the new `standingHerd` (the population fold the attention source had
+inline, now shared) — a pen has a line only for its LOOSE head, an animal for
+herself, a male never.
+
+**THE GESTATION LIVES IN THE PROFILE, LIKE THE TAPE DIVISOR.** `gestationDays`
+per species in the homestead profile's `packConfig` (cattle 283, swine 114;
+poultry deliberately absent — a hen does not gestate), read by
+`gestationDaysFrom`, pre-filled on the form, editable, and COPIED onto the row
+so a later change to the profile moves nothing already on the calendar.
+
+**Screens.** A fifth tab, `Breeding` (`/dashboard/m/livestock/breeding`):
+four stat cards, the `Due` list soonest first (cards below `md`, `LinkRow`
+above), `Finished` history. The lot page's Breeding section gained a `Due`
+panel (hidden for a male): the newest cycle in a sentence, `Record breeding`
+/ `Preg check` (member-level — opening the gate is a chore), the record
+underneath with `He's out` (the one correction an exposure nearly always
+needs), `Correct` and `Remove`, and on a pen an `Inside` list with each
+animal's own line. `breedingAttention` raises the week before a window
+opens, the day it opens, and a window shut with nothing recorded — never the
+middle of a three-month window; `livestock-barn` now returns those lines too.
+
+Tests: `tests/livestock-breeding.test.ts` (pure: the window, the fold, the
+words, the digest edges, the profile reader); `tests/livestock-ops.test.ts`
+"the breeding calendar" (the pen walk, narrow → fix through `recordBirth`,
+he's out, refusals, staff, who is due); `tests/isolation/livestock.test.ts`
+(both tables); `tests/livestock-attention.test.ts` (the three edges and the
+birth clearing the line). Guides: `breeding.md` new, `lot.md`, `overview.md`,
+`lots.md`, `workspace/what-needs-you.md`. Driven on Hilltop Farm (dev).
 
 ### 2026-09-08 — A course of treatment (`claude/a-course-of-treatment`)
 
@@ -2346,6 +2415,8 @@ This pack is the one that forced the change; the full reasoning is in
 | `livestock_feed_groups` | **A shared feeder** — a bin, a bulk bag, a trough | Holds the FEEDER, not the feed: no quantity, no cost, no balance. `status` in `active\|closed`; closed keeps reporting. Deliberately not an asset — a feeding group is a set of animals sharing a cost, so two bins feeding one flock are one group |
 | `livestock_feed_group_members` | Which lots eat from it, **between which dates** | The dates are the whole reason this is a table: head on any day is already in the ledger, but *when a pen went onto the bin* is not. `ended_on` INCLUSIVE, matching `land_occupancy` |
 | `livestock_treatments` | **What went into an animal, and when it is safe to eat** | **`course_days`** (`0273`, NOT NULL DEFAULT 1, CHECK ≥ 1): how many days running it was given; **the clock counts from the last day** (`lastDoseOn`). TWO clocks — `meat_withdrawal_days` and `milk_withdrawal_days`, both nullable and never merged. `withdrawal_source` in `label\|vet\|none_stated` carries where the number came from; `none_stated` BLOCKS. `dose` is free text and nothing computes on it. Optional `inventory_movement_id` puts the cost on the pen |
+| `livestock_breedings` | **The sire went in — a window, not a date** | Slice 4c (`0274`/`0275`). On the DAM side: a cow, or the pen he was turned in with, reaching every female living in it through `livestock_lot_members`. `sire_lot_id` composite self-FK, RESTRICT, nullable (AI, a bull nobody recorded). `exposed_from`, `exposed_to` (NULL = still in; CHECK not before from), `gestation_days` (CHECK 1..730) copied from the profile. **No due date and no status column** — both are folds in `core/breeding.ts` |
+| `livestock_breeding_checks` | **What the vet found: pregnant, open, or lost** | `result` in `bred\|open\|lost`, CLOSED by CHECK; `days_bred` only with `bred` (CHECK). **No FK to the exposure** — a check belongs to whichever cycle was running on its day, paired by date in the fold, and one with no exposure on file makes a cycle of its own |
 | `livestock_weights` | **What they weighed, and how anybody knows** | `method` open taxonomy (`scale`, `sample`, `tape`, `visual`). `sample_size` head went on the scale and together weighed `sample_weight_lb` — the AVERAGE is a division at read time and is never stored. A tape stores `heart_girth_in` + `body_length_in` and no pounds at all. CHECK: something must have been measured |
 | `livestock_feed_draws` | **This movement was feed drawn for that feeder** | A JOIN, not a second ledger. Composite FK to `inventory_movements`, which holds the quantity and the stamped cost. UNIQUE per movement — two rows would put one cost in two pots |
 
@@ -2375,6 +2446,17 @@ This pack is the one that forced the change; the full reasoning is in
   death from a transfer needs the kinds too
 - `src/packs/land/ops.ts` → `currentZoneForOccupants` — added for this pack, and
   it lives in `land` because `land` owns that table
+- `src/packs/livestock/core/breeding.ts` — pure. **The breeding calendar**:
+  `dueWindow`, `breedingCycles` (the fold: exposure → check → birth),
+  `describeCycle`, `dueStanding`, `breedingAttention`. `PREG_CHECK_SLACK_DAYS`
+  and `EARLY_BIRTH_SLACK_DAYS` live here. Read this before changing anything
+  about who is due
+- `src/packs/livestock/ops.ts` → `exposuresByLot` (the pen walk),
+  `breedingByLot` (the single funnel), `standingHerd` (the population fold,
+  shared with the attention source), `whoIsDue`
+- `src/packs/livestock/components/breeding-controls.tsx` — Record breeding,
+  He's out, Correct, Preg check, the two Removes
+- `src/app/dashboard/m/livestock/breeding/page.tsx` — who is due
 - `src/packs/livestock/core/attention.ts` — pure. **What the barn owes a
   person**: the missed round as one line, the clock nobody looked up, the
   clock clearing today or tomorrow. `ROUND_STALE_AFTER_DAYS` lives here
@@ -2509,6 +2591,7 @@ This pack is the one that forced the change; the full reasoning is in
   · `drizzle/0224_*.sql` · `drizzle/0225_livestock_capital_transfers_rls.sql`
   · `drizzle/0226_*.sql` (`inventory_lots.capitalised_on`)
   · `drizzle/0273_*.sql` (`livestock_treatments.course_days`)
+  · `drizzle/0274_*.sql` · `drizzle/0275_livestock_breeding_rls.sql` (`livestock_breedings`, `livestock_breeding_checks`)
 
 ## Decisions & gotchas
 
@@ -2533,6 +2616,23 @@ This pack is the one that forced the change; the full reasoning is in
   empty is refused — that row would later read as clear.
 - **The binding treatment clears LAST, not most recently.** A long-withdrawal
   product given first outlasts a short one given after it.
+- **A BULL MEANS WINDOWS, NOT DATES, AND THE CALENDAR IS A FOLD.** No due date
+  and no status is stored anywhere; `breedingCycles` folds the exposures, the
+  checks and the births (the rows `recordBirth` already writes) on every read.
+  A stored date would stop agreeing with the out date the first time somebody
+  corrected it. **The far end of an open exposure is TODAY pushed forward** —
+  it grows by a day for every day he stays, which is what makes `He's out`
+  the correction that matters.
+- **A PEN EXPOSURE REACHES ITS FEMALES THROUGH MEMBERSHIP, LIKE A DOSE IN THE
+  WATER.** One row on the pen; every female living in it during the window
+  reads it; the bull and any male do not. Same walk, same both-ends-inclusive
+  rule, same `via` marker as `treatmentsByLot`.
+- **THE VET'S DATE BEATS A REMEMBERED ONE.** A `days_bred` estimate narrows the
+  window to ± 7 days and is clipped to the exposure's window only when the
+  two overlap; when they do not, the arm wins and the window is the vet's.
+- **A BIRTH A MONTH BEFORE THE WINDOW IS NOT THIS CYCLE'S.** It came from an
+  exposure nobody recorded; counting it would put a negative six weeks in the
+  cull column. The cycle stays running and the birth is the offspring table's.
 - **A COURSE COUNTS FROM ITS LAST DOSE.** `course_days` is a length, never a
   set of rows, and every clock reader goes through `lastDoseOn`. Never read
   `treated_on` as "the day the clock starts" again — it is the first day.
@@ -2880,9 +2980,18 @@ on the dev branch, 2026-08-27** — the terminology review that produced
 - **A parent picker does not exclude descendants.** Finding them means a walk per
   candidate; the write path refuses the choice with a sentence that says why.
   Wrong trade if a herd ever gets deep enough for it to be a common mistake.
-- **No breeding-group or exposure record**, so "when is she due" is unanswerable
-  and `born_on` is the only date this pack knows. That is slice 4c and it is the
-  half of the founder's ask this slice did not reach.
+- ~~**No breeding-group or exposure record**, so "when is she due" is unanswerable~~
+  — **closed 2026-09-08**, slice 4c: `livestock_breedings`,
+  `livestock_breeding_checks`, the fold in `core/breeding.ts`, the Breeding tab.
+- **A pen-level preg check counts for all of its loose head at once.** Thirty
+  unnamed cows checked as `open` is thirty open cows; a mixed result on a pen
+  needs the cows named out first. Right for a pen nobody has named out of,
+  and the guide says so.
+- **The advisor does not see the calendar.** `farmSnapshot` carries the
+  breeding composition (4a) and nothing about who is due; a question about
+  calving season is answered blind.
+- **Sire performance (4d) has its edge now** — `livestock_breedings_tenant_sire_idx`
+  walks "which cows did this bull cover" — and nothing reads it yet.
 - **THERE IS NO BREEDING-LIVESTOCK ACCOUNT IN THE FARM CHART.** The picker
   offers `1600 · Equipment` and `1650 · Vehicles`, because the generic chart has
   no `1700 Breeding livestock`. A cow in Equipment is wrong on a balance sheet

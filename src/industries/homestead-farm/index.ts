@@ -114,6 +114,24 @@ export const homesteadFarm: IndustryProfile = {
         swine: 400,
       },
       /**
+       * Days from conception to birth, per species — what the breeding
+       * calendar pushes a bull's window forward by. Here for the reason the
+       * tape divisors are: an animal fact, not a software one, and a pack
+       * that knew a cow carries for 283 days would know what a cow is. The
+       * form pre-fills it and a person can change it, and the figure used
+       * is copied onto the record so a later change here moves nothing
+       * already on the calendar.
+       *
+       * **Poultry is deliberately absent.** A hen does not gestate; a hatch
+       * is twenty-one days in an incubator, which is a different calendar
+       * with a different starting event, and a figure here would offer a
+       * calving window for a flock.
+       */
+      gestationDays: {
+        cattle: 283,
+        swine: 114,
+      },
+      /**
        * Breeds worth OFFERING, per species — suggestions for the composition
        * editor, never a closed list. Here for the same reason species and tape
        * divisors are: a pack that knew what a Hereford was would know what

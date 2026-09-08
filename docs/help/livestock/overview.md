@@ -4,7 +4,7 @@
 > **Route:** /dashboard/m/livestock/**
 > **Order:** 0
 
-Open **Livestock** in the sidebar. Four tabs run along the top of every screen: `Overview`, `Daily round`, `Feed` and `Ask`.
+Open **Livestock** in the sidebar. Five tabs run along the top of every screen: `Overview`, `Daily round`, `Feed`, `Breeding` and `Ask`.
 
 ## What you see
 
@@ -15,6 +15,7 @@ Open **Livestock** in the sidebar. Four tabs run along the top of every screen: 
 - **One {{livestockLot|lower}}'s page.** Head, losses, age, feed, weight, withdrawal, where they are, breeding, tags, checks, treatments and weighings. See [One {{livestockLot|lower}}](lot.md).
 - **`Daily round`.** One tap to say you looked and they are fine. See [The daily round](daily-round.md).
 - **`Feed`.** The largest cash cost, and what each {{livestockLot|lower}} carried of it. See [Feed](feed.md).
+- **`Breeding`.** Who is due and when, from the day the sire went in. See [Breeding](breeding.md).
 - **`Ask`.** Husbandry questions answered against your own records. See [Ask](ask.md).
 
 ## Two ideas the whole tool rests on

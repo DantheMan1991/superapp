@@ -12,6 +12,18 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-08 — Livestock's source raises due windows (`claude/the-breeding-calendar`)
+
+`livestock-barn` now also returns `breedingAttention` items: the week before a
+female's due window opens (`soon`), the day it opens (`today`), and a window
+shut with no birth and no check recorded (`overdue`, persisting like a
+withdrawal nobody looked up). **Never the middle of the window** — a herd's is
+three months long and a line every day of it is the digest somebody mutes; the
+pack's Breeding tab carries who is due now. Same rules as before: derived from
+`whoIsDue`, the one funnel the tab reads, to everybody, reading the tenant's
+`industry` under the caller's own tx for the profile's gestation. Details in
+[livestock.md](livestock.md).
+
 ### 2026-09-08 — Livestock joins the digest, fourth (`claude/the-barn-reaches-what-needs-you`)
 
 The second pack source, `livestock-barn` (`src/packs/livestock/attention/source.ts`),

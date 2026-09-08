@@ -246,6 +246,40 @@ d("livestock tables (RLS)", () => {
         { tenantId: tenantB, livestockLotId: lotB, breed: "hereford", parts: 1 },
       ]);
 
+      // Slice 4c. One exposure and one check each side.
+      await tx.insert(schema.livestockBreedings).values([
+        {
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          exposedFrom: "2026-05-01",
+          exposedTo: "2026-05-01",
+          gestationDays: 21,
+          notes: "Ours",
+        },
+        {
+          tenantId: tenantB,
+          livestockLotId: lotB,
+          exposedFrom: "2026-05-01",
+          gestationDays: 283,
+          notes: "Theirs",
+        },
+      ]);
+      await tx.insert(schema.livestockBreedingChecks).values([
+        {
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          checkedOn: "2026-05-10",
+          result: "bred",
+          daysBred: 9,
+        },
+        {
+          tenantId: tenantB,
+          livestockLotId: lotB,
+          checkedOn: "2026-09-01",
+          result: "open",
+        },
+      ]);
+
       await tx.insert(schema.livestockFeedDraws).values([
         {
           tenantId: tenantA,
@@ -1209,5 +1243,159 @@ d("livestock tables (RLS)", () => {
       ),
     ).toHaveLength(0);
   });
+
+  // ------------------------------------------ slice 4c: the calendar ---
+  //
+  // A breeding row reaches every female living in the pen through the
+  // membership walk, the way a treatment in the water does — so a row from
+  // another farm would not merely be visible, it would put a due date on
+  // this farm's cows. And the sire column is a composite self-FK for the
+  // reason the dam column is: another tenant's bull cannot be named.
+
+  it("a tenant sees only its own breeding calendar", async () => {
+    const mine = await asOwner((tx) => tx.select().from(schema.livestockBreedings));
+    expect(mine.map((b) => b.notes)).toEqual(["Ours"]);
+    const theirs = await asOtherTenant((tx) => tx.select().from(schema.livestockBreedings));
+    expect(theirs.map((b) => b.notes)).toEqual(["Theirs"]);
+
+    const myChecks = await asOwner((tx) => tx.select().from(schema.livestockBreedingChecks));
+    expect(myChecks.map((c) => c.result)).toEqual(["bred"]);
+    const theirChecks = await asOtherTenant((tx) =>
+      tx.select().from(schema.livestockBreedingChecks),
+    );
+    expect(theirChecks.map((c) => c.result)).toEqual(["open"]);
+  });
+
+  it("CANNOT NAME ANOTHER TENANT'S ANIMAL AS THE SIRE, nor breed another tenant's animal", async () => {
+    // Unrepresentable: the composite FKs fail even here under withSystem.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockBreedings).values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          sireLotId: lotB,
+          exposedFrom: "2026-05-01",
+          gestationDays: 283,
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockBreedings).values({
+          tenantId: tenantA,
+          livestockLotId: lotB,
+          exposedFrom: "2026-05-01",
+          gestationDays: 283,
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockBreedingChecks).values({
+          tenantId: tenantA,
+          livestockLotId: lotB,
+          checkedOn: "2026-09-01",
+          result: "bred",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses the dates backwards, a gestation of nothing, an animal bred to itself, an invented result, and days on an open check", async () => {
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockBreedings).values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          exposedFrom: "2026-05-01",
+          exposedTo: "2026-04-01",
+          gestationDays: 283,
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockBreedings).values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          exposedFrom: "2026-05-01",
+          gestationDays: 0,
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockBreedings).values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          sireLotId: lotA,
+          exposedFrom: "2026-05-01",
+          gestationDays: 283,
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockBreedingChecks).values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          checkedOn: "2026-09-01",
+          result: "maybe",
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockBreedingChecks).values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          checkedOn: "2026-09-01",
+          result: "open",
+          daysBred: 30,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a staff member can record breeding and what the vet found, because opening the gate is a chore", async () => {
+    const [row] = await asStaff((tx) =>
+      tx
+        .insert(schema.livestockBreedings)
+        .values({
+          tenantId: tenantA,
+          livestockLotId: lotA2,
+          exposedFrom: "2026-06-01",
+          exposedTo: "2026-06-01",
+          gestationDays: 21,
+          notes: "By the mate",
+        })
+        .returning(),
+    );
+    expect(row.livestockLotId).toBe(lotA2);
+    const [check] = await asStaff((tx) =>
+      tx
+        .insert(schema.livestockBreedingChecks)
+        .values({
+          tenantId: tenantA,
+          livestockLotId: lotA2,
+          checkedOn: "2026-06-15",
+          result: "bred",
+          daysBred: 14,
+        })
+        .returning(),
+    );
+    expect(check.daysBred).toBe(14);
+  });
+
+  it("the calendar is default-deny with no tenant context", async () => {
+    const nowhere = "00000000-0000-0000-0000-000000000000";
+    expect(
+      await withTenant(nowhere, (tx) => tx.select().from(schema.livestockBreedings)),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) => tx.select().from(schema.livestockBreedingChecks)),
+    ).toHaveLength(0);
+  });
+
 });
 

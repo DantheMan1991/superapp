@@ -9,7 +9,7 @@ Open **Livestock** in the sidebar. The heading reads `A {{livestockLot|lower}} i
 ## What you see
 
 - **{button:Add animals|primary}.** Starts a {{livestockLot|lower}} or adds one named animal. Owners only.
-- **The four tabs.** `Overview` is this page. The others are the daily round, feed and ask.
+- **The five tabs.** `Overview` is this page. The others are the daily round, feed, breeding and ask.
 - **The search box.** Finds by name, by species, or by any tag an animal wears or has worn. Type and press Enter, or click {button:Find|outline}. {button:Clear|ghost} appears beside it while a search is on.
 - **The species pills.** `All`, then one pill per species on the farm, such as `Cattle`, `Poultry` and `Swine`. Click one to see only that species. They only appear when the farm has more than one species.
 - **{button:Show closed|outline}.** Brings finished groups back into the list. It then reads {button:Hiding nothing|primary}.

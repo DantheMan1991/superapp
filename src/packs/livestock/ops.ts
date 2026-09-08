@@ -10,6 +10,8 @@ import type {
   LivestockFeedGroup,
   LivestockFeedGroupMember,
   LivestockLotMember,
+  LivestockBreeding,
+  LivestockBreedingCheck,
   LivestockCapitalTransfer,
   LivestockIdentifier,
   LivestockLot,
@@ -58,16 +60,26 @@ import {
 import { isValidSlug } from "@/packs/inventory/vocabulary";
 import { carriedValue } from "@/packs/inventory/core/valuation";
 import { convert, getUnit } from "@/packs/inventory/core/units";
-import { breedLabel, tapeDivisorFrom } from "./vocabulary";
+import { breedLabel, gestationDaysFrom, tapeDivisorFrom } from "./vocabulary";
 import { addDays } from "@/lib/timezone";
 import {
   ageInDays,
   headEffect,
   splitInHead,
   summariseHead,
+  summarisePen,
   type HeadSummary,
 } from "./core/herd";
 import { checkStreak } from "./core/daily";
+import {
+  BREEDING_RESULTS,
+  breedingCycles,
+  currentCycle,
+  type BirthLike,
+  type BreedingResult,
+  type Cycle,
+  type ExposureVia,
+} from "./core/breeding";
 import {
   allocateCents,
   allocateQuantity,
@@ -162,6 +174,7 @@ export class LivestockError extends Error {
       | "INVALID_WEIGHT"
       | "INVALID_TREATMENT"
       | "INVALID_BREED"
+      | "INVALID_BREEDING"
       | "INVALID_PARENT",
     message: string,
   ) {
@@ -1418,6 +1431,8 @@ export type LotMemberSummary = {
    * off a head balance of one — a pen down to its last bird is still a pen.
    */
   isIndividual: boolean;
+  /** Slice 4c: a male living in the pen has no line on its calendar. */
+  sex: string | null;
   startedOn: string;
 };
 
@@ -1440,6 +1455,7 @@ export async function lotMemberSummaries(
       inventoryLotId: true,
       species: true,
       recordKind: true,
+      sex: true,
     },
   });
   const byId = new Map(lots.map((l) => [l.id, l]));
@@ -1471,6 +1487,7 @@ export async function lotMemberSummaries(
       splitInHead: splitInHead(rows),
       parentInventoryLotId: codes.get(lot.inventoryLotId)?.parentLotId ?? null,
       isIndividual: lot.recordKind === "animal",
+      sex: lot.sex,
       startedOn: m.startedOn,
     });
   }
@@ -2607,6 +2624,613 @@ export async function lotForOffspring(
     if (parent?.recordKind === "lot") return parent.id;
   }
   return null;
+}
+
+// ── Slice 4c: the breeding calendar ──────────────────────────────────────────
+
+/** A gestation past this is not an animal this pack will meet. */
+export const GESTATION_DAYS_MAX = 730;
+
+export interface BreedingInput {
+  /** The dam side: one cow, or the pen the bull was turned in with. */
+  livestockLotId: string;
+  sireLotId?: string | null;
+  /** The day he went in, or the service date. */
+  exposedFrom: string;
+  /** The day he came out. Null or absent while he is still in. */
+  exposedTo?: string | null;
+  gestationDays: number;
+  notes?: string;
+}
+
+function validGestation(days: number): number {
+  if (!Number.isInteger(days) || days < 1 || days > GESTATION_DAYS_MAX) {
+    throw new LivestockError(
+      "INVALID_BREEDING",
+      `a gestation is a whole number of days, from 1 to ${GESTATION_DAYS_MAX}`,
+    );
+  }
+  return days;
+}
+
+/**
+ * The two ends of an exposure, and the sexes on either side of it.
+ *
+ * **A STATED CONTRADICTION IS REFUSED; AN UNRECORDED SEX IS NOT.** A sire
+ * recorded as female or a dam recorded as male is a mis-click, the same rule
+ * `setParents` follows; an animal with no sex on file goes through, because
+ * not knowing is not a contradiction. Species is deliberately not checked —
+ * a mule is a real animal.
+ */
+async function checkBreedingSides(
+  tx: Tx,
+  tenantId: string,
+  input: { livestockLotId: string; sireLotId: string | null; exposedFrom: string; exposedTo: string | null },
+): Promise<void> {
+  const lot = await getLivestockLot(tx, tenantId, input.livestockLotId);
+  if (!lot) throw new LivestockError("NOT_FOUND", `lot ${input.livestockLotId}`);
+  if (lot.sex === "male") {
+    throw new LivestockError(
+      "INVALID_BREEDING",
+      "this animal is recorded as male — record the breeding on the female, or on the pen he was in with",
+    );
+  }
+  if (input.exposedTo !== null && input.exposedTo < input.exposedFrom) {
+    throw new LivestockError(
+      "INVALID_BREEDING",
+      "he cannot come out before he went in — check the two dates",
+    );
+  }
+  if (input.sireLotId) {
+    if (input.sireLotId === input.livestockLotId) {
+      throw new LivestockError("INVALID_BREEDING", "an animal is not bred to itself");
+    }
+    const sire = await getLivestockLot(tx, tenantId, input.sireLotId);
+    if (!sire) throw new LivestockError("NOT_FOUND", "that sire no longer exists");
+    if (sire.sex === "female") {
+      throw new LivestockError(
+        "INVALID_BREEDING",
+        "that animal is recorded as female and cannot be the sire",
+      );
+    }
+  }
+}
+
+/**
+ * **THE BULL WENT IN.** One row on the pen, or on the cow; the calving
+ * window is a fold over it (`core/breeding.ts`), never a column.
+ *
+ * `member`: turning a bull in is done by whoever opened the gate, and so is
+ * writing it down. Same level as a treatment or a weighing.
+ */
+export async function recordBreeding(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: BreedingInput,
+): Promise<LivestockBreeding> {
+  requireWrite(ctx, "member");
+  const sireLotId = input.sireLotId ?? null;
+  const exposedTo = input.exposedTo ?? null;
+  await checkBreedingSides(tx, ctx.tenantId, {
+    livestockLotId: input.livestockLotId,
+    sireLotId,
+    exposedFrom: input.exposedFrom,
+    exposedTo,
+  });
+  const [row] = await tx
+    .insert(schema.livestockBreedings)
+    .values({
+      tenantId: ctx.tenantId,
+      livestockLotId: input.livestockLotId,
+      sireLotId,
+      exposedFrom: input.exposedFrom,
+      exposedTo,
+      gestationDays: validGestation(input.gestationDays),
+      notes: input.notes ?? "",
+      recordedBy: ctx.userId,
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * Correct an exposure — most often **the day he came out**, written down
+ * once he has. Every due date that hangs off it moves with it, which is the
+ * whole argument for the window being a fold.
+ */
+export async function updateBreeding(
+  tx: Tx,
+  ctx: LivestockCtx,
+  id: string,
+  patch: Partial<Omit<BreedingInput, "livestockLotId">>,
+): Promise<LivestockBreeding> {
+  requireWrite(ctx, "member");
+  const existing = await tx.query.livestockBreedings.findFirst({
+    where: and(
+      eq(schema.livestockBreedings.tenantId, ctx.tenantId),
+      eq(schema.livestockBreedings.id, id),
+    ),
+  });
+  if (!existing) throw new LivestockError("NOT_FOUND", `breeding ${id}`);
+  const next = {
+    sireLotId: patch.sireLotId === undefined ? existing.sireLotId : patch.sireLotId,
+    exposedFrom: patch.exposedFrom ?? existing.exposedFrom,
+    exposedTo: patch.exposedTo === undefined ? existing.exposedTo : patch.exposedTo,
+    gestationDays:
+      patch.gestationDays === undefined
+        ? existing.gestationDays
+        : validGestation(patch.gestationDays),
+    notes: patch.notes ?? existing.notes,
+  };
+  await checkBreedingSides(tx, ctx.tenantId, {
+    livestockLotId: existing.livestockLotId,
+    sireLotId: next.sireLotId,
+    exposedFrom: next.exposedFrom,
+    exposedTo: next.exposedTo,
+  });
+  const [row] = await tx
+    .update(schema.livestockBreedings)
+    .set({ ...next, updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.livestockBreedings.tenantId, ctx.tenantId),
+        eq(schema.livestockBreedings.id, id),
+      ),
+    )
+    .returning();
+  return row;
+}
+
+/** Remove an exposure that never happened. The checks and the births stay: they are facts of their own. */
+export async function deleteBreeding(tx: Tx, ctx: LivestockCtx, id: string): Promise<void> {
+  requireWrite(ctx, "member");
+  const gone = await tx
+    .delete(schema.livestockBreedings)
+    .where(
+      and(
+        eq(schema.livestockBreedings.tenantId, ctx.tenantId),
+        eq(schema.livestockBreedings.id, id),
+      ),
+    )
+    .returning({ id: schema.livestockBreedings.id });
+  if (gone.length === 0) throw new LivestockError("NOT_FOUND", `breeding ${id}`);
+}
+
+export interface BreedingCheckInput {
+  livestockLotId: string;
+  checkedOn: string;
+  result: BreedingResult;
+  /** The vet's estimate of days in calf. Only with `bred`. */
+  daysBred?: number | null;
+  notes?: string;
+}
+
+/**
+ * **WHAT THE VET FOUND.** In calf, open, or lost — a dated fact about one
+ * animal (or a pen nobody has named out of), folded into the calendar by
+ * date. No foreign key to the exposure: see the table's comment.
+ *
+ * `member`, because holding the cow for the vet is a chore.
+ */
+export async function recordBreedingCheck(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: BreedingCheckInput,
+): Promise<LivestockBreedingCheck> {
+  requireWrite(ctx, "member");
+  const lot = await getLivestockLot(tx, ctx.tenantId, input.livestockLotId);
+  if (!lot) throw new LivestockError("NOT_FOUND", `lot ${input.livestockLotId}`);
+  if (!BREEDING_RESULTS.includes(input.result)) {
+    throw new LivestockError("INVALID_BREEDING", "say what was found: in calf, open, or lost");
+  }
+  const daysBred = input.daysBred ?? null;
+  if (daysBred !== null) {
+    if (input.result !== "bred") {
+      throw new LivestockError(
+        "INVALID_BREEDING",
+        "days pregnant only go with an animal found pregnant",
+      );
+    }
+    if (!Number.isInteger(daysBred) || daysBred < 0 || daysBred > GESTATION_DAYS_MAX) {
+      throw new LivestockError(
+        "INVALID_BREEDING",
+        `days in calf is a whole number, from 0 to ${GESTATION_DAYS_MAX}`,
+      );
+    }
+  }
+  const [row] = await tx
+    .insert(schema.livestockBreedingChecks)
+    .values({
+      tenantId: ctx.tenantId,
+      livestockLotId: input.livestockLotId,
+      checkedOn: input.checkedOn,
+      result: input.result,
+      daysBred,
+      notes: input.notes ?? "",
+      recordedBy: ctx.userId,
+    })
+    .returning();
+  return row;
+}
+
+export async function deleteBreedingCheck(tx: Tx, ctx: LivestockCtx, id: string): Promise<void> {
+  requireWrite(ctx, "member");
+  const gone = await tx
+    .delete(schema.livestockBreedingChecks)
+    .where(
+      and(
+        eq(schema.livestockBreedingChecks.tenantId, ctx.tenantId),
+        eq(schema.livestockBreedingChecks.id, id),
+      ),
+    )
+    .returning({ id: schema.livestockBreedingChecks.id });
+  if (gone.length === 0) throw new LivestockError("NOT_FOUND", `check ${id}`);
+}
+
+/** How an exposure reached a lot: recorded on it, or on the pen it lived in. */
+export type BreedingForLot = LivestockBreeding & { via: ExposureVia };
+
+/**
+ * Whether any day of an exposure fell inside an animal's stay in a pen. Both
+ * ends inclusive, as `courseTouchesStay` — a bull in the pen the day she
+ * arrived was in with her.
+ */
+function exposureTouchesStay(
+  exposedFrom: string,
+  exposedTo: string | null,
+  today: string,
+  startedOn: string,
+  endedOn: string | null,
+): boolean {
+  const last = exposedTo ?? (today > exposedFrom ? today : exposedFrom);
+  if (last < startedOn) return false;
+  if (endedOn !== null && exposedFrom > endedOn) return false;
+  return true;
+}
+
+/**
+ * Every exposure that reaches each lot: its own rows, and **the pen's rows
+ * for every stay that overlapped them** — one row on the pen when the bull
+ * went in with thirty cows, read by all thirty, exactly as a treatment in the
+ * water is (`treatmentsByLot`). The bull himself, and any male living in the
+ * pen, do not read it.
+ *
+ * A pen's row keeps its own `livestock_lot_id`, so a cow's page can say "in
+ * with Cows" and never offer to correct another record's row.
+ */
+export async function exposuresByLot(
+  tx: Tx,
+  tenantId: string,
+  lotIds: string[],
+  today: string,
+): Promise<Map<string, BreedingForLot[]>> {
+  const out = new Map<string, BreedingForLot[]>();
+  if (lotIds.length === 0) return out;
+  const [lots, lived] = await Promise.all([
+    tx.query.livestockLots.findMany({
+      where: and(
+        eq(schema.livestockLots.tenantId, tenantId),
+        inArray(schema.livestockLots.id, lotIds),
+      ),
+      columns: { id: true, sex: true },
+    }),
+    membershipTreatmentSources(tx, tenantId, lotIds),
+  ]);
+  const sexOf = new Map(lots.map((l) => [l.id, l.sex]));
+  const wanted = [
+    ...new Set([
+      ...lotIds,
+      ...[...lived.values()].flatMap((rows) => rows.map((r) => r.livestockLotId)),
+    ]),
+  ];
+  const rows = await tx.query.livestockBreedings.findMany({
+    where: and(
+      eq(schema.livestockBreedings.tenantId, tenantId),
+      inArray(schema.livestockBreedings.livestockLotId, wanted),
+    ),
+    orderBy: (b, { desc: byDesc }) => [byDesc(b.exposedFrom)],
+  });
+  const byOwner = new Map<string, LivestockBreeding[]>();
+  for (const row of rows) {
+    const list = byOwner.get(row.livestockLotId);
+    if (list) list.push(row);
+    else byOwner.set(row.livestockLotId, [row]);
+  }
+  for (const lotId of lotIds) {
+    const own = (byOwner.get(lotId) ?? []).map((b) => ({ ...b, via: "own" as const }));
+    const fromPens =
+      sexOf.get(lotId) === "male"
+        ? []
+        : (lived.get(lotId) ?? []).flatMap((span) =>
+            (byOwner.get(span.livestockLotId) ?? [])
+              .filter(
+                (b) =>
+                  b.sireLotId !== lotId &&
+                  exposureTouchesStay(b.exposedFrom, b.exposedTo, today, span.startedOn, span.endedOn),
+              )
+              .map((b) => ({ ...b, via: "pen" as const })),
+          );
+    const seen = new Set<string>();
+    const all: BreedingForLot[] = [];
+    for (const b of [...own, ...fromPens]) {
+      if (seen.has(b.id)) continue;
+      seen.add(b.id);
+      all.push(b);
+    }
+    if (all.length > 0) {
+      all.sort((a, b) => (a.exposedFrom < b.exposedFrom ? 1 : -1));
+      out.set(lotId, all);
+    }
+  }
+  return out;
+}
+
+export async function listBreedingChecksForLot(
+  tx: Tx,
+  tenantId: string,
+  livestockLotId: string,
+): Promise<LivestockBreedingCheck[]> {
+  return tx.query.livestockBreedingChecks.findMany({
+    where: and(
+      eq(schema.livestockBreedingChecks.tenantId, tenantId),
+      eq(schema.livestockBreedingChecks.livestockLotId, livestockLotId),
+    ),
+    orderBy: (c, { desc: byDesc }) => [byDesc(c.checkedOn), byDesc(c.createdAt)],
+  });
+}
+
+/** What one lot's calendar is folded from, and the fold itself. */
+export interface BreedingCalendar {
+  exposures: BreedingForLot[];
+  checks: LivestockBreedingCheck[];
+  cycles: Cycle[];
+}
+
+/**
+ * The calendar of every lot asked for — **the single funnel**, so the lot
+ * page, the breeding page and What needs you cannot disagree about who is
+ * due. Exposures own and inherited, the checks, and the births (a lot with
+ * this one as its dam and a `born_on`), folded by `breedingCycles`.
+ *
+ * `packConfig` supplies the gestation for a cycle a check opened on its own;
+ * a cycle an exposure opened carries its own figure.
+ */
+export async function breedingByLot(
+  tx: Tx,
+  tenantId: string,
+  lotIds: string[],
+  today: string,
+  packConfig: unknown,
+): Promise<Map<string, BreedingCalendar>> {
+  const out = new Map<string, BreedingCalendar>();
+  if (lotIds.length === 0) return out;
+  const [lots, exposures, checks, offspring] = await Promise.all([
+    tx.query.livestockLots.findMany({
+      where: and(
+        eq(schema.livestockLots.tenantId, tenantId),
+        inArray(schema.livestockLots.id, lotIds),
+      ),
+      columns: { id: true, species: true },
+    }),
+    exposuresByLot(tx, tenantId, lotIds, today),
+    tx.query.livestockBreedingChecks.findMany({
+      where: and(
+        eq(schema.livestockBreedingChecks.tenantId, tenantId),
+        inArray(schema.livestockBreedingChecks.livestockLotId, lotIds),
+      ),
+      orderBy: (c, { desc: byDesc }) => [byDesc(c.checkedOn), byDesc(c.createdAt)],
+    }),
+    tx.query.livestockLots.findMany({
+      where: and(
+        eq(schema.livestockLots.tenantId, tenantId),
+        inArray(schema.livestockLots.damLotId, lotIds),
+      ),
+      columns: { id: true, damLotId: true, bornOn: true, inventoryLotId: true },
+    }),
+  ]);
+  const born = offspring.filter((o) => o.bornOn !== null && o.damLotId !== null);
+  const headByInventoryLot = await movementKindsForLots(
+    tx,
+    tenantId,
+    born.map((o) => o.inventoryLotId),
+  );
+  const checksByLot = new Map<string, LivestockBreedingCheck[]>();
+  for (const c of checks) {
+    const list = checksByLot.get(c.livestockLotId) ?? [];
+    list.push(c);
+    checksByLot.set(c.livestockLotId, list);
+  }
+  const birthsByDam = new Map<string, BirthLike[]>();
+  for (const o of born) {
+    const list = birthsByDam.get(o.damLotId!) ?? [];
+    list.push({
+      id: o.id,
+      bornOn: o.bornOn!,
+      head: Math.max(1, summariseHead(headByInventoryLot.get(o.inventoryLotId) ?? []).intake),
+    });
+    birthsByDam.set(o.damLotId!, list);
+  }
+  for (const lot of lots) {
+    const own = exposures.get(lot.id) ?? [];
+    const ownChecks = checksByLot.get(lot.id) ?? [];
+    const births = birthsByDam.get(lot.id) ?? [];
+    if (own.length === 0 && ownChecks.length === 0) continue;
+    const cycles = breedingCycles(
+      {
+        exposures: own,
+        checks: ownChecks.map((c) => ({
+          id: c.id,
+          checkedOn: c.checkedOn,
+          result: c.result as BreedingResult,
+          daysBred: c.daysBred,
+        })),
+        births,
+        gestationDays: gestationDaysFrom(packConfig, lot.species),
+      },
+      today,
+    );
+    out.set(lot.id, { exposures: own, checks: ownChecks, cycles });
+  }
+  return out;
+}
+
+/**
+ * How many animals stand in every open record today, and what each is
+ * called — **the fold the attention source, the breeding page and the round
+ * all need**, made once.
+ *
+ * A pen's `standing` is its population, loose plus named (`summarisePen`);
+ * its `loose` is the head in its own ledger, which is what a line about "the
+ * pen" means once every named animal has a line of her own. A member's
+ * `standing` is her own balance.
+ */
+export interface StandingHerd {
+  lots: LivestockLot[];
+  /** Records whose inventory lot is not closed. */
+  open: LivestockLot[];
+  /** Which lot each member lives in today. */
+  parentOf: Map<string, string>;
+  /** Population per open record. */
+  standing: Map<string, number>;
+  /** Head in the record's own ledger, ignoring what lives inside it. */
+  loose: Map<string, number>;
+  codeOf: (livestockLotId: string) => string;
+}
+
+export async function standingHerd(
+  tx: Tx,
+  tenantId: string,
+  today: string,
+): Promise<StandingHerd> {
+  const lots = await listLivestockLots(tx, tenantId);
+  const empty = (): StandingHerd => ({
+    lots,
+    open: [],
+    parentOf: new Map(),
+    standing: new Map(),
+    loose: new Map(),
+    codeOf: () => "—",
+  });
+  if (lots.length === 0) return empty();
+  const ids = lots.map((l) => l.id);
+  const inventoryLotIds = lots.map((l) => l.inventoryLotId);
+  const [inventoryLots, movements, parentOf] = await Promise.all([
+    listInventoryLots(tx, tenantId),
+    movementKindsForLots(tx, tenantId, inventoryLotIds),
+    parentByLot(tx, tenantId, ids, today),
+  ]);
+  const byInv = new Map(inventoryLots.map((l) => [l.id, l]));
+  const byId = new Map(lots.map((l) => [l.id, l]));
+  const membersOf = new Map<string, string[]>();
+  for (const [memberId, parentId] of parentOf) {
+    const list = membersOf.get(parentId) ?? [];
+    list.push(memberId);
+    membersOf.set(parentId, list);
+  }
+  const open = lots.filter((l) => byInv.get(l.inventoryLotId)?.status !== "closed");
+  const standing = new Map<string, number>();
+  const loose = new Map<string, number>();
+  for (const lot of open) {
+    const own = summariseHead(movements.get(lot.inventoryLotId) ?? []);
+    loose.set(lot.id, own.balance);
+    if (parentOf.has(lot.id)) {
+      standing.set(lot.id, own.balance);
+      continue;
+    }
+    const members = (membersOf.get(lot.id) ?? []).flatMap((memberId) => {
+      const m = byId.get(memberId);
+      if (!m) return [];
+      const rows = movements.get(m.inventoryLotId) ?? [];
+      return [
+        {
+          summary: summariseHead(rows),
+          splitInHead: splitInHead(rows),
+          splitFromHere: byInv.get(m.inventoryLotId)?.parentLotId === lot.inventoryLotId,
+        },
+      ];
+    });
+    standing.set(lot.id, summarisePen(own, members).balance);
+  }
+  return {
+    lots,
+    open,
+    parentOf,
+    standing,
+    loose,
+    codeOf: (livestockLotId) => {
+      const lot = byId.get(livestockLotId);
+      return (lot && byInv.get(lot.inventoryLotId)?.code) ?? "—";
+    },
+  };
+}
+
+/** One record on the breeding page: who, where, and where she stands. */
+export interface DueLine {
+  lotId: string;
+  code: string;
+  isAnimal: boolean;
+  species: string;
+  /** The pen she lives in, when she lives in one. */
+  insideOf: { id: string; code: string } | null;
+  /** Head this line is about: her, or the pen's loose females. */
+  head: number;
+  cycle: Cycle;
+  calendar: BreedingCalendar;
+}
+
+/**
+ * **WHO IS DUE**: every open record with a calendar and animals standing,
+ * newest cycle each. A pen has a line only for its LOOSE head — once every
+ * cow in it has a name, each has a line of her own and the pen's would be
+ * a double count. A male has no line at all.
+ */
+export async function whoIsDue(
+  tx: Tx,
+  tenantId: string,
+  today: string,
+  packConfig: unknown,
+): Promise<DueLine[]> {
+  const herd = await standingHerd(tx, tenantId, today);
+  const candidates = herd.open.filter((l) => {
+    if (l.sex === "male") return false;
+    const head = l.recordKind === "animal" ? herd.standing.get(l.id) ?? 0 : herd.loose.get(l.id) ?? 0;
+    return head > 0;
+  });
+  const calendars = await breedingByLot(
+    tx,
+    tenantId,
+    candidates.map((l) => l.id),
+    today,
+    packConfig,
+  );
+  const lines: DueLine[] = [];
+  for (const lot of candidates) {
+    const calendar = calendars.get(lot.id);
+    const cycle = calendar ? currentCycle(calendar.cycles) : null;
+    if (!calendar || !cycle) continue;
+    const parentId = herd.parentOf.get(lot.id) ?? null;
+    lines.push({
+      lotId: lot.id,
+      code: herd.codeOf(lot.id),
+      isAnimal: lot.recordKind === "animal",
+      species: lot.species,
+      insideOf: parentId ? { id: parentId, code: herd.codeOf(parentId) } : null,
+      head:
+        lot.recordKind === "animal"
+          ? herd.standing.get(lot.id) ?? 0
+          : herd.loose.get(lot.id) ?? 0,
+      cycle,
+      calendar,
+    });
+  }
+  // Soonest window first, undated last, then by name — the order the question
+  // "who is next" wants, so every reader of this list gets the same one.
+  lines.sort((a, b) => {
+    const da = a.cycle.due?.from ?? "9999";
+    const db = b.cycle.due?.from ?? "9999";
+    return da < db ? -1 : da > db ? 1 : a.code.localeCompare(b.code);
+  });
+  return lines;
 }
 
 /**

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   averagePackageWeight,
+  deliveryWeightLb,
+  describeWeightEntry,
   formatWeight,
   hasRecordedWeight,
   weightOf,
@@ -126,5 +128,67 @@ describe("formatWeight", () => {
   it("does not print trailing zeroes from the rounding", () => {
     expect(formatWeight({ lb: 12.5, approximate: true })).toBe("about 12.5 lb");
     expect(formatWeight({ lb: 12, approximate: true })).toBe("about 12 lb");
+  });
+});
+
+/**
+ * Typing a weight in. The ledger stores a TOTAL; the box can be read as one
+ * package or as the whole delivery, and on 2026-09-08 it was read the first
+ * way while meaning the second — five one-pound packages typed as `1` landed as
+ * 1 lb in all, and six packages read "about 2 lb".
+ */
+describe("deliveryWeightLb", () => {
+  it("multiplies a per-package weight by how many arrived", () => {
+    expect(deliveryWeightLb({ basis: "each", typed: 1, quantity: 5 })).toBe(5);
+  });
+
+  it("passes a total through untouched — the plant's ticket", () => {
+    expect(deliveryWeightLb({ basis: "total", typed: 47.5, quantity: 38 })).toBe(47.5);
+  });
+
+  it("keeps an empty box empty, because unweighed is not zero", () => {
+    expect(deliveryWeightLb({ basis: "each", typed: null, quantity: 5 })).toBeNull();
+    expect(deliveryWeightLb({ basis: "total", typed: null, quantity: 5 })).toBeNull();
+  });
+
+  it("does NOT turn a typed zero into 'nobody weighed it'", () => {
+    // `receiveStock` refuses a zero with a sentence. Swallowing it here would
+    // land the receipt unweighed and say nothing.
+    expect(deliveryWeightLb({ basis: "each", typed: 0, quantity: 5 })).toBe(0);
+  });
+});
+
+describe("describeWeightEntry", () => {
+  it("reads back the total under a per-package entry", () => {
+    expect(
+      describeWeightEntry({ basis: "each", typed: 1, quantity: 5, unit: "pkg" }),
+    ).toBe("5 packages, 5 lb in all.");
+  });
+
+  it("reads back the per-package figure under a total — the 0.2 lb that would have stopped it", () => {
+    expect(
+      describeWeightEntry({ basis: "total", typed: 1, quantity: 5, unit: "pkg" }),
+    ).toBe("5 packages, 0.2 lb each.");
+  });
+
+  it("says nothing until there is a quantity and a weight", () => {
+    expect(
+      describeWeightEntry({ basis: "each", typed: null, quantity: 5, unit: "pkg" }),
+    ).toBeNull();
+    expect(
+      describeWeightEntry({ basis: "each", typed: 1, quantity: 0, unit: "pkg" }),
+    ).toBeNull();
+    expect(
+      describeWeightEntry({ basis: "total", typed: 0, quantity: 5, unit: "pkg" }),
+    ).toBeNull();
+  });
+
+  it("uses the singular for one, and rounds the way every other figure does", () => {
+    expect(
+      describeWeightEntry({ basis: "total", typed: 1.3, quantity: 1, unit: "pkg" }),
+    ).toBe("1 package, 1.3 lb each.");
+    expect(
+      describeWeightEntry({ basis: "total", typed: 10, quantity: 3, unit: "pkg" }),
+    ).toBe("3 packages, 3.3333 lb each.");
   });
 });

@@ -62,7 +62,7 @@ Cost is shown without a sign in both directions. A row reading `Used · -20 poun
 3. Pick a `Batch`, or leave it on `No batch`.
 4. Set `When`. It begins on today.
 5. Type `What it cost` if you know it. The help reads `The whole delivery, not the price per pound. Leave it empty if the invoice has not arrived — the stock still counts.`
-6. Type `What it weighed (lb)` if somebody weighed it. Again the whole delivery, not one package. This box is not there for something already counted by weight.
+6. Type `What it weighed (lb)` if somebody weighed it. Beside the label, say how you read the scale. `Each package` means one was on the scale and the app multiplies by `How much`; `All together` means everything in this entry was weighed at once, the way a plant's ticket reads. `Each package` is picked to start, and the button names your unit, so for something counted in head it reads `Each head`. Once `How much` and the weight are both typed, a line under the box reads back the figure you did not type: `5 packages, 5 lb in all.` under `Each package`, or `5 packages, 0.2 lb each.` under `All together`. If that line looks wrong, the entry is wrong. The help under it changes with your choice and ends `Leave it empty if nobody weighed it — an unweighed batch says nothing rather than nothing-at-all-pounds.` This box is not there for something already counted by weight.
 7. Pick `Where` it went, and add `Notes`.
 8. Click {button:Record|primary}. You see `Stock recorded in`.
 

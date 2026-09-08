@@ -13,7 +13,7 @@ The heading is the asset's name. Under it sits its kind, then the company whose 
 - **{button:Edit|outline}.** Opens the dialog that changes anything about the asset. Owners only. It stays available after disposal.
 - **{button:Dispose|outline}.** Takes the asset off the books. Owners only, and it disappears once the asset is disposed of.
 - **`Details`.** `Model`, `Serial or tag`, `Acquired`, `Cost`, and `Kept in`. A dash means nothing was recorded. `Kept in` is a link to whatever this sits inside. `Notes` only appears when you have written some.
-- **`Contains`.** What is kept inside this one, with a count beside the heading. Each is a link. Something disposed of still shows here, marked {badge:disposed|outline}. When nothing is inside you see `Nothing is kept in this one.`
+- **`Contains`.** What is kept inside this one: other assets, and any stock recorded into it under Inventory. The count beside the heading covers both. Each asset is a link, and something disposed of still shows here, marked {badge:disposed|outline}. Each stock line names the item, then its batch after a dot, with how much is on hand at the right; the item's name opens its page. Stock lines only appear when Inventory is switched on, and a batch that has gone back to nothing here is not listed. When nothing at all is inside you see `Nothing is kept in this one.`
 - **`Depreciation`.** How the cost is being written down. See below.
 - **`Maintenance`.** What comes round again, and what has been raised as a job. See below.
 - **`Photos`.** Pictures of this asset over time. This panel only appears when Documents is switched on.
@@ -146,7 +146,7 @@ Emptying the `Acquired` box does not clear the date. It keeps whatever it had, a
 | `Disposed, and the books are settled` | It is off the books and the accounts balance. |
 | `Marked as disposed — nothing posted, see the note` | It is off the list, but nothing reached your accounts. Read the note in the dialog. |
 | `Photo removed — the file is still in Documents` | It is off this asset. The file itself is untouched. |
-| `Nothing is kept in this one.` | Nothing sits inside this asset. |
+| `Nothing is kept in this one.` | No asset sits inside this one, and no stock is recorded in it. |
 | `No schedules yet. Add one for anything that comes round — a service, an inspection, a filter.` | No maintenance is set up. |
 | `No baseline yet` | The schedule has never been done, and has nothing to count from. |
 | `Only an owner can change what the business owns.` | You are signed in as staff. Ask an owner. |

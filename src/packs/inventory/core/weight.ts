@@ -34,7 +34,7 @@
  * quietly drop it.
  */
 
-import { convert, getUnit, roundQuantity } from "./units";
+import { convert, formatQuantity, getUnit, roundQuantity } from "./units";
 
 /** A movement, as the weight fold sees it. */
 export interface WeighedMovement {
@@ -141,6 +141,69 @@ export function weightOf(input: {
  */
 export function formatWeight(reading: WeightReading): string | null {
   if (reading.lb === null) return null;
-  const shown = Number(roundQuantity(reading.lb).toFixed(4)).toString();
-  return `${reading.approximate ? "about " : ""}${shown} lb`;
+  return `${reading.approximate ? "about " : ""}${lbText(reading.lb)}`;
+}
+
+/** "47.5 lb" — the one place pounds are turned into text. */
+function lbText(lb: number): string {
+  return `${Number(roundQuantity(lb).toFixed(4)).toString()} lb`;
+}
+
+// ────────────────────────────────────────────────────────── typing one in ───
+
+/**
+ * How somebody read the scale: one package on it, or everything in the entry.
+ *
+ * **THE LEDGER ONLY EVER STORES THE TOTAL** — `weight_lb` is a total on the
+ * receipt (ADR 0016) and that does not change here. What changed is the box.
+ * On 2026-09-08 five one-pound packages were recorded by typing `1` into a box
+ * labelled "What it weighed", which meant the whole delivery, and the batch
+ * read "about 2 lb" for six packages. A box that can be read two ways will be,
+ * so the form now asks which way, and this is the answer's type.
+ */
+export type WeightEntryBasis = "each" | "total";
+
+/**
+ * The total the ledger stores, from what was typed and how it was meant.
+ *
+ * Unrounded, like `averagePackageWeight` — `receiveStock` rounds once when it
+ * stores. Null only when nothing was typed: an empty box means "nobody weighed
+ * it". A typed zero is passed through so the op can refuse it with its own
+ * sentence, rather than being swallowed into "unweighed" here.
+ */
+export function deliveryWeightLb(input: {
+  basis: WeightEntryBasis;
+  typed: number | null;
+  quantity: number;
+}): number | null {
+  if (input.typed === null) return null;
+  if (input.basis === "total") return input.typed;
+  return input.typed * input.quantity;
+}
+
+/**
+ * The figure somebody did NOT type, read back as they type the other one —
+ * "5 packages, 5 lb in all." under a per-package entry, "5 packages, 0.2 lb
+ * each." under a total. Null until there is a quantity and a weight to speak of.
+ *
+ * **THIS LINE IS THE FIX**, more than the toggle is. Whichever way the box is
+ * read, the other reading sits directly under it, and 0.2 lb a package is a
+ * figure nobody standing at a chest freezer believes for a second.
+ */
+export function describeWeightEntry(input: {
+  basis: WeightEntryBasis;
+  typed: number | null;
+  quantity: number;
+  /** The stocking unit's code, so "1 package" and "5 packages" come out right. */
+  unit: string;
+}): string | null {
+  if (input.typed === null || !Number.isFinite(input.typed) || input.typed <= 0) {
+    return null;
+  }
+  if (!Number.isFinite(input.quantity) || input.quantity <= 0) return null;
+  const count = formatQuantity(input.quantity, input.unit);
+  if (input.basis === "each") {
+    return `${count}, ${lbText(input.typed * input.quantity)} in all.`;
+  }
+  return `${count}, ${lbText(input.typed / input.quantity)} each.`;
 }

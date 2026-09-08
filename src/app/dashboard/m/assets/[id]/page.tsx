@@ -53,6 +53,14 @@ import {
   type MaintenanceView,
 } from "@/packs/assets/components/maintenance-panel";
 import { listAssignableMembers, memberLabel } from "@/lib/team";
+/**
+ * **A FREEZER SAYS WHAT IT HOLDS.** The stock kept at a location lives in the
+ * inventory pack's ledger, and this page reads it through the one query that
+ * pack exports for the purpose — the same door the market truck's till uses —
+ * rather than touching `inventory_movements` itself.
+ */
+import { stockAtLocation, type LocationStockLine } from "@/packs/inventory/ops";
+import { formatQuantity } from "@/packs/inventory/core/units";
 
 export const dynamic = "force-dynamic";
 
@@ -84,13 +92,17 @@ export default async function AssetDetailPage({
   const today = todayInTimezone(ctx.tenant.timezone);
   const currencySymbol = ctx.tenant.currencySymbol;
   const currentPeriod = periodOf(today);
+  // Stock is the inventory pack's to know about. Where that pack is off, the
+  // panel lists other assets only — it never says "no stock" about a ledger
+  // this business does not keep.
+  const inventoryOn = await isModuleEnabled(ctx.tenant.id, "inventory");
 
   const data = await withTenant(
     ctx.tenant.id,
     async (tx) => {
       const asset = await getAsset(tx, ctx.tenant.id, id);
       if (!asset) return null;
-      const [parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers, attachments] =
+      const [parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers, attachments, stock] =
         await Promise.all([
           asset.parentId ? getAsset(tx, ctx.tenant.id, asset.parentId) : null,
           listChildren(tx, ctx.tenant.id, asset.id),
@@ -110,6 +122,13 @@ export default async function AssetDetailPage({
             entityType: "asset",
             entityId: asset.id,
           }),
+          // Not gated on `isStorageLocation`: the ledger is the evidence. If
+          // stock was ever recorded into this asset, it is a place things are
+          // kept, whatever the switch says — the same rule the 2026-08-19
+          // backfill applied.
+          inventoryOn
+            ? stockAtLocation(tx, ctx.tenant.id, asset.id)
+            : Promise.resolve([] as LocationStockLine[]),
         ]);
       // Registers so the proceeds picker can exclude other companies', and
       // companies so the page can name this asset's owner (ADR 0010).
@@ -120,13 +139,13 @@ export default async function AssetDetailPage({
       const companies = await listEntities(tx, ctx.tenant.id, {
         includeInactive: true,
       });
-      return { asset, parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers, registers, companies, attachments };
+      return { asset, parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers, registers, companies, attachments, stock };
     },
     { role: ctx.role },
   );
 
   if (!data) notFound();
-  const { asset, parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers, registers, companies, attachments } = data;
+  const { asset, parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers, registers, companies, attachments, stock } = data;
   // The picture per asset the founder asked for on 2026-08-15, arriving with
   // livestock's — one Layer 0 table, two packs. The FILE is the DMS's, so the
   // panel exists only where the DMS does.
@@ -384,14 +403,22 @@ export default async function AssetDetailPage({
 
         <Panel className="p-5">
           <h2 className="font-heading text-base font-semibold tracking-heading">
-              Contains {children.length > 0 && `(${children.length})`}
-            </h2>
-          <div className="mt-3">
-            {children.length === 0 ? (
+            Contains{" "}
+            {children.length + stock.length > 0 &&
+              `(${children.length + stock.length})`}
+          </h2>
+          <div className="mt-3 space-y-3">
+            {/* **TWO KINDS OF THING LIVE IN A FREEZER**: other assets, kept
+                here through their own `Kept in`, and stock, kept here through
+                the inventory ledger's location column. Until 2026-09-08 this
+                panel knew only the first, and told a freezer holding six
+                packages of beef that nothing was kept in it. */}
+            {children.length === 0 && stock.length === 0 && (
               <p className="text-sm text-muted-foreground">
                 Nothing is kept in this one.
               </p>
-            ) : (
+            )}
+            {children.length > 0 && (
               <ul className="space-y-2 text-sm">
                 {children.map((child) => (
                   <li key={child.id} className="flex items-center gap-2">
@@ -407,6 +434,34 @@ export default async function AssetDetailPage({
                     {child.status === "disposed" && (
                       <Badge variant="outline">disposed</Badge>
                     )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {stock.length > 0 && (
+              <ul className="space-y-2 text-sm">
+                {stock.map((line) => (
+                  <li
+                    key={`${line.itemId}:${line.lotId ?? "none"}`}
+                    className="flex items-baseline justify-between gap-3"
+                  >
+                    <span className="min-w-0">
+                      <Link
+                        href={`/dashboard/m/inventory/${line.itemId}`}
+                        className="font-medium hover:underline"
+                      >
+                        {line.itemName}
+                      </Link>
+                      {line.lotCode && (
+                        <span className="text-muted-foreground">
+                          {" · "}
+                          {line.lotCode}
+                        </span>
+                      )}
+                    </span>
+                    <span className="shrink-0 tabular-nums">
+                      {formatQuantity(line.onHand, line.unit)}
+                    </span>
                   </li>
                 ))}
               </ul>

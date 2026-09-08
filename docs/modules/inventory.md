@@ -33,6 +33,44 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-09-08 — A weight typed the way a person reads a scale (`claude/what-the-freezer-holds`)
+
+**Five one-pound packages were recorded as one pound.** The founder received a
+package of Ground Beef into batch Baxter on the live Hilltop Farm tenant, typed
+`1` under *What it weighed (lb)*, and the batch read 1 lb. He received five more,
+typed `1` again, and six packages read "about 2 lb" — a third of a pound each.
+The box meant the whole delivery, its help text said so, and the label read as
+one package anyway. Slice 6b's decision that the LEDGER stores a total
+([ADR 0016](../decisions/0016-a-catch-weight-item-is-stocked-in-packages.md))
+was never the problem; the box that fed it was.
+
+**The form now asks which way the scale was read, and reads the other figure
+back.** `Each package` / `All together` sit beside the label — per package by
+default, because that is how somebody counting into a freezer reads a scale,
+and a plant's ticket, which gives the total, flips it. Under the box, live as
+both figures are typed: `5 packages, 5 lb in all.` or, the other way,
+`5 packages, 0.2 lb each.` — the sentence that would have stopped the mistake
+before Record. The arithmetic is two pure functions in `core/weight.ts`,
+`deliveryWeightLb` and `describeWeightEntry`, pinned in
+`tests/inventory-weight.test.ts`. **The form multiplies before it calls
+`receiveStockAction`**, so the action's schema, `receiveStock`, the column and
+every reader of it are untouched — the ledger still holds only totals.
+`MovementForm` takes the stocking unit's code (`unit`) now, so the read-back
+says "1 package" and "5 packages" rather than guessing a plural.
+
+**A recorded weight still cannot be corrected**, which is why the Baxter receipt
+has to be put right by hand — one column on one row, the 5-package receipt from
+1 lb to 5 lb, so the batch reads 6 lb. `Correct cost` has no `Correct weight`
+beside it, and the CHECK that keeps weights on inbound rows means a correction
+cannot borrow the cost adjustment's zero-quantity shape. It is in Open items.
+
+**The other half of the day is the asset page**, which now lists the stock kept
+at a location through `stockAtLocation` — the third caller, after the till and
+inventory's own screens. See [assets.md](assets.md), 2026-09-08.
+
+`docs/help/inventory/item.md` step 6 of *How to record a delivery* describes the
+two buttons, the read-back line and the help text that changes with them.
+
 ### 2026-09-03 — Recording stock is a chore, and now it is one (`claude/recording-stock-is-a-chore`)
 
 **The comment said ungated and the code four lines below it said `isOwner`.**
@@ -492,7 +530,10 @@ pounds" is one number twice — so `approximate` doubles as the display guard.
 **Somebody has to be able to enter one by hand, or the whole feature is
 reachable only through a production run.** The receipt form has a weight box —
 hidden for a mass-stocked item, because the quantity is already the weight and
-asking twice invites two numbers that disagree.
+asking twice invites two numbers that disagree. **Since 2026-09-08 the box asks
+which way the scale was read** — `Each package` or `All together` — and reads
+the other figure back as it is typed; the total is still the only thing stored.
+See that day's build-log entry for the mistake that made it necessary.
 
 Migration `0212`, two CHECKs, no new table and therefore no RLS migration and no
 new isolation coverage. Applied to dev and to production before the merge, per
@@ -1469,6 +1510,12 @@ commitment against a live animal to delivered without sitting on a shelf.
 
 ## Open items
 
+- **A recorded weight cannot be corrected.** `Correct cost` has no `Correct
+  weight` beside it. The shape is not free: `inventory_movements_weight_inbound`
+  allows a weight only on a row with `quantity > 0`, so a correction cannot be a
+  zero-quantity row, and `inventory_cost_adjustments` is money, not pounds. The
+  2026-09-08 Baxter receipt could only be put right by hand in SQL; the next
+  one should not have to be. See the 2026-09-08 build-log entry.
 - ~~**Staff cannot record stock in, out or adjusted**~~ — **fixed 2026-09-03.**
   `MovementForm` is out of the header's owner block and asks `allowsWrite`; see
   the build log.

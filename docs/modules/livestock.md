@@ -133,6 +133,36 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-09-08 — Feed without a feeder, and on a phone (`claude/feed-without-a-feeder`)
+
+**Livestock slice 7 of the improvement review.** The Feed page mounted
+`Record a draw` only once a shared feeder existed, while `RecordDrawForm`
+had carried the by-name path since 8f and opens straight into it when there
+are no feeders. So a farm that feeds every pen by name — right at a small
+size, and what the page's own empty prose tells it to do — could not record
+feed here at all, and for staff, who cannot create a feeder, the whole screen
+was inert. The guide had a section headed *There is a catch*.
+
+**The draw form mounts whenever there is something to feed and something to
+feed it.** `Who ate it` now offers only lots with animals standing in them
+(it offered emptied pens while the feeder list filtered them — two lists
+disagreeing about who can eat). The empty-feeders prose points at the button.
+
+**On a phone:** the By-lot table (twelve columns, 1,004px) is a card per lot
+below `md` — cost and quantity at the top right, the six figures in a
+three-column list, the provenance badge — and each feeder's members are a
+card each with `Take off` on it; the four stat cards go two-up.
+`EndMembershipForm` gained `idPrefix` for the two layouts.
+
+**Two small ones the guide had to apologise for:** `Close` on a feeder now
+asks first (`useConfirm`, the pattern accounting's dialogs use), because
+nothing reopens a feeder from this screen; `Add a lot` says why when it is
+greyed out.
+
+No logic changed and no tests were added; guide tests, lint and a cold `tsc`
+cover it, and it was driven at 375px and desktop on Hilltop Farm (dev).
+`docs/help/livestock/feed.md` rewritten without the catch. No migration.
+
 ### 2026-09-08 — The lot page in a phone's order (`claude/the-lot-page-on-a-phone`)
 
 **Livestock slice 6 of the improvement review.** The largest screen in the
@@ -2669,8 +2699,9 @@ This pack is the one that forced the change; the full reasoning is in
 - ~~**Head is counted two ways, and it hides controls.**~~ — **closed 2026-09-07
   by `summarisePen`**: one fold for the hub, the lot page and the round, with a
   split between a pen and its member treated as internal. See the build log.
-- **The Feed screen cannot record feed without a shared feeder**, and is entirely
-  inert for staff on a farm that has none.
+- ~~**The Feed screen cannot record feed without a shared feeder**, and is entirely
+  inert for staff on a farm that has none.~~ — **closed 2026-09-08**: the draw form
+  mounts whenever there is something to feed and something to feed it.
 - ~~`Sold live` never appears under `Lost today`~~ — **closed 2026-09-07**: read
   back by `soldOn` and named beneath the loss, on the tile and on the card,
   never counted as one.

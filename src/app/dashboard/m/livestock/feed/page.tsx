@@ -180,8 +180,12 @@ export default async function FeedPage({
    * ("in a lot it is the lot's, on her own it is hers") is about who is NAMED,
    * not about how many head they have.
    */
-  const animalOptions = lots
-    .map((lot) => ({ id: lot.id, code: codeByLot.get(lot.id) ?? "—" }))
+  const animalOptions = report.lots
+    // Only somebody with animals standing in it. The picker used to offer
+    // every lot on the farm, emptied pens included, while the feeder list
+    // filtered them — two lists disagreeing about who can eat.
+    .filter((row) => row.head > 0)
+    .map((row) => ({ id: row.lotId, code: row.code }))
     .sort((a, b) => a.code.localeCompare(b.code));
 
   const totalCents = report.lots.reduce((sum, row) => sum + row.totalCents, 0);
@@ -271,8 +275,18 @@ export default async function FeedPage({
     lotOptionsByItem[itemId] = itemLots.map((l) => ({ id: l.id, code: l.code }));
   }
 
+  /**
+   * **RECORDING FEED NEVER NEEDED A FEEDER.** `RecordDrawForm` has carried the
+   * by-name path since slice 8f and opens straight into it when there are no
+   * feeders — but this page only mounted it once a feeder existed, so a farm
+   * that feeds every pen by name (which is right at a small size, and what
+   * the empty prose below tells it to do) had no way to record feed here at
+   * all, and for staff — who cannot create a feeder — the whole screen was
+   * inert. It mounts whenever there is something to feed and something to
+   * feed it.
+   */
   const drawForm =
-    groups.length > 0 && itemOptions.length > 0 ? (
+    animalOptions.length > 0 && itemOptions.length > 0 ? (
       <RecordDrawForm
         feeders={groups.map((g) => ({ id: g.id, name: g.name }))}
         animals={animalOptions}
@@ -327,7 +341,7 @@ export default async function FeedPage({
         />
       ) : (
         <>
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatCard
               label="Fed"
               value={formatMoney(totalCents, currencySymbol)}
@@ -420,6 +434,122 @@ export default async function FeedPage({
             <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
               By lot
             </h2>
+            {/* Phone: a card per lot. The table is twelve columns and 1,004px
+                wide; on a 375px screen nine of them were off the right edge,
+                the ratio the whole page is judged on among them. */}
+            <ul className="space-y-3 md:hidden">
+              {report.lots.map((row) => {
+                const age = formatAge(row.ageDays);
+                return (
+                  <li key={row.lotId} className="rounded-2xl bg-card p-4 shadow-elevation-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <Link
+                          href={`${BASE}/${row.lotId}`}
+                          className="font-medium hover:underline"
+                        >
+                          {row.code}
+                        </Link>
+                        <p className="text-xs text-muted-foreground">
+                          {slugLabel(row.species)}
+                          {age !== "—" && ` · ${age}`} · {row.head} head
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="font-medium tabular-nums">
+                          {row.totalCents === 0
+                            ? "—"
+                            : formatMoney(row.totalCents, currencySymbol)}
+                        </p>
+                        <p className="text-xs text-muted-foreground tabular-nums">
+                          {formatQuantities(row.quantities)}
+                        </p>
+                        {row.releasedCents > 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            {formatMoney(row.remainingCents, currencySymbol)} left on the lot
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <dl className="mt-3 grid grid-cols-3 gap-x-3 gap-y-2 text-xs">
+                      <div>
+                        <dt className="text-muted-foreground">A head now</dt>
+                        <dd className="tabular-nums">
+                          {row.centsPerHead === null
+                            ? "—"
+                            : formatMoney(row.centsPerHead, currencySymbol)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">A head placed</dt>
+                        <dd className="tabular-nums">
+                          {row.centsPerHeadPlaced === null
+                            ? "—"
+                            : formatMoney(row.centsPerHeadPlaced, currencySymbol)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">vs last {lotWord.toLowerCase()}</dt>
+                        <dd
+                          className={
+                            row.vsPreviousCents !== null && row.vsPreviousCents > 0
+                              ? "tabular-nums text-destructive"
+                              : "tabular-nums"
+                          }
+                          title={
+                            row.vsPreviousCents === null
+                              ? undefined
+                              : `Against ${row.previousCode}, per head placed`
+                          }
+                        >
+                          {row.vsPreviousCents === null
+                            ? "—"
+                            : `${row.vsPreviousCents > 0 ? "+" : "−"}${formatMoney(Math.abs(row.vsPreviousCents), currencySymbol)}`}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Weight</dt>
+                        <dd className="tabular-nums">
+                          {formatLb(row.weight.latest?.averageLb ?? null)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Gain a day</dt>
+                        <dd className="tabular-nums">
+                          {row.weight.gain === null ? "—" : `${row.weight.gain.adgLb} lb`}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Feed : gain</dt>
+                        <dd
+                          className="tabular-nums"
+                          title={
+                            row.weight.conversion
+                              ? CONFIDENCE_NOTES[row.weight.conversion.confidence]
+                              : (row.weight.conversionBlockedBy ?? "")
+                          }
+                        >
+                          {row.weight.conversion
+                            ? formatRatio(row.weight.conversion.ratio)
+                            : "—"}
+                        </dd>
+                      </div>
+                    </dl>
+                    {row.provenance !== "none" && (
+                      <div className="mt-2">
+                        <Badge
+                          variant={row.provenance === "measured" ? "outline" : "default"}
+                          title={PROVENANCE_NOTES[row.provenance]}
+                        >
+                          {PROVENANCE_LABELS[row.provenance]}
+                        </Badge>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="hidden md:block">
             <DataTable>
               <Table>
               <TableHeader>
@@ -573,6 +703,7 @@ export default async function FeedPage({
               </TableBody>
               </Table>
             </DataTable>
+            </div>
             {!anyWeighed && (
               <p className="text-xs text-muted-foreground">
                 {/* One place, said the same way on the lot page — and gone the
@@ -618,7 +749,7 @@ export default async function FeedPage({
             issued to the lot by name and the cost is measured. A feeder is for
             when a ton goes into a bin serving fifteen pens and nobody can say
             which bird ate which pound — then the cost is spread by head and
-            days instead.
+            days instead. Record a draw above records a bag by name.
           </p>
         ) : (
           <div className="space-y-6">
@@ -685,6 +816,64 @@ export default async function FeedPage({
                       </div>
                     </div>
 
+                    {/* Phone: a card per lot on the feeder, Take off on it. */}
+                    <div className="md:hidden">
+                      {rows.length === 0 ? (
+                        <EmptyState
+                          panel
+                          title="Nothing on this feeder yet"
+                          description="Anything drawn for it has nowhere to land. Add the lots that eat from it — backdated to when they went on, because the share is worked out day by day."
+                        />
+                      ) : (
+                        <ul className="space-y-3">
+                          {rows.map((row) => {
+                            const share = byLot.get(row.livestockLotId);
+                            const code = codeByLot.get(row.livestockLotId) ?? "—";
+                            return (
+                              <li
+                                key={row.id}
+                                className="rounded-2xl bg-card p-4 shadow-elevation-1"
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <Link
+                                      href={`${BASE}/${row.livestockLotId}`}
+                                      className="font-medium hover:underline"
+                                    >
+                                      {code}
+                                    </Link>
+                                    <p className="text-xs text-muted-foreground tabular-nums">
+                                      {row.startedOn}
+                                      {row.endedOn ? ` to ${row.endedOn}` : " — still on it"}
+                                      {" · "}
+                                      {share?.daysOnFeed ?? 0} days ·{" "}
+                                      {(share?.headDays ?? 0).toLocaleString("en-US")} head-days
+                                    </p>
+                                  </div>
+                                  <p className="shrink-0 font-medium tabular-nums">
+                                    {share && share.shareCents > 0
+                                      ? formatMoney(share.shareCents, currencySymbol)
+                                      : "—"}
+                                  </p>
+                                </div>
+                                {row.endedOn === null && (
+                                  <div className="mt-2 flex justify-end">
+                                    <EndMembershipForm
+                                      memberId={row.id}
+                                      lotCode={code}
+                                      startedOn={row.startedOn}
+                                      today={today}
+                                      idPrefix="card-"
+                                    />
+                                  </div>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </div>
+                    <div className="hidden md:block">
                     <DataTable
                       isEmpty={rows.length === 0}
                       empty={
@@ -754,6 +943,7 @@ export default async function FeedPage({
                                       }
                                       startedOn={row.startedOn}
                                       today={today}
+                                      idPrefix="row-"
                                     />
                                   )}
                                 </TableCell>
@@ -763,6 +953,7 @@ export default async function FeedPage({
                         </TableBody>
                       </Table>
                     </DataTable>
+                    </div>
                   </div>
                 );
               })}

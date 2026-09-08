@@ -26,6 +26,11 @@ import {
   type FarmSnapshot,
 } from "../src/packs/livestock/core/digest";
 import { breedHint } from "../src/packs/livestock/vocabulary";
+import {
+  ROUND_STALE_AFTER_DAYS,
+  roundAttention,
+  withdrawalAttention,
+} from "../src/packs/livestock/core/attention";
 
 /**
  * The pure half of `livestock`: head arithmetic.
@@ -154,6 +159,115 @@ describe("splitInHead", () => {
   it("adds up what arrived by split and nothing else", () => {
     expect(splitInHead([m("split_in", 3), m("placement", 10), m("split_out", -2)])).toBe(3);
     expect(splitInHead([m("placement", 10)])).toBe(0);
+  });
+});
+
+describe("roundAttention", () => {
+  const TODAY = "2026-09-08";
+  const lot = (code: string, lastCheckedOn: string | null) => ({ id: code, code, lastCheckedOn });
+
+  it("is nothing while every lot was looked at today or yesterday", () => {
+    // Yesterday is an ordinary morning: today's round is still to come, and
+    // raising it at 7am would raise every lot on the farm every day.
+    expect(roundAttention([lot("PEN-1", TODAY), lot("PEN-2", "2026-09-07")], TODAY)).toBeNull();
+  });
+
+  it("raises ONE lot by name, overdue, due the day the round was first missed", () => {
+    expect(ROUND_STALE_AFTER_DAYS).toBe(2);
+    const item = roundAttention([lot("PEN-1", "2026-09-05"), lot("PEN-2", TODAY)], TODAY);
+    expect(item).toMatchObject({
+      key: "livestock_round:stale",
+      title: "PEN-1 has not been looked at for 3 days",
+      urgency: "overdue",
+      dueOn: "2026-09-07",
+      href: "/dashboard/m/livestock/log",
+    });
+  });
+
+  it("says never rather than a number for a lot with no check at all", () => {
+    expect(roundAttention([lot("Cows", null)], TODAY)?.title).toBe(
+      "Cows has never been looked at",
+    );
+  });
+
+  it("is ONE line for the farm however many lots were missed, naming four", () => {
+    const item = roundAttention(
+      ["A", "B", "C", "D", "E", "F"].map((c) => lot(c, "2026-09-01")),
+      TODAY,
+    );
+    expect(item?.title).toBe("6 lots have not been looked at for 2 days or more");
+    expect(item?.detail).toBe("A, B, C, D and 2 more");
+  });
+});
+
+describe("withdrawalAttention", () => {
+  const TODAY = "2026-09-08";
+  const clock = (
+    code: string,
+    state: "clear" | "under" | "unknown",
+    clearsOn: string | null,
+    product: string | null = "Tylan",
+    treatmentId: string | null = `t-${code}`,
+    ownsTreatment = true,
+  ) => ({ id: code, code, state, clearsOn, product, treatmentId, ownsTreatment });
+
+  it("raises ONE line per treatment, on the record it was given to", () => {
+    // A pen dosed in the water puts the same clock on the pen and on every
+    // named animal in it. Five lines saying one label was never read is the
+    // digest somebody mutes, and the fix is on the pen — whichever order
+    // the rows arrive in.
+    const items = withdrawalAttention(
+      [
+        clock("Speckles", "unknown", null, "Tylan", "t-pen", false),
+        clock("PEN-1", "unknown", null, "Tylan", "t-pen", true),
+        clock("Dot", "unknown", null, "Tylan", "t-pen", false),
+        // Her own dose is a different treatment, and stays a line of its own.
+        clock("Rosie", "unknown", null, "Penicillin G", "t-rosie", true),
+      ],
+      TODAY,
+    );
+    expect(items.map((i) => i.title)).toEqual([
+      "PEN-1's withdrawal was never looked up",
+      "Rosie's withdrawal was never looked up",
+    ]);
+  });
+
+  it("raises a clock nobody looked up as overdue with no date", () => {
+    const [item] = withdrawalAttention([clock("PEN-1", "unknown", null)], TODAY);
+    expect(item).toMatchObject({
+      key: "livestock_withdrawal_unknown:PEN-1",
+      title: "PEN-1's withdrawal was never looked up",
+      urgency: "overdue",
+      dueOn: null,
+      href: "/dashboard/m/livestock/PEN-1",
+    });
+    expect(item.detail).toContain("Tylan was given and nobody read the label");
+  });
+
+  it("raises the day it clears as today, and the day before as soon", () => {
+    // `withdrawalStatus` clears ON the day, so the clearing day reads `clear`
+    // with `clearsOn` today; the day before it is still `under`.
+    const items = withdrawalAttention(
+      [clock("HOGS-1", "clear", TODAY), clock("PEN-2", "under", "2026-09-09")],
+      TODAY,
+    );
+    expect(items.map((i) => [i.title, i.urgency])).toEqual([
+      ["HOGS-1 clears withdrawal today", "today"],
+      ["PEN-2 clears withdrawal tomorrow", "soon"],
+    ]);
+  });
+
+  it("says nothing about a clock with days to run, one that cleared last week, or no clock", () => {
+    expect(
+      withdrawalAttention(
+        [
+          clock("A", "under", "2026-09-20"),
+          clock("B", "clear", "2026-09-01"),
+          clock("C", "clear", null, null),
+        ],
+        TODAY,
+      ),
+    ).toEqual([]);
   });
 });
 

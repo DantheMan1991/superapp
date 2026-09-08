@@ -12,6 +12,8 @@ Everyone can walk the round, including your accountant. The round is walked by w
 
 A day with no entry is a day nobody looked, and that is a different fact from a day when nothing happened. Your loss rate is worked out over the days somebody actually walked the pens, so the empty rows are load-bearing.
 
+A group nobody has looked at for two days or more reaches [What needs you](/dashboard/today) and the morning email as `PEN-1 has not been looked at for 3 days`, for everyone in the business. Walking the round clears it. A group checked yesterday is not raised.
+
 ## What you see
 
 - **{button:All normal (6)|primary|check}.** Marks every group and every named animal you have not yet touched today as normal. Only appears while something is left.

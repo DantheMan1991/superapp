@@ -40,6 +40,14 @@ If nobody looks the period up, the animals read as **not clear**, not as clear. 
 
 A treatment given to a {{livestockLot|lower}} counts for every named animal living in it, from the day she went in to the day she came out, and shows on her own page. A treatment given to one animal is hers alone: her {{livestockLot|lower}} stays clear, and its row says `1 inside not clear` so nobody loads her by mistake.
 
+## What reaches What needs you
+
+Three things from here appear on [What needs you](/dashboard/today) and in the morning email, for everyone in the business, and each disappears the moment it is dealt with.
+
+- A {{livestockLot|lower}} nobody has looked at for two days or more: `PEN-1 has not been looked at for 3 days`, or one line for several. Walk the round and it goes.
+- A treatment nobody looked up: `PEN-1's withdrawal was never looked up`. Correct the treatment with the period off the label and it goes.
+- A withdrawal clearing today or tomorrow: `HOGS-1 clears withdrawal today`. The day after, it is gone.
+
 ## Not on this page
 
 - Nothing tracks individual animals inside a {{livestockLot|lower}} unless you name them. Naming one makes it a record of its own that stays in the {{livestockLot|lower}}.

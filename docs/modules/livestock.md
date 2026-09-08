@@ -133,6 +133,52 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-09-07 — A pen counted once (`claude/a-pen-counted-once`)
+
+**Livestock slice 3 of the improvement review, and the counting bug the
+guides had been apologising for since 2026-09-03.** The hub folded a pen's
+named members into `Head` and the pen's own page did not: `Cows` — five named
+cows, nothing loose — read `5 (5 in)` on the list and `Nothing placed yet` on
+its page, hid `Treat`, `Weigh` and the daily check off its own page, and was
+absent from the round while its five cows were five separate rows. `Lost`
+was over a different population from `Head` in the same row.
+
+**`summarisePen` in `core/herd.ts`** is the one fold both screens make now: a
+pen's population is what is loose in it plus every named animal living in it.
+**A split between the pen and a member is internal** — naming four cows out
+of a pen of a hundred writes `split_out` −4 on the pen and `split_in` +1 on
+each cow, and `summariseHead` counts a transfer IN as intake so a split-off
+lot has a mortality denominator; summed naively the population had taken in
+104 head. A member whose inventory lot was split out of THIS pen has her
+split-in taken back out of the intake (`lotMemberSummaries` now returns her
+`summary`, `splitInHead` and `parentInventoryLotId`); a member split out of
+some OTHER pen and put in here later genuinely arrived and keeps it.
+
+**Which count a control reads is the point.** A loss, a split and a name-out
+take head that is LOOSE, so they read the pen's own summary; a treatment, a
+weighing, a check and the headline are about the animals standing in the
+pen, so they read the population. `Record loss` is offered only while there
+is loose head and the lot is open — on an emptied or closed lot it was
+offered and then refused, and on a pen whose animals are all named it would
+have taken the pen's own ledger negative. The check dialog on such a pen
+replaces its `Head leaving` box with the sentence saying where the loss goes.
+
+**The round is walked by pen.** One row per pen with the named animals living
+in it under it (a sub-row on a wide screen, a list at the foot of the card on
+a phone); `Mark normal` on a pen marks the pen and everything in it in one
+tap through `markRoundNormal`, whose ON CONFLICT DO NOTHING keeps an animal
+somebody already flagged this morning flagged; each animal keeps a log row
+of her own, so her page still answers "when was she last looked at", and
+`Something's up` under her name is where a lame cow or a dead one goes.
+`Checked` counts pens and animals together, which is what the buttons act
+on. An animal living in no pen is a row of her own. `Mark normal` also toasts
+at last (`Marked normal` / `6 marked normal`).
+
+Tests: `summarisePen` and `splitInHead` in `tests/livestock.test.ts`; the
+member-summary assertions in `tests/livestock-ops.test.ts`. Guides `lots.md`,
+`lot.md` and `daily-round.md` swept. Driven on Hilltop Farm (dev). No
+migration.
+
 ### 2026-09-07 — The hub on a phone, and an animal found by her tag (`claude/the-hub-on-a-phone`)
 
 **Livestock slice 2 of the improvement review.** The hub's table measured
@@ -2102,7 +2148,10 @@ This pack is the one that forced the change; the full reasoning is in
 
 - `src/packs/livestock/core/herd.ts` — pure. Head summary, mortality, age,
   identifier preference. **The classification of movement kinds lives here**,
-  not in inventory: what counts as a death is livestock's business
+  not in inventory: what counts as a death is livestock's business. And
+  **`summarisePen`** — a pen's population, loose plus named, a split between
+  the two treated as internal; the one fold the hub, the lot page and the
+  round all make
 - `src/packs/livestock/ops.ts` — composes `inventory` and `land`
 - `src/packs/inventory/ops.ts` → `movementKindsForLots` — added for this pack.
   `MovementRow` carries only what a balance needs; a caller that must tell a
@@ -2234,6 +2283,13 @@ This pack is the one that forced the change; the full reasoning is in
 
 ## Decisions & gotchas
 
+- **A PEN IS COUNTED ONCE.** Its population is what is loose in it plus every
+  named animal living in it, and every screen folds it with `summarisePen`.
+  A loss, a split and a name-out take LOOSE head and read the pen's own
+  summary; a treatment, a weighing, a check and the headline read the
+  population. Never put a second way of counting a pen on a screen — two ways
+  of counting one pen is how `Cows` came to read five on one page and nothing
+  on the next.
 - **AN UNKNOWN WITHDRAWAL PERIOD IS NOT CLEARANCE.** A treatment recorded with
   `none_stated` blocks exactly as a future date does, and `blocksProcessing` is
   true for both. Never relax this into "no period means no wait": the null column
@@ -2467,13 +2523,9 @@ This pack is the one that forced the change; the full reasoning is in
 
 ## Open items
 
-- **Head is counted two ways, and it hides controls.** The hub folds in members;
-  the lot page does not. A lot whose head are all named members reads 0 on its own
-  page, which hides `Treat`, `Weigh` and the daily check. `Lost` excludes members
-  while `Head` includes them. **Re-confirmed 2026-09-03 as a counting bug rather
-  than a permission one** — the `head > 0` gate on those controls has no server
-  rule behind it to disagree with, and was left alone by the gate sweep so that
-  fixing the fold is what closes this.
+- ~~**Head is counted two ways, and it hides controls.**~~ — **closed 2026-09-07
+  by `summarisePen`**: one fold for the hub, the lot page and the round, with a
+  split between a pen and its member treated as internal. See the build log.
 - **The Feed screen cannot record feed without a shared feeder**, and is entirely
   inert for staff on a farm that has none.
 - ~~`Sold live` never appears under `Lost today`~~ — **closed 2026-09-07**: read

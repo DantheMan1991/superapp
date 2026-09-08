@@ -28,7 +28,7 @@ Only the first hundred rows are shown. When there are more you see `Showing 100 
 - **`Withdrawal`.** A dash when nothing has been given. Otherwise `Clear`, `Not looked up`, or `7 days left`. **`Not looked up` counts as not clear.** Rest on the badge for the full sentence.
 - **`Head`.** How many there are. `100 (4 in)` means a hundred loose in the group plus four named animals counted on top. A card reads `100 head` with `4 in` beneath it, or `nothing placed` before anything has arrived.
 
-**One thing to know about `Head` and `Lost`.** `Head` counts the named animals inside; `Lost` does not. So in a row with named members the two are over different populations. We are fixing that.
+`Head` and `Lost` are over the same animals: a group's loose head plus every named animal living in it. A cow named out of a group is never counted twice, and a death recorded on her page counts against the group she lives in.
 
 ## How to find an animal
 

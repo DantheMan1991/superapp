@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import Link from "next/link";
 import { ClipboardCheck } from "lucide-react";
 import { LivestockNav } from "@/packs/livestock/components/livestock-nav";
@@ -26,14 +27,16 @@ import {
   checksOn,
   lastCheckedByLot,
   listLivestockLots,
+  parentByLot,
   withdrawalByLot,
 } from "@/packs/livestock/ops";
 import {
   blocksProcessing,
   describeWithdrawal,
   formatWithdrawal,
+  type LotWithdrawal,
 } from "@/packs/livestock/core/withdrawal";
-import { summariseHead } from "@/packs/livestock/core/herd";
+import { splitInHead, summariseHead, summarisePen } from "@/packs/livestock/core/herd";
 import {
   checkStreak,
   describeLeft,
@@ -71,15 +74,20 @@ const STREAK_WINDOW_DAYS = 90;
  * and the losses recorded today are read back out of the ledger rather than
  * stored here a second time.
  *
- * **A TABLE ON A WIDE SCREEN, A CARD PER LOT ON A PHONE.** The table is 733px
+ * **THE ROUND IS WALKED BY PEN** (2026-09-07). It used to be walked by record:
+ * every lot with head of its own was a row, so five cows named into `Cows`
+ * were five rows and `Cows` itself — its head all named — was not there at
+ * all. A person walks to a pen and looks at what is in it, so a pen is one
+ * row with its named animals under it, and one tap marks the pen and
+ * everything in it. Each animal keeps a row in the log of her own, so her
+ * page still answers "when was she last looked at", and `Something's up`
+ * under her name is where a lame cow or a dead one is recorded.
+ *
+ * **A TABLE ON A WIDE SCREEN, A CARD PER PEN ON A PHONE.** The table is 733px
  * with its two buttons, and the phone this is walked on is 375px — so `Mark
  * normal` and `Something's up` sat at x=516–736 on every row, off the right
- * edge, and the one screen in the pack built to be used in a barn could not be
- * used there without dragging each row sideways. Measured in the Browser pane
- * on 2026-09-07, not guessed. Both layouts render from the same `round` array
- * and CSS picks (`md:hidden` / `hidden md:block`), the review queue's pattern:
- * a `matchMedia` hook would have to guess a width on the server and flash the
- * table on exactly the device this exists for.
+ * edge. Both layouts render from the same `pens` array and CSS picks
+ * (`md:hidden` / `hidden md:block`), the review queue's pattern.
  */
 export default async function DailyRoundPage() {
   const ctx = await requireTenant();
@@ -101,6 +109,7 @@ export default async function DailyRoundPage() {
         lastChecked,
         checkedDays,
         withdrawals,
+        lotParents,
       ] = await Promise.all([
         listLots(tx, ctx.tenant.id),
         movementKindsForLots(tx, ctx.tenant.id, inventoryLotIds),
@@ -117,6 +126,14 @@ export default async function DailyRoundPage() {
           lots.map((l) => l.id),
           today,
         ),
+        // Which lot each animal lives in, today — what turns a flat list of
+        // records into pens with animals under them.
+        parentByLot(
+          tx,
+          ctx.tenant.id,
+          lots.map((l) => l.id),
+          today,
+        ),
       ]);
       return {
         lots,
@@ -128,6 +145,7 @@ export default async function DailyRoundPage() {
         lastChecked,
         checkedDays,
         withdrawals,
+        lotParents,
       };
     },
     { role: ctx.role },
@@ -143,33 +161,70 @@ export default async function DailyRoundPage() {
     lastChecked,
     checkedDays,
     withdrawals,
+    lotParents,
   } = data;
   const byInventoryLot = new Map(inventoryLots.map((l) => [l.id, l]));
+  const byLivestockId = new Map(lots.map((l) => [l.id, l]));
+  const membersOf = new Map<string, string[]>();
+  for (const [memberId, parentId] of lotParents) {
+    const list = membersOf.get(parentId) ?? [];
+    list.push(memberId);
+    membersOf.set(parentId, list);
+  }
+
+  /** What one record — a pen or an animal in it — did today, from the ledger. */
+  const leftToday = (inventoryLotId: string) => {
+    const dated = (lostToday.get(inventoryLotId) ?? []).map((m) => ({
+      ...m,
+      occurredOn: today,
+    }));
+    return { lost: lossesOn(dated, today), sold: soldOn(dated, today) };
+  };
 
   /**
-   * The round is the lots with animals standing in them.
+   * The round is the pens with animals standing in them — loose, or named
+   * and living inside.
    *
-   * A lot whose balance is zero is not a pen somebody forgot to check — it is a
-   * lot that has gone. Leaving them on the list would grow it by one every
-   * time a lot finished, and the first thing an unusable list teaches is to
-   * stop tapping the button.
+   * A pen whose population is zero is not a pen somebody forgot to check — it
+   * is a pen that has gone. Leaving them on the list would grow it by one
+   * every time a lot finished, and the first thing an unusable list teaches
+   * is to stop tapping the button.
    */
-  const round = lots
+  const pens = lots
+    .filter((lot) => !lotParents.has(lot.id))
     .map((lot) => {
       const inv = byInventoryLot.get(lot.inventoryLotId);
-      const summary = summariseHead(movements.get(lot.inventoryLotId) ?? []);
-      const dated = (lostToday.get(lot.inventoryLotId) ?? []).map((m) => ({
-        ...m,
-        occurredOn: today,
-      }));
+      const own = summariseHead(movements.get(lot.inventoryLotId) ?? []);
+      const members = (membersOf.get(lot.id) ?? []).flatMap((memberId) => {
+        const m = byLivestockId.get(memberId);
+        if (!m) return [];
+        const mInv = byInventoryLot.get(m.inventoryLotId);
+        const rows = movements.get(m.inventoryLotId) ?? [];
+        return [
+          {
+            lot: m,
+            code: mInv?.code ?? "—",
+            summary: summariseHead(rows),
+            splitInHead: splitInHead(rows),
+            splitFromHere: mInv?.parentLotId === lot.inventoryLotId,
+            ...leftToday(m.inventoryLotId),
+            check: checks.get(m.id) ?? null,
+            withdrawal: withdrawals.get(m.id) ?? null,
+          },
+        ];
+      });
+      // The pen counted ONCE: what is loose plus what is named inside, with a
+      // split between the two treated as internal — see `summarisePen`.
+      const population = summarisePen(own, members);
+      const ownLeft = leftToday(lot.inventoryLotId);
       return {
         lot,
         code: inv?.code ?? "—",
-        balance: summary.balance,
-        lost: lossesOn(dated, today),
-        // A live sale is off the count and is not a loss. It used to be
-        // neither — read back so the row can say so.
-        sold: soldOn(dated, today),
+        loose: own.balance,
+        balance: population.balance,
+        members,
+        lost: ownLeft.lost + members.reduce((sum, m) => sum + m.lost, 0),
+        sold: ownLeft.sold + members.reduce((sum, m) => sum + m.sold, 0),
         zone: zones.get(lot.inventoryLotId) ?? null,
         check: checks.get(lot.id) ?? null,
         lastCheckedOn: lastChecked.get(lot.id) ?? null,
@@ -178,31 +233,35 @@ export default async function DailyRoundPage() {
     })
     .filter((row) => row.balance > 0);
 
-  const progress = roundProgress(
-    round.map((r) => r.lot.id),
-    [...checks.values()],
-  );
+  // Progress is over every record — the pens and the animals in them — which
+  // is exactly what the one-tap button acts on.
+  const everyId = pens.flatMap((p) => [p.lot.id, ...p.members.map((m) => m.lot.id)]);
+  const progress = roundProgress(everyId, [...checks.values()]);
   const streak = checkStreak(checkedDays, today);
-  const lostTotal = round.reduce((sum, r) => sum + r.lost, 0);
-  const soldTotal = round.reduce((sum, r) => sum + r.sold, 0);
+  const lostTotal = pens.reduce((sum, r) => sum + r.lost, 0);
+  const soldTotal = pens.reduce((sum, r) => sum + r.sold, 0);
+  const noted = pens.flatMap((p) => [
+    ...(p.check?.status === "attention"
+      ? [{ id: p.lot.id, code: p.code, notes: p.check.notes, lost: p.lost - p.members.reduce((s, m) => s + m.lost, 0), sold: p.sold - p.members.reduce((s, m) => s + m.sold, 0) }]
+      : []),
+    ...p.members
+      .filter((m) => m.check?.status === "attention")
+      .map((m) => ({ id: m.lot.id, code: m.code, notes: m.check?.notes ?? "", lost: m.lost, sold: m.sold })),
+  ]);
 
   /** The check's state, once there is one. The same badge in both layouts. */
-  const checkBadge = (row: (typeof round)[number]) =>
-    row.check ? (
-      <Badge variant={row.check.status === "attention" ? "default" : "outline"}>
-        {row.check.status === "attention" ? "Noted" : "Normal"}
+  const checkBadge = (check: { status: string } | null) =>
+    check ? (
+      <Badge variant={check.status === "attention" ? "default" : "outline"}>
+        {check.status === "attention" ? "Noted" : "Normal"}
       </Badge>
     ) : null;
 
   /** The withdrawal, only when it BLOCKS. A "clear" badge on every row would be the noise that hides this one. */
-  const withdrawalBadge = (row: (typeof round)[number]) =>
-    row.withdrawal && blocksProcessing(row.withdrawal.meat) ? (
-      <Badge
-        variant="default"
-        className="mt-1"
-        title={describeWithdrawal(row.withdrawal.meat)}
-      >
-        Withdrawal · {formatWithdrawal(row.withdrawal.meat)}
+  const withdrawalBadge = (w: LotWithdrawal | null) =>
+    w && blocksProcessing(w.meat) ? (
+      <Badge variant="default" title={describeWithdrawal(w.meat)}>
+        Withdrawal · {formatWithdrawal(w.meat)}
       </Badge>
     ) : null;
 
@@ -224,7 +283,7 @@ export default async function DailyRoundPage() {
 
       <LivestockNav />
 
-      {round.length === 0 ? (
+      {pens.length === 0 ? (
         <EmptyState
           panel
           icon={<ClipboardCheck className="h-5 w-5" />}
@@ -245,7 +304,7 @@ export default async function DailyRoundPage() {
               footnote={
                 progress.remaining.length === 0
                   ? "The whole farm, today."
-                  : `${progress.remaining.length} still to look at.`
+                  : `${progress.remaining.length} still to look at, pens and animals together.`
               }
             />
 
@@ -285,10 +344,11 @@ export default async function DailyRoundPage() {
             />
           </div>
 
-          {/* Phone: one card per lot. What a person walking the pens needs to
-              see, then the two buttons — and nothing off the edge. */}
+          {/* Phone: one card per pen, its animals listed under it. What a
+              person walking the pens needs to see, then the two buttons — and
+              nothing off the edge. */}
           <ul className="space-y-3 md:hidden">
-            {round.map((row) => {
+            {pens.map((row) => {
               const left = describeLeft(row.lost, row.sold);
               return (
                 <li
@@ -314,7 +374,9 @@ export default async function DailyRoundPage() {
                           </>
                         )}
                       </p>
-                      {withdrawalBadge(row)}
+                      {withdrawalBadge(row.withdrawal) && (
+                        <div className="mt-1">{withdrawalBadge(row.withdrawal)}</div>
+                      )}
                     </div>
                     <div className="shrink-0 text-right">
                       <p className="font-medium tabular-nums">
@@ -342,9 +404,12 @@ export default async function DailyRoundPage() {
                       {formatLastChecked(row.lastCheckedOn, today).toLowerCase()}
                     </span>
                     <div className="flex items-center gap-2">
-                      {checkBadge(row) ?? (
+                      {checkBadge(row.check) ?? (
                         <QuickNormalButton
-                          livestockLotId={row.lot.id}
+                          livestockLotIds={[
+                            row.lot.id,
+                            ...row.members.map((m) => m.lot.id),
+                          ]}
                           today={today}
                         />
                       )}
@@ -352,18 +417,67 @@ export default async function DailyRoundPage() {
                         livestockLotId={row.lot.id}
                         lotCode={row.code}
                         today={today}
-                        balance={row.balance}
+                        balance={row.loose}
+                        namedInside={row.members.length}
                         hasEntry={row.check !== null}
                         idPrefix="card-"
                       />
                     </div>
                   </div>
+                  {row.members.length > 0 && (
+                    <ul className="mt-3 divide-y divide-divider border-t border-divider">
+                      {row.members.map((m) => {
+                        const mLeft = describeLeft(m.lost, m.sold);
+                        return (
+                          <li
+                            key={m.lot.id}
+                            className="flex items-center justify-between gap-2 py-2"
+                          >
+                            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                              <Link
+                                href={`${BASE}/${m.lot.id}`}
+                                className="font-medium hover:underline"
+                              >
+                                {m.code}
+                              </Link>
+                              {m.summary.balance !== 1 && (
+                                <span className="text-xs text-muted-foreground">
+                                  {m.summary.balance} head
+                                </span>
+                              )}
+                              {mLeft && (
+                                <span
+                                  className={
+                                    m.lost > 0
+                                      ? "text-xs text-destructive"
+                                      : "text-xs text-muted-foreground"
+                                  }
+                                >
+                                  {mLeft} today
+                                </span>
+                              )}
+                              {withdrawalBadge(m.withdrawal)}
+                              {checkBadge(m.check)}
+                            </div>
+                            <LotCheckForm
+                              livestockLotId={m.lot.id}
+                              lotCode={m.code}
+                              today={today}
+                              balance={m.summary.balance}
+                              hasEntry={m.check !== null}
+                              idPrefix="card-"
+                            />
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
                 </li>
               );
             })}
           </ul>
 
-          {/* Wide screen: the table. */}
+          {/* Wide screen: the table, a pen's animals as rows under it. */}
           <div className="hidden md:block">
             <DataTable>
               <Table>
@@ -378,68 +492,121 @@ export default async function DailyRoundPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {round.map((row) => (
-                    <TableRow key={row.lot.id}>
-                      <TableCell>
-                        <div className="font-medium">
-                          <Link
-                            href={`${BASE}/${row.lot.id}`}
-                            className="hover:underline"
-                          >
-                            {row.code}
-                          </Link>
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {slugLabel(row.lot.species)}
-                        </div>
-                        {withdrawalBadge(row)}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {row.zone ? row.zone.zoneName : "—"}
-                        {row.zone?.structureName && (
-                          <span className="text-xs"> · {row.zone.structureName}</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {row.balance}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums text-muted-foreground">
-                        {row.lost === 0 ? "—" : row.lost}
-                        {/* Under the loss, not in it: sold is off the count
-                            and is not a death. */}
-                        {row.sold > 0 && (
-                          <div className="text-xs">{row.sold} sold live</div>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatLastChecked(row.lastCheckedOn, today)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center justify-end gap-2">
-                          {checkBadge(row) ?? (
-                            <QuickNormalButton
-                              livestockLotId={row.lot.id}
-                              today={today}
-                            />
+                  {pens.map((row) => (
+                    <Fragment key={row.lot.id}>
+                      <TableRow>
+                        <TableCell>
+                          <div className="font-medium">
+                            <Link
+                              href={`${BASE}/${row.lot.id}`}
+                              className="hover:underline"
+                            >
+                              {row.code}
+                            </Link>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {slugLabel(row.lot.species)}
+                            {row.members.length > 0 &&
+                              ` · ${row.loose} loose, ${row.members.length} named`}
+                          </div>
+                          {withdrawalBadge(row.withdrawal) && (
+                            <div className="mt-1">{withdrawalBadge(row.withdrawal)}</div>
                           )}
-                          <LotCheckForm
-                            livestockLotId={row.lot.id}
-                            lotCode={row.code}
-                            today={today}
-                            balance={row.balance}
-                            hasEntry={row.check !== null}
-                            idPrefix="row-"
-                          />
-                        </div>
-                      </TableCell>
-                    </TableRow>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {row.zone ? row.zone.zoneName : "—"}
+                          {row.zone?.structureName && (
+                            <span className="text-xs"> · {row.zone.structureName}</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {row.balance}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-muted-foreground">
+                          {row.lost === 0 ? "—" : row.lost}
+                          {/* Under the loss, not in it: sold is off the count
+                              and is not a death. */}
+                          {row.sold > 0 && (
+                            <div className="text-xs">{row.sold} sold live</div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {formatLastChecked(row.lastCheckedOn, today)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center justify-end gap-2">
+                            {checkBadge(row.check) ?? (
+                              <QuickNormalButton
+                                livestockLotIds={[
+                                  row.lot.id,
+                                  ...row.members.map((m) => m.lot.id),
+                                ]}
+                                today={today}
+                              />
+                            )}
+                            <LotCheckForm
+                              livestockLotId={row.lot.id}
+                              lotCode={row.code}
+                              today={today}
+                              balance={row.loose}
+                              namedInside={row.members.length}
+                              hasEntry={row.check !== null}
+                              idPrefix="row-"
+                            />
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                      {row.members.map((m) => (
+                        <TableRow key={m.lot.id} className="bg-muted/30">
+                          <TableCell className="pl-8">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Link
+                                href={`${BASE}/${m.lot.id}`}
+                                className="font-medium hover:underline"
+                              >
+                                {m.code}
+                              </Link>
+                              {withdrawalBadge(m.withdrawal)}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            in {row.code}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">
+                            {m.summary.balance}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">
+                            {m.lost === 0 ? "—" : m.lost}
+                            {m.sold > 0 && (
+                              <div className="text-xs">{m.sold} sold live</div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {formatLastChecked(lastChecked.get(m.lot.id) ?? null, today)}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center justify-end gap-2">
+                              {checkBadge(m.check)}
+                              <LotCheckForm
+                                livestockLotId={m.lot.id}
+                                lotCode={m.code}
+                                today={today}
+                                balance={m.summary.balance}
+                                hasEntry={m.check !== null}
+                                idPrefix="row-"
+                              />
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </Fragment>
                   ))}
                 </TableBody>
               </Table>
             </DataTable>
           </div>
 
-          {progress.needsAttention.length > 0 && (
+          {noted.length > 0 && (
             <section>
               <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
                 Noted today
@@ -453,25 +620,23 @@ export default async function DailyRoundPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {round
-                      .filter((row) => row.check?.status === "attention")
-                      .map((row) => {
-                        const left = describeLeft(row.lost, row.sold);
-                        return (
-                          <TableRow key={row.lot.id}>
-                            <TableCell className="font-medium">{row.code}</TableCell>
-                            <TableCell className="text-muted-foreground">
-                              {row.check?.notes || (
-                                <span>
-                                  {left
-                                    ? `${left}, no note left.`
-                                    : "Flagged with no note."}
-                                </span>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
+                    {noted.map((entry) => {
+                      const left = describeLeft(entry.lost, entry.sold);
+                      return (
+                        <TableRow key={entry.id}>
+                          <TableCell className="font-medium">{entry.code}</TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {entry.notes || (
+                              <span>
+                                {left
+                                  ? `${left}, no note left.`
+                                  : "Flagged with no note."}
+                              </span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </DataTable>

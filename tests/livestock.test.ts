@@ -6,7 +6,9 @@ import {
   headEffect,
   mortalityRate,
   preferredIdentifier,
+  splitInHead,
   summariseHead,
+  summarisePen,
 } from "../src/packs/livestock/core/herd";
 import {
   checkStreak,
@@ -95,6 +97,63 @@ describe("summariseHead", () => {
       transferred: 0,
       balance: 0,
     });
+  });
+});
+
+describe("summarisePen", () => {
+  // A pen of a hundred, five dead, four cows named out of it.
+  const pen = summariseHead([m("placement", 100), m("death", -5), m("split_out", -4)]);
+  const namedOutOfHere = (extra: { movementKind: string; quantity: number }[] = []) => {
+    const movements = [m("split_in", 1), ...extra];
+    return {
+      summary: summariseHead(movements),
+      splitInHead: splitInHead(movements),
+      splitFromHere: true,
+    };
+  };
+
+  it("counts the pen and its named animals ONCE", () => {
+    // Summed naively the population would have taken in 104 head: the four
+    // split-ins are transfers, and a transfer in is intake to the cow's own
+    // fold so a split-off lot has a mortality denominator. Inside the pen she
+    // came out of, it is the same head twice.
+    const p = summarisePen(pen, [namedOutOfHere(), namedOutOfHere(), namedOutOfHere(), namedOutOfHere()]);
+    expect(p.balance).toBe(95);
+    expect(p.intake).toBe(100);
+    expect(p.died).toBe(5);
+    expect(mortalityRate(p)).toBeCloseTo(0.05);
+  });
+
+  it("a death inside a named animal is the pen's loss", () => {
+    const p = summarisePen(pen, [
+      namedOutOfHere([m("death", -1)]),
+      namedOutOfHere(),
+      namedOutOfHere(),
+      namedOutOfHere(),
+    ]);
+    expect(p.died).toBe(6);
+    expect(p.balance).toBe(94);
+    expect(mortalityRate(p)).toBeCloseTo(0.06);
+  });
+
+  it("an animal that arrived from ANOTHER pen genuinely arrived", () => {
+    const movements = [m("split_in", 1)];
+    const p = summarisePen(pen, [
+      { summary: summariseHead(movements), splitInHead: 1, splitFromHere: false },
+    ]);
+    expect(p.intake).toBe(101);
+    expect(p.balance).toBe(92);
+  });
+
+  it("is the pen itself with nobody inside", () => {
+    expect(summarisePen(pen, [])).toEqual(pen);
+  });
+});
+
+describe("splitInHead", () => {
+  it("adds up what arrived by split and nothing else", () => {
+    expect(splitInHead([m("split_in", 3), m("placement", 10), m("split_out", -2)])).toBe(3);
+    expect(splitInHead([m("placement", 10)])).toBe(0);
   });
 });
 

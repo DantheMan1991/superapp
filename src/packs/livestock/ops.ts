@@ -60,7 +60,13 @@ import { carriedValue } from "@/packs/inventory/core/valuation";
 import { convert, getUnit } from "@/packs/inventory/core/units";
 import { breedLabel, tapeDivisorFrom } from "./vocabulary";
 import { addDays } from "@/lib/timezone";
-import { ageInDays, headEffect, summariseHead } from "./core/herd";
+import {
+  ageInDays,
+  headEffect,
+  splitInHead,
+  summariseHead,
+  type HeadSummary,
+} from "./core/herd";
 import { checkStreak } from "./core/daily";
 import {
   allocateCents,
@@ -1372,6 +1378,20 @@ export type LotMemberSummary = {
   species: string;
   head: number;
   /**
+   * The member's whole fold, not only its balance: the pen's page folds its
+   * members into ITS population (`summarisePen`), and mortality needs the
+   * intake and the deaths, not the head.
+   */
+  summary: HeadSummary;
+  /** Head that arrived in this member by `split_in` — see `summarisePen`. */
+  splitInHead: number;
+  /**
+   * The inventory lot this member was split OUT OF, or null. Equal to the
+   * parent pen's inventory lot when she was named out of the pen she lives
+   * in, which is what makes her split-in internal to the pen's count.
+   */
+  parentInventoryLotId: string | null;
+  /**
    * True when this member is ONE ANIMAL. Slice 8c: read off `record_kind`, not
    * off a head balance of one — a pen down to its last bird is still a pen.
    */
@@ -1417,13 +1437,17 @@ export async function lotMemberSummaries(
   for (const m of members) {
     const lot = byId.get(m.memberLotId);
     if (!lot) continue;
-    const head = summariseHead(movements.get(lot.inventoryLotId) ?? []).balance;
+    const rows = movements.get(lot.inventoryLotId) ?? [];
+    const summary = summariseHead(rows);
     out.push({
       livestockLotId: lot.id,
       inventoryLotId: lot.inventoryLotId,
       code: codes.get(lot.inventoryLotId)?.code ?? "—",
       species: lot.species,
-      head,
+      head: summary.balance,
+      summary,
+      splitInHead: splitInHead(rows),
+      parentInventoryLotId: codes.get(lot.inventoryLotId)?.parentLotId ?? null,
       isIndividual: lot.recordKind === "animal",
       startedOn: m.startedOn,
     });

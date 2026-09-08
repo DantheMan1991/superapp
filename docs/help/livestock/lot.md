@@ -11,9 +11,9 @@ A named animal and a group share this page. Where they differ, the page says so.
 ## What you can do from the top
 
 - **{button:Place head|primary}.** Records animals arriving. Hatched, bought in, or born.
-- **{button:Record loss|outline}.** Records animals leaving. The dialog is headed `Head leaving`.
-- **{button:Treat|outline}.** Records a treatment and its withdrawal. Only when there are head.
-- **{button:Weigh|outline}.** Records a weighing. Only when there are head.
+- **{button:Record loss|outline}.** Records animals leaving. The dialog is headed `Head leaving`. Only while there is loose head in it: a named animal's loss is recorded on her own page, and a finished or closed group has nothing to lose.
+- **{button:Treat|outline}.** Records a treatment and its withdrawal. Only when there are animals in it, loose or named.
+- **{button:Weigh|outline}.** Records a weighing. Only when there are animals in it, loose or named.
 - **{button:Feed|outline}.** Issues feed to this one by name.
 - **{button:Move to a paddock|outline}.** Moves them, and starts the old paddock's rest clock.
 - **{button:Split|outline}.** Cuts head into a new group inside this one. Owners only.
@@ -24,8 +24,8 @@ Everyone can use the first six. Only an owner sees the last three.
 
 ## The panels
 
-- **`Head`.** The count, with `{n} in, {n} out` underneath. **This is the group's own head and does not include named animals inside it**, which the list on the previous page does count. A group whose head are all named members reads zero here, and that hides `Treat`, `Weigh` and the daily check. Tell us if you hit that.
-- **`Lost`.** The share that died, over everything placed.
+- **`Head`.** Everything standing in it: the loose head plus every named animal living inside. Underneath, `{n} in, {n} out`, or for a group with animals in it `4 loose, 5 named inside · 9 in, 0 out`. Before anything has been placed it reads `—`. It is the same figure the list on the previous page shows.
+- **`Lost`.** The share that died, over everything placed, named animals included. A cow named out of this group is never counted twice.
 - **`Age`.** From the birth date, or `Birth date not recorded.`
 - **`Fed`.** What feed has cost, with a badge saying how it is known: {badge:Measured|outline} for feed issued to this one by name, {badge:Allocated|primary} for a share of a shared feeder. Rest on the badge to see what that means.
 - **`Weight`.** The latest weighing with a badge for how it was taken: {badge:Scale|outline}, {badge:Sampled|outline}, {badge:Tape|primary} or {badge:Eye|primary}. Underneath, the daily gain once there are two weighings.
@@ -130,6 +130,7 @@ She stops being stock and becomes something the business owns. What she cost mov
 | `Bluebell is breeding stock — $1,450.00 moved to fixed assets` | She is a capital asset now. |
 | `You are not inside any mapped paddock. Trace its boundary and this will find it.` | The phone found you, but that ground has no boundary drawn. |
 | `{n} head still in it — record what happened to them first` | A group cannot be closed with animals in it. |
+| `Every animal in this lot is named. A loss is recorded on the animal, under it` | The daily check on a group with nothing loose has no `Head leaving` box. Open the animal's page, or her line on the round, to record her loss. |
 | `that lot is already inside another one, and lots only nest one deep` | Groups nest one level, not two. |
 | `Only an owner can change animal records.` | You are signed in as staff. Ask an owner. |
 
@@ -138,7 +139,6 @@ She stops being stock and becomes something the business owns. What she cost mov
 - Nothing tracks individual animals inside a group unless you name them.
 - `Head events`, `Fed in by name` and `Daily checks` stop at 25, 10 and 14 rows without saying so.
 - A treatment inherited from a parent group cannot be corrected here.
-- `Record loss` is offered even on an empty or closed group, and then fails.
 - Nothing here gives you a dose or a withdrawal period. Read the label.
 - If you need any of this, ask us.
 

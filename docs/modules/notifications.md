@@ -193,7 +193,8 @@ is mailed to anybody.
   fail, not by assuming.
 - **Two sources.** CRM contributes follow-ups due within 7 days, scoped to the
   assignee, with unassigned work rolled up to owners and flagged. Accounting
-  contributes overdue invoices and bills awaiting approval, owners only.
+  contributes overdue invoices, bills awaiting approval, and (2026-09-07) bills
+  we owe that fall due within a week or are past due, owners only.
 - **`/dashboard/today`** — "What needs you", in nav for everyone.
 - 11 unit tests over the resolve layer, all on the failure-reporting behaviour.
 

@@ -5,6 +5,7 @@ import type { TenantContext } from "@/lib/auth";
 import { todayInTimezone } from "@/lib/timezone";
 import { formatMoney } from "@/lib/money";
 import { PageHeader } from "@/components/app/page-header";
+import { PasteListButton } from "@/components/app/paste-list-button";
 import { EmptyState } from "@/components/app/empty-state";
 import { DataTable } from "@/components/app/data-table";
 import { Badge } from "@/components/ui/badge";
@@ -107,10 +108,21 @@ export async function RetailModule({
               today={today}
             />
             {isOwner && (
-              <ChannelForm
-                channelWord={channelWord}
-                kindOptions={channelKindsFrom(pack.config)}
-              />
+              <>
+                {/* The price list, pasted (ADR 0036): the chalkboard, the
+                    sheet in the freezer lid. Says so itself when there is
+                    nowhere to sell yet. */}
+                <PasteListButton
+                  slug="retail.prices"
+                  label="prices"
+                  noun={{ one: "price", many: "prices" }}
+                  example={"Ground beef $8.50/lb\nEggs $6 a dozen\nWhole chicken $22 each"}
+                />
+                <ChannelForm
+                  channelWord={channelWord}
+                  kindOptions={channelKindsFrom(pack.config)}
+                />
+              </>
             )}
           </div>
         }

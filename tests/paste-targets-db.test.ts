@@ -14,8 +14,11 @@ import type { PasteCtx, PasteRow } from "../src/lib/paste-targets/types";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import { listCustomers } from "../src/modules/accounting/invoicing/customers";
 import { listVendors } from "../src/modules/accounting/payables/vendors";
+import { listAssets } from "../src/packs/assets/ops";
 import { listItems } from "../src/packs/inventory/ops";
+import { createParcel, listZones } from "../src/packs/land/ops";
 import { getLivestockLot, listLivestockLots } from "../src/packs/livestock/ops";
+import { createChannel, pricesForChannel } from "../src/packs/retail/ops";
 
 /**
  * The four paste targets, run as an owner through real RLS with the model
@@ -79,6 +82,9 @@ d("paste targets", () => {
         .values([
           { tenantId, moduleId: "accounting", enabled: true },
           { tenantId, moduleId: "inventory", enabled: true },
+          { tenantId, moduleId: "assets", enabled: true },
+          { tenantId, moduleId: "land", enabled: true },
+          { tenantId, moduleId: "retail", enabled: true },
           // Off to begin with: the first test is that the target does not exist.
           { tenantId, moduleId: "livestock", enabled: false },
         ])
@@ -94,8 +100,8 @@ d("paste targets", () => {
   });
 
   it("a target exists only when its module is on, and an unknown slug is refused", async () => {
-    expect(pasteTargetBySlug("retail.prices")).toBeNull();
-    await expect(enabledPasteTarget(tenantId, "retail.prices")).rejects.toMatchObject({
+    expect(pasteTargetBySlug("scheduling.calendars")).toBeNull();
+    await expect(enabledPasteTarget(tenantId, "scheduling.calendars")).rejects.toMatchObject({
       code: "TARGET_UNKNOWN",
     });
     await expect(enabledPasteTarget(tenantId, "livestock.animals")).rejects.toMatchObject({
@@ -279,5 +285,123 @@ d("paste targets", () => {
     );
     expect(contradiction).toMatch(/^Row 1 \(Clover\): /);
     expect(await asOwner((tx) => listLivestockLots(tx, tenantId))).toHaveLength(4);
+  });
+
+  it("equipment and buildings: the pack's kinds, dollars into cents, and a place is a place", async () => {
+    const proposal = await propose("assets.assets", [
+      { name: "Chest freezer (garage)", kind: "Equipment", keeps: "Yes", cost: "450" },
+      { name: "North barn", kind: "Building", keeps: "yes", acquired: "2015-06-01" },
+      { name: "Kubota L3901", kind: "Equipment", identifier: "KL3901-0042", cost: "$18,500", keeps: "No" },
+    ]);
+    const kind = proposal.fields.find((f) => f.key === "kind")!;
+    expect(kind.choices!.map((c) => c.value)).toEqual(
+      expect.arrayContaining(["building", "equipment", "vehicle"]),
+    );
+    expect(proposal.rows.map((r) => [r.values.keeps, r.values.cost])).toEqual([
+      ["yes", 450],
+      ["yes", null],
+      ["no", 18500],
+    ]);
+
+    expect(await save("assets.assets", proposal.rows.map((r) => r.values))).toHaveLength(3);
+    const assets = await asOwner((tx) => listAssets(tx, tenantId));
+    expect(assets.find((a) => a.name === "Chest freezer (garage)")).toMatchObject({
+      kind: "equipment",
+      isStorageLocation: true,
+      acquisitionCostCents: 45000,
+    });
+    expect(assets.find((a) => a.name === "North barn")).toMatchObject({
+      kind: "building",
+      isStorageLocation: true,
+      acquiredOn: "2015-06-01",
+      acquisitionCostCents: null,
+    });
+    expect(assets.find((a) => a.name === "Kubota L3901")).toMatchObject({
+      isStorageLocation: false,
+      identifier: "KL3901-0042",
+      acquisitionCostCents: 1850000,
+    });
+
+    const again = await propose("assets.assets", [{ name: "north barn" }]);
+    expect(again.rows[0].duplicateOf).toBe("North barn");
+  });
+
+  it("paddocks: blocked until a parcel exists, the only parcel used when blank, and a choice once there are two", async () => {
+    expect(await failing(() => propose("land.paddocks", [{ name: "North 40" }]))).toBe(
+      "Add a parcel first, so a paddock has somewhere to be.",
+    );
+
+    const home = await asOwner((tx) => createParcel(tx, ctx(), { name: "Home place", areaAcres: 80 }));
+    const proposal = await propose("land.paddocks", [
+      { name: "North 40", acres: "38" },
+      { name: "Creek field", acres: "12.5", parcel: "Home place" },
+    ]);
+    expect(proposal.fields.find((f) => f.key === "parcel")!.required).toBe(false);
+    expect(proposal.rows.map((r) => r.values.parcel)).toEqual([null, home.id]);
+    expect(await save("land.paddocks", proposal.rows.map((r) => r.values))).toHaveLength(2);
+    const zones = await asOwner((tx) => listZones(tx, tenantId));
+    expect(zones.map((z) => [z.name, z.parcelId, Number(z.areaAcres)]).sort()).toEqual([
+      ["Creek field", home.id, 12.5],
+      ["North 40", home.id, 38],
+    ]);
+
+    // A second parcel: the column is now required, and a parcel the list
+    // names that is not one of them comes back as the words beside an empty
+    // cell, which holds the save.
+    await asOwner((tx) => createParcel(tx, ctx(), { name: "Back forty" }));
+    const two = await propose("land.paddocks", [
+      { name: "north 40" },
+      { name: "Pen 3", parcel: "the back 40" },
+    ]);
+    expect(two.fields.find((f) => f.key === "parcel")!.required).toBe(true);
+    expect(two.rows[0].duplicateOf).toBe("North 40");
+    expect(two.rows[1].values.parcel).toBeNull();
+    expect(two.rows[1].hints.parcel).toBe("the back 40");
+    expect(await failing(() => save("land.paddocks", [two.rows[1].values]))).toBe(
+      "Row 1 (Pen 3): Parcel is missing.",
+    );
+    expect(await asOwner((tx) => listZones(tx, tenantId))).toHaveLength(2);
+  });
+
+  it("prices: blocked with nowhere to sell, item and place by label, dollars into cents, and the pack's own refusal per pound", async () => {
+    expect(await failing(() => propose("retail.prices", [{ item: "Eggs", price: "6" }]))).toBe(
+      "Add somewhere to sell first.",
+    );
+
+    const market = await asOwner((tx) => createChannel(tx, ctx(), { name: "Saturday market" }));
+    const proposal = await propose("retail.prices", [
+      { item: "Eggs", price: "6", per: "Each" },
+      { item: "eggs", price: "$5.50", from: "2026-10-01" },
+      { item: "Goat milk soap", price: "7" },
+    ]);
+    expect(proposal.fields.find((f) => f.key === "channel")!.required).toBe(false);
+    expect(proposal.rows[0].values).toMatchObject({ price: 6, per: "unit", channel: null });
+    expect(proposal.rows[1].values).toMatchObject({ price: 5.5, from: "2026-10-01" });
+    expect(proposal.rows[0].values.item).toBe(proposal.rows[1].values.item);
+    // Not something the farm holds: the words stay, the cell is empty.
+    expect(proposal.rows[2].values.item).toBeNull();
+    expect(proposal.rows[2].hints.item).toBe("Goat milk soap");
+    // A price change is a new row by design, so nothing is ever a duplicate.
+    expect(proposal.rows.every((r) => r.duplicateOf === null)).toBe(true);
+
+    expect(await failing(() => save("retail.prices", proposal.rows.map((r) => r.values)))).toBe(
+      "Row 3: Item is missing.",
+    );
+    expect(await save("retail.prices", proposal.rows.slice(0, 2).map((r) => r.values))).toHaveLength(2);
+    const today = new Date().toISOString().slice(0, 10);
+    const prices = await asOwner((tx) => pricesForChannel(tx, tenantId, market.id));
+    expect(prices.map((p) => [p.priceCents, p.effectiveFrom, p.priceBasis]).sort()).toEqual(
+      [
+        [550, "2026-10-01", "unit"],
+        [600, today, "unit"],
+      ].sort(),
+    );
+
+    // Per pound for something already measured in pounds: the pack's rule,
+    // in the pack's words, and nothing written.
+    const pellets = (await asOwner((tx) => listItems(tx, tenantId))).find((i) => i.name === "Layer pellets")!;
+    const refused = await failing(() => save("retail.prices", [{ item: pellets.id, price: 0.45, per: "lb" }]));
+    expect(refused).toMatch(/^Row 1: /);
+    expect(await asOwner((tx) => pricesForChannel(tx, tenantId, market.id))).toHaveLength(2);
   });
 });

@@ -578,6 +578,20 @@ grounds, which were never about optimisation as such.
 
 ## Build log
 
+### 2026-09-09 — Paddocks from a pasted list (`claude/paste-the-rest`)
+
+Onboarding slice 2, the last three targets ([onboarding.md](onboarding.md),
+[ADR 0036](../decisions/0036-a-pasted-list-is-proposed-by-the-model-reviewed-by-a-person-and-written-by-the-modules-own-verb.md)):
+`Paste a list` on the hub, beside `Add parcel`, for the twenty zones a farm
+already calls by name. This pack's part is one file, `paste/target.ts`: name,
+parcel (a choice among the tenant's parcels — REQUIRED only once there are
+two, a blank meaning the only one), acres, notes; `save` = `createZone` with no
+geometry, so the acreage is whatever the list gave until the paddock is drawn.
+**The first target that can be blocked**: with no parcel `describe` returns
+`Add a parcel first, so a paddock has somewhere to be.` and the dialog stops
+before reading. Parcels are not a target — two deeds are not a list. Guide:
+`parcels.md`.
+
 ### 2026-09-02 — Two dead ends the guides found (`claude/the-manual-not-the-summary`)
 
 Writing the tenant guides for Land to the founder's bar — every control on

@@ -23,6 +23,7 @@ import { periodOf } from "./core/depreciation";
 import { assetKindLabel } from "./vocabulary";
 import { primaryAttachments } from "@/modules/documents/attachments";
 import { RecordPhotoThumb } from "@/modules/documents/components/record-photos";
+import { PasteListButton } from "@/components/app/paste-list-button";
 import { AssetForm } from "./components/asset-form";
 import { PostAllDepreciation } from "./components/post-all-depreciation";
 
@@ -132,7 +133,15 @@ export async function AssetsModule({
         description="What the business owns — what it cost, where it lives, and what is still in service."
         actions={
           isOwner ? (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <PasteListButton
+                slug="assets.assets"
+                label="assets"
+                noun={{ one: "asset", many: "assets" }}
+                example={
+                  "Kubota L3901 tractor, bought 2019-04-12 for $18,500\nNorth barn, built 2015\nChest freezer in the garage — holds the beef"
+                }
+              />
               <PostAllDepreciation
                 through={currentPeriod}
                 assetsDue={due.assetsDue}

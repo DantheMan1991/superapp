@@ -34,7 +34,12 @@ import {
   isLotSource,
   isValidSlug,
 } from "./vocabulary";
-import { isKnownUnit, roundQuantity, type EntryBasis } from "./core/units";
+import {
+  formatQuantity,
+  isKnownUnit,
+  roundQuantity,
+  type EntryBasis,
+} from "./core/units";
 import { enterpriseForMovement } from "./core/enterprise";
 import { postedOnAllowed } from "./core/counts";
 import type { MovementRow } from "./core/balances";
@@ -379,6 +384,35 @@ export async function updateItem(
       ),
     )
     .returning();
+
+  /**
+   * **A LOT'S COST OBJECT IS NAMED `item · code`, SO RENAMING THE ITEM RENAMES
+   * EVERY BATCH OF IT.** Without this the journal's tag list kept the name the
+   * item had on the day each batch was made, and a business that renamed
+   * *Broiler chicks* to *Cornish Cross* got a picker listing both — two names
+   * for one thing, which is what the dimension exists to prevent. The mirror of
+   * `updateLot` re-upserting on a code change, and found while writing it.
+   *
+   * Bounded by the item's own batches and only on a real rename, so an ordinary
+   * edit costs nothing.
+   */
+  const renamedTo = typeof patch.name === "string" ? patch.name : null;
+  if (renamedTo !== null && renamedTo !== existing.name) {
+    const lots = await tx.query.inventoryLots.findMany({
+      where: and(
+        eq(schema.inventoryLots.tenantId, ctx.tenantId),
+        eq(schema.inventoryLots.itemId, id),
+      ),
+      columns: { id: true, code: true },
+    });
+    for (const lot of lots) {
+      await upsertDimensionMember(tx, ctx, {
+        dimensionType: LOT_DIMENSION,
+        packEntityId: lot.id,
+        displayName: `${renamedTo} · ${lot.code}`,
+      });
+    }
+  }
   return rows[0];
 }
 
@@ -558,6 +592,150 @@ export async function createLot(
   return lot;
 }
 
+/**
+ * What a batch is on hand, and what has ever come into it, in one query.
+ *
+ * Shared by the close guard and by `adjustLotCost`'s split — a batch's balance
+ * is a fold over movements and nothing anywhere writes it down.
+ */
+async function lotTotals(
+  tx: Tx,
+  tenantId: string,
+  lotId: string,
+): Promise<{ onHand: number; received: number }> {
+  const [totals] = await tx
+    .select({
+      onHand: sql<string>`coalesce(sum(${schema.inventoryMovements.quantity}), 0)`,
+      received: sql<string>`coalesce(sum(${schema.inventoryMovements.quantity}) filter (where ${schema.inventoryMovements.quantity} > 0), 0)`,
+    })
+    .from(schema.inventoryMovements)
+    .where(
+      and(
+        eq(schema.inventoryMovements.tenantId, tenantId),
+        eq(schema.inventoryMovements.lotId, lotId),
+      ),
+    );
+  return {
+    onHand: roundQuantity(Number(totals?.onHand ?? 0)),
+    received: roundQuantity(Number(totals?.received ?? 0)),
+  };
+}
+
+/** What `updateLot` will change. Absent means "leave it alone". */
+export interface LotUpdate {
+  code?: string;
+  openedOn?: string | null;
+  expiresOn?: string | null;
+  /** Only while nothing has moved — see the refusal below. */
+  source?: string;
+  enterpriseId?: string | null;
+  notes?: string;
+}
+
+/**
+ * Put a batch right.
+ *
+ * **THE MISSING HALF OF `createLot`, AND ITS ABSENCE WAS ALREADY BITING.**
+ * `LotForm`'s own doc comment names it: a stale enterprise prefill would write
+ * the old line of business onto a new batch *"permanently, because there is no
+ * `updateLot` to correct a batch with"*. Every batch fact was typed once, on a
+ * phone, at a delivery, and was then unchangeable — a code with a typo in it,
+ * an expiry a day out, a date nobody knew at the time.
+ *
+ * **THE LOT AND MOVEMENT MODEL IS UNCHANGED.** This writes columns that have
+ * existed since slice 0 and touches no movement: nothing is restated, no
+ * balance moves, no entry is rewritten. What a batch IS can be corrected; what
+ * happened to it stays exactly as recorded.
+ *
+ * **THE CODE IS ALSO A COST OBJECT'S NAME**, so changing it re-upserts the
+ * dimension member. A batch renamed on this screen and still called the old
+ * thing on a journal line would be two answers to one question — which is the
+ * `carriedValue` mistake in a different suit.
+ */
+export async function updateLot(
+  tx: Tx,
+  ctx: InventoryCtx,
+  id: string,
+  input: LotUpdate,
+): Promise<InventoryLot> {
+  requireWrite(ctx, "owner");
+  const existing = await getLot(tx, ctx.tenantId, id);
+  if (!existing) throw new InventoryError("NOT_FOUND", `lot ${id} not found`);
+
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  let nextCode = existing.code;
+  if (input.code !== undefined) {
+    const code = input.code.trim();
+    // The CHECK refuses it too; this says which field and why.
+    if (code.length === 0) {
+      throw new InventoryError("LOT_INVALID", "a batch needs a code");
+    }
+    patch.code = code;
+    nextCode = code;
+  }
+  if (input.openedOn !== undefined) patch.openedOn = input.openedOn;
+  if (input.expiresOn !== undefined) patch.expiresOn = input.expiresOn;
+  if (input.enterpriseId !== undefined) patch.enterpriseId = input.enterpriseId;
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+  if (input.source !== undefined && input.source !== existing.source) {
+    const source = input.source;
+    if (!isLotSource(source)) {
+      throw new InventoryError("INVALID_SOURCE", `invalid lot source: ${source}`);
+    }
+    /**
+     * **ONLY BEFORE ANYTHING HAS MOVED.** `recordMovement` reads
+     * `lot.source` to decide the CREDIT side of a receipt — bought stock
+     * credits the payable side, made stock credits production — and the
+     * decision is stamped into the entry at the time. Changing it afterwards
+     * would leave the batch describing itself one way while its own postings
+     * say the other, with no way to tell from either which is meant. Before the
+     * first movement there is nothing to disagree with, and it is a typo.
+     *
+     * Same shape and same reason as `updateItem`'s stocking-unit refusal.
+     */
+    const moved = await tx.query.inventoryMovements.findFirst({
+      where: and(
+        eq(schema.inventoryMovements.tenantId, ctx.tenantId),
+        eq(schema.inventoryMovements.lotId, id),
+      ),
+      columns: { id: true },
+    });
+    if (moved) {
+      throw new InventoryError(
+        "LOT_INVALID",
+        "stock has already moved through this batch, and where it came from decided how those entries were posted — start a new batch instead",
+      );
+    }
+    patch.source = source;
+  }
+
+  const rows = await tx
+    .update(schema.inventoryLots)
+    .set(patch)
+    .where(
+      and(
+        eq(schema.inventoryLots.tenantId, ctx.tenantId),
+        eq(schema.inventoryLots.id, id),
+      ),
+    )
+    .returning();
+
+  if (nextCode !== existing.code) {
+    const item = await getItem(tx, ctx.tenantId, existing.itemId);
+    // Same transaction and the same string `createLot` builds, so the two
+    // cannot drift.
+    if (item) {
+      await upsertDimensionMember(tx, ctx, {
+        dimensionType: LOT_DIMENSION,
+        packEntityId: id,
+        displayName: `${item.name} · ${nextCode}`,
+      });
+    }
+  }
+
+  return rows[0];
+}
+
 /** Every lot descended from `rootId`, exclusive. Iterative — depth is unbounded. */
 async function descendantLotIds(
   tx: Tx,
@@ -617,6 +795,30 @@ export async function closeLot(
   requireWrite(ctx, "owner");
   const existing = await getLot(tx, ctx.tenantId, id);
   if (!existing) throw new InventoryError("NOT_FOUND", `lot ${id} not found`);
+  /**
+   * **REFUSED WHILE STOCK IS STILL IN IT**, because closing ARCHIVES the cost
+   * object: the batch stops being taggable, `livestock` stops offering it as a
+   * feeder, and the valuation goes on counting the stock nobody can now reach.
+   * Hiding what is on the shelf is the one outcome this act must not have.
+   *
+   * `livestock` has refused this since its own slice — *"closing a lot that
+   * still holds a cow would hide her with it"* — with the guard in
+   * `closeLivestockLot` rather than here, so it protected livestock's door and
+   * not this one. It is here now, which is where the archiving happens.
+   *
+   * **BELOW ZERO IS ALLOWED THROUGH**, and deliberately: a batch at minus five
+   * hides nothing, and refusing it would strand a business that issued feed it
+   * never got round to recording a delivery for. The same reason negative stock
+   * is allowed in the first place.
+   */
+  const { onHand } = await lotTotals(tx, ctx.tenantId, id);
+  if (onHand > 0) {
+    const item = await getItem(tx, ctx.tenantId, existing.itemId);
+    throw new InventoryError(
+      "LOT_INVALID",
+      `${formatQuantity(onHand, item?.stockingUnit ?? "each")} is still in this batch — record what happened to it first`,
+    );
+  }
   const rows = await tx
     .update(schema.inventoryLots)
     .set({ status: "closed", updatedAt: new Date() })
@@ -633,6 +835,52 @@ export async function closeLot(
   const members = await listDimensionMembers(tx, ctx.tenantId, LOT_DIMENSION);
   const member = members.find((m) => m.packEntityId === id);
   if (member) await archiveDimensionMember(tx, ctx, { memberId: member.id });
+  return rows[0];
+}
+
+/**
+ * Open a closed batch again.
+ *
+ * **CLOSING ARCHIVES THE COST OBJECT, SO REOPENING HAS TO PUT IT BACK**, and
+ * for as long as the only reopen lived in `livestock` it did not.
+ * `reopenLivestockLot` set `inventory_lots.status` with a direct `update` —
+ * bypassing this pack's own door, which is what `closeLivestockLot` correctly
+ * uses — so a lot closed and reopened came back with its dimension member still
+ * archived. `assertDimensionsUsable` throws `DIMENSION_INVALID` on an archived
+ * member, so anything that ever tags a lot would refuse to post against a batch
+ * the screen showed as open. Nothing tags a lot TODAY, which is the only reason
+ * this was latent rather than live.
+ *
+ * `upsertDimensionMember` sets `isActive: true` on conflict, so one call both
+ * restores the member and refreshes its name.
+ */
+export async function reopenLot(
+  tx: Tx,
+  ctx: InventoryCtx,
+  id: string,
+): Promise<InventoryLot> {
+  requireWrite(ctx, "owner");
+  const existing = await getLot(tx, ctx.tenantId, id);
+  if (!existing) throw new InventoryError("NOT_FOUND", `lot ${id} not found`);
+  const rows = await tx
+    .update(schema.inventoryLots)
+    .set({ status: "open", updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.inventoryLots.tenantId, ctx.tenantId),
+        eq(schema.inventoryLots.id, id),
+      ),
+    )
+    .returning();
+
+  const item = await getItem(tx, ctx.tenantId, existing.itemId);
+  if (item) {
+    await upsertDimensionMember(tx, ctx, {
+      dimensionType: LOT_DIMENSION,
+      packEntityId: id,
+      displayName: `${item.name} · ${existing.code}`,
+    });
+  }
   return rows[0];
 }
 
@@ -2384,20 +2632,11 @@ export async function adjustLotCost(
    * read now and stored, because the split they produce has to survive
    * everything that happens to this batch afterwards.
    */
-  const [totals] = await tx
-    .select({
-      onHand: sql<string>`coalesce(sum(${schema.inventoryMovements.quantity}), 0)`,
-      received: sql<string>`coalesce(sum(${schema.inventoryMovements.quantity}) filter (where ${schema.inventoryMovements.quantity} > 0), 0)`,
-    })
-    .from(schema.inventoryMovements)
-    .where(
-      and(
-        eq(schema.inventoryMovements.tenantId, ctx.tenantId),
-        eq(schema.inventoryMovements.lotId, input.lotId),
-      ),
-    );
-  const quantityOnHand = roundQuantity(Number(totals?.onHand ?? 0));
-  const quantityReceived = roundQuantity(Number(totals?.received ?? 0));
+  const { onHand: quantityOnHand, received: quantityReceived } = await lotTotals(
+    tx,
+    ctx.tenantId,
+    input.lotId,
+  );
 
   const split = splitCostAdjustment({
     amountCents,

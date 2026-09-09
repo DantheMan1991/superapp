@@ -60,6 +60,8 @@ import {
 } from "@/packs/inventory/vocabulary";
 import {
   LotCostForm,
+  CloseLotButton,
+  EditLotForm,
   LotForm,
   LotWeightForm,
   MovementForm,
@@ -313,6 +315,9 @@ export default async function InventoryItemPage({
     const received = rows
       .filter((r) => r.lotId === lot.id && r.quantity > 0)
       .reduce((sum, r) => sum + r.quantity, 0);
+    // Read off the movements this page already holds. Only `Where from` cares,
+    // and only because it decided how those entries were posted.
+    const hasMovements = rows.some((r) => r.lotId === lot.id);
     /* Past its date AND still on the shelf is the only combination worth
        colouring: an empty batch cannot go off into a loss. */
     const pastDate = Boolean(
@@ -325,6 +330,7 @@ export default async function InventoryItemPage({
       weightLabel,
       weightDetail,
       received,
+      hasMovements,
       pastDate,
       source: isLotSource(lot.source) ? LOT_SOURCE_LABELS[lot.source] : lot.source,
       expiry: lot.expiresOn ? expiryLabel(lot.expiresOn, today) : null,
@@ -334,9 +340,29 @@ export default async function InventoryItemPage({
   /** The owner's three buttons for a batch, in one place for both shapes. */
   function batchActions(row: (typeof batchRows)[number]) {
     if (!isOwner) return null;
-    const { lot, balance, carriedCents, weightDetail, received } = row;
+    const { lot, balance, carriedCents, weightDetail, received, hasMovements } =
+      row;
     return (
       <>
+        {/* **PUT THE BATCH RIGHT, and it is first because it is the one that
+            changes nothing.** Every other button here appends to the record;
+            this one corrects what the batch is called and when it runs, which
+            is the thing somebody typed on a phone at a delivery and has had no
+            way to fix since slice 0. */}
+        <EditLotForm
+          lot={{
+            id: lot.id,
+            code: lot.code,
+            source: lot.source,
+            openedOn: lot.openedOn,
+            expiresOn: lot.expiresOn,
+            notes: lot.notes,
+            enterpriseId: lot.enterpriseId,
+            hasMovements,
+          }}
+          enterprises={enterprises.map((e) => ({ id: e.id, name: e.name }))}
+          enterpriseWord={enterpriseWord}
+        />
         {/* **A CORRECTION IS OFFERED ON AN EMPTY BATCH TOO**, and on a closed
             one. The invoice for a delivery routinely arrives after the feed has
             been eaten, and a screen that only offers the correction while stock
@@ -381,6 +407,15 @@ export default async function InventoryItemPage({
               unitSingular,
             }}
             today={today}
+          />
+        )}
+        {/* **AT ZERO OR BELOW, OR ALREADY CLOSED.** Closing archives the cost
+            object, so a batch with stock in it would be hidden by it — the op
+            refuses that and the button does not offer it. A closed batch keeps
+            the control so the judgement can be undone. */}
+        {(lot.status === "closed" || balance <= 0) && (
+          <CloseLotButton
+            lot={{ id: lot.id, code: lot.code, status: lot.status }}
           />
         )}
         {lot.status === "open" && balance > 0 && (
@@ -856,7 +891,13 @@ export default async function InventoryItemPage({
                         {c.occurredOn}
                       </TableCell>
                       <TableCell>{lotCodes.get(c.lotId) ?? "—"}</TableCell>
-                      <TableCell>
+                      {/* **FREE TEXT WRAPS, or one long note widens the whole
+                          table.** Measured 2026-09-09: a 96-character
+                          correction note put this table at 1168px in a 961px
+                          column, pushing the money columns off the right. Same
+                          fix and same reason as the batch-code and Good-until
+                          cells above. */}
+                      <TableCell className="max-w-[22rem] whitespace-normal">
                         {costAdjustmentReasonLabel(c.reason)}
                         {c.notes && (
                           <div className="text-xs text-muted-foreground">
@@ -952,7 +993,13 @@ export default async function InventoryItemPage({
                         {c.occurredOn}
                       </TableCell>
                       <TableCell>{lotCodes.get(c.lotId) ?? "—"}</TableCell>
-                      <TableCell>
+                      {/* **FREE TEXT WRAPS, or one long note widens the whole
+                          table.** Measured 2026-09-09: a 96-character
+                          correction note put this table at 1168px in a 961px
+                          column, pushing the money columns off the right. Same
+                          fix and same reason as the batch-code and Good-until
+                          cells above. */}
+                      <TableCell className="max-w-[22rem] whitespace-normal">
                         {weightAdjustmentReasonLabel(c.reason)}
                         {c.notes && (
                           <div className="text-xs text-muted-foreground">
@@ -1041,7 +1088,7 @@ export default async function InventoryItemPage({
                       <TableCell className="tabular-nums text-muted-foreground">
                         {m.occurredOn}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="max-w-[22rem] whitespace-normal">
                         {movementKindLabel(m.movementKind)}
                         {/**
                          * **THE REASON, BESIDE THE ENTRY.** Found by clicking: the

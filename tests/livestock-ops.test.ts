@@ -4710,6 +4710,21 @@ d("livestock ops", () => {
     );
     expect(closed?.status).toBe("closed");
 
+    const lotMember = async () => {
+      const members = await asOwner((tx) =>
+        tx.query.dimensionMembers.findMany({
+          where: and(
+            eq(schema.dimensionMembers.tenantId, tenantId),
+            eq(schema.dimensionMembers.dimensionType, LOT_DIMENSION),
+          ),
+        }),
+      );
+      return members.find((m) => m.packEntityId === inventoryLotId);
+    };
+    // Closing ARCHIVES the cost object, which is inventory's doing and the
+    // reason the reopen below has to be inventory's too.
+    expect((await lotMember())?.isActive).toBe(false);
+
     // Closing hides; it never deletes. The record and its history stay.
     await asOwner((tx) =>
       reopenLivestockLot(tx, ctx(), { livestockLotId: lot.id }),
@@ -4718,6 +4733,15 @@ d("livestock ops", () => {
       getInventoryLot(tx, tenantId, inventoryLotId),
     );
     expect(reopened?.status).toBe("open");
+    /**
+     * **AND ITS COST OBJECT IS BACK ON.** This reopen used to set
+     * `inventory_lots.status` with a direct `update`, so the member stayed
+     * archived and the lot came back as something no entry could be tagged
+     * with — `assertDimensionsUsable` throws `DIMENSION_INVALID` on an
+     * archived member. It goes through inventory's `reopenLot` since
+     * 2026-09-09; this assertion fails on the old behaviour.
+     */
+    expect((await lotMember())?.isActive).toBe(true);
   });
 
   it("REFUSES TO CLOSE A LOT WITH HEAD STILL IN IT", async () => {

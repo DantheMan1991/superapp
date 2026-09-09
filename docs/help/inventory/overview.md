@@ -41,7 +41,7 @@ Ask your accountant before turning it on. It changes your balance sheet.
 
 - Stock is allowed to go below zero, on purpose. Nothing stops you using something before the delivery that covered it was entered. The screens say so where it happens.
 - Nothing refuses a batch that has gone off. The page tells you which one to use first and leaves the choice to you, because you can see which bag is already open and it cannot.
-- A batch cannot be edited after it is started, and it cannot be closed or merged.
+- Two batches cannot be merged.
 - A posted count cannot be reopened or corrected. Click {button:Count again|outline} on it to walk the same place afresh.
 - Nothing here values stock at what it would sell for. Every figure is what it cost.
 - There is no import, no export, and no way to add things in bulk.

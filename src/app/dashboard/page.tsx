@@ -11,6 +11,7 @@ import { StatCard } from "@/components/app/stat-card";
 import { EmptyState } from "@/components/app/empty-state";
 import { SectionRow } from "@/components/app/section-row";
 import { getIcon } from "@/components/app/icon-registry";
+import { GettingSetUp } from "./getting-set-up";
 import { SubscriptionStatusBadge } from "@/components/status-badge";
 import { loadRetainerView } from "@/lib/retainer";
 import { formatMinutesAsHours } from "@/lib/retainer-core";
@@ -77,6 +78,11 @@ export default async function DashboardPage() {
           )}
         </div>
       )}
+
+      {/* What the switched-on tools still need, for the owner, until there is
+          nothing left — then the card is gone for good. Above the tiles because
+          for a new business it is the whole page. */}
+      <GettingSetUp tenantId={ctx.tenant.id} role={ctx.role} />
 
       <SectionRow
         title="Your modules"

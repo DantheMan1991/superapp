@@ -206,6 +206,19 @@ on and the writer fills every word slot, so an industry gets a website by
 writing one data file and the editor, renderer and SEO pack come for free
 ([ADR 0030](decisions/0030-a-site-template-is-data-an-industry-contributes.md)).
 
+**Used a fifth time on 2026-09-08, for the Overview's "Getting set up"
+card.** A new business needs telling what each switched-on tool is waiting
+for — a register, a place to keep stock, an animal, a parcel, somewhere to
+sell — and the shell must not know what any module needs.
+[src/lib/setup-sources/](../src/lib/setup-sources/types.ts) holds the slot
+(types only), `registry.ts` names three core modules and five packs, and the
+card calls `resolve.ts`; `<module>/setup/source.ts` fills it with a `LIMIT 1`
+over its own tables. The contract is `attention-sources`' with the dates and
+the person taken out, and one rule of its own: a step is a PREREQUISITE the
+data proves missing, never advice, asked as "has this ever existed" — which is
+what lets it have no dismiss button
+([ADR 0033](decisions/0033-a-setup-step-is-a-prerequisite-the-data-proves-missing.md)).
+
 What is **not** sanctioned: adding a column to a core table for one industry,
 branching on `tenant.industry` inside core, or a pack reading another pack's
 tables directly.

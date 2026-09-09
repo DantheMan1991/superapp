@@ -167,6 +167,18 @@ const ATTENTION_REGISTRY_MESSAGE =
   "isolation rule by one level of indirection.";
 
 /**
+ * Setup steps (the Overview's "Getting set up" card, ADR 0033) are the same
+ * shape as attention sources and get the same rule: the card is platform code
+ * in `src/app/dashboard/`, no module hosts the slot, so no module may reach the
+ * wiring. `has-any.ts` beside the contract is a helper, not wiring, and is not
+ * banned.
+ */
+const SETUP_REGISTRY_MESSAGE =
+  "A module may import only src/lib/setup-sources/types (and has-any). The registry and " +
+  "resolver are platform wiring — importing either pulls in every other module's source and " +
+  "defeats the isolation rule by one level of indirection.";
+
+/**
  * The patterns one module directory is forbidden to import.
  *
  * Extracted so the per-file override below can ask for the NON-host version of
@@ -197,6 +209,11 @@ function isolationPatterns(slug, { entityLinkHost }) {
         "@/lib/attention-sources/resolve",
       ],
       message: ATTENTION_REGISTRY_MESSAGE,
+    },
+    // Same shape, same reason — see SETUP_REGISTRY_MESSAGE above.
+    {
+      group: ["@/lib/setup-sources/registry", "@/lib/setup-sources/resolve"],
+      message: SETUP_REGISTRY_MESSAGE,
     },
     ...(entityLinkHost
       ? []
@@ -260,6 +277,9 @@ const eslintConfig = defineConfig([
       "src/lib/mail-extensions/resolve.ts",
       "src/lib/attention-sources/types.ts",
       "src/lib/attention-sources/resolve.ts",
+      "src/lib/setup-sources/types.ts",
+      "src/lib/setup-sources/resolve.ts",
+      "src/lib/setup-sources/has-any.ts",
       // The shared linkable-record contract. Same rule, same reason: a contract
       // that imported an implementation of itself would invert the graph.
       "src/lib/entity-links/types.ts",

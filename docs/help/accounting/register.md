@@ -19,6 +19,19 @@ Open **Banking** in the accounting menu and click an account's card. This is whe
 - **The buttons on a row.** On `To review`: {button:Match|outline} when the row has something in the books it could be, {button:Split|outline}, {button:Exclude|ghost} and {button:Post|primary}. On `All`: {button:Unmatch|ghost} on a row that was matched to an entry; a row that posted its own entry has no button, because that entry is undone by voiding it. On `Excluded`: {button:Restore|outline}. On a personal account the two are named for what they mean there: {button:Personal|ghost} in place of {button:Exclude|ghost}, and {button:It's the business's|outline} in place of {button:Restore|outline}.
 - **{button:Accept 12 suggestions (≥70%)|outline}.** At the top of `To review`. See how to post many at once, below. On a personal account the assistant's `personal` suggestions count among them, and accepting sets those aside rather than posting them.
 - **{button:Set aside the rest as personal (42)|ghost}.** On a personal account only, beside it: every transaction still waiting that nothing has called the business's. See how to sort a personal account, below.
+- **`8 payees you have no vendor for`.** A card above the search box, owners only, while any line on the account names somebody you have no vendor for. It reads `8 payees you have no vendor for — name them and every line they cover gets that vendor.` with {button:Name the payees|outline}. It goes when every payee has a name. See how to turn payees into vendors, below.
+
+## How to turn the payees into vendors
+
+Do this after importing a statement. It is how the Vendors list fills itself instead of being typed out.
+
+1. Click {button:Name the payees|outline}. `Payees on this account` opens and reads `Taken from what the bank wrote on each line. Untick anything that is not somebody you buy from, and correct any name before it is added.`
+2. Read the list. The biggest first. Each row has a tick box, the name it would use in a box you can retype, and under it `2 lines, 102.95 out. From “TRACTOR SUPPLY 8821”.` The name comes from the words the lines share, with the store and reference numbers dropped, so four lines from `TRACTOR SUPPLY 8821` and `TRACTOR SUPPLY 0412` become one payee called `Tractor Supply`.
+3. Untick anything that is not a supplier: a bank fee, a transfer, a person. Correct any name that reads badly.
+4. A payee you already have a vendor for comes back unticked with an amber line: `You already have a vendor called “Rural King”. Tick to put that name on these lines.` Its name cannot be edited, because it is that vendor. Tick it to label the lines, or leave it.
+5. Click {button:Name 6 payees|primary}. You see `6 vendors added, 14 lines named`.
+
+Only money going out is offered: a payee is somebody you pay. Money coming in is a customer, and that is a different list. Lines you have set aside as personal are left out too. Nothing is posted and no category is set — this only writes the `Payee` column, and the new vendors appear under Purchases.
 
 ## How to post a transaction
 
@@ -90,6 +103,7 @@ On a personal account the same button is {button:Personal|ghost}, the message is
 | `Posted 3, set aside 9 as personal` | {button:Accept 12 suggestions (≥70%)|outline} on a personal account posted the business's lines and set aside the ones the assistant called personal. |
 | `A personal account has no opening balance and is never reconciled — only the lines you mark as the business's reach the books, so its balance was never the business's.` | Something asked this account to reconcile. It never does. |
 | `That date is before the day your books begin. Anything from before then stays where it was — the books start with balances on that day, not with history.` | The row you tried to post is dated before the day the company's books begin. Exclude it, or move the day on the Close page if it is wrong. |
+| `6 vendors added, 14 lines named` | The payees you ticked are now vendors, and every line they cover carries the name. |
 | `No transactions here yet.` | The tab is empty. |
 | `Nothing matches “…”. Try fewer words, or clear the search.` | Nothing on this tab has what you typed in its description, its payee or its amount. |
 | `Suggestions were just requested — try again in a moment.` | You asked the assistant twice within half a minute. |
@@ -112,4 +126,4 @@ There is no date filter. Importing a statement and reconciling have their own pa
 
 ## Who can do what
 
-Staff and accountants can read the list and the tabs. Posting, matching, excluding, importing, reconciling and closing are the owner's. A personal account is the exception to the first sentence: owners and accountants can open it, and staff never see it, its transactions, or the rules written for it.
+Staff and accountants can read the list and the tabs. Posting, matching, excluding, importing, reconciling, naming the payees and closing are the owner's. A personal account is the exception to the first sentence: owners and accountants can open it, and staff never see it, its transactions, or the rules written for it.

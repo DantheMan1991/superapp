@@ -16,6 +16,7 @@ import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { getBalances, listDimensionMembers } from "@/modules/accounting/core";
 import { dimensionTypesFrom } from "@/lib/dimension-options";
 import {
+  formatCents,
   formatCentsSigned,
   parseMoneyToCents,
   todayInTimezone,
@@ -23,11 +24,14 @@ import {
 import { findMatchCandidatesBatch } from "@/modules/accounting/banking/match";
 import { readAiSuggestion } from "@/modules/accounting/banking/review";
 import { readRuleSuggestion } from "@/modules/accounting/banking/rules";
+import { listRegisterPayees } from "@/modules/accounting/banking/payees";
 import {
   BankAccountActiveToggle,
+  PayeeVendors,
   RegisterTabs,
   ReviewTable,
   SuggestButton,
+  type RegisterPayeeView,
 } from "./register-controls";
 
 export const dynamic = "force-dynamic";
@@ -224,6 +228,9 @@ export default async function BankRegisterPage({
     // Unfiltered on purpose — `dimensionTypesFrom` owns the active-only rule,
     // so no screen can forget it.
     const dimensionMembers = await listDimensionMembers(tx, tenantId);
+    // The payees nobody has named yet, over the WHOLE register rather than the
+    // page being shown: the question is about the statement, not the window.
+    const payees = await listRegisterPayees(tx, tenantId, id);
     return {
       bankAccount,
       balance,
@@ -237,6 +244,7 @@ export default async function BankRegisterPage({
       registers,
       linkedEntries,
       window,
+      payees,
     };
     // The role travels with the read: a personal register and its rows are
     // visible to owners and the accountant only (drizzle/0279, ADR 0034).
@@ -264,6 +272,16 @@ export default async function BankRegisterPage({
   // read as a positive figure.
   const display = bankAccount.kind === "credit_card" || personal ? -net : net;
   const isOwner = ctx.role === "owner";
+  // Money is formatted on the server, so the dialog stays a dumb renderer.
+  const payees: RegisterPayeeView[] = data.payees.map((p) => ({
+    phrase: p.phrase,
+    label: p.label,
+    count: p.count,
+    sample: p.sample,
+    totalLabel: formatCents(p.totalCents),
+    existingVendorId: p.existingVendorId,
+    existingVendorName: p.existingVendorName,
+  }));
 
   const attachmentsOf = new Map(
     data.attachmentCounts.map((a) => [a.bankTransactionId, a.n]),
@@ -414,6 +432,13 @@ export default async function BankRegisterPage({
             to it until you reopen it.
           </CardContent>
         </Card>
+      )}
+
+      {/* The Vendors list filling itself out of a statement just imported
+          (onboarding slice 2b). Owners only, and gone once every payee has a
+          name. */}
+      {isOwner && payees.length > 0 && (
+        <PayeeVendors bankAccountId={id} payees={payees} />
       )}
 
       <div className="flex justify-end">

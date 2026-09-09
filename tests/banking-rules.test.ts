@@ -9,6 +9,8 @@ import {
 } from "../src/modules/accounting/banking/rules-match";
 import {
   commonDescriptionPhrase,
+  descriptionNamesPayee,
+  payeeCandidates,
   suggestedRuleName,
   titleCasePhrase,
 } from "../src/modules/accounting/banking/rules-learn";
@@ -306,5 +308,56 @@ describe("suggestedRuleName", () => {
     expect(suggestedRuleName("westfield ins", "Insurance")).toBe(
       "(Suggested) Westfield Ins as Insurance",
     );
+  });
+});
+
+/**
+ * The payees a statement names (onboarding slice 2b). Pure: what a register's
+ * descriptions say, before anything is asked of the database.
+ */
+describe("payeeCandidates", () => {
+  const row = (description: string, amountCents: number) => ({ description, amountCents });
+
+  it("groups a payee's lines under the phrase they share, and counts what went out", () => {
+    const found = payeeCandidates([
+      row("TRACTOR SUPPLY 8821", -6_420),
+      row("TRACTOR SUPPLY 0412", -3_875),
+      row("RURAL KING FEED", -11_240),
+    ]);
+    expect(found.map((c) => [c.phrase, c.label, c.count, c.totalCents])).toEqual([
+      ["rural king feed", "Rural King Feed", 1, 11_240],
+      ["tractor supply", "Tractor Supply", 2, 10_295],
+    ]);
+    expect(found[0].sample).toBe("RURAL KING FEED");
+  });
+
+  it("leaves money in alone — a payee is somebody you pay", () => {
+    expect(
+      payeeCandidates([
+        row("FARMERS MARKET DEPOSIT", 14_500),
+        row("KROGER 0412", -3_875),
+      ]).map((c) => c.phrase),
+    ).toEqual(["kroger"]);
+  });
+
+  it("has no threshold: a vendor billed once is still a vendor", () => {
+    expect(payeeCandidates([row("DOC REYNOLDS VETERINARY", -22_000)])).toHaveLength(1);
+  });
+
+  it("ignores a description with nothing but generic words or digits in it", () => {
+    expect(
+      payeeCandidates([
+        row("ACH DEBIT", -1_000),
+        row("CHECK 1042", -5_000),
+        row("1234567", -900),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("says which descriptions a payee covers, the same way it counted them", () => {
+    expect(descriptionNamesPayee("TRACTOR SUPPLY 8821", "tractor supply")).toBe(true);
+    expect(descriptionNamesPayee("tractor-supply #4", "tractor supply")).toBe(true);
+    expect(descriptionNamesPayee("TRACTORS UNLIMITED", "tractor")).toBe(false);
+    expect(descriptionNamesPayee("RURAL KING", "tractor supply")).toBe(false);
   });
 });

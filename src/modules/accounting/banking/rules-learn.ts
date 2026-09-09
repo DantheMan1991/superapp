@@ -136,6 +136,93 @@ export function commonExcludePhrases(
   return out.sort();
 }
 
+/**
+ * The payees a register's rows name, one row per payee, for a business that
+ * has just imported its statements and has a vendor for none of them
+ * (onboarding slice 2b).
+ *
+ * MONEY OUT ONLY. A payee you pay is a vendor; money coming in is a customer,
+ * and a deposit's description is usually the bank's own words for a transfer
+ * rather than anybody's name.
+ *
+ * Grouped the way `commonExcludePhrases` groups — by the leading real word —
+ * but with NO THRESHOLD, because a vendor billed once a year is still a
+ * vendor. Each group yields the longest run its descriptions share, which is
+ * what identifies the payee: `["TRACTOR SUPPLY 8821", "TRACTOR SUPPLY 0412"]`
+ * → `tractor supply`, not `tractor supply 8821`.
+ *
+ * Sorted by how much of the statement each accounts for, so the first row of
+ * the dialog is the one worth naming.
+ */
+export interface PayeeCandidate {
+  /** Lower case, the phrase the rows share. */
+  phrase: string;
+  /** Title-cased — what the vendor would be called. */
+  label: string;
+  /** How many rows it covers. */
+  count: number;
+  /** One of the descriptions, so a person can see where it came from. */
+  sample: string;
+  /** Total paid out, in positive cents. */
+  totalCents: number;
+}
+
+/**
+ * Drop the store and reference numbers off the ends of a phrase.
+ *
+ * `commonDescriptionPhrase` over a group of ONE returns that description
+ * whole, so a payee seen once would be called `Kroger 0412`. A number at
+ * either end of a bank description is the till, the store or the cheque —
+ * never part of the name. One kept in the middle, as in `7 eleven store`, is
+ * left alone because there it is the name.
+ */
+function trimReferenceNumbers(phrase: string): string {
+  const tokens = phrase.split(" ");
+  while (tokens.length > 1 && /^\d+$/.test(tokens[0])) tokens.shift();
+  while (tokens.length > 1 && /^\d+$/.test(tokens[tokens.length - 1])) tokens.pop();
+  return tokens.join(" ");
+}
+
+export function payeeCandidates(
+  rows: ReadonlyArray<{ description: string; amountCents: number }>,
+): PayeeCandidate[] {
+  const groups = new Map<string, Array<{ description: string; amountCents: number }>>();
+  for (const row of rows) {
+    if (row.amountCents >= 0) continue;
+    const key = tokenize(row.description).find(
+      (t) => /[a-z]/.test(t) && t.length >= 4 && !GENERIC_TOKENS.has(t),
+    );
+    if (!key) continue;
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+
+  const out: PayeeCandidate[] = [];
+  for (const [key, group] of groups) {
+    const phrase = trimReferenceNumbers(
+      commonDescriptionPhrase(group.map((r) => r.description)) ?? key,
+    );
+    out.push({
+      phrase,
+      label: titleCasePhrase(phrase),
+      count: group.length,
+      sample: group[0].description,
+      totalCents: group.reduce((s, r) => s - r.amountCents, 0),
+    });
+  }
+  return out.sort(
+    (a, b) => b.totalCents - a.totalCents || b.count - a.count || a.label.localeCompare(b.label),
+  );
+}
+
+/**
+ * Does this description name that payee? The same containment test the
+ * proposal used, so the rows a pick labels are exactly the rows it was
+ * counted from.
+ */
+export function descriptionNamesPayee(description: string, phrase: string): boolean {
+  return ` ${tokenize(description).join(" ")} `.includes(` ${phrase} `);
+}
+
 /** Title case for display: "westfield ins" → "Westfield Ins". */
 export function titleCasePhrase(phrase: string): string {
   return phrase

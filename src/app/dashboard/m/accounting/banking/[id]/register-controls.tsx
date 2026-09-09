@@ -13,6 +13,8 @@ import {
 } from "@/components/app/dimension-tags";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -38,6 +40,7 @@ import {
   excludeTransactionAction,
   excludeTransactionsAction,
   matchTransactionToEntryAction,
+  namePayeesAction,
   restoreTransactionAction,
   setBankAccountActiveAction,
   suggestCategoriesAction,
@@ -150,6 +153,170 @@ export function SuggestButton({
       <Sparkles className="mr-1.5 size-4" />
       {pending ? "Thinking…" : "Suggest categories"}
     </Button>
+  );
+}
+
+/** One payee the register names and the business has no vendor for. */
+export interface RegisterPayeeView {
+  phrase: string;
+  label: string;
+  count: number;
+  sample: string;
+  totalLabel: string;
+  existingVendorId: string | null;
+  existingVendorName: string | null;
+}
+
+/**
+ * The payees on this register with nobody's name on them (onboarding slice
+ * 2b) — the Vendors list filling itself out of a statement that has just been
+ * imported.
+ *
+ * THE REVIEW IS THE SAME ONE THE PASTE DIALOG GIVES (ADR 0036): every row is
+ * shown, every name is editable, nothing is written until the button. What is
+ * different is that nothing was guessed — the phrases are computed from the
+ * descriptions, so there is no accuracy to check, only a decision about which
+ * of them are worth a vendor.
+ *
+ * A payee that already matches a vendor comes back unticked and says so.
+ * Naming rows against somebody else's vendor is useful but it is not what the
+ * card offered to do, so it is opt-in.
+ */
+export function PayeeVendors({
+  bankAccountId,
+  payees,
+}: {
+  bankAccountId: string;
+  payees: RegisterPayeeView[];
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [picked, setPicked] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(payees.map((p) => [p.phrase, p.existingVendorId === null])),
+  );
+  const [names, setNames] = useState<Record<string, string>>(() =>
+    Object.fromEntries(payees.map((p) => [p.phrase, p.existingVendorName ?? p.label])),
+  );
+
+  const chosen = payees.filter((p) => picked[p.phrase] && names[p.phrase]?.trim());
+  const unknown = payees.filter((p) => p.existingVendorId === null).length;
+  if (unknown === 0) return null;
+
+  function save() {
+    if (chosen.length === 0) return;
+    startTransition(async () => {
+      const result = await namePayeesAction({
+        bankAccountId,
+        picks: chosen.map((p) =>
+          p.existingVendorId
+            ? { phrase: p.phrase, vendorId: p.existingVendorId }
+            : { phrase: p.phrase, name: names[p.phrase].trim() },
+        ),
+      });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      const { vendorsCreated = 0, rowsNamed = 0 } = result.data ?? {};
+      toast.success(
+        `${vendorsCreated} ${vendorsCreated === 1 ? "vendor" : "vendors"} added, ${rowsNamed} ${
+          rowsNamed === 1 ? "line" : "lines"
+        } named`,
+      );
+      setOpen(false);
+      router.refresh();
+    });
+  }
+
+  return (
+    <>
+      <Card>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
+          <p className="text-sm">
+            <span className="font-medium">
+              {unknown} {unknown === 1 ? "payee" : "payees"} you have no vendor for
+            </span>
+            <span className="text-muted-foreground">
+              {" "}
+              — name them and every line they cover gets that vendor.
+            </span>
+          </p>
+          <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+            Name the payees
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+        }}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Payees on this account</DialogTitle>
+            <DialogDescription>
+              Taken from what the bank wrote on each line. Untick anything that is not
+              somebody you buy from, and correct any name before it is added.
+            </DialogDescription>
+          </DialogHeader>
+
+          <ul className="space-y-2">
+            {payees.map((p) => (
+              <li
+                key={p.phrase}
+                className={cn(
+                  "space-y-2 rounded-md border p-3",
+                  !picked[p.phrase] && "opacity-60",
+                )}
+              >
+                <div className="flex items-start gap-3">
+                  <Checkbox
+                    className="mt-2"
+                    checked={picked[p.phrase] ?? false}
+                    onCheckedChange={(c) =>
+                      setPicked({ ...picked, [p.phrase]: c === true })
+                    }
+                    aria-label={`Name ${p.label}`}
+                  />
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <Input
+                      className="h-8"
+                      value={names[p.phrase] ?? ""}
+                      onChange={(e) => setNames({ ...names, [p.phrase]: e.target.value })}
+                      disabled={p.existingVendorId !== null}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {p.count} {p.count === 1 ? "line" : "lines"}, {p.totalLabel} out.
+                      From “{p.sample}”.
+                    </p>
+                    {p.existingVendorId && (
+                      <p className="text-xs text-amber-600">
+                        You already have a vendor called “{p.existingVendorName}”. Tick
+                        to put that name on these lines.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
+              Cancel
+            </Button>
+            <Button onClick={save} disabled={pending || chosen.length === 0}>
+              {pending
+                ? "Adding…"
+                : `Name ${chosen.length} ${chosen.length === 1 ? "payee" : "payees"}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

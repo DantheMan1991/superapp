@@ -16,8 +16,15 @@ import { resetBankLinkForEntry } from "./match";
 
 /** Shape of the ai_suggestion jsonb on bank_transactions. */
 export interface StoredAiSuggestion {
-  accountId: string;
+  /** Null when the assistant said the line is not the business's (`personal`). */
+  accountId: string | null;
   accountCode: string;
+  /**
+   * True on a PERSONAL register when the assistant judged the line to be the
+   * owner's own (ADR 0034). Accepting it sets the row aside rather than
+   * posting anything.
+   */
+  personal?: boolean;
   confidence: number;
   reason?: string;
   model: string;
@@ -26,7 +33,9 @@ export interface StoredAiSuggestion {
 
 export function readAiSuggestion(txn: BankTransaction): StoredAiSuggestion | null {
   const s = txn.aiSuggestion as StoredAiSuggestion | null;
-  return s && typeof s.accountId === "string" ? s : null;
+  if (!s) return null;
+  if (s.personal === true) return { ...s, accountId: null };
+  return typeof s.accountId === "string" ? s : null;
 }
 
 async function loadUnreviewedTxn(

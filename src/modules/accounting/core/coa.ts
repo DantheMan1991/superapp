@@ -255,6 +255,14 @@ export function isCodableAccount(
   registerAccountIds: ReadonlySet<string>,
 ): boolean {
   if (registerAccountIds.has(account.id)) return false;
+  /**
+   * A PERSONAL register's ledger account (ADR 0034). It is a register account
+   * and the id check above already catches it FOR ANYONE WHO CAN SEE THE
+   * REGISTER — but staff cannot (drizzle/0279 hides personal registers from
+   * them), so for staff the id set does not contain it and the subtype is the
+   * only thing standing between a bill line and the owner's equity.
+   */
+  if (account.subtype === "owner_funds") return false;
   if (account.subtype === "opening_balance") return false;
   if (account.subtype === "due_from_affiliate") return false;
   if (account.subtype === "due_to_affiliate") return false;

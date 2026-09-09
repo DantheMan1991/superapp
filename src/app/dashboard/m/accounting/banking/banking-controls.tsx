@@ -268,12 +268,13 @@ function CreateBankAccountButton({
   const [entityId, setEntityId] = useState(defaultEntityId ?? "");
   const [form, setForm] = useState({
     name: "",
-    kind: "checking" as "checking" | "savings" | "credit_card",
+    kind: "checking" as "checking" | "savings" | "credit_card" | "personal",
     institution: "",
     last4: "",
     openingBalance: "",
     openingDate: "",
   });
+  const personal = form.kind === "personal";
 
   function submit() {
     const cents =
@@ -295,8 +296,10 @@ function CreateBankAccountButton({
         entityId: entityId || undefined,
         institution: form.institution.trim() || undefined,
         last4: form.last4 || undefined,
-        openingBalanceCents: cents,
-        openingBalanceDate: form.openingDate || null,
+        // The fields are hidden for a personal register; the value typed
+        // before switching the type must not travel.
+        openingBalanceCents: personal ? null : cents,
+        openingBalanceDate: personal ? null : form.openingDate || null,
       });
       if ("error" in result) toast.error(result.error);
       else {
@@ -372,10 +375,23 @@ function CreateBankAccountButton({
                     <SelectItem value="checking">Checking</SelectItem>
                     <SelectItem value="savings">Savings</SelectItem>
                     <SelectItem value="credit_card">Credit card</SelectItem>
+                    <SelectItem value="personal">Personal account (mixed)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
+            {/* Said where the choice is made, because it changes what the
+                account IS: not a balance the business holds, but the owner's
+                own account with some business lines running through it. */}
+            {personal && (
+              <p className="text-xs text-muted-foreground">
+                Your own account that also carries some of the business&apos;s
+                money. Only the lines you mark as the business&apos;s are posted,
+                as money you put in or took out; everything else stays personal
+                and never reaches the books. Staff never see this account. It
+                has no opening balance and is never reconciled.
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="ba-inst">Institution (optional)</Label>
@@ -397,30 +413,35 @@ function CreateBankAccountButton({
                 />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="ba-obal">
-                  {form.kind === "credit_card" ? "Amount owed" : "Opening balance"}{" "}
-                  (optional)
-                </Label>
-                <Input
-                  id="ba-obal"
-                  inputMode="decimal"
-                  placeholder="0.00"
-                  value={form.openingBalance}
-                  onChange={(e) => setForm({ ...form, openingBalance: e.target.value })}
-                />
+            {/* A personal register has no opening balance — its balance was
+                never the business's — so the fields are not offered rather
+                than offered and refused. */}
+            {!personal && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="ba-obal">
+                    {form.kind === "credit_card" ? "Amount owed" : "Opening balance"}{" "}
+                    (optional)
+                  </Label>
+                  <Input
+                    id="ba-obal"
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    value={form.openingBalance}
+                    onChange={(e) => setForm({ ...form, openingBalance: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="ba-odate">As of</Label>
+                  <Input
+                    id="ba-odate"
+                    type="date"
+                    value={form.openingDate}
+                    onChange={(e) => setForm({ ...form, openingDate: e.target.value })}
+                  />
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="ba-odate">As of</Label>
-                <Input
-                  id="ba-odate"
-                  type="date"
-                  value={form.openingDate}
-                  onChange={(e) => setForm({ ...form, openingDate: e.target.value })}
-                />
-              </div>
-            </div>
+            )}
           </div>
           <DialogFooter>
             <Button onClick={submit} disabled={pending || !form.name.trim()}>

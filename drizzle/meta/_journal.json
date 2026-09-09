@@ -1947,6 +1947,20 @@
       "when": 1788910334110,
       "tag": "0277_livestock_advisor_threads_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 278,
+      "version": "7",
+      "when": 1788917479090,
+      "tag": "0278_slow_blacklash",
+      "breakpoints": true
+    },
+    {
+      "idx": 279,
+      "version": "7",
+      "when": 1788917687053,
+      "tag": "0279_personal_register_rls",
+      "breakpoints": true
     }
   ]
 }

@@ -13,6 +13,83 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-08 — The personal account (`claude/the-mixed-account`, migrations `0278`–`0279`)
+
+Onboarding slice 3 ([onboarding.md](onboarding.md)), and the blocker for
+loading the pilot farm, whose one bank account carries the groceries and the
+feed store alike. [ADR 0034](../decisions/0034-a-personal-account-is-a-register-whose-ledger-leg-is-the-owners-equity.md)
+is the decision; this is what shipped.
+
+**A fourth register kind, `personal`, whose ledger account is EQUITY.**
+`createBankAccount` opens it on an `owner_funds` account in the 3300s
+(beside Owner Contributions and Owner Draws) instead of a bank asset, so the
+ordinary posting — register on one side, category on the other — produces the
+accountant's entry by itself: a business line paid from it credits the owner's
+funds, a business receipt landing in it debits them, and the balance is what
+the owner has put in net of what they took out. The hub card and the register
+page read it as `Put in by you, net`. **Nothing in `categorizeTransaction`
+changed**; splits, transfers, matches and undo work as they did.
+
+**Three refusals, one code.** No opening balance (the form hides the fields and
+`createBankAccount` refuses `PERSONAL_REGISTER`), no reconciliation
+(`startReconciliation` refuses, the button is not offered, the reconcile page
+404s, and the close checklist no longer counts it as behind), and the account is
+not a deposit target. All three have the same cause and the same message: the
+balance was never the business's.
+
+**Personal by default.** `bank_rules.action` (`categorize | exclude`,
+`0278`) lets a rule set a row aside on arrival — status `excluded`, a
+`rule_suggestion` naming the rule, nothing posted, no closed-period or
+closed-register yield because there is nothing to post. `set_account_id` is
+nullable with a CHECK holding it to the action. The AI sweep is told whose
+account it is (`SuggestGathered.personal`), the user turn leads with an
+inverted prior (`PERSONAL_INSTRUCTION`), the pseudo-code `PERSONAL` sits in
+the chart it is shown and `validateSuggestions` accepts it only when the
+caller allows (`allowPersonal`), and the register's set-aside rows travel as
+history under that code. Accepting a personal suggestion sets the row aside
+(`acceptSuggestionsAction` now returns `setAside` too). `Set aside the rest as
+personal (N)` on the To review tab, behind a confirm, sets aside every waiting
+row nothing called the business's (`excludeTransactionsAction`, 50 at a time).
+**Setting aside teaches the register**: `proposeExcludeRulesFromHistory`
+groups set-aside descriptions by their leading merchant word
+(`commonExcludePhrases`) and proposes one exclude rule per group at the
+threshold, `(Suggested) Kroger as personal`, personal registers only — on a
+business register an excluded row is a duplicate, not a payee to stop watching.
+
+**Visible to the owner and the accountant, never to staff — in Postgres.**
+`0279` replaces three `member_all` policies by name: `bank_accounts` hides
+`kind = 'personal'` (compared as text, because the enum value arrived in
+`0278` and a runner wrapping both files in one transaction would trip
+"unsafe use of new value") unless `app_current_tenant_role()` is `owner` or
+`expert`; `bank_transactions` and `bank_rules` (when scoped to a register)
+INHERIT through an `EXISTS` on the register, the documents-versions device, so
+there is no second copy of the rule. **THE COST IS ROLE PLUMBING**: `withTenant`
+defaults to `staff`, under which the owner's own register reads as empty.
+Every banking action now opens its transaction through `inTenant(ctx, fn)`,
+which passes the role and the user, and the hub, register, import, reconcile
+and rules pages pass `{ role, userId }`. `isCodableAccount` refuses the
+`owner_funds` subtype by shape, because staff cannot see the register row
+and the id set alone would not protect the account from a bill line.
+
+**Words.** The tab reads `Personal (n)`, the row button `Personal`, the way
+back `It's the business's`, the chips `RULE · personal` and `AI · personal ·
+92%`, the type in the add dialog `Personal account (mixed)` with what it means
+under it. Plaid may never pick the kind: a feed knows what an account is at the
+bank, not whose money runs through it.
+
+**Tests.** `tests/banking-personal.test.ts` (pure): the validator's
+`PERSONAL` gate, the prompt's inverted prior, exclude rules in `matchRules`
+and their priority, `commonExcludePhrases`. `tests/banking-personal-db.test.ts`
+(as an owner through real RLS): the equity leg and code, the three refusals,
+an exclude rule setting rows aside on import and idempotent on re-apply, the
+credit/debit directions and the net, the proposal after three set-asides and
+never on a business register, the sweep's `personal` flag and history and
+`PERSONAL` dropped on a checking register, and staff seeing none of the
+register, its rows or its scoped rules while the owner and the accountant see
+all three, including a staff INSERT refused by the policy. Guides:
+`banking.md`, `register.md`, `bank-rules.md`, `import-statement.md`,
+`chart-of-accounts.md`; `workspace/getting-around.md` for the setup row.
+
 ### 2026-09-07 — Credit memos (`claude/credit-memos`, migrations `0268`–`0270`)
 
 **What.** `Credit` beside `Record payment` on an issued or part-paid
@@ -3779,6 +3856,7 @@ preview in either state. The change is argued to be inert, not observed to be.
 | `credit_memos` | 2026-09-07 | A credit against one invoice (`0269`; `source = credit_memo`, `0268`; RLS `0270`, owner-only writes). Posts Dr income / Cr AR and settles the invoice through an `invoice_payments` row of `method = credit_memo` (`payment_id`, detached on void) — see the build log for why that one decision is the whole design. Own `CM-####` series |
 | `deposits` | 2026-09-07 | Payments held in Undeposited Funds banked together as one entry (`0265`; `source = deposit`, `0264`; RLS `0266`, owner-only writes). `invoice_payments.deposit_id` points back, cleared by a void. One company per deposit, the register's; a deposit is voided, never deleted |
 | `bank_rules` | 2026-08-10 | Deterministic feed categorization. Priority-ordered, first match wins; `is_suggested` marks a machine-proposed rule; `auto_post` posts without review but never into a closed period. Gained `set_vendor_id` (`0113`) so a rule can name the payee too. `bank_transactions.rule_suggestion` is a **snapshot**, not an FK — it records what a rule said at match time, so editing the rule later cannot rewrite what the owner was shown |
+| `bank_accounts.kind = 'personal'`, `accounts.subtype = 'owner_funds'`, `bank_rules.action` | 2026-09-08 | The personal register ([ADR 0034](../decisions/0034-a-personal-account-is-a-register-whose-ledger-leg-is-the-owners-equity.md), `0278`). Its ledger account is EQUITY (`owner_funds`, 3300s), never a bank asset; no opening balance, never reconciled, not a deposit target. `bank_rules.action` is `categorize` (default, every pre-existing rule) or `exclude` (sets the row aside on arrival); `set_account_id` became nullable, held to the action by CHECK `bank_rules_action_account`. `bank_transactions.rule_suggestion` and `ai_suggestion` may now carry `action: "exclude"` / `personal: true` with a null `accountId`. RLS `0279`: `bank_accounts` hides the kind from `staff`; `bank_transactions` and register-scoped `bank_rules` inherit through an EXISTS |
 | `parties` | 2026-08-03 | **Shared, not this module's.** The identity spine behind `customers` and `vendors`; written through `src/lib/parties/`. See [crm.md](crm.md) |
 | `customers`, `invoices`, `invoice_lines`, `invoice_payments` | S4 | AR. `customers.party_id` (2026-08-03) makes the row a role on a party. Both `customers` and `invoices` gained `reminders_muted` (`0114`) — standing and one-off suppression of automatic chasing. `recurring_invoices` folded into `recurring_entries` (`0121`/`0122`) and was dropped in `0147` |
 | `documents`, `document_links` | S5 | Capture substrate; exactly-one-of link targets |
@@ -3817,6 +3895,28 @@ sentence rather than leaving it aspirational.
 
 ## Decisions & gotchas
 
+- **A PERSONAL REGISTER'S LEDGER LEG IS OWNER'S EQUITY** (ADR 0034,
+  2026-09-08), and every read of a register now has to carry the caller's
+  role. `withTenant` defaults to `staff`; `drizzle/0279` hides a personal
+  register and its rows from `staff`; so an owner path that opens its
+  transaction without `{ role }` shows the owner an EMPTY register with no
+  error. Banking actions go through `inTenant(ctx, fn)` in `actions.ts`, the
+  banking pages pass `{ role: ctx.role, userId: ctx.userId }`, and any new
+  reader of `bank_accounts`, `bank_transactions` or `bank_rules` must do the
+  same. Other readers that run as staff — `assertCodableAccounts`,
+  `assertNoForeignRegisters`, the bill form — simply do not see the personal
+  register, which is why `isCodableAccount` refuses the `owner_funds` subtype
+  by shape rather than trusting the register-id set.
+- **The enum value and the policy that names it are in different migrations,
+  and the policy compares as text.** `0278` adds `'personal'` to
+  `bank_account_kind`; `0279` writes `"kind"::text <> 'personal'`. A policy
+  written `"kind" <> 'personal'` in the same transaction as the ADD VALUE
+  fails with "unsafe use of new value" — the runner (`drizzle-orm`'s migrator)
+  can wrap pending files together, and this is the second time a new enum
+  value has been used by the migration after it (see `0264`/`0265`).
+- **Plaid never picks `personal`.** `PlaidLinkableAccount.kind` excludes it at
+  the type level: a feed knows what an account is at the bank, not whose money
+  runs through it. The kind is the owner's call, in the add dialog.
 - **MONEY BETWEEN TWO COMPANIES IS A PAIR OF ENTRIES**, never one. As a single
   entry it leaves one balance sheet showing cash it does not own and the other
   showing nothing, while the ledger still balances. Each leg touches only its

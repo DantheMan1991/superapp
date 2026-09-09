@@ -78,7 +78,7 @@ rather than one wizard that tries to be all of them:
 | 1 | **The derived "Getting set up" card** on the Overview: each switched-on tool says what it is waiting for, rows vanish as the data appears, nothing stored ([ADR 0033](../decisions/0033-a-setup-step-is-a-prerequisite-the-data-proves-missing.md)) | **shipped 2026-09-08** |
 | 2 | **Paste anything**: one dialog, reused — paste a list or a spreadsheet, or upload a photo of the herd book; the model proposes rows; the owner sees every row before it saves; duplicates checked against what exists (the CRM "From a note" shape, under the packs' rule that AI never writes a row without a human seeing it first). Targets in order of value: vendors, customers, kinds of stock, animals with tag and dam and sire where known, places, paddocks, prices | planned |
 | 2b | **Vendors from the bank import**: after an import, "eight payees you have no vendor for" with a checkbox each | planned |
-| 3 | **The mixed account**: a register kind whose ledger leg is owner's equity (3100/3200 exist) rather than a bank asset; lines default to excluded/personal; rules that can say "personal" (today they only assign a category); the sweep asks "is this the farm's?" before it codes (today it must pick one chart code for every line); owners-only visibility of that register (`bank_transactions` RLS is `member_all`). Exclude, the Excluded tab and Split already exist. Needs its own ADR when built | planned — **Hilltop cannot be loaded without it** |
+| 3 | **The personal account**: a register kind whose ledger leg is owner's equity rather than a bank asset; personal by default — exclude rules act on arrival, the sweep asks "is this the business's?" first and may answer `PERSONAL`, one button sets aside the rest; setting aside proposes rules; no opening balance, never reconciled; visible to the owner and the accountant, never to staff, in RLS ([ADR 0034](../decisions/0034-a-personal-account-is-a-register-whose-ledger-leg-is-the-owners-equity.md), migrations `0278`–`0279`; the build log is in [accounting.md](accounting.md)) | **shipped 2026-09-08** |
 | 4 | **The books-start date**, stored once beside the fiscal year, and an import that refuses or flags a line before it | planned |
 | 5 | **The opening position**: open invoices and bills as of the start date as real documents with their income or expense leg to OBE, so they age and get paid like any other; equipment with "depreciation already taken through", posted as that asset's own entry; the opening trial balance on one screen with the equity plug visible; an export for the accountant | planned |
 | 6 | **Tell it things**: one sentence box on the phone — "fed two bags to the broilers", "three chicks dead in pen two", "moved cows to paddock seven" — parsed into proposed record cards, one tap each to confirm, refusing where the packs already refuse. Rides the Ask thread ([livestock.md](livestock.md), PR #451) | planned, after #451 |
@@ -113,6 +113,20 @@ the farm's asset list until they say so.
 ## Build log
 
 Newest first. One entry per session/PR that touched this area.
+
+### 2026-09-08 — Slice 3: the personal account (`claude/the-mixed-account`)
+
+Built in the accounting module, where the register lives; the full entry, the
+data model and the decisions are in [accounting.md](accounting.md) and the
+reasoning in [ADR 0034](../decisions/0034-a-personal-account-is-a-register-whose-ledger-leg-is-the-owners-equity.md).
+What it means for the plan: **Hilltop can now be loaded.** The mixed account is
+added as `Personal account (mixed)`, its statements imported whole from
+2026-01-01, the business lines posted (each one money the owner put in), and
+the rest set aside as personal — by rule on arrival, by the sweep's inverted
+prior, or by one button for whatever is left. The setup card's first row now
+says a personal account counts as the register it asks for. Slice 4 (the
+books-start date) is the next blocker: nothing yet refuses a 2025 line that
+wanders into an import.
 
 ### 2026-09-08 — Slice 1: Getting set up, derived (`claude/getting-set-up`)
 
@@ -238,9 +252,12 @@ stored, and nothing may be ([ADR 0033](../decisions/0033-a-setup-step-is-a-prere
 
 ## Open items
 
-- **Slices 2–7 above are unbuilt.** Slice 3 (the mixed account) is the
-  blocker for loading Hilltop and comes before the opening position, because
-  on 2026-01-01 the farm had no account of its own to open a balance in.
+- **Slices 2 and 4–7 above are unbuilt.** Slice 3 shipped 2026-09-08; slice 4
+  (the books-start date) is now the blocker for the opening position, because
+  nothing yet refuses a line dated before the books began.
+- **A deposit into a personal account is a draw, and is not yet a deposit.**
+  The account is left out of the deposit picker until a deposit can say so
+  (ADR 0034); recording the receipt on the register itself works.
 - **Steps that could exist and do not**, if a tenant ever needs them:
   `production` — a processing plant recorded as a vendor before its first bill
   can be matched; `marketing` — a site started; `scheduling` — a calendar

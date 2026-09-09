@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { schema, withTenant } from "@/db";
+import { schema, withTenant, type Tx } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAudit, logAuditInTx } from "@/lib/audit";
@@ -46,6 +46,7 @@ import {
   createRule,
   deleteRule,
   dismissSuggestedRule,
+  proposeExcludeRulesFromHistory,
   proposeRuleFromHistory,
   readRuleSuggestion,
   reorderRules,
@@ -79,6 +80,18 @@ async function gate(opts?: { allowExpert?: boolean }): Promise<LedgerCtx> {
     throw new LedgerError("FORBIDDEN_EXPERT", "accountant access is read-only");
   }
   return { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role };
+}
+
+/**
+ * Every banking action opens its transaction THROUGH THIS, never through
+ * `withTenant` bare. The role travels with the transaction because a PERSONAL
+ * register and its rows are visible to owners and the accountant only
+ * (drizzle/0279, ADR 0034): `withTenant` without a role sets `staff`, under
+ * which an owner's own personal register would read as empty — silently, with
+ * no error to notice. `userId` rides along for the per-person policies.
+ */
+function inTenant<T>(ctx: LedgerCtx, fn: (tx: Tx) => Promise<T>): Promise<T> {
+  return withTenant(ctx.tenantId, fn, { role: ctx.role, userId: ctx.userId });
 }
 
 function fail(err: unknown): { error: string } {
@@ -118,7 +131,7 @@ const dateStr = z
 const createBankAccountSchema = z
   .object({
     name: z.string().trim().min(1).max(120),
-    kind: z.enum(["checking", "savings", "credit_card"]),
+    kind: z.enum(["checking", "savings", "credit_card", "personal"]),
     /**
      * Which company owns the register (ADR 0010). Optional over the wire and
      * resolved to the tenant's default. Chosen ONCE — there is no update path,
@@ -142,6 +155,15 @@ const createBankAccountSchema = z
       v.openingBalanceCents === 0 ||
       !!v.openingBalanceDate,
     { message: "Opening balance needs a date" },
+  )
+  // A personal register opens with nothing (ADR 0034); `createBankAccount`
+  // refuses it too, with the message the form shows.
+  .refine(
+    (v) =>
+      v.kind !== "personal" ||
+      v.openingBalanceCents == null ||
+      v.openingBalanceCents === 0,
+    { message: "A personal account has no opening balance" },
   );
 
 export async function createBankAccountAction(
@@ -151,7 +173,7 @@ export async function createBankAccountAction(
   const parsed = createBankAccountSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    const result = await withTenant(ctx.tenantId, async (tx) => {
+    const result = await inTenant(ctx, async (tx) => {
       const r = await createBankAccount(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: "banking.account_created",
@@ -192,7 +214,7 @@ export async function updateBankAccountAction(
   const parsed = updateBankAccountSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    await withTenant(ctx.tenantId, async (tx) => {
+    await inTenant(ctx, async (tx) => {
       const { before, after } = await updateBankAccount(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: "banking.account_updated",
@@ -226,7 +248,7 @@ export async function setBankAccountActiveAction(
   const parsed = setActiveSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    await withTenant(ctx.tenantId, async (tx) => {
+    await inTenant(ctx, async (tx) => {
       await setBankAccountActive(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: parsed.data.active
@@ -269,7 +291,7 @@ export async function parseCsvPreviewAction(
   if (!parsed.success) return { error: "Invalid input" };
   try {
     requireOwnerRole(ctx);
-    await withTenant(ctx.tenantId, (tx) =>
+    await inTenant(ctx, (tx) =>
       loadWritableBankAccount(tx, ctx.tenantId, parsed.data.bankAccountId),
     );
     let rows: string[][];
@@ -357,7 +379,7 @@ export async function importCsvTransactionsAction(
       };
     }
     if (txns.length === 0) return { error: "No transactions found in that file." };
-    const result = await withTenant(ctx.tenantId, async (tx) => {
+    const result = await inTenant(ctx, async (tx) => {
       const r = await importTransactions(tx, ctx, {
         bankAccountId: payload.data.bankAccountId,
         txns,
@@ -415,7 +437,7 @@ export async function splitTransactionAction(
   const parsed = splitSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    const { bankAccountId } = await withTenant(ctx.tenantId, async (tx) => {
+    const { bankAccountId } = await inTenant(ctx, async (tx) => {
       const r = await categorizeTransaction(tx, ctx, {
         transactionId: parsed.data.transactionId,
         splits: parsed.data.lines,
@@ -456,8 +478,8 @@ export async function categorizeTransactionAction(
   const parsed = categorizeSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    const { bankAccountId, fromRule } = await withTenant(
-      ctx.tenantId,
+    const { bankAccountId, fromRule } = await inTenant(
+      ctx,
       async (tx) => {
         const r = await categorizeTransaction(tx, ctx, parsed.data);
         await logAuditInTx(tx, {
@@ -485,7 +507,7 @@ export async function categorizeTransactionAction(
     // precondition for the categorization that just succeeded.
     if (!fromRule) {
       try {
-        await withTenant(ctx.tenantId, async (tx) => {
+        await inTenant(ctx, async (tx) => {
           const proposed = await proposeRuleFromHistory(tx, ctx, {
             bankAccountId,
             accountId: parsed.data.accountId,
@@ -521,7 +543,7 @@ export async function excludeTransactionAction(
   const parsed = txnRefSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    await withTenant(ctx.tenantId, async (tx) => {
+    const bankAccountId = await inTenant(ctx, async (tx) => {
       const txn = await setTransactionExcluded(tx, ctx, {
         transactionId: parsed.data.transactionId,
         excluded: true,
@@ -533,12 +555,90 @@ export async function excludeTransactionAction(
         targetType: "bank_transaction",
         targetId: txn.id,
       });
+      return txn.bankAccountId;
     });
+    await proposeExcludeRules(ctx, bankAccountId);
     revalidateBanking();
     return { ok: true };
   } catch (err) {
     return fail(err);
   }
+}
+
+/**
+ * Setting aside on a PERSONAL register is how it learns (ADR 0034): once the
+ * same payee has been set aside often enough, a rule that does it on arrival
+ * is proposed, the same way a repeated hand-coding proposes a categorize rule.
+ * Its own transaction, and its failure is logged rather than surfaced — the
+ * set-aside already happened and a proposal is never worth un-doing it for.
+ * On a business register the op returns nothing and nothing is written.
+ */
+async function proposeExcludeRules(ctx: LedgerCtx, bankAccountId: string): Promise<void> {
+  try {
+    await inTenant(ctx, async (tx) => {
+      const proposed = await proposeExcludeRulesFromHistory(tx, ctx, { bankAccountId });
+      for (const rule of proposed) {
+        await logAuditInTx(tx, {
+          action: "banking.rule_proposed",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "bank_rule",
+          targetId: rule.id,
+          meta: { action: "exclude", name: rule.name },
+        });
+      }
+    });
+  } catch (err) {
+    console.error("exclude rule proposal failed", err);
+  }
+}
+
+const excludeManySchema = z.object({
+  transactionIds: z.array(z.string().uuid()).min(1).max(50),
+});
+
+/**
+ * Set many rows aside at once — the bulk half of working a personal register,
+ * where most of the feed is the owner's own and one tap per row is the
+ * overwhelm this exists to remove. One transaction per row, as
+ * `acceptSuggestionsAction` does, so a row that changed state under us skips
+ * rather than rolling the others back.
+ */
+export async function excludeTransactionsAction(
+  input: z.infer<typeof excludeManySchema>,
+): Promise<ActionResult<{ setAside: number; skipped: number }>> {
+  const ctx = await gate();
+  const parsed = excludeManySchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  let setAside = 0;
+  let skipped = 0;
+  let bankAccountId: string | null = null;
+  for (const transactionId of parsed.data.transactionIds) {
+    try {
+      const done = await inTenant(ctx, async (tx) => {
+        const txn = await setTransactionExcluded(tx, ctx, {
+          transactionId,
+          excluded: true,
+        });
+        await logAuditInTx(tx, {
+          action: "banking.txn_excluded",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "bank_transaction",
+          targetId: txn.id,
+          meta: { bulk: true },
+        });
+        return txn.bankAccountId;
+      });
+      bankAccountId ??= done;
+      setAside += 1;
+    } catch {
+      skipped += 1;
+    }
+  }
+  if (bankAccountId) await proposeExcludeRules(ctx, bankAccountId);
+  revalidateBanking(bankAccountId ?? undefined);
+  return { ok: true, data: { setAside, skipped } };
 }
 
 export async function restoreTransactionAction(
@@ -548,7 +648,7 @@ export async function restoreTransactionAction(
   const parsed = txnRefSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    await withTenant(ctx.tenantId, async (tx) => {
+    await inTenant(ctx, async (tx) => {
       const txn = await setTransactionExcluded(tx, ctx, {
         transactionId: parsed.data.transactionId,
         excluded: false,
@@ -582,8 +682,8 @@ export async function undoCategorizeTransactionAction(
   const parsed = txnRefSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    const { entry, bankAccountId } = await withTenant(
-      ctx.tenantId,
+    const { entry, bankAccountId } = await inTenant(
+      ctx,
       async (tx) => {
         const r = await undoCategorization(tx, ctx, parsed.data);
         await logAuditInTx(tx, {
@@ -615,33 +715,53 @@ const acceptSchema = z.object({
  */
 export async function acceptSuggestionsAction(
   input: z.infer<typeof acceptSchema>,
-): Promise<ActionResult<{ posted: number; skipped: number; firstError?: string }>> {
+): Promise<
+  ActionResult<{ posted: number; setAside: number; skipped: number; firstError?: string }>
+> {
   const ctx = await gate();
   const parsed = acceptSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   let posted = 0;
+  let setAside = 0;
   let skipped = 0;
   let firstError: string | undefined;
+  let personalRegisterId: string | null = null;
   for (const transactionId of parsed.data.transactionIds) {
     try {
-      const done = await withTenant(ctx.tenantId, async (tx) => {
+      const done = await inTenant(ctx, async (tx) => {
         const txn = await tx.query.bankTransactions.findFirst({
           where: and(
             eq(schema.bankTransactions.tenantId, ctx.tenantId),
             eq(schema.bankTransactions.id, transactionId),
           ),
         });
-        if (!txn || txn.status !== "unreviewed") return false;
+        if (!txn || txn.status !== "unreviewed") return null;
         // A rule match is a decision the owner already made, so it is always
         // acceptable; the model's guess still has to clear the threshold.
         const rule = readRuleSuggestion(txn);
         const suggestion = readAiSuggestion(txn);
+        const confident =
+          suggestion !== null && suggestion.confidence >= ACCEPT_CONFIDENCE;
+        /**
+         * The model said "not the business's" on a personal register (ADR
+         * 0034). Accepting that sets the row aside — nothing posts — and the
+         * register learns from it like any other set-aside.
+         */
+        if (rule === null && confident && suggestion.personal) {
+          await setTransactionExcluded(tx, ctx, { transactionId, excluded: true });
+          await logAuditInTx(tx, {
+            action: "banking.txn_excluded",
+            tenantId: ctx.tenantId,
+            actorClerkUserId: ctx.userId,
+            targetType: "bank_transaction",
+            targetId: transactionId,
+            meta: { fromSuggestion: true, confidence: suggestion.confidence, bulk: true },
+          });
+          return { kind: "setAside" as const, bankAccountId: txn.bankAccountId };
+        }
         const accountId =
-          rule?.accountId ??
-          (suggestion && suggestion.confidence >= ACCEPT_CONFIDENCE
-            ? suggestion.accountId
-            : null);
-        if (!accountId) return false;
+          rule?.accountId ?? (confident ? suggestion.accountId : null);
+        if (!accountId) return null;
         const { entry } = await categorizeTransaction(tx, ctx, {
           transactionId,
           accountId,
@@ -662,17 +782,22 @@ export async function acceptSuggestionsAction(
             bulk: true,
           },
         });
-        return true;
+        return { kind: "posted" as const, bankAccountId: txn.bankAccountId };
       });
-      if (done) posted += 1;
-      else skipped += 1;
+      if (done === null) skipped += 1;
+      else if (done.kind === "posted") posted += 1;
+      else {
+        setAside += 1;
+        personalRegisterId ??= done.bankAccountId;
+      }
     } catch (err) {
       skipped += 1;
       firstError ??= friendlyMessage(err);
     }
   }
+  if (personalRegisterId) await proposeExcludeRules(ctx, personalRegisterId);
   revalidateBanking();
-  return { ok: true, data: { posted, skipped, firstError } };
+  return { ok: true, data: { posted, setAside, skipped, firstError } };
 }
 
 // ---------------------------------------------------------------- matching
@@ -690,7 +815,7 @@ export async function matchTransactionToEntryAction(
   const parsed = matchSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    await withTenant(ctx.tenantId, async (tx) => {
+    await inTenant(ctx, async (tx) => {
       await matchTransactionToEntry(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: "banking.txn_matched",
@@ -715,7 +840,7 @@ export async function unmatchTransactionAction(
   const parsed = txnRefSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    await withTenant(ctx.tenantId, async (tx) => {
+    await inTenant(ctx, async (tx) => {
       await unmatchTransaction(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: "banking.txn_unmatched",
@@ -794,7 +919,7 @@ export async function quickAddTransactionAction(
   if (!parsed.success) return { error: "Invalid input" };
   const p = parsed.data;
   try {
-    const otherRegisterId = await withTenant(ctx.tenantId, async (tx) => {
+    const otherRegisterId = await inTenant(ctx, async (tx) => {
       const bankAccount = await loadWritableBankAccount(tx, ctx.tenantId, p.bankAccountId);
       const a = p.amountCents;
       // A transfer's far end must be one of the business's own OPEN registers,
@@ -886,7 +1011,7 @@ export async function startReconciliationAction(
   const parsed = startReconSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    const recon = await withTenant(ctx.tenantId, async (tx) => {
+    const recon = await inTenant(ctx, async (tx) => {
       const r = await startReconciliation(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: "banking.reconciliation_started",
@@ -923,7 +1048,7 @@ export async function toggleReconciliationLineAction(
   const parsed = toggleLineSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    await withTenant(ctx.tenantId, (tx) => toggleReconciliationLine(tx, ctx, parsed.data));
+    await inTenant(ctx, (tx) => toggleReconciliationLine(tx, ctx, parsed.data));
     revalidateBanking();
     return { ok: true };
   } catch (err) {
@@ -943,7 +1068,7 @@ export async function completeReconciliationAction(
   const parsed = reconRefSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    await withTenant(ctx.tenantId, async (tx) => {
+    await inTenant(ctx, async (tx) => {
       const recon = await completeReconciliation(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: "banking.reconciliation_completed",
@@ -972,7 +1097,7 @@ export async function cancelReconciliationAction(
   const parsed = reconRefSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    await withTenant(ctx.tenantId, async (tx) => {
+    await inTenant(ctx, async (tx) => {
       await cancelReconciliation(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: "banking.reconciliation_canceled",
@@ -996,7 +1121,7 @@ export async function reopenReconciliationAction(
   const parsed = reconRefSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    await withTenant(ctx.tenantId, async (tx) => {
+    await inTenant(ctx, async (tx) => {
       const recon = await reopenReconciliation(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: "banking.reconciliation_reopened",
@@ -1091,7 +1216,7 @@ export async function linkPlaidAccountsAction(
   if (!parsed.success) return { error: "Invalid input" };
   const p = parsed.data;
   try {
-    const linked = await withTenant(ctx.tenantId, async (tx) => {
+    const linked = await inTenant(ctx, async (tx) => {
       let count = 0;
       for (const sel of p.selections) {
         if (sel.existingBankAccountId) {
@@ -1196,17 +1321,25 @@ function revalidateRules(): void {
   revalidateBanking();
 }
 
-const ruleInputSchema = z.object({
-  name: z.string().trim().min(1).max(120),
-  appliesTo: z.enum(["money_in", "money_out", "both"]),
-  bankAccountId: z.string().uuid().nullable(),
-  matchMode: z.enum(["all", "any"]),
-  conditions: ruleConditionsSchema,
-  setAccountId: z.string().uuid(),
-  setVendorId: z.string().uuid().nullable(),
-  setMemo: z.string().trim().max(500).nullable(),
-  autoPost: z.boolean(),
-});
+const ruleInputSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120),
+    appliesTo: z.enum(["money_in", "money_out", "both"]),
+    bankAccountId: z.string().uuid().nullable(),
+    matchMode: z.enum(["all", "any"]),
+    conditions: ruleConditionsSchema,
+    /** Absent means `categorize` — the shape every rule had before ADR 0034. */
+    action: z.enum(["categorize", "exclude"]).default("categorize"),
+    setAccountId: z.string().uuid().nullable(),
+    setVendorId: z.string().uuid().nullable(),
+    setMemo: z.string().trim().max(500).nullable(),
+    autoPost: z.boolean(),
+  })
+  // The same pairing the CHECK constraint holds: a category exactly when the
+  // rule categorizes.
+  .refine((v) => (v.action === "exclude") === (v.setAccountId === null), {
+    message: "An exclude rule names no category; a categorize rule needs one",
+  });
 
 const ruleRefSchema = z.object({ ruleId: z.string().uuid() });
 
@@ -1217,7 +1350,7 @@ export async function createRuleAction(
   const parsed = ruleInputSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    const rule = await withTenant(ctx.tenantId, async (tx) => {
+    const rule = await inTenant(ctx, async (tx) => {
       const created = await createRule(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: "banking.rule_created",
@@ -1247,7 +1380,7 @@ export async function updateRuleAction(
   const parsed = ruleInputSchema.merge(ruleRefSchema).safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    await withTenant(ctx.tenantId, async (tx) => {
+    await inTenant(ctx, async (tx) => {
       const updated = await updateRule(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: "banking.rule_updated",
@@ -1272,7 +1405,7 @@ export async function deleteRuleAction(
   const parsed = ruleRefSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    await withTenant(ctx.tenantId, async (tx) => {
+    await inTenant(ctx, async (tx) => {
       await deleteRule(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: "banking.rule_deleted",
@@ -1298,7 +1431,7 @@ export async function setRuleActiveAction(
   const parsed = ruleActiveSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    await withTenant(ctx.tenantId, async (tx) => {
+    await inTenant(ctx, async (tx) => {
       await setRuleActive(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: parsed.data.active
@@ -1324,7 +1457,7 @@ export async function confirmSuggestedRuleAction(
   const parsed = ruleRefSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    await withTenant(ctx.tenantId, async (tx) => {
+    await inTenant(ctx, async (tx) => {
       await confirmSuggestedRule(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: "banking.rule_confirmed",
@@ -1348,7 +1481,7 @@ export async function dismissSuggestedRuleAction(
   const parsed = ruleRefSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    await withTenant(ctx.tenantId, async (tx) => {
+    await inTenant(ctx, async (tx) => {
       await dismissSuggestedRule(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: "banking.rule_dismissed",
@@ -1376,7 +1509,7 @@ export async function reorderRulesAction(
   const parsed = reorderSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    await withTenant(ctx.tenantId, (tx) => reorderRules(tx, ctx, parsed.data));
+    await inTenant(ctx, (tx) => reorderRules(tx, ctx, parsed.data));
     revalidateRules();
     return { ok: true };
   } catch (err) {
@@ -1395,7 +1528,7 @@ export async function applyRulesAction(
   const parsed = applyRulesSchema.safeParse(input ?? {});
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    const result = await withTenant(ctx.tenantId, async (tx) => {
+    const result = await inTenant(ctx, async (tx) => {
       const r = await applyRulesToUnreviewed(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: "banking.rules_applied",

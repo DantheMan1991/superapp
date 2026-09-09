@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { and, eq, sql } from "drizzle-orm";
-import { Filter, Landmark, PiggyBank } from "lucide-react";
+import { Filter, Landmark, PiggyBank, Wallet } from "lucide-react";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { plaidConfigured, plaidEnv } from "@/lib/plaid";
@@ -93,7 +93,10 @@ export default async function BankingPage() {
       // figure on this page that is a job rather than a balance.
       waiting: await listUndepositedPayments(tx, tenantId),
     };
-  });
+    // The role travels with the read: a personal register is visible to
+    // owners and the accountant only (drizzle/0279, ADR 0034), and without
+    // it the owner's own card would be missing from this page.
+  }, { role: ctx.role, userId: ctx.userId });
   const waitingCents = data.waiting.reduce((s, p) => s + p.amountCents, 0);
 
   const companyName = new Map(data.entities.map((e) => [e.id, e.name]));
@@ -215,7 +218,11 @@ export default async function BankingPage() {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {data.bankAccounts.map((b) => {
             const net = balanceOf.get(b.accountId) ?? 0;
-            const display = b.kind === "credit_card" ? -net : net;
+            const personal = b.kind === "personal";
+            // A card shows what is owed, and a personal register what the
+            // owner has put in net of what they took out (ADR 0034) — both
+            // are the credit side read as a positive figure.
+            const display = b.kind === "credit_card" || personal ? -net : net;
             const pending = unreviewedOf.get(b.id) ?? 0;
             return (
               <Link
@@ -230,7 +237,11 @@ export default async function BankingPage() {
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-2">
                       <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-module-accent/10 text-module-accent">
-                        <Landmark className="size-4" />
+                        {personal ? (
+                          <Wallet className="size-4" />
+                        ) : (
+                          <Landmark className="size-4" />
+                        )}
                       </div>
                       <p className="truncate font-heading font-medium tracking-heading">
                         {b.name}
@@ -243,7 +254,7 @@ export default async function BankingPage() {
                         decides what may clear through the account, so it
                         belongs on the card rather than a detail page. */}
                     {showCompany ? `${companyName.get(b.entityId) ?? "—"} · ` : ""}
-                    {b.kind.replaceAll("_", " ")}
+                    {personal ? "personal account · private" : b.kind.replaceAll("_", " ")}
                     {b.institution ? ` · ${b.institution}` : ""}
                     {b.last4 ? ` ···· ${b.last4}` : ""}
                     {b.plaidItemId ? " · connected" : ""}
@@ -252,7 +263,11 @@ export default async function BankingPage() {
                 <div className="flex items-end justify-between gap-2">
                   <div>
                     <p className="text-[13px] text-muted-foreground">
-                      {b.kind === "credit_card" ? "Owed" : "Balance"}
+                      {b.kind === "credit_card"
+                        ? "Owed"
+                        : personal
+                          ? "Put in by you, net"
+                          : "Balance"}
                     </p>
                     <p className="font-heading text-2xl font-semibold tracking-heading tabular-nums">
                       {formatCentsSigned(display)}

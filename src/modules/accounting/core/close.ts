@@ -181,6 +181,9 @@ export async function getCloseChecklist(
         eq(schema.bankAccounts.tenantId, tenantId),
         eq(schema.bankAccounts.entityId, entityId),
         eq(schema.bankAccounts.isActive, true),
+        // A personal register is never reconciled (ADR 0034), so it cannot
+        // be behind on one.
+        sql`${schema.bankAccounts.kind} <> 'personal'`,
       ),
     )
     .groupBy(schema.bankAccounts.id, schema.bankAccounts.name);

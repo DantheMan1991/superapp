@@ -76,7 +76,13 @@ export interface MatchableRule {
   bankAccountId: string | null;
   matchMode: "all" | "any";
   conditions: unknown;
-  setAccountId: string;
+  /**
+   * `categorize` fills in a category; `exclude` sets the row aside (ADR 0034).
+   * Absent means `categorize` — the shape of every rule before the column.
+   */
+  action?: "categorize" | "exclude";
+  /** Null exactly when `action` is `exclude`. */
+  setAccountId: string | null;
   setVendorId: string | null;
   setMemo: string | null;
   autoPost: boolean;
@@ -86,7 +92,9 @@ export interface MatchableRule {
 export interface RuleMatch {
   ruleId: string;
   ruleName: string;
-  accountId: string;
+  action: "categorize" | "exclude";
+  /** Null for an exclude rule: there is nothing to post. */
+  accountId: string | null;
   /** Null when the rule says nothing about who was paid. */
   vendorId: string | null;
   memo: string | null;
@@ -178,7 +186,8 @@ export function matchRules(
     return {
       ruleId: rule.id,
       ruleName: rule.name,
-      accountId: rule.setAccountId,
+      action: rule.action ?? "categorize",
+      accountId: rule.action === "exclude" ? null : rule.setAccountId,
       vendorId: rule.setVendorId,
       memo: rule.setMemo,
       autoPost: rule.autoPost,

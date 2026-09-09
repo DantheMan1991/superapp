@@ -36,6 +36,7 @@ import {
   categorizeTransactionAction,
   splitTransactionAction,
   excludeTransactionAction,
+  excludeTransactionsAction,
   matchTransactionToEntryAction,
   restoreTransactionAction,
   setBankAccountActiveAction,
@@ -157,18 +158,27 @@ export function RegisterTabs({
   active,
   counts,
   term = "",
+  personal = false,
 }: {
   bankAccountId: string;
   active: "unreviewed" | "all" | "excluded";
   counts: { unreviewed: number; all: number; excluded: number };
   /** The search term in force, carried from tab to tab; the page is not. */
   term?: string;
+  /**
+   * A PERSONAL register (ADR 0034): the set-aside tab is where most of the
+   * feed ends up, and it is the owner's own spending, so it says so.
+   */
+  personal?: boolean;
 }) {
   const q = term ? `&q=${encodeURIComponent(term)}` : "";
   const tabs = [
     { key: "unreviewed", label: `To review (${counts.unreviewed})` },
     { key: "all", label: `All (${counts.all})` },
-    { key: "excluded", label: `Excluded (${counts.excluded})` },
+    {
+      key: "excluded",
+      label: personal ? `Personal (${counts.excluded})` : `Excluded (${counts.excluded})`,
+    },
   ] as const;
   return (
     <div className="flex gap-1 border-b pb-px print:hidden">
@@ -222,15 +232,20 @@ interface ReviewRow {
   postedHere: boolean;
   source: string;
   suggestion: {
-    accountId: string;
+    /** Null when the assistant said the line is not the business's. */
+    accountId: string | null;
     accountCode: string;
     confidence: number;
     reason: string | null;
+    /** The assistant's "not the business's", on a personal register (ADR 0034). */
+    personal: boolean;
   } | null;
   ruleSuggestion: {
     ruleName: string;
-    accountId: string;
+    /** Null for a rule that set the row aside. */
+    accountId: string | null;
     accountCode: string;
+    action: "categorize" | "exclude";
   } | null;
   /** Who was paid, once a rule or a person has said so. */
   payee: string | null;
@@ -240,10 +255,15 @@ interface ReviewRow {
 /**
  * A rule beats the model. It is a decision the owner already made, it cannot
  * drift between runs, and it can say why — so where both have an opinion, the
- * rule is the one shown and the one the Accept button would post.
+ * rule is the one shown and the one the Accept button would post. A "personal"
+ * opinion names no account, so it pre-fills nothing.
  */
 function preferredAccountId(row: ReviewRow): string | undefined {
-  return row.ruleSuggestion?.accountId ?? row.suggestion?.accountId;
+  if (row.ruleSuggestion?.accountId) return row.ruleSuggestion.accountId;
+  if (row.suggestion && !row.suggestion.personal && row.suggestion.accountId) {
+    return row.suggestion.accountId;
+  }
+  return undefined;
 }
 
 interface CategoryOption {
@@ -263,7 +283,8 @@ function suggestionChip(row: ReviewRow): ReactNode {
         title={row.ruleSuggestion.ruleName}
       >
         <Filter className="size-3" />
-        RULE · {row.ruleSuggestion.accountCode}
+        RULE ·{" "}
+        {row.ruleSuggestion.action === "exclude" ? "personal" : row.ruleSuggestion.accountCode}
       </span>
     );
   }
@@ -279,7 +300,7 @@ function suggestionChip(row: ReviewRow): ReactNode {
         title={row.suggestion.reason ?? undefined}
       >
         <Sparkles className="size-3" />
-        AI · {row.suggestion.accountCode} ·{" "}
+        AI · {row.suggestion.personal ? "personal" : row.suggestion.accountCode} ·{" "}
         {Math.round(row.suggestion.confidence * 100)}%
       </span>
     );
@@ -335,6 +356,7 @@ export function ReviewTable({
   transferTargets,
   dimensionTypes,
   canAct,
+  personal = false,
 }: {
   tab: "unreviewed" | "all" | "excluded";
   rows: ReviewRow[];
@@ -349,9 +371,17 @@ export function ReviewTable({
   /** Active members, grouped by type. Empty renders no tag control at all. */
   dimensionTypes: DimensionTypeOption[];
   canAct: boolean;
+  /**
+   * A PERSONAL register (ADR 0034). The verbs mean something different here —
+   * setting aside is "this one is mine", not "this is a duplicate" — so the
+   * buttons and the toasts say so, and a bulk set-aside is offered because
+   * most of the feed is the owner's own.
+   */
+  personal?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const { confirm, confirmDialog } = useConfirm();
   const [chosen, setChosen] = useState<Record<string, string>>({});
   /**
    * **PER ROW, and keyed the same way `chosen` is.** Categorising is a list
@@ -402,6 +432,20 @@ export function ReviewTable({
       (r.ruleSuggestion !== null ||
         (r.suggestion !== null && r.suggestion.confidence >= ACCEPT_THRESHOLD)),
   );
+  /**
+   * On a personal register, everything still waiting that nothing has called
+   * the business's: no rule, and no category from the assistant — either no
+   * opinion, or the opinion "personal" at any confidence. Once the business's
+   * lines are posted, this is the rest, and one press sets it aside.
+   */
+  const restPersonal = personal
+    ? rows.filter(
+        (r) =>
+          r.status === "unreviewed" &&
+          r.ruleSuggestion === null &&
+          (r.suggestion === null || r.suggestion.personal),
+      )
+    : [];
 
   /**
    * The Undo voids the entry the row just posted and puts the row back — the
@@ -478,12 +522,41 @@ export function ReviewTable({
       if ("error" in result) toast.error(result.error);
       else {
         // Restore already existed; the Undo is only a shorter road to it.
-        toast.success("Excluded", {
+        toast.success(personal ? "Set aside as personal" : "Excluded", {
           action: { label: "Undo", onClick: () => restore(row) },
           duration: UNDO_WINDOW_MS,
         });
       }
       setBusyId(null);
+      router.refresh();
+    });
+  }
+
+  /**
+   * The bulk set-aside on a personal register. Asks first, because it is one
+   * press over a whole page, then sets every row that nothing called the
+   * business's aside — reversibly: each comes back with Restore.
+   */
+  function setAsideRest() {
+    const ids = restPersonal.map((r) => r.id).slice(0, 50);
+    if (ids.length === 0) return;
+    startTransition(async () => {
+      const ok = await confirm({
+        title: `Set aside ${ids.length} as personal?`,
+        description:
+          "Nothing posts. Anything that turns out to be the business's can be brought back from the Personal tab.",
+        confirmLabel: "Set aside",
+      });
+      if (!ok) return;
+      const result = await excludeTransactionsAction({ transactionIds: ids });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      const { setAside, skipped } = result.data!;
+      toast.success(
+        `Set aside ${setAside} as personal${skipped > 0 ? `, skipped ${skipped}` : ""}`,
+      );
       router.refresh();
     });
   }
@@ -585,9 +658,9 @@ export function ReviewTable({
         toast.error(result.error);
         return;
       }
-      const { posted, skipped, firstError } = result.data!;
+      const { posted, setAside, skipped, firstError } = result.data!;
       toast.success(
-        `Posted ${posted}${skipped > 0 ? `, skipped ${skipped}` : ""}${firstError ? ` — ${firstError}` : ""}`,
+        `Posted ${posted}${setAside > 0 ? `, set aside ${setAside} as personal` : ""}${skipped > 0 ? `, skipped ${skipped}` : ""}${firstError ? ` — ${firstError}` : ""}`,
       );
       router.refresh();
     });
@@ -662,7 +735,7 @@ export function ReviewTable({
             disabled={busy}
             onClick={() => exclude(row)}
           >
-            Exclude
+            {personal ? "Personal" : "Exclude"}
           </Button>
           <Button
             size="sm"
@@ -698,7 +771,7 @@ export function ReviewTable({
           disabled={busy}
           onClick={() => restore(row)}
         >
-          Restore
+          {personal ? "It's the business's" : "Restore"}
         </Button>
       );
     }
@@ -707,12 +780,20 @@ export function ReviewTable({
 
   return (
     <div className="space-y-3">
-      {canAct && tab === "unreviewed" && acceptable.length > 0 && (
-        <div className="flex justify-end print:hidden">
-          <Button size="sm" variant="outline" onClick={acceptAll} disabled={pending}>
-            Accept {acceptable.length} suggestion{acceptable.length === 1 ? "" : "s"} (≥
-            {Math.round(ACCEPT_THRESHOLD * 100)}%)
-          </Button>
+      {confirmDialog}
+      {canAct && tab === "unreviewed" && (acceptable.length > 0 || restPersonal.length > 0) && (
+        <div className="flex flex-wrap justify-end gap-2 print:hidden">
+          {restPersonal.length > 0 && (
+            <Button size="sm" variant="outline" onClick={setAsideRest} disabled={pending}>
+              Set aside the rest as personal ({restPersonal.length})
+            </Button>
+          )}
+          {acceptable.length > 0 && (
+            <Button size="sm" variant="outline" onClick={acceptAll} disabled={pending}>
+              Accept {acceptable.length} suggestion{acceptable.length === 1 ? "" : "s"} (≥
+              {Math.round(ACCEPT_THRESHOLD * 100)}%)
+            </Button>
+          )}
         </div>
       )}
       <Dialog open={matchFor !== null} onOpenChange={(o) => !o && setMatchFor(null)}>

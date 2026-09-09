@@ -75,7 +75,7 @@ Four transaction-local settings, read by every policy
 | --- | --- | --- |
 | `app.role` | `superadmin` \| `member` | God view, or scoped to one tenant |
 | `app.tenant_id` | uuid | Which tenant, when `member` |
-| `app.tenant_role` | `owner` \| `staff` \| `expert` | Lets a policy separate owners from staff. For a request this comes from Clerk; for a background job it comes from `memberships.role`, which is why that column is `withSystem`-write-only (S6) |
+| `app.tenant_role` | `owner` \| `staff` \| `expert` | Lets a policy separate owners from staff. For a request this comes from Clerk; for a background job it comes from `memberships.role`, which is why that column is `withSystem`-write-only (S6). Read by Documents' owners-only folders (`0024`) and by Banking's personal registers (`0279`, [ADR 0034](decisions/0034-a-personal-account-is-a-register-whose-ledger-leg-is-the-owners-equity.md)), where `expert` is let in beside `owner` and `staff` is not |
 | `app.clerk_user_id` | Clerk user id | Lets a policy scope rows to **one person** inside a tenant |
 
 Set only by `withTenant()` / `withSystem()` in [src/db/index.ts](../src/db/index.ts),

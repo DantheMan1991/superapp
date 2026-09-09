@@ -55,6 +55,7 @@ export function ImportWizard({
     rules?: {
       matched: number;
       autoPosted: number;
+      excluded: number;
       skippedLocked: number;
       skippedClosed: number;
     };
@@ -171,6 +172,9 @@ export function ImportWizard({
                 {done.rules.matched} matched a rule
                 {done.rules.autoPosted > 0
                   ? `, ${done.rules.autoPosted} posted automatically`
+                  : ""}
+                {done.rules.excluded > 0
+                  ? `, ${done.rules.excluded} set aside as personal`
                   : ""}
                 {done.rules.skippedLocked > 0
                   ? `, ${done.rules.skippedLocked} left for review because the period is closed`

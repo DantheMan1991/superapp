@@ -16,14 +16,16 @@ export type BankAccountKind = BankAccount["kind"];
 
 /**
  * Deterministic ledger-account code suggestion: 1000-range for bank/cash,
- * 2100-range for credit cards. Tens first, then +1 steps, then anywhere
- * in the block.
+ * 2100-range for credit cards, 3300-range for a personal register's equity
+ * account (past 3100 Owner Contributions and 3200 Owner Draws, which it sits
+ * beside on the balance sheet). Tens first, then +1 steps, then anywhere in
+ * the block.
  */
 export function suggestBankAccountCode(
   existingCodes: string[],
   kind: BankAccountKind,
 ): string {
-  const base = kind === "credit_card" ? 2100 : 1000;
+  const base = kind === "credit_card" ? 2100 : kind === "personal" ? 3300 : 1000;
   const taken = new Set(existingCodes);
   for (let c = base; c <= base + 90; c += 10) {
     if (!taken.has(String(c))) return String(c);
@@ -110,16 +112,53 @@ export async function createBankAccount(
   },
 ): Promise<{ bankAccount: BankAccount; ledgerAccount: Account }> {
   requireOwnerRole(ctx);
+  /**
+   * A PERSONAL register (ADR 0034) opens with nothing. Its balance is the
+   * owner's, not the business's, and the business's books never carry it —
+   * so an opening balance would put the owner's money on the balance sheet
+   * as if the business held it. Refused here as well as in the form, because
+   * the form is not the boundary.
+   */
+  if (
+    input.kind === "personal" &&
+    input.openingBalanceCents != null &&
+    input.openingBalanceCents !== 0
+  ) {
+    throw new LedgerError("PERSONAL_REGISTER", "a personal register has no opening balance");
+  }
   const existing = await listAccounts(tx, ctx.tenantId);
   const code = suggestBankAccountCode(existing.map((a) => a.code), input.kind);
+  /**
+   * The ledger leg. A bank or card register is an asset or a liability the
+   * business holds. A personal register is EQUITY: a business expense paid
+   * from it is money the owner put in (the posting credits this account), a
+   * business receipt landing in it is money the owner took out (a debit), and
+   * the account's balance is the net of the two. `owner_funds` is its own
+   * subtype so `isCodableAccount` can refuse it by shape — staff cannot see
+   * the register row, so the id check alone would not protect it from a bill
+   * line — and so the balance sheet can name it.
+   */
   const ledgerAccount = await createAccount(tx, ctx, {
     code,
     name: input.name,
-    accountType: input.kind === "credit_card" ? "liability" : "asset",
-    subtype: input.kind === "credit_card" ? "credit_card" : "bank",
-    description: input.institution
-      ? `${input.institution} — connected register`
-      : "Bank register",
+    accountType:
+      input.kind === "credit_card"
+        ? "liability"
+        : input.kind === "personal"
+          ? "equity"
+          : "asset",
+    subtype:
+      input.kind === "credit_card"
+        ? "credit_card"
+        : input.kind === "personal"
+          ? "owner_funds"
+          : "bank",
+    description:
+      input.kind === "personal"
+        ? "Owner's personal account — business lines only"
+        : input.institution
+          ? `${input.institution} — connected register`
+          : "Bank register",
   });
   const [bankAccount] = await tx
     .insert(schema.bankAccounts)

@@ -13,7 +13,7 @@ Open an account from **Banking** and click {button:Import CSV|outline}. Owners o
 - **The mapping card.** Once a file is chosen: `84 rows found (header detected) — check the mapping, then import.`, then `Date column`, `Description column`, `Date format` (`MM/DD/YYYY`, `DD/MM/YYYY` or `YYYY-MM-DD`), `Amount style` (`One signed column`, where money out is negative, or `Separate in/out columns`, which then asks for `Money out column` and `Money in column`), and the check box `Flip signs (my bank shows money out as positive)`.
 - **The preview.** The first ten rows as Yosher reads them.
 - **{button:Import transactions|primary}** and **{button:Start over|outline}.**
-- **The summary.** After the import, for example `12 transactions imported · 3 duplicates skipped. 5 matched a rule, 4 posted automatically, 1 left for review because the period is closed.`, with {button:Go review them|outline}.
+- **The summary.** After the import, for example `12 transactions imported · 3 duplicates skipped. 5 matched a rule, 4 posted automatically, 1 left for review because the period is closed.`, with {button:Go review them|outline}. On a personal account the same line can read `… 8 matched a rule, 8 set aside as personal.`: a rule that sets aside as personal has already moved those rows to the `Personal` tab, and nothing was posted.
 
 ## How to import a statement
 

@@ -100,6 +100,42 @@ export function commonDescriptionPhrase(descriptions: string[]): string | null {
   return null;
 }
 
+/**
+ * The phrases worth an EXCLUDE rule, from the descriptions of rows set aside
+ * as personal on one register (ADR 0034).
+ *
+ * `commonDescriptionPhrase` asks what EVERY description shares, which is the
+ * right question when the rows already share a category. "Personal" is one
+ * bucket holding the grocer, the pharmacy and the streaming service, so the
+ * rows are grouped first by their leading merchant word — the first token that
+ * is a real word, four letters or more, and not one of the generic ones — and
+ * each group that has reached the threshold yields one phrase: the longest run
+ * the group shares, or the word itself. `["KROGER #412", "KROGER FUEL 9",
+ * "KROGER #412", "NETFLIX.COM"]` → `["kroger"]` at a threshold of three.
+ *
+ * Sorted, so a run over the same rows proposes the same rules in the same
+ * order.
+ */
+export function commonExcludePhrases(
+  descriptions: string[],
+  threshold: number = RULE_PROPOSAL_THRESHOLD,
+): string[] {
+  const groups = new Map<string, string[]>();
+  for (const description of descriptions) {
+    const key = tokenize(description).find(
+      (t) => /[a-z]/.test(t) && t.length >= 4 && !GENERIC_TOKENS.has(t),
+    );
+    if (!key) continue;
+    groups.set(key, [...(groups.get(key) ?? []), description]);
+  }
+  const out: string[] = [];
+  for (const [key, group] of groups) {
+    if (group.length < threshold) continue;
+    out.push(commonDescriptionPhrase(group) ?? key);
+  }
+  return out.sort();
+}
+
 /** Title case for display: "westfield ins" → "Westfield Ins". */
 export function titleCasePhrase(phrase: string): string {
   return phrase

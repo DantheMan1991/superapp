@@ -19,6 +19,7 @@ import {
   RULE_PROPOSAL_THRESHOLD,
   SUGGESTED_RULE_PRIORITY,
   commonDescriptionPhrase,
+  commonExcludePhrases,
   suggestedRuleName,
 } from "./rules-learn";
 // One-way: rules post THROUGH the review path, review knows nothing of rules.
@@ -34,7 +35,14 @@ import { categorizeTransaction } from "./review";
 export interface StoredRuleSuggestion {
   ruleId: string;
   ruleName: string;
-  accountId: string;
+  /**
+   * `exclude` when the rule set the row aside as not the business's (ADR
+   * 0034). Absent on rows written before the column existed, which all meant
+   * `categorize`.
+   */
+  action?: "categorize" | "exclude";
+  /** Null for an exclude rule: there was nothing to post. */
+  accountId: string | null;
   accountCode: string;
   /** Snapshot of the payee the rule named, for the same reason as the rest. */
   vendorId?: string;
@@ -47,9 +55,9 @@ export function readRuleSuggestion(txn: {
   ruleSuggestion: unknown;
 }): StoredRuleSuggestion | null {
   const s = txn.ruleSuggestion as StoredRuleSuggestion | null;
-  return s && typeof s.accountId === "string" && typeof s.ruleId === "string"
-    ? s
-    : null;
+  if (!s || typeof s.ruleId !== "string") return null;
+  if (s.action === "exclude") return { ...s, accountId: null };
+  return typeof s.accountId === "string" ? s : null;
 }
 
 export async function listRules(tx: Tx, tenantId: string): Promise<BankRule[]> {
@@ -127,12 +135,58 @@ export interface RuleInput {
   bankAccountId: string | null;
   matchMode: "all" | "any";
   conditions: RuleCondition[];
-  setAccountId: string;
+  /**
+   * What the rule does when it matches. `exclude` sets the row aside as not
+   * the business's — most of the work on a personal register (ADR 0034) — and
+   * carries no category, payee, memo or auto-post: there is nothing to post.
+   * Absent means `categorize`, the only thing a rule could do before the
+   * column existed, so every caller written before it still reads the same.
+   */
+  action?: "categorize" | "exclude";
+  /** Required for `categorize`, must be null for `exclude`. */
+  setAccountId: string | null;
   /** Null = the rule says nothing about the payee. */
   setVendorId: string | null;
   setMemo: string | null;
   autoPost: boolean;
   isActive?: boolean;
+}
+
+/**
+ * The half of a rule's shape the CHECK constraint also holds: an exclude rule
+ * names no category, a categorize rule always does. Checked here so the
+ * refusal has a code the form can read, rather than a constraint violation
+ * flattened to "something went wrong".
+ */
+function outcomeOf(input: RuleInput): {
+  action: "categorize" | "exclude";
+  setAccountId: string | null;
+  setVendorId: string | null;
+  setMemo: string | null;
+  autoPost: boolean;
+} {
+  if (input.action === "exclude") {
+    if (input.setAccountId !== null) {
+      throw new LedgerError("ACCOUNT_NOT_FOUND", "an exclude rule names no category");
+    }
+    return {
+      action: "exclude",
+      setAccountId: null,
+      setVendorId: null,
+      setMemo: null,
+      autoPost: false,
+    };
+  }
+  if (input.setAccountId === null) {
+    throw new LedgerError("ACCOUNT_NOT_FOUND", "a categorize rule needs a category");
+  }
+  return {
+    action: "categorize",
+    setAccountId: input.setAccountId,
+    setVendorId: input.setVendorId,
+    setMemo: input.setMemo,
+    autoPost: input.autoPost,
+  };
 }
 
 export async function createRule(
@@ -141,8 +195,11 @@ export async function createRule(
   input: RuleInput,
 ): Promise<BankRule> {
   requireOwnerRole(ctx);
-  await assertUsableCategory(tx, ctx.tenantId, input.setAccountId);
-  await assertUsableVendor(tx, ctx.tenantId, input.setVendorId);
+  const outcome = outcomeOf(input);
+  if (outcome.setAccountId !== null) {
+    await assertUsableCategory(tx, ctx.tenantId, outcome.setAccountId);
+  }
+  await assertUsableVendor(tx, ctx.tenantId, outcome.setVendorId);
   const rows = await tx
     .insert(schema.bankRules)
     .values({
@@ -152,10 +209,7 @@ export async function createRule(
       bankAccountId: input.bankAccountId,
       matchMode: input.matchMode,
       conditions: input.conditions,
-      setAccountId: input.setAccountId,
-      setVendorId: input.setVendorId,
-      setMemo: input.setMemo,
-      autoPost: input.autoPost,
+      ...outcome,
       isActive: input.isActive ?? true,
     })
     .returning();
@@ -169,8 +223,11 @@ export async function updateRule(
 ): Promise<BankRule> {
   requireOwnerRole(ctx);
   await loadRule(tx, ctx.tenantId, args.ruleId);
-  await assertUsableCategory(tx, ctx.tenantId, args.setAccountId);
-  await assertUsableVendor(tx, ctx.tenantId, args.setVendorId);
+  const outcome = outcomeOf(args);
+  if (outcome.setAccountId !== null) {
+    await assertUsableCategory(tx, ctx.tenantId, outcome.setAccountId);
+  }
+  await assertUsableVendor(tx, ctx.tenantId, outcome.setVendorId);
   const rows = await tx
     .update(schema.bankRules)
     .set({
@@ -179,10 +236,7 @@ export async function updateRule(
       bankAccountId: args.bankAccountId,
       matchMode: args.matchMode,
       conditions: args.conditions,
-      setAccountId: args.setAccountId,
-      setVendorId: args.setVendorId,
-      setMemo: args.setMemo,
-      autoPost: args.autoPost,
+      ...outcome,
       isActive: args.isActive ?? true,
       // Editing a proposal adopts it: it is now a decision somebody made.
       isSuggested: false,
@@ -338,6 +392,7 @@ function toMatchable(rule: BankRule): MatchableRule {
     bankAccountId: rule.bankAccountId,
     matchMode: rule.matchMode,
     conditions: rule.conditions,
+    action: rule.action,
     setAccountId: rule.setAccountId,
     setVendorId: rule.setVendorId,
     setMemo: rule.setMemo,
@@ -347,10 +402,12 @@ function toMatchable(rule: BankRule): MatchableRule {
 }
 
 export interface ApplyRulesResult {
-  /** Rows that gained a rule suggestion. */
+  /** Rows that gained a rule suggestion, or were set aside by an exclude rule. */
   matched: number;
   /** Rows an auto-post rule categorized outright. */
   autoPosted: number;
+  /** Rows an exclude rule set aside as not the business's (ADR 0034). */
+  excluded: number;
   /** Auto-post rows left alone because their date is in a closed period. */
   skippedLocked: number;
   /**
@@ -386,6 +443,7 @@ export async function applyRulesToUnreviewed(
   const result: ApplyRulesResult = {
     matched: 0,
     autoPosted: 0,
+    excluded: 0,
     skippedLocked: 0,
     skippedClosed: 0,
   };
@@ -427,7 +485,11 @@ export async function applyRulesToUnreviewed(
 
   // Account codes are resolved once for the snapshot — the suggestion has to
   // render without re-reading the chart of accounts on every row.
-  const accountIds = [...new Set(matchable.map((r) => r.setAccountId))];
+  const accountIds = [
+    ...new Set(
+      matchable.map((r) => r.setAccountId).filter((a): a is string => a !== null),
+    ),
+  ];
   const accounts = await tx.query.accounts.findMany({
     where: and(
       eq(schema.accounts.tenantId, ctx.tenantId),
@@ -452,7 +514,7 @@ export async function applyRulesToUnreviewed(
         });
   const vendorNameById = new Map(vendorRows.map((v) => [v.id, v.name]));
 
-  const autoPostable: Array<{ txnId: string; match: RuleMatch }> = [];
+  const autoPostable: Array<{ txnId: string; accountId: string; match: RuleMatch }> = [];
   const now = new Date().toISOString();
 
   for (const txn of txns) {
@@ -466,9 +528,44 @@ export async function applyRulesToUnreviewed(
     );
     if (!match) continue;
 
+    /**
+     * An EXCLUDE rule acts at once (ADR 0034). There is nothing to post, so
+     * there is no closed period or closed register to yield to, and no review
+     * a person would want: the rule IS the decision that this line is not the
+     * business's. The row keeps the rule's name, so the Personal tab can say
+     * which rule set it aside, and Restore still brings it back.
+     */
+    if (match.action === "exclude" || match.accountId === null) {
+      const setAside: StoredRuleSuggestion = {
+        ruleId: match.ruleId,
+        ruleName: match.ruleName,
+        action: "exclude",
+        accountId: null,
+        accountCode: "",
+        at: now,
+      };
+      const moved = await tx
+        .update(schema.bankTransactions)
+        .set({ status: "excluded", ruleSuggestion: setAside, updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.bankTransactions.tenantId, ctx.tenantId),
+            eq(schema.bankTransactions.id, txn.id),
+            eq(schema.bankTransactions.status, "unreviewed"),
+          ),
+        )
+        .returning({ id: schema.bankTransactions.id });
+      if (moved.length > 0) {
+        result.matched += 1;
+        result.excluded += 1;
+      }
+      continue;
+    }
+
     const suggestion: StoredRuleSuggestion = {
       ruleId: match.ruleId,
       ruleName: match.ruleName,
+      action: "categorize",
       accountId: match.accountId,
       accountCode: codeById.get(match.accountId) ?? "",
       ...(match.vendorId
@@ -518,15 +615,15 @@ export async function applyRulesToUnreviewed(
       result.skippedClosed += 1;
       continue;
     }
-    autoPostable.push({ txnId: txn.id, match });
+    autoPostable.push({ txnId: txn.id, accountId: match.accountId, match });
   }
 
   // Posting happens after every suggestion is written, so a failure part-way
   // through cannot leave some rows suggested and others silently untouched.
-  for (const { txnId, match } of autoPostable) {
+  for (const { txnId, accountId, match } of autoPostable) {
     await categorizeTransaction(tx, ctx, {
       transactionId: txnId,
-      accountId: match.accountId,
+      accountId,
       ...(match.memo ? { memo: match.memo } : {}),
     });
     result.autoPosted += 1;
@@ -624,10 +721,93 @@ export async function proposeRuleFromHistory(
       bankAccountId: args.bankAccountId,
       matchMode: "all",
       conditions: [{ field: "description", op: "contains", value: phrase }],
+      action: "categorize",
       setAccountId: args.accountId,
       // Never auto-post something nobody asked for.
       autoPost: false,
     })
     .returning();
   return inserted[0];
+}
+
+/**
+ * The exclude-side twin of `proposeRuleFromHistory`, for PERSONAL registers
+ * only (ADR 0034): once the same payee has been set aside as personal often
+ * enough on one register, propose a rule that does it on arrival.
+ *
+ * The grouping is different from the categorize side, on purpose. There, the
+ * rows already share a category and the question is whether their
+ * descriptions share a phrase. Here, "personal" is one bucket holding the
+ * grocer, the pharmacy and the streaming service, so nothing is common to all
+ * of them — `commonExcludePhrases` groups by the leading merchant word first
+ * and proposes one rule per group that has reached the threshold. Several
+ * rules can come out of one call; each is a suggestion the owner keeps or
+ * dismisses, exactly like the other kind.
+ *
+ * Personal registers only: on a business account an excluded row is a
+ * duplicate or a non-movement, and a rule that excluded every future line
+ * from that payee would hide real spending.
+ */
+export async function proposeExcludeRulesFromHistory(
+  tx: Tx,
+  ctx: LedgerCtx,
+  args: { bankAccountId: string },
+): Promise<BankRule[]> {
+  const register = await tx.query.bankAccounts.findFirst({
+    where: and(
+      eq(schema.bankAccounts.tenantId, ctx.tenantId),
+      eq(schema.bankAccounts.id, args.bankAccountId),
+    ),
+    columns: { kind: true },
+  });
+  if (!register || register.kind !== "personal") return [];
+
+  const rows = await tx
+    .select({ description: schema.bankTransactions.description })
+    .from(schema.bankTransactions)
+    .where(
+      and(
+        eq(schema.bankTransactions.tenantId, ctx.tenantId),
+        eq(schema.bankTransactions.bankAccountId, args.bankAccountId),
+        eq(schema.bankTransactions.status, "excluded"),
+      ),
+    )
+    .orderBy(asc(schema.bankTransactions.txnDate));
+  const phrases = commonExcludePhrases(
+    rows.map((r) => r.description).filter((d) => d.trim() !== ""),
+  );
+  if (phrases.length === 0) return [];
+
+  // One rule per phrase, ever — the same coverage test the categorize side
+  // applies, so a dismissed suggestion stays dismissed.
+  const existing = await listRules(tx, ctx.tenantId);
+  const covered = new Set(
+    existing.flatMap((rule) =>
+      (parseConditions(rule.conditions) ?? [])
+        .filter((c) => c.field === "description" && c.op === "contains")
+        .map((c) => c.value.trim().toLowerCase()),
+    ),
+  );
+  const fresh = phrases.filter((p) => !covered.has(p));
+  if (fresh.length === 0) return [];
+
+  return tx
+    .insert(schema.bankRules)
+    .values(
+      fresh.map((phrase) => ({
+        tenantId: ctx.tenantId,
+        name: suggestedRuleName(phrase, "personal"),
+        priority: SUGGESTED_RULE_PRIORITY,
+        isSuggested: true,
+        isActive: true,
+        appliesTo: "both" as const,
+        bankAccountId: args.bankAccountId,
+        matchMode: "all" as const,
+        conditions: [{ field: "description", op: "contains", value: phrase }],
+        action: "exclude" as const,
+        setAccountId: null,
+        autoPost: false,
+      })),
+    )
+    .returning();
 }

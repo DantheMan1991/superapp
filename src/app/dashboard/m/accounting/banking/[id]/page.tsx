@@ -238,7 +238,10 @@ export default async function BankRegisterPage({
       linkedEntries,
       window,
     };
-  });
+    // The role travels with the read: a personal register and its rows are
+    // visible to owners and the accountant only (drizzle/0279, ADR 0034).
+    // Without it this page would 404 for the owner who created the account.
+  }, { role: ctx.role, userId: ctx.userId });
   if (!data) notFound();
   const { bankAccount, txns, counts } = data;
 
@@ -254,8 +257,12 @@ export default async function BankRegisterPage({
   };
 
   const countOf = (s: string) => counts.find((c) => c.status === s)?.n ?? 0;
+  const personal = bankAccount.kind === "personal";
   const net = data.balance?.netCents ?? 0;
-  const display = bankAccount.kind === "credit_card" ? -net : net;
+  // A card shows what is owed, and a personal register what the owner has
+  // put in net of what they took out (ADR 0034) — both are the credit side
+  // read as a positive figure.
+  const display = bankAccount.kind === "credit_card" || personal ? -net : net;
   const isOwner = ctx.role === "owner";
 
   const attachmentsOf = new Map(
@@ -283,6 +290,7 @@ export default async function BankRegisterPage({
             accountCode: suggestion.accountCode,
             confidence: suggestion.confidence,
             reason: suggestion.reason ?? null,
+            personal: suggestion.personal === true,
           }
         : null,
       ruleSuggestion: rule
@@ -290,6 +298,7 @@ export default async function BankRegisterPage({
             ruleName: rule.ruleName,
             accountId: rule.accountId,
             accountCode: rule.accountCode,
+            action: rule.action ?? "categorize",
           }
         : null,
       payee: t.vendorId ? (vendorName.get(t.vendorId) ?? null) : null,
@@ -320,10 +329,14 @@ export default async function BankRegisterPage({
         title={bankAccount.name}
         description={
           <>
-            {bankAccount.kind.replaceAll("_", " ")}
+            {personal ? "personal account" : bankAccount.kind.replaceAll("_", " ")}
             {bankAccount.institution ? ` · ${bankAccount.institution}` : ""}
             {bankAccount.last4 ? ` ···· ${bankAccount.last4}` : ""} ·{" "}
-            {bankAccount.kind === "credit_card" ? "owed" : "balance"}{" "}
+            {bankAccount.kind === "credit_card"
+              ? "owed"
+              : personal
+                ? "put in by you, net"
+                : "balance"}{" "}
             <span className="font-mono font-medium tabular-nums">
               {formatCentsSigned(display)}
             </span>
@@ -354,11 +367,16 @@ export default async function BankRegisterPage({
                       bankAccountId={id}
                       disabled={countOf("unreviewed") === 0}
                     />
-                    <Button asChild size="sm" variant="outline">
-                      <Link href={`/dashboard/m/accounting/banking/${id}/reconcile`}>
-                        Reconcile
-                      </Link>
-                    </Button>
+                    {/* A personal register is never reconciled: its statement
+                        balance is the owner's, and only the business's lines
+                        ever posted. The server refuses it too (ADR 0034). */}
+                    {!personal && (
+                      <Button asChild size="sm" variant="outline">
+                        <Link href={`/dashboard/m/accounting/banking/${id}/reconcile`}>
+                          Reconcile
+                        </Link>
+                      </Button>
+                    )}
                   </>
                 )}
                 <BankAccountActiveToggle
@@ -373,6 +391,20 @@ export default async function BankRegisterPage({
       />
 
       <AccountingNav />
+
+      {/* What this register IS, stated on the page that works it, because the
+          verbs below mean something different here: Post is "this one is the
+          business's", Personal is "this one is mine". */}
+      {personal && (
+        <Card>
+          <CardContent className="py-3 text-sm text-muted-foreground">
+            Your own account, with some of the business&apos;s money running
+            through it. Only the lines you post reach the books, as money you put
+            in or took out. Everything you set aside as personal stays out of
+            them: never counted, never reported, and never seen by staff.
+          </CardContent>
+        </Card>
+      )}
 
       {!bankAccount.isActive && (
         <Card className="border-warning/40 bg-warning/8">
@@ -392,6 +424,7 @@ export default async function BankRegisterPage({
         bankAccountId={id}
         active={tab}
         term={term}
+        personal={personal}
         counts={{
           unreviewed: countOf("unreviewed"),
           all: counts.reduce((s, c) => s + c.n, 0),
@@ -405,7 +438,9 @@ export default async function BankRegisterPage({
             {term
               ? `Nothing matches “${term}”. Try fewer words, or clear the search.`
               : tab === "unreviewed"
-                ? "Nothing to review — the feed is clear."
+                ? personal
+                  ? "Nothing to review — everything is sorted."
+                  : "Nothing to review — the feed is clear."
                 : "No transactions here yet."}
           </CardContent>
         </Card>
@@ -417,6 +452,7 @@ export default async function BankRegisterPage({
           transferTargets={transferTargets}
           dimensionTypes={dimensionTypes}
           canAct={isOwner}
+          personal={personal}
         />
       )}
 

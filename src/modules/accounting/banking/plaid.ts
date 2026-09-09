@@ -36,8 +36,12 @@ export interface PlaidLinkableAccount {
   plaidAccountId: string;
   name: string;
   mask: string;
-  /** Suggested register kind from Plaid type/subtype. */
-  kind: BankAccount["kind"];
+  /**
+   * Suggested register kind from Plaid type/subtype. Never `personal`: a
+   * feed knows what an account IS at the bank, not whose money runs through
+   * it — that is the owner's call, made by hand (ADR 0034).
+   */
+  kind: Exclude<BankAccount["kind"], "personal">;
 }
 
 /**
@@ -185,7 +189,7 @@ export async function syncPlaidItem(
     modified: 0,
     removed: 0,
     skippedUnlinked: 0,
-    rules: { matched: 0, autoPosted: 0, skippedLocked: 0, skippedClosed: 0 },
+    rules: { matched: 0, autoPosted: 0, excluded: 0, skippedLocked: 0, skippedClosed: 0 },
   };
   let cursor = item.syncCursor ?? undefined;
   let hasMore = true;
@@ -331,6 +335,7 @@ export async function syncPlaidItem(
     );
     result.rules.matched += applied.matched;
     result.rules.autoPosted += applied.autoPosted;
+    result.rules.excluded += applied.excluded;
     result.rules.skippedLocked += applied.skippedLocked;
     result.rules.skippedClosed += applied.skippedClosed;
   }

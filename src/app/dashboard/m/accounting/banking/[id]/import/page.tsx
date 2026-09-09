@@ -20,13 +20,18 @@ export default async function ImportPage({
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
 
-  const bankAccount = await withTenant(ctx.tenant.id, (tx) =>
-    tx.query.bankAccounts.findFirst({
-      where: and(
-        eq(schema.bankAccounts.tenantId, ctx.tenant.id),
-        eq(schema.bankAccounts.id, id),
-      ),
-    }),
+  const bankAccount = await withTenant(
+    ctx.tenant.id,
+    (tx) =>
+      tx.query.bankAccounts.findFirst({
+        where: and(
+          eq(schema.bankAccounts.tenantId, ctx.tenant.id),
+          eq(schema.bankAccounts.id, id),
+        ),
+      }),
+    // A personal register is visible to owners and the accountant only
+    // (drizzle/0279); the role has to travel or the owner's own import 404s.
+    { role: ctx.role, userId: ctx.userId },
   );
   if (!bankAccount) notFound();
 

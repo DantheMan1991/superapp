@@ -1,22 +1,24 @@
 # An account's transactions
 
-> One bank or card account: the transactions waiting for review, the suggested categories, posting, matching to something already in the books, transfers between your own accounts, excluding, and closing the account.
+> One bank or card account, or your own account when the business's money runs through it: the transactions waiting for review, the suggested categories, posting, matching to something already in the books, transfers between your own accounts, excluding or setting aside as personal, and closing the account.
 > **Route:** /dashboard/m/accounting/banking/*
 > **Order:** 20
 > **Area:** Banking
 
-Open **Banking** in the accounting menu and click an account's card. This is where the bank feed is worked: each transaction waits under `To review` until an owner posts it, matches it to something already in the books, or excludes it.
+Open **Banking** in the accounting menu and click an account's card. This is where the bank feed is worked: each transaction waits under `To review` until an owner posts it, matches it to something already in the books, or excludes it. On a personal account the same page runs the other way round: every transaction is yours until you post it as the business's, and setting one aside is the ordinary thing to do.
 
 ## What you see
 
-- **The top of the page.** The title is the account's name. The line under it gives its kind, institution, last four digits and today's balance, or `owed` for a card. {badge:connected|success} for a live feed and {badge:closed|outline} for a closed account. Owners see, while the account is open, {button:Import CSV|outline}, {button:Suggest categories|primary|sparkles} and {button:Reconcile|outline}, and always {button:Close account|outline} or {button:Reopen account|outline}.
-- **The three tabs.** `To review (3)`, transactions that have arrived and are not in your books yet. `All (120)`, everything. `Excluded (2)`, transactions you have set aside. The counts are live, and count the whole account whatever you have searched for. The list is newest first, a hundred to a page.
+- **The top of the page.** The title is the account's name. The line under it gives its kind, institution, last four digits and today's balance, or `owed` for a card, or `put in by you, net` for a personal account. {badge:connected|success} for a live feed and {badge:closed|outline} for a closed account. Owners see, while the account is open, {button:Import CSV|outline}, {button:Suggest categories|primary|sparkles} and {button:Reconcile|outline}, and always {button:Close account|outline} or {button:Reopen account|outline}. A personal account has no {button:Reconcile|outline}: there is nothing to reconcile it against.
+- **On a personal account, a note under the menu.** `Your own account, with some of the business's money running through it. Only the lines you post reach the books, as money you put in or took out. Everything you set aside as personal stays out of them: never counted, never reported, and never seen by staff.`
+- **The three tabs.** `To review (3)`, transactions that have arrived and are not in your books yet. `All (120)`, everything. `Excluded (2)`, transactions you have set aside; on a personal account this tab reads `Personal (2)`. The counts are live, and count the whole account whatever you have searched for. The list is newest first, a hundred to a page.
 - **Search.** The box above the tabs. Type part of the description or the payee, or an amount such as `45.10`, and the list narrows as you type; press Enter to search at once. An amount finds the rows for exactly that figure, in or out. What you typed stays as you switch tabs. Clear the box to see everything again.
 - **Pages.** When a tab holds more than a hundred transactions, `Showing 1–100 of 312 transactions` sits under the list with {button:Newer|outline} and {button:Older|outline}. A search, or a different tab, starts again from the first page.
-- **Each row.** `Date` and `Description`, as the bank gave them, with a {icon:paperclip} and a count when receipts are attached from the Inbox. Under the description, on a row still to review, a chip with a suggested category: `RULE · 6300` means one of your bank rules matched, and hovering it shows which; `AI · 6100 · 87%` is the assistant's suggestion and how sure it is. When both have an opinion only the rule's chip is shown, because a rule is a decision you wrote down. `Payee`, the vendor, once a rule or a person has set one. `In` and `Out`. On `All`, `Status`: `unreviewed`, `posted` or `excluded`, where `posted` is a link to the entry in the journal. On `To review`, for owners, `Category`, already set to the suggestion. Click it and type part of a code or a name, such as `63` or `insur`, and the list narrows to what matches; click the account, or press Enter for the highlighted one. {button:Tag|outline} sits under it when your business has tags. At the end of the list, `Transfer to [account]` on money out and `Transfer from [account]` on money in, one for each of your other accounts in the same company, so money you moved between your own accounts is recorded as a transfer rather than as spending or income.
+- **Each row.** `Date` and `Description`, as the bank gave them, with a {icon:paperclip} and a count when receipts are attached from the Inbox. Under the description, on a row still to review, a chip with a suggested category: `RULE · 6300` means one of your bank rules matched, and hovering it shows which; `AI · 6100 · 87%` is the assistant's suggestion and how sure it is. On a personal account the chip can also read `AI · personal · 92%`, the assistant saying the line is not the business's, and on the `Personal` tab `RULE · personal` names the rule that set a row aside. When both have an opinion only the rule's chip is shown, because a rule is a decision you wrote down. `Payee`, the vendor, once a rule or a person has set one. `In` and `Out`. On `All`, `Status`: `unreviewed`, `posted` or `excluded`, where `posted` is a link to the entry in the journal. On `To review`, for owners, `Category`, already set to the suggestion. Click it and type part of a code or a name, such as `63` or `insur`, and the list narrows to what matches; click the account, or press Enter for the highlighted one. {button:Tag|outline} sits under it when your business has tags. At the end of the list, `Transfer to [account]` on money out and `Transfer from [account]` on money in, one for each of your other accounts in the same company, so money you moved between your own accounts is recorded as a transfer rather than as spending or income.
 - **On a phone.** Each transaction is a card instead of a row: the description and the amount at the top, money in with a `+` in green and money out with a `−`, then the date, the payee and the receipt count, the chip, the `Category`, the tag and the buttons. Everything works the same as in the table.
-- **The buttons on a row.** On `To review`: {button:Match|outline} when the row has something in the books it could be, {button:Split|outline}, {button:Exclude|ghost} and {button:Post|primary}. On `All`: {button:Unmatch|ghost} on a row that was matched to an entry; a row that posted its own entry has no button, because that entry is undone by voiding it. On `Excluded`: {button:Restore|outline}.
-- **{button:Accept 12 suggestions (≥70%)|outline}.** At the top of `To review`. See how to post many at once, below.
+- **The buttons on a row.** On `To review`: {button:Match|outline} when the row has something in the books it could be, {button:Split|outline}, {button:Exclude|ghost} and {button:Post|primary}. On `All`: {button:Unmatch|ghost} on a row that was matched to an entry; a row that posted its own entry has no button, because that entry is undone by voiding it. On `Excluded`: {button:Restore|outline}. On a personal account the two are named for what they mean there: {button:Personal|ghost} in place of {button:Exclude|ghost}, and {button:It's the business's|outline} in place of {button:Restore|outline}.
+- **{button:Accept 12 suggestions (≥70%)|outline}.** At the top of `To review`. See how to post many at once, below. On a personal account the assistant's `personal` suggestions count among them, and accepting sets those aside rather than posting them.
+- **{button:Set aside the rest as personal (42)|ghost}.** On a personal account only, beside it: every transaction still waiting that nothing has called the business's. See how to sort a personal account, below.
 
 ## How to post a transaction
 
@@ -38,7 +40,19 @@ A split is undone the way a posting is: {button:Undo|link} while it shows, or vo
 ## How to post many at once
 
 1. Click {button:Suggest categories|primary|sparkles} if rows are still without a suggestion. It reads `Thinking…`, then `Suggested categories for 12 of 14 transactions`.
-2. Click {button:Accept 12 suggestions (≥70%)|outline}. Every waiting transaction with a rule match, or a suggestion the assistant is at least 70% sure of, is posted, up to 50 at a time. You see `Posted 12`, or `Posted 9, skipped 3` with the first reason, such as a date in a closed month.
+2. Click {button:Accept 12 suggestions (≥70%)|outline}. Every waiting transaction with a rule match, or a suggestion the assistant is at least 70% sure of, is posted, up to 50 at a time. You see `Posted 12`, or `Posted 9, skipped 3` with the first reason, such as a date in a closed month. On a personal account a suggestion of `personal` is accepted by setting the row aside instead, and the message says so: `Posted 3, set aside 9 as personal`.
+
+## How to sort a personal account
+
+On a personal account most of what arrives is your own spending, so the work is picking out the business's lines rather than coding every line.
+
+1. Import the statement. Any rule that sets aside as personal has already moved its matches to `Personal` when the summary appears. See [Bank rules](bank-rules.md).
+2. Click {button:Suggest categories|primary|sparkles}. The assistant is told whose account this is, treats every line as yours unless it looks like the business's, and remembers what you have set aside before. It answers `personal` for your own spending and a category for the rest.
+3. Check the rows it called the business's. Post each with {button:Post|primary}, changing `Category` first if it guessed wrong, or click {button:Accept 12 suggestions (≥70%)|outline} to post the confident ones and set aside the confident `personal` ones together.
+4. Click {button:Set aside the rest as personal (42)|ghost}. The dialog reads `Set aside 42 as personal?` and `Nothing posts. Anything that turns out to be the business's can be brought back from the Personal tab.` Click {button:Set aside|primary}. You see `Set aside 42 as personal`. Everything still waiting that had no rule and no category from the assistant is now on `Personal`, up to 50 at a time; press it again for more.
+5. Skim `Personal` now and then. Click {button:It's the business's|outline} on anything that belongs in the books; it goes back to `To review`, and you see `Back in review`.
+
+Every business line you post from this account is recorded as money you put into the business, and every business receipt that landed here as money you took out. Setting the same payee aside three times proposes a rule that does it on arrival, named like `(Suggested) Kroger as personal`; keep or dismiss it on the Rules page. A transaction set aside is not deleted and not counted anywhere. It is not on any report, and staff never see it.
 
 ## How to match a transaction to something already in the books
 
@@ -59,6 +73,8 @@ It works the other way round too: post `Transfer from [account]` on the account 
 1. Click {button:Exclude|ghost} on a duplicate, or on a row that is not money moving at all. It moves to `Excluded` without being posted, and you see `Excluded` with {button:Undo|link} beside it for a few seconds.
 2. Click {button:Undo|link} while it shows, or {button:Restore|outline} on `Excluded`, to bring it back. You see `Back in review`.
 
+On a personal account the same button is {button:Personal|ghost}, the message is `Set aside as personal`, the tab is `Personal`, and the way back is {button:It's the business's|outline}.
+
 ## How to close the account
 
 1. Click {button:Close account|outline}. The dialog is `Close this account?` and reads `Nothing is deleted and no balance changes — the account stops taking new transactions, imports and reconciliations. You can reopen it whenever you like.`
@@ -69,6 +85,10 @@ It works the other way round too: post `Transfer from [account]` on the account 
 | Message | What it means |
 | --- | --- |
 | `Nothing to review — the feed is clear.` | Every transaction has been posted, matched or excluded. |
+| `Nothing to review — everything is sorted.` | The same, on a personal account. |
+| `Set aside as personal` and `Set aside 42 as personal` | On a personal account: one transaction, or many, moved to `Personal` without posting. {button:Undo|link} on the single one brings it back. |
+| `Posted 3, set aside 9 as personal` | {button:Accept 12 suggestions (≥70%)|outline} on a personal account posted the business's lines and set aside the ones the assistant called personal. |
+| `A personal account has no opening balance and is never reconciled — only the lines you mark as the business's reach the books, so its balance was never the business's.` | Something asked this account to reconcile. It never does. |
 | `No transactions here yet.` | The tab is empty. |
 | `Nothing matches “…”. Try fewer words, or clear the search.` | Nothing on this tab has what you typed in its description, its payee or its amount. |
 | `Suggestions were just requested — try again in a moment.` | You asked the assistant twice within half a minute. |
@@ -91,4 +111,4 @@ There is no date filter. Importing a statement and reconciling have their own pa
 
 ## Who can do what
 
-Staff and accountants can read the list and the tabs. Posting, matching, excluding, importing, reconciling and closing are the owner's.
+Staff and accountants can read the list and the tabs. Posting, matching, excluding, importing, reconciling and closing are the owner's. A personal account is the exception to the first sentence: owners and accountants can open it, and staff never see it, its transactions, or the rules written for it.

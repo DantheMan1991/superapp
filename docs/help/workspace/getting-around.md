@@ -40,7 +40,7 @@ The rows you can see, and when each one is there:
 
 | Row | It is there while | The button opens |
 | --- | --- | --- |
-| `Add your bank account` | Accounting is switched on and no bank account or card has ever been added. | Banking. |
+| `Add your bank account` | Accounting is switched on and no bank account, card or personal account has ever been added. | Banking. |
 | `Bring in your transactions` | An account exists and no transaction has ever come in, by import or by feed. | That account's Import statement page when you have one account, otherwise Banking. |
 | `Add your equipment and buildings` | Assets is switched on and nothing has ever been added to it. | Assets. |
 | `Add what you hold` | Inventory is switched on and no kind of thing has ever been added. | Items. |

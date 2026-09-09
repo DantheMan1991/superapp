@@ -45,6 +45,8 @@ Nothing is ever deleted from the chart.
 
 A few accounts appear in the chart but are set only by Yosher: each bank account's own ledger account, Opening Balance Equity, Goods Received Not Invoiced, Inventory, Services Received Not Invoiced, the Due from and Due to Affiliates accounts, and Accounts Receivable and Payable. A bill or invoice line cannot be coded to them. A journal entry may name any active account. Opening balances are entered when a bank account is added on the Banking page, not here.
 
+A personal account added on the Banking page gets an equity account here, in the 3300s, named after the account. It is what you have put into the business through that account, net of what you have taken out, and it sits with Owner Contributions and Owner Draws. Everyone who can read the chart sees its name, so name the account plainly; what moves through it is visible only to owners and your accountant. It cannot be coded to from a bill or an invoice either.
+
 ## Who can do what
 
 Owners add, edit and deactivate. Staff and accountants read the chart.

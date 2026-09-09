@@ -45,7 +45,7 @@ export const accountingSetupSource: SetupSource = {
           key: "accounting.bank-account",
           title: "Add your bank account",
           detail:
-            "Every transaction starts from a register. Add the account the business pays from, or a card.",
+            "Every transaction starts from a register. Add the account the business pays from, a card, or your own account if the business's money runs through it.",
           href: "/dashboard/m/accounting/banking",
           cta: "Add account",
           guide: "accounting/banking",

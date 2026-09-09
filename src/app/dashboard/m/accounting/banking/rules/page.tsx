@@ -38,7 +38,9 @@ export default async function BankRulesPage() {
       orderBy: (a, { asc }) => [asc(a.code)],
     });
     return { rules, bankAccounts, categories, vendorRows };
-  });
+    // A personal register, and a rule scoped to one, are visible to owners and
+    // the accountant only (drizzle/0279); the role has to travel.
+  }, { role: ctx.role, userId: ctx.userId });
 
   // A rule may not code to a register's own account — that would be a transfer,
   // not a categorization, and the posting engine rejects it anyway.
@@ -61,14 +63,18 @@ export default async function BankRulesPage() {
     matchMode: r.matchMode,
     conditions: r.conditions,
     conditionsLabel: describeConditions(r.conditions, r.matchMode),
+    action: r.action,
     setAccountId: r.setAccountId,
     setVendorId: r.setVendorId,
-    setsLabel: [
-      `Set category to "${accountName.get(r.setAccountId) ?? "Unknown"}"`,
-      ...(r.setVendorId
-        ? [`set payee to "${vendorName.get(r.setVendorId) ?? "Unknown"}"`]
-        : []),
-    ].join(", "),
+    setsLabel:
+      r.action === "exclude"
+        ? "Set aside as personal"
+        : [
+            `Set category to "${(r.setAccountId && accountName.get(r.setAccountId)) ?? "Unknown"}"`,
+            ...(r.setVendorId
+              ? [`set payee to "${vendorName.get(r.setVendorId) ?? "Unknown"}"`]
+              : []),
+          ].join(", "),
     setMemo: r.setMemo,
     autoPost: r.autoPost,
   }));

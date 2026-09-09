@@ -39,14 +39,16 @@ export default async function ReconcilePage({
         eq(schema.bankAccounts.id, id),
       ),
     });
-    if (!bankAccount) return null;
+    // A personal register is never reconciled (ADR 0034): the register page
+    // offers no Reconcile button, and a URL typed by hand finds nothing here.
+    if (!bankAccount || bankAccount.kind === "personal") return null;
     const history = await listReconciliations(tx, tenantId, id);
     const active = history.find((r) => r.status === "in_progress");
     const view = active
       ? await getReconciliationView(tx, tenantId, active.id)
       : null;
     return { bankAccount, history, view };
-  });
+  }, { role: ctx.role, userId: ctx.userId });
   if (!data) notFound();
   const { bankAccount, history, view } = data;
   const isOwner = ctx.role === "owner";

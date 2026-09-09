@@ -68,6 +68,7 @@ import {
   Unlink,
   Upload,
   UserRound,
+  Wallet,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -155,6 +156,8 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   unlink: Unlink,
   upload: Upload,
   "user-round": UserRound,
+  // A personal register's card (ADR 0034) wears this instead of the bank mark.
+  wallet: Wallet,
   x: X,
 };
 

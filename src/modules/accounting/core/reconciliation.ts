@@ -75,6 +75,12 @@ export async function startReconciliation(
 ): Promise<Reconciliation> {
   requireOwnerRole(ctx);
   const bankAccount = await loadBankAccount(tx, ctx.tenantId, args.bankAccountId);
+  // A personal account's statement balance is the owner's, not the
+  // business's; only the lines marked as the business's ever posted, so there
+  // is no ledger figure a statement could agree with (ADR 0034).
+  if (bankAccount.kind === "personal") {
+    throw new LedgerError("PERSONAL_REGISTER", "a personal register is never reconciled");
+  }
   if (!bankAccount.isActive) {
     // Was BANK_ACCOUNT_NOT_FOUND, which told the reader the account was gone
     // while they were looking straight at it.

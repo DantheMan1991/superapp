@@ -63,12 +63,47 @@ export const SUGGEST_TOOL = {
   },
 };
 
+/**
+ * The one code that is not in the chart: "this line is not the business's".
+ * Offered to the model only for a PERSONAL register (ADR 0034), and accepted
+ * by `validateSuggestions` only when the caller says so.
+ */
+export const PERSONAL_CODE = "PERSONAL";
+
+/**
+ * What the model is told about a personal register, ahead of the chart. The
+ * prior is inverted on purpose: on a business account every line is the
+ * business's until proven otherwise, on the owner's own account it is the
+ * other way round, and a business line missed is cheaper than personal
+ * spending in the books — the owner will find the missed line when the
+ * feed store's bill arrives, and nobody will find the groceries.
+ */
+export const PERSONAL_INSTRUCTION = [
+  "THIS IS THE OWNER'S PERSONAL ACCOUNT. It also carries some of the business's money, but MOST LINES ARE PERSONAL.",
+  "For each transaction decide FIRST whether it is the business's at all:",
+  `- If it is the owner's own spending or income — groceries, household, medical, entertainment, personal transfers, pay from an unrelated job — answer accountCode ${PERSONAL_CODE}. Default to ${PERSONAL_CODE} when unsure.`,
+  "- Only when it is clearly the business's — a supplier, feed, seed, equipment, fuel for the work, a customer paying — pick the category from the chart as usual.",
+  `${PERSONAL_CODE} is a valid accountCode for this account and appears in the chart below. Prior decisions marked ${PERSONAL_CODE} in the history are personal lines the owner has already set aside.`,
+].join("\n");
+
 export function buildSuggestUserTurn(
   coa: PromptAccount[],
   history: PromptHistoryRow[],
   batch: PromptTxn[],
+  options: { personal?: boolean } = {},
 ): string {
-  const chart = coa
+  const rows = options.personal
+    ? [
+        ...coa,
+        {
+          code: PERSONAL_CODE,
+          name: "Not the business's — the owner's own spending or income",
+          accountType: "personal",
+          subtype: "personal",
+        },
+      ]
+    : coa;
+  const chart = rows
     .map((a) => `${a.code} | ${a.name} | ${a.accountType} | ${a.subtype}`)
     .join("\n");
   const past =
@@ -79,6 +114,7 @@ export function buildSuggestUserTurn(
     .map((t) => `${t.id} | ${t.txnDate} | ${t.amountCents} | ${t.description}`)
     .join("\n");
   return [
+    ...(options.personal ? [PERSONAL_INSTRUCTION, ""] : []),
     "CHART OF ACCOUNTS (code | name | type | subtype):",
     "```",
     chart,

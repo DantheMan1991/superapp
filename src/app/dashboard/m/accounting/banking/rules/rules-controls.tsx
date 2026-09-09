@@ -49,6 +49,8 @@ import { ruleConditionsSchema } from "@/modules/accounting/banking/rules-match";
 
 type AppliesTo = "money_in" | "money_out" | "both";
 type MatchMode = "all" | "any";
+/** What a rule does: fill in a category, or set the row aside as personal (ADR 0034). */
+type RuleAction = "categorize" | "exclude";
 type ConditionField = "description" | "amount";
 
 interface Condition {
@@ -69,7 +71,9 @@ export interface RuleRow {
   matchMode: MatchMode;
   conditions: unknown;
   conditionsLabel: string;
-  setAccountId: string;
+  action: RuleAction;
+  /** Null for an exclude rule: there is nothing to post. */
+  setAccountId: string | null;
   setVendorId: string | null;
   setsLabel: string;
   setMemo: string | null;
@@ -172,6 +176,7 @@ export function RulesTable({
                 const r = result.data;
                 const parts = [`${r?.matched ?? 0} matched`];
                 if (r?.autoPosted) parts.push(`${r.autoPosted} posted`);
+                if (r?.excluded) parts.push(`${r.excluded} set aside as personal`);
                 if (r?.skippedLocked) {
                   parts.push(`${r.skippedLocked} left for review (period closed)`);
                 }
@@ -252,7 +257,9 @@ export function RulesTable({
                         {row.appliedTo}
                         {row.appliesTo !== "both" &&
                           ` · ${row.appliesTo === "money_in" ? "money in" : "money out"} only`}
-                        {row.autoPost && " · posts automatically"}
+                        {row.action === "exclude"
+                          ? " · sets aside as personal"
+                          : row.autoPost && " · posts automatically"}
                       </span>
                       {/* On narrow screens the two hidden columns fold to here,
                           so nothing is unreachable rather than merely off-screen. */}
@@ -422,6 +429,7 @@ function RuleDialog({
   const [conditions, setConditions] = useState<Condition[]>(
     rule ? conditionsOf(rule.conditions) : [emptyCondition()],
   );
+  const [action, setAction] = useState<RuleAction>(rule?.action ?? "categorize");
   const [setAccountId, setSetAccountId] = useState(rule?.setAccountId ?? "");
   const [setVendorId, setSetVendorId] = useState(rule?.setVendorId ?? NO_VENDOR);
   const [setMemo, setSetMemo] = useState(rule?.setMemo ?? "");
@@ -446,7 +454,7 @@ function RuleDialog({
       toast.error("Give the rule a name");
       return;
     }
-    if (setAccountId === "") {
+    if (action === "categorize" && setAccountId === "") {
       toast.error("Pick a category");
       return;
     }
@@ -470,10 +478,13 @@ function RuleDialog({
       bankAccountId: bankAccountId === ALL_REGISTERS ? null : bankAccountId,
       matchMode,
       conditions: parsedConditions.data,
-      setAccountId,
-      setVendorId: setVendorId === NO_VENDOR ? null : setVendorId,
-      setMemo: setMemo.trim() === "" ? null : setMemo.trim(),
-      autoPost,
+      action,
+      // An exclude rule carries nothing to post: no category, payee, memo or
+      // auto-post travel, whatever the hidden controls still hold.
+      setAccountId: action === "exclude" ? null : setAccountId,
+      setVendorId: action === "exclude" || setVendorId === NO_VENDOR ? null : setVendorId,
+      setMemo: action === "exclude" || setMemo.trim() === "" ? null : setMemo.trim(),
+      autoPost: action === "exclude" ? false : autoPost,
     };
     startTransition(async () => {
       const result = rule
@@ -493,8 +504,8 @@ function RuleDialog({
         <DialogHeader>
           <DialogTitle>{rule ? "Edit rule" : "New rule"}</DialogTitle>
           <DialogDescription>
-            Matching rows are pre-filled with this category. Rules are checked in
-            list order and the first match wins.
+            Matching rows are pre-filled with this category, or set aside as
+            personal. Rules are checked in list order and the first match wins.
           </DialogDescription>
         </DialogHeader>
 
@@ -630,6 +641,31 @@ function RuleDialog({
             )}
           </div>
 
+          <div className="space-y-1.5">
+            <Label>What the rule does</Label>
+            <Select value={action} onValueChange={(v) => setAction(v as RuleAction)}>
+              <SelectTrigger aria-label="What the rule does">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="categorize">Fill in a category</SelectItem>
+                <SelectItem value="exclude">Set aside as personal</SelectItem>
+              </SelectContent>
+            </Select>
+            {/* The exclude half of ADR 0034: on a personal account most of the
+                feed is the owner's own, and a rule that says so on arrival is
+                how the account stops asking. */}
+            {action === "exclude" && (
+              <p className="text-xs text-muted-foreground">
+                Matching transactions are set aside as not the business&apos;s the
+                moment they arrive. Nothing posts. They sit on the account&apos;s
+                Personal tab, and any one can be brought back from there.
+              </p>
+            )}
+          </div>
+
+          {action === "categorize" && (
+          <>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>Set category to</Label>
@@ -690,6 +726,8 @@ function RuleDialog({
               </p>
             </div>
           </div>
+          </>
+          )}
         </div>
 
         <DialogFooter>

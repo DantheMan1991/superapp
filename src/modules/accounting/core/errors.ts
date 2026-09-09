@@ -38,6 +38,7 @@ export type LedgerErrorCode =
   | "TXN_NOT_UNREVIEWED"
   | "BANK_ACCOUNT_NOT_FOUND"
   | "BANK_ACCOUNT_INACTIVE"
+  | "PERSONAL_REGISTER"
   | "RECON_ACTIVE_EXISTS"
   | "RECON_NOT_OPEN"
   | "RECON_NOT_BALANCED"
@@ -192,6 +193,11 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   // reader needs the way out rather than a message telling them it is gone.
   BANK_ACCOUNT_INACTIVE:
     "That account is closed. Reopen it from the account page to record anything new — everything already in the books stays either way.",
+  // One message for both refusals, because they have one cause: the balance
+  // of a personal account was never the business's, so there is nothing to
+  // open the books with and nothing to reconcile them against.
+  PERSONAL_REGISTER:
+    "A personal account has no opening balance and is never reconciled — only the lines you mark as the business's reach the books, so its balance was never the business's.",
   RECON_ACTIVE_EXISTS:
     "A reconciliation is already in progress for this account.",
   RECON_NOT_OPEN: "That reconciliation is not open.",

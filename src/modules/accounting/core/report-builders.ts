@@ -172,6 +172,10 @@ export const BS_GROUP_BY_SUBTYPE: Record<string, BsGroupKey> = {
   long_term_liability: "long_term_liabilities",
   opening_balance: "equity",
   owner_equity: "equity",
+  // A personal register's account (ADR 0034): what the owner has put in
+  // through their own account, net of what they took out. Equity, and the
+  // fallback below would say so anyway — mapped so the intent is written down.
+  owner_funds: "equity",
   // retained_earnings deliberately absent: merged into the computed line (P2).
 };
 

@@ -26,11 +26,28 @@ import { accounts, entities, journalEntries, journalLines } from "./ledger";
 // One-way: payables knows nothing of banking, so the payee FK does not cycle.
 import { vendors } from "./payables";
 
+/**
+ * `personal` (2026-09-08, ADR 0034): the owner's own account that also carries
+ * some of the business's money. Its ledger account is EQUITY (`owner_funds`),
+ * not a bank asset — a business line paid from it is money the owner put in,
+ * a business receipt landing in it is money the owner took out — so the
+ * business's balance sheet never carries the owner's personal balance. No
+ * opening balance, never reconciled, and its rows are visible to owners and
+ * the accountant only (drizzle/0279).
+ */
 export const bankAccountKind = pgEnum("bank_account_kind", [
   "checking",
   "savings",
   "credit_card",
+  "personal",
 ]);
+
+/**
+ * What a matching rule DOES. `categorize` fills in (or posts) a category;
+ * `exclude` sets the row aside — "this is not the business's" — which on a
+ * personal register is most of the work (ADR 0034).
+ */
+export const bankRuleAction = pgEnum("bank_rule_action", ["categorize", "exclude"]);
 
 export const bankTransactionSource = pgEnum("bank_transaction_source", [
   "csv",
@@ -261,8 +278,17 @@ export const bankRules = pgTable(
     matchMode: bankRuleMatchMode("match_mode").notNull().default("all"),
     /** Zod-validated `[{field, op, value}]` — see rules-match.ts. */
     conditions: jsonb("conditions").notNull().default([]),
-    /** The category this rule codes to. */
-    setAccountId: uuid("set_account_id").notNull(),
+    /**
+     * `categorize` or `exclude`. Existing rows are `categorize` by default,
+     * which is exactly what every rule was before the column existed.
+     */
+    action: bankRuleAction("action").notNull().default("categorize"),
+    /**
+     * The category this rule codes to. NULL exactly when `action = 'exclude'`
+     * — the CHECK below holds the two together, so a rule can never both set
+     * aside a row and name where to post it.
+     */
+    setAccountId: uuid("set_account_id"),
     /** Optional payee. Half the work a rule saves is not typing the vendor. */
     setVendorId: uuid("set_vendor_id"),
     setMemo: text("set_memo"),
@@ -300,6 +326,11 @@ export const bankRules = pgTable(
       columns: [t.tenantId, t.setVendorId],
       foreignColumns: [vendors.tenantId, vendors.id],
     }),
+    // An exclude rule has no category; a categorize rule always has one.
+    check(
+      "bank_rules_action_account",
+      sql`(${t.action} = 'exclude') = (${t.setAccountId} is null)`,
+    ),
   ],
 );
 

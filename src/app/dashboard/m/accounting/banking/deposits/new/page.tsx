@@ -53,9 +53,11 @@ export default async function NewDepositPage({
     return {
       entities,
       entityId,
-      // A card is not something money is deposited INTO.
+      // A card is not something money is deposited INTO. Nor, here, is the
+      // owner's personal account: banking the business's takings there is a
+      // draw, and until a deposit can say so it is not offered (ADR 0034).
       registers: registers
-        .filter((b) => b.kind !== "credit_card")
+        .filter((b) => b.kind !== "credit_card" && b.kind !== "personal")
         .map((b) => ({ id: b.id, name: b.name })),
       payments: await listUndepositedPayments(tx, tenantId, { entityId }),
     };

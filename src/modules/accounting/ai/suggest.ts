@@ -5,6 +5,7 @@ import { CLAUDE_MODEL, CLAUDE_THINKING_OFF, getClaude } from "@/lib/claude";
 import { LedgerError, requireOwnerRole, type LedgerCtx } from "../core";
 import { loadBankAccount } from "../banking/accounts";
 import {
+  PERSONAL_CODE,
   SUGGEST_SYSTEM_PROMPT,
   SUGGEST_TOOL,
   buildSuggestUserTurn,
@@ -23,6 +24,11 @@ export interface SuggestGathered {
   coa: PromptAccount[];
   history: PromptHistoryRow[];
   accountsByCode: Map<string, { id: string; isActive: boolean }>;
+  /**
+   * True for a PERSONAL register (ADR 0034): the prompt inverts its prior,
+   * the model may answer `PERSONAL`, and the validator accepts it.
+   */
+  personal: boolean;
 }
 
 /** Everything the prompt needs, in one tenant read. */
@@ -119,6 +125,42 @@ export async function gatherSuggestInputs(
     .orderBy(desc(schema.bankTransactions.updatedAt))
     .limit(HISTORY_LIMIT);
 
+  /**
+   * On a PERSONAL register the decisions worth learning from are mostly the
+   * ones that posted nothing: the grocer set aside last week is the strongest
+   * signal about the grocer this week. Those rows are history too, under the
+   * one code that means "not the business's", and they compete for the same
+   * window so the prompt stays the size it was.
+   */
+  const personal = bankAccount.kind === "personal";
+  const setAsideRows = personal
+    ? await tx
+        .select({
+          description: schema.bankTransactions.description,
+          updatedAt: schema.bankTransactions.updatedAt,
+        })
+        .from(schema.bankTransactions)
+        .where(
+          and(
+            eq(schema.bankTransactions.tenantId, ctx.tenantId),
+            eq(schema.bankTransactions.bankAccountId, bankAccountId),
+            eq(schema.bankTransactions.status, "excluded"),
+          ),
+        )
+        .orderBy(desc(schema.bankTransactions.updatedAt))
+        .limit(HISTORY_LIMIT)
+    : [];
+  const history = [
+    ...historyRows.map((h) => ({ description: h.description, code: h.code, at: h.updatedAt })),
+    ...setAsideRows.map((r) => ({
+      description: r.description,
+      code: PERSONAL_CODE,
+      at: r.updatedAt,
+    })),
+  ]
+    .sort((a, b) => b.at.getTime() - a.at.getTime())
+    .slice(0, HISTORY_LIMIT);
+
   return {
     batch: txns.map((t) => ({
       id: t.id,
@@ -132,10 +174,11 @@ export async function gatherSuggestInputs(
       accountType: a.accountType,
       subtype: a.subtype,
     })),
-    history: historyRows.map((h) => ({ description: h.description, code: h.code })),
+    history: history.map((h) => ({ description: h.description, code: h.code })),
     accountsByCode: new Map(
       eligible.map((a) => [a.code, { id: a.id, isActive: a.isActive }]),
     ),
+    personal,
   };
 }
 
@@ -167,7 +210,9 @@ export async function callSuggestModel(
     messages: [
       {
         role: "user",
-        content: buildSuggestUserTurn(gathered.coa, gathered.history, gathered.batch),
+        content: buildSuggestUserTurn(gathered.coa, gathered.history, gathered.batch, {
+          personal: gathered.personal,
+        }),
       },
     ],
   });
@@ -220,8 +265,14 @@ export async function suggestCategoriesForBankAccount(
   callModel: (g: SuggestGathered) => Promise<unknown> = callSuggestModel,
 ): Promise<{ requested: number; returned: number }> {
   requireOwnerRole(ctx);
-  const gathered = await withTenant(ctx.tenantId, (tx) =>
-    gatherSuggestInputs(tx, ctx, bankAccountId),
+  // The caller's role travels with the transaction: a personal register's
+  // rows are visible to owners and the accountant only (drizzle/0279), and a
+  // sweep opened as the default `staff` would find no rows and say so.
+  const scope = { role: ctx.role, userId: ctx.userId };
+  const gathered = await withTenant(
+    ctx.tenantId,
+    (tx) => gatherSuggestInputs(tx, ctx, bankAccountId),
+    scope,
   );
   if (gathered.batch.length === 0) return { requested: 0, returned: 0 };
   const rawOutput = await callModel(gathered);
@@ -231,9 +282,12 @@ export async function suggestCategoriesForBankAccount(
     gathered.accountsByCode,
     CLAUDE_MODEL,
     new Date().toISOString(),
+    { allowPersonal: gathered.personal },
   );
-  await withTenant(ctx.tenantId, (tx) =>
-    persistSuggestions(tx, ctx, bankAccountId, validated),
+  await withTenant(
+    ctx.tenantId,
+    (tx) => persistSuggestions(tx, ctx, bankAccountId, validated),
+    scope,
   );
   return { requested: gathered.batch.length, returned: validated.size };
 }

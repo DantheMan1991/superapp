@@ -90,6 +90,28 @@ all three, including a staff INSERT refused by the policy. Guides:
 `banking.md`, `register.md`, `bank-rules.md`, `import-statement.md`,
 `chart-of-accounts.md`; `workspace/getting-around.md` for the setup row.
 
+**Driven on Hilltop (dev), and three things it found.** `Add manually` →
+`Personal (mixed)`: the note appears and the opening-balance fields go; the
+card reads `personal account · private` and `Put in by you, net 0.00`; the
+register page carries the note, `Personal (0)`, no `Reconcile`, and `Nothing
+to review — everything is sorted.` Nine mixed lines imported by CSV; the real
+sweep answered `AI · personal · 95%` for the grocer, the pharmacy and Netflix,
+`45%` for fuel, `5000 · 60%` and `55%` for the two feed stores and `4000 ·
+80%` for the market cash. `Accept 5 suggestions` → `Posted 1, set aside 4 as
+personal`; `Personal` on a row → `Set aside as personal` with Undo; `Post` on
+the feed store → the figure moved from `(86.00)` to `56.00`, which is 142 put
+in less 86 taken out; `It's the business's` → `Back in review`; the rules
+dialog's `Set aside as personal` hides the four posting controls and shows
+the note; the phone layout holds. Found: (1) `{icon:wallet}` in the guide was
+not a registered guide icon — `tests/guides.test.ts` caught it on CI, the
+icon is registered now; (2) the option label `Personal account (mixed)` sat
+in a half-width column and pushed the dialog 16px wider than itself, hence
+`Personal (mixed)`; (3) **the bulk set-aside opened no dialog and left its
+button disabled** — the confirm was awaited INSIDE `startTransition`, the
+same trap the 2026-08-12 confirm-dialog entry records, fixed by asking first
+and driven again. **The Chase personal register with its nine lines is left
+on the dev fixture** for the founder to drive.
+
 ### 2026-09-07 — Credit memos (`claude/credit-memos`, migrations `0268`–`0270`)
 
 **What.** `Credit` beside `Record payment` on an issued or part-paid

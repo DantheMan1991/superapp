@@ -537,17 +537,25 @@ export function ReviewTable({
    * press over a whole page, then sets every row that nothing called the
    * business's aside — reversibly: each comes back with Restore.
    */
-  function setAsideRest() {
+  async function setAsideRest() {
     const ids = restPersonal.map((r) => r.id).slice(0, 50);
     if (ids.length === 0) return;
+    /**
+     * ASKED BEFORE THE TRANSITION, NOT INSIDE IT. Awaiting the dialog inside
+     * `startTransition` marks the transition pending while the question waits,
+     * React then holds back the state update that OPENS the dialog, and the
+     * two wait on each other: no dialog ever shows, and the button sits
+     * disabled until the page is reloaded. Found by pressing it. The same
+     * trap is recorded against the confirm dialogs of 2026-08-12.
+     */
+    const ok = await confirm({
+      title: `Set aside ${ids.length} as personal?`,
+      description:
+        "Nothing posts. Anything that turns out to be the business's can be brought back from the Personal tab.",
+      confirmLabel: "Set aside",
+    });
+    if (!ok) return;
     startTransition(async () => {
-      const ok = await confirm({
-        title: `Set aside ${ids.length} as personal?`,
-        description:
-          "Nothing posts. Anything that turns out to be the business's can be brought back from the Personal tab.",
-        confirmLabel: "Set aside",
-      });
-      if (!ok) return;
       const result = await excludeTransactionsAction({ transactionIds: ids });
       if ("error" in result) {
         toast.error(result.error);

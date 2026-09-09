@@ -31,8 +31,19 @@ import {
   splitLot,
   transferStock,
   updateItem,
+  listLocations,
+  valueStock,
+  NO_ENTERPRISE_FILTER,
+  NO_PLACE,
   type InventoryCtx,
 } from "./ops";
+import {
+  valuationCsvFilename,
+  valuationToCsvRows,
+} from "./core/valuation-csv";
+import { VALUATION_METHOD_NOTES, slugLabel } from "./vocabulary";
+import { listEnterprises } from "@/lib/enterprises";
+import { toCsv } from "@/lib/csv";
 import {
   allocateBillLineToStock,
   assertPostingChangeSafe,
@@ -1271,6 +1282,98 @@ export async function setInventoryTreatmentAction(input: unknown) {
     revalidatePath(BASE, "layout");
     revalidatePath("/dashboard/m/accounting", "layout");
     return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * **THE VALUATION AS A FILE, WITH ITS CAVEAT AND ITS FILTERS IN IT.**
+ *
+ * Read-only and open to everyone the page is, an accountant included — it is
+ * the same figures they can already see, and refusing the download while
+ * showing the screen would be a gate that protects nothing.
+ *
+ * **THE LABELS ARE RESOLVED HERE, on the server, and never sent from the
+ * client.** A file naming a uuid answers nothing, and a filename built from
+ * whatever the browser claimed the place was called is a filename that can lie
+ * about which freezer it is. Both are read back out of the same rows the
+ * figures come from.
+ */
+export async function exportValuationCsv(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      asOf: requiredDate,
+      kind: z.string().max(64).optional(),
+      enterpriseId: z.string().max(64).optional(),
+      locationAssetId: z.string().max(64).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  const q = parsed.data;
+
+  try {
+    const data = await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        const valuation = await valueStock(tx, ctx.tenant.id, {
+          asOf: q.asOf,
+          kind: q.kind,
+          enterpriseId: q.enterpriseId,
+          locationAssetId: q.locationAssetId,
+        });
+        let placeLabel: string | null = null;
+        if (q.locationAssetId === NO_PLACE) {
+          placeLabel = "Not recorded";
+        } else if (q.locationAssetId) {
+          const places = await listLocations(tx, ctx.tenant.id);
+          placeLabel =
+            places.find((p) => p.id === q.locationAssetId)?.name ?? null;
+        }
+        let enterpriseLabel: string | null = null;
+        if (q.enterpriseId === NO_ENTERPRISE_FILTER) {
+          enterpriseLabel = "None";
+        } else if (q.enterpriseId) {
+          const all = await listEnterprises(tx, ctx.tenant.id);
+          enterpriseLabel =
+            all.find((e) => e.id === q.enterpriseId)?.name ?? null;
+        }
+        return {
+          valuation,
+          context: {
+            asOf: q.asOf,
+            placeLabel,
+            kindLabel: q.kind ? slugLabel(q.kind) : null,
+            enterpriseLabel,
+          },
+        };
+      },
+      { role: ctx.role },
+    );
+
+    const labels = Object.fromEntries(
+      Object.entries(VALUATION_METHOD_NOTES).map(([k, v]) => [k, v.label]),
+    );
+    await logAudit({
+      action: "inventory.valuation.exported",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "inventory",
+      targetId: ctx.tenant.id,
+      // What was asked for, never the figures.
+      meta: {
+        asOf: q.asOf,
+        lines: data.valuation.rows.length,
+        unvalued: data.valuation.total.unvaluedLines,
+      },
+    });
+    return {
+      ok: true,
+      filename: valuationCsvFilename(data.context),
+      csv: toCsv(valuationToCsvRows(data.valuation, data.context, labels)),
+    };
   } catch (err) {
     return toResult(err);
   }

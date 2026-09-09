@@ -33,6 +33,102 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-09-09 — Value and matching narrowed (`claude/value-and-matching-narrowed`)
+
+Slice 8 of the review. **No migration.** Four things, and one of them turned
+out to be a costing decision rather than the `groupBy` this dossier's own open
+item promised it would be.
+
+**THE VALUATION NARROWS BY KIND, LINE OF BUSINESS AND PLACE**, with the hub's
+three parameter names, the hub's words, and `All` as a pill of its own so being
+unfiltered is visible rather than inferred. The line of business is resolved the
+way the COSTING resolves it — `coalesce(lot.enterprise_id, item.enterprise_id)`
+— because the batch's beats the item's, and a filter reading only the item's
+would answer a different question from the P&L it is being checked against.
+
+**VALUING ONE PLACE IS AN APPORTIONMENT, AND THE OPEN ITEM CALLING IT "A
+`groupBy` AWAY" WAS WRONG.** The grouping is trivial. The problem is that
+**nothing anywhere records what one shelf of a batch cost** — a batch has one
+carried figure, so answering *what is in the freezer worth* means splitting it.
+The rule, in pure `shareOfCarried`:
+
+- the place's quantity as a share of the batch's quantity everywhere, rounded to
+  whole cents. Two of three packages in the truck is two thirds of the money,
+  and the places add back to the whole;
+- **it refuses rather than guesses in two cases** — the batch nets to zero
+  overall (nine in the truck against nine short elsewhere: there is no share of
+  nothing, dividing is a division by zero, picking a side is an invention), and
+  a ratio outside 0 to 1 (a place holding more than the batch, or signs that
+  disagree, which multiplies the cost up or flips it);
+- a refusal is a NEW method, `unsplit`, labelled `Cannot be split`. **It is not
+  `none`.** `none` says nobody ever costed this batch; this batch WAS costed and
+  the figure cannot honestly be divided, and folding them together would tell
+  somebody looking at one freezer that their bought stock had never been priced.
+  It lands in `unvaluedLines`, so the caveat card the page is built around
+  reports it with no new machinery at all.
+
+Stock held outside any batch is untouched by this: the item's average already
+multiplies by the quantity here. And a valuation with no place asked for takes
+no share and is byte-for-byte what it always was.
+
+**THE VALUATION EXPORTS, and the caveat is the FIRST LINE OF THE FILE.** The
+page's header says a total on its own cannot be checked; a screen can put that
+beside the number and a file cannot, because it is emailed to an accountant and
+opened months later with no memory of the screen. So row one is
+`INCOMPLETE — 11 batches have no cost recorded, 51 in all, and the total below
+does NOT include them.`, ahead of anything a spreadsheet will add up — the shape
+the general ledger's export already uses. The as-of and every filter follow it,
+in the content and in the filename, because a valuation of one freezer and a
+valuation of a business are two correct and entirely different files. **`Worth`
+is EMPTY for a line that could not be valued, never `0.00`**: `SUM` skips a
+blank and adds a zero, and adding a zero is exactly the lie `core/valuation.ts`
+exists to prevent.
+
+`toCsv` moved to `@/lib/csv` and accounting re-exports it. Quoting a comma is
+not an accounting idea, and a second copy of a pure helper is the mistake
+`hasRecordedCost` was written to end.
+
+**THE DELIVERIES ARE PAGED, AND THE HEADLINE STOPPED BEING CAPPED.** The table
+took the first hundred while the card above counted up to a thousand, so the two
+disagreed and only the guide said which was right. Both halves are fixed:
+
+- `unbilledReceipts` takes an `offset`, and its ordering gained an **id
+  tiebreak** — `occurred_on` is a DATE, so a day's deliveries sorted equal and
+  paging could show a row twice or never;
+- **`grniPosition` counted and summed by fetching a thousand rows and folding
+  in JS.** That is a silent cap on a headline figure, on the one card whose
+  whole job is to be compared with the ledger account beside it — the difference
+  line would have reported the cap as though it were a problem. New
+  `unbilledReceiptTotals` does both in SQL over every open receipt, with the
+  same predicate as the list so the count and the rows cannot disagree about
+  what "waiting" means.
+
+The match dialog gets a **search box** over the item name, batch code and date,
+and keeps any delivery a quantity has been typed against whatever the search
+says. **It cannot narrow by supplier**, and that is not an omission to fix
+later: `inventory_movements` records what arrived and not who sold it, which is
+the very fact matching establishes. It also gets its own unpaged list, because
+matching a bill to a delivery on page three would otherwise be impossible.
+
+**The valuation table finally has phone cards**, one fold rendered twice like
+every other screen in the pack since slice 2. It was the last one handing a
+phone a five-column table to scroll sideways.
+
+Verified on the dev branch's Hilltop Farm at 375px and 1280px: the place, kind
+and line-of-business pills; a batch carrying **−$8.00 across three packages,
+two in the truck and one in the freezer, splitting as −$5.33 and −$2.67** and
+summing back to −$8.00; the by-place totals adding to the whole-business total;
+the export downloading with the caveat as line one and `Place: Chest freezer
+(garage)` resolved on the server; the search box narrowing seven deliveries to
+one; and the GRNI card reading exactly what it read before the totals moved into
+SQL.
+
+Tests: thirteen pure over the share rule and the file (both refusals, `unsplit`
+kept apart from `none`, the empty `Worth` cell, the caveat's presence and
+absence, the quoting, the filename), six ops over the three filters and the
+share, and one posting test proving the paging is a total order and the totals
+are over everything.
+
 ### 2026-09-09 — A batch you can put right (`claude/a-batch-you-can-put-right`)
 
 **`createLot` HAS HAD NO OPPOSITE SINCE SLICE 0.** Every fact about a batch was
@@ -1950,6 +2046,35 @@ commitment against a live animal to delivered without sitting on a shelf.
 
 ## Decisions & gotchas
 
+- **VALUING ONE PLACE IS AN APPORTIONMENT, NOT A LOOKUP.** Nothing records what
+  a shelf of a batch cost — a batch has ONE carried figure — so `shareOfCarried`
+  splits it by the place's share of the quantity, and **refuses** when the batch
+  nets to zero overall or the ratio falls outside 0 to 1. A refusal is the
+  `unsplit` method, which is unvalued like `none` and is **not the same fact**:
+  `none` says nobody costed it, `unsplit` says somebody did and it cannot
+  honestly be divided. Any new caller valuing a subset of a batch faces the same
+  question and should use the same function.
+- **A CAVEAT THAT DOES NOT TRAVEL WITH THE FIGURE IS NOT A CAVEAT.** The
+  valuation screen has always shown what it left out beside the total; the
+  export puts it on the FIRST LINE of the file, ahead of anything a spreadsheet
+  totals, and repeats it at the bottom. `Worth` is EMPTY for an unvalued line
+  rather than `0.00`, because `SUM` skips a blank and adds a zero. Anything that
+  moves these figures somewhere new carries the caveat or it is a defect.
+- **A SILENT CAP ON A HEADLINE FIGURE IS THE SAME DEFECT AS TRUNCATING THE
+  WRONG END.** `grniPosition` summed a thousand fetched rows in JS, so a
+  business past that saw a number quietly short on the one card built to be
+  compared with a ledger account. Counted and summed in SQL since 2026-09-09.
+  Same family as the `expiringLots` and `unbilledReceipts` truncations: **any
+  read that bounds rows and then folds them into a total is capping the total.**
+- **PAGING NEEDS A TOTAL ORDER.** `unbilledReceipts` orders by `occurred_on`,
+  which is a DATE — a day's deliveries sort equal, so with an `offset` a row
+  could appear twice or never. The id tiebreak is what makes the page boundary
+  mean anything.
+- **NOTHING LINKS A DELIVERY TO A SUPPLIER.** `inventory_movements` records what
+  arrived, not who sold it; establishing that link is what matching a bill IS.
+  So the match dialog cannot narrow to the bill's vendor, and its search covers
+  the item, the batch and the date instead. A future slice wanting supplier
+  narrowing needs a column, not a filter.
 - **WHAT A BATCH IS CAN BE CORRECTED; WHAT HAPPENED TO IT CANNOT.** That line
   runs through the whole pack and `updateLot` (2026-09-09) sits on one side of
   it: the code, the dates, the line of business and the notes are columns and
@@ -2176,10 +2301,9 @@ commitment against a live animal to delivered without sitting on a shelf.
   report while the only way to group is a substring. `livestock` already has
   species and `production` already has run kinds, so the vocabulary exists; what
   is missing is a column on the item and a decision about who owns it.
-- **The filter does not reach the other inventory screens.** Counting, valuation
-  and matching all list items and none of them can be narrowed. The valuation one
-  is the likeliest to be asked for first: *"what is the meat worth"* is a
-  question somebody will have the moment they see the total.
+- **The filter does not reach COUNTING or MATCHING.** The valuation gained kind,
+  line of business and place on 2026-09-09; the counting screen and the bills
+  list still cannot be narrowed at all.
 
 - ~~Nobody has driven slice 0 yet~~ — **closed 2026-08-19.** Driven on
   production; the fold, the split, the location split and the return to zero all
@@ -2254,14 +2378,14 @@ commitment against a live animal to delivered without sitting on a shelf.
   statements, because on their basis it is not an asset
   ([ADR 0013](../decisions/0013-inventory-tax-treatment.md)). The card should
   say which basis it is and is not.
-- **A valuation cannot be exported.** The figure is on a screen and an
-  accountant will want it as a file, with the as-of date and the unvalued count
-  in it — an export that carried the total alone would strip the caveat, which
-  is the one thing this slice was careful about.
-- **Nothing values stock BY LOCATION.** `valueStock` groups by item and lot; a
-  farm with three freezers and a market truck cannot ask what is in each. The
-  read already joins movements, so this is a `groupBy` away rather than a
-  design question.
+- ~~**A valuation cannot be exported.**~~ — **closed 2026-09-09.** CSV with the
+  caveat as its first line, the as-of and every filter in the content and the
+  filename, and an EMPTY `Worth` for an unvalued line rather than `0.00`.
+- ~~**Nothing values stock BY LOCATION.** … this is a `groupBy` away rather than
+  a design question.~~ — **closed 2026-09-09, and the framing was wrong.** The
+  grouping was trivial; VALUING a place is an apportionment, because nothing
+  records what a shelf of a batch cost. See `shareOfCarried` and the `unsplit`
+  method in the decisions above.
 - **`recordMovementAction` should now GO.** Slice 2 gave adjustments their own
   action rather than reusing it: an adjustment has a required reason and a signed
   quantity, and routing it through the generic primitive would have made the

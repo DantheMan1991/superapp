@@ -1156,6 +1156,13 @@ export async function unbilledReceipts(
   opts: {
     itemId?: string;
     limit?: number;
+    /**
+     * How many to skip. **Paging, not truncation** — the caller shows which
+     * page of how many, so nothing goes quiet. Ordering is oldest-first and
+     * fully determined by `occurred_on` plus the id tiebreak below, so a row
+     * cannot appear on two pages or on neither.
+     */
+    offset?: number;
     movementIds?: string[];
     /**
      * Ignore what THIS bill line already claims.
@@ -1256,8 +1263,18 @@ export async function unbilledReceipts(
           : undefined,
       ),
     )
-    .orderBy(asc(schema.inventoryMovements.occurredOn))
-    .limit(opts.limit ?? 200);
+    /**
+     * **THE ID TIEBREAK IS WHAT MAKES PAGING SOUND.** `occurred_on` is a DATE,
+     * so a day's deliveries sort equal and Postgres may return them in any
+     * order between two queries — with `offset` that means a row appearing on
+     * both page one and page two, or on neither. Total order, always.
+     */
+    .orderBy(
+      asc(schema.inventoryMovements.occurredOn),
+      asc(schema.inventoryMovements.id),
+    )
+    .limit(opts.limit ?? 200)
+    .offset(opts.offset ?? 0);
 
   return rows
     .map((r) => {
@@ -1287,6 +1304,63 @@ export async function unbilledReceipts(
 
 function round4(n: number): number {
   return Math.round(n * 10_000) / 10_000;
+}
+
+/**
+ * **HOW MANY DELIVERIES ARE WAITING, AND WHAT THEY ARE WORTH — ALL OF THEM.**
+ *
+ * `grniPosition` used to answer this by fetching `unbilledReceipts` with
+ * `limit: 1000` and folding in JS, which is a **silent cap on a headline
+ * figure**: a business past a thousand open receipts saw a number that was
+ * quietly short, on the one card whose entire job is to be compared against the
+ * ledger account beside it. The difference line would then report a gap that
+ * was the cap rather than a problem.
+ *
+ * The predicate is the same one the list uses, kept beside it so the count and
+ * the rows can never disagree about what "waiting" means.
+ */
+export async function unbilledReceiptTotals(
+  tx: Tx,
+  tenantId: string,
+): Promise<{ count: number; openCostCents: number }> {
+  const [row] = await tx
+    .select({
+      count: sql<number>`count(*)::int`,
+      // The open cost is what the receipt cost less what has been matched
+      // against it — the same subtraction the fold does, done once in SQL.
+      openCostCents: sql<string>`coalesce(sum(
+        ${schema.inventoryMovements.costCents} - coalesce((
+          select sum(a.receipt_cost_cents) from bill_line_stock_allocations a
+           where a.tenant_id = ${schema.inventoryMovements.tenantId}
+             and a.inventory_movement_id = ${schema.inventoryMovements.id}
+        ), 0)
+      ), 0)`,
+    })
+    .from(schema.inventoryMovements)
+    .leftJoin(
+      schema.inventoryLots,
+      and(
+        eq(schema.inventoryLots.tenantId, schema.inventoryMovements.tenantId),
+        eq(schema.inventoryLots.id, schema.inventoryMovements.lotId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.inventoryMovements.tenantId, tenantId),
+        eq(schema.inventoryMovements.movementKind, "receipt"),
+        gt(schema.inventoryMovements.costCents, 0),
+        sql`(${schema.inventoryLots.source} is null or ${schema.inventoryLots.source} = 'purchased')`,
+        sql`${schema.inventoryMovements.quantity} > coalesce((
+          select sum(a.quantity_matched) from bill_line_stock_allocations a
+           where a.tenant_id = ${schema.inventoryMovements.tenantId}
+             and a.inventory_movement_id = ${schema.inventoryMovements.id}
+        ), 0)`,
+      ),
+    );
+  return {
+    count: row?.count ?? 0,
+    openCostCents: Number(row?.openCostCents ?? 0),
+  };
 }
 
 export interface AllocateBillLineInput {
@@ -1962,8 +2036,10 @@ export async function grniPosition(
   tx: Tx,
   tenantId: string,
 ): Promise<GrniPosition> {
-  const open = await unbilledReceipts(tx, tenantId, { limit: 1000 });
-  const awaitingInvoiceCents = open.reduce((sum, r) => sum + r.openCostCents, 0);
+  // Counted and summed in SQL over every open receipt — see
+  // `unbilledReceiptTotals` for the cap this replaced.
+  const totals = await unbilledReceiptTotals(tx, tenantId);
+  const awaitingInvoiceCents = totals.openCostCents;
 
   let accountCents = 0;
   try {
@@ -1988,7 +2064,7 @@ export async function grniPosition(
 
   return {
     awaitingInvoiceCents,
-    awaitingInvoiceCount: open.length,
+    awaitingInvoiceCount: totals.count,
     accountCents,
     differenceCents: awaitingInvoiceCents - accountCents,
   };

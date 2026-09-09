@@ -24,6 +24,7 @@ import {
   lotAncestry,
   type InventoryCtx,
   listLocations,
+  NO_ENTERPRISE_FILTER,
   setTaxRule,
   clearTaxRule,
   listTaxRules,
@@ -292,6 +293,286 @@ d("inventory ops", () => {
     );
     const valuation = await asOwner((tx) => valueStock(tx, tenantId, { itemId: item.id }));
     expect(valuation.rows.filter((r) => r.lotCode === "GONE")).toHaveLength(0);
+  });
+
+  describe("NARROWING THE VALUATION", () => {
+    /**
+     * The three filters are the hub's three, with the same URL grammar and the
+     * same words. Place is the one that changes what `Worth` MEANS, and the
+     * screen says so — see the share tests below.
+     */
+    it("narrows by kind, and the total follows the rows", async () => {
+      const feed = await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: "Narrow feed",
+          stockingUnit: "lb",
+          itemKind: "feed",
+        }),
+      );
+      const med = await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: "Narrow medicine",
+          stockingUnit: "floz",
+          itemKind: "medicine",
+        }),
+      );
+      for (const item of [feed, med]) {
+        await asOwner((tx) =>
+          receiveStock(tx, ownerCtx(), {
+            itemId: item.id,
+            quantity: 10,
+            costCents: 5_000,
+            occurredOn: "2026-08-01",
+          }),
+        );
+      }
+      const all = await asOwner((tx) => valueStock(tx, tenantId));
+      const onlyFeed = await asOwner((tx) =>
+        valueStock(tx, tenantId, { kind: "medicine" }),
+      );
+      expect(all.rows.some((r) => r.itemName === "Narrow feed")).toBe(true);
+      expect(onlyFeed.rows.some((r) => r.itemName === "Narrow feed")).toBe(false);
+      expect(onlyFeed.rows.some((r) => r.itemName === "Narrow medicine")).toBe(true);
+      // The total is the rows' total, not the whole business's.
+      expect(onlyFeed.total.valueCents).toBe(
+        onlyFeed.rows.reduce((sum, r) => sum + (r.valueCents ?? 0), 0),
+      );
+    });
+
+    it("READS THE BATCH'S LINE OF BUSINESS OVER THE ITEM'S", async () => {
+      /**
+       * `inventory_lots.enterprise_id` exists because feed belongs to no one
+       * part of a business while the pen it was fed to belongs to exactly one.
+       * A filter reading only the item's would answer a different question from
+       * the P&L it is being checked against.
+       */
+      const broilers = await asOwner((tx) =>
+        createEnterprise(tx, ownerCtx(), { name: `Broilers ${STAMP}` }),
+      );
+      const pigs = await asOwner((tx) =>
+        createEnterprise(tx, ownerCtx(), { name: `Pigs ${STAMP}` }),
+      );
+      const item = await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: "Tagged feed",
+          stockingUnit: "lb",
+          itemKind: "feed",
+          enterpriseId: broilers.id,
+        }),
+      );
+      // The batch says otherwise, and the batch wins.
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: "TAG-PIGS",
+          enterpriseId: pigs.id,
+        }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 10,
+          costCents: 5_000,
+          occurredOn: "2026-08-01",
+        }),
+      );
+      const asPigs = await asOwner((tx) =>
+        valueStock(tx, tenantId, { enterpriseId: pigs.id }),
+      );
+      const asBroilers = await asOwner((tx) =>
+        valueStock(tx, tenantId, { enterpriseId: broilers.id }),
+      );
+      expect(asPigs.rows.some((r) => r.lotCode === "TAG-PIGS")).toBe(true);
+      expect(asBroilers.rows.some((r) => r.lotCode === "TAG-PIGS")).toBe(false);
+    });
+
+    it("finds what nobody tagged, which is a real answer", async () => {
+      const item = await newItem("Untagged feed");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 4,
+          costCents: 1_000,
+          occurredOn: "2026-08-01",
+        }),
+      );
+      const untagged = await asOwner((tx) =>
+        valueStock(tx, tenantId, { enterpriseId: NO_ENTERPRISE_FILTER }),
+      );
+      expect(untagged.rows.some((r) => r.itemName === "Untagged feed")).toBe(true);
+    });
+
+    it("SPLITS A BATCH'S COST BY HOW MUCH OF IT IS IN THE PLACE", async () => {
+      /**
+       * Nothing anywhere records what a shelf of a batch cost, so the quantity
+       * there is used as the share of the quantity everywhere. This batch cost
+       * $100.00 for 40 lb; a quarter of it is in the truck, so the truck holds
+       * a quarter of the money.
+       */
+      const truck = await withSystem(async (tx) => {
+        const rows = await tx
+          .insert(schema.assets)
+          .values({
+            tenantId,
+            kind: "equipment",
+            name: `Share truck ${STAMP}`,
+            isStorageLocation: true,
+          })
+          .returning();
+        return rows[0].id;
+      });
+      const item = await newItem("Shared feed");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: item.id, code: "SHARE-1" }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 40,
+          costCents: 10_000,
+          occurredOn: "2026-08-01",
+        }),
+      );
+      await asOwner((tx) =>
+        transferStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 10,
+          toLocationAssetId: truck,
+          occurredOn: "2026-08-02",
+        }),
+      );
+
+      const whole = await asOwner((tx) =>
+        valueStock(tx, tenantId, { itemId: item.id }),
+      );
+      expect(whole.rows[0]).toMatchObject({
+        quantity: 40,
+        valueCents: 10_000,
+        method: "carried",
+      });
+
+      const atTruck = await asOwner((tx) =>
+        valueStock(tx, tenantId, { itemId: item.id, locationAssetId: truck }),
+      );
+      expect(atTruck.rows).toHaveLength(1);
+      expect(atTruck.rows[0]).toMatchObject({
+        quantity: 10,
+        valueCents: 2_500,
+        method: "share",
+      });
+
+      // And the rest is still where it was, unplaced.
+      const unplaced = await asOwner((tx) =>
+        valueStock(tx, tenantId, { itemId: item.id, locationAssetId: NO_PLACE }),
+      );
+      expect(unplaced.rows[0]).toMatchObject({
+        quantity: 30,
+        valueCents: 7_500,
+        method: "share",
+      });
+      // The two places add back to the whole, which is the property that makes
+      // the apportionment worth doing at all.
+      expect(
+        (atTruck.total.valueCents ?? 0) + (unplaced.total.valueCents ?? 0),
+      ).toBe(whole.total.valueCents);
+    });
+
+    it("says CANNOT BE SPLIT rather than inventing a share, and counts it as missing", async () => {
+      /**
+       * Nine in the truck and minus nine unplaced nets to nothing. There is no
+       * share of nothing, and the batch HAS a cost — so `none` would be a lie
+       * about a batch nobody costed while a zero would be a lie about its
+       * worth. The line lands in the same "what this figure leaves out" count
+       * the page is built around.
+       */
+      const truck = await withSystem(async (tx) => {
+        const rows = await tx
+          .insert(schema.assets)
+          .values({
+            tenantId,
+            kind: "equipment",
+            name: `Unsplit truck ${STAMP}`,
+            isStorageLocation: true,
+          })
+          .returning();
+        return rows[0].id;
+      });
+      const item = await newItem("Unsplittable feed");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: item.id, code: "UNSPLIT-1" }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 9,
+          costCents: 4_500,
+          occurredOn: "2026-08-01",
+        }),
+      );
+      // Moved to the truck, then issued from nowhere — a real sequence, and it
+      // leaves the batch at zero overall with nine standing in one place.
+      await asOwner((tx) =>
+        transferStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 9,
+          toLocationAssetId: truck,
+          occurredOn: "2026-08-02",
+        }),
+      );
+      await asOwner((tx) =>
+        issueStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 9,
+          occurredOn: "2026-08-03",
+        }),
+      );
+
+      const atTruck = await asOwner((tx) =>
+        valueStock(tx, tenantId, { itemId: item.id, locationAssetId: truck }),
+      );
+      expect(atTruck.rows[0]).toMatchObject({
+        quantity: 9,
+        valueCents: null,
+        method: "unsplit",
+      });
+      expect(atTruck.total).toMatchObject({
+        unvaluedLines: 1,
+        unvaluedQuantity: 9,
+        incomplete: true,
+      });
+    });
+
+    it("leaves the whole-business valuation exactly as it was", async () => {
+      // Every existing caller passes no place, so no share is taken and the
+      // answer is the one it has always been.
+      const item = await newItem("Unnarrowed feed");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: item.id, code: "PLAIN-1" }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 20,
+          costCents: 8_000,
+          occurredOn: "2026-08-01",
+        }),
+      );
+      const valuation = await asOwner((tx) =>
+        valueStock(tx, tenantId, { itemId: item.id }),
+      );
+      expect(valuation.rows[0]).toMatchObject({
+        valueCents: 8_000,
+        method: "carried",
+        locationAssetId: null,
+      });
+    });
   });
 
   it("averageRatesForItems answers for many items in one query", async () => {

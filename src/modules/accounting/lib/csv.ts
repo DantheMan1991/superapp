@@ -9,20 +9,16 @@ import type {
 import type { AccountingBasis, TrialBalance } from "../core/balances";
 
 /**
- * RFC 4180 CSV construction (pure, client-safe). Amounts go through
- * centsToCsvAmount — integer construction, never floats (P5).
+ * The accounting reports' CSV shapes. Amounts go through `centsToCsvAmount` —
+ * integer construction, never floats (P5).
+ *
+ * **`toCsv` ITSELF MOVED TO `@/lib/csv` (2026-09-09)** and is re-exported here
+ * so this module's own importers are unchanged. RFC 4180 quoting is not an
+ * accounting idea, and inventory's valuation export needed the same function —
+ * copying it would have been the second copy of a pure helper this codebase has
+ * twice watched drift.
  */
-
-function field(value: string): string {
-  if (/[",\r\n]/.test(value)) {
-    return `"${value.replaceAll('"', '""')}"`;
-  }
-  return value;
-}
-
-export function toCsv(rows: string[][]): string {
-  return rows.map((r) => r.map(field).join(",")).join("\r\n") + "\r\n";
-}
+export { toCsv } from "@/lib/csv";
 
 function indent(row: ReportRow): string {
   return "  ".repeat(row.depth) + row.label;

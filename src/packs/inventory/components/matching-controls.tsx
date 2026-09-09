@@ -181,6 +181,33 @@ export function MatchDialog({
   const [pending, startTransition] = useTransition();
   const [picked, setPicked] = useState<Record<string, string>>({});
   const [invoiceQuantity, setInvoiceQuantity] = useState("");
+  const [search, setSearch] = useState("");
+
+  /**
+   * **NARROWED BY WHAT A PERSON CAN SEE ON THE ROW, and not by the supplier.**
+   * The obvious filter — only this vendor's deliveries — cannot be built:
+   * `inventory_movements` records what arrived, not who sold it, so nothing
+   * anywhere links a receipt to a bill's vendor until somebody matches them.
+   * That is the whole reason this screen exists. So the box searches the item
+   * name, the batch code and the date, which are the three things somebody
+   * reads off a paper invoice.
+   *
+   * **A DELIVERY WITH A QUANTITY TYPED AGAINST IT ALWAYS STAYS**, whatever the
+   * search says. Typing four numbers and then narrowing the list would
+   * otherwise hide rows that are about to be submitted, and the person would
+   * not see what they were sending.
+   */
+  const shown = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return deliveries;
+    return deliveries.filter(
+      (d) =>
+        Boolean(picked[d.movementId]) ||
+        d.itemName.toLowerCase().includes(q) ||
+        (d.lotCode ?? "").toLowerCase().includes(q) ||
+        d.occurredOn.includes(q),
+    );
+  }, [deliveries, search, picked]);
 
   const matches = useMemo(
     () =>
@@ -254,13 +281,30 @@ export function MatchDialog({
           </DialogDescription>
         </DialogHeader>
 
+        {deliveries.length > 4 && (
+          /* Four fits on a phone without scrolling; below that a search box is
+             more to read than the list it filters. */
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by what, batch or date"
+            aria-label="Search the deliveries"
+            className="h-9"
+          />
+        )}
+
         <div className="max-h-80 space-y-2 overflow-y-auto py-2">
           {deliveries.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No priced deliveries are waiting for an invoice.
             </p>
+          ) : shown.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Nothing here matches “{search}”. Clear the box to see all{" "}
+              {deliveries.length}.
+            </p>
           ) : (
-            deliveries.map((d) => (
+            shown.map((d) => (
               <div
                 key={d.movementId}
                 className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3"

@@ -1,10 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Download } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { exportValuationCsv } from "../actions";
 
 /**
  * The date a valuation is as of.
@@ -60,5 +63,63 @@ export function AsOfPicker({ asOf, today }: { asOf: string; today: string }) {
         Value it
       </Button>
     </div>
+  );
+}
+
+/**
+ * The valuation as a file.
+ *
+ * **THE BUTTON SENDS WHAT THE SCREEN IS SHOWING, AND NOTHING ELSE.** It passes
+ * the four things in the URL and the server does the reading, so the file can
+ * never be of a different question from the page it was pressed on — and the
+ * labels in it are resolved from the same rows the figures come from rather
+ * than from whatever the browser thought a place was called.
+ *
+ * The download itself is the same three lines accounting's report toolbar uses:
+ * a blob, an anchor, a revoke. Nothing is written to disk on the server and
+ * nothing is left behind in the page.
+ */
+export function ExportValuationButton({
+  asOf,
+  kind,
+  enterpriseId,
+  locationAssetId,
+}: {
+  asOf: string;
+  kind?: string;
+  enterpriseId?: string;
+  locationAssetId?: string;
+}) {
+  const [pending, startTransition] = useTransition();
+
+  function download() {
+    startTransition(async () => {
+      const result = await exportValuationCsv({
+        asOf,
+        kind,
+        enterpriseId,
+        locationAssetId,
+      });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      const url = URL.createObjectURL(
+        new Blob([result.csv!], { type: "text/csv;charset=utf-8" }),
+      );
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = result.filename!;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Downloaded");
+    });
+  }
+
+  return (
+    <Button variant="outline" size="sm" onClick={download} disabled={pending}>
+      <Download className="mr-1.5 size-3.5" />
+      {pending ? "Exporting…" : "Export"}
+    </Button>
   );
 }

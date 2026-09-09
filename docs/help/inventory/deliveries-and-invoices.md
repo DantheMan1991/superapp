@@ -15,7 +15,7 @@ This is where a supplier's invoice gets tied to the delivery it is paying for.
 - **`Bills waiting to be matched`.** `Supplier`, `Line`, `Charged` and `Matched`. Click a supplier to open the bill in Accounting.
 - **`Matched`** reads `Nothing yet`, or a badge like {badge:2 deliveries · $6,000.00|secondary}.
 - **{button:Match|outline}** and **{button:Unpick|ghost}** at the end of each bill row. Owners only, and only when stock is on the balance sheet.
-- **`Deliveries with no invoice yet`.** `When`, `What`, `Batch`, `Still open` and `Worth`. These are the priced deliveries waiting for a bill.
+- **`Deliveries with no invoice yet`.** `When`, `What`, `Batch`, `Still open` and `Worth`. These are the priced deliveries waiting for a bill, oldest first. Past fifty there are pages, with a line under the table reading `Showing 1 to 50 of 214, oldest first.` and `Older` and `Newer` beside it. The card above counts every one of them, whatever page you are on.
 
 A delivery recorded without a price never appears here at all. It has no cost for an invoice to settle, and it shows on [what it is worth](what-it-is-worth.md) instead.
 
@@ -35,12 +35,13 @@ Staff and your accountant see the switch greyed out with no explanation. That is
 
 1. Find the bill line under `Bills waiting to be matched` and click {button:Match|outline}.
 2. The dialog is headed with the supplier and the amount. It reads `Say how much of each delivery this bill is paying for.`
-3. For each delivery this bill covers, type how much of it into the box. Click {button:All|ghost} to fill in the whole thing.
-4. If the bill charges for more than turned up, put the invoiced amount into `How much is the bill charging for?`. The help then reads `Charged for 2 more than arrived. That stays as owed stock rather than becoming a cost.`
-5. Leave that box blank if the bill is for exactly what arrived.
-6. Click {button:Match|primary}. You see `Matched`, or `Matched — $500.00 dearer than the ticket`.
+3. With more than four deliveries waiting there is a search box at the top. Type part of the {{item|lower}} name, the batch code or the date to narrow the list. Anything you have already typed a quantity against stays visible whatever you search for.
+4. For each delivery this bill covers, type how much of it into the box. Click {button:All|ghost} to fill in the whole thing.
+5. If the bill charges for more than turned up, put the invoiced amount into `How much is the bill charging for?`. The help then reads `Charged for 2 more than arrived. That stays as owed stock rather than becoming a cost.`
+6. Leave that box blank if the bill is for exactly what arrived.
+7. Click {button:Match|primary}. You see `Matched`, or `Matched — $500.00 dearer than the ticket`.
 
-There is no confirmation step. The dialog lists every delivery in the business, not only this supplier's, so read the item and date on each line before typing.
+There is no confirmation step. **The dialog cannot narrow itself to this supplier's deliveries**, because a delivery does not record who sold it — that is the very thing matching establishes. So read the {{item|lower}} and the date on each line before typing, or use the search box.
 
 **A price difference is a real cost** and goes to your accounts as one. **Being charged for stock that never arrived is not a cost**, so it stays as owed stock for you to chase.
 
@@ -63,6 +64,8 @@ You must then go into Accounting and say what that bill line was for, or the bil
 | `Stock now posts to the books` / `Stock no longer posts` | The switch moved. |
 | `No bills waiting` | No bill is waiting. A bill can be matched while it is a draft or waiting for approval, never after. |
 | `Nothing waiting` | Every priced delivery has an invoice against it. |
+| `Showing 1 to 50 of 214, oldest first.` | The deliveries run over more than one page. `Older` and `Newer` walk them. |
+| `Nothing here matches “feed”. Clear the box to see all 12.` | The search in the match dialog found nothing. |
 | `Stock is not on the balance sheet for this business, so there is nothing for a bill to settle. Turn that on first.` | Turn the switch on before matching. |
 | `that bill is already approved — match the delivery before approving it` | Too late for that bill. Match before approving next time. |
 | `that delivery only has 40 lb left to invoice` | You typed more than is left on that delivery. |
@@ -74,7 +77,7 @@ You must then go into Accounting and say what that bill line was for, or the bil
 ## Not on this page
 
 - The dialog does not narrow the deliveries to the supplier on the bill, so you scroll all of them.
-- The list stops at a hundred deliveries, while the card above counts more than that. If the two disagree, the card is right.
+- Nothing groups the deliveries by supplier, because a delivery does not record one.
 - If you need any of this, ask us.
 
 ## Who can do what

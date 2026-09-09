@@ -26,12 +26,95 @@ this dossier is the build record.
 | **3d iii** | **The lens** — `paid` applies on a cash-basis report, through a seam core owns and a pack fills | **shipped 2026-08-22** |
 | 3d iv | `billed`, `sold` and the two `later_of` rules | each needs different machinery — see `packs/inventory/basis-lens.ts` |
 | 4 | Commitments (pre-sold halves) — needs `production` and `retail` | |
-| 5 | Reorder points, capacity warnings — needs history | |
+| **5** | **Reorder points** — `reorder_point` on the item, and the pack's attention source | **shipped 2026-09-09** (capacity warnings still unbuilt) |
 | **6a** | **A package is a unit** — the `pkg` stocking unit, and an item you can edit | **shipped 2026-08-25** |
 | **6b** | **What a batch weighs** — `inventory_movements.weight_lb`, a per-lot average, production passes the weight it already has | **shipped 2026-08-25** |
 | **6c** | **Selling by the pound** — `retail`'s half, see [retail.md](retail.md) slice 8 | **shipped 2026-08-25** |
 
 ## Build log
+
+### 2026-09-09 — Stock reaches What needs you (`claude/stock-reaches-what-needs-you`)
+
+**Every deviation this pack surfaces waited for somebody to open the page.**
+The item page has said "that is below zero" since slice 0, the hub has
+coloured a batch past its date since slice 2, a count sits in `Being counted`
+forever, and the matching page's own footnote says a delivery waiting longer
+than a supplier takes to bill "is worth a look" — and no digest, no What needs
+you, ever carried any of it. Slice 5 of the improvement review, and roadmap
+slice 5's reorder point with it. **Migration `0282`: `inventory_items.reorder_point`
+(numeric 18,4, nullable, CHECK ≥ 0) — applied to dev and production before the
+merge per [ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md).**
+No RLS change: it is a column on a table already under FORCE RLS.
+
+**It was generated as `0281` and renumbered to `0282` after the fact**, because
+`claude/the-opening-position` took the same slot from a parallel session and
+merged first. The renumber keeps the journal entry's original `when`
+(`1788961712609`) — the exact `created_at` already recorded in both databases —
+because drizzle applies a migration only when `lastApplied.created_at <
+when` (STRICTLY), so a fresh stamp would have re-run `ADD COLUMN` against a
+column that exists. Both `db:migrate` runs are no-ops now and the row counts
+did not move. **If two sessions ever collide on a slot again, that is the
+repair: rebase, delete the loser's files, regenerate against the winner's
+snapshot, and put the applied stamp back.**
+
+- **`inventory-stock`, the third pack source** (`src/packs/inventory/attention/source.ts`,
+  registered fifth, below livestock and above accounting — see the registry's
+  comment). Five items over `core/attention.ts` (pure): stock below zero
+  (`today`); a batch past its date (`overdue`), going off today (`today`) or
+  within the week (`soon`), with stock on hand — the middle of the hub's six
+  weeks is a shelf to use first, not an obligation; an item at or below its
+  reorder point (`soon`, or `today` when it is out; never when nothing was ever
+  recorded, and never twice with below-zero); a draft count walked
+  `COUNT_STALE_AFTER_DAYS` (14) ago with shelves on it (`today` — an EMPTY draft
+  is not raised, because it cannot be posted and cannot be deleted, so its line
+  would never clear); and, for OWNERS only and only once stock is on the balance
+  sheet, priced deliveries unbilled `UNBILLED_AFTER_DAYS` (60) or more, as ONE
+  line naming the oldest four (`soon`). Everything derived from the reads the
+  hub, the counts page and the matching page already make.
+- **`reorder_point` is the one stored WISH in the pack**, beside a ledger of
+  records, and the attention source is its only reader: nothing refuses an
+  issue for crossing it, because the pack's oldest rule is that a refusal
+  teaches people to stop entering things. `Reorder at` on the Add and Edit
+  dialogs (`quantity.min(0).nullable()` at the action, the CHECK at the table),
+  `Reorder at 100 pounds` under On hand with `running low` / `out` in red once
+  reached, and the same badge on the hub's cards and rows — judged on the
+  item's total whatever place is picked.
+
+**A REVIEW PASS OVER THIS SLICE FOUND FOUR THINGS AND THEY ARE FIXED HERE.**
+Two were the same defect in two shared reads: `expiringLots` and
+`unbilledReceipts` both apply their `limit` in SQL, ordered oldest-first, and
+drop the irrelevant rows (empty batches; settled receipts) in JS AFTERWARDS —
+so a business that accumulates enough history spends the whole budget on it and
+the row that matters is never fetched. The digest then goes quiet, which is the
+one failure this slice exists to prevent. Both now test the condition in SQL as
+well (`exists (… having sum(quantity) > 0)`, `quantity > coalesce(matched, 0)`),
+with the JS filters left exactly as they were — the predicate decides what is
+worth fetching, the fold still decides what is true. The matching screen and the
+hub inherit the fix. Third: the item page and the hub claimed `and on What needs
+you` for RETIRED items, which the source never reads — and an item is normally
+retired once it is used up, so it was false in the ordinary case. Fourth: the
+multi-delivery title said `more than 60 days` for a delivery that had waited
+exactly 60, the boundary the threshold exists for.
+
+Tests: `tests/inventory-attention.test.ts` (pure — the five rules, the
+thresholds, the one-line invoice item), `tests/inventory-attention-db.test.ts`
+(the reads composing as a person through RLS: low → below zero → cleared by the
+delivery → cleared by removing the point; a dated batch raised while it has
+stock and not after; a walked count raised at two weeks, an empty one never,
+cleared by posting), an isolation case for the CHECK. Guides: `items.md`
+(`Reorder at`, the badge), `item.md` (the Edit box, the On hand line),
+`workspace/what-needs-you.md` (the Inventory rows). [notifications.md](notifications.md)
+carries the registry entry. Driven on the dev branch's Hilltop Farm at 375px
+and 1280px: `Reorder at` on Grower crumble's Edit dialog set to 1,000 (795 on
+hand) and the On hand panel read `Reorder at 1000 pounds — running low, and on
+What needs you` in red; the hub's card and row wore `running low`; What needs
+you carried three inventory rows — `PEN-PAST-REVIEW of Penicillin G is past
+its date` (`Overdue`), `Grower crumble is down to 795 pounds · Reorder at 1000
+pounds` (`Open`, the page's word for an undated row) and, for the owner, `A
+Grower crumble delivery from 2026-07-01 has waited 70 days for its invoice`
+(`Open`) — and raised nothing for the batch due in eleven days, the item at
+zero with no reorder point, or the empty draft count. The reorder point stays
+on Grower crumble as a dev fixture.
 
 ### 2026-09-09 — Move stock (`claude/move-stock`)
 
@@ -1585,7 +1668,7 @@ tree, so the archive renders at /admin/docs with no code change.
 
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
-| `inventory_items` | A kind of thing held | `tenant_id`, FORCE RLS. One `stocking_unit`, and the balance is kept only in it. `purchase_unit` + `purchase_unit_qty` are an ENTRY convenience, never a second balance |
+| `inventory_items` | A kind of thing held | `tenant_id`, FORCE RLS. One `stocking_unit`, and the balance is kept only in it. `purchase_unit` + `purchase_unit_qty` are an ENTRY convenience, never a second balance. `reorder_point` (2026-09-09, migration `0282`, CHECK ≥ 0) is the pack's one stored WISH — read by the attention source, refused by nothing |
 | `inventory_lots` | **The spine.** A batch, with lineage | Composite FKs to the item and to a parent lot (self-referential, RESTRICT). `source` in `purchased\|raised\|produced` — recorded now because slice 3 cannot infer it retroactively. CHECK: a lot is not its own parent |
 | `inventory_movements` | **The ledger.** Every quantity change, and what it cost | Composite FKs to item, lot and **`assets`** (the location). `quantity` is signed and CHECKed non-zero. FORCE RLS in its own right — it is the traceability chain. `reason` (slice 2) is an open taxonomy and the diagnostic |
 | `inventory_counts` | **A physical count.** Two acts: `draft` while walking, `posted` once the variances are in the ledger | `tenant_id`, FORCE RLS. `location_asset_id` null means everywhere. CHECK: `posted` status and `posted_on` are set together |
@@ -1741,6 +1824,16 @@ commitment against a live animal to delivered without sitting on a shelf.
 - **RESOLVE AN ACCOUNT BY CODE BEFORE SUBTYPE, AND REFUSE AMBIGUITY.** Two
   accounts ship with subtype `cogs`. A resolver that picks the first row is
   wrong quietly and compounds.
+- **A REORDER POINT TELLS, AND NEVER REFUSES.** `reorder_point` is the only
+  figure in the pack that is a wish rather than a record of something that
+  happened, and its only reader is the attention source. An issue that crosses
+  it goes through exactly as one that takes stock negative does, for the same
+  reason: a refusal teaches people to stop entering things. If a future slice
+  is tempted to block on it, that is the design being unlearned.
+- **AN OBLIGATION THAT CANNOT CLEAR IS NOT RAISED.** An empty draft count can
+  be neither posted nor deleted, so the attention source leaves it alone rather
+  than raising a line for the rest of time — the shape `notifications.md` calls
+  the digest somebody mutes.
 - **NEGATIVE STOCK IS ALLOWED, and it is not a bug.** Somebody issues feed on
   Tuesday and records Monday's delivery on Wednesday; a system that refuses the
   Tuesday entry teaches people to stop entering things, which costs far more
@@ -1945,9 +2038,12 @@ commitment against a live animal to delivered without sitting on a shelf.
   ~~What is missing is the honest remedy — count again — and nothing on the
   screen suggests it.~~ **`Count again` is on every posted count since
   2026-09-09**, starting a fresh walk at the same place.
-- **Nothing warns that a batch has gone past its date and is still on hand.**
+- ~~**Nothing warns that a batch has gone past its date and is still on hand.**
   The item page colours it and the home page lists it; neither is a rule anybody
-  is asked about, which is the deviation-surfacing the design keeps wanting.
+  is asked about, which is the deviation-surfacing the design keeps wanting.~~ —
+  **closed 2026-09-09** by the attention source (past its date, today, within
+  the week), with below zero, the reorder point, a stale count and an unbilled
+  delivery beside it.
 - ~~**Four of the eight actions have no UI caller**~~ — **two of the four closed
   2026-08-25.** `updateItem` and `archiveItem` are reached by `ItemControls` on
   the item page, along with a new `restoreItem`, so an item can be renamed,

@@ -148,6 +148,8 @@ const itemSchema = z.object({
   purchaseUnit: z.string().max(32).nullable().optional(),
   purchaseUnitQty: quantity.positive().nullable().optional(),
   storageRequirement: z.string().max(32).nullable().optional(),
+  /** In the stocking unit. Null clears it; a negative is refused here and by the CHECK. */
+  reorderPoint: quantity.min(0).nullable().optional(),
   notes: z.string().max(5000).optional(),
 });
 

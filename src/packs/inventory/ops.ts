@@ -255,6 +255,11 @@ export interface ItemInput {
   purchaseUnit?: string | null;
   purchaseUnitQty?: number | null;
   storageRequirement?: string | null;
+  /**
+   * The level at or below which the business wants to be told. Null for no
+   * reminder. Read by the attention source and by nothing that refuses.
+   */
+  reorderPoint?: number | null;
   notes?: string;
 }
 
@@ -286,6 +291,7 @@ export async function createItem(
       purchaseUnit: input.purchaseUnit?.trim() || null,
       purchaseUnitQty: input.purchaseUnitQty ?? null,
       storageRequirement: input.storageRequirement?.trim() || null,
+      reorderPoint: input.reorderPoint ?? null,
       notes: input.notes?.trim() ?? "",
     })
     .returning();
@@ -348,6 +354,10 @@ export async function updateItem(
   }
   if (input.storageRequirement !== undefined) {
     patch.storageRequirement = input.storageRequirement?.trim() || null;
+  }
+  if (input.reorderPoint !== undefined) {
+    // Null clears it. The CHECK refuses a negative; the action refuses it first.
+    patch.reorderPoint = input.reorderPoint;
   }
   if (input.notes !== undefined) patch.notes = input.notes.trim();
 
@@ -2737,6 +2747,21 @@ export async function expiringLots(
   const where = [
     eq(schema.inventoryLots.tenantId, tenantId),
     isNotNull(schema.inventoryLots.expiresOn),
+    /**
+     * **ON HAND, TESTED IN SQL — because `limit` counts rows BEFORE the fold
+     * below drops the empty ones.** A batch that has been used up keeps its
+     * date forever, and this is ordered soonest-first, so a business with two
+     * hundred consumed dated batches spent the whole budget on them and the
+     * one going off tomorrow was never fetched. The JS filter stays: it reads
+     * the same fold every other screen reads, and this predicate only decides
+     * which rows are worth fetching.
+     */
+    sql`exists (
+      select 1 from inventory_movements m
+       where m.tenant_id = ${schema.inventoryLots.tenantId}
+         and m.lot_id = ${schema.inventoryLots.id}
+      having sum(m.quantity) > 0
+    )`,
   ];
   if (options.onOrBefore) {
     where.push(lte(schema.inventoryLots.expiresOn, options.onOrBefore));

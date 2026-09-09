@@ -401,6 +401,27 @@ d("inventory tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
+  it("refuses a reorder point below nothing, and keeps one that is not", async () => {
+    // The one stored WISH in the pack (2026-09-09): a level to be told at,
+    // never a level that refuses anything. Below zero is not a level.
+    await expect(
+      asOwner((tx) =>
+        tx
+          .update(schema.inventoryItems)
+          .set({ reorderPoint: -1 })
+          .where(eq(schema.inventoryItems.id, feedA)),
+      ),
+    ).rejects.toThrow();
+    const [row] = await asOwner((tx) =>
+      tx
+        .update(schema.inventoryItems)
+        .set({ reorderPoint: 50 })
+        .where(eq(schema.inventoryItems.id, feedA))
+        .returning(),
+    );
+    expect(row.reorderPoint).toBe(50);
+  });
+
   // ---- lots ------------------------------------------------------------
 
   it("a tenant sees only its own lots", async () => {

@@ -966,6 +966,54 @@ it("CLEARS GRNI TO ZERO when the bill is matched and approved", async () => {
       expect((await netOf(grniAccountId)) - grniBefore).toBe(0);
     });
 
+    it("spends its LIMIT on deliveries still waiting, not on settled history", async () => {
+      /**
+       * **THE TRUNCATION THAT WOULD HAVE MADE THE MATCHING SCREEN GO QUIET.**
+       * Every priced purchased receipt stays in this population forever after
+       * it is matched, and the query is ordered oldest-first with the "still
+       * open" test applied in JS AFTER the `limit`. So a business with enough
+       * settled history spent the whole budget on it and the delivery actually
+       * waiting for an invoice was never fetched — the list, the GRNI working
+       * behind it and the attention line that reads it all went quiet together.
+       */
+      const item = await newItem("Crowded out");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 10,
+          costCents: 6_000,
+          occurredOn: "2026-01-01",
+        }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 4,
+          costCents: 2_000,
+          occurredOn: "2026-09-01",
+        }),
+      );
+      const both = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      expect(both.map((r) => r.occurredOn)).toEqual(["2026-01-01", "2026-09-01"]);
+
+      const { billLineId } = await makeBill(6_000);
+      await asOwner((tx) =>
+        allocateBillLineToStock(tx, ownerCtx(), {
+          billLineId,
+          matches: [{ movementId: both[0].movementId, quantityMatched: 10 }],
+        }),
+      );
+
+      // One row of budget, and the settled 2026-01-01 receipt sorts first.
+      const page = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id, limit: 1 }),
+      );
+      expect(page.map((r) => r.occurredOn)).toEqual(["2026-09-01"]);
+      expect(page[0].openQuantity).toBe(4);
+    });
+
     describe("EDITING THE BILL AFTERWARDS", () => {
       /**
        * **THE GRNI DOUBLE-CLEAR.**

@@ -1,0 +1,1 @@
+ALTER TABLE "entities" ADD COLUMN "books_start_on" date;

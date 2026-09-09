@@ -3,8 +3,10 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Lock, LockOpen } from "lucide-react";
+import { CalendarDays, Lock, LockOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -24,11 +26,106 @@ import {
 import {
   completeCloseAction,
   reopenCloseAction,
+  setBooksStartAction,
 } from "@/modules/accounting/close/actions";
 
 interface BlockerRow {
   label: string;
   count: number;
+}
+
+/**
+ * The first day of one company's books (ADR 0035): set it, move it, clear it.
+ *
+ * A dialog rather than an inline date box, because the day carries a rule —
+ * nothing may be dated before it and imports drop the earlier lines — and the
+ * rule should be read at the moment the day is chosen. The refusals (a day
+ * after money already recorded, or after the close) come back from the server
+ * as toasts; moving the day earlier is always allowed.
+ */
+export function BooksStartControls({
+  entityId,
+  entityName,
+  booksStartOn,
+}: {
+  entityId: string;
+  /** Undefined on a single-company tenant; then the dialog names no company. */
+  entityName: string | undefined;
+  booksStartOn: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const [date, setDate] = useState(booksStartOn ?? "");
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+
+  function save(next: string | null) {
+    startTransition(async () => {
+      const res = await setBooksStartAction({ entityId, date: next });
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      setOpen(false);
+      toast.success(
+        next
+          ? `${entityName ? `${entityName}'s books` : "Books"} begin on ${next}.`
+          : "Start date cleared.",
+      );
+      router.refresh();
+    });
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) setDate(booksStartOn ?? "");
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline">
+          <CalendarDays className="mr-1.5 h-4 w-4" />
+          {booksStartOn ? "Change" : "Set the date"}
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            When do {entityName ? `${entityName}'s` : "the"} books begin?
+          </DialogTitle>
+          <DialogDescription>
+            The first day the books cover. Nothing may be dated before it, and a
+            statement you import drops the earlier lines, so history stays where
+            it was. Opening balances are dated on this day. You can move it
+            earlier at any time; it cannot be moved past money already recorded.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-1.5">
+          <Label htmlFor="books-start">First day</Label>
+          <Input
+            id="books-start"
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
+        </div>
+        <DialogFooter>
+          {booksStartOn && (
+            <Button variant="ghost" disabled={pending} onClick={() => save(null)}>
+              Clear
+            </Button>
+          )}
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
+            Cancel
+          </Button>
+          <Button disabled={pending || date === ""} onClick={() => save(date)}>
+            {pending ? "Saving…" : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 export function CloseControls({

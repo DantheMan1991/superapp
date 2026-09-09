@@ -44,6 +44,7 @@ If the vendor already has a bill with the same invoice number, or the same total
 | Message | What it means |
 | --- | --- |
 | `Pick or create a vendor.` | The vendor is missing. |
+| `That date is before the day your books begin. Anything from before then stays where it was — the books start with balances on that day, not with history.` | When the bill is approved: its date is earlier than the first day of this company's books, set on the Close page. |
 | `Not a real calendar date` | The date does not exist. |
 | `That vendor is inactive — reactivate them first.` | The vendor was deactivated on the Vendors page. |
 | `A line is coded to an account that cannot be chosen by hand. Pick an ordinary account — or, if a match set it, undo the match first.` | A line names an account only a match may set. |

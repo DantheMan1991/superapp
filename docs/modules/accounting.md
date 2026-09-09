@@ -13,6 +13,68 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-08 — The day the books begin (`claude/the-books-begin`, migration `0280`)
+
+Onboarding slice 4 ([onboarding.md](onboarding.md)), and the lower bound the
+period never had. [ADR 0035](../decisions/0035-the-books-begin-on-a-day-and-nothing-is-dated-before-it.md)
+is the decision.
+
+**`entities.books_start_on`**, beside `closed_through`, because the two are
+the two ends of one company's books and the lock already moved off
+`accounting_settings` for exactly this reason. Null = never said. Set, moved
+or cleared by `setBooksStartOn` (owner-only): earlier and clear are always
+allowed; a day after a non-void entry of that company is refused
+(`BOOKS_START_HAS_ENTRIES`), and a day after the close is refused
+(`BOOKS_START_AFTER_CLOSE`).
+
+**`assertPeriodOpen` now reads both bounds in one query** and refuses a date
+before the start with `BEFORE_BOOKS_START`, checked before the close because it
+is the more specific thing to say. Every posting and every date edit already
+passed through that guard — journals, invoices at issue, bills at approval,
+quick add, bank rows posted by hand or by rule, recurring templates — so
+nothing new had to learn the rule. Opening balances are dated ON the day, and
+the day itself is allowed.
+
+**Imports drop the earlier lines rather than carrying them in.**
+`importTransactions` filters rows before the register's company's start and
+returns `skippedBeforeStart` and `booksStartOn`; the wizard's summary says
+`12 dated before your books begin on 2026-01-01 were left out.`
+`syncPlaidItem` does the same per linked register (`SyncResult.skippedBeforeStart`,
+in the sync toast). Not imported-and-excluded, deliberately: a row the books
+can never take would sit on the Excluded tab forever, one Restore from posting
+2025 into 2026.
+
+**The Close page is the home**, there being no settings screen for
+`accounting_settings` at all — the fiscal year is read by every report and
+written by nothing. A `Books begin on` card above the checklist, per company,
+with `Set the date` / `Change` opening a dialog that states the rule, and
+`Clear` in it (`setBooksStartAction`, audited as `accounting.books_start_set`).
+
+**The setup card asks for it first.** `accounting.books-start` on the default
+company, ahead of the register: a fact about the business the module needs,
+proven missing by a null column (ADR 0033), not advice. Every existing tenant
+sees the row until an owner sets the day — which is the point.
+
+**Tests.** `tests/books-start-db.test.ts`: unset on a fresh company and first
+on the card; staff refused, owner sets, the step clears; a post dated before
+refused, on the day allowed, a date edit to before refused; a later day
+refused for entries and for the close, earlier and clear allowed; an import
+drops two of three lines and says so, and a re-import still drops them while
+the kept one is a duplicate. `tests/setup-sources-db.test.ts` updated for the
+new first row. Guides: `close.md` (the card, `How to say when your books
+begin`, five messages, who can do what), `import-statement.md`, `banking.md`,
+`register.md`, `new-entry.md`, `new-invoice.md`, `new-bill.md`,
+`workspace/getting-around.md`.
+
+**Driven on Hilltop (dev), and it found nothing to fix.** The setup card led
+with `Say when your books begin`; `Set the date` on the Close page took
+`2026-01-01` and the row cleared; a four-row statement on the personal register
+imported two and read `2 dated before your books begin on 2026-01-01 were left
+out.`, the 2025 lines never reaching the queue; `Change` to `2026-09-01` was
+refused with the entries message and the dialog held; a quick add dated
+`2025-12-15` was refused with the books-begin message. Hilltop now begins on
+`2026-01-01`, which is the founder's chosen day.
+
 ### 2026-09-08 — The personal account (`claude/the-mixed-account`, migrations `0278`–`0279`)
 
 Onboarding slice 3 ([onboarding.md](onboarding.md)), and the blocker for
@@ -3878,6 +3940,7 @@ preview in either state. The change is argued to be inert, not observed to be.
 | `credit_memos` | 2026-09-07 | A credit against one invoice (`0269`; `source = credit_memo`, `0268`; RLS `0270`, owner-only writes). Posts Dr income / Cr AR and settles the invoice through an `invoice_payments` row of `method = credit_memo` (`payment_id`, detached on void) — see the build log for why that one decision is the whole design. Own `CM-####` series |
 | `deposits` | 2026-09-07 | Payments held in Undeposited Funds banked together as one entry (`0265`; `source = deposit`, `0264`; RLS `0266`, owner-only writes). `invoice_payments.deposit_id` points back, cleared by a void. One company per deposit, the register's; a deposit is voided, never deleted |
 | `bank_rules` | 2026-08-10 | Deterministic feed categorization. Priority-ordered, first match wins; `is_suggested` marks a machine-proposed rule; `auto_post` posts without review but never into a closed period. Gained `set_vendor_id` (`0113`) so a rule can name the payee too. `bank_transactions.rule_suggestion` is a **snapshot**, not an FK — it records what a rule said at match time, so editing the rule later cannot rewrite what the owner was shown |
+| `entities.books_start_on` | 2026-09-08 | The day one company's books begin ([ADR 0035](../decisions/0035-the-books-begin-on-a-day-and-nothing-is-dated-before-it.md), `0280`), beside `closed_through` — the two ends of the period on one row. Null = never said. Written only by `setBooksStartOn` (owner), never to a day after a non-void entry or after the close. Read by `assertPeriodOpen` (refuses `BEFORE_BOOKS_START`), by the CSV import and the Plaid sync (rows before it are not staged), and by the setup card |
 | `bank_accounts.kind = 'personal'`, `accounts.subtype = 'owner_funds'`, `bank_rules.action` | 2026-09-08 | The personal register ([ADR 0034](../decisions/0034-a-personal-account-is-a-register-whose-ledger-leg-is-the-owners-equity.md), `0278`). Its ledger account is EQUITY (`owner_funds`, 3300s), never a bank asset; no opening balance, never reconciled, not a deposit target. `bank_rules.action` is `categorize` (default, every pre-existing rule) or `exclude` (sets the row aside on arrival); `set_account_id` became nullable, held to the action by CHECK `bank_rules_action_account`. `bank_transactions.rule_suggestion` and `ai_suggestion` may now carry `action: "exclude"` / `personal: true` with a null `accountId`. RLS `0279`: `bank_accounts` hides the kind from `staff`; `bank_transactions` and register-scoped `bank_rules` inherit through an EXISTS |
 | `parties` | 2026-08-03 | **Shared, not this module's.** The identity spine behind `customers` and `vendors`; written through `src/lib/parties/`. See [crm.md](crm.md) |
 | `customers`, `invoices`, `invoice_lines`, `invoice_payments` | S4 | AR. `customers.party_id` (2026-08-03) makes the row a role on a party. Both `customers` and `invoices` gained `reminders_muted` (`0114`) — standing and one-off suppression of automatic chasing. `recurring_invoices` folded into `recurring_entries` (`0121`/`0122`) and was dropped in `0147` |
@@ -3917,6 +3980,13 @@ sentence rather than leaving it aspirational.
 
 ## Decisions & gotchas
 
+- **THE BOOKS BEGIN ON A DAY, PER COMPANY, AND NOTHING IS DATED BEFORE IT**
+  (ADR 0035, 2026-09-08). One guard, `assertPeriodOpen`, holds both ends of the
+  period; a new posting path that bypasses it bypasses the close too, which is
+  the existing rule. Imports DROP earlier rows rather than staging them
+  excluded. The refusal message is static, so the Close page is where the
+  actual day is read. Rows that reached a register before the day was set are
+  not swept; they are refused one at a time at posting.
 - **A PERSONAL REGISTER'S LEDGER LEG IS OWNER'S EQUITY** (ADR 0034,
   2026-09-08), and every read of a register now has to carry the caller's
   role. `withTenant` defaults to `staff`; `drizzle/0279` hides a personal

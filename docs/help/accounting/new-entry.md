@@ -33,6 +33,7 @@ Owners post. Staff save drafts for an owner to post. Someone with accountant acc
 | `A journal entry needs at least two lines.` | Add a second line. |
 | `Every line needs a non-zero amount.` | A line has no amount. Fill it in or remove the line. |
 | `That date falls in a closed period. Use a reversal, or reopen the period first.` | The month has been closed for this company. |
+| `That date is before the day your books begin. Anything from before then stays where it was — the books start with balances on that day, not with history.` | The date is earlier than the first day of this company's books, set on the Close page. |
 | `That bank account belongs to a different company. Use one of this company's own accounts — money moving between two of your companies is a transfer, and recording it properly needs both sides.` | Record money between companies with Move money on the Companies page instead. |
 | `One of the selected accounts is inactive.` | An account on a line was deactivated. Pick another. |
 | `One of the selected tags is invalid or inactive.` | A tag on a line has been retired. Pick another. |

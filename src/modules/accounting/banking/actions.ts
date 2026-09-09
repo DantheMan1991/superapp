@@ -350,6 +350,8 @@ export async function importCsvTransactionsAction(
   ActionResult<{
     imported: number;
     skippedDuplicates: number;
+    skippedBeforeStart: number;
+    booksStartOn: string | null;
     rules: ApplyRulesResult;
   }>
 > {
@@ -393,6 +395,7 @@ export async function importCsvTransactionsAction(
         meta: {
           imported: r.imported,
           skipped: r.skippedDuplicates,
+          skippedBeforeStart: r.skippedBeforeStart,
           rowCount: txns.length,
           ruleMatched: r.rules.matched,
           ruleAutoPosted: r.rules.autoPosted,
@@ -1270,7 +1273,13 @@ const itemRefSchema = z.object({ plaidItemId: z.string().min(1).max(200) });
 export async function syncPlaidItemAction(
   input: z.infer<typeof itemRefSchema>,
 ): Promise<
-  ActionResult<{ added: number; modified: number; removed: number }>
+  ActionResult<{
+    added: number;
+    modified: number;
+    removed: number;
+    /** Rows from before the company's books begin, not staged (ADR 0035). */
+    skippedBeforeStart: number;
+  }>
 > {
   const ctx = await gate();
   const parsed = itemRefSchema.safeParse(input);

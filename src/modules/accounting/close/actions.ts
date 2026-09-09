@@ -12,6 +12,7 @@ import {
   completeClose,
   friendlyMessage,
   reopenClose,
+  setBooksStartOn,
   signOffClose,
   type LedgerCtx,
 } from "../core";
@@ -106,6 +107,45 @@ export async function completeCloseAction(
       ok: true,
       data: { closeId: close.id, blockerCount: checklist.blockerCount },
     };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const booksStartSchema = z.object({
+  entityId: z.string().uuid(),
+  /** Null clears it. */
+  date: dateStr.nullable(),
+});
+
+/**
+ * The first day of one company's books (ADR 0035). Owner-only, like the close
+ * itself; the op refuses a day after money already recorded or after the
+ * close. The Overview is revalidated too, because the setup card's first row
+ * is this date being unset.
+ */
+export async function setBooksStartAction(
+  input: z.infer<typeof booksStartSchema>,
+): Promise<ActionResult<{ before: string | null; after: string | null }>> {
+  const ctx = await gate();
+  const parsed = booksStartSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    const result = await withTenant(ctx.tenantId, async (tx) => {
+      const r = await setBooksStartOn(tx, ctx, parsed.data);
+      await logAuditInTx(tx, {
+        action: "accounting.books_start_set",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "entity",
+        targetId: parsed.data.entityId,
+        meta: { before: r.before, after: r.after },
+      });
+      return r;
+    });
+    revalidate();
+    revalidatePath("/dashboard");
+    return { ok: true, data: result };
   } catch (err) {
     return fail(err);
   }

@@ -43,6 +43,7 @@ A draft dated in a closed month saves; the refusal comes when you issue it.
 | Message | What it means |
 | --- | --- |
 | `Pick or create a customer.` | The customer is missing. |
+| `That date is before the day your books begin. Anything from before then stays where it was — the books start with balances on that day, not with history.` | When the invoice is issued: its date is earlier than the first day of this company's books, set on the Close page. |
 | `That customer is inactive — reactivate them first.` | The customer was deactivated on the Customers page. |
 | `That invoice number is already in use.` | Type a different `Number`. |
 | `That tax rate is inactive or no longer exists — pick another one.` | The rate was deactivated in the catalogue. |

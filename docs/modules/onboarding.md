@@ -58,9 +58,10 @@ rather than one wizard that tries to be all of them:
 
 ### Three gaps the plan has to close, found while grounding it
 
-1. **There is no books-start date anywhere.** `accounting_settings` holds the
-   fiscal year start, the default basis and the inventory treatment, and
-   nothing says "before this date is not ours".
+1. ~~**There is no books-start date anywhere.**~~ — **closed 2026-09-08 by
+   slice 4**: `entities.books_start_on`, per company, refused at
+   `assertPeriodOpen` and dropped at import (ADR 0035). `accounting_settings`
+   still has no settings screen; the day lives on the Close page.
 2. **Opening balances exist for bank accounts only** (`createBankAccount` →
    Opening Balance Equity). Open invoices and bills as of the start date have
    no path but a hand journal, and `isCodableAccount` refuses OBE on a bill
@@ -79,7 +80,7 @@ rather than one wizard that tries to be all of them:
 | 2 | **Paste anything**: one dialog, reused — paste a list or a spreadsheet, or upload a photo of the herd book; the model proposes rows; the owner sees every row before it saves; duplicates checked against what exists (the CRM "From a note" shape, under the packs' rule that AI never writes a row without a human seeing it first). Targets in order of value: vendors, customers, kinds of stock, animals with tag and dam and sire where known, places, paddocks, prices | planned |
 | 2b | **Vendors from the bank import**: after an import, "eight payees you have no vendor for" with a checkbox each | planned |
 | 3 | **The personal account**: a register kind whose ledger leg is owner's equity rather than a bank asset; personal by default — exclude rules act on arrival, the sweep asks "is this the business's?" first and may answer `PERSONAL`, one button sets aside the rest; setting aside proposes rules; no opening balance, never reconciled; visible to the owner and the accountant, never to staff, in RLS ([ADR 0034](../decisions/0034-a-personal-account-is-a-register-whose-ledger-leg-is-the-owners-equity.md), migrations `0278`–`0279`; the build log is in [accounting.md](accounting.md)) | **shipped 2026-09-08** |
-| 4 | **The books-start date**, stored once beside the fiscal year, and an import that refuses or flags a line before it | planned |
+| 4 | **The day the books begin**: `entities.books_start_on`, per company beside the close date (not on `accounting_settings` as first planned — the lock had already moved off it for the same reason); `assertPeriodOpen` refuses anything dated before it; the CSV import and the Plaid sync drop earlier lines and say how many; set on the Close page; the setup card asks for it first ([ADR 0035](../decisions/0035-the-books-begin-on-a-day-and-nothing-is-dated-before-it.md), migration `0280`; build log in [accounting.md](accounting.md)) | **shipped 2026-09-08** |
 | 5 | **The opening position**: open invoices and bills as of the start date as real documents with their income or expense leg to OBE, so they age and get paid like any other; equipment with "depreciation already taken through", posted as that asset's own entry; the opening trial balance on one screen with the equity plug visible; an export for the accountant | planned |
 | 6 | **Tell it things**: one sentence box on the phone — "fed two bags to the broilers", "three chicks dead in pen two", "moved cows to paddock seven" — parsed into proposed record cards, one tap each to confirm, refusing where the packs already refuse. Rides the Ask thread ([livestock.md](livestock.md), PR #451) | planned, after #451 |
 | 7 | **The setup interview**: the health-check machinery turned inward — a conversation that produces the plan for THIS business (which packs, what to load, the start date), opening on "Is the farm's money in its own account?" | planned |
@@ -95,6 +96,7 @@ superadmin act — so slice 1 serves both.
 | Step | What goes in | How today |
 | --- | --- | --- |
 | Profile and settings | Homestead Farm installed; fiscal year January; default basis cash; inventory posting left OFF until the accountant answers [the brief](../briefs/inventory-tax-treatment.md) | Admin page for the install; Business settings for the rest |
+| The day the books begin | `2026-01-01`, set on the Close page before any statement is imported, so 2025 lines are left out with a count | Close page, `Books begin on`, exists |
 | Companies and banks | One company; a farm-only account opened NOW so the mixed window is bounded (2026-01-01 to the day it opens) | Banking, exists; the mixed window needs slice 3 |
 | Places | Garage with three freezers, barn with the walk-in, the two parcels, twenty paddocks | Assets, then Land (Find my parcels where the county service is connected) |
 | Vendors and customers | Feed store, hatchery, each butcher, the plant; half-beef buyers only | By hand, or from the bank import (2b) |
@@ -113,6 +115,18 @@ the farm's asset list until they say so.
 ## Build log
 
 Newest first. One entry per session/PR that touched this area.
+
+### 2026-09-08 — Slice 4: the day the books begin (`claude/the-books-begin`)
+
+Built in the accounting module; the entry, the data model and the decision are
+in [accounting.md](accounting.md), the reasoning in
+[ADR 0035](../decisions/0035-the-books-begin-on-a-day-and-nothing-is-dated-before-it.md).
+What it means for the plan: the first of the three gaps below is closed, and
+the Hilltop script gains its first step — on the Close page, `Books begin on`
+→ `2026-01-01` — before any statement is imported, so the 2025 lines on the
+personal account's statements are left out with a count rather than sorted by
+hand. The setup card now opens with `Say when your books begin`. Slice 5 (the
+opening position) has a day to stand on.
 
 ### 2026-09-08 — Slice 3: the personal account (`claude/the-mixed-account`)
 
@@ -252,9 +266,13 @@ stored, and nothing may be ([ADR 0033](../decisions/0033-a-setup-step-is-a-prere
 
 ## Open items
 
-- **Slices 2 and 4–7 above are unbuilt.** Slice 3 shipped 2026-09-08; slice 4
-  (the books-start date) is now the blocker for the opening position, because
-  nothing yet refuses a line dated before the books began.
+- **Slices 2 and 5–7 above are unbuilt.** Slices 3 and 4 shipped 2026-09-08;
+  the opening position (5) now has a day to stand on and is the next blocker
+  for a complete conversion.
+- **Feed rows that arrived before the day was set are not swept.** They stay
+  in the queue and are refused one by one at posting (ADR 0035); a "left out
+  by the start date" sweep would be a delete of imported rows, which is a
+  different decision.
 - **A deposit into a personal account is a draw, and is not yet a deposit.**
   The account is left out of the deposit picker until a deposit can say so
   (ADR 0034); recording the receipt on the register itself works.

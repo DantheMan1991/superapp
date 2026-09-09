@@ -1,5 +1,5 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { hasAny } from "@/lib/setup-sources/has-any";
 import type { SetupCtx, SetupSource, SetupStep } from "@/lib/setup-sources/types";
@@ -33,6 +33,33 @@ export const accountingSetupSource: SetupSource = {
   label: "Accounting",
 
   async collect(tx: Tx, ctx: SetupCtx): Promise<SetupStep[]> {
+    const steps: SetupStep[] = [];
+
+    /**
+     * THE FIRST DECISION OF A CONVERSION, so the first row (ADR 0035): the day
+     * the books begin. It is a fact about the business, not advice — every set
+     * of books begins somewhere — and the column proves it missing. Read from
+     * the default company; a second company sets its own on the Close page.
+     */
+    const home = await tx.query.entities.findFirst({
+      where: and(
+        eq(schema.entities.tenantId, ctx.tenantId),
+        eq(schema.entities.isDefault, true),
+      ),
+      columns: { booksStartOn: true },
+    });
+    if (home && home.booksStartOn === null) {
+      steps.push({
+        key: "accounting.books-start",
+        title: "Say when your books begin",
+        detail:
+          "The first day the books cover. Anything dated before it is refused, and an imported statement drops the earlier lines, so history stays where it was.",
+        href: "/dashboard/m/accounting/close",
+        cta: "Set the date",
+        guide: "accounting/close",
+      });
+    }
+
     const accounts = await tx
       .select({ id: schema.bankAccounts.id })
       .from(schema.bankAccounts)
@@ -40,24 +67,22 @@ export const accountingSetupSource: SetupSource = {
       .limit(2);
 
     if (accounts.length === 0) {
-      return [
-        {
-          key: "accounting.bank-account",
-          title: "Add your bank account",
-          detail:
-            "Every transaction starts from a register. Add the account the business pays from, a card, or your own account if the business's money runs through it.",
-          href: "/dashboard/m/accounting/banking",
-          cta: "Add account",
-          guide: "accounting/banking",
-        },
-      ];
+      steps.push({
+        key: "accounting.bank-account",
+        title: "Add your bank account",
+        detail:
+          "Every transaction starts from a register. Add the account the business pays from, a card, or your own account if the business's money runs through it.",
+        href: "/dashboard/m/accounting/banking",
+        cta: "Add account",
+        guide: "accounting/banking",
+      });
+      return steps;
     }
 
-    if (await hasAny(tx, schema.bankTransactions, ctx.tenantId)) return [];
+    if (await hasAny(tx, schema.bankTransactions, ctx.tenantId)) return steps;
 
     const only = accounts.length === 1 ? accounts[0].id : null;
-    return [
-      {
+    steps.push({
         key: "accounting.transactions",
         title: "Bring in your transactions",
         detail:
@@ -67,7 +92,7 @@ export const accountingSetupSource: SetupSource = {
           : "/dashboard/m/accounting/banking",
         cta: only ? "Import a statement" : "Open Banking",
         guide: only ? "accounting/import-statement" : "accounting/banking",
-      },
-    ];
+    });
+    return steps;
   },
 };

@@ -52,6 +52,9 @@ export function ImportWizard({
   const [done, setDone] = useState<{
     imported: number;
     skippedDuplicates: number;
+    /** Rows dated before the company's books begin, left out (ADR 0035). */
+    skippedBeforeStart?: number;
+    booksStartOn?: string | null;
     rules?: {
       matched: number;
       autoPosted: number;
@@ -164,6 +167,17 @@ export function ImportWizard({
               ? ` · ${done.skippedDuplicates} duplicate${done.skippedDuplicates === 1 ? "" : "s"} skipped`
               : ""}
             .
+            {/* Rows from before the books began are not imported at all, and
+                the one moment to say so is here — otherwise a statement that
+                reaches back a year looks like it lost rows. */}
+            {(done.skippedBeforeStart ?? 0) > 0 && (
+              <>
+                {" "}
+                {done.skippedBeforeStart} dated before your books begin
+                {done.booksStartOn ? ` on ${done.booksStartOn}` : ""}{" "}
+                {done.skippedBeforeStart === 1 ? "was" : "were"} left out.
+              </>
+            )}
             {/* What the rules did. The import already computed this; saying
                 nothing made the feature invisible at the one moment it ran. */}
             {done.rules && done.rules.matched > 0 && (

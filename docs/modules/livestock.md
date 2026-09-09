@@ -133,6 +133,25 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-09-09 — The herd book, pasted or photographed (`claude/paste-anything`)
+
+Onboarding slice 2 ([onboarding.md](onboarding.md), [ADR 0036](../decisions/0036-a-pasted-list-is-proposed-by-the-model-reviewed-by-a-person-and-written-by-the-modules-own-verb.md)):
+`Paste a list` beside `Add animals` on the hub — a herd book typed, copied
+from a spreadsheet, or a photo of the page. This pack's part is one file,
+`paste/target.ts`. Fields: name or tag, what that is (`IDENTIFIER_KINDS`),
+species (the industry's list via `packContext` plus species in use; a typed
+word when there is neither), sex, breed, born, arrived, dam, sire, head,
+counted under. **Two shapes of row**: one named animal through
+`startIndividual` (a digits-only name is a visual tag, and she is placed as one
+head on the day she arrived or was born, today failing both); head > 1 through
+`createLivestockLot` with the count placed. **The stock line** resolves by name
+to an existing head item or is created by `newItemName`, and twenty rows
+saying "Beef cattle" make one item because each row's lookup finds what the
+last made. **Parents are a second pass** in the same transaction: a dam in the
+same list or already on the farm by exact tag; one that is neither is a
+refusal that names the row; `setParents` then applies this pack's rules and
+its refusals surface the same way. No cost, no weight. Guide: `lots.md`.
+
 ### 2026-09-08 — Ask keeps the thread (`claude/ask-keeps-the-thread`)
 
 **Livestock slice 11 of the improvement review — the last on its list.**

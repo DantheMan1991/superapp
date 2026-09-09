@@ -4,11 +4,12 @@
 > **Route:** /dashboard/m/inventory
 > **Order:** 10
 
-Open **Inventory** in the sidebar. The heading reads `What the business holds, where it is, and which batch it came from.` To add something new, click {button:Add item|primary}. On a phone each {{item|lower}} is a card with its figure on the right. On a wide screen the same list is a table.
+Open **Inventory** in the sidebar. The heading reads `What the business holds, where it is, and which batch it came from.` To add something new, click {button:Add item|primary}. To add many at once, click {button:Paste a list|outline|sparkles}. On a phone each {{item|lower}} is a card with its figure on the right. On a wide screen the same list is a table.
 
 ## What you see
 
 - **{button:Add item|primary}.** Opens the dialog that adds a new kind of thing you hold. Owners only.
+- **{button:Paste a list|outline|sparkles}.** Reads a pasted list, or a photo of one, and proposes a row per kind of thing for you to check before anything is added. Owners only. See how to paste a list, below.
 - **The five tabs.** `Items` is this page. `Counting`, `What it is worth` and `Deliveries & invoices` are the other screens. `When it is deducted` only appears for an owner. The strip scrolls sideways on a narrow screen.
 - **`What it is worth`.** The cost standing in stock right now. Click the card to open the full valuation. Underneath it tells you whether every batch carries a cost, or how many are `Short by 2 batches nobody has costed`.
 - **`Not costed`.** How many batches nobody ever put a price on. `None` is the good answer. This card is also a link to the valuation.
@@ -60,10 +61,26 @@ A place is an asset with `Things are kept here` turned on, under [Assets](../ass
 
 The search looks at names only. A bag of feed for the beef herd is not called beef, and the empty state says so. Kind, line of business, place and search combine, so `Meat` with the truck picked is the meat on the truck.
 
+## How to paste a list of what you hold
+
+1. Click {button:Paste a list|outline|sparkles}. `Paste a list of kinds of stock` opens and reads `Paste a list, columns from a spreadsheet, or add a photo of one. You'll see every row it found and can change anything before it saves.`
+2. Paste into `The list`, or click `Or a photo of it` and choose a photo or a PDF of up to 4 MB. A shelf list, a feed-store invoice, or the left-hand column of a spreadsheet all work. The counter under the box reads `0 / 20,000` and counts up. Only what you paste or attach is sent, and nothing else about your business.
+3. Click {button:Read it|primary}. Its label turns to `Reading…` while it works. The line under the title then reads `9 kinds of stock found. Untick what you don't want, fix what's wrong, then add them.`
+4. Check the rows. Each has `Name`; `Kind`, a pick list of feed, produce, meat, egg, supply, livestock, seed, medicine and any kind you already use; `Counted in`, a pick list of the units, which must be chosen; `Bought in`, such as `bag`; `How many, each`, such as `50` for a 50 lb bag; `Kept`, frozen, refrigerated, dry or ambient; and `Notes`. On a wide screen it is a table, on a phone one card per row. When the list said a unit it does not have, the cell is left empty and an amber line reads `The list said “boxes” for counted in — pick one, or leave it blank.`; while a ticked row has no unit, `Counted in is missing.` shows under it and the button stays gray. A row that names something you already hold comes back unticked and reads `Already here as “Layer pellets”. Unticked — tick it to add another.`
+5. Click {button:Add 9 kinds of stock|primary}. It reads `Adding…`, then you see `Added 9 kinds of stock`, the dialog closes and the page refreshes. Nothing is saved until you click it. If any ticked row is refused, nothing is saved at all, and the message names the row.
+
+No quantities and no costs are read. What is on the shelf is recorded as a count or a delivery, and a cost nobody ever tracked stays blank rather than guessed. {button:Start over|ghost} clears the rows and the list you pasted; closing the dialog does the same. Leave ten seconds between readings. At most 200 rows come back from one reading.
+
 ## Messages
 
 | Message | What it means |
 | --- | --- |
+| `Nothing to add from that.` | The reading found nothing of this kind in what you pasted or attached. |
+| `Row 3 (Fence staples): Counted in is missing.` | The third ticked row has no unit. Pick one, or untick the row. |
+| `Row 3 (Fence staples): …` | The third row was refused for the reason given after the colon. Nothing was added. Fix the row and add again. |
+| `Give it a few seconds, then try again.` | Two readings inside ten seconds. |
+| `That file is too large. 4 MB at most.` and `A photo (JPEG, PNG, WebP or GIF) or a PDF.` | The photo is too big, or not a kind it can read. |
+| `It could not read that. Try a cleaner copy, or fewer rows at a time.` | The reading came back in a shape it could not use. |
 | `Item added` | It worked. The new row is in the list. |
 | `Nothing tracked yet` | Nothing has been added. An owner adds the first one. |
 | `Nothing matches` | Your filter or search found nothing. Click {button:Clear filters|outline} to start again. |

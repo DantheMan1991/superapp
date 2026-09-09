@@ -319,7 +319,7 @@ Paste these into the PR. They are the actual gate.
 | `STRIPE_CONNECT_WEBHOOK_SECRET` | Connect events — the tenant's own connected accounts. A SEPARATE endpoint with a separate secret, because Stripe only delivers `account.updated` to a Connect-enabled one | Stripe dashboard |
 | `SQUARE_APPLICATION_ID`, `SQUARE_APPLICATION_SECRET` | The tenant's own Square account, via OAuth (ADR 0017). The secret is sent to Square at code exchange and on revoke, and never anywhere else. `SQUARE_ENVIRONMENT` picks sandbox (the default) or production | Square Developer Console |
 | `SQUARE_WEBHOOK_SIGNATURE_KEY` | Square events. HMAC-SHA256 over the notification URL plus the raw body, so `NEXT_PUBLIC_APP_URL` must match the URL registered in the console exactly | Square Developer Console |
-| `ANTHROPIC_API_KEY` | Copilot, extraction, the site copywriter and the page editor's assistant (Marketing 1, 12) | Anthropic console |
+| `ANTHROPIC_API_KEY` | Copilot, extraction, the site copywriter and the page editor's assistant (Marketing 1, 12), the "Paste a list" dialog (ADR 0036) | Anthropic console |
 | `PLAID_*` | Bank feed | Plaid dashboard |
 | Stalwart / JMAP creds | Mailbox access | Per-deployment |
 
@@ -396,7 +396,11 @@ Two recurring traps:
   instructions found inside one. A section's words and an owner's
   instruction reach the page editor's assistant the same way (Marketing 12):
   the model may only answer with words for the slots it was given, and the
-  code, never the model, decides where they go.
+  code, never the model, decides where they go. A pasted list or a
+  photographed page reaches the "Paste a list" dialog the same way (ADR
+  0036): the model may only propose rows, every row is read by a person
+  before it exists, and the module's own verb writes it — a line in a herd
+  book that reads like an instruction is a row nobody ticks.
 
 ---
 

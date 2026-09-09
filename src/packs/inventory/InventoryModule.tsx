@@ -35,6 +35,7 @@ import { describeExpiring, expiryLabel, splitExpiring } from "./core/expiry";
 import { Button } from "@/components/ui/button";
 import { todayInTimezone } from "@/lib/timezone";
 import { formatMoney } from "@/lib/money";
+import { PasteListButton } from "@/components/app/paste-list-button";
 import { ItemForm } from "./components/item-form";
 import { ItemFilters } from "./components/item-filters";
 import { InventoryNav } from "./components/inventory-nav";
@@ -313,12 +314,20 @@ export async function InventoryModule({
         icon={<Boxes />}
         actions={
           isOwner ? (
-            <ItemForm
-              kindsInUse={kinds.map((k) => k.kind)}
-              enterprises={enterpriseOptions}
-              enterpriseWord={enterpriseWord}
-              livestockEnabled={livestockEnabled}
-            />
+            <div className="flex flex-wrap items-center gap-2">
+              <PasteListButton
+                slug="inventory.items"
+                label="kinds of stock"
+                noun={{ one: "kind of stock", many: "kinds of stock" }}
+                example={"Layer pellets, feed, 50 lb bag\nEggs, dozen\nFence staples, each"}
+              />
+              <ItemForm
+                kindsInUse={kinds.map((k) => k.kind)}
+                enterprises={enterpriseOptions}
+                enterpriseWord={enterpriseWord}
+                livestockEnabled={livestockEnabled}
+              />
+            </div>
           ) : undefined
         }
       />

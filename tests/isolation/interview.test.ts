@@ -74,3 +74,100 @@ d("interview-session isolation (RLS, superadmin only)", () => {
     if (audit) expect(["founder", "self_serve"]).toContain(audit.source);
   });
 });
+
+const STAMP_SI = `iso-setup-iv-${process.pid}`;
+
+/**
+ * The SETUP interview (ADR 0040) is the inward twin of the one above, and its
+ * isolation is the opposite: tenant-scoped rather than superadmin-only,
+ * because the person walking it is signed in and it is about THEIR business.
+ * So the thing to certify is the ordinary one — one tenant's conversation is
+ * invisible to another, and to nobody at all.
+ */
+d("setup-interview isolation (RLS, tenant-scoped)", () => {
+  let tenantA: string;
+  let tenantB: string;
+  let interviewId: string;
+
+  beforeAll(async () => {
+    [tenantA, tenantB] = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.tenants)
+        .values([
+          { clerkOrgId: `${STAMP_SI}-a`, name: "Setup A", slug: `${STAMP_SI}-a` },
+          { clerkOrgId: `${STAMP_SI}-b`, name: "Setup B", slug: `${STAMP_SI}-b` },
+        ])
+        .returning();
+      return [rows[0].id, rows[1].id];
+    });
+    interviewId = await withTenant(tenantA, async (tx) => {
+      const [row] = await tx
+        .insert(schema.setupInterviews)
+        .values({
+          tenantId: tenantA,
+          startedByClerkUserId: `${STAMP_SI}-owner`,
+          messages: [{ role: "assistant", content: "how is your money kept?" }],
+        })
+        .returning();
+      return row.id;
+    });
+  });
+
+  afterAll(async () => {
+    await withSystem(async (tx) => {
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantA));
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantB));
+    });
+  });
+
+  it("the other tenant sees none of it, and cannot write into it", async () => {
+    const rows = await withTenant(tenantB, (tx) =>
+      tx.select().from(schema.setupInterviews),
+    );
+    expect(rows).toHaveLength(0);
+
+    const updated = await withTenant(tenantB, (tx) =>
+      tx
+        .update(schema.setupInterviews)
+        .set({ state: "done" })
+        .where(eq(schema.setupInterviews.id, interviewId))
+        .returning(),
+    );
+    expect(updated).toHaveLength(0);
+
+    // And it cannot forge one against a tenant it is not in.
+    await expect(
+      withTenant(tenantB, (tx) =>
+        tx.insert(schema.setupInterviews).values({
+          tenantId: tenantA,
+          startedByClerkUserId: "forged",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("its own tenant sees it, and nobody at all sees nothing", async () => {
+    const mine = await withTenant(tenantA, (tx) =>
+      tx.select().from(schema.setupInterviews),
+    );
+    expect(mine).toHaveLength(1);
+
+    const none = await withSystem(async (tx) => {
+      await tx.execute(sql`select set_config('app.role', '', true)`);
+      await tx.execute(sql`select set_config('app.tenant_id', '', true)`);
+      return tx.select().from(schema.setupInterviews);
+    });
+    expect(none).toHaveLength(0);
+  });
+
+  it("only one conversation is active at a time", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.setupInterviews).values({
+          tenantId: tenantA,
+          startedByClerkUserId: `${STAMP_SI}-owner`,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+});

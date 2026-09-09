@@ -15,6 +15,61 @@ to be listed by a trades profile unchanged.
 
 ## Build log
 
+### 2026-09-09 — Owned before the books began (`claude/the-asset-opening-balance`)
+
+Onboarding slice 5b ([onboarding.md](onboarding.md), [ADR 0038](../decisions/0038-an-asset-owned-before-the-books-began-arrives-as-two-entries.md)),
+and the last of the plan's three gaps. **Two entries, both dated on the day
+the company's books begin**: the cost `Dr Cost sits in / Cr Opening Balance
+Equity` under source `opening_balance`, and the depreciation already taken
+`Dr Opening Balance Equity / Cr Accumulated depreciation` under source
+`depreciation`.
+
+**The split is load-bearing.** `postedToDateCents` sums the POSITIVE lines of
+an asset's `depreciation` entries, so a cost debit inside one would be read as
+depreciation taken and double the accumulated figure. Under
+`opening_balance` it is also the same shape as a register's opening balance.
+
+**No new mechanism for the old months.** The depreciation entry's key is
+`catchUpKey(asset, throughPeriod)` — the key a stranded catch-up already
+uses — and `periodsCoveredByKey` already expands it to every scheduled period
+up to that one. So `listPostedPeriods` treats 2024 and 2025 as posted and the
+next `postDepreciation` starts at the first month the new books own. The
+period is the last whose month ENDED before the start day, so books that begin
+mid-month leave that month to the new books.
+
+`getAssetOpeningState` names the four prerequisites one at a time
+(`no_books_start`, `no_cost`, `no_asset_account`, `not_before_start`) plus the
+finished state (`already_recorded`), and `openingBlockedMessage` in
+`vocabulary.ts` turns each into the same sentence for the page and the action
+— a `"use server"` module may export only async functions, so a shared string
+helper could not have lived beside the action anyway. `recordAssetOpening`
+takes the PERSON's figure, not the schedule's; the schedule's is offered
+beside the field and the difference is stated.
+
+Tests: `tests/asset-opening-db.test.ts` (6) — the prerequisites one at a time
+through a real staging order (the `assets_depreciable_is_complete` CHECK
+refuses a method before a cost, which is also the order a person fills it in);
+something bought after the day refused; the two entries, their sources, keys
+and the day-one balance sheet; the old months counted as posted so only
+January to March are due; a second recording refused; a barn that is never
+depreciated getting its cost on with no second entry. Guide: `asset.md`.
+
+**Driven on Hilltop (dev).** The tractor pasted in earlier that day had no
+`Cost sits in`, and the section said exactly that in amber with no button —
+the refusal arriving before the press, which is the whole point of
+`getAssetOpeningState`. Setting the account to `1600 Equipment` turned the
+button on; a figure typed with no schedule yet was refused with `This asset's
+depreciation starts on or after the day your books begin`; after a
+straight-line schedule (2019-05-01, 10 years) the field pre-filled
+`12,333.60` and said so, `12,000.00` was recorded instead, and the panel then
+read `Posted to date $12,000.00 · 80 of 120 months`, `Book value $6,500.00`
+and `Post 9 months · $1,387.44 due through 2026-09` — only the months the new
+books own. The Opening page's standing read `1600 Equipment 18,500.00`,
+`1700 Accumulated Depreciation 12,000.00` and `3000 Opening Balance Equity ·
+the plug 7,000.00`, balancing at 19,000.00 against the open invoice's 500.00.
+**Dev fixture now:** Hilltop's Kubota L3901 tractor is on the books with a
+schedule and an opening balance.
+
 ### 2026-09-09 — The register from a pasted list (`claude/paste-the-rest`)
 
 Onboarding slice 2, the last three targets ([onboarding.md](onboarding.md),

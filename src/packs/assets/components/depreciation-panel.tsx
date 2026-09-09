@@ -24,7 +24,30 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { postDepreciationAction, updateAssetAction } from "../actions";
+import {
+  postDepreciationAction,
+  recordAssetOpeningAction,
+  updateAssetAction,
+} from "../actions";
+import { openingBlockedMessage } from "../vocabulary";
+
+/**
+ * What the asset page knows about putting something owned before the books
+ * began onto them (ADR 0038). Absent when the tenant keeps no books.
+ */
+export interface AssetOpeningView {
+  booksStartOn: string | null;
+  /** The server's own reason, or null when it can be recorded. */
+  blocked: string | null;
+  /** Dollars as a string, for the field's starting value. */
+  suggestionInput: string;
+  /** Pre-formatted, like every other figure this component shows. */
+  suggestionLabel: string;
+  throughPeriod: string | null;
+  costLabel: string;
+  /** True once it is on the books — the section then states that and nothing more. */
+  recorded: boolean;
+}
 
 export interface DepreciationView {
   method: string;
@@ -59,18 +82,39 @@ export interface DepreciationView {
 export function DepreciationPanel({
   assetId,
   view,
+  opening,
   canEdit,
 }: {
   assetId: string;
   view: DepreciationView;
+  opening?: AssetOpeningView;
   canEdit: boolean;
 }) {
   const router = useRouter();
   const [setupOpen, setSetupOpen] = useState(false);
+  const [openingOpen, setOpeningOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [method, setMethod] = useState(view.method);
+  const [openingAmount, setOpeningAmount] = useState(
+    opening?.suggestionInput ?? "",
+  );
 
   const configured = view.method !== "none";
+
+  function recordOpening() {
+    const cents = Math.round(Number(openingAmount || "0") * 100);
+    if (!Number.isFinite(cents) || cents < 0) return;
+    startTransition(async () => {
+      const result = await recordAssetOpeningAction({ id: assetId, accumulatedCents: cents });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(`Put on the books as of ${result.entryDate}`);
+      setOpeningOpen(false);
+      router.refresh();
+    });
+  }
 
   function saveSchedule(formData: FormData) {
     const rawSalvage = String(formData.get("salvage") ?? "").trim();
@@ -305,6 +349,93 @@ export function DepreciationPanel({
               </Badge>
             )}
           </>
+        )}
+
+        {/**
+         * OWNED BEFORE THE BOOKS BEGAN (ADR 0038). Outside the `configured`
+         * branch on purpose: a barn that is never depreciated still has to
+         * reach the balance sheet on day one. Shown only while it is a real
+         * question — the tenant keeps books, and this is not already on them.
+         */}
+        {opening && opening.blocked !== "not_before_start" && (
+          <div className="mt-6 border-t pt-4">
+            <h3 className="text-sm font-medium">Owned before your books began</h3>
+            {opening.recorded ? (
+              <p className="mt-1 text-sm text-muted-foreground">
+                On the books as of {opening.booksStartOn}, at {opening.costLabel} less
+                what had been written off by then.
+              </p>
+            ) : (
+              <>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Put its cost and the depreciation already taken on the books, dated
+                  {opening.booksStartOn ? ` ${opening.booksStartOn}` : " the day they begin"}.
+                  {opening.throughPeriod
+                    ? ` Months up to ${opening.throughPeriod} then count as already posted.`
+                    : ""}
+                </p>
+                {opening.blocked ? (
+                  <p className="mt-2 text-xs text-amber-600">
+                    {openingBlockedMessage(opening.blocked)}
+                  </p>
+                ) : (
+                  canEdit && (
+                    <Dialog open={openingOpen} onOpenChange={setOpeningOpen}>
+                      <DialogTrigger asChild>
+                        <Button variant="outline" size="sm" className="mt-3">
+                          Put it on the books
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                          <DialogTitle>Owned before your books began</DialogTitle>
+                          <DialogDescription>
+                            Two entries dated {opening.booksStartOn}: its cost of{" "}
+                            {opening.costLabel} against Opening Balance Equity, and what
+                            had been written off by then against accumulated
+                            depreciation. Nothing before that day is touched.
+                          </DialogDescription>
+                        </DialogHeader>
+
+                        <div className="grid gap-2 py-4">
+                          <Label htmlFor="openingAccumulated">
+                            Depreciation already taken
+                          </Label>
+                          <Input
+                            id="openingAccumulated"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={openingAmount}
+                            onChange={(e) => setOpeningAmount(e.target.value)}
+                            placeholder="0.00"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            {opening.throughPeriod
+                              ? `What your old books had written off by ${opening.booksStartOn}. This schedule would have taken ${opening.suggestionLabel} through ${opening.throughPeriod} — use your own figure if it differs, and the asset finishes that much above or below its salvage value.`
+                              : "What your old books had written off by then. Leave it at zero if none was taken."}
+                          </p>
+                        </div>
+
+                        <DialogFooter>
+                          <Button
+                            variant="ghost"
+                            onClick={() => setOpeningOpen(false)}
+                            disabled={pending}
+                          >
+                            Cancel
+                          </Button>
+                          <Button onClick={recordOpening} disabled={pending}>
+                            {pending ? "Recording…" : "Put it on the books"}
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  )
+                )}
+              </>
+            )}
+          </div>
         )}
       </div>
     </Panel>

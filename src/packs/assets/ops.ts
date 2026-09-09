@@ -39,7 +39,10 @@ export class AssetError extends Error {
       | "NOT_DEPRECIABLE"
       | "DEPRECIATION_ACCOUNTS"
       /** An asset with no company, which only a row from the `0154` window can be. */
-      | "ASSET_NO_COMPANY",
+      | "ASSET_NO_COMPANY"
+      /** Owned before the books began, but not in a state to be put on them (ADR 0038). */
+      | "ASSET_OPENING_BLOCKED"
+      | "ASSET_OPENING_AMOUNT",
     message: string,
   ) {
     super(message);

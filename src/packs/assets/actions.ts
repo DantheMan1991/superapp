@@ -30,7 +30,9 @@ import {
   postAllDepreciation,
   postDepreciation,
   postDisposal,
+  recordAssetOpening,
 } from "./depreciation-ops";
+import { openingBlockedMessage } from "./vocabulary";
 import { todayInTimezone } from "@/lib/timezone";
 import {
   createSchedule,
@@ -92,7 +94,15 @@ function toResult(err: unknown): { error: string } {
       case "NOT_DEPRECIABLE":
         return { error: "Set a method, in-service date, life and cost first." };
       case "DEPRECIATION_ACCOUNTS":
+      case "ASSET_OPENING_AMOUNT":
         return { error: err.message };
+      /**
+       * The page shows the same reason as a sentence before the button is
+       * pressed, so this is the race — somebody cleared the start day, or
+       * recorded it in another tab, between the page loading and the save.
+       */
+      case "ASSET_OPENING_BLOCKED":
+        return { error: openingBlockedMessage(err.message) };
     }
   }
   // Photos are Documents' rows, so its refusals arrive here already written
@@ -449,6 +459,69 @@ export async function postDepreciationAction(input: unknown) {
   } catch (err) {
     // A closed period is a legitimate refusal from the ledger, not a bug —
     // say so in the ledger's own words rather than "something went wrong".
+    if (err instanceof LedgerError) return { error: friendlyMessage(err) };
+    return toResult(err);
+  }
+}
+
+const openingSchema = z.object({
+  id: z.string().uuid(),
+  /** Cents. What the old books say had been written off by the start day. */
+  accumulatedCents: z.number().int().min(0),
+});
+
+/**
+ * Put an asset the business already owned onto the books it is starting
+ * (ADR 0038). Two entries, both dated on the day the books begin: the cost
+ * against Opening Balance Equity, and the depreciation already taken against
+ * accumulated depreciation.
+ */
+export async function recordAssetOpeningAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = openingSchema.safeParse(input);
+  if (!parsed.success) return { error: "Enter what had been written off by then." };
+
+  const assetCtx: AssetCtx = {
+    tenantId: ctx.tenant.id,
+    userId: ctx.userId,
+    role: ctx.role,
+  };
+
+  try {
+    const result = await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        const asset = await getAsset(tx, ctx.tenant.id, parsed.data.id);
+        if (!asset) throw new AssetError("NOT_FOUND", "asset not found");
+        const config = await readPackConfig(tx, ctx.tenant.id);
+        return recordAssetOpening(
+          tx,
+          assetCtx,
+          asset,
+          { accumulatedCents: parsed.data.accumulatedCents },
+          config,
+        );
+      },
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "asset.opening_recorded",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "asset",
+      targetId: parsed.data.id,
+      meta: {
+        entryDate: result.entryDate,
+        costCents: result.costCents,
+        accumulatedCents: result.accumulatedCents,
+      },
+    });
+    revalidatePath(`/dashboard/m/assets/${parsed.data.id}`);
+    revalidatePath("/dashboard/m/assets");
+    revalidatePath("/dashboard/m/accounting/opening");
+    return { ok: true, ...result };
+  } catch (err) {
     if (err instanceof LedgerError) return { error: friendlyMessage(err) };
     return toResult(err);
   }

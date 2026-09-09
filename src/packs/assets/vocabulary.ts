@@ -43,3 +43,30 @@ export function assetKindLabel(kind: string): string {
   const spaced = kind.replace(/_/g, " ");
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
+
+/**
+ * Why something owned before the books began cannot be put on them yet, in
+ * the person's words (ADR 0038).
+ *
+ * HERE RATHER THAN IN `actions.ts` because both sides say it: the asset's
+ * page explains it before the button is pressed, and the action says it again
+ * if the state changed underneath. A `"use server"` module may export nothing
+ * but async functions, so a shared string helper could not live there anyway —
+ * and one copy is what stops the two from drifting apart.
+ */
+export function openingBlockedMessage(blocked: string): string {
+  switch (blocked) {
+    case "no_books_start":
+      return "Say when your books begin first, on the Opening position page. That is the day this lands on.";
+    case "no_cost":
+      return "Record what it cost first. An opening balance is that figure going onto the books.";
+    case "no_asset_account":
+      return "Choose the account its cost sits in first, under Edit.";
+    case "not_before_start":
+      return "Give it an acquired date before the day your books begin. Anything bought since then reaches the books through its bill.";
+    case "already_recorded":
+      return "This is already on the books. A correction is a journal entry.";
+    default:
+      return "This cannot be put on the books yet.";
+  }
+}

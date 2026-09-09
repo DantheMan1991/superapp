@@ -35,9 +35,11 @@ import {
 } from "@/packs/assets/components/asset-controls";
 import {
   DepreciationPanel,
+  type AssetOpeningView,
   type DepreciationView,
 } from "@/packs/assets/components/depreciation-panel";
 import {
+  getAssetOpeningState,
   getDepreciationStatus,
   postedToDateCents,
 } from "@/packs/assets/depreciation-ops";
@@ -139,13 +141,16 @@ export default async function AssetDetailPage({
       const companies = await listEntities(tx, ctx.tenant.id, {
         includeInactive: true,
       });
-      return { asset, parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers, registers, companies, attachments, stock };
+      // Whether this is something the business already owned when its books
+      // began, and what the schedule thinks was taken by then (ADR 0038).
+      const opening = await getAssetOpeningState(tx, ctx.tenant.id, asset);
+      return { asset, parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers, registers, companies, attachments, stock, opening };
     },
     { role: ctx.role },
   );
 
   if (!data) notFound();
-  const { asset, parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers, registers, companies, attachments, stock } = data;
+  const { asset, parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers, registers, companies, attachments, stock, opening } = data;
   // The picture per asset the founder asked for on 2026-08-15, arriving with
   // livestock's — one Layer 0 table, two packs. The FILE is the DMS's, so the
   // panel exists only where the DMS does.
@@ -214,6 +219,20 @@ export default async function AssetDetailPage({
     currentPeriod,
     scheduleLength: depreciation?.schedule.length ?? 0,
     postedCount: depreciation?.postedPeriods.length ?? 0,
+  };
+
+  /**
+   * Owned before the books began (ADR 0038). `already_recorded` is shown as a
+   * statement rather than a refusal — it is the finished state, not a problem.
+   */
+  const openingView: AssetOpeningView = {
+    booksStartOn: opening.booksStartOn,
+    blocked: opening.blocked === "already_recorded" ? null : opening.blocked,
+    recorded: opening.blocked === "already_recorded",
+    suggestionInput: (opening.scheduleAccumulatedCents / 100).toFixed(2),
+    suggestionLabel: formatMoney(opening.scheduleAccumulatedCents, currencySymbol),
+    throughPeriod: opening.throughPeriod,
+    costLabel: depreciationView.costLabel,
   };
 
   const view: AssetDetailView = {
@@ -472,6 +491,7 @@ export default async function AssetDetailPage({
         <DepreciationPanel
           assetId={asset.id}
           view={depreciationView}
+          opening={openingView}
           canEdit={isOwner}
         />
 

@@ -3,6 +3,8 @@ import { and, eq, gt, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { Asset } from "@/db/schema";
 import {
+  findOpeningBalanceAccountId,
+  getBooksStartOn,
   getClosedThrough,
   listDimensionMembers,
   postEntry,
@@ -250,8 +252,14 @@ export async function postedToDateCents(
         eq(schema.journalEntries.source, "depreciation"),
         eq(schema.journalEntries.sourceId, assetId),
         eq(schema.journalEntries.status, "posted"),
-        // The debit half. Each entry is one debit to expense and one credit to
-        // accumulated, so the positives are the depreciation taken.
+        /**
+         * The debit half. An ordinary entry is one debit to expense and one
+         * credit to accumulated; the opening entry of an asset owned before
+         * the books began (ADR 0038) debits Opening Balance Equity instead.
+         * Either way the positive line IS the depreciation taken, which is why
+         * the cost half of that opening balance is deliberately a separate
+         * entry under another source.
+         */
         gt(schema.journalLines.amountCents, 0),
       ),
     );
@@ -605,4 +613,220 @@ export async function postAllDepreciation(
     result.caughtUpCount += one.caughtUpCount;
   }
   return result;
+}
+
+/* -- Owned before the books began (ADR 0038) ------------------------------ */
+
+/** The cost entry's key. One per asset, for ever — see `getAssetOpeningState`. */
+function openingCostKey(assetId: string): string {
+  return `opening:asset:${assetId}`;
+}
+
+export interface AssetOpeningState {
+  /** The company's first day, or null when nobody has said (ADR 0035). */
+  booksStartOn: string | null;
+  /**
+   * Why an opening balance cannot be recorded, or null when it can. Read by
+   * the asset's page so it can explain BEFORE the button is pressed, which is
+   * the lesson `postDisposal`'s `reason` learned the other way round.
+   */
+  blocked:
+    | "no_books_start"
+    | "no_cost"
+    | "no_asset_account"
+    | "not_before_start"
+    | "already_recorded"
+    | null;
+  /**
+   * The last scheduled period whose month ENDED before the start day — what
+   * the depreciation entry's key says it covers. Null when the asset is not
+   * depreciated, or when its schedule starts on or after the day.
+   */
+  throughPeriod: string | null;
+  /** What the schedule says was taken through that period. A suggestion, never the answer. */
+  scheduleAccumulatedCents: number;
+  costCents: number | null;
+}
+
+/**
+ * Can this asset's opening balance be recorded, and what does the schedule
+ * think was already taken?
+ */
+export async function getAssetOpeningState(
+  tx: Tx,
+  tenantId: string,
+  asset: Asset,
+): Promise<AssetOpeningState> {
+  const booksStartOn = asset.entityId
+    ? await getBooksStartOn(tx, tenantId, asset.entityId)
+    : null;
+
+  const input = scheduleInputFor(asset);
+  const schedule = input ? buildSchedule(input) : [];
+  /**
+   * A period belongs to the OLD books when its month ENDED before the day.
+   * Books that begin mid-month leave that month to the new books, where its
+   * depreciation is posted month by month like any other.
+   */
+  const covered = booksStartOn
+    ? schedule.filter((r) => periodEndDate(r.period) < booksStartOn)
+    : [];
+  const state = {
+    booksStartOn,
+    throughPeriod: covered.at(-1)?.period ?? null,
+    scheduleAccumulatedCents: covered.at(-1)?.accumulatedCents ?? 0,
+    costCents: asset.acquisitionCostCents,
+  };
+
+  if (!booksStartOn) return { ...state, blocked: "no_books_start" as const };
+  if (asset.acquisitionCostCents === null) return { ...state, blocked: "no_cost" as const };
+  if (!asset.assetAccountId) return { ...state, blocked: "no_asset_account" as const };
+  const ownedFrom = asset.acquiredOn ?? asset.inServiceOn;
+  if (!ownedFrom || ownedFrom >= booksStartOn) {
+    return { ...state, blocked: "not_before_start" as const };
+  }
+
+  /**
+   * ALREADY IN THE BOOKS, by either half. The cost entry's key is one per
+   * asset for ever — the ledger's unique index on it is not freed by a void —
+   * and depreciation already posted would be double-counted by an opening
+   * figure laid on top. Both are the same answer to the person: this is
+   * recorded, and a correction is a journal entry.
+   */
+  const prior = await tx
+    .select({ id: schema.journalEntries.id })
+    .from(schema.journalEntries)
+    .where(
+      and(
+        eq(schema.journalEntries.tenantId, tenantId),
+        eq(schema.journalEntries.idempotencyKey, openingCostKey(asset.id)),
+      ),
+    );
+  if (prior.length > 0) return { ...state, blocked: "already_recorded" as const };
+  if ((await postedToDateCents(tx, tenantId, asset.id)) > 0) {
+    return { ...state, blocked: "already_recorded" as const };
+  }
+
+  return { ...state, blocked: null };
+}
+
+export interface AssetOpeningPosted {
+  entryDate: string;
+  costCents: number;
+  accumulatedCents: number;
+  /** The period the depreciation entry covers, or null when none was written. */
+  throughPeriod: string | null;
+}
+
+/**
+ * Put an asset the business already owned onto the books it is starting.
+ *
+ * TWO ENTRIES, both dated on the day the books begin (ADR 0038):
+ *
+ *   Dr  Cost sits in              cost           source `opening_balance`
+ *       Cr  Opening Balance Equity
+ *
+ *   Dr  Opening Balance Equity    already taken  source `depreciation`
+ *       Cr  Accumulated depreciation
+ *
+ * THE SPLIT IS NOT COSMETIC. `postedToDateCents` sums the POSITIVE lines of
+ * this asset's `depreciation` entries, so a cost debit inside one would be
+ * read as depreciation taken. Keeping the cost under `opening_balance` also
+ * makes it the same shape as a register's opening balance, which is the only
+ * other thing in the product that puts a starting figure on the books.
+ *
+ * The depreciation entry's key is `catchUpKey(asset, throughPeriod)`, which
+ * `periodsCoveredByKey` already reads as "every scheduled period up to and
+ * including this one". So the old books' months are marked posted by the very
+ * mechanism a catch-up uses, and the next `postDepreciation` starts at the
+ * first month the new books own. No new concept, and nothing to keep in step.
+ *
+ * THE FIGURE IS THE PERSON'S, not the schedule's. The old books were kept by
+ * somebody, possibly on a convention this app does not model, and their number
+ * is the true one. The schedule's figure is offered beside it as a suggestion,
+ * and where the two disagree the asset finishes above or below its salvage
+ * value — which the guide says plainly rather than quietly correcting.
+ */
+export async function recordAssetOpening(
+  tx: Tx,
+  ctx: AssetCtx,
+  asset: Asset,
+  args: { accumulatedCents: number },
+  config?: unknown,
+): Promise<AssetOpeningPosted> {
+  if (ctx.role !== "owner") {
+    throw new AssetError("FORBIDDEN", "owner role required");
+  }
+  const state = await getAssetOpeningState(tx, ctx.tenantId, asset);
+  if (state.blocked) {
+    throw new AssetError("ASSET_OPENING_BLOCKED", state.blocked);
+  }
+  const entryDate = state.booksStartOn!;
+  const cost = asset.acquisitionCostCents!;
+  const accumulated = Math.round(args.accumulatedCents);
+  if (accumulated < 0 || accumulated > cost) {
+    throw new AssetError(
+      "ASSET_OPENING_AMOUNT",
+      "Depreciation already taken cannot be negative, or more than what it cost.",
+    );
+  }
+  if (accumulated > 0 && !state.throughPeriod) {
+    throw new AssetError(
+      "ASSET_OPENING_AMOUNT",
+      "This asset's depreciation starts on or after the day your books begin, so none was taken before it.",
+    );
+  }
+
+  const obeAccountId = await findOpeningBalanceAccountId(tx, ctx.tenantId);
+  const members = await listDimensionMembers(tx, ctx.tenantId, ASSET_DIMENSION);
+  const member = members.find((m) => m.packEntityId === asset.id);
+  const dimensionMemberIds = member ? [member.id] : undefined;
+
+  await postEntry(tx, ctx, {
+    entityId: entityOf(asset),
+    status: "posted",
+    entryDate,
+    memo: `Opening balance — ${asset.name}`,
+    source: "opening_balance",
+    sourceId: asset.id,
+    idempotencyKey: openingCostKey(asset.id),
+    lines: [
+      {
+        accountId: asset.assetAccountId!,
+        amountCents: cost,
+        memo: asset.name,
+        dimensionMemberIds,
+      },
+      { accountId: obeAccountId, amountCents: -cost, memo: asset.name },
+    ],
+  });
+
+  if (accumulated > 0) {
+    const accounts = await resolveDepreciationAccounts(tx, ctx.tenantId, config);
+    await postEntry(tx, ctx, {
+      entityId: entityOf(asset),
+      status: "posted",
+      entryDate,
+      memo: `Depreciation already taken — ${asset.name} (through ${state.throughPeriod})`,
+      source: "depreciation",
+      sourceId: asset.id,
+      idempotencyKey: catchUpKey(asset.id, state.throughPeriod!),
+      lines: [
+        { accountId: obeAccountId, amountCents: accumulated, memo: asset.name },
+        {
+          accountId: accounts.accumulatedAccountId,
+          amountCents: -accumulated,
+          memo: asset.name,
+          dimensionMemberIds,
+        },
+      ],
+    });
+  }
+
+  return {
+    entryDate,
+    costCents: cost,
+    accumulatedCents: accumulated,
+    throughPeriod: accumulated > 0 ? state.throughPeriod : null,
+  };
 }

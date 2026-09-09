@@ -1961,6 +1961,13 @@
       "when": 1788917687053,
       "tag": "0279_personal_register_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 280,
+      "version": "7",
+      "when": 1788921449932,
+      "tag": "0280_fast_proemial_gods",
+      "breakpoints": true
     }
   ]
 }

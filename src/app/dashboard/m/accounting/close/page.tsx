@@ -37,7 +37,7 @@ import {
   monthEndIso,
 } from "@/modules/accounting/lib/dates";
 import { isValidIsoDate, todayInTimezone } from "@/modules/accounting/lib/money";
-import { CloseControls, ReopenCloseButton } from "./close-controls";
+import { BooksStartControls, CloseControls, ReopenCloseButton } from "./close-controls";
 import { ExportBooksDialog } from "@/modules/accounting/components/export-books-dialog";
 
 export const dynamic = "force-dynamic";
@@ -204,6 +204,31 @@ export default async function ClosePage({
           ))}
         </div>
       )}
+
+      {/* THE OTHER END OF THE PERIOD (ADR 0035). The close is the day the books
+          are locked through; this is the day they begin. Same page, same
+          company, because both are bounds on the same set of books. */}
+      <Card>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
+          <div>
+            <CardTitle>
+              Books begin on{data.showPicker ? ` — ${data.entity.name}` : ""}
+            </CardTitle>
+            <CardDescription>
+              {data.entity.booksStartOn
+                ? `${data.entity.booksStartOn}. Nothing may be dated before this day, and an imported statement drops the earlier lines. Opening balances are dated on it.`
+                : "Not set. Until it is, nothing stops a line from before your books began being posted, and an imported statement keeps every row it holds."}
+            </CardDescription>
+          </div>
+          {ctx.role === "owner" && (
+            <BooksStartControls
+              entityId={data.entity.id}
+              entityName={data.showPicker ? data.entity.name : undefined}
+              booksStartOn={data.entity.booksStartOn}
+            />
+          )}
+        </CardHeader>
+      </Card>
 
       {data.checklist && (
         <Card>

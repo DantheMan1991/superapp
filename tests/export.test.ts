@@ -51,6 +51,7 @@ function minimalBooksData(): BooksData {
         isDefault: true, isActive: true,
         // The period lock lives here since ADR 0010 slice 4.
         closedThrough: "2026-06-30",
+        booksStartOn: "2026-01-01",
         createdAt: new Date(), updatedAt: new Date(),
       },
     ],

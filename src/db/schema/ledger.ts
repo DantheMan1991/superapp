@@ -289,6 +289,18 @@ export const entities = pgTable(
      * close history unrepresentable.
      */
     closedThrough: date("closed_through", { mode: "string" }),
+    /**
+     * The OTHER end of the period (ADR 0035, 2026-09-08): the first day this
+     * company's books cover. Null = never said. Nothing may be dated before
+     * it — `assertPeriodOpen` refuses, the way it refuses a date inside the
+     * closed period — and an import drops earlier lines rather than carrying
+     * history in. Per company for the reason `closed_through` is: two
+     * companies in one tenant begin and close on different days.
+     *
+     * Written by `setBooksStartOn` only, owner-only, and never to a day after
+     * money already recorded or after `closed_through`.
+     */
+    booksStartOn: date("books_start_on", { mode: "string" }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

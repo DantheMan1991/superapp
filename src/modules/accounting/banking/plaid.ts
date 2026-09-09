@@ -145,6 +145,8 @@ export interface SyncResult {
   modified: number;
   removed: number;
   skippedUnlinked: number;
+  /** Rows dated before their company's books begin, left out (ADR 0035). */
+  skippedBeforeStart: number;
   rules: ApplyRulesResult;
 }
 
@@ -182,6 +184,25 @@ export async function syncPlaidItem(
   const byPlaidAccount = new Map(
     linked.filter((b) => b.isActive).map((b) => [b.plaidAccountId!, b]),
   );
+  // The day each linked register's company's books begin (ADR 0035). A feed
+  // reaches back as far as the bank keeps, and rows from before that day are
+  // not staged — the same rule the CSV import applies.
+  const entityIds = [...new Set(linked.map((b) => b.entityId))];
+  const startOfEntity = new Map(
+    entityIds.length === 0
+      ? []
+      : (
+          await withTenant(ctx.tenantId, (tx) =>
+            tx.query.entities.findMany({
+              where: and(
+                eq(schema.entities.tenantId, ctx.tenantId),
+                inArray(schema.entities.id, entityIds),
+              ),
+              columns: { id: true, booksStartOn: true },
+            }),
+          )
+        ).map((e) => [e.id, e.booksStartOn] as const),
+  );
   const accessToken = decryptSecret(item.accessTokenEnc);
 
   const result: SyncResult = {
@@ -189,6 +210,7 @@ export async function syncPlaidItem(
     modified: 0,
     removed: 0,
     skippedUnlinked: 0,
+    skippedBeforeStart: 0,
     rules: { matched: 0, autoPosted: 0, excluded: 0, skippedLocked: 0, skippedClosed: 0 },
   };
   let cursor = item.syncCursor ?? undefined;
@@ -210,6 +232,11 @@ export async function syncPlaidItem(
           const bank = byPlaidAccount.get(staged.plaidAccountId);
           if (!bank) {
             result.skippedUnlinked += 1;
+            continue;
+          }
+          const start = startOfEntity.get(bank.entityId);
+          if (start && staged.txnDate < start) {
+            result.skippedBeforeStart += 1;
             continue;
           }
           const rows = await tx

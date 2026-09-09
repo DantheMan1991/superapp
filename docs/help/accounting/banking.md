@@ -58,6 +58,8 @@ To stop the feed, click {button:Disconnect|ghost}. The dialog is `Disconnect [ba
 | `Connect a bank` and `Connect an account or add one manually, and the feed starts filling in.` | No accounts exist yet. The buttons are in the title row. |
 | `Opening balance needs an as-of date` | You entered a balance without its date. |
 | `A personal account has no opening balance and is never reconciled — only the lines you mark as the business's reach the books, so its balance was never the business's.` | An opening balance, or a reconciliation, was asked for on a personal account. Neither exists for it. |
+| `Synced: 12 new, 0 updated, 0 removed, 8 from before the books began left out` | The feed reached back before the day the company's books begin; those rows were not brought in. See [Close](close.md). |
+| `That date is before the day your books begin. Anything from before then stays where it was — the books start with balances on that day, not with history.` | A quick add, or an opening balance, was dated before the day the books begin. Set that day on the Close page. |
 | `Plaid is in sandbox mode — bank connections use Plaid's test institutions, not real banks.` | The feed is running against test banks. |
 | `1,240.00 waiting in Undeposited Funds · 3 payments not yet banked.` | Customer payments were recorded into Undeposited Funds and no deposit has banked them yet. See [Deposits](deposits.md). |
 

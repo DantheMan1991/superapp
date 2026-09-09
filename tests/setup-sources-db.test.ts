@@ -6,6 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { schema, withSystem, withTenant, type Tx } from "../src/db";
 import { collectSetup, enabledSetupSources } from "../src/lib/setup-sources/resolve";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
+import { getDefaultEntityId, setBooksStartOn } from "../src/modules/accounting/core";
 import { createBankAccount } from "../src/modules/accounting/banking/accounts";
 import { createParty } from "../src/lib/parties";
 import { createAsset } from "../src/packs/assets/ops";
@@ -81,6 +82,8 @@ d("setup sources", () => {
     expect(result.complete).toBe(true);
     expect(result.failed).toEqual([]);
     expect(result.steps.map((s) => s.key)).toEqual([
+      // The first decision of a conversion comes first (ADR 0035).
+      "accounting.books-start",
       "accounting.bank-account",
       "assets.first",
       "inventory.items",
@@ -93,6 +96,7 @@ d("setup sources", () => {
       "email.mailbox",
     ]);
     expect(result.steps.map((s) => s.section)).toEqual([
+      "Accounting",
       "Accounting",
       "Assets",
       "Inventory",
@@ -146,6 +150,14 @@ d("setup sources", () => {
     );
     result = await collect();
     expect(result.steps.map((s) => s.key)).not.toContain("accounting.transactions");
+    // The one accounting step left is the day the books begin (ADR 0035);
+    // saying it clears the section.
+    expect(result.steps.filter((s) => s.section === "Accounting").map((s) => s.key)).toEqual([
+      "accounting.books-start",
+    ]);
+    const entityId = await asOwner((tx) => getDefaultEntityId(tx, tenantId));
+    await asOwner((tx) => setBooksStartOn(tx, ctx(), { entityId, date: "2026-01-01" }));
+    result = await collect();
     expect(result.steps.filter((s) => s.section === "Accounting")).toEqual([]);
   });
 

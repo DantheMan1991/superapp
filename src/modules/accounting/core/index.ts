@@ -9,11 +9,13 @@ export {
   assertEntryNotSourceManaged,
   assertNotIntercompanyLeg,
   assertPeriodOpen,
+  getBooksStartOn,
   getClosedThrough,
   getSettings,
   requireOwnerRole,
   requirePostingRight,
   requireReviewRole,
+  setBooksStartOn,
   setClosedThrough,
   MACHINE_SOURCES,
 } from "./guards";

@@ -89,6 +89,7 @@ On a personal account the same button is {button:Personal|ghost}, the message is
 | `Set aside as personal` and `Set aside 42 as personal` | On a personal account: one transaction, or many, moved to `Personal` without posting. {button:Undo|link} on the single one brings it back. |
 | `Posted 3, set aside 9 as personal` | {button:Accept 12 suggestions (≥70%)|outline} on a personal account posted the business's lines and set aside the ones the assistant called personal. |
 | `A personal account has no opening balance and is never reconciled — only the lines you mark as the business's reach the books, so its balance was never the business's.` | Something asked this account to reconcile. It never does. |
+| `That date is before the day your books begin. Anything from before then stays where it was — the books start with balances on that day, not with history.` | The row you tried to post is dated before the day the company's books begin. Exclude it, or move the day on the Close page if it is wrong. |
 | `No transactions here yet.` | The tab is empty. |
 | `Nothing matches “…”. Try fewer words, or clear the search.` | Nothing on this tab has what you typed in its description, its payee or its amount. |
 | `Suggestions were just requested — try again in a moment.` | You asked the assistant twice within half a minute. |

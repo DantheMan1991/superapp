@@ -39,6 +39,9 @@ export type LedgerErrorCode =
   | "BANK_ACCOUNT_NOT_FOUND"
   | "BANK_ACCOUNT_INACTIVE"
   | "PERSONAL_REGISTER"
+  | "BEFORE_BOOKS_START"
+  | "BOOKS_START_HAS_ENTRIES"
+  | "BOOKS_START_AFTER_CLOSE"
   | "RECON_ACTIVE_EXISTS"
   | "RECON_NOT_OPEN"
   | "RECON_NOT_BALANCED"
@@ -147,6 +150,14 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
     "A line is coded to an account that cannot be chosen by hand. Pick an ordinary account — or, if a match set it, undo the match first.",
   PERIOD_CLOSED:
     "That date falls in a closed period. Use a reversal, or reopen the period first.",
+  // The lower bound of the books (ADR 0035). Static like the rest — the Close
+  // page shows the date itself; the message says what the rule is for.
+  BEFORE_BOOKS_START:
+    "That date is before the day your books begin. Anything from before then stays where it was — the books start with balances on that day, not with history.",
+  BOOKS_START_HAS_ENTRIES:
+    "Entries are already dated before that day. The books cannot begin after money already recorded — pick the earliest date, or void those entries first.",
+  BOOKS_START_AFTER_CLOSE:
+    "The books are already closed through a later date than that, so they cannot begin there.",
   ENTRY_NOT_FOUND: "That entry no longer exists.",
   ENTRY_NOT_DRAFT: "Only draft entries can be changed this way.",
   ENTRY_NOT_POSTED: "Only posted entries can be voided or reversed.",

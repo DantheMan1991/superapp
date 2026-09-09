@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { schema, type Tx } from "@/db";
-import { requireOwnerRole, type LedgerCtx } from "../core";
+import { getBooksStartOn, requireOwnerRole, type LedgerCtx } from "../core";
 import { loadWritableBankAccount } from "./accounts";
 import { applyRulesToUnreviewed, type ApplyRulesResult } from "./rules";
 import type { NormalizedTxn } from "./csv-parse";
@@ -25,14 +25,28 @@ export async function importTransactions(
 ): Promise<{
   imported: number;
   skippedDuplicates: number;
+  /** Rows dated before the register's company's books begin (ADR 0035). */
+  skippedBeforeStart: number;
+  booksStartOn: string | null;
   rules: ApplyRulesResult;
 }> {
   requireOwnerRole(ctx);
   const bankAccount = await loadWritableBankAccount(tx, ctx.tenantId, args.bankAccountId);
+  /**
+   * Lines from before the books began are NOT imported, rather than imported
+   * and set aside (ADR 0035): a row the books can never take would sit on the
+   * Excluded tab forever and be one Restore away from posting 2025 into 2026.
+   * Counted, so the summary can say what happened to them.
+   */
+  const booksStartOn = await getBooksStartOn(tx, ctx.tenantId, bankAccount.entityId);
+  const eligible = booksStartOn
+    ? args.txns.filter((t) => t.txnDate >= booksStartOn)
+    : args.txns;
+  const skippedBeforeStart = args.txns.length - eligible.length;
   let imported = 0;
   const CHUNK = 500;
-  for (let i = 0; i < args.txns.length; i += CHUNK) {
-    const chunk = args.txns.slice(i, i + CHUNK);
+  for (let i = 0; i < eligible.length; i += CHUNK) {
+    const chunk = eligible.slice(i, i + CHUNK);
     const rows = await tx
       .insert(schema.bankTransactions)
       .values(
@@ -56,5 +70,11 @@ export async function importTransactions(
   const rules = await applyRulesToUnreviewed(tx, ctx, {
     bankAccountId: bankAccount.id,
   });
-  return { imported, skippedDuplicates: args.txns.length - imported, rules };
+  return {
+    imported,
+    skippedDuplicates: eligible.length - imported,
+    skippedBeforeStart,
+    booksStartOn,
+    rules,
+  };
 }

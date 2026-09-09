@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { AccountingSettings } from "@/db/schema";
 import { LedgerError } from "./errors";
@@ -187,13 +187,118 @@ export async function assertPeriodOpen(
   entityId: string,
   entryDate: string,
 ): Promise<void> {
-  const closedThrough = await getClosedThrough(tx, tenantId, entityId);
+  // Both ends of the period in one read: the day the books begin (ADR 0035)
+  // and the day they are closed through. A date before the start is refused
+  // first — it is also inside any close there is, and the start is the more
+  // specific thing to say about it.
+  const row = await tx.query.entities.findFirst({
+    where: and(
+      eq(schema.entities.tenantId, tenantId),
+      eq(schema.entities.id, entityId),
+    ),
+    columns: { closedThrough: true, booksStartOn: true },
+  });
+  if (!row) {
+    throw new LedgerError("ENTITY_NOT_FOUND", `entity ${entityId} not found`);
+  }
+  if (row.booksStartOn && entryDate < row.booksStartOn) {
+    throw new LedgerError("BEFORE_BOOKS_START", `books begin ${row.booksStartOn}`, {
+      booksStartOn: row.booksStartOn,
+      entryDate,
+    });
+  }
+  const closedThrough = row.closedThrough;
   if (closedThrough && entryDate <= closedThrough) {
     throw new LedgerError("PERIOD_CLOSED", `period closed through ${closedThrough}`, {
       closedThrough,
       entryDate,
     });
   }
+}
+
+/**
+ * The first day ONE COMPANY's books cover, or null when nobody has said
+ * (ADR 0035). The other bound of the period `getClosedThrough` reads.
+ */
+export async function getBooksStartOn(
+  tx: Tx,
+  tenantId: string,
+  entityId: string,
+): Promise<string | null> {
+  const row = await tx.query.entities.findFirst({
+    where: and(
+      eq(schema.entities.tenantId, tenantId),
+      eq(schema.entities.id, entityId),
+    ),
+    columns: { booksStartOn: true },
+  });
+  if (!row) {
+    throw new LedgerError("ENTITY_NOT_FOUND", `entity ${entityId} not found`);
+  }
+  return row.booksStartOn;
+}
+
+/**
+ * Set, move or clear the day ONE COMPANY's books begin. Owner-only.
+ *
+ * Earlier is always allowed and clearing is always allowed; the two refusals
+ * are the two ways the day could contradict the books. It cannot be moved past
+ * money already recorded — a non-void entry dated before the proposed day —
+ * because then the books would begin after their own first entry; and it
+ * cannot lie after the close, because the closed period would then contain
+ * days the books do not cover.
+ */
+export async function setBooksStartOn(
+  tx: Tx,
+  ctx: LedgerCtx,
+  args: { entityId: string; date: string | null },
+): Promise<{ before: string | null; after: string | null }> {
+  requireOwnerRole(ctx);
+  const row = await tx.query.entities.findFirst({
+    where: and(
+      eq(schema.entities.tenantId, ctx.tenantId),
+      eq(schema.entities.id, args.entityId),
+    ),
+    columns: { closedThrough: true, booksStartOn: true },
+  });
+  if (!row) {
+    throw new LedgerError("ENTITY_NOT_FOUND", `entity ${args.entityId} not found`);
+  }
+  if (args.date !== null) {
+    if (row.closedThrough && args.date > row.closedThrough) {
+      throw new LedgerError("BOOKS_START_AFTER_CLOSE", `closed through ${row.closedThrough}`, {
+        closedThrough: row.closedThrough,
+        booksStartOn: args.date,
+      });
+    }
+    const [{ n }] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(schema.journalEntries)
+      .where(
+        and(
+          eq(schema.journalEntries.tenantId, ctx.tenantId),
+          eq(schema.journalEntries.entityId, args.entityId),
+          sql`${schema.journalEntries.status} <> 'void'`,
+          sql`${schema.journalEntries.entryDate} < ${args.date}`,
+        ),
+      );
+    if (n > 0) {
+      throw new LedgerError("BOOKS_START_HAS_ENTRIES", `${n} entries before ${args.date}`, {
+        count: n,
+        booksStartOn: args.date,
+      });
+    }
+  }
+  await tx
+    .update(schema.entities)
+    .set({ booksStartOn: args.date, updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.entities.tenantId, ctx.tenantId),
+        eq(schema.entities.id, args.entityId),
+      ),
+    );
+  return { before: row.booksStartOn, after: args.date };
 }
 
 /**

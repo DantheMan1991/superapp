@@ -694,8 +694,13 @@ export function PlaidConnectionCard({
       const result = await syncPlaidItemAction({ plaidItemId: item.plaidItemId });
       if ("error" in result) toast.error(result.error);
       else {
-        const { added, modified, removed } = result.data!;
-        toast.success(`Synced: ${added} new, ${modified} updated, ${removed} removed`);
+        const { added, modified, removed, skippedBeforeStart } = result.data!;
+        toast.success(
+          `Synced: ${added} new, ${modified} updated, ${removed} removed` +
+            (skippedBeforeStart > 0
+              ? `, ${skippedBeforeStart} from before the books began left out`
+              : ""),
+        );
         router.refresh();
       }
     });

@@ -8,6 +8,7 @@ import { formatMoney } from "@/lib/money";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { DataTable } from "@/components/app/data-table";
+import { LinkRow } from "@/components/app/link-row";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -19,7 +20,7 @@ import {
 } from "@/components/ui/table";
 import {
   adjustmentReasons,
-  countLines,
+  lineCountsByCount,
   listCounts,
   listLocations,
 } from "@/packs/inventory/ops";
@@ -63,24 +64,33 @@ export default async function InventoryCountsPage() {
   const { counts, lineCounts, locations, reasons } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
-      const [counts, locations, reasons] = await Promise.all([
+      const [counts, lineCounts, locations, reasons] = await Promise.all([
         listCounts(tx, ctx.tenant.id),
+        // One grouped query. This used to be `countLines` once per count.
+        lineCountsByCount(tx, ctx.tenant.id),
         listLocations(tx, ctx.tenant.id),
         adjustmentReasons(tx, ctx.tenant.id, { from, to: today }),
       ]);
-      const lineCounts = new Map<string, number>();
-      for (const count of counts) {
-        lineCounts.set(
-          count.id,
-          (await countLines(tx, ctx.tenant.id, count.id)).length,
-        );
-      }
       return { counts, lineCounts, locations, reasons };
     },
     { role: ctx.role },
   );
 
   const byId = new Map(locations.map((l) => [l.id, l.name]));
+  const rows = counts.map((count) => {
+    const lines = lineCounts.get(count.id) ?? 0;
+    return {
+      count,
+      href: `${BASE}/counts/${count.id}`,
+      where: count.locationAssetId
+        ? (byId.get(count.locationAssetId) ?? "—")
+        : "Everywhere",
+      lines,
+      shelves: `${lines} ${lines === 1 ? "shelf" : "shelves"}`,
+      state:
+        COUNT_STATUS_LABELS[count.status as CountStatus] ?? count.status,
+    };
+  });
 
   return (
     <div className="space-y-6">
@@ -152,61 +162,106 @@ export default async function InventoryCountsPage() {
         </section>
       )}
 
-      <DataTable
-        isEmpty={counts.length === 0}
-        empty={
-          <EmptyState
-            icon={<ClipboardList className="h-5 w-5" />}
-            title="Nothing counted yet"
-            description="Walk a freezer and write down what is in it. Nothing changes until you post, so a count can be taken over an afternoon and reconciled at the end."
-          />
-        }
-      >
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Counted</TableHead>
-              <TableHead>Where</TableHead>
-              <TableHead>Who</TableHead>
-              <TableHead className="text-right">Lines</TableHead>
-              <TableHead>State</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {counts.map((count) => (
-              <TableRow key={count.id}>
-                <TableCell>
-                  <Link
-                    href={`${BASE}/counts/${count.id}`}
-                    className="font-medium tabular-nums hover:underline"
-                  >
-                    {count.countedOn}
-                  </Link>
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {count.locationAssetId
-                    ? (byId.get(count.locationAssetId) ?? "—")
-                    : "Everywhere"}
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {count.countedBy || "—"}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {lineCounts.get(count.id) ?? 0}
-                </TableCell>
-                <TableCell>
-                  <Badge
-                    variant={count.status === "posted" ? "outline" : "default"}
-                  >
-                    {COUNT_STATUS_LABELS[count.status as CountStatus] ??
-                      count.status}
-                  </Badge>
-                </TableCell>
-              </TableRow>
+      {rows.length === 0 ? (
+        <DataTable
+          isEmpty
+          empty={
+            <EmptyState
+              icon={<ClipboardList className="h-5 w-5" />}
+              title="Nothing counted yet"
+              description="Walk a freezer and write down what is in it. Nothing changes until you post, so a count can be taken over an afternoon and reconciled at the end."
+            />
+          }
+        >
+          {null}
+        </DataTable>
+      ) : (
+        <>
+          {/* Phone: one card per walk, and the whole card opens it. */}
+          <ul className="space-y-3 md:hidden">
+            {rows.map((row) => (
+              <li key={row.count.id}>
+                <Link
+                  href={row.href}
+                  className="block rounded-2xl bg-card p-4 shadow-elevation-1 transition-shadow hover:shadow-elevation-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-medium tabular-nums">
+                        {row.count.countedOn}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {row.where}
+                        {row.count.countedBy && ` · ${row.count.countedBy}`}
+                      </p>
+                    </div>
+                    <Badge
+                      variant={
+                        row.count.status === "posted" ? "outline" : "default"
+                      }
+                    >
+                      {row.state}
+                    </Badge>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {row.shelves} written down
+                    {row.count.postedOn && ` · posted ${row.count.postedOn}`}
+                  </p>
+                </Link>
+              </li>
             ))}
-          </TableBody>
-        </Table>
-      </DataTable>
+          </ul>
+
+          {/* Wide screen: the table, and the whole row opens the count. */}
+          <div className="hidden md:block">
+            <DataTable>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Counted</TableHead>
+                    <TableHead>Where</TableHead>
+                    <TableHead>Who</TableHead>
+                    <TableHead className="text-right">Lines</TableHead>
+                    <TableHead>State</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((row) => (
+                    <LinkRow key={row.count.id} href={row.href}>
+                      <TableCell>
+                        <Link
+                          href={row.href}
+                          className="font-medium tabular-nums hover:underline"
+                        >
+                          {row.count.countedOn}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {row.where}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {row.count.countedBy || "—"}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {row.lines}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            row.count.status === "posted" ? "outline" : "default"
+                          }
+                        >
+                          {row.state}
+                        </Badge>
+                      </TableCell>
+                    </LinkRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </DataTable>
+          </div>
+        </>
+      )}
     </div>
   );
 }

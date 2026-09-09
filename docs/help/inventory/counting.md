@@ -12,7 +12,7 @@ Counting is the one part of Inventory everybody can do.
 
 - **{button:Count stock|primary}.** Opens the dialog that starts a count. Anyone can.
 - **`What keeps happening · last 1 year`.** Every correction made in the last year, grouped by reason. This only appears once there has been one.
-- **The counts table.** `Counted`, `Where`, `Who`, `Lines` and `State`. Click a date to open it.
+- **The counts.** On a phone, one card per count: the date, the place and who counted, how many shelves were written down, and {badge:Being counted|primary} or {badge:Posted|outline}. Tap anywhere on the card to open it. On a wide screen the same as a table: `Counted`, `Where`, `Who`, `Lines` and `State`. Click anywhere on a row to open it.
 - **`Where`.** The place counted, or `Everywhere` when the whole business was walked in one go.
 - **`Lines`.** How many shelves were written down.
 - **`State`.** {badge:Being counted|primary} while it is open, {badge:Posted|outline} once it has been reconciled.
@@ -33,10 +33,10 @@ Stock that turns up costs nothing, so `Found` and `Found by counting` show a das
 2. Set `When`. It begins on today.
 3. Type `Who` did the counting. Up to 200 characters, and you can leave it blank.
 4. Pick `Where`. The help reads `Everywhere is the honest answer for counting the whole barn in one go.`
-5. Add `Notes` if you want.
-6. Click {button:Start counting|primary}. You see `Count started` and the count opens.
+5. Add `Notes` if you want. The help reads `Shown at the top of the count, for whoever walks it.`
+6. Click {button:Start counting|primary}. You see `Count started` and the count opens. See [One count](count.md) for writing down the shelves.
 
-Take the count over an afternoon if you need to. Nothing changes until you post it.
+Take the count over an afternoon if you need to. Nothing changes until you post.
 
 ## Messages
 
@@ -50,7 +50,6 @@ Take the count over an afternoon if you need to. Nothing changes until you post 
 ## Not on this page
 
 - A count cannot be deleted. One you start and abandon stays in the list as `Being counted` forever.
-- The notes you type when starting a count are stored and never shown again anywhere.
 - The list is not paged, filtered or searchable.
 - The pattern panel always says `last 1 year`, whatever the numbers behind it.
 - If you need any of this, ask us.

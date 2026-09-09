@@ -40,7 +40,7 @@ The rows you can see, and when each one is there:
 
 | Row | It is there while | The button opens |
 | --- | --- | --- |
-| `Say when your books begin` | Accounting is switched on and the first day of your company's books has not been set. | Close. |
+| `Say when your books begin` | Accounting is switched on and the first day of your company's books has not been set. | Opening position. |
 | `Add your bank account` | Accounting is switched on and no bank account, card or personal account has ever been added. | Banking. |
 | `Bring in your transactions` | An account exists and no transaction has ever come in, by import or by feed. | That account's Import statement page when you have one account, otherwise Banking. |
 | `Add your equipment and buildings` | Assets is switched on and nothing has ever been added to it. | Assets. |

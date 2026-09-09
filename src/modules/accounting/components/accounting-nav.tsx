@@ -12,6 +12,7 @@ import {
   Receipt,
   Scale,
   ShoppingCart,
+  Sunrise,
 } from "lucide-react";
 import {
   CategoryStrip,
@@ -67,6 +68,8 @@ const TABS: CategoryItem[] = [
     label: "Trial Balance",
     icon: Scale,
   },
+  // The two ends of the books, side by side (ADRs 0035, 0037).
+  { href: "/dashboard/m/accounting/opening", label: "Opening", icon: Sunrise },
   { href: "/dashboard/m/accounting/close", label: "Close", icon: Lock },
 ];
 

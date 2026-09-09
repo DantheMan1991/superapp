@@ -220,13 +220,23 @@ export default async function ClosePage({
                 : "Not set. Until it is, nothing stops a line from before your books began being posted, and an imported statement keeps every row it holds."}
             </CardDescription>
           </div>
-          {ctx.role === "owner" && (
-            <BooksStartControls
-              entityId={data.entity.id}
-              entityName={data.showPicker ? data.entity.name : undefined}
-              booksStartOn={data.entity.booksStartOn}
-            />
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* What was open on that day lives on its own page (ADR 0037). */}
+            <Button asChild variant="outline" size="sm">
+              <Link
+                href={`/dashboard/m/accounting/opening${data.showPicker ? `?entity=${data.entity.id}` : ""}`}
+              >
+                Opening position
+              </Link>
+            </Button>
+            {ctx.role === "owner" && (
+              <BooksStartControls
+                entityId={data.entity.id}
+                entityName={data.showPicker ? data.entity.name : undefined}
+                booksStartOn={data.entity.booksStartOn}
+              />
+            )}
+          </div>
         </CardHeader>
       </Card>
 

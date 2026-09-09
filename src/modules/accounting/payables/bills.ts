@@ -12,6 +12,7 @@ import {
   voidEntry,
   type LedgerCtx,
 } from "../core";
+import { openingPosting } from "../core/opening";
 import {
   billTotalCents,
   normalizeBillNumber,
@@ -239,6 +240,11 @@ export interface BillDraftInput {
   dueDate?: string | null;
   memo?: string;
   lines: BillLineInput[];
+  /**
+   * Open on the day the books began (ADR 0037). Set only by the Opening
+   * page's own verb, `recordOpeningBill`; the form never sends it.
+   */
+  isOpening?: boolean;
 }
 
 export async function createBillDraft(
@@ -260,6 +266,7 @@ export async function createBillDraft(
       billDate: input.billDate,
       dueDate: input.dueDate ?? null,
       memo: input.memo ?? "",
+      isOpening: input.isOpening ?? false,
       createdByClerkUserId: ctx.userId,
     })
     .returning();
@@ -567,6 +574,16 @@ export async function approveBill(
   }
   const apAccountId = await findApAccount(tx, ctx.tenantId);
 
+  /**
+   * OPEN ON THE DAY THE BOOKS BEGAN (ADR 0037): the AP mirror of the invoice
+   * rule. The expense belongs to the old books, so the debit is Opening
+   * Balance Equity and the entry is dated on the start day; cash basis
+   * recognises the lines' accounts when it is paid.
+   */
+  const opening = bill.isOpening
+    ? await openingPosting(tx, ctx.tenantId, bill.entityId, bill.billDate)
+    : null;
+
   const prior = await tx
     .select({ id: schema.journalEntries.id })
     .from(schema.journalEntries)
@@ -583,19 +600,29 @@ export async function approveBill(
     // invoice rule.
     entityId: bill.entityId,
     status: "posted",
-    entryDate: bill.billDate,
-    memo: `Bill — ${vendor.name}${bill.billNumber ? ` ${bill.billNumber}` : ""}`,
+    entryDate: opening ? opening.entryDate : bill.billDate,
+    memo: `Bill — ${vendor.name}${bill.billNumber ? ` ${bill.billNumber}` : ""}${
+      opening ? " — open when the books began" : ""
+    }`,
     source: "bill",
     sourceId: bill.id,
     idempotencyKey: `bill:${bill.id}:${prior.length}`,
     lines: [
-      ...postable.map((l) => ({
-        accountId: l.accountId!,
-        amountCents: l.amountCents,
-        memo: l.description,
-        dimensionMemberIds:
-          l.dimensionMemberIds.length > 0 ? l.dimensionMemberIds : undefined,
-      })),
+      ...(opening
+        ? [
+            {
+              accountId: opening.obeAccountId,
+              amountCents: total,
+              memo: "Open when the books began",
+            },
+          ]
+        : postable.map((l) => ({
+            accountId: l.accountId!,
+            amountCents: l.amountCents,
+            memo: l.description,
+            dimensionMemberIds:
+              l.dimensionMemberIds.length > 0 ? l.dimensionMemberIds : undefined,
+          }))),
       { accountId: apAccountId, amountCents: -total },
     ],
   });

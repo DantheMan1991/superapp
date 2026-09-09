@@ -62,10 +62,11 @@ rather than one wizard that tries to be all of them:
    slice 4**: `entities.books_start_on`, per company, refused at
    `assertPeriodOpen` and dropped at import (ADR 0035). `accounting_settings`
    still has no settings screen; the day lives on the Close page.
-2. **Opening balances exist for bank accounts only** (`createBankAccount` →
-   Opening Balance Equity). Open invoices and bills as of the start date have
-   no path but a hand journal, and `isCodableAccount` refuses OBE on a bill
-   or invoice line by design.
+2. ~~**Opening balances exist for bank accounts only**~~ — **closed 2026-09-09
+   by slice 5a**: an open invoice or bill is a real document with one flag,
+   its issuance dated on the start day against OBE, its lines what the cash
+   basis recognises when it is paid (ADR 0037). `isCodableAccount` still
+   refuses OBE by hand; the verbs write it.
 3. **An asset owned before the start date cannot carry the depreciation
    already taken.** `postedToDateCents` (`src/packs/assets/depreciation-ops.ts`)
    reads only entries with `source = depreciation` and `sourceId = the asset`,
@@ -81,7 +82,7 @@ rather than one wizard that tries to be all of them:
 | 2b | **Vendors from the bank import**: after an import, "eight payees you have no vendor for" with a checkbox each | planned |
 | 3 | **The personal account**: a register kind whose ledger leg is owner's equity rather than a bank asset; personal by default — exclude rules act on arrival, the sweep asks "is this the business's?" first and may answer `PERSONAL`, one button sets aside the rest; setting aside proposes rules; no opening balance, never reconciled; visible to the owner and the accountant, never to staff, in RLS ([ADR 0034](../decisions/0034-a-personal-account-is-a-register-whose-ledger-leg-is-the-owners-equity.md), migrations `0278`–`0279`; the build log is in [accounting.md](accounting.md)) | **shipped 2026-09-08** |
 | 4 | **The day the books begin**: `entities.books_start_on`, per company beside the close date (not on `accounting_settings` as first planned — the lock had already moved off it for the same reason); `assertPeriodOpen` refuses anything dated before it; the CSV import and the Plaid sync drop earlier lines and say how many; set on the Close page; the setup card asks for it first ([ADR 0035](../decisions/0035-the-books-begin-on-a-day-and-nothing-is-dated-before-it.md), migration `0280`; build log in [accounting.md](accounting.md)) | **shipped 2026-09-08** |
-| 5 | **The opening position**: open invoices and bills as of the start date as real documents with their income or expense leg to OBE, so they age and get paid like any other; equipment with "depreciation already taken through", posted as that asset's own entry; the opening trial balance on one screen with the equity plug visible; an export for the accountant | planned |
+| 5 | **The opening position**: open invoices and bills as of the start date as real documents with their income or expense leg to OBE, so they age and get paid like any other; equipment with "depreciation already taken through", posted as that asset's own entry; the opening trial balance on one screen with the equity plug visible; an export for the accountant | **5a shipped 2026-09-09**: the Opening page, open invoices and bills ([ADR 0037](../decisions/0037-a-document-open-when-the-books-began-is-real-and-its-other-leg-is-opening-balance-equity.md), migration `0281`), the standing with the plug named, the export pointed at (Export books on the Close page covers it); **5b planned**: depreciation already taken |
 | 6 | **Tell it things**: one sentence box on the phone — "fed two bags to the broilers", "three chicks dead in pen two", "moved cows to paddock seven" — parsed into proposed record cards, one tap each to confirm, refusing where the packs already refuse. Rides the Ask thread ([livestock.md](livestock.md), PR #451) | planned, after #451 |
 | 7 | **The setup interview**: the health-check machinery turned inward — a conversation that produces the plan for THIS business (which packs, what to load, the start date), opening on "Is the farm's money in its own account?" | planned |
 
@@ -96,7 +97,8 @@ superadmin act — so slice 1 serves both.
 | Step | What goes in | How today |
 | --- | --- | --- |
 | Profile and settings | Homestead Farm installed; fiscal year January; default basis cash; inventory posting left OFF until the accountant answers [the brief](../briefs/inventory-tax-treatment.md) | Admin page for the install; Business settings for the rest |
-| The day the books begin | `2026-01-01`, set on the Close page before any statement is imported, so 2025 lines are left out with a count | Close page, `Books begin on`, exists |
+| The day the books begin | `2026-01-01`, set before any statement is imported, so 2025 lines are left out with a count | Opening page (or Close), `Books begin on`, exists |
+| Open invoices and bills on that day | The half-beef buyers who had not paid by New Year; the December feed bill | Opening page, `Add an open invoice` / `Add an open bill` (slice 5a); each becomes a real document dated on the day against Opening Balance Equity, and the cash basis counts it when paid |
 | Companies and banks | One company; a farm-only account opened NOW so the mixed window is bounded (2026-01-01 to the day it opens) | Banking, exists; the mixed window needs slice 3 |
 | Places | Garage with three freezers, barn with the walk-in, the two parcels, twenty paddocks | `Paste a list` on the Assets page with `Things are kept here` = Yes for the freezers and the barn (slice 2); the two parcels by hand or Find my parcels; then `Paste a list` on the Land page for the twenty paddocks (slice 2) |
 | Vendors and customers | Feed store, hatchery, each butcher, the plant; half-beef buyers only | `Paste a list` on the Vendors and Customers pages (slice 2), one at a time by hand, or from the bank import (2b, planned) |
@@ -115,6 +117,20 @@ the farm's asset list until they say so.
 ## Build log
 
 Newest first. One entry per session/PR that touched this area.
+
+### 2026-09-09 — Slice 5a: the opening position (`claude/the-opening-position`)
+
+Built in the accounting module; the entry, the data model and the decision are
+in [accounting.md](accounting.md), the reasoning in
+[ADR 0037](../decisions/0037-a-document-open-when-the-books-began-is-real-and-its-other-leg-is-opening-balance-equity.md).
+What it means for the plan: the second gap is closed — an invoice or bill
+open on the start day is a real document again, dated on the day against
+Opening Balance Equity, aging and paid like any other, and counted by the
+cash basis when the money moves. The Opening page is now the one screen the
+plan asked for: the day, the two lists, and the standing with the plug
+named; the setup card's first row lands there. Hilltop's script gains a row.
+Gap 3 — depreciation already taken on equipment owned before the day — is
+slice 5b, on the asset page.
 
 ### 2026-09-09 — Slice 2, the rest: assets, paddocks, prices (`claude/paste-the-rest`)
 
@@ -380,6 +396,11 @@ stored, and nothing may be ([ADR 0033](../decisions/0033-a-setup-step-is-a-prere
 - `src/components/app/paste-list-button.tsx` — the dialog; hosted beside each
   page's own add button
 - `tests/paste-targets.test.ts` · `tests/paste-targets-db.test.ts`
+- `src/modules/accounting/core/opening.ts` — how an open document posts (the
+  day, the refusals, OBE); `opening/position.ts` — the two verbs and the
+  page's read; `opening/actions.ts`; `src/app/dashboard/m/accounting/opening/`
+  — the page and its two dialogs; `tests/opening-position.test.ts`;
+  `docs/help/accounting/opening.md`
 
 ## Decisions & gotchas
 
@@ -421,9 +442,19 @@ stored, and nothing may be ([ADR 0033](../decisions/0033-a-setup-step-is-a-prere
 
 ## Open items
 
-- **Slices 5–7 above are unbuilt.** Slices 3 and 4 shipped 2026-09-08, slice 2
-  on 2026-09-09 in two PRs for all seven targets; the opening position (5) now
-  has a day to stand on and is the next blocker for a complete conversion.
+- **Slices 5b, 6 and 7 above are unbuilt.** Slices 3 and 4 shipped
+  2026-09-08, slice 2 on 2026-09-09 in two PRs for all seven targets, slice
+  5a the same day. What remains of the opening position is gap 3: an asset
+  owned before the day carries no "depreciation already taken", because
+  `postedToDateCents` reads only entries with `source = depreciation` and
+  `sourceId = the asset`. The shape is an opening entry with exactly that
+  source and id, Dr OBE / Cr accumulated depreciation, dated on the day, with
+  an idempotency key `listPostedPeriods` reads as covering every period
+  through the date given — a change to the assets pack, not to accounting.
+- **The Opening page shows one company at a time**, like Close. A tenant
+  with several companies switches with the pills; there is no "all
+  companies" position, because an opening balance is a fact about one set of
+  books.
 - **Slice 2b, vendors from the bank import's payees**, is still planned and is
   a different shape: nothing is pasted, the rows come from `bank_transactions`.
 - **Parcels are not pasted.** Two deeds are typed or found from the county;

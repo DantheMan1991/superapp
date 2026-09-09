@@ -54,9 +54,11 @@ export const accountingSetupSource: SetupSource = {
         title: "Say when your books begin",
         detail:
           "The first day the books cover. Anything dated before it is refused, and an imported statement drops the earlier lines, so history stays where it was.",
-        href: "/dashboard/m/accounting/close",
+        // The Opening page since ADR 0037: the day is set there too, and it
+        // is where the rest of the opening position is entered.
+        href: "/dashboard/m/accounting/opening",
         cta: "Set the date",
-        guide: "accounting/close",
+        guide: "accounting/opening",
       });
     }
 

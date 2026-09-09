@@ -477,6 +477,16 @@ export const invoices = pgTable(
     /** Stop chasing this one invoice — a dispute, or a payment plan agreed by
      * phone. Distinct from muting the customer, which is standing. */
     remindersMuted: boolean("reminders_muted").notNull().default(false),
+    /**
+     * OPEN ON THE DAY THE BOOKS BEGAN (ADR 0037). An invoice issued before the
+     * company's `books_start_on` and still unpaid on it: a real invoice that
+     * ages and gets paid like any other, but its issuance posts Dr AR / Cr
+     * Opening Balance Equity ON the start day instead of Cr income on its own
+     * date — the income was earned before these books. Cash basis recognises
+     * its lines' income accounts when it is paid, from the LINES, since the
+     * entry carries none. Written once, by the Opening page; never edited.
+     */
+    isOpening: boolean("is_opening").notNull().default(false),
     /* ----------------------------------------------------------------------
      * Sales tax (2026-08-13). The three columns below are FROZEN at write:
      * they record the tax this invoice charges, not a live view of the rate.

@@ -375,3 +375,29 @@ export async function assertCodableAccounts(
     }
   }
 }
+
+/**
+ * Opening Balance Equity, found BY SUBTYPE like every other system account —
+ * the general template calls it 3000 and a tenant may have renumbered.
+ *
+ * The one account that is written to by machinery and never coded by hand
+ * (`isCodableAccount` refuses it): a register's opening balance, and since
+ * ADR 0037 the other leg of an invoice or bill that was open on the day the
+ * books began. Its balance is the plug — what has been entered so far, taken
+ * together — until the accountant moves it to retained earnings.
+ */
+export async function findOpeningBalanceAccountId(
+  tx: Tx,
+  tenantId: string,
+): Promise<string> {
+  const obe = await tx.query.accounts.findFirst({
+    where: and(
+      eq(schema.accounts.tenantId, tenantId),
+      eq(schema.accounts.subtype, "opening_balance"),
+      eq(schema.accounts.isSystem, true),
+    ),
+    columns: { id: true },
+  });
+  if (!obe) throw new LedgerError("ACCOUNT_NOT_FOUND", "Opening Balance Equity missing");
+  return obe.id;
+}

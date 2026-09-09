@@ -5023,6 +5023,19 @@ export async function feedReport(
     reports: groupReports,
   } = foldGroups(from, to);
 
+  /**
+   * **THE THIRD WINDOW: THE LOT'S WHOLE LIFE.** The period fold answers "what
+   * did this pen eat this month"; what is still standing in the pen is a fact
+   * about now and needs everything the pen has ever eaten. On `Last 30 days`
+   * the two disagree on any pen fed before the period, and subtracting a
+   * lifetime release from a month's feed read "−$200 still on the lot" about a
+   * pen carrying $200. Same fold, widest window — the reason `foldGroups` is a
+   * function — and skipped when the report's own window already is the whole
+   * life, which the lot page's and `All time` are.
+   */
+  const lifetimeAllocatedCents =
+    from === LEDGER_EPOCH ? allocatedCents : foldGroups(LEDGER_EPOCH, to).cents;
+
   const rows = feedReportRows(
     lots.map((lot) => {
       const summary = summariseHead(
@@ -5036,6 +5049,22 @@ export async function feedReport(
       // through the same door and is reported beside the treatment that used
       // it, not inside the feed figures.
       const fed = consumed.filter((c) => !NOT_FEED_KINDS.has(c.itemKind));
+      /**
+       * Every issue into this pen, EVER, for the remainder — the same population
+       * `inventory`'s `lotCarried` folds as `consumedCents`, so the two halves
+       * of that arithmetic agree to the cent. Feed and not-feed kept apart for
+       * the same reason as the line above: the medicine is not feed, but it is
+       * cost the pen carried and a run took its share of, which is what
+       * `nonFeedCents` has to know.
+       */
+      const everConsumed = fedDated.get(lot.inventoryLotId) ?? [];
+      const lifetimeMeasuredCents = everConsumed
+        .filter((m) => !NOT_FEED_KINDS.has(m.itemKind))
+        .reduce((sum, m) => sum + (m.costCents ?? 0), 0);
+      const nonFeedConsumedCents = everConsumed
+        .filter((m) => NOT_FEED_KINDS.has(m.itemKind))
+        .reduce((sum, m) => sum + (m.costCents ?? 0), 0);
+      const carriedRow = carried.get(lot.inventoryLotId);
       const inventoryLot = byInventoryLot.get(lot.inventoryLotId);
       return {
         lotId: lot.id,
@@ -5054,15 +5083,29 @@ export async function feedReport(
         allocatedCents: allocatedCents.get(lot.id) ?? 0,
         allocatedQuantities: mergeQuantities(allocatedQuantities.get(lot.id) ?? []),
         unpricedMovements: fed.reduce((sum, f) => sum + f.unpricedMovements, 0),
+        lifetimeMeasuredCents,
+        lifetimeAllocatedCents: lifetimeAllocatedCents.get(lot.id) ?? 0,
         /**
          * **DELIBERATELY NOT WINDOWED BY THE REPORT'S PERIOD.** What a pen is
          * still carrying is a fact about now, not about the last 30 days: asking
          * for a month and being told a pen carries cost it handed to the freezer
          * in April would be worse than useless. The measured and allocated
          * figures above ARE windowed, because "what did this pen eat this month"
-         * is exactly that question.
+         * is exactly that question — which is why the remainder is worked out
+         * from the lifetime figures instead, never from these.
          */
-        releasedCents: carried.get(lot.inventoryLotId)?.releasedCents ?? 0,
+        releasedCents: carriedRow?.releasedCents ?? 0,
+        carriedCents: carriedRow?.remainingCents ?? 0,
+        /**
+         * What the pen's ledger carries that is not feed: the animals' price,
+         * corrections on stock still on hand, and anything not-feed issued to
+         * it with a price. Zero is the one case where what has left can be
+         * known to have been feed; `core/feed.ts` says what hangs on it.
+         */
+        nonFeedCents:
+          (carriedRow?.purchasedCents ?? 0) +
+          (carriedRow?.adjustedOnHandCents ?? 0) +
+          nonFeedConsumedCents,
       };
     }),
   );

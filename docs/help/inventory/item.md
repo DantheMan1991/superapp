@@ -19,7 +19,7 @@ The heading is the name. Under it sits the kind, then `counted in pounds` or wha
 - **`Batches`.** Every batch, newest first. See below.
 - **`Cost corrections`.** Every time somebody re-stated what a batch cost. Only appears when there has been one.
 - **`Weight corrections`.** Every time somebody re-stated what a batch weighs. Only appears when there has been one.
-- **`Recent entries`.** The last twenty five things that happened. See below.
+- **`Entries`.** Everything that ever happened to it, newest first, twenty five to a page. See below.
 
 When the total is below zero you also see `That is below zero, which usually means something was used before the delivery that covered it was entered.` That is allowed on purpose. Nothing stops you recording stock out before the delivery that covered it.
 
@@ -33,9 +33,11 @@ On a phone, one card per batch: the code with its badges, where it came from and
 - **{badge:closed|outline}** and **{badge:split|outline}** mark a batch that has been closed elsewhere, or one cut off another.
 - **{button:Edit|ghost}**, **{button:Correct cost|ghost}**, **{button:Correct weight|ghost}**, **{button:Close|ghost}** and **{button:Split|ghost}** sit under each card, or at the end of each row, for owners. `Edit` is always there. `Correct weight` only appears on a batch that has a weight recorded. `Split` only while the batch is open and has something on hand. `Close` only once the batch is at zero or below, and it reads {button:Reopen|ghost} on a batch that is already closed.
 
-## The recent entries
+## The entries
 
-On a phone, one card per entry: what happened, then the date, the place and the batch under it, the reason of a correction, any note, and the amount on the right with its cost under it. On a wide screen: `When`, `What happened`, `Where`, `Amount` and `Cost`.
+On a phone, one card per entry: what happened, then the date, the place and the batch under it, the reason of a correction, any note, and the amount on the right with its cost under it. On a wide screen: `When`, `What happened`, `Where`, `Amount` and `Cost`. Feed that was fed to animals also names the batch that ate it: `fed to PEN-3`.
+
+Twenty five to a page, newest first. Past that, `Showing 1–25 of 300 entries` sits under the list with {button:Newer|outline} and {button:Older|outline}; the page is in the address. To see every {{item|lower}}'s entries together, with a search, open [What happened](what-happened.md).
 
 Read an entry as: on this day, this much went in or out at this place, and this much money went with it. A `+` means it came in.
 
@@ -43,7 +45,6 @@ Read an entry as: on this day, this much went in or out at this place, and this 
 
 Cost is shown without a sign in both directions. An entry reading `Used · -20 pounds · $57.00` means $57 of cost left stock.
 
-**Only the last twenty five entries are shown, and nothing on the screen says so.** The line under `On hand` counts every entry there has ever been, so `From 300 entries.` over twenty five cards is normal.
 
 ## How to start a batch
 
@@ -197,6 +198,7 @@ Once a batch has a correction, a `Weight corrections` list appears above `Recent
 | `this batch already reads 6 lb` | The figure you typed is what the batch already reads. Nothing was recorded. |
 | `Saved` | Your changes to the {{item|lower}} are in. |
 | `Retired` / `Back in the list` | It is out of, or back in, the lists. |
+| `Showing 26–50 of 300 entries` | You are on the second page of entries. `Newer` goes back to the first. |
 | `No batches yet` | Nothing has been started. An owner starts the first. |
 | `Nothing on hand anywhere.` | Every place nets to zero. |
 | `Enter a quantity other than zero.` | The amount box was left at zero. |
@@ -214,7 +216,6 @@ Once a batch has a correction, a `Weight corrections` list appears above `Recent
 
 - Two batches cannot be merged from here.
 - Stock in a closed batch cannot be moved. You can see it, edit it and correct its cost, and nothing else.
-- Only the last twenty five entries are listed, and there is no way to see the rest.
 - The counted unit is locked the moment anything moves, even if the balance is back to zero.
 - Nothing traces a batch back through its splits, although the record is kept.
 - A cost correction cannot be undone. The remedy is an equal and opposite one. A weight correction cannot be undone either; state the right figure again.

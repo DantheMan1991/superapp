@@ -7,9 +7,11 @@ import {
   LOT_DIMENSION,
   archiveItem,
   closeLot,
+  countEntries,
   createItem,
   createLot,
   getItem,
+  listEntries,
   listItems,
   listLots,
   mergeLot,
@@ -573,6 +575,220 @@ d("inventory ops", () => {
         locationAssetId: null,
       });
     });
+  });
+
+  describe("THE WHOLE HISTORY", () => {
+    /**
+     * Every figure in this pack is a fold over these rows and nothing writes a
+     * balance down, so this is not a log of what the pack did — it IS the
+     * record, and until slice 9 it could only be read one item at a time,
+     * twenty five rows deep.
+     */
+    it("is a TOTAL order, so a page boundary never shows a row twice or never", async () => {
+      /**
+       * `occurred_on` is a DATE and `created_at` ties inside one transaction —
+       * a split writes its out and in legs with one `now()`. Without the id
+       * tiebreak, two queries with `offset` can disagree about which of two
+       * equal rows is on which page. Every page here is walked and the union
+       * has to be exactly the set, with no repeats.
+       */
+      const item = await newItem("Paged feed");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: item.id, code: "PAGE-1" }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 100,
+          occurredOn: "2026-08-01",
+        }),
+      );
+      // Five splits on ONE day, each writing two rows in one transaction: ten
+      // rows with the same date, in pairs sharing created_at.
+      for (let i = 1; i <= 5; i += 1) {
+        await asOwner((tx) =>
+          splitLot(tx, ownerCtx(), {
+            lotId: lot.id,
+            quantity: 2,
+            newCode: `PAGE-1-${i}`,
+            occurredOn: "2026-08-01",
+          }),
+        );
+      }
+      const total = await asOwner((tx) =>
+        countEntries(tx, tenantId, { itemId: item.id }),
+      );
+      expect(total).toBe(11);
+
+      const seen = new Set<string>();
+      for (let page = 0; page * 3 < total; page += 1) {
+        const rows = await asOwner((tx) =>
+          listEntries(tx, tenantId, { itemId: item.id, limit: 3, offset: page * 3 }),
+        );
+        for (const row of rows) {
+          expect(seen.has(row.movement.id)).toBe(false);
+          seen.add(row.movement.id);
+        }
+      }
+      expect(seen.size).toBe(11);
+    });
+
+    it("names the batch it left and the batch that ate it", async () => {
+      const feed = await newItem("Named feed");
+      const birds = await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: "Named birds",
+          stockingUnit: "head",
+          itemKind: "livestock",
+        }),
+      );
+      const pen = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: birds.id, code: "PEN-EATS" }),
+      );
+      const bag = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: feed.id, code: "BAG-EATEN" }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: feed.id,
+          lotId: bag.id,
+          quantity: 50,
+          occurredOn: "2026-08-01",
+        }),
+      );
+      await asOwner((tx) =>
+        issueStock(tx, ownerCtx(), {
+          itemId: feed.id,
+          lotId: bag.id,
+          issuedToLotId: pen.id,
+          quantity: 10,
+          occurredOn: "2026-08-02",
+        }),
+      );
+      const [newest] = await asOwner((tx) =>
+        listEntries(tx, tenantId, { itemId: feed.id, limit: 1 }),
+      );
+      expect(newest).toMatchObject({
+        itemName: "Named feed",
+        unit: "lb",
+        lotCode: "BAG-EATEN",
+        consumerCode: "PEN-EATS",
+      });
+      expect(newest.movement.quantity).toBe(-10);
+    });
+
+    it("searches the note, the reason and both batch codes, and a typed % is a %", async () => {
+      const item = await newItem("Searchable feed");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: item.id, code: "FIND-ME" }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 20,
+          occurredOn: "2026-08-01",
+          notes: "ticket said 100% organic",
+        }),
+      );
+      await asOwner((tx) =>
+        adjustStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: -2,
+          reason: "spoilage",
+          occurredOn: "2026-08-03",
+        }),
+      );
+      const mine = (rows: { movement: { itemId: string } }[]) =>
+        rows.filter((r) => r.movement.itemId === item.id);
+
+      expect(mine(await asOwner((tx) => listEntries(tx, tenantId, { q: "find-me" })))).toHaveLength(2);
+      expect(mine(await asOwner((tx) => listEntries(tx, tenantId, { q: "organic" })))).toHaveLength(1);
+      expect(mine(await asOwner((tx) => listEntries(tx, tenantId, { q: "spoil" })))).toHaveLength(1);
+      // `%` typed by a person means the character. Unescaped it matches every
+      // row, and `100% organic` is exactly the note somebody would type.
+      expect(mine(await asOwner((tx) => listEntries(tx, tenantId, { q: "100%" })))).toHaveLength(1);
+      expect(mine(await asOwner((tx) => listEntries(tx, tenantId, { q: "999%" })))).toHaveLength(0);
+      // And the count agrees with the list, always.
+      expect(await asOwner((tx) => countEntries(tx, tenantId, { q: "organic", itemId: item.id }))).toBe(1);
+    });
+
+    it("narrows by kind and by place, and a hand-typed place is NO rows", async () => {
+      const truck = await withSystem(async (tx) => {
+        const rows = await tx
+          .insert(schema.assets)
+          .values({
+            tenantId,
+            kind: "equipment",
+            name: `Log truck ${STAMP}`,
+            isStorageLocation: true,
+          })
+          .returning();
+        return rows[0].id;
+      });
+      const med = await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: "Logged medicine",
+          stockingUnit: "floz",
+          itemKind: "medicine",
+        }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: med.id,
+          quantity: 5,
+          occurredOn: "2026-08-01",
+          locationAssetId: truck,
+        }),
+      );
+      const asMedicine = await asOwner((tx) =>
+        listEntries(tx, tenantId, { kind: "medicine", itemId: med.id }),
+      );
+      expect(asMedicine).toHaveLength(1);
+      expect(asMedicine[0].placeName).toBe(`Log truck ${STAMP}`);
+      expect(
+        await asOwner((tx) => listEntries(tx, tenantId, { kind: "feed", itemId: med.id })),
+      ).toHaveLength(0);
+      expect(
+        await asOwner((tx) =>
+          listEntries(tx, tenantId, { locationAssetId: truck, itemId: med.id }),
+        ),
+      ).toHaveLength(1);
+      expect(
+        await asOwner((tx) =>
+          listEntries(tx, tenantId, { locationAssetId: NO_PLACE, itemId: med.id }),
+        ),
+      ).toHaveLength(0);
+      // `?place=all` typed into the address bar. Not every row, and not a 500.
+      expect(
+        await asOwner((tx) => listEntries(tx, tenantId, { locationAssetId: "all" })),
+      ).toEqual([]);
+      expect(
+        await asOwner((tx) => countEntries(tx, tenantId, { locationAssetId: "all" })),
+      ).toBe(0);
+    });
+  });
+
+  it("valueStock answers a hand-typed id with NO rows rather than a 500", async () => {
+    /**
+     * Slice 8 sent `?place=` and `?enterprise=` straight to uuid columns, and
+     * Postgres refuses `invalid input syntax for type uuid` rather than
+     * returning nothing — so `?place=all` in the address bar took the whole
+     * valuation page down. The same rule `listItems` already had on its
+     * enterprise filter: a malformed id is no rows, which is what a valid id
+     * from another tenant already produces.
+     */
+    const byPlace = await asOwner((tx) =>
+      valueStock(tx, tenantId, { locationAssetId: "all" }),
+    );
+    expect(byPlace.rows).toEqual([]);
+    expect(byPlace.total.incomplete).toBe(false);
+    const byEnterprise = await asOwner((tx) =>
+      valueStock(tx, tenantId, { enterpriseId: "not-a-uuid" }),
+    );
+    expect(byEnterprise.rows).toEqual([]);
   });
 
   it("averageRatesForItems answers for many items in one query", async () => {

@@ -10,6 +10,8 @@ import { PageHeader } from "@/components/app/page-header";
 import { DataTable } from "@/components/app/data-table";
 import { EmptyState } from "@/components/app/empty-state";
 import { Panel } from "@/components/app/panel";
+import { Pager } from "@/components/app/pager";
+import { pageFrom, pageWindow } from "@/lib/list-query";
 import { InventoryNav } from "@/packs/inventory/components/inventory-nav";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -30,6 +32,8 @@ import {
   listItems,
   listLots,
   listMovements,
+  countEntries,
+  listEntries,
   movementRowsForItem,
   weightRatesForItems,
 } from "@/packs/inventory/ops";
@@ -92,14 +96,21 @@ export const dynamic = "force-dynamic";
  * buttons 300px off the right edge. Every list on it — batches, corrections,
  * entries — is one fold rendered twice, and CSS picks.
  */
+/** The section used to stop here with nothing saying so. Now it is a page of that size. */
+const ENTRIES_PER_PAGE = 25;
+
 export default async function InventoryItemPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { id } = await params;
+  const query = await searchParams;
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "inventory");
+  const page = pageFrom(typeof query.page === "string" ? query.page : undefined);
 
   const today = todayInTimezone(ctx.tenant.timezone);
   const currencySymbol = ctx.tenant.currencySymbol;
@@ -109,10 +120,18 @@ export default async function InventoryItemPage({
     async (tx) => {
       const item = await getItem(tx, ctx.tenant.id, id);
       if (!item) return null;
+      /**
+       * **THE COUNT FIRST, so a stale link past the end shows the last page**
+       * rather than an empty one — `pageWindow` clamps, but only if it knows
+       * the total before the offset is chosen.
+       */
+      const entryCount = await countEntries(tx, ctx.tenant.id, { itemId: id });
+      const entryWindow = pageWindow(page, ENTRIES_PER_PAGE, entryCount);
       const [
         lots,
         rows,
         movements,
+        entries,
         locations,
         allLots,
         allItems,
@@ -123,7 +142,19 @@ export default async function InventoryItemPage({
       ] = await Promise.all([
           listLots(tx, ctx.tenant.id, { itemId: id }),
           movementRowsForItem(tx, ctx.tenant.id, id),
-          listMovements(tx, ctx.tenant.id, { itemId: id, limit: 25 }),
+          /**
+           * **ONE ROW, and only for the Record stock dialog's default place.**
+           * `defaultPlace` wants the newest entry's place; it used to read it
+           * off the twenty-five-row section, which with paging would make
+           * page 2 change the dialog's default. The section itself is
+           * `entries`, below.
+           */
+          listMovements(tx, ctx.tenant.id, { itemId: id, limit: 1 }),
+          listEntries(tx, ctx.tenant.id, {
+            itemId: id,
+            limit: ENTRIES_PER_PAGE,
+            offset: entryWindow.offset,
+          }),
           listLocations(tx, ctx.tenant.id),
           // Anything that can EAT this, which is deliberately every open lot
           // on the farm: feed is not the same item as the birds that eat it.
@@ -154,6 +185,8 @@ export default async function InventoryItemPage({
         lots,
         rows,
         movements,
+        entries,
+        entryWindow,
         enterprises,
         labels: pack.labels,
         weights,
@@ -175,6 +208,8 @@ export default async function InventoryItemPage({
     lots,
     rows,
     movements,
+    entries,
+    entryWindow,
     enterprises,
     labels,
     weights,
@@ -1027,24 +1062,29 @@ export default async function InventoryItemPage({
         </section>
       )}
 
-      {movements.length > 0 && (
+      {entryWindow.total > 0 && (
         <section>
           <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
-            Recent entries
+            {/* **NO LONGER "RECENT".** It is every entry, newest first, in
+                pages of twenty five — the same read the What happened screen
+                uses, narrowed to this item. The old heading promised the
+                last few and delivered exactly that with nothing saying the
+                rest existed. */}
+            Entries
           </h2>
           {/* Phone: a card per entry — what happened and how much, the place
               and the money under it. */}
           <ul className="space-y-3 md:hidden">
-            {movements.map((m) => (
+            {entries.map(({ movement: m, placeName, lotCode, consumerCode }) => (
               <li key={m.id} className="rounded-2xl bg-card p-4 shadow-elevation-1">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-medium">{movementKindLabel(m.movementKind)}</p>
                     <p className="text-xs text-muted-foreground tabular-nums">
                       {m.occurredOn}
-                      {m.locationAssetId &&
-                        ` · ${locationNames.get(m.locationAssetId) ?? "—"}`}
-                      {m.lotId && lotCodes.get(m.lotId) && ` · ${lotCodes.get(m.lotId)}`}
+                      {placeName && ` · ${placeName}`}
+                      {lotCode && ` · ${lotCode}`}
+                      {consumerCode && ` · fed to ${consumerCode}`}
                     </p>
                     {m.reason && (
                       <p className="text-xs text-muted-foreground">
@@ -1083,13 +1123,18 @@ export default async function InventoryItemPage({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {movements.map((m) => (
+                  {entries.map(({ movement: m, placeName, consumerCode }) => (
                     <TableRow key={m.id}>
                       <TableCell className="tabular-nums text-muted-foreground">
                         {m.occurredOn}
                       </TableCell>
                       <TableCell className="max-w-[22rem] whitespace-normal">
                         {movementKindLabel(m.movementKind)}
+                        {consumerCode && (
+                          <div className="text-xs text-muted-foreground">
+                            fed to {consumerCode}
+                          </div>
+                        )}
                         {/**
                          * **THE REASON, BESIDE THE ENTRY.** Found by clicking: the
                          * ledger said "Adjusted · −20 pounds · $10.00" and nothing
@@ -1110,9 +1155,7 @@ export default async function InventoryItemPage({
                         )}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {m.locationAssetId
-                          ? (locationNames.get(m.locationAssetId) ?? "—")
-                          : "—"}
+                        {placeName ?? "—"}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {m.quantity > 0 ? "+" : ""}
@@ -1130,6 +1173,17 @@ export default async function InventoryItemPage({
                 </TableBody>
               </Table>
             </DataTable>
+          </div>
+          {/* Renders nothing while everything fits on one page, so an item
+              with twelve entries looks exactly as it did. */}
+          <div className="mt-3">
+            <Pager
+              window={entryWindow}
+              noun={{ one: "entry", many: "entries" }}
+              hrefFor={(p) =>
+                p > 1 ? `?page=${p}` : `/dashboard/m/inventory/${item.id}`
+              }
+            />
           </div>
         </section>
       )}

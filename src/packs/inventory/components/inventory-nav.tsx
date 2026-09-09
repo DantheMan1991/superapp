@@ -1,6 +1,13 @@
 "use client";
 
-import { Boxes, ClipboardList, Coins, FileCheck, Scale } from "lucide-react";
+import {
+  Boxes,
+  ClipboardList,
+  Coins,
+  FileCheck,
+  History,
+  Scale,
+} from "lucide-react";
 import {
   CategoryStrip,
   type CategoryItem,
@@ -14,7 +21,7 @@ const BASE = "/dashboard/m/inventory";
  * **THESE WERE FOUR OUTLINE BUTTONS IN THE PAGE HEADER'S ACTIONS ROW**, beside
  * the one control that actually does something. A header's actions are verbs —
  * *add an item* — and Counting, What it is worth, Deliveries & invoices and
- * When it is deducted are places. Rendered as five identical outline buttons
+ * When it is deducted are places. Rendered as identical outline buttons
  * they read as one undifferentiated row of chrome, and the only real action sat
  * last in the queue because it was added last.
  *
@@ -44,6 +51,12 @@ export function InventoryNav({ isOwner }: { isOwner: boolean }) {
      * a section.
      */
     { href: BASE, label: "Items", icon: Boxes, exact: true },
+    /**
+     * The whole record, since 2026-09-09. Second, because it is the screen a
+     * person reaches for after Items — *what happened on Tuesday* — and
+     * before any of the screens that fold it into a figure.
+     */
+    { href: `${BASE}/entries`, label: "What happened", icon: History },
     { href: `${BASE}/counts`, label: "Counting", icon: ClipboardList },
     { href: `${BASE}/value`, label: "What it is worth", icon: Coins },
     {

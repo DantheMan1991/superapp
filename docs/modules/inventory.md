@@ -33,6 +33,64 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-09-09 — The whole history (`claude/the-whole-history`)
+
+Slice 9 of the review. **No migration.**
+
+**EVERY FIGURE IN THIS PACK IS A FOLD OVER `inventory_movements`, AND UNTIL
+TODAY THE ROWS THEMSELVES COULD ONLY BE READ ONE ITEM AT A TIME, TWENTY FIVE
+DEEP, WITH NOTHING SAYING THE REST EXISTED.** The item page's *Recent entries*
+was `listMovements(limit: 25)` under a heading that promised the last few and a
+guide sentence admitting nothing on the screen said so. *What happened on
+Tuesday* had no screen at all.
+
+- **`What happened`**, a sixth strip item at `/entries`: every entry across
+  everything, newest first, fifty to a page, with a search and the hub's kind
+  and place pills under the hub's parameter names. Cards below `md`, a
+  `LinkRow` table above. Read-only, for everyone the pack lets in.
+- **One read for both screens.** `listEntries` joins the item (name, unit), the
+  batch, the batch that ate it (`inventory_lots` aliased a second time — Drizzle
+  folds two joins to one table into one without the alias, and the consumer's
+  code came back as the batch's own), and the place. `countEntries` shares its
+  predicate so the pager's total and the rows cannot disagree. The item page
+  now shows page one of the same read, keyed `?page=`, and reads ONE movement
+  for the Record stock dialog's default place rather than the section — with
+  paging, page two would otherwise change the dialog's default.
+- **The search looks at the five things a person remembers about an entry**:
+  the item, the batch, the batch that ate it, the reason and the note. Not the
+  date, which has its own column and sorts the list — a search for `09` would
+  match every row of September. The item list searches by name only and says
+  why; a log is the opposite case, because the question here is *when did I
+  write that*, and the note is where it was written.
+- **The order is a total order**: `occurred_on`, `created_at`, then the id.
+  `created_at` is not enough — a split's two legs and a move's two legs are
+  written in one transaction and share `now()` to the microsecond, so a page
+  boundary between them could show one twice or never. The test walks every
+  page of eleven same-day rows in threes and asserts the union is the set.
+- **`recentMovements` is gone.** Nothing called it.
+
+**Found while reading `listItems` for this slice, and fixed here: slice 8's
+`valueStock` 500'd on a hand-typed id.** `?place=all` or `?enterprise=x` went
+straight to a uuid column and Postgres refused `invalid input syntax for type
+uuid` rather than returning nothing — the exact defect `listItems` had fixed on
+its own enterprise filter and written a comment about. Same rule now: a
+malformed id is no rows, never every row under a bar claiming to be filtered.
+`listEntries` was written with the guard from the start. And `listItems`' private
+`escapeLike` — the same regex as `ilikePattern` in `@/lib/list-query`, written
+twice — is now the shared one; a third copy for the log was the moment to stop.
+
+**NOT DRIVEN, and the PR says so.** The browser pane's Clerk session expired
+between slice 8 and this one, every route redirects to sign-in, and only the
+founder can complete it. The screens are covered by five ops tests (the total
+order across pages, the two batch codes, search across all five fields with a
+literal `%`, kind and place with the uuid guard, and `valueStock`'s guard), the
+route builds, and the guides test passes. The 375px measurement this review
+insists on has not been taken for `/entries`; it is the first thing to do when
+the pane is signed in again.
+
+Guides: `what-happened.md` (new), `overview.md` (six pages, the bullet),
+`item.md` (*Entries*, paged, the `fed to` line, two twenty-five claims gone).
+
 ### 2026-09-09 — Value and matching narrowed (`claude/value-and-matching-narrowed`)
 
 Slice 8 of the review. **No migration.** Four things, and one of them turned
@@ -2046,6 +2104,19 @@ commitment against a live animal to delivered without sitting on a shelf.
 
 ## Decisions & gotchas
 
+- **A LOG SEARCHES THE NOTE; A LIST SEARCHES THE NAME.** `listItems` matches
+  the name only, on purpose, so a search for *beef* does not return the feed
+  whose note mentions the beef herd. `listEntries` matches the item, both batch
+  codes, the reason and the note — and never the date — because the question on
+  a log is *when did I write that*. Two different questions, two different
+  predicates, both stated.
+- **A HAND-TYPED ID IS NO ROWS, NEVER EVERY ROW AND NEVER A 500.** Every filter
+  that reaches a uuid column — `listItems`' enterprise, `listEntries`' place,
+  `valueStock`'s place and line of business — tests `UUID_FORMAT` first and
+  answers empty. A valid id from another tenant already answers empty, so this
+  is the consistent case; showing everything under a bar that claims to be
+  filtered is the worse lie, and `invalid input syntax for type uuid` is a
+  page down. Slice 8 shipped without it and slice 9 found it.
 - **VALUING ONE PLACE IS AN APPORTIONMENT, NOT A LOOKUP.** Nothing records what
   a shelf of a batch cost — a batch has ONE carried figure — so `shareOfCarried`
   splits it by the place's share of the quantity, and **refuses** when the batch
@@ -2301,9 +2372,12 @@ commitment against a live animal to delivered without sitting on a shelf.
   report while the only way to group is a substring. `livestock` already has
   species and `production` already has run kinds, so the vocabulary exists; what
   is missing is a column on the item and a decision about who owns it.
-- **The filter does not reach COUNTING or MATCHING.** The valuation gained kind,
-  line of business and place on 2026-09-09; the counting screen and the bills
-  list still cannot be narrowed at all.
+- **The filter does not reach COUNTING or MATCHING.** The valuation and the
+  entries log gained kind and place on 2026-09-09; the counting screen and the
+  bills list still cannot be narrowed at all.
+- **`/entries` has not been measured at 375px.** Built to the pack's card
+  pattern and covered by tests, but the pane's session expired before it could
+  be driven. Measure it first thing.
 
 - ~~Nobody has driven slice 0 yet~~ — **closed 2026-08-19.** Driven on
   production; the fold, the split, the location split and the return to zero all

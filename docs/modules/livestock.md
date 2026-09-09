@@ -133,6 +133,59 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-09-08 — Ask keeps the thread (`claude/ask-keeps-the-thread`)
+
+**Livestock slice 11 of the improvement review — the last on its list.**
+Migrations `0276` (`livestock_advisor_threads`, `livestock_advisor_messages`)
+and `0277` (RLS) — applied to the dev branch and to production, RLS verified
+on both (171 tables), before this PR was opened, per
+[ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md).
+**`0276` is hand-reordered**, like `0222`: drizzle-kit emits every FK before
+every index, and the messages table's composite FK needs the threads table's
+`(tenant_id, id)` unique index to exist first — the first run rolled back on
+both databases with `42830` and the FK now sits last in the file.
+
+**THE THREAD IS A ROW, PER PERSON.** Slice 1b kept the conversation in
+component state to stay migration-free, and the dossier carried the cost as
+two open items — *the advisor forgets on refresh* and *nothing rate-limits
+it*. The review found what that costs on a phone: the starters vanished after
+one question and the only way to start over was a reload, which also lost
+everything. A thread is `livestock_advisor_threads` (`clerk_user_id`, a title
+cut from the first question), its turns `livestock_advisor_messages`
+(`position`-ordered, because a question and its answer written in one
+transaction share a `now()`). **Per person**: every read in
+`ai/threads.ts` is scoped to the asker; RLS stays tenant-wide at the row
+level as everywhere in the pack, and what one member wondered about their
+cows is not another's to open. Two tables rather than the interview's one
+jsonb column because the turns are appended one at a time and COUNTED.
+
+**THE BROWSER NOW SENDS ONLY THE QUESTION AND THE THREAD ID.** Until today
+the history travelled from the client with every question — the digest was
+server-built but the turns the model saw were whatever the browser posted.
+Now `askAdvisorAction` reads the thread under the caller's tx, hands the
+model `historyForModel` (the last `ADVISOR_HISTORY_MAX` turns, opening on a
+question — a window that opened on an answer would hand the model a reply to
+nothing), asks, and only then keeps the question and the answer as one act.
+A question the model never answered is not kept and never counts.
+
+**THE CAP CAME FREE.** `ADVISOR_DAILY_CAP` = 100 questions per farm in a
+rolling day, over everyone's threads because the cost is the farm's, counted
+off the messages table by an index made for it. The box closes and says so.
+
+**Screens.** `New thread` in the header (a link to `?thread=new`); the
+threads listed newest-first, a column from `md` and a `<details>` disclosure
+below it; `?thread=<id>` opens one, no parameter lands on the newest — where
+somebody who closed the tab in the barn expects to be; `Remove` per thread
+behind `useConfirm`; the chat keyed on the thread so opening another starts
+the component over. Starters are back on every empty thread.
+
+Tests: `tests/livestock.test.ts` (pure: the title, the window, the cap);
+`tests/livestock-ops.test.ts` "the advisor's threads" (order and newest-first,
+another person on the same farm cannot read, continue or remove, the cap
+counts questions not answers); `tests/isolation/livestock.test.ts` (both
+tables, a turn on another tenant's thread unrepresentable, the CHECKs, staff,
+default-deny). Guide `ask.md` rewritten. Driven on Hilltop Farm (dev).
+
 ### 2026-09-08 — The breeding calendar (`claude/the-breeding-calendar`)
 
 **Livestock slice 10 of the improvement review, and slice 4c of the pack's own
@@ -2417,6 +2470,8 @@ This pack is the one that forced the change; the full reasoning is in
 | `livestock_treatments` | **What went into an animal, and when it is safe to eat** | **`course_days`** (`0273`, NOT NULL DEFAULT 1, CHECK ≥ 1): how many days running it was given; **the clock counts from the last day** (`lastDoseOn`). TWO clocks — `meat_withdrawal_days` and `milk_withdrawal_days`, both nullable and never merged. `withdrawal_source` in `label\|vet\|none_stated` carries where the number came from; `none_stated` BLOCKS. `dose` is free text and nothing computes on it. Optional `inventory_movement_id` puts the cost on the pen |
 | `livestock_breedings` | **The sire went in — a window, not a date** | Slice 4c (`0274`/`0275`). On the DAM side: a cow, or the pen he was turned in with, reaching every female living in it through `livestock_lot_members`. `sire_lot_id` composite self-FK, RESTRICT, nullable (AI, a bull nobody recorded). `exposed_from`, `exposed_to` (NULL = still in; CHECK not before from), `gestation_days` (CHECK 1..730) copied from the profile. **No due date and no status column** — both are folds in `core/breeding.ts` |
 | `livestock_breeding_checks` | **What the vet found: pregnant, open, or lost** | `result` in `bred\|open\|lost`, CLOSED by CHECK; `days_bred` only with `bred` (CHECK). **No FK to the exposure** — a check belongs to whichever cycle was running on its day, paired by date in the fold, and one with no exposure on file makes a cycle of its own |
+| `livestock_advisor_threads` | **A conversation with the advisor, kept — per person** | Slice 11 (`0276`/`0277`). `clerk_user_id` is the asker and every read is scoped to them; `title` is the first question cut to a line (CHECK present). `updated_at` is the last turn, the list's order |
+| `livestock_advisor_messages` | **One turn: what was asked, or what it said** | `role` in `user\|assistant` (CLOSED), `content` present, `position` dense per thread and UNIQUE with it — a question and its answer written in one transaction share a `now()`. Indexed `(tenant_id, role, created_at)` for the daily cap. **The digest is deliberately not kept** — an answer's snapshot would be a second place for farm facts to sit stale |
 | `livestock_weights` | **What they weighed, and how anybody knows** | `method` open taxonomy (`scale`, `sample`, `tape`, `visual`). `sample_size` head went on the scale and together weighed `sample_weight_lb` — the AVERAGE is a division at read time and is never stored. A tape stores `heart_girth_in` + `body_length_in` and no pounds at all. CHECK: something must have been measured |
 | `livestock_feed_draws` | **This movement was feed drawn for that feeder** | A JOIN, not a second ledger. Composite FK to `inventory_movements`, which holds the quantity and the stamped cost. UNIQUE per movement — two rows would put one cost in two pots |
 
@@ -2474,7 +2529,12 @@ This pack is the one that forced the change; the full reasoning is in
 - `src/packs/livestock/ai/advisor.ts` — server-only. The system prompt and the
   call. Never imported by a client component, so the prompt does not ship in the
   public bundle
-- `src/packs/livestock/components/advisor-chat.tsx` — the ask screen
+- `src/packs/livestock/components/advisor-chat.tsx` — the ask screen, and
+  `RemoveThreadButton`
+- `src/packs/livestock/ai/threads.ts` — server-only. The threads and their
+  turns, every read scoped to the asker; `questionsAskedInLastDay` is the cap
+- `src/packs/livestock/core/threads.ts` — pure. `threadTitle`,
+  `historyForModel`, `ADVISOR_DAILY_CAP`
 - `src/app/dashboard/m/livestock/ask/page.tsx` — fetches almost nothing: the
   digest is built per question, so an answer never comes from a snapshot taken
   when the tab was opened
@@ -2592,6 +2652,7 @@ This pack is the one that forced the change; the full reasoning is in
   · `drizzle/0226_*.sql` (`inventory_lots.capitalised_on`)
   · `drizzle/0273_*.sql` (`livestock_treatments.course_days`)
   · `drizzle/0274_*.sql` · `drizzle/0275_livestock_breeding_rls.sql` (`livestock_breedings`, `livestock_breeding_checks`)
+  · `drizzle/0276_*.sql` (**hand-reordered**, the FK last) · `drizzle/0277_livestock_advisor_threads_rls.sql` (`livestock_advisor_threads`, `livestock_advisor_messages`)
 
 ## Decisions & gotchas
 
@@ -2767,6 +2828,10 @@ This pack is the one that forced the change; the full reasoning is in
   inspection rule as authoritative** — prompted, and repeated on the screen
   under the input. Being confidently wrong there can put uninspectable meat in
   somebody's freezer, which is worse than having no feature.
+- **THE THREAD IS PER PERSON, AND THE HISTORY THE MODEL SEES IS THE ROW'S.**
+  Since slice 11 the browser sends the question and a thread id; the turns
+  come from `livestock_advisor_messages` under the caller's tx, scoped to the
+  asker, never from the client. A question with no answer is never kept.
 - **The question is the only thing the browser sends.** Every fact comes from
   `farmSnapshot`, inside `withTenant`, under RLS. Never build a digest from
   client input — that is what makes it safe for an answer to sound certain
@@ -3053,12 +3118,17 @@ on the dev branch, 2026-08-27** — the terminology review that produced
   with the owner.
 - ~~No daily log~~ — **shipped 2026-08-19** as slice 1a.
 - ~~No advisory layer~~ — **shipped 2026-08-19** as slice 1b.
-- **The advisor forgets on refresh.** The thread lives in component state, which
-  is what kept 1b migration-free. A question worth keeping — "what did it say
-  about the flip losses" — has to be copied out.
-- **Nothing rate-limits the advisor.** Every question is a model call on the
-  tenant's behalf, with no quota, cost cap or per-tenant counter. Fine for a
-  pilot with one farm; not fine for a hundred.
+- ~~**The advisor forgets on refresh.**~~ — **closed 2026-09-08**, slice 11:
+  `livestock_advisor_threads`, per person, `New thread`, `Remove`.
+- ~~**Nothing rate-limits the advisor.**~~ — **closed 2026-09-08**:
+  `ADVISOR_DAILY_CAP` = 100 questions per farm in a rolling day, counted off
+  the messages table. A cost cap in dollars is still not one.
+- **No retention on the advisor's threads.** Nothing ages a thread out; the
+  list shows the newest twenty and older ones are reachable only by their
+  id. A farm that asks daily for a year holds a few hundred rows of prose.
+- **A thread cannot be renamed, searched or exported**, and an old answer
+  does not say which day's records it was made against — the digest is
+  deliberately not kept with it.
 - ~~The advisor cannot see feed issued, treatments or weights~~ — **feed landed
   2026-08-20** with slice 2, and with no change to the prompt: the digest carries
   cost, cost per head and provenance, and the answer got sharper on its own.

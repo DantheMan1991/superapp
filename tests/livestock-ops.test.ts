@@ -96,6 +96,15 @@ import {
 import { summariseHead, mortalityRate } from "../src/packs/livestock/core/herd";
 import { formatComposition } from "../src/packs/livestock/core/pedigree";
 import { describeCycle } from "../src/packs/livestock/core/breeding";
+import {
+  appendAdvisorTurns,
+  deleteAdvisorThread,
+  getAdvisorThread,
+  latestAdvisorThread,
+  listAdvisorThreads,
+  questionsAskedSince,
+  startAdvisorThread,
+} from "../src/packs/livestock/ai/threads";
 import { getAsset } from "../src/packs/assets/ops";
 import { slugLabel } from "../src/packs/inventory/vocabulary";
 import { gainBetween } from "../src/packs/livestock/core/weights";
@@ -5067,6 +5076,93 @@ d("livestock ops", () => {
       const running = lines.filter((l) => l.cycle.state === "exposed" || l.cycle.state === "bred");
       const order = running.map((l) => l.cycle.due?.from ?? "9999");
       expect([...order].sort()).toEqual(order);
+    });
+  });
+
+
+  // ---- the advisor's threads -------------------------------------------------
+  //
+  // A conversation kept per person. What is worth certifying is the scoping:
+  // one person's thread is not another's to read, continue or remove, even
+  // inside the same farm — and the cap counts the farm's questions, whoever
+  // asked them.
+  describe("the advisor's threads", () => {
+    it("keeps a question and its answer in order, and lists the newest first", async () => {
+      const first = await asOwner((tx) =>
+        startAdvisorThread(tx, tenantId, OWNER, "Is the loss rate on PEN-1 normal?"),
+      );
+      expect(first.title).toBe("Is the loss rate on PEN-1 normal?");
+      await asOwner((tx) =>
+        appendAdvisorTurns(tx, tenantId, first.id, [
+          { role: "user", content: "Is the loss rate on PEN-1 normal?" },
+          { role: "assistant", content: "Roughly, yes." },
+        ]),
+      );
+      const second = await asOwner((tx) =>
+        startAdvisorThread(tx, tenantId, OWNER, "When should I wean?"),
+      );
+      await asOwner((tx) =>
+        appendAdvisorTurns(tx, tenantId, second.id, [
+          { role: "user", content: "When should I wean?" },
+          { role: "assistant", content: "About six months." },
+        ]),
+      );
+      // A follow-up on the first makes it the newest again.
+      await asOwner((tx) =>
+        appendAdvisorTurns(tx, tenantId, first.id, [
+          { role: "user", content: "And on HATCH-4A?" },
+          { role: "assistant", content: "Too early to say." },
+        ]),
+      );
+
+      const listed = await asOwner((tx) => listAdvisorThreads(tx, tenantId, OWNER));
+      expect(listed.slice(0, 2).map((t) => t.id)).toEqual([first.id, second.id]);
+
+      const got = await asOwner((tx) => getAdvisorThread(tx, tenantId, OWNER, first.id));
+      expect(got?.turns.map((t) => [t.position, t.role])).toEqual([
+        [0, "user"],
+        [1, "assistant"],
+        [2, "user"],
+        [3, "assistant"],
+      ]);
+      expect(
+        (await asOwner((tx) => latestAdvisorThread(tx, tenantId, OWNER)))?.thread.id,
+      ).toBe(first.id);
+    });
+
+    it("ANOTHER PERSON ON THE SAME FARM CANNOT READ, CONTINUE OR REMOVE IT", async () => {
+      const mine = await asOwner((tx) =>
+        startAdvisorThread(tx, tenantId, OWNER, "Private wondering"),
+      );
+      expect(await asOwner((tx) => getAdvisorThread(tx, tenantId, STAFF, mine.id))).toBeNull();
+      expect(
+        (await asOwner((tx) => listAdvisorThreads(tx, tenantId, STAFF))).map((t) => t.id),
+      ).not.toContain(mine.id);
+      expect(await asOwner((tx) => deleteAdvisorThread(tx, tenantId, STAFF, mine.id))).toBe(false);
+      // Their own is theirs.
+      expect(await asOwner((tx) => deleteAdvisorThread(tx, tenantId, OWNER, mine.id))).toBe(true);
+      expect(await asOwner((tx) => getAdvisorThread(tx, tenantId, OWNER, mine.id))).toBeNull();
+    });
+
+    it("the cap counts the farm's QUESTIONS in the window, not its answers", async () => {
+      const before = await asOwner((tx) =>
+        questionsAskedSince(tx, tenantId, new Date(Date.now() - 60_000)),
+      );
+      const t = await asOwner((tx) => startAdvisorThread(tx, tenantId, STAFF, "Counting"));
+      await asOwner((tx) =>
+        appendAdvisorTurns(tx, tenantId, t.id, [
+          { role: "user", content: "one" },
+          { role: "assistant", content: "answer" },
+          { role: "user", content: "two" },
+          { role: "assistant", content: "answer" },
+        ]),
+      );
+      const after = await asOwner((tx) =>
+        questionsAskedSince(tx, tenantId, new Date(Date.now() - 60_000)),
+      );
+      expect(after - before).toBe(2);
+      // Nothing in the future counts, whoever asked.
+      expect(await asOwner((tx) => questionsAskedSince(tx, tenantId, new Date(Date.now() + 60_000)))).toBe(0);
     });
   });
 

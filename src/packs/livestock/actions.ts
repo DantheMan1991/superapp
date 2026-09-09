@@ -26,6 +26,14 @@ import {
 } from "./ai/advisor";
 import { speciesFrom } from "./vocabulary";
 import {
+  appendAdvisorTurns,
+  deleteAdvisorThread,
+  getAdvisorThread,
+  questionsAskedInLastDay,
+  startAdvisorThread,
+} from "./ai/threads";
+import { ADVISOR_DAILY_CAP, capMessage, historyForModel } from "./core/threads";
+import {
   LivestockError,
   GESTATION_DAYS_MAX,
   MAX_BREED_PARTS,
@@ -1878,30 +1886,35 @@ export async function askAdvisorAction(input: unknown) {
   const parsed = z
     .object({
       question: z.string().trim().min(1).max(ADVISOR_QUESTION_MAX),
-      history: z
-        .array(
-          z.object({
-            role: z.enum(["user", "assistant"]),
-            content: z.string().min(1).max(20000),
-          }),
-        )
-        .max(ADVISOR_HISTORY_MAX)
-        .default([]),
+      /** The thread to continue. Null or absent starts one with this question. */
+      threadId: z.string().uuid().nullable().optional(),
     })
     .safeParse(input);
   if (!parsed.success) return { error: "Ask a shorter question." };
+  const question = parsed.data.question;
+  const threadId = parsed.data.threadId ?? null;
 
   try {
-    const snapshot = await withTenant(
+    // Everything about the thread is read under the caller's own tx — whose
+    // it is, how many questions the farm has asked today, and what was said
+    // before — never taken from the browser. The history the model sees is
+    // the row's, which is what makes it safe for an answer to build on it.
+    const prepared = await withTenant(
       ctx.tenant.id,
       async (tx) => {
+        const asked = await questionsAskedInLastDay(tx, ctx.tenant.id);
+        if (asked >= ADVISOR_DAILY_CAP) return { capped: true as const };
+        const existing = threadId
+          ? await getAdvisorThread(tx, ctx.tenant.id, ctx.userId, threadId)
+          : null;
+        if (threadId && !existing) return { capped: false as const, missing: true as const };
         const pack = await packContext(
           tx,
           ctx.tenant.id,
           ctx.tenant.industry,
           PACK,
         );
-        return farmSnapshot(tx, ctx.tenant.id, {
+        const snapshot = await farmSnapshot(tx, ctx.tenant.id, {
           today: todayInTimezone(ctx.tenant.timezone),
           species: speciesFrom(pack.config),
           // The whole config, not just the species: the tape divisors live in
@@ -1909,15 +1922,52 @@ export async function askAdvisorAction(input: unknown) {
           // advisor with no weight at all.
           packConfig: pack.config,
         });
+        return {
+          capped: false as const,
+          missing: false as const,
+          snapshot,
+          history: historyForModel(
+            (existing?.turns ?? []).map((t) => ({
+              role: t.role as "user" | "assistant",
+              content: t.content,
+            })),
+            ADVISOR_HISTORY_MAX,
+          ),
+        };
       },
       { role: ctx.role },
     );
+    if (prepared.capped) return { error: capMessage(ADVISOR_DAILY_CAP) };
+    if (prepared.missing) {
+      return { error: "That thread is not yours or no longer exists. Start a new one." };
+    }
 
     const answer = await askAdvisor({
-      snapshot,
-      history: parsed.data.history,
-      question: parsed.data.question,
+      snapshot: prepared.snapshot,
+      history: prepared.history,
+      question,
     });
+    if (answer === "") {
+      return { error: "The advisor gave no answer. Ask again." };
+    }
+
+    // Kept AFTER the answer, as one act: a question the model never answered
+    // is not a turn anybody wants to read back, and it never counts against
+    // the cap. A first question starts the thread.
+    const savedThreadId = await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        const id =
+          threadId ??
+          (await startAdvisorThread(tx, ctx.tenant.id, ctx.userId, question)).id;
+        await appendAdvisorTurns(tx, ctx.tenant.id, id, [
+          { role: "user", content: question },
+          { role: "assistant", content: answer },
+        ]);
+        return id;
+      },
+      { role: ctx.role },
+    );
 
     // Identifiers only — never the question or the answer. What is worth
     // recording is that this farm's records went to a model and when, not what
@@ -1928,13 +1978,46 @@ export async function askAdvisorAction(input: unknown) {
       actorClerkUserId: ctx.userId,
       targetType: "tenant",
       targetId: ctx.tenant.id,
-      meta: { lots: snapshot.lots.length, turns: parsed.data.history.length },
+      meta: {
+        lots: prepared.snapshot.lots.length,
+        turns: prepared.history.length,
+        threadId: savedThreadId,
+      },
     });
-    return { ok: true, answer };
+    revalidatePath(`${BASE}/ask`);
+    return { ok: true, answer, threadId: savedThreadId };
   } catch (err) {
     if (err instanceof Error && err.message.includes("ANTHROPIC_API_KEY")) {
       return { error: "The advisor is not configured on this deployment yet." };
     }
+    return toResult(err);
+  }
+}
+
+/** Take one of the asker's own threads off the list. Nothing in the farm's records changes. */
+export async function removeAdvisorThreadAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const removed = await withTenant(
+      ctx.tenant.id,
+      (tx) => deleteAdvisorThread(tx, ctx.tenant.id, ctx.userId, parsed.data.id),
+      { role: ctx.role },
+    );
+    if (!removed) return { error: "That thread is not yours or no longer exists." };
+    await logAudit({
+      action: "livestock.advisor.thread_removed",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_advisor_thread",
+      targetId: parsed.data.id,
+    });
+    revalidatePath(`${BASE}/ask`);
+    return { ok: true };
+  } catch (err) {
     return toResult(err);
   }
 }

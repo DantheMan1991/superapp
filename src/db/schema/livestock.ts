@@ -1377,6 +1377,125 @@ export const livestockBreedingChecks = pgTable(
   ],
 );
 
+/**
+ * **A CONVERSATION WITH THE ADVISOR, KEPT.**
+ *
+ * Slice 1b left the thread in component state — deliberately, to stay
+ * migration-free — and the dossier carried the cost as an open item: a refresh
+ * lost it, and a question worth keeping had to be copied out. The improvement
+ * review found the two consequences on a phone, where a refresh is one thumb
+ * away: the starters vanished after one question, and the only way to start
+ * over was to reload, which also lost everything. So the thread is a row.
+ *
+ * **PER PERSON, NOT PER FARM.** `clerk_user_id` is the asker. A thread is a
+ * conversation, not a farm record — the digest is delivered per person and so
+ * is this — and the ops read only the asker's own. RLS stays tenant-wide at
+ * the row level, as everywhere in this pack: it answers "whose rows are these",
+ * and which person may read which thread is the ops' business.
+ *
+ * **TWO TABLES, NOT ONE JSONB COLUMN.** The health-check interview keeps its
+ * messages as one array because a session is written once and read once. The
+ * advisor's turns are appended one question at a time and COUNTED: the daily
+ * cap is a count of user turns since this time yesterday, per farm, and an
+ * array inside a column cannot be indexed for that.
+ *
+ * **WHAT IS DELIBERATELY NOT HERE: the digest.** Every answer was made against
+ * the farm's records as they stood that minute (`farmSnapshot`, rebuilt per
+ * question). The turns keep what was asked and what was said, never the
+ * snapshot — a stored copy would be a second place for farm facts to sit
+ * stale, which is the reason 1b gave for keeping nothing at all.
+ */
+export const livestockAdvisorThreads = pgTable(
+  "livestock_advisor_threads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Whose conversation. Not an FK — the platform has no users table. */
+    clerkUserId: text("clerk_user_id").notNull(),
+    /** The first question, cut to a line. What the list shows. */
+    title: text("title").notNull(),
+    /** P2 extension bag: `NOT NULL DEFAULT '{}'` so `metadata->>'x'` is always safe. */
+    metadata: jsonb("metadata").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** The last turn's time. The list is newest-first on this. */
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("livestock_advisor_threads_tenant_id_id_idx").on(t.tenantId, t.id),
+    // "My threads, newest first" is the only read.
+    index("livestock_advisor_threads_tenant_user_updated_idx").on(
+      t.tenantId,
+      t.clerkUserId,
+      t.updatedAt,
+    ),
+    check(
+      "livestock_advisor_threads_title_present",
+      sql`length(btrim(${t.title})) > 0`,
+    ),
+  ],
+);
+
+/**
+ * One turn: what somebody asked, or what the advisor said. `position` orders
+ * them — two rows written in one transaction share a `now()`, so a timestamp
+ * cannot tell the question from its answer.
+ */
+export const livestockAdvisorMessages = pgTable(
+  "livestock_advisor_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    threadId: uuid("thread_id").notNull(),
+    /** Zero-based, dense within a thread. */
+    position: integer("position").notNull(),
+    /** 'user' | 'assistant'. CLOSED — the model's API branches on it. */
+    role: text("role").notNull(),
+    content: text("content").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("livestock_advisor_messages_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("livestock_advisor_messages_tenant_thread_position_idx").on(
+      t.tenantId,
+      t.threadId,
+      t.position,
+    ),
+    // The daily cap: user turns since this time yesterday, per farm.
+    index("livestock_advisor_messages_tenant_role_created_idx").on(
+      t.tenantId,
+      t.role,
+      t.createdAt,
+    ),
+    foreignKey({
+      name: "livestock_advisor_messages_thread_fk",
+      columns: [t.tenantId, t.threadId],
+      foreignColumns: [livestockAdvisorThreads.tenantId, livestockAdvisorThreads.id],
+    }).onDelete("cascade"),
+    check(
+      "livestock_advisor_messages_role_valid",
+      sql`${t.role} in ('user', 'assistant')`,
+    ),
+    check(
+      "livestock_advisor_messages_content_present",
+      sql`length(${t.content}) > 0`,
+    ),
+    check(
+      "livestock_advisor_messages_position_valid",
+      sql`${t.position} >= 0`,
+    ),
+  ],
+);
+
 export type LivestockLot = typeof livestockLots.$inferSelect;
 export type NewLivestockLot = typeof livestockLots.$inferInsert;
 export type LivestockIdentifier = typeof livestockIdentifiers.$inferSelect;
@@ -1394,3 +1513,6 @@ export type LivestockCapitalTransfer =
 export type LivestockBreeding = typeof livestockBreedings.$inferSelect;
 export type LivestockBreedingCheck =
   typeof livestockBreedingChecks.$inferSelect;
+export type LivestockAdvisorThread = typeof livestockAdvisorThreads.$inferSelect;
+export type LivestockAdvisorMessage =
+  typeof livestockAdvisorMessages.$inferSelect;

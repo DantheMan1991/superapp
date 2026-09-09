@@ -41,6 +41,8 @@ d("livestock tables (RLS)", () => {
   let lotB: string;
   let feederA: string;
   let feederB: string;
+  let threadA: string;
+  let threadB: string;
   let movementA: string;
   let movementB: string;
 
@@ -264,6 +266,21 @@ d("livestock tables (RLS)", () => {
           notes: "Theirs",
         },
       ]);
+      // The advisor's threads: one each side, one turn each.
+      const threads = await tx
+        .insert(schema.livestockAdvisorThreads)
+        .values([
+          { tenantId: tenantA, clerkUserId: OWNER, title: "Ours" },
+          { tenantId: tenantB, clerkUserId: OTHER, title: "Theirs" },
+        ])
+        .returning();
+      threadA = threads[0].id;
+      threadB = threads[1].id;
+      await tx.insert(schema.livestockAdvisorMessages).values([
+        { tenantId: tenantA, threadId: threadA, position: 0, role: "user", content: "Ours?" },
+        { tenantId: tenantB, threadId: threadB, position: 0, role: "user", content: "Theirs?" },
+      ]);
+
       await tx.insert(schema.livestockBreedingChecks).values([
         {
           tenantId: tenantA,
@@ -1394,6 +1411,129 @@ d("livestock tables (RLS)", () => {
     ).toHaveLength(0);
     expect(
       await withTenant(nowhere, (tx) => tx.select().from(schema.livestockBreedingChecks)),
+    ).toHaveLength(0);
+  });
+
+
+  // --------------------------------------------- the advisor's threads ---
+  //
+  // A conversation with the advisor, kept. What a thread holds came from the
+  // farm's own digest; the boundary that matters is the tenant's, and a
+  // message cannot name another tenant's thread at all.
+
+  it("a tenant sees only its own advisor threads and turns", async () => {
+    const mine = await asOwner((tx) => tx.select().from(schema.livestockAdvisorThreads));
+    expect(mine.map((t) => t.title)).toEqual(["Ours"]);
+    const theirs = await asOtherTenant((tx) => tx.select().from(schema.livestockAdvisorThreads));
+    expect(theirs.map((t) => t.title)).toEqual(["Theirs"]);
+    const myTurns = await asOwner((tx) => tx.select().from(schema.livestockAdvisorMessages));
+    expect(myTurns.map((m) => m.content)).toEqual(["Ours?"]);
+    const theirTurns = await asOtherTenant((tx) =>
+      tx.select().from(schema.livestockAdvisorMessages),
+    );
+    expect(theirTurns.map((m) => m.content)).toEqual(["Theirs?"]);
+  });
+
+  it("CANNOT PUT A TURN ON ANOTHER TENANT'S THREAD", async () => {
+    // Unrepresentable: the composite FK fails even here under withSystem.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockAdvisorMessages).values({
+          tenantId: tenantA,
+          threadId: threadB,
+          position: 1,
+          role: "user",
+          content: "Stolen",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses an invented role, an empty turn, a negative position, a second turn at one position, and a blank title", async () => {
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockAdvisorMessages).values({
+          tenantId: tenantA,
+          threadId: threadA,
+          position: 1,
+          role: "system",
+          content: "x",
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockAdvisorMessages).values({
+          tenantId: tenantA,
+          threadId: threadA,
+          position: 1,
+          role: "assistant",
+          content: "",
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockAdvisorMessages).values({
+          tenantId: tenantA,
+          threadId: threadA,
+          position: -1,
+          role: "assistant",
+          content: "x",
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockAdvisorMessages).values({
+          tenantId: tenantA,
+          threadId: threadA,
+          position: 0,
+          role: "assistant",
+          content: "a second first turn",
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockAdvisorThreads).values({
+          tenantId: tenantA,
+          clerkUserId: OWNER,
+          title: "   ",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a staff member can keep a thread, because anyone can ask", async () => {
+    const [thread] = await asStaff((tx) =>
+      tx
+        .insert(schema.livestockAdvisorThreads)
+        .values({ tenantId: tenantA, clerkUserId: MATE, title: "The mate's" })
+        .returning(),
+    );
+    const [turn] = await asStaff((tx) =>
+      tx
+        .insert(schema.livestockAdvisorMessages)
+        .values({
+          tenantId: tenantA,
+          threadId: thread.id,
+          position: 0,
+          role: "user",
+          content: "Why are the hens off lay?",
+        })
+        .returning(),
+    );
+    expect(turn.threadId).toBe(thread.id);
+  });
+
+  it("advisor threads are default-deny with no tenant context", async () => {
+    const nowhere = "00000000-0000-0000-0000-000000000000";
+    expect(
+      await withTenant(nowhere, (tx) => tx.select().from(schema.livestockAdvisorThreads)),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) => tx.select().from(schema.livestockAdvisorMessages)),
     ).toHaveLength(0);
   });
 

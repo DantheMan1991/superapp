@@ -53,6 +53,7 @@ import {
   RotateCcw,
   Save,
   Search,
+  MessageSquarePlus,
   Send,
   Share2,
   Smartphone,
@@ -140,6 +141,8 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   save: Save,
   search: Search,
   send: Send,
+  // The advisor's New thread (livestock, slice 11).
+  "message-square-plus": MessageSquarePlus,
   share: Share2,
   smartphone: Smartphone,
   sparkles: Sparkles,

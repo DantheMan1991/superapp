@@ -241,7 +241,23 @@ export default async function InventoryItemPage({
       code: l.code,
       balanceLabel: formatQuantity(balanceOfLot(rows, l.id), unit),
     }));
-  const locationOptions = locations.map((l) => ({ id: l.id, name: l.name }));
+  /**
+   * Each place with what THIS item holds there, so the Move door's `From`
+   * picker reads `Market truck · 9 packages` — and `Not recorded` with what
+   * was never placed, because moving that into a place is the commonest move
+   * on a farm that has just started recording where things are.
+   */
+  const balanceAt = new Map(byLocation.map((b) => [b.locationAssetId, b.quantity]));
+  const locationOptions = locations.map((l) => ({
+    id: l.id,
+    name: l.name,
+    onHandLabel: balanceAt.has(l.id)
+      ? formatQuantity(balanceAt.get(l.id)!, unit)
+      : null,
+  }));
+  const unplacedLabel = balanceAt.has(null)
+    ? formatQuantity(balanceAt.get(null)!, unit)
+    : null;
   /**
    * The lots feed can be fed TO. Named with their item, because "B-2026-04-15"
    * alone does not say whether it is a pen of broilers or a pallet of cartons.
@@ -363,7 +379,7 @@ export default async function InventoryItemPage({
               balanceLabel: formatQuantity(balance, unit),
             }}
             unitLabel={unitLabel}
-            locations={locationOptions}
+            locations={locationOptions.map((l) => ({ id: l.id, name: l.name }))}
             today={today}
           />
         )}
@@ -432,6 +448,7 @@ export default async function InventoryItemPage({
                       defaultLotId={defaultLotId}
                       defaultLocationId={defaultLocationId}
                       canStartBatch={isOwner}
+                      unplacedLabel={unplacedLabel}
                     />
                   )}
                 </>

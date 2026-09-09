@@ -15,6 +15,8 @@ Open an account from **Banking** and click {button:Import CSV|outline}. Owners o
 - **{button:Import transactions|primary}** and **{button:Start over|outline}.**
 - **The summary.** After the import, for example `12 transactions imported · 3 duplicates skipped. 5 matched a rule, 4 posted automatically, 1 left for review because the period is closed.`, with {button:Go review them|outline}. On a personal account the same line can read `… 8 matched a rule, 8 set aside as personal.`: a rule that sets aside as personal has already moved those rows to the `Personal` tab, and nothing was posted. When the company's books have a first day, rows dated before it are not imported at all, and the summary says so: `12 dated before your books begin on 2026-01-01 were left out.` Set that day on the Close page before importing history; see [Close](close.md).
 
+Once the rows are in, the register offers to turn the payees into vendors: `8 payees you have no vendor for`, with a tick box each. It is the quickest way to fill the Vendors list after a conversion; see [A bank account's register](register.md).
+
 ## How to import a statement
 
 1. Click {button:Choose a CSV file|outline} and pick the export.

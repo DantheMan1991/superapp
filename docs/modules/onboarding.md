@@ -80,7 +80,7 @@ rather than one wizard that tries to be all of them:
 | --- | --- | --- |
 | 1 | **The derived "Getting set up" card** on the Overview: each switched-on tool says what it is waiting for, rows vanish as the data appears, nothing stored ([ADR 0033](../decisions/0033-a-setup-step-is-a-prerequisite-the-data-proves-missing.md)) | **shipped 2026-09-08** |
 | 2 | **Paste anything**: one dialog, reused — paste a list or a spreadsheet, or upload a photo of the herd book; the model proposes rows; the owner sees every row before it saves; duplicates checked against what exists (the CRM "From a note" shape, under the packs' rule that AI never writes a row without a human seeing it first). Targets in order of value: vendors, customers, kinds of stock, animals with tag and dam and sire where known, places, paddocks, prices. Built as a declared extension point, `src/lib/paste-targets/`: a target is FIELDS as data plus the module's own `save` ([ADR 0036](../decisions/0036-a-pasted-list-is-proposed-by-the-model-reviewed-by-a-person-and-written-by-the-modules-own-verb.md)) | **shipped 2026-09-09**, all seven targets: vendors, customers, kinds of stock and animals in `claude/paste-anything`; equipment and buildings (places as a `Things are kept here` column), paddocks and prices in `claude/paste-the-rest` |
-| 2b | **Vendors from the bank import**: after an import, "eight payees you have no vendor for" with a checkbox each | planned |
+| 2b | **Vendors from the bank import**: after an import, "eight payees you have no vendor for" with a checkbox each | **shipped 2026-09-09**: a card on the register, `payeeCandidates` computing the names from the descriptions (no model), `createVendor` writing them; build log in [accounting.md](accounting.md) |
 | 3 | **The personal account**: a register kind whose ledger leg is owner's equity rather than a bank asset; personal by default — exclude rules act on arrival, the sweep asks "is this the business's?" first and may answer `PERSONAL`, one button sets aside the rest; setting aside proposes rules; no opening balance, never reconciled; visible to the owner and the accountant, never to staff, in RLS ([ADR 0034](../decisions/0034-a-personal-account-is-a-register-whose-ledger-leg-is-the-owners-equity.md), migrations `0278`–`0279`; the build log is in [accounting.md](accounting.md)) | **shipped 2026-09-08** |
 | 4 | **The day the books begin**: `entities.books_start_on`, per company beside the close date (not on `accounting_settings` as first planned — the lock had already moved off it for the same reason); `assertPeriodOpen` refuses anything dated before it; the CSV import and the Plaid sync drop earlier lines and say how many; set on the Close page; the setup card asks for it first ([ADR 0035](../decisions/0035-the-books-begin-on-a-day-and-nothing-is-dated-before-it.md), migration `0280`; build log in [accounting.md](accounting.md)) | **shipped 2026-09-08** |
 | 5 | **The opening position**: open invoices and bills as of the start date as real documents with their income or expense leg to OBE, so they age and get paid like any other; equipment with "depreciation already taken through", posted as that asset's own entry; the opening trial balance on one screen with the equity plug visible; an export for the accountant | **shipped 2026-09-09** in two parts: 5a the Opening page, open invoices and bills ([ADR 0037](../decisions/0037-a-document-open-when-the-books-began-is-real-and-its-other-leg-is-opening-balance-equity.md), migration `0281`), the standing with the plug named, the export pointed at; 5b equipment owned before the day, cost and depreciation already taken, on the asset's own page ([ADR 0038](../decisions/0038-an-asset-owned-before-the-books-began-arrives-as-two-entries.md), no migration) |
@@ -103,7 +103,7 @@ superadmin act — so slice 1 serves both.
 | Equipment already owned | The tractor, the truck, the barn, the freezers — each with what it cost and what the accountant had written off by 2026-01-01 | The asset's own page, `Put it on the books` at the foot of the Depreciation panel (slice 5b); the accountant's figure, not the schedule's guess |
 | Companies and banks | One company; a farm-only account opened NOW so the mixed window is bounded (2026-01-01 to the day it opens) | Banking, exists; the mixed window needs slice 3 |
 | Places | Garage with three freezers, barn with the walk-in, the two parcels, twenty paddocks | `Paste a list` on the Assets page with `Things are kept here` = Yes for the freezers and the barn (slice 2); the two parcels by hand or Find my parcels; then `Paste a list` on the Land page for the twenty paddocks (slice 2) |
-| Vendors and customers | Feed store, hatchery, each butcher, the plant; half-beef buyers only | `Paste a list` on the Vendors and Customers pages (slice 2), one at a time by hand, or from the bank import (2b, planned) |
+| Vendors and customers | Feed store, hatchery, each butcher, the plant; half-beef buyers only | `Paste a list` on the Vendors and Customers pages (slice 2); or, once the statements are in, `Name the payees` on each register, which turns what the bank wrote into vendors (slice 2b) |
 | Kinds of stock | Feed by pound, chicks, broilers, eggs by dozen, cuts as packages, cartons | `Paste a list` on the Inventory page, the unit read per row (slice 2); `Add item` for one |
 | Animals | Cattle as individuals with tags; pigs as one lot; layers as one flock; broilers one lot per pen | `Paste a list` on the Livestock page — the herd book typed or photographed, dams and sires placed (slice 2); `Add animals` for one |
 | Stock on hand | One count per place, no costs | Counting, exists |
@@ -119,6 +119,18 @@ the farm's asset list until they say so.
 ## Build log
 
 Newest first. One entry per session/PR that touched this area.
+
+### 2026-09-09 — Slice 2b: vendors from a register's payees (`claude/vendors-from-the-bank`)
+
+Built in the accounting module; the entry is in [accounting.md](accounting.md).
+What it means for the plan: the standing-data half is now complete both ways
+round — paste a list you already have, or let the statements you imported name
+the suppliers for you. It is the plan's own answer to *"customers and vendors
+mostly make themselves"*, applied to the one moment when they do not: the
+conversion, when a year of statements arrives before a single bill has been
+entered. **No model call**: the names are computed from the descriptions by
+the same tokenizer the rule-learner uses, so this is the cheapest of the
+onboarding tools to run and the only one with nothing to get wrong.
 
 ### 2026-09-09 — Slice 5b: equipment owned before the day (`claude/the-asset-opening-balance`)
 
@@ -415,6 +427,10 @@ stored, and nothing may be ([ADR 0033](../decisions/0033-a-setup-step-is-a-prere
   page's read; `opening/actions.ts`; `src/app/dashboard/m/accounting/opening/`
   — the page and its two dialogs; `tests/opening-position.test.ts`;
   `docs/help/accounting/opening.md`
+- `src/modules/accounting/banking/rules-learn.ts` — `payeeCandidates`, pure:
+  the payees a statement names; `banking/payees.ts` — the proposal and the
+  write; the card in `[id]/register-controls.tsx`;
+  `tests/banking-payees-db.test.ts`
 - `src/packs/assets/depreciation-ops.ts` — `getAssetOpeningState` (the four
   prerequisites, each named) and `recordAssetOpening` (the two entries);
   `vocabulary.ts`'s `openingBlockedMessage`, said by both the page and the
@@ -461,11 +477,17 @@ stored, and nothing may be ([ADR 0033](../decisions/0033-a-setup-step-is-a-prere
 
 ## Open items
 
-- **Slices 6 and 7 above are unbuilt**, and 2b. Slices 3 and 4 shipped
-  2026-09-08; slice 2 on 2026-09-09 in two PRs for all seven targets, and
-  slice 5 the same day in two more. All three of the plan's gaps are closed,
-  so a business can now be converted end to end: the day, the standing data,
-  the money that was open, and what it owns.
+- **Slices 6 and 7 above are unbuilt.** Everything else has shipped: 3 and 4
+  on 2026-09-08; 2, 2b and 5 on 2026-09-09. All three of the plan's gaps are
+  closed, so a business can now be converted end to end — the day, the
+  standing data, the money that was open, and what it owns. What is left is
+  the DAILY HABIT half: slice 6, the one-sentence box, and slice 7, the setup
+  interview.
+- **Only money out becomes a vendor.** Slice 2b deliberately leaves the
+  deposits alone: a payee you pay is a supplier, and a deposit's description
+  is usually the bank's word for a transfer rather than anybody's name.
+  Customers from the feed would be a different proposal with a different
+  rule, and nothing is asking for it yet.
 - **An asset's opening balance can be recorded once.** The cost entry's key
   is one per asset and the ledger's unique index is not freed by a void, so a
   correction is a journal entry (ADR 0038). Said in those words by the page

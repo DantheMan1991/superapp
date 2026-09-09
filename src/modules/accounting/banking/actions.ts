@@ -55,6 +55,7 @@ import {
   type ApplyRulesResult,
 } from "./rules";
 import { ruleConditionsSchema } from "./rules-match";
+import { nameRegisterPayees, type PayeesNamed } from "./payees";
 import { matchTransactionToEntry, unmatchTransaction } from "./match";
 import { suggestCategoriesForBankAccount } from "../ai/suggest";
 import {
@@ -1555,6 +1556,54 @@ export async function applyRulesAction(
       return r;
     });
     revalidateRules();
+    return { ok: true, data: result };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/* -- Vendors from the register's payees (onboarding slice 2b) ------------- */
+
+const namePayeesSchema = z.object({
+  bankAccountId: z.string().uuid(),
+  picks: z
+    .array(
+      z.object({
+        phrase: z.string().min(1).max(200),
+        name: z.string().trim().min(1).max(200).optional(),
+        vendorId: z.string().uuid().optional(),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+
+/**
+ * Create a vendor for each payee picked off a register, and name every row it
+ * covers. The proposal is recomputed server-side; see `payees.ts`.
+ */
+export async function namePayeesAction(
+  input: z.infer<typeof namePayeesSchema>,
+): Promise<ActionResult<PayeesNamed>> {
+  const ctx = await gate();
+  const parsed = namePayeesSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    const result = await inTenant(ctx, async (tx) => {
+      const r = await nameRegisterPayees(tx, ctx, parsed.data);
+      await logAuditInTx(tx, {
+        action: "banking.payees_named",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "bank_account",
+        targetId: parsed.data.bankAccountId,
+        meta: { vendorsCreated: r.vendorsCreated, rowsNamed: r.rowsNamed },
+      });
+      return r;
+    });
+    revalidatePath(`${BASE}/banking/${parsed.data.bankAccountId}`);
+    revalidatePath(`${BASE}/purchases/vendors`);
+    revalidatePath("/dashboard");
     return { ok: true, data: result };
   } catch (err) {
     return fail(err);

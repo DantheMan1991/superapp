@@ -13,6 +13,55 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-09 — Vendors from a register's payees (`claude/vendors-from-the-bank`)
+
+Onboarding slice 2b ([onboarding.md](onboarding.md)), and the last piece of
+the plan's standing-data half. A card on the register — `8 payees you have no
+vendor for` — opening a dialog that proposes one vendor per payee, with the
+lines each covers, and names those lines when they are ticked.
+
+**The shape is the paste dialog's without the paste** ([ADR 0036](../decisions/0036-a-pasted-list-is-proposed-by-the-model-reviewed-by-a-person-and-written-by-the-modules-own-verb.md)):
+something proposes rows, a person reads every one, and the module's own verb
+(`createVendor`) writes them. **No model is called** — the rows come from
+`bank_transactions` the business already has, and the phrases are computed by
+`payeeCandidates` in `rules-learn.ts`, which is pure and tested on its own.
+So there is no accuracy to review, only the decision about which payees are
+worth a vendor.
+
+`payeeCandidates` reuses the rule-learning tokenizer: group by the leading
+real word, then the longest run the group's descriptions share, **with no
+threshold** (a vendor billed once a year is still a vendor) and **money out
+only** (a payee you pay is a vendor; money in is a customer).
+`trimReferenceNumbers` drops the store and cheque numbers off the ends, so a
+payee seen once is `Kroger`, not `Kroger 0412`. Sorted by what each accounts
+for, so the first row of the dialog is the one worth naming.
+
+`payees.ts` adds the two database halves. `listRegisterPayees` leaves out
+rows already named and rows set aside as personal (ADR 0034) — proposing a
+vendor for the grocer is noise on exactly the register where the list would
+otherwise be longest — and matches a candidate to a vendor on file only when
+the vendor's WHOLE name appears in the phrase. `nameRegisterPayees`
+**recomputes the candidates and skips a phrase the fresh list does not hold**,
+because the page's list can be minutes old and the rows a pick labels must be
+the rows it was counted from; the same reason `saveForTarget` re-reads a paste
+target's fields.
+
+Tests: `tests/banking-rules.test.ts` (5 more, pure) and
+`tests/banking-payees-db.test.ts` (5). Guides: `register.md` (the card, how
+to do it, the message, who can do what), `import-statement.md`.
+
+**Driven on Hilltop (dev).** The mixed register read `2 payees you have no
+vendor for` — the six rows set aside as personal and the market deposit all
+correctly outside the question, leaving the two money-out lines still in
+review. Farm Checking read `1 payee`, and its dialog held two rows: the feed
+mill unticked with its name locked and `You already have a vendor called
+“Pleasant Valley Feed Mill”. Tick to put that name on these lines.`, and
+`Tractor Supply Co` ticked, `1 line, 92.15 out. From “TRACTOR SUPPLY CO”.`
+`Name 1 payee` gave `1 vendor added, 1 line named`; the row's `Payee` column
+then read Tractor Supply Co, the vendor appeared under Purchases, and the
+card was gone. **Dev fixture now:** Hilltop has a `Tractor Supply Co` vendor
+and one Farm Checking row named with it.
+
 ### 2026-09-09 — The opening position: invoices and bills open when the books began (`claude/the-opening-position`, migration `0281`)
 
 Onboarding slice 5a ([onboarding.md](onboarding.md), [ADR 0037](../decisions/0037-a-document-open-when-the-books-began-is-real-and-its-other-leg-is-opening-balance-equity.md)):

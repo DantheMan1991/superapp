@@ -375,7 +375,11 @@ function CreateBankAccountButton({
                     <SelectItem value="checking">Checking</SelectItem>
                     <SelectItem value="savings">Savings</SelectItem>
                     <SelectItem value="credit_card">Credit card</SelectItem>
-                    <SelectItem value="personal">Personal account (mixed)</SelectItem>
+                    {/* Short, because the label sits in a half-width column:
+                        "Personal account (mixed)" pushed the dialog 16px wider
+                        than itself and gave it a horizontal scrollbar. The note
+                        below says what it means. */}
+                    <SelectItem value="personal">Personal (mixed)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

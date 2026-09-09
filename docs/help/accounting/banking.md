@@ -19,7 +19,7 @@ Open **Banking** in the accounting menu. The line under the title reads `Bank fe
 
 1. Click {button:Add manually|outline}. The dialog is `Add a bank account` and reads `Creates the register and its ledger account. Use CSV import (or connect via Plaid later) to feed it.`
 2. Pick `Company` if you keep more than one: `This cannot be changed later. Only this company's invoices, bills and journals may use the account.`
-3. Fill in `Name`, such as `Chase Operating`, and pick `Type`: `Checking`, `Savings`, `Credit card` or `Personal account (mixed)`. Add `Institution (optional)` and `Last 4 digits (optional)` if you like.
+3. Fill in `Name`, such as `Chase Operating`, and pick `Type`: `Checking`, `Savings`, `Credit card` or `Personal (mixed)`. Add `Institution (optional)` and `Last 4 digits (optional)` if you like.
 4. Fill in `Opening balance (optional)`, or `Amount owed (optional)` for a card: the balance on the day you start keeping books in Yosher. Set `As of`, the date of that balance. It is required when a balance is entered.
 5. Click {button:Add account|primary}. You see `Bank account added`. The account gets its own ledger account in the chart, and an opening balance is posted against Opening Balance Equity.
 
@@ -29,7 +29,7 @@ The name, institution and last four cannot be changed afterwards.
 
 Most small businesses start with one account that pays for the groceries and the feed store alike. Add it as a personal account, and only the lines you say are the business's ever reach the books.
 
-1. Click {button:Add manually|outline} and pick `Type`: `Personal account (mixed)`. Under the boxes you see `Your own account that also carries some of the business's money. Only the lines you mark as the business's are posted, as money you put in or took out; everything else stays personal and never reaches the books. Staff never see this account. It has no opening balance and is never reconciled.`
+1. Click {button:Add manually|outline} and pick `Type`: `Personal (mixed)`. Under the boxes you see `Your own account that also carries some of the business's money. Only the lines you mark as the business's are posted, as money you put in or took out; everything else stays personal and never reaches the books. Staff never see this account. It has no opening balance and is never reconciled.`
 2. Fill in `Name`. Everyone who can read the chart of accounts sees this name, because the account gets an equity account there named after it, so name it plainly: `Chase personal`, not the account number. Add `Institution (optional)` and `Last 4 digits (optional)` if you like. There is no `Opening balance` and no `As of`: the balance in that account is yours, not the business's.
 3. Click {button:Add account|primary}. You see `Bank account added`. The account gets an equity account in the 3300s, beside Owner Contributions and Owner Draws.
 4. Open the card and import its statements, as far back as your books begin. See [Import a statement](import-statement.md), and then [An account's transactions](register.md) for how the sorting goes: every line is yours until you say it is the business's.

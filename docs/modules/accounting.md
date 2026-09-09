@@ -73,7 +73,7 @@ and the id set alone would not protect the account from a bill line.
 
 **Words.** The tab reads `Personal (n)`, the row button `Personal`, the way
 back `It's the business's`, the chips `RULE · personal` and `AI · personal ·
-92%`, the type in the add dialog `Personal account (mixed)` with what it means
+92%`, the type in the add dialog `Personal (mixed)` with what it means
 under it. Plaid may never pick the kind: a feed knows what an account is at the
 bank, not whose money runs through it.
 

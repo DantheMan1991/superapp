@@ -120,7 +120,7 @@ Built in the accounting module, where the register lives; the full entry, the
 data model and the decisions are in [accounting.md](accounting.md) and the
 reasoning in [ADR 0034](../decisions/0034-a-personal-account-is-a-register-whose-ledger-leg-is-the-owners-equity.md).
 What it means for the plan: **Hilltop can now be loaded.** The mixed account is
-added as `Personal account (mixed)`, its statements imported whole from
+added as `Personal (mixed)`, its statements imported whole from
 2026-01-01, the business lines posted (each one money the owner put in), and
 the rest set aside as personal — by rule on arrival, by the sweep's inverted
 prior, or by one button for whatever is left. The setup card's first row now

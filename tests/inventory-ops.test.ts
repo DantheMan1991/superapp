@@ -1887,6 +1887,31 @@ d("inventory ops", () => {
   // ---- slice 1: receipts, issues, and the loop they close -----------------
 
   describe("receipts and issues", () => {
+    it("starts the delivery's batch with its date, in the one act", async () => {
+      // A delivery IS a batch, and a dated one arrives dated — meat, medicine.
+      const item = await newItem("Dated on arrival");
+      const { lotId } = await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          newLotCode: "ARRIVED-DATED",
+          newLotExpiresOn: "2026-10-01",
+          quantity: 12,
+          occurredOn: "2026-09-09",
+        }),
+      );
+      const lots = await asOwner((tx) =>
+        listLots(tx, tenantId, { itemId: item.id }),
+      );
+      expect(lots).toHaveLength(1);
+      expect(lots[0].id).toBe(lotId);
+      expect(lots[0].expiresOn).toBe("2026-10-01");
+      expect(lots[0].openedOn).toBe("2026-09-09");
+      expect(balanceOfLot(
+        await asOwner((tx) => movementRowsForItem(tx, tenantId, item.id)),
+        lotId!,
+      )).toBe(12);
+    });
+
     it("puts money on the farm, and the rate falls out of the ledger", async () => {
       const feed = await newItem("Layer pellets");
       await asOwner((tx) =>

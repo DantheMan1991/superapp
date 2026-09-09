@@ -1341,6 +1341,12 @@ export async function receiveStock(
     /** An existing batch, or `newLotCode` to start one. */
     lotId?: string;
     newLotCode?: string;
+    /**
+     * When the NEW batch stops being good, for a delivery that arrives with a
+     * date on it — meat, medicine. Ignored without `newLotCode`: an existing
+     * batch's date is its own.
+     */
+    newLotExpiresOn?: string | null;
     quantity: number;
     /** Total, in cents. Null when the price is not known yet. */
     costCents?: number | null;
@@ -1406,6 +1412,7 @@ export async function receiveStock(
       code: newLotCode,
       source: input.source ?? "purchased",
       openedOn: input.occurredOn,
+      expiresOn: input.newLotExpiresOn ?? null,
       // Absent means "not said" and inherits the item's, which is what a
       // delivery wants. A caller that knows better — `production`, whose output
       // belongs to the run rather than to the item — says so.

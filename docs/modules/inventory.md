@@ -33,6 +33,17 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-09-09 — Kinds of stock from a pasted list (`claude/paste-anything`)
+
+Onboarding slice 2 ([onboarding.md](onboarding.md), [ADR 0036](../decisions/0036-a-pasted-list-is-proposed-by-the-model-reviewed-by-a-person-and-written-by-the-modules-own-verb.md)):
+`Paste a list` beside `Add item` on the hub. This pack's part is one file,
+`paste/target.ts`: name, kind (`SUGGESTED_ITEM_KINDS` plus the kinds in use),
+counted-in unit (`UNITS`, required — the model is shown "pounds (lb)" and the
+row carries `lb`), bought in, how many each, kept, notes. **No quantity and no
+cost**, on purpose: a kind of stock is a thing, what is on the shelf is a
+delivery or a count, and cost never tracked stays blank. `save` = `createItem`,
+so an unknown unit is this pack's refusal and staff are refused in this pack's
+words. Guide: `items.md`.
 ### 2026-09-09 — What is in this place (`claude/what-is-in-this-place`)
 
 **The hub's stated purpose was "what do I have and where", and it answered the

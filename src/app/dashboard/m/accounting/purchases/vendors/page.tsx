@@ -24,6 +24,7 @@ import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { listVendors } from "@/modules/accounting/payables/vendors";
 import { listPaymentTerms } from "@/modules/accounting/invoicing/catalogue";
 import { PurchasesNav } from "../purchases-nav";
+import { PasteListButton } from "@/components/app/paste-list-button";
 import { VendorDialogButton } from "./vendor-dialogs";
 
 export const dynamic = "force-dynamic";
@@ -101,7 +102,19 @@ export default async function VendorsPage({
       <PageHeader
         title="Vendors"
         description={`Who ${ctx.tenant.name} buys from. A default expense account prefills new bill lines.`}
-        actions={<VendorDialogButton accounts={accountOptions} terms={termOptions} />}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {ctx.role !== "expert" && (
+              <PasteListButton
+                slug="accounting.vendors"
+                label="vendors"
+                noun={{ one: "vendor", many: "vendors" }}
+                example={"Tractor Supply, ap@tractorsupply.com, 555-0100\nRural King — feed and fencing"}
+              />
+            )}
+            <VendorDialogButton accounts={accountOptions} terms={termOptions} />
+          </div>
+        }
       />
 
       <AccountingNav />

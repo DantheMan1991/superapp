@@ -219,6 +219,21 @@ data proves missing, never advice, asked as "has this ever existed" — which is
 what lets it have no dismiss button
 ([ADR 0033](decisions/0033-a-setup-step-is-a-prerequisite-the-data-proves-missing.md)).
 
+**Used a sixth time on 2026-09-09, for the "Paste a list" dialog.** A
+business moving in has its vendors, its shelf list and its herd book on paper,
+and one dialog should load any of them — yet the dialog must not know what a
+vendor or an animal is, and a module must not write its own copy of the
+model call, the review and the safety property.
+[src/lib/paste-targets/](../src/lib/paste-targets/types.ts) holds the slot
+(types only), `registry.ts` names the fillers, `resolve.ts` and `actions.ts`
+are what the dialog calls; `<module>/paste/target(s).ts` fills it with FIELDS
+as data plus `duplicates` and the module's own `save`. The platform builds the
+model's tool from the fields, draws the review from them, checks a reviewed
+row against them, and hands each row to the module's verb in one transaction;
+the model never writes, a choice resolves by label and never nearest, and a
+refusal is the module's own, row named
+([ADR 0036](decisions/0036-a-pasted-list-is-proposed-by-the-model-reviewed-by-a-person-and-written-by-the-modules-own-verb.md)).
+
 What is **not** sanctioned: adding a column to a core table for one industry,
 branching on `tenant.industry` inside core, or a pack reading another pack's
 tables directly.

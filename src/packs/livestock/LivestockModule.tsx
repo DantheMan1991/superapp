@@ -48,6 +48,7 @@ import {
 } from "./core/herd";
 import { labelFor } from "@/lib/packs/resolve";
 import { breedLabel, breedsFrom, speciesFrom } from "./vocabulary";
+import { PasteListButton } from "@/components/app/paste-list-button";
 import { LivestockLotForm } from "./components/lot-controls";
 import { LivestockNav } from "./components/livestock-nav";
 import { LotFilters } from "./components/lot-filters";
@@ -462,6 +463,15 @@ export async function LivestockModule({
         actions={
           isOwner ? (
             <div className="flex flex-wrap items-center gap-2">
+            {/* The herd book, pasted or photographed (ADR 0036). */}
+            <PasteListButton
+              slug="livestock.animals"
+              label="animals"
+              noun={{ one: "animal", many: "animals" }}
+              example={
+                "Bluebell, cow, Angus, born 2021-04-02\nRosie, heifer, born 2024-03-01, dam Bluebell\n840 9917, steer"
+              }
+            />
             {/* No longer gated on an item existing: the form can create one. A
                 farm's first animal used to require a trip to Inventory first. */}
             <LivestockLotForm

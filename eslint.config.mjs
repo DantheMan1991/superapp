@@ -179,6 +179,18 @@ const SETUP_REGISTRY_MESSAGE =
   "defeats the isolation rule by one level of indirection.";
 
 /**
+ * Paste targets (the "Paste a list" dialog, ADR 0036) are the same shape and
+ * get the same rule: the dialog is platform code in `src/components/app/` and
+ * its actions live beside the contract, no module hosts the slot, so no module
+ * may reach the wiring. `shape.ts` beside the contract is pure helpers, not
+ * wiring, and is not banned.
+ */
+const PASTE_REGISTRY_MESSAGE =
+  "A module may import only src/lib/paste-targets/types (and shape). The registry and " +
+  "resolver are platform wiring — importing either pulls in every other module's target and " +
+  "defeats the isolation rule by one level of indirection.";
+
+/**
  * The patterns one module directory is forbidden to import.
  *
  * Extracted so the per-file override below can ask for the NON-host version of
@@ -214,6 +226,11 @@ function isolationPatterns(slug, { entityLinkHost }) {
     {
       group: ["@/lib/setup-sources/registry", "@/lib/setup-sources/resolve"],
       message: SETUP_REGISTRY_MESSAGE,
+    },
+    // And again — see PASTE_REGISTRY_MESSAGE above.
+    {
+      group: ["@/lib/paste-targets/registry", "@/lib/paste-targets/resolve"],
+      message: PASTE_REGISTRY_MESSAGE,
     },
     ...(entityLinkHost
       ? []
@@ -280,6 +297,11 @@ const eslintConfig = defineConfig([
       "src/lib/setup-sources/types.ts",
       "src/lib/setup-sources/resolve.ts",
       "src/lib/setup-sources/has-any.ts",
+      "src/lib/paste-targets/types.ts",
+      "src/lib/paste-targets/shape.ts",
+      "src/lib/paste-targets/model.ts",
+      "src/lib/paste-targets/resolve.ts",
+      "src/lib/paste-targets/actions.ts",
       // The shared linkable-record contract. Same rule, same reason: a contract
       // that imported an implementation of itself would invert the graph.
       "src/lib/entity-links/types.ts",

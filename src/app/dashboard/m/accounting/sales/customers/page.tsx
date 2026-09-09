@@ -16,6 +16,7 @@ import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { formatCentsSigned, toSafeCents } from "@/modules/accounting/lib/money";
 import { SalesNav } from "../sales-nav";
 import { listPaymentTerms } from "@/modules/accounting/invoicing/catalogue";
+import { PasteListButton } from "@/components/app/paste-list-button";
 import { AddCustomerButton, CustomerRowActions } from "./customer-dialogs";
 
 export const dynamic = "force-dynamic";
@@ -131,7 +132,19 @@ export default async function CustomersPage({
       <PageHeader
         title="Customers"
         description={`Who ${ctx.tenant.name} bills.`}
-        actions={isOwnerOrStaff && <AddCustomerButton terms={termOptions} />}
+        actions={
+          isOwnerOrStaff && (
+            <div className="flex flex-wrap items-center gap-2">
+              <PasteListButton
+                slug="accounting.customers"
+                label="customers"
+                noun={{ one: "customer", many: "customers" }}
+                example={"Maple Street Market, orders@maplestreet.example\nThe Hendersons — half a beef each fall"}
+              />
+              <AddCustomerButton terms={termOptions} />
+            </div>
+          )
+        }
       />
 
       <AccountingNav />

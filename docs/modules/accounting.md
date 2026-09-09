@@ -13,6 +13,19 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-09 — Vendors and customers from a pasted list (`claude/paste-anything`)
+
+Onboarding slice 2 ([onboarding.md](onboarding.md), [ADR 0036](../decisions/0036-a-pasted-list-is-proposed-by-the-model-reviewed-by-a-person-and-written-by-the-modules-own-verb.md)):
+`Paste a list` beside `New vendor` and `Add customer`. This module's part is
+one file, `paste/targets.ts` — five fields each (name, email, phone, address,
+notes; terms and the default account deliberately not, because a pasted list
+does not carry them and a guessed Net 30 sets every due date wrong),
+duplicates by name, and `save` = `createVendor` / `createCustomer` exactly as
+the forms call them, so a party is born with each and the CRM sees it. The
+dialog, the model call and the review are the platform's
+(`src/lib/paste-targets/`). Offered to owners and staff, never the accountant.
+Guides: `vendors.md`, `customers.md`.
+
 ### 2026-09-08 — The day the books begin (`claude/the-books-begin`, migration `0280`)
 
 Onboarding slice 4 ([onboarding.md](onboarding.md)), and the lower bound the

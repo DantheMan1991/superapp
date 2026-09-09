@@ -5,10 +5,11 @@
 > **Order:** 110
 > **Area:** Sales
 
-Open **Sales** in the accounting menu and click the `Customers` pill. The line under the title reads `Who [your business] bills.` To add one, click {button:Add customer|primary}. You need a customer before you can write an invoice.
+Open **Sales** in the accounting menu and click the `Customers` pill. The line under the title reads `Who [your business] bills.` To add one, click {button:Add customer|primary}. To add many at once, click {button:Paste a list|outline|sparkles}. You need a customer before you can write an invoice.
 
 ## What you see
 
+- **{button:Paste a list|outline|sparkles}.** Opens the dialog that reads a pasted list, or a photo of one, and proposes a row per customer for you to check before anything is added. See how to paste a list, below. Not shown to an accountant.
 - **The list.** Every customer, active or not, in name order. Each row shows the name, {badge:inactive|outline} where it applies, the email and phone under it, then `Net 45 terms` when the customer has payment terms of their own, and at the right how much they currently owe, `1,240.00 open`, when anything is outstanding. Fifty to a page.
 - **The menu on each row.** The dots at the end open `Statement`, the customer's statement for a period (see [A customer's statement](statement.md)), `Edit`, `Never send reminders` or `Resume reminders`, and `Deactivate` or `Reactivate`.
 - **Search.** The box beside the pills. Type part of a name, an email or a phone number and the list narrows as you type; press Enter to search at once. A phone number matches with or without its spaces and brackets. Clear the box to see everyone again.
@@ -42,10 +43,27 @@ A customer is also created on the spot when you type a new name on an invoice. T
 
 A deactivated customer keeps every invoice and all their history, but cannot be picked on a new invoice, and a draft that names them cannot be saved. Customers are never deleted.
 
+## How to paste a list of customers
+
+1. Click {button:Paste a list|outline|sparkles}. `Paste a list of customers` opens and reads `Paste a list, columns from a spreadsheet, or add a photo of one. You'll see every row it found and can change anything before it saves.`
+2. Paste into `The list`, or click `Or a photo of it` and choose a photo or a PDF of up to 4 MB. The counter under the box reads `0 / 20,000` and counts up. Only what you paste or attach is sent, and nothing else about your business.
+3. Click {button:Read it|primary}. Its label turns to `Reading…` while it works. The line under the title then reads `8 customers found. Untick what you don't want, fix what's wrong, then add them.`
+4. Check the rows. Each has `Name`, `Email`, `Phone`, `Address` and `Notes`, every one a box you can retype; `Name` is the one that must be filled. On a wide screen it is a table, on a phone one card per row with its fields named. A row that names a customer you already have comes back unticked and reads `Already here as “Maple Street Market”. Unticked — tick it to add another.` Untick anything else you do not want.
+5. Click {button:Add 8 customers|primary}. It reads `Adding…`, then you see `Added 8 customers`, the dialog closes and the list refreshes. Nothing is saved until you click it. If any ticked row is refused, nothing is saved at all, and the message names the row.
+
+{button:Start over|ghost} clears the rows and the list you pasted. Closing the dialog does the same. Leave ten seconds between readings. At most 200 rows come back from one reading, so paste a longer list in pieces. A customer added this way is on your default terms and has whatever else the list gave; edit them afterwards for terms of their own.
+
 ## Messages
 
 | Message | What it means |
 | --- | --- |
+| `Nothing to add from that.` | The reading found no customers in what you pasted or attached. |
+| `Row 3: Name is missing.` | The third ticked row has no name. Type one, or untick the row. The button stays gray until every ticked row is complete. |
+| `Row 3 (Maple Street Market): …` | The third row was refused for the reason given after the colon. Nothing was added. Fix the row and add again. |
+| `Give it a few seconds, then try again.` | Two readings inside ten seconds. |
+| `That file is too large. 4 MB at most.` and `A photo (JPEG, PNG, WebP or GIF) or a PDF.` | The photo is too big, or not a kind it can read. |
+| `It could not read that. Try a cleaner copy, or fewer rows at a time.` | The reading came back in a shape it could not use. |
+| `Paste something, or add a photo.` | The box and the file were both empty. |
 | `Add your first customer` and `You need somebody to bill before you can raise an invoice.` | The list is empty. Click {button:Add customer|primary}. |
 | `Nothing matches “…”` and `Try fewer words, or add them now.` | No customer's name, email or phone contains what you typed. {button:Add customer|primary} is right there, so a customer you looked for and did not find is one click from existing. |
 | `That customer is inactive — reactivate them first.` | An invoice names a deactivated customer. Reactivate them here. |

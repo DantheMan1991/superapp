@@ -268,7 +268,7 @@ export function slugLabel(slug: string): string {
  * measured and the guessed-at side by side looking identical.
  */
 export const VALUATION_METHOD_NOTES: Record<
-  "carried" | "average" | "none",
+  "carried" | "average" | "share" | "unsplit" | "none",
   { label: string; note: string }
 > = {
   carried: {
@@ -278,6 +278,16 @@ export const VALUATION_METHOD_NOTES: Record<
   average: {
     label: "Average",
     note: "No batch, so the item's average of what came in priced",
+  },
+  // Only ever seen with one place picked. Nothing records what a shelf cost, so
+  // the batch's figure is split by how much of it is here.
+  share: {
+    label: "This much of the batch",
+    note: "The batch's cost, split by how much of it is in this place",
+  },
+  unsplit: {
+    label: "Cannot be split",
+    note: "The batch has a cost, and what is here is not a share of it",
   },
   none: {
     label: "No cost recorded",

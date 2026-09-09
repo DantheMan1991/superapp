@@ -43,6 +43,7 @@ import {
   resolveServicesAccruedAccount,
   postServiceAccrual,
   unbilledReceipts,
+  unbilledReceiptTotals,
   unmatchBillLine,
 } from "../src/packs/inventory/ledger-ops";
 import { carriedValue } from "../src/packs/inventory/core/valuation";
@@ -1012,6 +1013,66 @@ it("CLEARS GRNI TO ZERO when the bill is matched and approved", async () => {
       );
       expect(page.map((r) => r.occurredOn)).toEqual(["2026-09-01"]);
       expect(page[0].openQuantity).toBe(4);
+    });
+
+    it("COUNTS AND SUMS EVERY OPEN DELIVERY, not a page of them", async () => {
+      /**
+       * **THE SILENT CAP THIS REPLACED.** `grniPosition` answered by fetching
+       * `unbilledReceipts` with `limit: 1000` and folding in JS, so a business
+       * past a thousand open receipts saw a headline figure that was quietly
+       * short — on the one card whose whole job is to be compared with the
+       * ledger account beside it, where the difference line would then report
+       * the cap as though it were a problem. Counted and summed in SQL now.
+       *
+       * Proved here at a scale a test can run: three receipts, a page of one,
+       * and the totals still describe all three.
+       */
+      const item = await newItem("Paged deliveries");
+      for (const [on, cents] of [
+        ["2026-03-01", 1_000],
+        ["2026-03-02", 2_000],
+        ["2026-03-03", 3_000],
+      ] as const) {
+        await asOwner((tx) =>
+          receiveStock(tx, ownerCtx(), {
+            itemId: item.id,
+            quantity: 5,
+            costCents: cents,
+            occurredOn: on,
+          }),
+        );
+      }
+      const mine = (rows: { itemId: string }[]) =>
+        rows.filter((r) => r.itemId === item.id);
+
+      const firstPage = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id, limit: 1 }),
+      );
+      const secondPage = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id, limit: 1, offset: 1 }),
+      );
+      const thirdPage = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id, limit: 1, offset: 2 }),
+      );
+      // Oldest first, and no row on two pages or on none.
+      expect(firstPage.map((r) => r.occurredOn)).toEqual(["2026-03-01"]);
+      expect(secondPage.map((r) => r.occurredOn)).toEqual(["2026-03-02"]);
+      expect(thirdPage.map((r) => r.occurredOn)).toEqual(["2026-03-03"]);
+
+      const all = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      expect(mine(all)).toHaveLength(3);
+
+      // The totals are over everything, whatever page anybody is looking at.
+      const totals = await asOwner((tx) => unbilledReceiptTotals(tx, tenantId));
+      const everything = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { limit: 5_000 }),
+      );
+      expect(totals.count).toBe(everything.length);
+      expect(totals.openCostCents).toBe(
+        everything.reduce((sum, r) => sum + r.openCostCents, 0),
+      );
     });
 
     describe("EDITING THE BILL AFTERWARDS", () => {

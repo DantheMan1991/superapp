@@ -47,12 +47,31 @@ const BASE = "/dashboard/m/inventory";
  * opposite ends, and the whole value of GRNI is seeing them together. A
  * reconciliation split across two screens is one nobody completes.
  */
-export default async function InventoryMatchingPage() {
+/** How many deliveries one page of the table holds. */
+const PER_PAGE = 50;
+
+export default async function InventoryMatchingPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const query = await searchParams;
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "inventory");
 
   const currencySymbol = ctx.tenant.currencySymbol;
   const isOwner = ctx.role === "owner";
+
+  /**
+   * **PAGED, NOT TRUNCATED.** The table used to stop at a hundred while the
+   * card above it counted more, so the two disagreed and only the guide said
+   * which was right. A page number in the URL is the same grammar the item list
+   * uses, and the line under the table says which page of how many.
+   */
+  const page = Math.max(
+    1,
+    Number.parseInt(typeof query.page === "string" ? query.page : "1", 10) || 1,
+  );
 
   const data = await withTenant(
     ctx.tenant.id,
@@ -60,16 +79,31 @@ export default async function InventoryMatchingPage() {
       const [treatment, position, open, lines, posted] = await Promise.all([
         inventoryTreatmentOf(tx, ctx.tenant.id),
         grniPosition(tx, ctx.tenant.id),
-        unbilledReceipts(tx, ctx.tenant.id, { limit: 100 }),
+        unbilledReceipts(tx, ctx.tenant.id, {
+          limit: PER_PAGE,
+          offset: (page - 1) * PER_PAGE,
+        }),
         matchableBillLines(tx, ctx.tenant.id),
         postedInventoryEntries(tx, ctx.tenant.id),
       ]);
-      return { treatment, position, open, lines, posted };
+      /**
+       * **THE DIALOG GETS ITS OWN LIST, UNPAGED.** Matching a bill to a
+       * delivery on page three would be impossible if the picker only held
+       * page one, and a person opening it is looking for one specific delivery
+       * rather than reading the table. Its own search box narrows it.
+       */
+      const forDialog =
+        position.awaitingInvoiceCount > PER_PAGE
+          ? await unbilledReceipts(tx, ctx.tenant.id, { limit: 500 })
+          : open;
+      return { treatment, position, open, lines, posted, forDialog };
     },
     { role: ctx.role },
   );
 
-  const { treatment, position, open, lines, posted } = data;
+  const { treatment, position, open, lines, posted, forDialog } = data;
+  const pages = Math.max(1, Math.ceil(position.awaitingInvoiceCount / PER_PAGE));
+  const firstOnPage = (page - 1) * PER_PAGE + 1;
 
   return (
     <div className="space-y-6">
@@ -213,7 +247,7 @@ export default async function InventoryMatchingPage() {
                           description={line.description}
                           invoiceCents={line.invoiceCents}
                           currencySymbol={currencySymbol}
-                          deliveries={open}
+                          deliveries={forDialog}
                         />
                         {line.matchedCount > 0 && (
                           <UnmatchButton billLineId={line.billLineId} />
@@ -310,6 +344,31 @@ export default async function InventoryMatchingPage() {
             </TableBody>
           </Table>
         </DataTable>
+
+        {position.awaitingInvoiceCount > PER_PAGE && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>
+              Showing {firstOnPage} to{" "}
+              {Math.min(
+                firstOnPage + open.length - 1,
+                position.awaitingInvoiceCount,
+              )}{" "}
+              of {position.awaitingInvoiceCount}, oldest first.
+            </span>
+            <span className="flex items-center gap-3">
+              {page > 1 && (
+                <Link href={`?page=${page - 1}`} className="underline">
+                  Newer
+                </Link>
+              )}
+              {page < pages && (
+                <Link href={`?page=${page + 1}`} className="underline">
+                  Older
+                </Link>
+              )}
+            </span>
+          </div>
+        )}
       </section>
 
       {treatment === "capitalise" && position.awaitingInvoiceCount > 0 && (

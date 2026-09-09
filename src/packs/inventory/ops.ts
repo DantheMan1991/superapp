@@ -63,8 +63,8 @@ import {
   carriedValue,
   valuationTotal,
   valueLine,
-  type ValuationMethod,
-  type ValuationTotal,
+  type StockValuation,
+  type ValuationRow,
 } from "./core/valuation";
 import {
   isImplementedRule,
@@ -1437,6 +1437,15 @@ export async function listKindsInUse(
 
 /** The key `onHandByPlace` files stock under when its entries named no place. */
 export const NO_PLACE = "none";
+
+/**
+ * The same idea for a line of business: what `valueStock` is passed to mean
+ * "the ones nobody tagged", which is a real answer and not the absence of one.
+ *
+ * The string matches `EnterprisePicker`'s own sentinel so a URL written by one
+ * is read by the other.
+ */
+export const NO_ENTERPRISE_FILTER = "__none__";
 
 /**
  * On hand per PLACE per item, summed in SQL — "what is in the truck".
@@ -3585,25 +3594,45 @@ export async function stockAtLocation(
 
 // ------------------------------------------------------------- valuation ---
 
-export interface ValuationRow {
-  itemId: string;
-  itemName: string;
-  unit: string;
-  lotId: string | null;
-  lotCode: string | null;
-  /** The lot's provenance — `purchased`, `raised` or `produced`. */
-  lotSource: string | null;
-  quantity: number;
-  valueCents: number | null;
-  method: ValuationMethod;
+/**
+ * What each of these batches holds ACROSS EVERY PLACE, as of the same date.
+ *
+ * The denominator for a by-place valuation, and separate from the main fold
+ * because that one is narrowed to one place by the time it runs. Same date
+ * filter, so a share is taken of what the batch held on the day being asked
+ * about rather than of what it holds now.
+ */
+async function lotOnHandEverywhere(
+  tx: Tx,
+  tenantId: string,
+  lotIds: string[],
+  asOf?: string,
+): Promise<Map<string, number>> {
+  if (lotIds.length === 0) return new Map();
+  const rows = await tx
+    .select({
+      lotId: schema.inventoryMovements.lotId,
+      quantity: sql<string>`sum(${schema.inventoryMovements.quantity})`,
+    })
+    .from(schema.inventoryMovements)
+    .where(
+      and(
+        eq(schema.inventoryMovements.tenantId, tenantId),
+        inArray(schema.inventoryMovements.lotId, lotIds),
+        asOf ? lte(schema.inventoryMovements.occurredOn, asOf) : undefined,
+      ),
+    )
+    .groupBy(schema.inventoryMovements.lotId);
+  const out = new Map<string, number>();
+  for (const row of rows) {
+    if (row.lotId) out.set(row.lotId, roundQuantity(Number(row.quantity)));
+  }
+  return out;
 }
 
-export interface StockValuation {
-  rows: ValuationRow[];
-  total: ValuationTotal;
-  /** The date everything here is as of. */
-  asOf: string;
-}
+// Declared in `core/valuation.ts` since 2026-09-09, so the pure CSV builder can
+// name them without importing this file. Re-exported so callers are unchanged.
+export type { StockValuation, ValuationRow } from "./core/valuation";
 
 /**
  * **WHAT THE SHELF IS WORTH, AS OF A DATE.**
@@ -3627,13 +3656,48 @@ export interface StockValuation {
 export async function valueStock(
   tx: Tx,
   tenantId: string,
-  opts: { asOf?: string; itemId?: string } = {},
+  opts: {
+    asOf?: string;
+    itemId?: string;
+    /** An `item_kind` slug. */
+    kind?: string;
+    /**
+     * An enterprise id, or `NO_ENTERPRISE_FILTER` for the untagged.
+     *
+     * **RESOLVED THE WAY THE COSTING RESOLVES IT: the batch's beats the
+     * item's.** `inventory_lots.enterprise_id` exists precisely because feed
+     * belongs to no one part of a business while the pen it was fed to belongs
+     * to exactly one, and a filter that read only the item's would answer a
+     * different question from the P&L it is being checked against.
+     */
+    enterpriseId?: string;
+    /**
+     * An asset id, or `NO_PLACE` for stock whose entries named no place.
+     *
+     * **THIS CHANGES WHAT `Worth` MEANS**, and the screen says so. See the
+     * share fold below.
+     */
+    locationAssetId?: string;
+  } = {},
 ): Promise<StockValuation> {
   const dateFilter = opts.asOf
     ? lte(schema.inventoryMovements.occurredOn, opts.asOf)
     : undefined;
   const itemFilter = opts.itemId
     ? eq(schema.inventoryMovements.itemId, opts.itemId)
+    : undefined;
+  const kindFilter = opts.kind
+    ? eq(schema.inventoryItems.itemKind, opts.kind)
+    : undefined;
+  const enterpriseFilter = opts.enterpriseId
+    ? opts.enterpriseId === NO_ENTERPRISE_FILTER
+      ? sql`coalesce(${schema.inventoryLots.enterpriseId}, ${schema.inventoryItems.enterpriseId}) is null`
+      : sql`coalesce(${schema.inventoryLots.enterpriseId}, ${schema.inventoryItems.enterpriseId}) = ${opts.enterpriseId}::uuid`
+    : undefined;
+  const placeFilter = opts.locationAssetId
+    ? opts.locationAssetId === NO_PLACE
+      ? isNull(schema.inventoryMovements.locationAssetId)
+      : eq(schema.inventoryMovements.locationAssetId, opts.locationAssetId)
     : undefined;
 
   const rows = await tx
@@ -3663,7 +3727,14 @@ export async function valueStock(
       ),
     )
     .where(
-      and(eq(schema.inventoryMovements.tenantId, tenantId), dateFilter, itemFilter),
+      and(
+        eq(schema.inventoryMovements.tenantId, tenantId),
+        dateFilter,
+        itemFilter,
+        kindFilter,
+        enterpriseFilter,
+        placeFilter,
+      ),
     )
     .groupBy(
       schema.inventoryMovements.itemId,
@@ -3696,6 +3767,17 @@ export async function valueStock(
   ];
   const itemIds = [...new Set(standing.map((r) => r.itemId))];
 
+  /**
+   * **THE DENOMINATOR IS EVERYWHERE, and it has to be read separately.** With a
+   * place picked, the fold above is already narrowed to that place — so the
+   * quantity it produces is the numerator and the batch's own on-hand is
+   * nowhere in it. Asked for only when it is needed, so the whole-business
+   * valuation still runs the two queries it always did.
+   */
+  const wholeByLot = placeFilter
+    ? await lotOnHandEverywhere(tx, tenantId, lotIds, opts.asOf)
+    : null;
+
   const [carried, rates] = await Promise.all([
     carriedCostByLot(tx, tenantId, lotIds, opts.asOf),
     averageRatesForItems(tx, tenantId, itemIds, opts.asOf),
@@ -3715,6 +3797,16 @@ export async function valueStock(
             })()
           : null,
         averageRate: rates.get(row.itemId) ?? null,
+        /**
+         * **ONLY WITH A PLACE PICKED, and only for stock IN a batch.** Stock
+         * held outside any batch is valued at the item's average, which
+         * multiplies by the quantity here and needs no apportioning at all —
+         * passing a share for it would be arithmetic looking for a problem.
+         */
+        share:
+          wholeByLot && row.lotId
+            ? { here: row.quantity, whole: wholeByLot.get(row.lotId) ?? 0 }
+            : undefined,
       });
       return {
         itemId: row.itemId,
@@ -3723,6 +3815,9 @@ export async function valueStock(
         lotId: row.lotId,
         lotCode: row.lotCode,
         lotSource: row.lotSource,
+        // Echoed back so the screen can label the column without re-deriving
+        // what it asked for.
+        locationAssetId: opts.locationAssetId ?? null,
         quantity: row.quantity,
         valueCents: line.valueCents,
         method: line.method,

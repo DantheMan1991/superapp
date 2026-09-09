@@ -42,6 +42,19 @@ export interface ValuationInput {
    * `averageCostRate`. Null when nothing came in with a price.
    */
   averageRate: number | null;
+  /**
+   * **PRESENT ONLY WHEN THE READER ASKED ABOUT ONE PLACE**, and it is what
+   * turns a whole-batch figure into that place's part of it.
+   *
+   * `here` is what is at the place, `whole` is what the batch holds
+   * everywhere. A batch's carried cost is a fact about the BATCH — nothing
+   * anywhere records what each shelf of it cost — so answering "what is in the
+   * freezer worth" means apportioning, and apportioning is a decision rather
+   * than a lookup. See `shareOfCarried` for the rule and for when it refuses.
+   *
+   * Absent is the ordinary whole-business case and is untouched by any of this.
+   */
+  share?: { here: number; whole: number };
 }
 
 /** The cost figures a lot carries, from `lotCarried`. */
@@ -112,10 +125,57 @@ export function carriedValue(cost: CarriedCost): number | null {
 
 /**
  * How a line got its number. Carried beside the money because **a balance sheet
- * reader is entitled to know which of these three they are looking at** — one is
- * measured, one is an average over a fungible item, and one is an admission.
+ * reader is entitled to know which of these they are looking at** — one is
+ * measured, one is an average over a fungible item, one is an apportionment,
+ * and two are admissions.
+ *
+ * `none` and `unsplit` are BOTH unvalued and are NOT the same fact. `none` says
+ * nobody ever costed this batch; `unsplit` says somebody did and the figure
+ * cannot honestly be divided between places. Folding them together would tell a
+ * reader looking at one freezer that their raised stock had never been costed.
  */
-export type ValuationMethod = "carried" | "average" | "none";
+export type ValuationMethod =
+  | "carried"
+  | "average"
+  | "share"
+  | "unsplit"
+  | "none";
+
+/**
+ * **ONE PLACE'S PART OF WHAT A BATCH IS CARRIED AT.**
+ *
+ * Nothing anywhere records what each shelf of a batch cost. A batch has ONE
+ * carried figure, and a person standing in front of one freezer still wants a
+ * number — so the quantity there is used as the share of the quantity
+ * everywhere. It is the same pro-rate `lotCarried` already names as the thing a
+ * production run must do against what is still standing, and the same one
+ * `splitCostAdjustment` does when a batch is cut in two.
+ *
+ * **IT REFUSES RATHER THAN GUESSES, in two cases**, and both are real:
+ *
+ * - `whole` is zero. A batch holding nine in the freezer and minus nine in the
+ *   truck nets to nothing, and there is no share of nothing to take. Dividing
+ *   would be a division by zero; picking a side would be an invention.
+ * - the share falls outside 0 to 1 — a place holding more than the batch does,
+ *   or holding a positive against a batch that is negative overall. The signs
+ *   disagree, and multiplying by a ratio above one or below zero produces a
+ *   figure that is confidently wrong.
+ *
+ * A refusal comes back as `null` and the caller reports it as `unsplit`, which
+ * lands in the same "what this figure leaves out" count the page is built
+ * around. That is the point: the caveat machinery already exists, so the honest
+ * answer costs nothing to say.
+ */
+export function shareOfCarried(
+  carriedCents: number,
+  here: number,
+  whole: number,
+): number | null {
+  if (whole === 0) return null;
+  const ratio = here / whole;
+  if (!Number.isFinite(ratio) || ratio < 0 || ratio > 1) return null;
+  return Math.round(carriedCents * ratio);
+}
 
 export interface ValuedLine {
   /** Null means it could not be valued. NEVER zero for that case. */
@@ -144,6 +204,18 @@ export function valueLine(input: ValuationInput): ValuedLine {
   if (input.quantity === 0) return { valueCents: 0, method: "carried" };
 
   if (input.carriedCents !== null) {
+    // **A SHARE IS ASKED FOR ONLY WHEN ONE PLACE IS.** Without it this is the
+    // whole-business answer it has always been, byte for byte.
+    if (input.share) {
+      const part = shareOfCarried(
+        input.carriedCents,
+        input.share.here,
+        input.share.whole,
+      );
+      return part === null
+        ? { valueCents: null, method: "unsplit" }
+        : { valueCents: part, method: "share" };
+    }
     return { valueCents: input.carriedCents, method: "carried" };
   }
   if (input.averageRate !== null) {
@@ -155,6 +227,37 @@ export function valueLine(input: ValuationInput): ValuedLine {
   // Raised, no purchase basis, and nobody recorded what went into it. Saying so
   // is the only honest answer.
   return { valueCents: null, method: "none" };
+}
+
+/**
+ * One line of a valuation: an item, and one of its batches or the stock it
+ * holds outside any.
+ *
+ * **DECLARED HERE RATHER THAN IN `ops.ts` (2026-09-09)** so a pure file can
+ * describe the report a pure file builds — `core/valuation-csv.ts` turns one of
+ * these into a file and must not import a module that opens a database. `ops`
+ * re-exports both, so every existing caller is unchanged.
+ */
+export interface ValuationRow {
+  itemId: string;
+  itemName: string;
+  unit: string;
+  lotId: string | null;
+  lotCode: string | null;
+  /** The lot's provenance — `purchased`, `raised` or `produced`. */
+  lotSource: string | null;
+  /** Which place this line is at, when the reader asked about one. */
+  locationAssetId?: string | null;
+  quantity: number;
+  valueCents: number | null;
+  method: ValuationMethod;
+}
+
+export interface StockValuation {
+  rows: ValuationRow[];
+  total: ValuationTotal;
+  /** The date everything here is as of. */
+  asOf: string;
 }
 
 export interface ValuationTotal {

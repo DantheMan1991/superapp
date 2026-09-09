@@ -66,6 +66,7 @@ import {
   isSubstitutingRule,
   isTimingRule,
   resolveTaxRule,
+  unavailableRuleSentence,
   type ResolvedTaxRule,
   type TaxRuleRow,
 } from "./core/tax-rules";
@@ -102,6 +103,13 @@ export class InventoryError extends Error {
     readonly code:
       | "FORBIDDEN"
       | "NOT_FOUND"
+      /**
+       * A delivery that is on the screen and cannot be settled — fully
+       * invoiced already, or carrying no cost for a bill to clear. **NOT
+       * `NOT_FOUND`**, which `toResult` flattens to "That no longer exists."
+       * about a row the reader is looking at.
+       */
+      | "RECEIPT_UNAVAILABLE"
       | "INVALID_KIND"
       | "INVALID_UNIT"
       | "INVALID_SOURCE"
@@ -2210,9 +2218,11 @@ export async function setTaxRule(
     );
   }
   if (!isImplementedRule(input.timingRule)) {
+    // Computed from IMPLEMENTED_TIMING_RULES, never restated — see the
+    // helper's own comment for the four days this sentence was a lie.
     throw new InventoryError(
       "TIMING_RULE_UNAVAILABLE",
-      `The reports cannot apply "${input.timingRule}" yet, so recording it here would mean a setting that says one thing and does another. Only "when it is used" is applied today.`,
+      unavailableRuleSentence(input.timingRule),
     );
   }
 

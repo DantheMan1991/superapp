@@ -34,7 +34,7 @@ import { formatQuantity } from "./core/units";
 import { describeExpiring, expiryLabel, splitExpiring } from "./core/expiry";
 import { Button } from "@/components/ui/button";
 import { todayInTimezone } from "@/lib/timezone";
-import { formatMoney } from "@/lib/money";
+import { formatMoneySign } from "@/lib/money";
 import { PasteListButton } from "@/components/app/paste-list-button";
 import { ItemForm } from "./components/item-form";
 import { ItemFilters } from "./components/item-filters";
@@ -374,7 +374,9 @@ export async function InventoryModule({
            */}
           <StatCard
             label="What it is worth"
-            value={formatMoney(valuation.total.valueCents, currencySymbol)}
+            /* Signed, like the page it links to: the two must not disagree
+               about whether a total is negative. */
+            value={formatMoneySign(valuation.total.valueCents, currencySymbol)}
             href={`${BASE}/value`}
             tone="accent"
             footnote={

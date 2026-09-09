@@ -4,7 +4,7 @@ import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { allowsWrite } from "@/lib/packs/authorize";
 import { requireModuleEnabled } from "@/lib/modules";
-import { formatMoney } from "@/lib/money";
+import { formatMoney, formatMoneySign } from "@/lib/money";
 import { todayInTimezone } from "@/lib/timezone";
 import { PageHeader } from "@/components/app/page-header";
 import { DataTable } from "@/components/app/data-table";
@@ -345,10 +345,18 @@ export default async function InventoryItemPage({
           lot={{
             id: lot.id,
             code: lot.code,
+            /**
+             * **SIGNED, and this is the worst of the four.** A correction
+             * larger than what is still standing in the batch leaves
+             * `remainingCents` negative on purpose — `costing.ts` says so —
+             * and unsigned the dialog opened with *"This batch is carrying
+             * $8.00"* about a batch carrying MINUS $8.00. Found by driving
+             * exactly that correction on 2026-09-09.
+             */
             carriedLabel:
               carriedCents === null
                 ? null
-                : formatMoney(carriedCents, currencySymbol),
+                : formatMoneySign(carriedCents, currencySymbol),
             quantityOnHand: balance,
             quantityReceived: received,
             onHandLabel: formatQuantity(balance, unit),
@@ -679,7 +687,8 @@ export default async function InventoryItemPage({
                             No cost recorded
                           </span>
                         ) : (
-                          formatMoney(row.carriedCents, currencySymbol)
+                          /* Signed: see `LotCostForm`'s carriedLabel. */
+                          formatMoneySign(row.carriedCents, currencySymbol)
                         )}
                       </dd>
                     </div>
@@ -759,7 +768,8 @@ export default async function InventoryItemPage({
                               No cost recorded
                             </span>
                           ) : (
-                            formatMoney(row.carriedCents, currencySymbol)
+                            /* Signed: see `LotCostForm`'s carriedLabel. */
+                            formatMoneySign(row.carriedCents, currencySymbol)
                           )}
                         </TableCell>
                         <TableCell className="text-right">

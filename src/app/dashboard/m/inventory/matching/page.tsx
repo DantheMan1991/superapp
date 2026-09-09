@@ -3,7 +3,7 @@ import { FileCheck, TriangleAlert } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
-import { formatMoney } from "@/lib/money";
+import { formatMoney, formatMoneySign } from "@/lib/money";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { DataTable } from "@/components/app/data-table";
@@ -100,7 +100,13 @@ export default async function InventoryMatchingPage() {
               precisely so a difference is visible instead of assumed away. */}
           <StatCard
             label="Arrived, not yet invoiced"
-            value={formatMoney(position.accountCents, currencySymbol)}
+            /* **SIGNED, because this one is allowed to go either way.** A
+               shortfall — being billed for more than turned up — deliberately
+               leaves a DEBIT balance here, and `formatMoney` drops the sign,
+               so the screen read as though the business were owed the money it
+               owes. Every other figure on this page is a cost and stays
+               unsigned. */
+            value={formatMoneySign(position.accountCents, currencySymbol)}
             footnote={
               <>
                 What Goods Received Not Invoiced is holding.{" "}
@@ -144,8 +150,8 @@ export default async function InventoryMatchingPage() {
           isEmpty={lines.length === 0}
           empty={
             <EmptyState
-              title="No draft bills"
-              description="A bill can only be matched while it is still a draft — once it is approved its entry has posted, and changing what the bill says would not change what was posted."
+              title="No bills waiting"
+              description="A bill can be matched while it is a draft or waiting for approval. Once it is approved its entry has posted, and changing what the bill says would not change what was posted."
             />
           }
         >
@@ -177,7 +183,9 @@ export default async function InventoryMatchingPage() {
                     {line.description || "—"}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {formatMoney(line.invoiceCents, currencySymbol)}
+                    {/* A credit line is a negative charge, and unsigned it
+                        read as a charge. */}
+                    {formatMoneySign(line.invoiceCents, currencySymbol)}
                   </TableCell>
                   <TableCell>
                     {line.matchedCount === 0 ? (

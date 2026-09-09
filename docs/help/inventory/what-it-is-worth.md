@@ -16,6 +16,7 @@ Nothing on this page changes anything. It is a report.
 - **`Batch by batch`.** `What`, `Batch`, `On hand`, `How it was valued` and `Worth`.
 - **`Batch`** shows a dash for stock held outside any batch.
 - **`Worth`** reads `Not known` for a batch nobody costed. That is not zero.
+- **A minus sign** in front of a figure means the batch has gone below zero: more has left it than ever went in. The total counts it as it falls, so a minus is a disagreement worth opening the {{item|lower}} for.
 
 **Never quote the total without the second card.** Understated by an unknown amount is a different fact from understated by nothing, and only the two together tell you which you have.
 
@@ -33,9 +34,7 @@ The badge in `How it was valued` says which of three ways was used.
 2. Press Enter, or click {button:Value it|outline}.
 3. Both cards and the whole table recompute for that day.
 
-The date is in the address, so you can send somebody the link and the back button walks through the dates you looked at.
-
-If you use the back button and the date box looks out of step with the figures, retype the date. We are fixing that.
+The date is in the address, so you can send somebody the link and the back button walks through the dates you looked at. The date box follows, so what it shows is always the day the figures are for.
 
 ## Messages
 
@@ -54,7 +53,7 @@ If you use the back button and the date box looks out of step with the figures, 
 - There is no export and no print layout.
 - There is no total row in the table. The two cards are the only totals.
 - Nothing groups by place, kind or line of business.
-- A batch that has gone below zero shows a negative amount with no explanation.
+- Nothing here explains why a batch went below zero. The page shows the minus and no more; open the {{item|lower}} and read its entries.
 - The count of what is left out is a count of batches, and the quantity beside it adds up different units into one number. Read it as a rough size, not a figure.
 - If you need any of this, ask us.
 

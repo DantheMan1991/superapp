@@ -29,7 +29,7 @@ On a phone, one card per batch: the code with its badges, where it came from and
 
 - **`From`** is `Bought`, `Raised here` or `Made here`.
 - **`Good until`** turns red once the date is past and there is still something on hand, and a line under the date says `past its date`, `goes off today`, `goes off in 5 days` or `good until 2026-11-01`. Blank covers both "nobody dated it" and "it does not go off".
-- **`Carrying`** is what that batch cost and has not yet released. `No cost recorded` means nobody ever costed it, which is different from `$0.00`, meaning it was costed and has all been used.
+- **`Carrying`** is what that batch cost and has not yet released. `No cost recorded` means nobody ever costed it, which is different from `$0.00`, meaning it was costed and has all been used. A minus in front of it, `−$8.00`, means a correction took more off the batch than was still standing in it. That is allowed and it is worth looking at.
 - **{badge:closed|outline}** and **{badge:split|outline}** mark a batch that has been closed elsewhere, or one cut off another.
 - **{button:Correct cost|ghost}**, **{button:Correct weight|ghost}** and **{button:Split|ghost}** sit under each card, or at the end of each row, for owners. `Correct weight` only appears on a batch that has a weight recorded. `Split` only while the batch is open and has something on hand.
 

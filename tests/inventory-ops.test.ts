@@ -2140,7 +2140,15 @@ d("inventory ops", () => {
             timingRule: "later_of_paid_and_consumed",
           }),
         ),
-      ).rejects.toMatchObject({ code: "TIMING_RULE_UNAVAILABLE" });
+      ).rejects.toMatchObject({
+        code: "TIMING_RULE_UNAVAILABLE",
+        // And the sentence names what the reports DO apply, read from
+        // IMPLEMENTED_TIMING_RULES rather than restated — see
+        // tests/inventory-tax-rules.test.ts for why that matters.
+        message: expect.stringContaining(
+          'Today they apply "when it is used" and "when it is paid for".',
+        ),
+      });
     });
 
     it("refuses something that is not a moment the ledger can date", async () => {

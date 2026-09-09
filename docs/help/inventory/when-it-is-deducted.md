@@ -58,7 +58,7 @@ If you close the dialog without saving and open it again, it may still show the 
 | `Removed — it falls back to whatever covers it.` | The row is gone and the category inherits again. |
 | `No items yet, so there are no categories to decide about. The default row above is what a new one will inherit.` | Nothing is held yet. |
 | `Pick the expense account this cost should land in.` | The answer you chose moves cost off the balance sheet, so it has to say where. |
-| `The reports cannot apply "when it is sold to a customer" yet` | That answer is not built. Pick one that is. The message goes on to say only `when it is used` is applied, which is out of date. `When it is paid for` is applied too. |
+| `The reports cannot apply "when it is sold to a customer" yet` | That answer is not built. The message goes on to name the ones that are: `Today they apply "when it is used" and "when it is paid for".` Pick one of those. |
 | `Only an owner can change stock records.` | You are signed in as staff. |
 
 ## Not on this page

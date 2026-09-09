@@ -8,6 +8,7 @@ import {
   isImplementedRule,
   isTimingRule,
   resolveTaxRule,
+  unavailableRuleSentence,
   type TaxRuleRow,
 } from "../src/packs/inventory/core/tax-rules";
 
@@ -111,6 +112,43 @@ describe("timing rules", () => {
     // dates per line and place the result in whichever window it falls in.
     expect(isImplementedRule("later_of_paid_and_consumed")).toBe(false);
     expect(isTimingRule("later_of_paid_and_consumed")).toBe(true);
+  });
+
+  describe("the refusal for a rule the reports cannot honour", () => {
+    it("names the rejected rule by the words on the picker, not by its slug", () => {
+      // A person chose "When it is sold to a customer" and was told the reports
+      // cannot apply `"sold"`, which is a word they never saw.
+      const sentence = unavailableRuleSentence("sold");
+      expect(sentence).toContain('cannot apply "when it is sold to a customer"');
+      expect(sentence).not.toContain('"sold"');
+    });
+
+    it("READS THE APPLIED LIST rather than restating it", () => {
+      /**
+       * **THE REGRESSION THIS TEST EXISTS FOR.** The sentence used to be a
+       * literal ending "Only \"when it is used\" is applied today.", and it
+       * stayed that way for the four days after `paid` shipped — so the
+       * refusal contradicted the card at the top of the same screen, which
+       * reads its list from `IMPLEMENTED_TIMING_RULES`. Assert against the
+       * list, so widening the list without widening the sentence fails here
+       * rather than in front of a tenant.
+       */
+      const sentence = unavailableRuleSentence("billed");
+      for (const rule of IMPLEMENTED_TIMING_RULES) {
+        expect(sentence).toContain(`"${TIMING_RULE_LABELS[rule].toLowerCase()}"`);
+      }
+      // And says nothing about a rule it cannot honour. `.includes` rather
+      // than `isImplementedRule`, whose type predicate narrows the loop
+      // variable to `never` on the way out of the `continue`.
+      for (const rule of TIMING_RULES) {
+        if (IMPLEMENTED_TIMING_RULES.includes(rule) || rule === "billed") continue;
+        expect(sentence).not.toContain(TIMING_RULE_LABELS[rule].toLowerCase());
+      }
+      // Today that is exactly two, joined as prose rather than as a list.
+      expect(sentence).toContain(
+        'Today they apply "when it is used" and "when it is paid for".',
+      );
+    });
   });
 
   it("gives every rule a label and a note, including the unbuilt ones", () => {

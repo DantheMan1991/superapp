@@ -33,6 +33,115 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-09-09 — Messages that say what happened (`claude/messages-that-say-what-happened`)
+
+**Refusals and figures that told the reader the wrong thing.** Every one the
+review named, plus four more the driving found. Slice 6, no migration, and no
+behaviour change beyond what a person reads.
+
+- **A `LedgerError` is the books refusing, not this pack.** Recording stock
+  posts through `postEntry`, so its guards reach `toResult` — and every one of
+  them came out as `Something went wrong saving that.`, which tells the reader
+  to try again when trying again cannot work. Three are ordinary: a movement
+  backdated into a closed period (`PERIOD_CLOSED`, the one refusal that names
+  its own remedy), one dated before the books begin (`BEFORE_BOOKS_START`), and
+  an `expert` issuing stock — `requirePostingRight` refuses them even on a
+  machine source, while this pack admits them at `member` level, so the pack
+  says yes and the ledger says no. `toResult` now answers a `LedgerError` with
+  accounting's own `friendlyMessage`, so there is one vocabulary rather than
+  two that can drift. The accountant case then reads
+  `Only the business owner can do that.`, which is accounting's own sentence
+  and looser than the rule (staff may issue); left as is, because the place to
+  tighten it is accounting, once, not here.
+- **The matching flow's most useful sentence has a code of its own.**
+  `that delivery is already fully invoiced, or carries no cost to settle` was
+  thrown as `NOT_FOUND`, which flattens to `That no longer exists.` about a row
+  the reader is looking at. New code `RECEIPT_UNAVAILABLE`, message passed
+  through; `NOT_FOUND` goes back to meaning gone.
+- **`setTaxRule`'s refusal is computed from `IMPLEMENTED_TIMING_RULES`**, so it
+  cannot go stale the way it did for four days after `paid` shipped, when it
+  still said only *when it is used* was applied while the card above it said
+  otherwise. It also names the rule by the words on the picker instead of by
+  its slug.
+- **`INVALID_COST` passes its own message.** One code carried two refusals and
+  rendered both as `A cost cannot be negative.`, including
+  `a correction of nothing is not a correction` — which Zod catches on the
+  action, but `livestock`'s capital return calls the op directly.
+- **Seven figures that may be negative are signed** (`formatMoneySign`).
+  `formatMoney` does not merely omit a minus — `formatCents` takes the absolute
+  value — so an unsigned negative reads as its own OPPOSITE. The review named
+  three; driving found four more, and the worst of them was not on the list:
+  - the GRNI headline, where a shortfall deliberately leaves a debit balance
+    and the screen read as though the business were owed what it owes;
+  - a credit bill line, which read as a charge;
+  - the valuation total and the hub card that links to it, where
+    `core/valuation.ts` sums negatives as they fall on purpose;
+  - each batch's `Worth` on the valuation;
+  - **and the three places the item page renders a batch's `carriedValue`** —
+    the phone card, the desktop table, and the correction dialog's own opening
+    line. `costing.ts` leaves `remainingCents` negative when a correction lands
+    after stock has left, and unsigned the dialog opened *"This batch is
+    carrying $8.00"* about a batch carrying minus $8.00. Found by driving
+    exactly that correction, not by reading.
+
+  Every other figure on those screens is a cost, cannot go below zero
+  (`receiveStock` refuses a negative and a movement's `costCents` is a
+  magnitude, the quantity carrying the direction), and stays unsigned.
+- **The matching empty state stops saying `No draft bills`** while listing and
+  matching bills that are awaiting approval.
+- **The valuation's `As of` box re-syncs on Back and Forward**, keyed on the
+  date the way the item filter bar keys its search box. The component's own doc
+  comment named that behaviour as the design goal and the box did not have it.
+
+Not changed, deliberately: the two hand-written `FORBIDDEN` sentences in
+`ledger-ops.ts` still flatten to `Only an owner can change stock records.` That
+sentence is accurate, four guides document it, and making one act's refusal
+more specific than the rest would be a sweep rather than a fix.
+
+**Found while driving, and NOT fixed here** — two things this slice's own
+change put in view:
+
+- **`src/app/dashboard/m/livestock/feed/page.tsx` renders a lot's
+  `remainingCents` unsigned**, twice. That is livestock's own fold rather than
+  `lotCarried`, so whether it can reach the screen negative needs reading
+  before it needs signing; it is out of this pack and has a task of its own.
+- **An UNCOSTED movement may be dated before the books begin, and its
+  correction may not.** A receipt with no price posts nothing, so no ledger
+  guard runs and the date is accepted; adjusting it away stamps the item
+  average, which posts, and is refused with `BEFORE_BOOKS_START`. Both
+  behaviours are right on their own terms and the pair is a trap. Reproduced on
+  the dev branch on 2026-09-09 and left in the fixture — see Verified below.
+
+Verified on the dev branch's Hilltop Farm at 375px and 1280px:
+
+- A −$20.00 correction on `GB-REVIEW-2026-09-09`, which carried $12.00, put the
+  batch at minus $8.00. The item page's card and table, the correction dialog's
+  opening line, and the valuation row all read `−$8.00`; the valuation total
+  fell by exactly $20.00, so the negative is summed as it falls.
+- Recording a costed delivery dated 2025-12-31 answered
+  *"That date is before the day your books begin…"* — accounting's own sentence,
+  through this pack's `toResult`, where the reader used to get
+  `Something went wrong saving that.` Nothing was written; the transaction
+  rolled back.
+- The `As of` box followed Back and Forward, box and heading agreeing on both
+  2026-08-25 and 2026-09-09.
+- `TIMING_RULE_UNAVAILABLE` and `RECEIPT_UNAVAILABLE` are **server guards with
+  no clickable path** — the unbuilt rules are `disabled` in the picker and the
+  match dialog only offers open deliveries — so both are pinned by tests rather
+  than driven. The matching empty state needs a tenant with no waiting bill and
+  Hilltop has three; its copy is a constant with no branch.
+
+Dev-branch fixture left behind: the −$20.00 correction on
+`GB-REVIEW-2026-09-09`, and a 1-package receipt dated 2025-12-31 recorded by
+accident while driving, backed out by a `Correcting an entry` adjustment dated
+2026-09-09 (the trap above is why the two dates differ).
+
+Guides swept: `deliveries-and-invoices.md` (both messages, the empty state, the
+minus on the GRNI card, and two Not-on-this-page bullets that are now false),
+`what-it-is-worth.md` (what a minus means, and the back button),
+`item.md` (the minus on `Carrying`), `items.md` (the minus on the hub card),
+`when-it-is-deducted.md` (the refusal now names what the reports do apply).
+
 ### 2026-09-09 — Stock reaches What needs you (`claude/stock-reaches-what-needs-you`)
 
 **Every deviation this pack surfaces waited for somebody to open the page.**
@@ -1899,12 +2008,17 @@ commitment against a live animal to delivered without sitting on a shelf.
 - ~~**Staff cannot record stock in, out or adjusted**~~ — **fixed 2026-09-03.**
   `MovementForm` is out of the header's owner block and asks `allowsWrite`; see
   the build log.
-- **A closed period and an accountant's posting refusal both surface as
-  `Something went wrong saving that.`** `LedgerError` is not in `toResult`.
-- **The matching flow's most useful message is thrown as `NOT_FOUND`** and
-  flattened to `That no longer exists.` about a delivery on screen.
-- **`setTaxRule` still says only `when it is used` is applied.** Stale since
-  `paid` shipped, and contradicted by the card on the same page.
+- ~~**A closed period and an accountant's posting refusal both surface as
+  `Something went wrong saving that.`** `LedgerError` is not in `toResult`.~~ —
+  **closed 2026-09-09**: `toResult` answers a `LedgerError` with accounting's
+  own `friendlyMessage`.
+- ~~**The matching flow's most useful message is thrown as `NOT_FOUND`** and
+  flattened to `That no longer exists.` about a delivery on screen.~~ —
+  **closed 2026-09-09** by `RECEIPT_UNAVAILABLE`. The two hand-written
+  `FORBIDDEN` sentences beside it are still flattened, deliberately.
+- ~~**`setTaxRule` still says only `when it is used` is applied.** Stale since
+  `paid` shipped, and contradicted by the card on the same page.~~ —
+  **closed 2026-09-09**: computed from `IMPLEMENTED_TIMING_RULES`.
 - **The `lot` label is declared, renamed by the farm profile, and resolved
   nowhere.** `item` is resolved only on the hub. Fixing either sweeps
   `docs/help/inventory/*.md` in the same PR.
@@ -1923,7 +2037,9 @@ commitment against a live animal to delivered without sitting on a shelf.
 - ~~**`Going off soon` includes stock that already went off, and caps at 12
   silently.**~~ — **fixed 2026-09-09**: past its date is split out and named,
   the panel says `12 of N shown`.
-- **Money is rendered unsigned in three places where the value may be negative.**
+- ~~**Money is rendered unsigned in three places where the value may be
+  negative.**~~ — **closed 2026-09-09**, four places counting the valuation
+  row: GRNI, the valuation total, each batch's `Worth`, and a credit bill line.
 - **`capitalised_on` is set by `livestock` and by nothing else yet.** The column
   is neutral — a batch whose cost has been capitalised elsewhere is not a farm
   idea — and `valueStock` and `carriedCostByLot` both respect it. Anything else
@@ -2030,6 +2146,11 @@ commitment against a live animal to delivered without sitting on a shelf.
   action rather than reusing it: an adjustment has a required reason and a signed
   quantity, and routing it through the generic primitive would have made the
   action lie about what it accepts. Nothing calls it, and nothing is going to.
+- **A lot's carried cost is rendered unsigned on the livestock feed page.**
+  `src/app/dashboard/m/livestock/feed/page.tsx` shows `remainingCents` through
+  `formatMoney` twice, the way this pack's own screens did before 2026-09-09.
+  It is livestock's fold, not `lotCarried`, so whether it can go negative wants
+  reading first.
 - **A batch's expiry cannot be edited after it is created.** There is no
   `updateLot` at all — the same shape as the four actions below — so a delivery
   entered without a date, or with the wrong one, is stuck with it.

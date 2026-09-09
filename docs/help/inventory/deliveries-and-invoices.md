@@ -11,7 +11,7 @@ This is where a supplier's invoice gets tied to the delivery it is paying for.
 ## What you see
 
 - **The posting panel at the top.** It reads `Stock is on the balance sheet` or `Stock is not on the balance sheet`, with a switch marked `On` or `Off`. Owners only, and see below before you touch it.
-- **`Arrived, not yet invoiced`.** What you hold and have not been billed for. It only appears once stock is on the balance sheet. Under it, how many deliveries are waiting and what they are worth.
+- **`Arrived, not yet invoiced`.** What you hold and have not been billed for. It only appears once stock is on the balance sheet. Under it, how many deliveries are waiting and what they are worth. A minus in front of it means you have been billed for more than turned up.
 - **`Bills waiting to be matched`.** `Supplier`, `Line`, `Charged` and `Matched`. Click a supplier to open the bill in Accounting.
 - **`Matched`** reads `Nothing yet`, or a badge like {badge:2 deliveries · $6,000.00|secondary}.
 - **{button:Match|outline}** and **{button:Unpick|ghost}** at the end of each bill row. Owners only, and only when stock is on the balance sheet.
@@ -61,21 +61,20 @@ You must then go into Accounting and say what that bill line was for, or the bil
 | `$120.00 charged for stock that did not arrive` | You were billed for more than turned up. Chase the supplier. |
 | `Unpicked` | The match is undone and the bill line is uncoded. |
 | `Stock now posts to the books` / `Stock no longer posts` | The switch moved. |
-| `No draft bills` | No bill is waiting. A bill can only be matched before it is approved. |
+| `No bills waiting` | No bill is waiting. A bill can be matched while it is a draft or waiting for approval, never after. |
 | `Nothing waiting` | Every priced delivery has an invoice against it. |
 | `Stock is not on the balance sheet for this business, so there is nothing for a bill to settle. Turn that on first.` | Turn the switch on before matching. |
 | `that bill is already approved — match the delivery before approving it` | Too late for that bill. Match before approving next time. |
 | `that delivery only has 40 lb left to invoice` | You typed more than is left on that delivery. |
 | `That delivery belongs to a different company from this bill.` | The delivery is on another company's books. |
-| `That no longer exists.` | Usually means that delivery is already fully invoiced, or has no cost to settle. The message is vaguer than it should be, and we are fixing it. |
+| `that delivery is already fully invoiced, or carries no cost to settle` | The delivery you typed against cannot take this bill. Reload the page to see what is still open. |
+| `That no longer exists.` | The bill line or the delivery was removed while you were looking at it. Reload the page. |
 | `Only an owner can change stock records.` | You are signed in as staff. Ask an owner. |
 
 ## Not on this page
 
 - The dialog does not narrow the deliveries to the supplier on the bill, so you scroll all of them.
 - The list stops at a hundred deliveries, while the card above counts more than that. If the two disagree, the card is right.
-- Money is shown without a minus sign anywhere on this page, so a credit reads like a charge.
-- A bill can only be matched while it is a draft or waiting for approval, and the empty state only mentions drafts.
 - If you need any of this, ask us.
 
 ## Who can do what

@@ -4,7 +4,7 @@ import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { todayInTimezone } from "@/lib/timezone";
-import { formatMoney } from "@/lib/money";
+import { formatMoneySign } from "@/lib/money";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { DataTable } from "@/components/app/data-table";
@@ -73,7 +73,16 @@ export default async function InventoryValuePage({
         title="What it is worth"
         description="The cost standing in stock on hand. Not what it would sell for — what it cost to have."
         icon={<Coins />}
-        actions={<AsOfPicker asOf={asOf} today={today} />}
+        /**
+         * **KEYED ON THE DATE, so Back and Forward re-sync the box.** The
+         * picker seeds `useState` from this prop, and React keeps state across
+         * a prop change — so walking the dates with the back button left the
+         * field showing one day and the figures another, defeating the exact
+         * behaviour the component's own doc comment names as its design goal.
+         * `key` is React's answer to resetting state on a prop change, and it
+         * is what the item filter bar already does with its search box.
+         */
+        actions={<AsOfPicker key={asOf} asOf={asOf} today={today} />}
       />
 
       <InventoryNav isOwner={ctx.role === "owner"} />
@@ -81,7 +90,11 @@ export default async function InventoryValuePage({
       <div className="grid gap-3 sm:grid-cols-2">
         <StatCard
           label={`On hand at ${asOf}`}
-          value={formatMoney(valuation.total.valueCents, currencySymbol)}
+          /* **SIGNED.** `core/valuation.ts` sums negative lines as they
+             fall, on purpose — "a correction landing after stock has left is a
+             real disagreement somebody should see" — and an unsigned total
+             hides exactly that. */
+          value={formatMoneySign(valuation.total.valueCents, currencySymbol)}
           footnote={
             valuation.total.valuedLines === 0
               ? "Nothing on hand that anybody has costed."
@@ -182,7 +195,10 @@ export default async function InventoryValuePage({
                     {row.valueCents === null ? (
                       <span className="text-muted-foreground">Not known</span>
                     ) : (
-                      formatMoney(row.valueCents, currencySymbol)
+                      /* Signed for the same reason as the total: a batch
+                         issued below zero carries a negative, and unsigned it
+                         read as though it were worth that much. */
+                      formatMoneySign(row.valueCents, currencySymbol)
                     )}
                   </TableCell>
                 </TableRow>

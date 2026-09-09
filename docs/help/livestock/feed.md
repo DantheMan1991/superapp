@@ -38,7 +38,7 @@ Two of those need explaining, and the footnote does it:
 
 A ratio below 1 : 1 means some of what they ate is not recorded here, most likely pasture. Read it as a floor.
 
-When some of a group has been processed, `$12.00 left on the lot` under the cost says how much of the bill is still standing in the pen.
+When some of a group has been processed, `$12.00 left on the lot` under the cost says how much of the bill is still standing in the pen. It can read below zero, as `−$10.20 left on the lot`. What leaves with processed animals is everything they were carrying, their own purchase price included, while the cost above it is only the feed in the period you chose. So a group whose animals had a price reads below zero once they have gone, and `Last 30 days` reads below zero for a group fed before the period and processed inside it. `All time` sets the whole feed bill against what left.
 
 ## How to record feed
 

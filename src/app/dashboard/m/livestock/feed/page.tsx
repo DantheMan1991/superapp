@@ -7,7 +7,7 @@ import { packContext } from "@/lib/packs/tenant-context";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { addDays, todayInTimezone } from "@/lib/timezone";
-import { formatMoney } from "@/lib/money";
+import { formatMoney, formatMoneySign } from "@/lib/money";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { Badge } from "@/components/ui/badge";
@@ -464,9 +464,11 @@ export default async function FeedPage({
                         <p className="text-xs text-muted-foreground tabular-nums">
                           {formatQuantities(row.quantities)}
                         </p>
+                        {/* Signed — the table's comment below says why this is under zero on
+                            an ordinary farm. */}
                         {row.releasedCents > 0 && (
                           <p className="text-xs text-muted-foreground">
-                            {formatMoney(row.remainingCents, currencySymbol)} left on the lot
+                            {formatMoneySign(row.remainingCents, currencySymbol)} left on the lot
                           </p>
                         )}
                       </div>
@@ -602,10 +604,20 @@ export default async function FeedPage({
                       {/* WHAT HAS LEFT, under what was spent. A pen processed
                           out still ate the feed — the total is right — but the
                           money is in the freezer now, and a report that only
-                          showed the total would have it in both places. */}
+                          showed the total would have it in both places.
+
+                          **SIGNED, BECAUSE IT IS BELOW ZERO ON AN ORDINARY FARM.**
+                          `remainingCents` is this period's feed less everything that has
+                          ever left the pen with a cost on it — and a run stamps the pen's
+                          WHOLE carried cost onto the head it takes, the animals' own
+                          purchase price included. A pen of priced chicks processed out
+                          reads minus the chick bill here; a 30-day period on a pen fed and
+                          processed before it reads minus the release. `formatMoney` takes
+                          the absolute value, so each of those showed as money still standing
+                          in the pen — the opposite of the fact. */}
                       {row.releasedCents > 0 && (
                         <div className="text-xs text-muted-foreground">
-                          {formatMoney(row.remainingCents, currencySymbol)} left
+                          {formatMoneySign(row.remainingCents, currencySymbol)} left
                           on the lot
                         </div>
                       )}

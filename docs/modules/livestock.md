@@ -133,6 +133,72 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-09-09 — The feed remainder is signed (`claude/feed-figures-signed`)
+
+**Asked by the inventory review's sweep of unsigned figures**: can the feed
+page's `remainingCents` reach the screen negative? It comes from this pack's own
+fold, not from inventory's `lotCarried`, so the answer was read off
+`feedReportRows` and `feedReport` rather than assumed. **It can, and on an
+ordinary farm rather than after a mistake.**
+
+`remainingCents = totalCents − releasedCents`, where the total is this period's
+feed (`consumedByLotAndItem` and `foldGroups` are both windowed by the report's
+`from`/`to`) and the release is deliberately not windowed (the 2026-08-20 entry
+below: what a pen still carries is a fact about now). Two things take the
+subtraction below zero, and neither is the route inventory signed for:
+
+- **The period.** `Last 30 days` on a pen fed before the period and processed
+  inside it: feed in the window $0, release $200, remainder −$200. The guard on
+  the line is `releasedCents > 0`, so it renders.
+- **The animals' own price.** A run stamps the pen's WHOLE carried cost onto the
+  head it takes (`lotShareCents` over inventory's `remainingCents` — purchase,
+  feed and on-hand corrections together), while the feed report's total is feed
+  alone. A pen of chicks bought for $300, fed $400 and processed out reads −$300
+  on `All time`.
+- A cost correction on the pen — the route inventory signed for — reaches this
+  figure only through a later run's stamp, never on its own: it lands in
+  `adjustedOnHandCents`, which the feed report does not read.
+
+`formatMoney` takes the absolute value (`formatCents` does), so each of those
+rendered as money still standing in the pen: `$200.00 left on the lot` about a
+pen carrying minus $200.
+
+**Every other money figure on the page was checked against the same question.**
+`inventory_movements_cost_not_negative` keeps every stamp at or above zero, so
+`measuredCents`, `allocatedCents`, `drawnCents`, `shareCents` and the page's
+totals of them cannot go below it; `unallocatedCents` is a subtraction but is
+rendered only when `> 0`; `centsPerHead` and `centsPerHeadPlaced` come back null
+for a non-positive amount (`perUnit`); `vsPreviousCents` already hand-rolls its
+sign. Only the remainder needed signing.
+
+- **Three renders switched to `formatMoneySign`**: the feed page's phone card
+  and desktop Cost cell, and — one screen beyond the ask, said so here because
+  it is the same row rendered the same way — the lot page's `still on this lot`
+  figure under Fed, which reads the same fold on `All time` and so is reached by
+  the price route.
+- **Two db-backed tests in `production-ops.test.ts`**, one per route, each
+  ending in the sentence the screen rendered before and the one it renders now.
+  The pure fold test already asserted −5,000 and is unchanged.
+- **Guides**: `feed.md` says what a minus under Cost means and which period sets
+  the whole bill against what left; `lot.md`'s Fed panel now documents the two
+  lines under it, which it never had.
+- **Not driven in the browser.** The in-app pane held no Clerk session on the
+  dev server (`Sign in to Yosher App`, `Clerk.client.sessions` empty) and
+  signing in is the founder's to do, so the 375px and desktop pass is his:
+  PEN-1 on Hilltop (fed $100.00 on 2026-07-15, never processed) shows it after a
+  run of a few birds, on `Last 30 days`. `tsc` is clean on both pages. No
+  migration.
+
+**Open: the line subtracts everything that left from feed alone, so a minus is
+the arithmetic showing rather than a disagreement.** The 2026-08-20 entry chose
+not to clamp because a negative "would mean more cost left than was ever
+recorded going in"; with priced animals that is the ordinary case. An honest
+`left on the lot` needs the lifetime feed total rather than the period's (the
+window route — a third run of the fold, which is already a function for that
+reason) and, for the price route, the released stamp split by what it carried,
+which the ledger does not record. Signed for now, so it at least tells the truth
+it knows.
+
 ### 2026-09-09 — Tell it what happened (`claude/tell-it-things`)
 
 Onboarding slice 6 ([onboarding.md](onboarding.md), [ADR 0039](../decisions/0039-a-pack-declares-what-it-can-be-told-in-one-sentence.md)),

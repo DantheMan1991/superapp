@@ -77,7 +77,7 @@ rather than one wizard that tries to be all of them:
 | # | Slice | Status |
 | --- | --- | --- |
 | 1 | **The derived "Getting set up" card** on the Overview: each switched-on tool says what it is waiting for, rows vanish as the data appears, nothing stored ([ADR 0033](../decisions/0033-a-setup-step-is-a-prerequisite-the-data-proves-missing.md)) | **shipped 2026-09-08** |
-| 2 | **Paste anything**: one dialog, reused — paste a list or a spreadsheet, or upload a photo of the herd book; the model proposes rows; the owner sees every row before it saves; duplicates checked against what exists (the CRM "From a note" shape, under the packs' rule that AI never writes a row without a human seeing it first). Targets in order of value: vendors, customers, kinds of stock, animals with tag and dam and sire where known, places, paddocks, prices. Built as a declared extension point, `src/lib/paste-targets/`: a target is FIELDS as data plus the module's own `save` ([ADR 0036](../decisions/0036-a-pasted-list-is-proposed-by-the-model-reviewed-by-a-person-and-written-by-the-modules-own-verb.md)) | **shipped 2026-09-09** for vendors, customers, kinds of stock and animals; places, paddocks and prices are one target file each, still to write |
+| 2 | **Paste anything**: one dialog, reused — paste a list or a spreadsheet, or upload a photo of the herd book; the model proposes rows; the owner sees every row before it saves; duplicates checked against what exists (the CRM "From a note" shape, under the packs' rule that AI never writes a row without a human seeing it first). Targets in order of value: vendors, customers, kinds of stock, animals with tag and dam and sire where known, places, paddocks, prices. Built as a declared extension point, `src/lib/paste-targets/`: a target is FIELDS as data plus the module's own `save` ([ADR 0036](../decisions/0036-a-pasted-list-is-proposed-by-the-model-reviewed-by-a-person-and-written-by-the-modules-own-verb.md)) | **shipped 2026-09-09**, all seven targets: vendors, customers, kinds of stock and animals in `claude/paste-anything`; equipment and buildings (places as a `Things are kept here` column), paddocks and prices in `claude/paste-the-rest` |
 | 2b | **Vendors from the bank import**: after an import, "eight payees you have no vendor for" with a checkbox each | planned |
 | 3 | **The personal account**: a register kind whose ledger leg is owner's equity rather than a bank asset; personal by default — exclude rules act on arrival, the sweep asks "is this the business's?" first and may answer `PERSONAL`, one button sets aside the rest; setting aside proposes rules; no opening balance, never reconciled; visible to the owner and the accountant, never to staff, in RLS ([ADR 0034](../decisions/0034-a-personal-account-is-a-register-whose-ledger-leg-is-the-owners-equity.md), migrations `0278`–`0279`; the build log is in [accounting.md](accounting.md)) | **shipped 2026-09-08** |
 | 4 | **The day the books begin**: `entities.books_start_on`, per company beside the close date (not on `accounting_settings` as first planned — the lock had already moved off it for the same reason); `assertPeriodOpen` refuses anything dated before it; the CSV import and the Plaid sync drop earlier lines and say how many; set on the Close page; the setup card asks for it first ([ADR 0035](../decisions/0035-the-books-begin-on-a-day-and-nothing-is-dated-before-it.md), migration `0280`; build log in [accounting.md](accounting.md)) | **shipped 2026-09-08** |
@@ -98,12 +98,12 @@ superadmin act — so slice 1 serves both.
 | Profile and settings | Homestead Farm installed; fiscal year January; default basis cash; inventory posting left OFF until the accountant answers [the brief](../briefs/inventory-tax-treatment.md) | Admin page for the install; Business settings for the rest |
 | The day the books begin | `2026-01-01`, set on the Close page before any statement is imported, so 2025 lines are left out with a count | Close page, `Books begin on`, exists |
 | Companies and banks | One company; a farm-only account opened NOW so the mixed window is bounded (2026-01-01 to the day it opens) | Banking, exists; the mixed window needs slice 3 |
-| Places | Garage with three freezers, barn with the walk-in, the two parcels, twenty paddocks | Assets, then Land (Find my parcels where the county service is connected) |
+| Places | Garage with three freezers, barn with the walk-in, the two parcels, twenty paddocks | `Paste a list` on the Assets page with `Things are kept here` = Yes for the freezers and the barn (slice 2); the two parcels by hand or Find my parcels; then `Paste a list` on the Land page for the twenty paddocks (slice 2) |
 | Vendors and customers | Feed store, hatchery, each butcher, the plant; half-beef buyers only | `Paste a list` on the Vendors and Customers pages (slice 2), one at a time by hand, or from the bank import (2b, planned) |
 | Kinds of stock | Feed by pound, chicks, broilers, eggs by dozen, cuts as packages, cartons | `Paste a list` on the Inventory page, the unit read per row (slice 2); `Add item` for one |
 | Animals | Cattle as individuals with tags; pigs as one lot; layers as one flock; broilers one lot per pen | `Paste a list` on the Livestock page — the herd book typed or photographed, dams and sires placed (slice 2); `Add animals` for one |
 | Stock on hand | One count per place, no costs | Counting, exists |
-| Prices | Per channel on the market stall | Retail, exists |
+| Prices | Per channel on the market stall | `Paste a list` on the Retail page — the chalkboard typed or photographed (slice 2); the price form for one |
 | Bank history | CSVs from 2026-01-01 for every account the farm touched (checking, any card, Square, Venmo, PayPal), coded by rules and the sweep, reconciled | Import wizard, exists; personal lines need slice 3 |
 
 Two things for the accountant rather than the software: cash from market
@@ -115,6 +115,49 @@ the farm's asset list until they say so.
 ## Build log
 
 Newest first. One entry per session/PR that touched this area.
+
+### 2026-09-09 — Slice 2, the rest: assets, paddocks, prices (`claude/paste-the-rest`)
+
+The three targets the first PR left as open items, one file each in the
+pack (`assets/paste/target.ts`, `land/paste/target.ts`,
+`retail/paste/target.ts`), a registry line each, a button on each hub, and a
+guide section each. Nothing in the slot changed, which is the point of the
+slot. What each deliberately is, in its header:
+
+- **Equipment and buildings**, not "places": the plan's places are assets that
+  hold stock, so `Things are kept here` is a Yes/No column and the freezers
+  and the barn arrive in the same list as the tractor. Cost only when the list
+  gives it, in dollars, with no depreciation method.
+- **Paddocks**, with the parcel as a choice that is required only once there
+  are two — and the first target that is BLOCKED (`describe` returns why) when
+  there is nowhere for a paddock to be. Parcels are not a target.
+- **Prices**, with the item and the channel as choices by name (nothing is
+  created), dollars into cents, per pound where the pack allows it, and NO
+  duplicate check, because a price change is a new row by that pack's rule.
+
+Tests: three more in `tests/paste-targets-db.test.ts` (10 total) — the
+kinds and cents and the place column; blocked without a parcel, the only
+parcel used when blank, required with two, a parcel the list names that is not
+one of them held as a hint; blocked without a channel, item and place by
+label, two egg prices on two days, per pound refused in the pack's words with
+nothing written. Guides: `assets/assets.md`, `land/parcels.md`,
+`retail/channels.md`.
+
+**Driven on Hilltop (dev), with the real model.** Three assets read in
+three seconds: the freezer came back `Fixture` with `Things are kept here` =
+Yes and its note, the tractor with its serial, its model `L3901`, the date and
+`18500`, and the barn's "built 2015" was held as `The list said “2015” for
+acquired — fill it in, or leave it blank.` rather than invented as a day;
+`Add 3 assets` in under two seconds. Three paddocks on Hilltop's one parcel
+with `Parcel` left `Not set`, `Add 3 paddocks`. The price list found Hilltop
+has two places to sell, so `Where` was required and the two priced rows read
+`Where is missing.` until `Farm gate` was picked; `Ground beef` matched the
+existing `Ground beef 1 lb packs`, `Whole chicken` matched `Whole broilers`
+with the model's own note `Listed as "Whole chicken"`, and `Eggs`, which the
+farm does not hold, stayed as a hint and was unticked; `Add 2 prices`.
+**Dev fixture now:** Hilltop has assets Chest freezer (garage), North barn and
+Kubota L3901 tractor; paddocks North 40, Creek field and Pen 3; and farm-gate
+prices on Ground beef 1 lb packs ($8.50/lb) and Whole broilers ($22 each).
 
 ### 2026-09-09 — Slice 2: Paste a list (`claude/paste-anything`)
 
@@ -332,8 +375,8 @@ stored, and nothing may be ([ADR 0033](../decisions/0033-a-setup-step-is-a-prere
   network call, the two halves, the two server actions
 - `src/lib/paste-targets/registry.ts` — the composition root; add a target here
 - `src/modules/accounting/paste/targets.ts`,
-  `src/packs/{inventory,livestock}/paste/target.ts` — the fillers, each header
-  saying what the target deliberately does not take
+  `src/packs/{inventory,livestock,assets,land,retail}/paste/target.ts` — the
+  fillers, each header saying what the target deliberately does not take
 - `src/components/app/paste-list-button.tsx` — the dialog; hosted beside each
   page's own add button
 - `tests/paste-targets.test.ts` · `tests/paste-targets-db.test.ts`
@@ -379,17 +422,12 @@ stored, and nothing may be ([ADR 0033](../decisions/0033-a-setup-step-is-a-prere
 ## Open items
 
 - **Slices 5–7 above are unbuilt.** Slices 3 and 4 shipped 2026-09-08, slice 2
-  on 2026-09-09 for four targets; the opening position (5) now has a day to
-  stand on and is the next blocker for a complete conversion.
-- **Three paste targets still to write: places, paddocks, prices.** Each is
-  one file of fields plus the pack's own verb (`createAsset` with
-  `isStorageLocation`, `createZone` with the parcel as a choice, `setPrice`
-  with the item and the channel as choices), a registry line, a button on the
-  page and a guide section. Paddocks and prices will be the first targets
-  whose `describe` returns `blocked` — no parcel, no channel — and the first
-  to show the dialog's blocked message.
+  on 2026-09-09 in two PRs for all seven targets; the opening position (5) now
+  has a day to stand on and is the next blocker for a complete conversion.
 - **Slice 2b, vendors from the bank import's payees**, is still planned and is
   a different shape: nothing is pasted, the rows come from `bank_transactions`.
+- **Parcels are not pasted.** Two deeds are typed or found from the county;
+  a tenant with twenty parcels would want a target, and it is one file.
 - **Feed rows that arrived before the day was set are not swept.** They stay
   in the queue and are refused one by one at posting (ADR 0035); a "left out
   by the start date" sweep would be a delete of imported rows, which is a

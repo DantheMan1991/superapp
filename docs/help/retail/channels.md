@@ -4,11 +4,12 @@
 > **Route:** /dashboard/m/retail
 > **Order:** 10
 
-Open **Retail** in the sidebar. The heading reads `Where the business sells, what it charges there, and what a {{marketDay|lower}} costs to stand at.` To add a place, click {button:Add a channel|primary}.
+Open **Retail** in the sidebar. The heading reads `Where the business sells, what it charges there, and what a {{marketDay|lower}} costs to stand at.` To add a place, click {button:Add a channel|primary}. To bring in a price list, click {button:Paste a list|outline|sparkles}.
 
 ## What you see
 
 - **{button:Add a channel|primary}.** Opens the dialog that adds somewhere to sell. Owners only.
+- **{button:Paste a list|outline|sparkles}.** Reads a pasted price list, or a photo of one, and proposes a row per price for you to check before anything is set. Owners only. See how to paste a price list, below.
 - **{button:Start a market day|outline}.** Opens the stall so you can sell. Anyone can. It is greyed until you have somewhere to sell.
 - **The {{channel}} table.** `{{channel}}`, `Kind`, `Where`, `Priced` and `State`. Click a name to open it.
 - **`Priced`.** How many things have a price at that place today. A price you have set for a future date is not counted yet.
@@ -48,10 +49,27 @@ Under the table: `Margin is what a day took less what it cost to stand there. Th
 
 Everything else about the day is filled in at the end, when you know it.
 
+## How to paste a price list
+
+1. Have somewhere to sell and something to sell first. With no place, the dialog reads `Add somewhere to sell first.`; with nothing under Inventory, `Add what you sell first, under Inventory.` Either way it stops there.
+2. Click {button:Paste a list|outline|sparkles}. `Paste a list of prices` opens and reads `Paste a list, columns from a spreadsheet, or add a photo of one. You'll see every row it found and can change anything before it saves.`
+3. Paste into `The list`, or click `Or a photo of it` and choose a photo of the chalkboard, the sheet in the freezer lid, or a PDF, up to 4 MB. Only what you paste or attach is sent, together with the names of what you hold and where you sell, and nothing else about your business.
+4. Click {button:Read it|primary}. Its label turns to `Reading…` while it works. The line under the title then reads `9 prices found. Untick what you don't want, fix what's wrong, then add them.`
+5. Check the rows. Each has `Item`, a pick list of what you hold, which must be chosen; `Where`, a pick list of your places to sell, which may be left blank when you have only one; `Price`, in dollars, which must be filled; `Per`, `Each` or `Per pound`; `From`, the day the price starts, blank for today; and `Notes`. A line that names something you do not hold leaves `Item` empty with an amber line reading `The list said “Goat milk soap” for item — pick one, or leave it blank.`; add it under Inventory and read the list again, or untick the row. Nothing on a price list is ever marked as already here, because a new price for something already priced is exactly what a price list is.
+6. Click {button:Add 9 prices|primary}. It reads `Adding…`, then you see `Added 9 prices`, the dialog closes and the page refreshes. Each price is a new row from its `From` day, and setting the same day twice replaces that day's row. Nothing is saved until you click it. If any ticked row is refused, nothing is saved at all, and the message names the row.
+
+`Per pound` is refused for something you count in pounds, in the same words the price form uses, because the quantity is already the weight. {button:Start over|ghost} clears the rows and the list you pasted; closing the dialog does the same. Leave ten seconds between readings. At most 200 rows come back from one reading.
+
 ## Messages
 
 | Message | What it means |
 | --- | --- |
+| `Add somewhere to sell first.` and `Add what you sell first, under Inventory.` | You clicked {button:Paste a list|outline|sparkles} before there was a place to sell, or anything to price. |
+| `Nothing to add from that.` | The reading found no prices in what you pasted or attached. |
+| `Row 3: Item is missing.` | The third ticked row names nothing you hold. Pick the item, or untick the row. |
+| `Row 3: …` | The third row was refused for the reason given after the colon, such as `Per pound` on something counted in pounds. Nothing was added. Fix the row and add again. |
+| `Give it a few seconds, then try again.` | Two readings inside ten seconds. |
+| `That file is too large. 4 MB at most.` and `A photo (JPEG, PNG, WebP or GIF) or a PDF.` | The photo is too big, or not a kind it can read. |
 | `Channel added` | The place exists and its page is open. |
 | `Nowhere to sell yet` | Nothing has been added. An owner adds the first one. |
 | `Add somewhere to sell first.` | You tried to start a day with no place to sell at. |

@@ -15,6 +15,20 @@ to be listed by a trades profile unchanged.
 
 ## Build log
 
+### 2026-09-09 — The register from a pasted list (`claude/paste-the-rest`)
+
+Onboarding slice 2, the last three targets ([onboarding.md](onboarding.md),
+[ADR 0036](../decisions/0036-a-pasted-list-is-proposed-by-the-model-reviewed-by-a-person-and-written-by-the-modules-own-verb.md)):
+`Paste a list` beside `Add asset` on the hub. This pack's part is one file,
+`paste/target.ts`: name, kind (`SUGGESTED_ASSET_KINDS` plus the kinds in use),
+serial or tag, model, acquired, cost (dollars, only when the list gives it,
+into `acquisitionCostCents` with no depreciation method — the CHECK that
+moves the four depreciation settings together is not half-filled here), and
+`Things are kept here` as a Yes/No column, which is how the plan's "places"
+arrive: the freezers and the barn are assets that hold stock, so they are a
+column, not a target. `save` = `createAsset`, the default company resolved
+there. Guide: `assets.md`.
+
 ### 2026-09-08 — A freezer says what it holds (`claude/what-the-freezer-holds`)
 
 **`Contains` listed other assets and nothing else.** The panel was built from

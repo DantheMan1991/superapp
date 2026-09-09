@@ -38,6 +38,21 @@ Rows are listed in build order; the numbers are left alone because the build log
 
 ## Build log
 
+### 2026-09-09 — The price list, pasted (`claude/paste-the-rest`)
+
+Onboarding slice 2, the last three targets ([onboarding.md](onboarding.md),
+[ADR 0036](../decisions/0036-a-pasted-list-is-proposed-by-the-model-reviewed-by-a-person-and-written-by-the-modules-own-verb.md)):
+`Paste a list` on the hub, beside `Add a channel`. This pack's part is one
+file, `paste/target.ts`: item (a choice among the tenant's active items, by
+name — nothing is created here, a price is a fact about an existing thing),
+where (a choice among active channels, required only once there are two),
+price in dollars into cents, per (`unit` / `lb`), from (blank = today), notes;
+`save` = `setPrice`, so per pound on a thing measured in pounds is this pack's
+own refusal in its own words. **No duplicates, on purpose**: a price change is
+a new row (this pack's rule), so a re-pasted list is the normal case and
+nothing unticks it. Blocked with `Add somewhere to sell first.` or `Add what
+you sell first, under Inventory.` Guide: `channels.md`.
+
 ### 2026-09-05 — A channel's prices on the website (`claude/marketing-site-blocks-seam`)
 
 Marketing slice 9b made the website a declared slot a pack can fill

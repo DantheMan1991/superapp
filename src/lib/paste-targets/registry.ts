@@ -1,7 +1,10 @@
 import "server-only";
 import { customersPasteTarget, vendorsPasteTarget } from "@/modules/accounting/paste/targets";
+import { assetsPasteTarget } from "@/packs/assets/paste/target";
 import { itemsPasteTarget } from "@/packs/inventory/paste/target";
+import { paddocksPasteTarget } from "@/packs/land/paste/target";
 import { animalsPasteTarget } from "@/packs/livestock/paste/target";
+import { pricesPasteTarget } from "@/packs/retail/paste/target";
 import type { PasteTarget } from "./types";
 
 /**
@@ -13,16 +16,20 @@ import type { PasteTarget } from "./types";
  *
  * ORDER IS THE ORDER OF VALUE TO A BUSINESS MOVING IN, per the onboarding
  * plan: who it deals with, then what it keeps, then the animals counted in
- * that. Nothing reads the order today — each page offers only its own target
- * — but a screen that one day lists "what can I paste" should not have to
- * decide it.
+ * that, then what it owns, the ground, and what it charges. Nothing reads the
+ * order today — each page offers only its own target — but a screen that one
+ * day lists "what can I paste" should not have to decide it.
  *
- * Not registered yet, and each is an open item in docs/modules/onboarding.md:
- * places (assets that keep things), paddocks (land zones), prices (retail).
+ * The plan's seven targets are all here. What is NOT a target, and why, is in
+ * each filler's header: parcels (two deeds are not a list), quantities on
+ * hand (a count or a delivery, never a paste), costs never tracked (blank).
  */
 export const pasteTargets: readonly PasteTarget[] = [
   vendorsPasteTarget,
   customersPasteTarget,
   itemsPasteTarget,
   animalsPasteTarget,
+  assetsPasteTarget,
+  paddocksPasteTarget,
+  pricesPasteTarget,
 ];

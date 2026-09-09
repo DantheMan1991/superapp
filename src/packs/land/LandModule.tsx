@@ -31,6 +31,7 @@ import {
   totalArea,
 } from "./core/area";
 import { ParcelForm } from "./components/parcel-form";
+import { PasteListButton } from "@/components/app/paste-list-button";
 
 /**
  * The `land` pack's home: parcels, and what is inside each.
@@ -127,6 +128,14 @@ export async function LandModule({
                   </Link>
                 </Button>
               )}
+              {/* The paddocks, pasted (ADR 0036). Says so itself when there is
+                  no parcel for them to be on. */}
+              <PasteListButton
+                slug="land.paddocks"
+                label={`${zoneWord.toLowerCase()}s`}
+                noun={{ one: zoneWord.toLowerCase(), many: `${zoneWord.toLowerCase()}s` }}
+                example={"North 40, 38 acres\nCreek field, 12.5 acres\nPen 3"}
+              />
               <ParcelForm unit={unit} />
             </div>
           ) : null

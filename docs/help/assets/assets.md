@@ -4,11 +4,12 @@
 > **Route:** /dashboard/m/assets
 > **Order:** 10
 
-Open **Assets** in the sidebar. The heading reads `What the business owns — what it cost, where it lives, and what is still in service.` Everything still in service is listed here. To put something new on the books, click {button:Add asset|primary}.
+Open **Assets** in the sidebar. The heading reads `What the business owns — what it cost, where it lives, and what is still in service.` Everything still in service is listed here. To put something new on the books, click {button:Add asset|primary}. To bring a whole list in, click {button:Paste a list|outline|sparkles}.
 
 ## What you see
 
 - **{button:Add asset|primary}.** Opens the dialog that puts something new on the books. Owners only.
+- **{button:Paste a list|outline|sparkles}.** Reads a pasted list, or a photo of one, and proposes a row per thing for you to check before anything is added. Owners only. See how to paste a list, below.
 - **{button:Post depreciation (2 assets, $145.00)|outline}.** Writes this month's depreciation to your accounts for everything that is due. The number of assets and the total are in the label, so you know what you are about to post before you click. Owners only, and it only appears when something is actually due. There is no confirmation step, so read the label first.
 - **{icon:circle-question-mark}.** Opens this guide beside the screen.
 - **`Asset`.** The name, with a small photo if the asset has one and a serial or tag underneath if you gave it one. Click the name to open the asset.
@@ -47,10 +48,26 @@ If some of the months fall before your closing date, the message adds ` — 3 pr
 
 To post one asset on its own instead, open it and use the button on its page.
 
+## How to paste a list of what you own
+
+1. Click {button:Paste a list|outline|sparkles}. `Paste a list of assets` opens and reads `Paste a list, columns from a spreadsheet, or add a photo of one. You'll see every row it found and can change anything before it saves.`
+2. Paste into `The list`, or click `Or a photo of it` and choose a photo or a PDF of up to 4 MB. An insurance schedule, the accountant's depreciation list, or a walk round the yard typed up all work. The counter under the box reads `0 / 20,000` and counts up. Only what you paste or attach is sent, and nothing else about your business.
+3. Click {button:Read it|primary}. Its label turns to `Reading…` while it works. The line under the title then reads `7 assets found. Untick what you don't want, fix what's wrong, then add them.`
+4. Check the rows. Each has `Name`, which must be filled; `Kind`, a pick list of building, equipment, vehicle, infrastructure, fixture and any kind you already use; `Serial or tag`; `Model`; `Acquired`, a date; `Cost`, in dollars, filled only when the list gave one; `Things are kept here`, `Yes` or `No`; and `Notes`. On a wide screen it is a table, on a phone one card per row. A row that names something you already own comes back unticked and reads `Already here as “North barn”. Unticked — tick it to add another.` A cell the reading could not place is left empty with an amber line under the row saying what the list said.
+5. Click {button:Add 7 assets|primary}. It reads `Adding…`, then you see `Added 7 assets`, the dialog closes and the list refreshes. Nothing is saved until you click it. If any ticked row is refused, nothing is saved at all, and the message names the row.
+
+An asset added this way belongs to your default company, carries its cost only if the list gave one, and has no depreciation set; open it afterwards to set that. `Things are kept here` set to `Yes` makes it a place stock can be recorded in, so the freezers and the barn appear under Inventory at once. Nothing here estimates a cost. {button:Start over|ghost} clears the rows and the list you pasted; closing the dialog does the same. Leave ten seconds between readings. At most 200 rows come back from one reading.
+
 ## Messages
 
 | Message | What it means |
 | --- | --- |
+| `Nothing to add from that.` | The reading found nothing of this kind in what you pasted or attached. |
+| `Row 3: Name is missing.` | The third ticked row has no name. Type one, or untick the row. The button stays gray until every ticked row is complete. |
+| `Row 3 (Kubota L3901): …` | The third row was refused for the reason given after the colon. Nothing was added. Fix the row and add again. |
+| `Give it a few seconds, then try again.` | Two readings inside ten seconds. |
+| `That file is too large. 4 MB at most.` and `A photo (JPEG, PNG, WebP or GIF) or a PDF.` | The photo is too big, or not a kind it can read. |
+| `It could not read that. Try a cleaner copy, or fewer rows at a time.` | The reading came back in a shape it could not use. |
 | `Asset added` | It worked. The new row is in the list. |
 | `Posted 1 month across 2 assets` | The depreciation reached your accounts. |
 | `Nothing on the books yet` | The list is empty. An owner adds the first thing. |

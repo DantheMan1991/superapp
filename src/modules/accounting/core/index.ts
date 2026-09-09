@@ -76,6 +76,7 @@ export {
   type AffiliateBalance,
   type IntercompanyPair,
 } from "./intercompany";
+export { openingPosting, type OpeningPosting } from "./opening";
 export { getBalances, getTrialBalance, ledgerIsBalanced, ledgerIsBalancedPerEntity, resolveBasis, type AccountingBasis, type BalanceRow, type TrialBalance, type TrialBalanceRow } from "./balances";
 export {
   MAX_COA_DEPTH,
@@ -83,6 +84,7 @@ export {
   createAccount,
   deactivateAccount,
   assertCodableAccounts,
+  findOpeningBalanceAccountId,
   isCodableAccount,
   listAccounts,
   updateAccount,

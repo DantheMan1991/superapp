@@ -13,6 +13,54 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-09 — The opening position: invoices and bills open when the books began (`claude/the-opening-position`, migration `0281`)
+
+Onboarding slice 5a ([onboarding.md](onboarding.md), [ADR 0037](../decisions/0037-a-document-open-when-the-books-began-is-real-and-its-other-leg-is-opening-balance-equity.md)):
+the second of the plan's three gaps closed. **An opening document is an
+ordinary invoice or bill with one flag**, `is_opening`, set once by the
+Opening page's verbs (`opening/position.ts`: a one-line draft, then the
+ordinary `issueInvoice` / `approveBill`). The rule is in the verbs, not the
+page: `core/opening.ts` reads the company's start day (`BOOKS_START_UNSET`
+without one), refuses a document dated on or after it
+(`OPENING_NOT_BEFORE_START`), and hands back the entry date and Opening
+Balance Equity; issuance posts Dr AR / Cr OBE ON the day, approval Dr OBE /
+Cr AP, with the document keeping its real date and due date so it ages and
+gets paid like any other. **The cash lens reads the flagged documents' own
+lines** (`cash-basis.ts`, step 3) instead of their OBE legs, so the pilot's
+January collection of a November invoice is January income under the
+account chosen on the line — which is the only reason the line has one.
+`findOpeningBalanceAccountId` joins the by-subtype lookups in `coa.ts`.
+
+**The Opening page**, `/dashboard/m/accounting/opening`, `Opening` in the
+nav beside `Close`: the same start-day control as the Close page, a card
+and dialog each for open invoices and open bills (customer or vendor,
+number, the document's date before the day, due, amount still owed, the
+income or expense account, memo), and the accrual trial balance as of the
+day with the OBE row shaded as `the plug`. One company at a time, `?entity=`
+with the Close page's 404 rule. The setup card's `Say when your books begin`
+now lands here; the Close page's card gained an `Opening position` button.
+
+**Tests.** `tests/opening-position.test.ts` (6): the day required and the
+date before it, the refused draft rolled back; AR / OBE on the day with
+income untouched; paid in January, cash income under the line's account and
+accrual none; the bill mirror; the position's lists and the plug that
+balances AR against AP. Guides: `opening.md` (new), `close.md`,
+`workspace/getting-around.md`.
+
+**Driven on Hilltop (dev).** The page read the day set in slice 4, both
+buttons live, the standing card honest that nothing was posted as of the
+day. `Add an open invoice` → Maple Street Market, `INV-2025-118`, issued
+2025-11-15 (the date box capped at 2025-12-31), due 2025-12-15, 500.00,
+`4000 · Sales`, `Record the invoice` → `Recorded INV-2025-118, open from
+2025-11-15` in 1.5 s; the list read `open`, and the standing read `1200
+Accounts Receivable 500.00` against `3000 Opening Balance Equity · the plug
+500.00`, totals equal. The Close page's card carries the `Opening position`
+button and the nav the `Opening` tab. **Dev fixture now:** Hilltop has one
+open invoice, INV-2025-118 for Maple Street Market, unpaid.
+
+**Not in this slice.** Equipment owned before the books began and the
+depreciation already taken on it (gap 3): the asset page, next.
+
 ### 2026-09-09 — Vendors and customers from a pasted list (`claude/paste-anything`)
 
 Onboarding slice 2 ([onboarding.md](onboarding.md), [ADR 0036](../decisions/0036-a-pasted-list-is-proposed-by-the-model-reviewed-by-a-person-and-written-by-the-modules-own-verb.md)):
@@ -3954,6 +4002,7 @@ preview in either state. The change is argued to be inert, not observed to be.
 | `deposits` | 2026-09-07 | Payments held in Undeposited Funds banked together as one entry (`0265`; `source = deposit`, `0264`; RLS `0266`, owner-only writes). `invoice_payments.deposit_id` points back, cleared by a void. One company per deposit, the register's; a deposit is voided, never deleted |
 | `bank_rules` | 2026-08-10 | Deterministic feed categorization. Priority-ordered, first match wins; `is_suggested` marks a machine-proposed rule; `auto_post` posts without review but never into a closed period. Gained `set_vendor_id` (`0113`) so a rule can name the payee too. `bank_transactions.rule_suggestion` is a **snapshot**, not an FK — it records what a rule said at match time, so editing the rule later cannot rewrite what the owner was shown |
 | `entities.books_start_on` | 2026-09-08 | The day one company's books begin ([ADR 0035](../decisions/0035-the-books-begin-on-a-day-and-nothing-is-dated-before-it.md), `0280`), beside `closed_through` — the two ends of the period on one row. Null = never said. Written only by `setBooksStartOn` (owner), never to a day after a non-void entry or after the close. Read by `assertPeriodOpen` (refuses `BEFORE_BOOKS_START`), by the CSV import and the Plaid sync (rows before it are not staged), and by the setup card |
+| `invoices.is_opening`, `bills.is_opening` | 2026-09-09 | Open on the day the books began ([ADR 0037](../decisions/0037-a-document-open-when-the-books-began-is-real-and-its-other-leg-is-opening-balance-equity.md), `0281`). Boolean, default false, written once by the Opening page's verbs. Read by `issueInvoice` / `approveBill` (the entry is dated on the start day and the other leg is Opening Balance Equity), by the cash lens (recognition from the document's lines), and by the Opening page's lists |
 | `bank_accounts.kind = 'personal'`, `accounts.subtype = 'owner_funds'`, `bank_rules.action` | 2026-09-08 | The personal register ([ADR 0034](../decisions/0034-a-personal-account-is-a-register-whose-ledger-leg-is-the-owners-equity.md), `0278`). Its ledger account is EQUITY (`owner_funds`, 3300s), never a bank asset; no opening balance, never reconciled, not a deposit target. `bank_rules.action` is `categorize` (default, every pre-existing rule) or `exclude` (sets the row aside on arrival); `set_account_id` became nullable, held to the action by CHECK `bank_rules_action_account`. `bank_transactions.rule_suggestion` and `ai_suggestion` may now carry `action: "exclude"` / `personal: true` with a null `accountId`. RLS `0279`: `bank_accounts` hides the kind from `staff`; `bank_transactions` and register-scoped `bank_rules` inherit through an EXISTS |
 | `parties` | 2026-08-03 | **Shared, not this module's.** The identity spine behind `customers` and `vendors`; written through `src/lib/parties/`. See [crm.md](crm.md) |
 | `customers`, `invoices`, `invoice_lines`, `invoice_payments` | S4 | AR. `customers.party_id` (2026-08-03) makes the row a role on a party. Both `customers` and `invoices` gained `reminders_muted` (`0114`) — standing and one-off suppression of automatic chasing. `recurring_invoices` folded into `recurring_entries` (`0121`/`0122`) and was dropped in `0147` |
@@ -3993,6 +4042,14 @@ sentence rather than leaving it aspirational.
 
 ## Decisions & gotchas
 
+- **A DOCUMENT OPEN WHEN THE BOOKS BEGAN IS A REAL DOCUMENT WHOSE OTHER LEG
+  IS OPENING BALANCE EQUITY** (ADR 0037, 2026-09-09). The flag is set once
+  and the rule is in the verbs, so `issueInvoice` and `approveBill` are the
+  only places that know it. The cash lens reads a flagged document's LINES,
+  never its OBE leg, and the substitution map from `@/lib/basis-lens` does
+  not apply to those lines — they are not journal lines. An opening document
+  has no dimensions and no tax; anything wanting either is an ordinary
+  document written on the day.
 - **THE BOOKS BEGIN ON A DAY, PER COMPANY, AND NOTHING IS DATED BEFORE IT**
   (ADR 0035, 2026-09-08). One guard, `assertPeriodOpen`, holds both ends of the
   period; a new posting path that bypasses it bypasses the close too, which is

@@ -117,6 +117,13 @@ export const bills = pgTable(
     billDate: date("bill_date", { mode: "string" }).notNull(),
     dueDate: date("due_date", { mode: "string" }),
     memo: text("memo").notNull().default(""),
+    /**
+     * OPEN ON THE DAY THE BOOKS BEGAN (ADR 0037): the AP mirror of
+     * `invoices.is_opening`. Approval posts Dr Opening Balance Equity / Cr AP
+     * on the company's start day; cash basis recognises the lines' expense
+     * accounts when it is paid. Written once, by the Opening page.
+     */
+    isOpening: boolean("is_opening").notNull().default(false),
     /** Denormalized Σ line amounts; recomputed in the same tx as line writes. */
     totalCents: bigint("total_cents", { mode: "number" }).notNull().default(0),
     /** The approval entry. Null while draft; survives void (audit trail). */

@@ -42,6 +42,8 @@ export type LedgerErrorCode =
   | "BEFORE_BOOKS_START"
   | "BOOKS_START_HAS_ENTRIES"
   | "BOOKS_START_AFTER_CLOSE"
+  | "BOOKS_START_UNSET"
+  | "OPENING_NOT_BEFORE_START"
   | "RECON_ACTIVE_EXISTS"
   | "RECON_NOT_OPEN"
   | "RECON_NOT_BALANCED"
@@ -158,6 +160,12 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
     "Entries are already dated before that day. The books cannot begin after money already recorded — pick the earliest date, or void those entries first.",
   BOOKS_START_AFTER_CLOSE:
     "The books are already closed through a later date than that, so they cannot begin there.",
+  // The opening position (ADR 0037) stands on the start day; without one there
+  // is nothing to date it.
+  BOOKS_START_UNSET:
+    "Say when your books begin first. An opening balance is dated on that day, and there is no day yet.",
+  OPENING_NOT_BEFORE_START:
+    "An open invoice or bill is one dated before the books began. This one is not — record it as an ordinary invoice or bill instead.",
   ENTRY_NOT_FOUND: "That entry no longer exists.",
   ENTRY_NOT_DRAFT: "Only draft entries can be changed this way.",
   ENTRY_NOT_POSTED: "Only posted entries can be voided or reversed.",

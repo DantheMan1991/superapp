@@ -252,11 +252,49 @@ export async function cashBasisAdjustment(
     )
     .orderBy(jl.lineNo);
 
+  /**
+   * DOCUMENTS THAT WERE OPEN WHEN THE BOOKS BEGAN (ADR 0037) posted their
+   * other leg to Opening Balance Equity, not to their lines' accounts — the
+   * income or expense belongs to the books before these. On the cash basis,
+   * though, the collection IS this year's income, so recognition for them
+   * comes from the DOCUMENT's lines, whose accounts the person chose for
+   * exactly this purpose. They carry no dimensions (the Opening page offers
+   * none), so the member is null, and the substitution map does not apply:
+   * a lens re-points journal lines, and these have none to re-point.
+   */
+  const openingInvoices =
+    invoiceIds.length === 0
+      ? []
+      : await tx.query.invoices.findMany({
+          where: and(
+            eq(schema.invoices.tenantId, tenantId),
+            inArray(schema.invoices.id, invoiceIds),
+            eq(schema.invoices.isOpening, true),
+          ),
+          columns: { id: true },
+        });
+  const openingBills =
+    billIds.length === 0
+      ? []
+      : await tx.query.bills.findMany({
+          where: and(
+            eq(schema.bills.tenantId, tenantId),
+            inArray(schema.bills.id, billIds),
+            eq(schema.bills.isOpening, true),
+          ),
+          columns: { id: true },
+        });
+  const openingIds = new Set([
+    ...openingInvoices.map((i) => i.id),
+    ...openingBills.map((b) => b.id),
+  ]);
+
   const substituted = opts.substitutedLineAccounts;
   const recognitionByDoc = new Map<string, RecognitionLine[]>();
   for (const row of recognitionRows) {
     if (!row.documentId) continue;
     if (controlIds.has(row.accountId)) continue; // the AR/AP leg
+    if (openingIds.has(row.documentId)) continue; // the OBE leg; see above
     const list = recognitionByDoc.get(row.documentId) ?? [];
     list.push({
       // The lens moves a line sideways in the chart. The AMOUNT is never
@@ -266,6 +304,41 @@ export async function cashBasisAdjustment(
       amountCents: row.amountCents,
     });
     recognitionByDoc.set(row.documentId, list);
+  }
+  if (openingInvoices.length > 0) {
+    const lines = await tx.query.invoiceLines.findMany({
+      where: and(
+        eq(schema.invoiceLines.tenantId, tenantId),
+        inArray(
+          schema.invoiceLines.invoiceId,
+          openingInvoices.map((i) => i.id),
+        ),
+      ),
+    });
+    for (const l of lines) {
+      if (l.amountCents === 0) continue;
+      const list = recognitionByDoc.get(l.invoiceId) ?? [];
+      // A credit, as the issuance's income line would have been.
+      list.push({ accountId: l.incomeAccountId, memberId: null, amountCents: -l.amountCents });
+      recognitionByDoc.set(l.invoiceId, list);
+    }
+  }
+  if (openingBills.length > 0) {
+    const lines = await tx.query.billLines.findMany({
+      where: and(
+        eq(schema.billLines.tenantId, tenantId),
+        inArray(
+          schema.billLines.billId,
+          openingBills.map((b) => b.id),
+        ),
+      ),
+    });
+    for (const l of lines) {
+      if (l.amountCents === 0 || !l.accountId) continue;
+      const list = recognitionByDoc.get(l.billId) ?? [];
+      list.push({ accountId: l.accountId, memberId: null, amountCents: l.amountCents });
+      recognitionByDoc.set(l.billId, list);
+    }
   }
 
   // 4. The control account each payment entry actually used. Read from the

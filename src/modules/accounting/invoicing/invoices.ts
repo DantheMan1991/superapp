@@ -12,6 +12,7 @@ import {
   voidEntry,
   type LedgerCtx,
 } from "../core";
+import { openingPosting } from "../core/opening";
 import { loadCustomer } from "./customers";
 import { computeLineAmounts, type InvoiceLineInput } from "./lines";
 import { suggestInvoiceNumber } from "./numbering";
@@ -225,6 +226,11 @@ export interface InvoiceDraftInput {
   lines: InvoiceLineInput[];
   /** The unified template that generated this invoice. */
   recurringEntryId?: string | null;
+  /**
+   * Open on the day the books began (ADR 0037). Set only by the Opening
+   * page's own verb, `recordOpeningInvoice`; the form never sends it.
+   */
+  isOpening?: boolean;
 }
 
 /**
@@ -259,6 +265,7 @@ export async function createInvoiceDraft(
     taxRateId: tax.taxRateId,
     taxRatePpm: tax.taxRatePpm,
     recurringEntryId: input.recurringEntryId ?? null,
+    isOpening: input.isOpening ?? false,
     createdByClerkUserId: ctx.userId,
   });
 
@@ -449,6 +456,17 @@ export async function issueInvoice(
   const taxAccountId =
     totals.taxCents !== 0 ? await findSalesTaxAccount(tx, ctx.tenantId) : null;
 
+  /**
+   * OPEN ON THE DAY THE BOOKS BEGAN (ADR 0037). The income was earned before
+   * these books, so the other leg is Opening Balance Equity, not the lines'
+   * income accounts, and the entry is dated ON the start day — the invoice's
+   * own date is before it, where `assertPeriodOpen` would refuse. Cash basis
+   * still recognises the lines' accounts when it is paid; see cash-basis.ts.
+   */
+  const opening = invoice.isOpening
+    ? await openingPosting(tx, ctx.tenantId, invoice.entityId, invoice.issueDate)
+    : null;
+
   const prior = await tx
     .select({ id: schema.journalEntries.id })
     .from(schema.journalEntries)
@@ -467,20 +485,30 @@ export async function issueInvoice(
     // AR across two balance sheets.
     entityId: invoice.entityId,
     status: "posted",
-    entryDate: invoice.issueDate,
-    memo: `Invoice ${invoice.invoiceNumber}`,
+    entryDate: opening ? opening.entryDate : invoice.issueDate,
+    memo: opening
+      ? `Invoice ${invoice.invoiceNumber} — open when the books began`
+      : `Invoice ${invoice.invoiceNumber}`,
     source: "invoice",
     sourceId: invoice.id,
     idempotencyKey: `invoice:${invoice.id}:${prior.length}`,
     lines: [
       { accountId: arAccountId, amountCents: total },
-      ...postable.map((l) => ({
-        accountId: l.incomeAccountId,
-        amountCents: -l.amountCents,
-        memo: l.description,
-        dimensionMemberIds:
-          l.dimensionMemberIds.length > 0 ? l.dimensionMemberIds : undefined,
-      })),
+      ...(opening
+        ? [
+            {
+              accountId: opening.obeAccountId,
+              amountCents: -total,
+              memo: "Open when the books began",
+            },
+          ]
+        : postable.map((l) => ({
+            accountId: l.incomeAccountId,
+            amountCents: -l.amountCents,
+            memo: l.description,
+            dimensionMemberIds:
+              l.dimensionMemberIds.length > 0 ? l.dimensionMemberIds : undefined,
+          }))),
       // Tax collected is money held for somebody else. It is CARRIED NO
       // DIMENSION on purpose: a dimension answers "which part of the business
       // earned this", and this line is not earnings.

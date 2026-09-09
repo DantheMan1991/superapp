@@ -166,6 +166,31 @@ export const TIMING_RULE_LABELS: Record<TimingRule, string> = {
   later_of_paid_and_sold: "The later of paid and sold",
 };
 
+/**
+ * The refusal a person reads when they pick a rule the reports cannot honour.
+ *
+ * **DERIVED FROM `IMPLEMENTED_TIMING_RULES`, NEVER RESTATED.** The sentence
+ * used to be a literal in `setTaxRule` naming only *when it is used*, and it
+ * stayed that way for the four days after `paid` shipped — so the refusal
+ * contradicted the card at the top of the same screen, which reads its list
+ * from here. A message about what the software can do has to be computed from
+ * what it does, or it becomes a lie on the day somebody widens the list.
+ *
+ * It names both rules by the words on the picker rather than by their slugs: a
+ * person who chose `When it is sold to a customer` was told the reports cannot
+ * apply `"sold"`.
+ */
+export function unavailableRuleSentence(rule: TimingRule): string {
+  const applied = IMPLEMENTED_TIMING_RULES.map(
+    (r) => `"${TIMING_RULE_LABELS[r].toLowerCase()}"`,
+  );
+  const list =
+    applied.length === 1
+      ? applied[0]
+      : `${applied.slice(0, -1).join(", ")} and ${applied[applied.length - 1]}`;
+  return `The reports cannot apply "${TIMING_RULE_LABELS[rule].toLowerCase()}" yet, so recording it here would mean a setting that says one thing and does another. Today they apply ${list}.`;
+}
+
 export const TIMING_RULE_NOTES: Record<TimingRule, string> = {
   consumed:
     "Stock is an asset until it is issued or used, and the cost lands then. This is what the books do today.",

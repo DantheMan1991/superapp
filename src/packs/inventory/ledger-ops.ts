@@ -1451,7 +1451,7 @@ export async function allocateBillLineToStock(
     const receipt = byId.get(match.movementId);
     if (!receipt) {
       throw new InventoryError(
-        "NOT_FOUND",
+        "RECEIPT_UNAVAILABLE",
         "that delivery is already fully invoiced, or carries no cost to settle",
       );
     }

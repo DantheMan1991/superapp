@@ -39,6 +39,7 @@ import {
 } from "./ledger-ops";
 import { schema } from "@/db";
 import { eq } from "drizzle-orm";
+import { LedgerError, friendlyMessage } from "@/modules/accounting/core";
 
 /**
  * Inventory write surface.
@@ -57,12 +58,38 @@ const PACK = "inventory";
 const BASE = "/dashboard/m/inventory";
 
 function toResult(err: unknown): { error: string } {
+  /**
+   * **A `LedgerError` IS THE BOOKS REFUSING, NOT THIS PACK.** Recording stock
+   * posts through `postEntry`, so its guards reach this function and every one
+   * of them used to come out as "Something went wrong saving that." — a
+   * sentence that tells the reader to try again when trying again cannot work.
+   * Three are ordinary, not exotic:
+   *
+   * - `PERIOD_CLOSED` — a delivery dated back into a month the books have
+   *   closed. The only refusal here that names its own remedy.
+   * - `BEFORE_BOOKS_START` — the same movement dated before the day the books
+   *   begin (ADR 0035).
+   * - `FORBIDDEN` — `requirePostingRight` refuses an `expert` even on a
+   *   machine source, and issuing stock is a `member`-level chore this pack
+   *   lets them do, so the pack says yes and the ledger says no.
+   *
+   * Accounting has written a sentence for every code it can throw, and
+   * `friendlyMessage` is exported for exactly this. Borrow it rather than
+   * writing a second vocabulary that drifts from the first — the accountant
+   * refusal then reads "Only the business owner can do that.", which is
+   * accounting's own wording and is looser than the rule (staff may issue),
+   * but it is the right sentence to fix in ONE place if it is ever fixed.
+   */
+  if (err instanceof LedgerError) return { error: friendlyMessage(err) };
   if (err instanceof InventoryError) {
     switch (err.code) {
       case "FORBIDDEN":
         return { error: "Only an owner can change stock records." };
       case "NOT_FOUND":
         return { error: "That no longer exists." };
+      // On the screen, and not settleable — see the code's own comment.
+      case "RECEIPT_UNAVAILABLE":
+        return { error: err.message };
       case "INVALID_KIND":
         return { error: "Use lowercase letters, numbers and underscores." };
       case "INVALID_UNIT":
@@ -75,8 +102,12 @@ function toResult(err: unknown): { error: string } {
         return { error: err.message };
       case "LOT_CYCLE":
         return { error: err.message };
+      // Two different refusals, and one of them is not about a negative at
+      // all: `adjustLotCost` refuses a correction of nothing. Zod catches the
+      // zero before the action does, but `livestock`'s capital return calls
+      // the op directly, so the sentence has a live caller.
       case "INVALID_COST":
-        return { error: "A cost cannot be negative." };
+        return { error: err.message };
       // Both weight refusals carry the reason in their own sentence — one is
       // "not more than nothing" and the other is "only stock arriving is
       // weighed here", and flattening the two would hide which rule was hit.

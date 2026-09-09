@@ -1119,7 +1119,19 @@ it("CLEARS GRNI TO ZERO when the bill is matched and approved", async () => {
               ],
             }),
           ),
-        ).rejects.toMatchObject({ code: "NOT_FOUND" });
+        ).rejects.toMatchObject({
+          /**
+           * **NOT `NOT_FOUND`.** This delivery is on the screen the reader is
+           * looking at; it simply cannot take another bill. Thrown as
+           * `NOT_FOUND` it was flattened by `toResult` to
+           * `That no longer exists.`, which is false and sends the reader
+           * looking for a row that is right there. `RECEIPT_UNAVAILABLE`
+           * carries its own sentence through.
+           */
+          code: "RECEIPT_UNAVAILABLE",
+          message:
+            "that delivery is already fully invoiced, or carries no cost to settle",
+        });
       });
 
       it("REFUSES TO RE-PRICE a matched line, because the amount is the match's", async () => {

@@ -38,7 +38,11 @@ import {
   balanceOfLot,
 } from "@/packs/inventory/core/balances";
 import { carriedValue } from "@/packs/inventory/core/valuation";
-import { formatQuantity, getUnit } from "@/packs/inventory/core/units";
+import {
+  formatQuantity,
+  getUnit,
+  roundQuantity,
+} from "@/packs/inventory/core/units";
 import { formatLb, formatWeight, weightOf } from "@/packs/inventory/core/weight";
 import { expiryLabel } from "@/packs/inventory/core/expiry";
 import {
@@ -464,6 +468,7 @@ export default async function InventoryItemPage({
                   purchaseUnit: item.purchaseUnit,
                   purchaseUnitQty: item.purchaseUnitQty,
                   storageRequirement: item.storageRequirement,
+                  reorderPoint: item.reorderPoint,
                   notes: item.notes,
                   status: item.status,
                 }}
@@ -529,6 +534,27 @@ export default async function InventoryItemPage({
                   {formatMoney(Math.round(costRate), currencySymbol)}
                 </span>{" "}
                 a {unitSingular} across everything received.
+              </p>
+            )}
+            {item.reorderPoint !== null && (
+              <p className="mt-1 text-sm text-muted-foreground">
+                {/* The wish beside the record. Red once the record has fallen
+                    to it — and the "on What needs you" half is claimed ONLY
+                    for a live item, because the attention source reads active
+                    items alone. An item is normally retired once it is used
+                    up, so an ungated claim was false in the ordinary case.
+                    Rounded to the column's scale like every other reader: the
+                    total here is a JS sum of raw rows, and float dust at the
+                    boundary would disagree with the hub. */}
+                Reorder at {formatQuantity(item.reorderPoint, unit)}
+                {rows.length > 0 &&
+                  roundQuantity(total) <= item.reorderPoint && (
+                    <span className="text-destructive">
+                      {" — "}
+                      {total <= 0 ? "out" : "running low"}
+                      {item.status === "active" && ", and on What needs you"}
+                    </span>
+                  )}
               </p>
             )}
             {total < 0 && (

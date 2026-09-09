@@ -12,6 +12,19 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-09 — Inventory joins the digest, fifth (`claude/stock-reaches-what-needs-you`)
+
+The third pack source, `inventory-stock` (`src/packs/inventory/attention/source.ts`),
+registered below livestock and above accounting: four of its five lines reach
+everybody — stock below zero, a batch past its date or going off within the
+week, an item at its reorder point (the pack's first stored wish, migration
+`0282`), a count walked two weeks ago and never posted — and the fifth, priced
+deliveries two months without an invoice, is the owner's and only once stock is
+on the balance sheet. One line for the invoices, naming the oldest four; never
+an empty draft count, which nothing can clear. Arithmetic pure in
+`src/packs/inventory/core/attention.ts`; the source reads only. The seam took a
+sixth source without changing. Details in [inventory.md](inventory.md).
+
 ### 2026-09-08 — Livestock's source raises due windows (`claude/the-breeding-calendar`)
 
 `livestock-barn` now also returns `breedingAttention` items: the week before a

@@ -1229,6 +1229,25 @@ export async function unbilledReceipts(
         // raised lot credited the consumption account, not GRNI, so there is
         // nothing here for a bill to clear — see `owesASupplier`.
         sql`(${schema.inventoryLots.source} is null or ${schema.inventoryLots.source} = 'purchased')`,
+        /**
+         * **STILL OPEN, TESTED IN SQL — because `limit` counts rows BEFORE the
+         * fold below drops the settled ones.** Every priced purchased receipt
+         * stays in this population forever after it is matched, so a business
+         * with two hundred settled receipts spent the whole budget on history
+         * and the one delivery still waiting for an invoice was never fetched:
+         * the matching screen went quiet, and so did the attention line that
+         * reads it. Ordering is oldest-first, which is exactly the wrong end to
+         * truncate. The JS filter stays as it is — it rounds to the quantity
+         * column's scale, and this predicate only decides which rows are worth
+         * fetching. The same `exceptLine` fragment is used, so re-matching a
+         * pair (a CORRECTION) still sees its own receipt as open.
+         */
+        sql`${schema.inventoryMovements.quantity} > coalesce((
+          select sum(a.quantity_matched) from bill_line_stock_allocations a
+           where a.tenant_id = ${schema.inventoryMovements.tenantId}
+             and a.inventory_movement_id = ${schema.inventoryMovements.id}
+             ${exceptLine}
+        ), 0)`,
         opts.itemId
           ? eq(schema.inventoryMovements.itemId, opts.itemId)
           : undefined,

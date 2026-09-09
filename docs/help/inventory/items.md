@@ -16,7 +16,7 @@ Open **Inventory** in the sidebar. The heading reads `What the business holds, w
 - **`Going off soon`.** How many batches are past their date or within six weeks of it. It turns red when any batch is already past its date, and takes the accent color when something is close. The line under it says which: `2 past their date, 3 more within six weeks`. Click the card to jump to the list below.
 - **`Going off soon` list.** Soonest first, so anything past its date comes first. On a phone, one card per batch: the name, the batch, how much is on hand, and a badge reading `past its date`, `goes off today`, `goes off tomorrow` or `goes off in 5 days`, with the date beside it. On a wide screen the same as a table: `What`, `Batch`, `On hand` and `Good until`. Tap or click anywhere on a card or row to open the {{item|lower}}. The first twelve are shown, and the line under the list reads `12 of 27 shown` when there are more.
 - **The filter rows.** Pills for each kind, pills for each line of business, pills for each place, a search box, and a link that shows or hides retired things. The line-of-business row only appears once something is tagged. The place row only appears once something has been recorded in a place.
-- **The list.** On a phone, one card per {{item|lower}}: the name, the kind and how it has to be kept, the figure on the right, and a going-off badge when one of its batches is dated. Tap anywhere on the card to open it. On a wide screen: `{{item}}`, `Kind`, `Keeps` and `On hand`. Click anywhere on a row to open it.
+- **The list.** On a phone, one card per {{item|lower}}: the name, the kind and how it has to be kept, the figure on the right, a going-off badge when one of its batches is dated, and `running low` or `out` when it has fallen to its reorder point. That badge always counts everything you hold, so with a place picked it can sit beside a healthy figure for that one place. Retired things never carry it. Tap anywhere on the card to open it. On a wide screen: `{{item}}`, `Kind`, `Keeps` and `On hand`. Click anywhere on a row to open it.
 - **`Keeps`.** Whether it has to be `Frozen`, `Refrigerated`, `Dry` or `Ambient`. A dash means it does not matter.
 - **`On hand`.** How much there is, in the unit it is counted in. A dash means nothing has ever been recorded, which is not the same as zero. With a place picked, the column reads `On hand at Market truck` and shows only what is there.
 - **`managed in Livestock`.** Beside an {{item|lower}} whose kind is `Livestock`, when you have Livestock switched on. Animals are one thing seen from two pages; this is the pointer to the other one.
@@ -30,10 +30,11 @@ The three cards only appear once you hold something. The `Going off soon` list o
 3. Pick a `Kind` from `Feed`, `Produce`, `Meat`, `Egg`, `Supply`, `Livestock`, `Seed` or `Medicine`. To use a word of your own, pick `Something else…` and type it. Lowercase letters and numbers only, starting with a letter.
 4. Pick `Counted in`. **Choose carefully.** The help reads `Every balance for this item is kept in that unit, and it cannot be changed once anything has moved.` Count meat in packages, not pounds, because a package is what gets handed over.
 5. Fill in `Bought in` and `How many, each` if you buy it in a different unit from the one you count it in. `Bought in` is free text, such as `bag`, and `How many, each` is how many of the counted unit are in one of those.
-6. Pick a line of business if you keep them. Batches inherit it.
-7. Pick `Needs to be kept` if it has to be kept cold or dry. It starts on `Doesn't matter`.
-8. Add `Notes` if you want. Up to 5,000 characters.
-9. Click {button:Add item|primary}. You see `Item added` and the row appears in the list.
+6. Type `Reorder at` if you want to be told when it runs low. The help reads `You are told on What needs you when on hand falls to this, in the unit you count it in. Blank for no reminder.` Nothing stops you using stock below it; it is a reminder, not a limit.
+7. Pick a line of business if you keep them. Batches inherit it.
+8. Pick `Needs to be kept` if it has to be kept cold or dry. It starts on `Doesn't matter`.
+9. Add `Notes` if you want. Up to 5,000 characters.
+10. Click {button:Add item|primary}. You see `Item added` and the row appears in the list.
 
 The button stays grayed until you have picked both a `Kind` and a `Counted in`, and nothing on the screen says which one is missing. There is no cancel button, so close the dialog with the X.
 

@@ -108,6 +108,19 @@ export const inventoryItems = pgTable(
      */
     storageRequirement: text("storage_requirement"),
     /**
+     * **REORDER AT.** The level at or below which the business wants to be
+     * told — "we are down to two bags". Null means nobody has said, which is
+     * ordinary. It is the only figure this pack stores that is a WISH rather
+     * than a record of something that happened, and the attention source is
+     * its only reader: nothing refuses an issue for crossing it. Kept in the
+     * stocking unit, like every balance. Added 2026-09-09 (migration 0282).
+     */
+    reorderPoint: numeric("reorder_point", {
+      precision: 18,
+      scale: 4,
+      mode: "number",
+    }),
+    /**
      * **WHICH LINE OF BUSINESS THIS BELONGS TO.** Null is ordinary and is the
      * default: plenty of what a business holds belongs to no one part of it.
      *
@@ -158,6 +171,11 @@ export const inventoryItems = pgTable(
     check(
       "inventory_items_purchase_unit_complete",
       sql`${t.purchaseUnitQty} is null or (${t.purchaseUnit} is not null and ${t.purchaseUnitQty} > 0)`,
+    ),
+    // A reorder point below nothing is not a level anything can fall to.
+    check(
+      "inventory_items_reorder_point_nonneg",
+      sql`${t.reorderPoint} is null or ${t.reorderPoint} >= 0`,
     ),
   ],
 );

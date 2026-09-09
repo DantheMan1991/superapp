@@ -3,6 +3,7 @@ import { accountingAttentionSource } from "@/modules/accounting/attention/source
 import { schedulingAttentionSource } from "@/modules/scheduling/attention/source";
 import { workAttentionSource } from "@/modules/work/attention/source";
 import { livestockAttentionSource } from "@/packs/livestock/attention/source";
+import { inventoryAttentionSource } from "@/packs/inventory/attention/source";
 import { productionAttentionSource } from "@/packs/production/attention/source";
 import type { AttentionSource } from "./types";
 
@@ -61,6 +62,13 @@ import type { AttentionSource } from "./types";
  * missed round or a clock that needs a label read: daily chores, not dated
  * money. Above accounting for the reason production is.
  *
+ * INVENTORY IS FIFTH, from 2026-09-09 — the third pack source. Below
+ * livestock because a pen nobody looked at is a living thing and a bag of
+ * feed below zero is a record; above accounting because four of its five
+ * lines reach everybody (stock below zero, a batch past its date, an item at
+ * its reorder point, a count walked and never posted) and only the fifth — a
+ * delivery two months without an invoice — is the owner's.
+ *
  * Accounting is last because it reaches owners only and has no per-record
  * assignee at all.
  */
@@ -69,6 +77,7 @@ export const attentionSources: readonly AttentionSource[] = [
   workAttentionSource,
   productionAttentionSource,
   livestockAttentionSource,
+  inventoryAttentionSource,
   accountingAttentionSource,
 ];
 

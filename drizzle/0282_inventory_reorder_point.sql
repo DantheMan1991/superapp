@@ -1,0 +1,2 @@
+ALTER TABLE "inventory_items" ADD COLUMN "reorder_point" numeric(18, 4);--> statement-breakpoint
+ALTER TABLE "inventory_items" ADD CONSTRAINT "inventory_items_reorder_point_nonneg" CHECK ("inventory_items"."reorder_point" is null or "inventory_items"."reorder_point" >= 0);

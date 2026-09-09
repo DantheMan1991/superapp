@@ -12,9 +12,9 @@ The heading is the name. Under it sits the kind, then `counted in pounds` or wha
 
 - **{button:New batch|outline}.** Starts a batch on its own, with a line of business and notes. Owners only, and gone once the {{item|lower}} is retired. A delivery can also start its batch from inside {button:Record stock|primary}.
 - **{button:Record stock|primary}.** Records a delivery, stock going out, a move between places, or a correction. Anyone can, including an accountant, and gone once retired.
-- **{button:Edit|outline|pencil}.** Changes what it is and how it is bought. Owners only, and it stays available on a retired {{item|lower}}.
+- **{button:Edit|outline|pencil}.** Changes what it is and how it is bought. The dialog has the same boxes as adding one, including `Reorder at`; only `Counted in` locks once anything has moved. Owners only, and it stays available on a retired {{item|lower}}.
 - **{button:Retire|ghost}.** Takes it out of lists without changing anything else. Once retired the button reads {button:Put back|outline}.
-- **`On hand`.** The total, in the counted unit. A dash means nothing has ever been recorded. Underneath, how many entries it was added up from, and the average paid across everything that came in with a price. For something counted in packages, `about 55 lb` when deliveries were weighed.
+- **`On hand`.** The total, in the counted unit. A dash means nothing has ever been recorded. Underneath, how many entries it was added up from, and the average paid across everything that came in with a price. For something counted in packages, `about 55 lb` when deliveries were weighed. With a reorder point set, `Reorder at 100 pounds`, and in red `running low` or `out` once on hand has fallen to it; it is then on What needs you.
 - **`Where it is`.** The total split by place, biggest first. Stock nobody said a place for shows as `Not recorded`. A place you have since retired shows as `Unknown place`.
 - **`Batches`.** Every batch, newest first. See below.
 - **`Cost corrections`.** Every time somebody re-stated what a batch cost. Only appears when there has been one.

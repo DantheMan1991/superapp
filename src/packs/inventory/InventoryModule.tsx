@@ -288,6 +288,25 @@ export async function InventoryModule({
         ? (placeStock.get(item.id) ?? null)
         : (onHand.get(item.id) ?? null),
       expiry: expiryByItem.get(item.id) ?? null,
+      /**
+       * Judged on the item's TOTAL, whatever place is picked: a reorder point
+       * is a business-wide wish, and the truck being empty is not "out".
+       *
+       * **LIVE ITEMS ONLY**, because the attention source reads active items
+       * alone — and an item is normally retired once it is used up, so the
+       * `?archived=1` view would otherwise wear a red `out` beside every
+       * `retired` badge for something nothing will ever raise.
+       */
+      low:
+        item.status === "active" &&
+        item.reorderPoint !== null &&
+        onHand.has(item.id)
+          ? (onHand.get(item.id) ?? 0) <= 0
+            ? "out"
+            : (onHand.get(item.id) ?? 0) <= item.reorderPoint
+              ? "running low"
+              : null
+          : null,
       keeps: item.storageRequirement ? slugLabel(item.storageRequirement) : null,
       managedInLivestock: item.itemKind === "livestock" && livestockEnabled,
     }),
@@ -618,11 +637,18 @@ export async function InventoryModule({
                       )}
                     </p>
                   </div>
-                  {row.expiry && (
-                    <div className="mt-2">
-                      <Badge variant={row.expiry.past ? "destructive" : "outline"}>
-                        {row.expiry.label}
-                      </Badge>
+                  {(row.expiry || row.low) && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {row.expiry && (
+                        <Badge variant={row.expiry.past ? "destructive" : "outline"}>
+                          {row.expiry.label}
+                        </Badge>
+                      )}
+                      {row.low && (
+                        <Badge variant={row.low === "out" ? "destructive" : "outline"}>
+                          {row.low}
+                        </Badge>
+                      )}
                     </div>
                   )}
                 </Link>
@@ -658,6 +684,11 @@ export async function InventoryModule({
                               variant={row.expiry.past ? "destructive" : "outline"}
                             >
                               {row.expiry.label}
+                            </Badge>
+                          )}
+                          {row.low && (
+                            <Badge variant={row.low === "out" ? "destructive" : "outline"}>
+                              {row.low}
                             </Badge>
                           )}
                         </div>

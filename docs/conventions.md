@@ -162,6 +162,26 @@ a feature PR; **import `@/lib/money` in new code.**
   way round is harmless. Say so in the migration's header, as
   `0075_accounting_contacts_contract.sql` and `0221` (livestock's `breed`) both
   do — those two are the only migrations in the repo that run after a deploy.
+- **A MIGRATION THAT IS ALREADY APPLIED KEEPS ITS ORIGINAL `when` WHEN IT IS
+  RENUMBERED.** Two parallel sessions can generate the same migration number;
+  whichever merges second has to move. The repair is: rebase, delete the
+  loser's `.sql` and snapshot, take the winner's `_journal.json` and snapshot
+  whole, regenerate against the winner's snapshot — and then **put the original
+  `when` back into the new journal entry.** Drizzle applies a migration only
+  when `Number(lastDbMigration.created_at) < migration.folderMillis`
+  (`node_modules/drizzle-orm/pg-core/dialect.js`, which
+  `drizzle-orm/neon-serverless/migrator` delegates to), reading a single
+  high-water row rather than a per-hash ledger — so a fresh stamp re-runs
+  `ADD COLUMN` against a column that exists and aborts the whole migrate
+  transaction, while the original stamp is skipped exactly as it should be. A
+  fresh database is unaffected either way: with no rows the timestamp is never
+  consulted and the journal replays in `idx` order, which is what CI does on
+  every run. `npx tsx scripts/inspect-migration-state.ts [--dev]` is the
+  read-only reconciler that prints a database's applied rows against the
+  checkout's journal and names what is PENDING or applied-but-unknown; it
+  matches on the exact `when`, which is the second reason not to invent a new
+  one. First hit 2026-09-09, `0281` twice
+  ([inventory.md](modules/inventory.md)).
 - **A composite FK cannot take a bare `ON DELETE SET NULL`.** Postgres nulls
   every referencing column, `tenant_id` included, and `tenant_id` is NOT NULL on
   every tenant table — so the delete fails with a not-null violation instead of

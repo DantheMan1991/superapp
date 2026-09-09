@@ -109,6 +109,7 @@ export function ItemForm({
     const rawQty = String(formData.get("purchaseUnitQty") ?? "").trim();
     const purchaseUnit = String(formData.get("purchaseUnit") ?? "").trim();
     const storage = String(formData.get("storageRequirement") ?? NO_STORAGE);
+    const rawReorder = String(formData.get("reorderPoint") ?? "").trim();
 
     startTransition(async () => {
       const result = await createItemAction({
@@ -119,6 +120,7 @@ export function ItemForm({
         purchaseUnit: purchaseUnit || null,
         purchaseUnitQty: rawQty ? Number(rawQty) : null,
         storageRequirement: storage === NO_STORAGE ? null : storage,
+        reorderPoint: rawReorder ? Number(rawReorder) : null,
         notes: String(formData.get("notes") ?? ""),
       });
       if ("error" in result) {
@@ -229,6 +231,26 @@ export function ItemForm({
               </div>
             </div>
 
+            <div className="grid gap-2">
+              <Label htmlFor="reorderPoint">Reorder at</Label>
+              <Input
+                id="reorderPoint"
+                name="reorderPoint"
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.0001"
+                placeholder="e.g. 100"
+              />
+              <p className="text-xs text-muted-foreground">
+                {/* The only figure this pack stores that is a wish rather
+                    than a record. Nothing refuses an issue for crossing it;
+                    the digest and What needs you say so. */}
+                You are told on What needs you when on hand falls to this,
+                in the unit you count it in. Blank for no reminder.
+              </p>
+            </div>
+
             <EnterprisePicker
               id="enterprise"
               word={enterpriseWord}
@@ -312,6 +334,7 @@ export interface EditableItem {
   purchaseUnit: string | null;
   purchaseUnitQty: number | null;
   storageRequirement: string | null;
+  reorderPoint: number | null;
   notes: string;
   status: string;
 }
@@ -385,6 +408,7 @@ export function ItemControls({
     if (!kind || !unit) return;
     const rawQty = String(formData.get("purchaseUnitQty") ?? "").trim();
     const purchaseUnit = String(formData.get("purchaseUnit") ?? "").trim();
+    const rawReorder = String(formData.get("reorderPoint") ?? "").trim();
 
     startTransition(async () => {
       const result = await updateItemAction({
@@ -396,6 +420,7 @@ export function ItemControls({
         purchaseUnit: purchaseUnit || null,
         purchaseUnitQty: rawQty ? Number(rawQty) : null,
         storageRequirement: storage === NO_STORAGE ? null : storage,
+        reorderPoint: rawReorder ? Number(rawReorder) : null,
         notes: String(formData.get("notes") ?? ""),
       });
       if ("error" in result) {
@@ -551,6 +576,24 @@ export function ItemControls({
                     defaultValue={item.purchaseUnitQty ?? ""}
                   />
                 </div>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="edit-reorderPoint">Reorder at</Label>
+                <Input
+                  id="edit-reorderPoint"
+                  name="reorderPoint"
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.0001"
+                  placeholder="e.g. 100"
+                  defaultValue={item.reorderPoint ?? ""}
+                />
+                <p className="text-xs text-muted-foreground">
+                  You are told on What needs you when on hand falls to this,
+                  in the unit you count it in. Blank for no reminder.
+                </p>
               </div>
 
               <EnterprisePicker

@@ -49,6 +49,7 @@ import {
   weightRatesForItems,
   adjustLotWeight,
   weightAdjustmentsForLots,
+  lineCountsByCount,
 } from "../src/packs/inventory/ops";
 
 const RUN = !!process.env.DATABASE_URL;
@@ -675,6 +676,59 @@ d("inventory ops", () => {
       { role: "staff", userId: STAFF },
     );
     expect(posted.adjusted).toBe(1);
+  });
+
+  it("refuses to post a count before the day it was walked, in a sentence", async () => {
+    // The table CHECKs the same thing; the op says it first so the screen can
+    // name the day instead of "something went wrong".
+    const item = await newItem("Posted early");
+    const count = await asOwner((tx) =>
+      startCount(tx, ownerCtx(), { countedOn: "2026-08-20" }),
+    );
+    await asOwner((tx) =>
+      recordCountLine(tx, ownerCtx(), {
+        countId: count.id,
+        itemId: item.id,
+        countedQuantity: 3,
+      }),
+    );
+    await expect(
+      asOwner((tx) => postCount(tx, ownerCtx(), count.id, "2026-08-19")),
+    ).rejects.toThrow(/on or after the day it was counted/);
+    // Still a draft, so the same walk posts on the right day.
+    const posted = await asOwner((tx) =>
+      postCount(tx, ownerCtx(), count.id, "2026-08-20"),
+    );
+    expect(posted.count.status).toBe("posted");
+  });
+
+  it("counts every walk's shelves in one query", async () => {
+    const item = await newItem("Shelf counted");
+    const walked = await asOwner((tx) =>
+      startCount(tx, ownerCtx(), { countedOn: "2026-08-20" }),
+    );
+    const empty = await asOwner((tx) =>
+      startCount(tx, ownerCtx(), { countedOn: "2026-08-21" }),
+    );
+    await asOwner((tx) =>
+      recordCountLine(tx, ownerCtx(), {
+        countId: walked.id,
+        itemId: item.id,
+        countedQuantity: 1,
+      }),
+    );
+    // The same shelf again replaces rather than adds, so it is still one.
+    await asOwner((tx) =>
+      recordCountLine(tx, ownerCtx(), {
+        countId: walked.id,
+        itemId: item.id,
+        countedQuantity: 2,
+      }),
+    );
+    const byCount = await asOwner((tx) => lineCountsByCount(tx, tenantId));
+    expect(byCount.get(walked.id)).toBe(1);
+    // A walk with nothing written down is absent, which the page reads as 0.
+    expect(byCount.has(empty.id)).toBe(false);
   });
 
   it("lists batches by expiry, soonest first, and drops the empty ones", async () => {

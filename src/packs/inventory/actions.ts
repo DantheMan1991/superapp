@@ -744,6 +744,19 @@ export async function startCountAction(input: unknown) {
       (tx) => startCount(tx, ctxOf(ctx), parsed.data),
       { role: ctx.role },
     );
+    // Identifiers only: who counted is a name somebody typed, and the notes
+    // are the tenant's words. Both stay on the row.
+    await logAudit({
+      action: "inventory.count.started",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "inventory_count",
+      targetId: count.id,
+      meta: {
+        countedOn: count.countedOn,
+        locationAssetId: count.locationAssetId,
+      },
+    });
     revalidatePath(BASE, "layout");
     return { ok: true, countId: count.id };
   } catch (err) {
@@ -767,11 +780,27 @@ export async function recordCountLineAction(input: unknown) {
   if (!parsed.success) return { error: "Check the details and try again." };
 
   try {
-    await withTenant(
+    const line = await withTenant(
       ctx.tenant.id,
       (tx) => recordCountLine(tx, ctxOf(ctx), parsed.data),
       { role: ctx.role },
     );
+    // The shelf and the figure, never the note. Counting is the one flow in
+    // the pack anybody can do, which is where "who wrote this down" is least
+    // obvious — and, until 2026-09-09, least recorded.
+    await logAudit({
+      action: "inventory.count.line_recorded",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "inventory_count",
+      targetId: line.countId,
+      meta: {
+        lineId: line.id,
+        itemId: line.itemId,
+        lotId: line.lotId,
+        countedQuantity: line.countedQuantity,
+      },
+    });
     revalidatePath(BASE, "layout");
     return { ok: true };
   } catch (err) {
@@ -786,11 +815,19 @@ export async function removeCountLineAction(input: unknown) {
   if (!parsed.success) return { error: "Check the details and try again." };
 
   try {
-    await withTenant(
+    const line = await withTenant(
       ctx.tenant.id,
       (tx) => removeCountLine(tx, ctxOf(ctx), parsed.data.id),
       { role: ctx.role },
     );
+    await logAudit({
+      action: "inventory.count.line_removed",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "inventory_count",
+      targetId: line.countId,
+      meta: { lineId: line.id, itemId: line.itemId, lotId: line.lotId },
+    });
     revalidatePath(BASE, "layout");
     return { ok: true };
   } catch (err) {

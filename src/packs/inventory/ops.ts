@@ -36,6 +36,7 @@ import {
 } from "./vocabulary";
 import { isKnownUnit, roundQuantity, type EntryBasis } from "./core/units";
 import { enterpriseForMovement } from "./core/enterprise";
+import { postedOnAllowed } from "./core/counts";
 import type { MovementRow } from "./core/balances";
 import {
   averageCostRate,
@@ -2913,6 +2914,28 @@ export async function countLines(
   });
 }
 
+/**
+ * How many shelves each count holds, in one grouped query.
+ *
+ * The counts list used to ask `countLines` once per count — a list of forty
+ * walks was forty-one queries for one column. Keyed by count id; a count with
+ * no lines is simply absent, which the caller reads as 0.
+ */
+export async function lineCountsByCount(
+  tx: Tx,
+  tenantId: string,
+): Promise<Map<string, number>> {
+  const rows = await tx
+    .select({
+      countId: schema.inventoryCountLines.countId,
+      lines: sql<number>`count(*)::int`,
+    })
+    .from(schema.inventoryCountLines)
+    .where(eq(schema.inventoryCountLines.tenantId, tenantId))
+    .groupBy(schema.inventoryCountLines.countId);
+  return new Map(rows.map((r) => [r.countId, r.lines]));
+}
+
 export interface CountPosting {
   count: InventoryCount;
   /** Lines whose count matched the ledger exactly. No movement written. */
@@ -2949,6 +2972,15 @@ export async function postCount(
 ): Promise<CountPosting> {
   requireWrite(ctx, "member");
   const count = await draftCountOrThrow(tx, ctx, countId);
+  if (!postedOnAllowed(count.countedOn, postedOn)) {
+    // The table refuses this too (`inventory_counts_posted_after_counted`),
+    // but a CHECK failing reaches the screen as "something went wrong". Said
+    // here in a sentence, with the day that would have been fine.
+    throw new InventoryError(
+      "COUNT_INVALID",
+      `post it on or after the day it was counted — this one was walked on ${count.countedOn}`,
+    );
+  }
   const lines = await countLines(tx, ctx.tenantId, countId);
   if (lines.length === 0) {
     throw new InventoryError(

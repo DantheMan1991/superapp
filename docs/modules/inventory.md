@@ -33,6 +33,75 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-09-09 — The count walk (`claude/the-count-walk`)
+
+**Counting is the one chore the pack lets everybody do, and it was built for a
+desk.** The founder's per-module improvement pass (accounting, then livestock)
+reached this pack on 2026-09-09; the review's measured findings sit in the
+session memory, and the counting ones were the sharpest: at 375px the count
+page was a 564px table with `Remove` at x=498 (off the right edge), every shelf
+was a dialog that closed on Save, and `What` was a plain `Select` over every
+active item — nine on Hilltop, forty on a real farm. Slice 1 of that review.
+**No migration; the lot and movement model is untouched.**
+
+- **The count page and the counts list are cards below `md`** — one `rows`
+  fold each, `hidden md:block` on the table, the livestock hub's pattern. A
+  shelf's card carries the name, the batch, what was counted, the line's note
+  and, once posted, what the record said and the difference; `Remove` sits on
+  the card where a thumb reaches it. The list's rows are `LinkRow`s above `md`
+  and whole-card links below it.
+- **`What` is a `Combobox`** (the kit's type-ahead) with the kind as its hint;
+  `Batch` stays a `Select`, because a batch list is short.
+- **`Save and count another` keeps the dialog open for the next shelf** — the
+  walk's primary button, and Enter. It resets item, batch, quantity and notes
+  and puts focus back on the picker; `Save` closes as before. The toast names
+  the shelf: `Counted · Grower crumble · 795 pounds`.
+- **A shelf counted twice is said out loud before it is replaced.**
+  `existingLineFor` (pure, `core/counts.ts`) finds the line already on the
+  count for the same item and batch — `recordCountLine`'s upsert key, which was
+  right and silent. The dialog reads `Already on this count as 795 pounds.
+  Saving replaces that figure.` and PREFILLS the notes box with that line's
+  note, so what is in the box is what will be stored. That closes the
+  empty-box-wipes-the-note item from the right side: keeping stale text on the
+  server behind an empty box would make a note impossible to clear.
+- **The count's own notes are displayed** under the strip. They were captured,
+  trimmed, stored, and shown nowhere.
+- **`Remove` asks first** (`useConfirm`): on a card it is a thumb-sized target.
+- **`postedOn` before `countedOn` is refused in a sentence.** `postedOnAllowed`
+  (pure) in `postCount` names the day the count was walked; the date box
+  carries `min`; the dialog says so before the click. The DB CHECK
+  (`inventory_counts_posted_after_counted`) had been answering
+  `Something went wrong saving that.`
+- **`Count again` on a posted count** starts a new walk at the same place —
+  `StartCountForm` gained `defaultLocationId` / `trigger` / `variant`. The
+  honest remedy the Open items said nothing on the screen suggested.
+- **The four count actions write audit entries** (`inventory.count.started`,
+  `inventory.count.line_recorded`, `inventory.count.line_removed`; posting
+  already did) — identifiers and quantities, never the notes or who counted.
+- **`lineCountsByCount`** replaces the counts list's per-count `countLines`
+  loop (N+1) with one grouped query.
+- A posted line for a since-retired item resolves its name and unit again: the
+  page reads every item and every batch for the lookup and hands the dialog
+  the active and open ones.
+
+Tests: `tests/inventory-counts.test.ts` (pure — the same-shelf key with null
+and undefined lots, the variance scale, the date rule) and two ops tests (the
+early `postedOn` refusal, the one-query line counts). Guides `count.md` and
+`counting.md` rewritten for every control; `overview.md` names `Count again`.
+Driven on the dev branch's Hilltop Farm at 375px and 1280px: the counts list
+as cards (343px wide, the whole card a link) and as `LinkRow`s; the count
+page's cards with `Remove` at x=273; `What` narrowed to two options on `beef`
+with the kind beside each; `Save and count another` kept the dialog open,
+toasted `Counted · Ground beef 1 lb packs · 55 packages`, reset the form and
+put focus on the picker; re-picking Grower crumble read `Already on this count
+as 795 pounds. Saving replaces that figure.`; `Remove` asked `Take Ground beef
+1 lb packs off this count?`; posting on 2026-09-08 against a 2026-09-09 count
+was refused in the sentence, and posting on the day read `Posted · all 2
+agreed with the record` (agreeing lines only, so the ledger is untouched);
+`Count again` opened with the same place and made a second count. The dev
+branch's Hilltop now holds a posted count (`9a456350…`, two agreed lines) and
+an empty draft (`14e80f4f…`).
+
 ### 2026-09-08 — Correct weight, and the cost box read the same way (`claude/correct-weight`)
 
 **The receipt form asks ONCE how its figures were read, because the cost box
@@ -1590,12 +1659,16 @@ commitment against a live animal to delivered without sitting on a shelf.
 - **The `lot` label is declared, renamed by the farm profile, and resolved
   nowhere.** `item` is resolved only on the hub. Fixing either sweeps
   `docs/help/inventory/*.md` in the same PR.
-- **The four count actions write no audit entry.**
+- ~~**The four count actions write no audit entry.**~~ — **fixed 2026-09-09**
+  (the count walk): started, line recorded and line removed now log, as
+  posting always did.
 - **`LOT_CYCLE`, `descendantLotIds` and `ALLOCATION_MISMATCH` are unreachable
   or never thrown.**
 - **Quantity scale is refused on five actions and silently rounded on three.**
-- **A count's notes are stored and never displayed**, and re-counting a shelf
-  with the box empty wipes the earlier note.
+- ~~**A count's notes are stored and never displayed**, and re-counting a shelf
+  with the box empty wipes the earlier note.~~ — **fixed 2026-09-09**: the
+  notes show under the strip, and the dialog names the shelf already on the
+  count and prefills its note before it is replaced.
 - **Kind pill counts disagree with the list they filter.**
 - **`Going off soon` includes stock that already went off, and caps at 12
   silently.**
@@ -1711,8 +1784,9 @@ commitment against a live animal to delivered without sitting on a shelf.
   entered without a date, or with the wrong one, is stuck with it.
 - **A posted count cannot be corrected.** By design, and the screen says so: the
   variances are in the ledger and unwriting them would rewrite what happened.
-  What is missing is the honest remedy — count again — and nothing on the screen
-  suggests it.
+  ~~What is missing is the honest remedy — count again — and nothing on the
+  screen suggests it.~~ **`Count again` is on every posted count since
+  2026-09-09**, starting a fresh walk at the same place.
 - **Nothing warns that a batch has gone past its date and is still on hand.**
   The item page colours it and the home page lists it; neither is a rule anybody
   is asked about, which is the deviation-surfacing the design keeps wanting.

@@ -16,6 +16,7 @@ A group nobody has looked at for two days or more reaches [What needs you](/dash
 
 ## What you see
 
+- **`Tell it what happened`.** A box at the top of the page, above the round. Type one sentence — `Three chicks dead in pen two` — and it works out what to record. See how to tell it, below. Everyone who can walk the round can use it.
 - **{button:All normal (6)|primary|check}.** Marks every group and every named animal you have not yet touched today as normal. Only appears while something is left.
 - **`Checked`.** How many of today's groups and animals you have looked at, counted together. It turns green when you are done.
 - **`Streak`.** How many days in a row the round was walked, across the whole farm.
@@ -33,6 +34,32 @@ Only groups with animals in them, loose or named, are listed. A finished group d
 - **`Lost today`.** Head lost today, or a dash. Head sold live today show underneath as `2 sold live`, because a sale is not a loss. On a phone the card reads `3 lost today`, `2 sold live today`, or `3 lost, 2 sold live today` in the same corner, and nothing at all when nothing left. A named animal's own loss shows on her line and is counted in the group's figure too.
 - **`Last checked`.** `Never`, `Today`, `Yesterday` or `5 days ago`.
 - **`Today`.** Either {button:Mark normal|outline}, or once you have checked it a {badge:Normal|outline} or {badge:Noted|primary} badge. {button:Something's up|outline} sits beside it, and reads {button:Edit|outline} once there is an entry. On a phone both buttons sit along the bottom of the card. A named animal's line has only {button:Something's up|outline}: marking her group normal marks her too.
+
+## How to tell it what happened
+
+Instead of finding the right lot and the right dialog, say it.
+
+1. Type one sentence into `Tell it what happened`, such as `Three chicks dead in pen two, and moved the cows to the creek field`. One sentence can hold more than one thing.
+2. Click {button:Read it|primary|sparkles}. It reads `Reading…` while it works.
+3. You get a card for each thing it found: `Animals lost`, `Looked at them`, `Moved somewhere` or `Fed them`, with the fields already filled in. Read every one. Change anything that is wrong, and click {icon:x} on a card you do not want.
+4. Anything it could not place is left empty with an amber line under it: `It heard “the back pen” — pick or type the right one.` Pick from the list. It never guesses the nearest pen.
+5. A card that is not ready says so: `Which animals is missing.` The button stays gray until every card is complete.
+6. Click {button:Record 2 things|primary}. You see what was recorded, such as `3 head — died — from Pen 2`.
+
+What it can record, and what it needs:
+
+| Card | What it records | It needs |
+| --- | --- | --- |
+| `Animals lost` | Head that died, were culled or were sold live, exactly as {button:Something's up|outline} does | Which animals, how many, and what happened |
+| `Looked at them` | That you walked the pen, with a note if you saw something | Which animals |
+| `Moved somewhere` | Animals moved onto a paddock | Which animals, and where to. Only when you keep Land |
+| `Fed them` | Feed or other stock given to animals, taken out of stock | Which animals, what, and how much **in the unit that item is counted in**, shown beside its name. Only when you keep Inventory |
+
+`When` fills itself in with today, because you are usually saying it where it happened on the day it happened. Everything else is left blank unless the sentence says it. It never invents a number, a pen or a date.
+
+Only lots with animals in them are offered, so a finished group cannot be picked by mistake. **Treatments cannot be told this way**, on purpose: a treatment sets the withdrawal clock that decides whether meat may be sold, and that is worth four deliberate answers on its own screen. Weights are the same, since you have the scale in front of you anyway.
+
+If nothing is recorded, either all the cards are recorded or none of them are — two things said in one sentence happened together.
 
 ## How to walk the round
 
@@ -63,6 +90,14 @@ Checking a group or an animal twice in one day updates the first entry rather th
 
 | Message | What it means |
 | --- | --- |
+| `3 head — died — from Pen 2` and `Recorded 2 things` | What the box recorded. One line when it was one thing, a count when it was more. |
+| `Nothing to record from that.` | The sentence described nothing it can record. Treatments and weights are on their own screens. |
+| `It heard “the back pen” — pick or type the right one.` | A word matched no pen, paddock or feed you have. Pick from the list. |
+| `Which animals is missing.` and `How many is missing.` | A card is short of something it must have. |
+| `Fed them: an issue has to be a positive quantity` | A card was refused, named by its heading, in the words of the part of the app that refused it. Nothing was recorded, including the other cards. |
+| `There is nothing here to tell yet.` | You have no lots with animals in them, so there is nothing to say anything about. |
+| `It could not read that. Try saying it more plainly.` | The reading came back in a shape it could not use. |
+| `Give it a moment, then try again.` | Two readings within a few seconds. |
 | `Marked normal` | The group is recorded as looked at and fine. |
 | `6 marked normal` | The group and the animals in it were recorded. Ones already done are not counted again. |
 | `6 lots marked normal` | Everything untouched was recorded. Ones already done are not counted again. |

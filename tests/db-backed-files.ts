@@ -103,6 +103,7 @@ export const DB_BACKED_TESTS = [
   "tests/scheduling-recurring-range.test.ts",
   "tests/scheduling-item-ops.test.ts",
   "tests/setup-sources-db.test.ts",
+  "tests/tell-sources-db.test.ts",
   "tests/work-attention.test.ts",
   "tests/work-ops.test.ts",
   "tests/work.test.ts",

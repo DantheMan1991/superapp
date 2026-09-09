@@ -84,7 +84,7 @@ rather than one wizard that tries to be all of them:
 | 3 | **The personal account**: a register kind whose ledger leg is owner's equity rather than a bank asset; personal by default — exclude rules act on arrival, the sweep asks "is this the business's?" first and may answer `PERSONAL`, one button sets aside the rest; setting aside proposes rules; no opening balance, never reconciled; visible to the owner and the accountant, never to staff, in RLS ([ADR 0034](../decisions/0034-a-personal-account-is-a-register-whose-ledger-leg-is-the-owners-equity.md), migrations `0278`–`0279`; the build log is in [accounting.md](accounting.md)) | **shipped 2026-09-08** |
 | 4 | **The day the books begin**: `entities.books_start_on`, per company beside the close date (not on `accounting_settings` as first planned — the lock had already moved off it for the same reason); `assertPeriodOpen` refuses anything dated before it; the CSV import and the Plaid sync drop earlier lines and say how many; set on the Close page; the setup card asks for it first ([ADR 0035](../decisions/0035-the-books-begin-on-a-day-and-nothing-is-dated-before-it.md), migration `0280`; build log in [accounting.md](accounting.md)) | **shipped 2026-09-08** |
 | 5 | **The opening position**: open invoices and bills as of the start date as real documents with their income or expense leg to OBE, so they age and get paid like any other; equipment with "depreciation already taken through", posted as that asset's own entry; the opening trial balance on one screen with the equity plug visible; an export for the accountant | **shipped 2026-09-09** in two parts: 5a the Opening page, open invoices and bills ([ADR 0037](../decisions/0037-a-document-open-when-the-books-began-is-real-and-its-other-leg-is-opening-balance-equity.md), migration `0281`), the standing with the plug named, the export pointed at; 5b equipment owned before the day, cost and depreciation already taken, on the asset's own page ([ADR 0038](../decisions/0038-an-asset-owned-before-the-books-began-arrives-as-two-entries.md), no migration) |
-| 6 | **Tell it things**: one sentence box on the phone — "fed two bags to the broilers", "three chicks dead in pen two", "moved cows to paddock seven" — parsed into proposed record cards, one tap each to confirm, refusing where the packs already refuse. Rides the Ask thread ([livestock.md](livestock.md), PR #451) | planned, after #451 |
+| 6 | **Tell it things**: one sentence box on the phone — "fed two bags to the broilers", "three chicks dead in pen two", "moved cows to paddock seven" — parsed into proposed record cards, one tap each to confirm, refusing where the packs already refuse | **shipped 2026-09-09**: `src/lib/tell-sources/`, the seventh declared extension point, with livestock as its first filler and the box on the daily round ([ADR 0039](../decisions/0039-a-pack-declares-what-it-can-be-told-in-one-sentence.md)). NOT on the Ask thread as first sketched — Ask answers, this records, and one box doing both is the ambiguity the confirm step exists to remove |
 | 7 | **The setup interview**: the health-check machinery turned inward — a conversation that produces the plan for THIS business (which packs, what to load, the start date), opening on "Is the farm's money in its own account?" | planned |
 
 Two users for all of it: the founder, running a paid Tier 1 onboarding in an
@@ -119,6 +119,22 @@ the farm's asset list until they say so.
 ## Build log
 
 Newest first. One entry per session/PR that touched this area.
+
+### 2026-09-09 — Slice 6: tell it what happened (`claude/tell-it-things`)
+
+Built as a declared extension point with livestock as its first filler; the
+entry is in [livestock.md](livestock.md), the reasoning in
+[ADR 0039](../decisions/0039-a-pack-declares-what-it-can-be-told-in-one-sentence.md).
+What it means for the plan: the DAILY HABIT half opens. Every slice before
+this one was about getting a business INTO the app; this is the first about
+what happens on day two, which is where the founder said the overwhelm
+actually lives. The money side was already answered by the feed and the
+rules; this is the farm side.
+
+**It is not on the Ask thread**, as the plan sketched. Ask is a conversation
+that answers questions; this records facts. One box doing both would mean
+half the sentences change the herd and half do not, which is exactly the
+ambiguity the confirm step exists to remove.
 
 ### 2026-09-09 — Slice 2b: vendors from a register's payees (`claude/vendors-from-the-bank`)
 
@@ -427,6 +443,15 @@ stored, and nothing may be ([ADR 0033](../decisions/0033-a-setup-step-is-a-prere
   page's read; `opening/actions.ts`; `src/app/dashboard/m/accounting/opening/`
   — the page and its two dialogs; `tests/opening-position.test.ts`;
   `docs/help/accounting/opening.md`
+- `src/lib/tell-sources/types.ts` — the tell contract. **Read the header
+  before adding a source**: actions as data plus the pack's verb, the model
+  never writes, choices by label never nearest, all the cards or none
+- `src/lib/tell-sources/shape.ts` — pure: the tool from every action, the
+  boundary, `resolveEntries`, `checkEntry`; shared with the box
+- `src/lib/tell-sources/{model,registry,resolve,actions}.ts`;
+  `src/packs/livestock/tell/source.ts` — the first filler, its header saying
+  what it deliberately will not take; `src/components/app/tell-box.tsx`
+- `tests/tell-sources.test.ts` · `tests/tell-sources-db.test.ts`
 - `src/modules/accounting/banking/rules-learn.ts` — `payeeCandidates`, pure:
   the payees a statement names; `banking/payees.ts` — the proposal and the
   write; the card in `[id]/register-controls.tsx`;
@@ -477,12 +502,16 @@ stored, and nothing may be ([ADR 0033](../decisions/0033-a-setup-step-is-a-prere
 
 ## Open items
 
-- **Slices 6 and 7 above are unbuilt.** Everything else has shipped: 3 and 4
-  on 2026-09-08; 2, 2b and 5 on 2026-09-09. All three of the plan's gaps are
-  closed, so a business can now be converted end to end — the day, the
-  standing data, the money that was open, and what it owns. What is left is
-  the DAILY HABIT half: slice 6, the one-sentence box, and slice 7, the setup
-  interview.
+- **Only slice 7 is unbuilt.** Everything else has shipped: 3 and 4 on
+  2026-09-08; 2, 2b, 5 and 6 on 2026-09-09. All three of the plan's gaps are
+  closed, a business can be converted end to end, and the daily habit has its
+  first tool. What is left is the setup interview, which is the health-check
+  machinery turned inward and needs none of the above to change.
+- **The tell box has one filler.** Livestock. Three packs could fill the slot
+  next — inventory (stock used or counted), land (a paddock rested), and
+  production (a run's yield) — and each is one file plus a registry line. The
+  box moves to What needs you when the second one exists; while there is one,
+  it belongs on that pack's own daily round.
 - **Only money out becomes a vendor.** Slice 2b deliberately leaves the
   deposits alone: a payee you pay is a supplier, and a deposit's description
   is usually the bank's word for a transfer rather than anybody's name.

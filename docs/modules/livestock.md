@@ -133,6 +133,52 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-09-09 — Tell it what happened (`claude/tell-it-things`)
+
+Onboarding slice 6 ([onboarding.md](onboarding.md), [ADR 0039](../decisions/0039-a-pack-declares-what-it-can-be-told-in-one-sentence.md)),
+and the daily-habit half of the plan. A box at the top of the daily round:
+one sentence in, a card per thing out, confirm, and this pack's own verbs
+record it.
+
+**The seventh declared extension point**, `src/lib/tell-sources/`, and this
+pack is its first filler. `tell/source.ts` declares four actions —
+`livestock.loss` (`recordDailyCheck` with a loss), `livestock.check` (the
+same verb without one), `livestock.move` (`moveLotToZone`, only when Land is
+on and a zone exists) and `livestock.feed` (`recordDirectFeed`, only when
+there is something to feed) — each as FIELDS plus the verb. Only lots with
+head standing in them are offered as choices, so a finished pen cannot be
+picked by mistake.
+
+**No treatments, and no weights, deliberately.** A treatment sets the
+withdrawal clock that decides whether meat may be sold, and its route and
+dose change that clock; it would be the one place in this pack where a
+misread word has a food-safety consequence. A weight is said with a scale in
+the other hand, and that screen is already open.
+
+**A composed pack's refusal is a refusal.** `recordDirectFeed` issues stock
+and `moveLotToZone` writes into land, so `InventoryError` and `LandError`
+arrive here as legitimately as this pack's own and are surfaced in their own
+words — matched by `name`, the way `actions.ts` already does it. The first
+version wrapped only `LivestockError` and a feed of nothing came back as
+"something went wrong"; `tests/tell-sources-db.test.ts` is what found it.
+
+Tests: `tests/tell-sources.test.ts` (11, pure) and
+`tests/tell-sources-db.test.ts` (5) — nothing offered until there are
+animals; the actions this farm's rows support; a proposal writing nothing and
+a confirmation moving the head count and landing in the daily round; a word
+it could not place held until somebody picks; and a refusal naming its card
+with neither of two cards landing. Guide: `daily-round.md`.
+
+**Driven on Hilltop (dev), with the real model.** *"Two broilers died in the
+spring broilers pen this morning, water was frozen"* came back in two seconds
+as one `Animals lost` card: `Spring broilers 2026`, `2`, `Died`, `2026-09-09`
+and the note — every field right, nothing invented, no amber line.
+`Record 1 thing` gave `2 head — died — from Spring broilers 2026`, and the
+round below it then read 38 head, `Lost today 2 · Head, already off the
+count.`, the group badged {badge:Noted}, and `Noted today` listing
+`Spring broilers 2026 — water was frozen`. **Dev fixture now:** that group is
+at 38 head with a daily log for 2026-09-09.
+
 ### 2026-09-09 — Reopening a lot goes through inventory's door (`claude/a-batch-you-can-put-right`)
 
 **ONE LINE, AND IT CLOSES AN ASYMMETRY THAT HAD BEEN THERE SINCE THE CLOSE

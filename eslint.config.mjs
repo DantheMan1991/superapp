@@ -191,6 +191,16 @@ const PASTE_REGISTRY_MESSAGE =
   "defeats the isolation rule by one level of indirection.";
 
 /**
+ * Tell sources (the "tell it what happened" box, ADR 0039) are the same shape
+ * again: the box is platform code in `src/components/app/`, no module hosts
+ * the slot, so no module may reach the wiring.
+ */
+const TELL_REGISTRY_MESSAGE =
+  "A module may import only src/lib/tell-sources/types (and shape). The registry and " +
+  "resolver are platform wiring — importing either pulls in every other pack's source and " +
+  "defeats the isolation rule by one level of indirection.";
+
+/**
  * The patterns one module directory is forbidden to import.
  *
  * Extracted so the per-file override below can ask for the NON-host version of
@@ -231,6 +241,11 @@ function isolationPatterns(slug, { entityLinkHost }) {
     {
       group: ["@/lib/paste-targets/registry", "@/lib/paste-targets/resolve"],
       message: PASTE_REGISTRY_MESSAGE,
+    },
+    // And once more — see TELL_REGISTRY_MESSAGE above.
+    {
+      group: ["@/lib/tell-sources/registry", "@/lib/tell-sources/resolve"],
+      message: TELL_REGISTRY_MESSAGE,
     },
     ...(entityLinkHost
       ? []
@@ -302,6 +317,11 @@ const eslintConfig = defineConfig([
       "src/lib/paste-targets/model.ts",
       "src/lib/paste-targets/resolve.ts",
       "src/lib/paste-targets/actions.ts",
+      "src/lib/tell-sources/types.ts",
+      "src/lib/tell-sources/shape.ts",
+      "src/lib/tell-sources/model.ts",
+      "src/lib/tell-sources/resolve.ts",
+      "src/lib/tell-sources/actions.ts",
       // The shared linkable-record contract. Same rule, same reason: a contract
       // that imported an implementation of itself would invert the graph.
       "src/lib/entity-links/types.ts",

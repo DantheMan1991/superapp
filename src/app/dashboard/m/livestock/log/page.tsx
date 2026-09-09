@@ -7,6 +7,7 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { addDays, todayInTimezone } from "@/lib/timezone";
 import { PageHeader } from "@/components/app/page-header";
+import { TellBox } from "@/components/app/tell-box";
 import { EmptyState } from "@/components/app/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { DataTable } from "@/components/app/data-table";
@@ -282,6 +283,13 @@ export default async function DailyRoundPage() {
       />
 
       <LivestockNav />
+
+      {/* SAY IT INSTEAD OF FINDING THE SCREEN (onboarding slice 6). Above the
+          round because it is the faster path for anything that is not "all
+          normal", and this page is the one already open in a barn. Shown to
+          everyone the round is shown to — the pack's own verbs decide who may
+          record, exactly as they do for the buttons below. */}
+      <TellBox placeholder="Three chicks dead in pen two, and moved the cows to the creek field" />
 
       {pens.length === 0 ? (
         <EmptyState

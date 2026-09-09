@@ -234,6 +234,22 @@ the model never writes, a choice resolves by label and never nearest, and a
 refusal is the module's own, row named
 ([ADR 0036](decisions/0036-a-pasted-list-is-proposed-by-the-model-reviewed-by-a-person-and-written-by-the-modules-own-verb.md)).
 
+**Used a seventh time on 2026-09-09, for the "tell it what happened" box.**
+Standing in a barn, "three chicks dead in pen two" is one sentence and four
+screens — yet the box must not know what a pen is, and a pack must not write
+its own copy of the model call, the review and the safety property.
+[src/lib/tell-sources/](../src/lib/tell-sources/types.ts) holds the slot
+(types only), `registry.ts` names the fillers, `resolve.ts` and `actions.ts`
+are what the box calls; `<pack>/tell/source.ts` fills it with ACTIONS — a
+slug, an `about` telling the model when to choose it, fields as data, and
+`record`, which calls the pack's own verb. It is `paste-targets` with the
+kind of thing no longer fixed: the model picks the action as well as filling
+it in, so the review is a card per event rather than a table of rows. The
+same three rules hold — the model never writes, choices resolve by label and
+never nearest, and the pack's refusals are the refusals — plus one of its
+own: all the cards or none, because two things said in one sentence happened
+together ([ADR 0039](decisions/0039-a-pack-declares-what-it-can-be-told-in-one-sentence.md)).
+
 What is **not** sanctioned: adding a column to a core table for one industry,
 branching on `tenant.industry` inside core, or a pack reading another pack's
 tables directly.

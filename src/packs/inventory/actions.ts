@@ -22,6 +22,8 @@ import {
   createItem,
   createLot,
   mergeLot,
+  reopenLot,
+  updateLot,
   issueStock,
   receiveStock,
   recordMovement,
@@ -327,6 +329,76 @@ export async function createLotAction(input: unknown) {
     });
     revalidatePath(BASE, "layout");
     return { ok: true, id: lot.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * What a batch IS, never what happened to it. No movement is touched, so the
+ * fields here are exactly the ones `createLot` asked for.
+ */
+const lotUpdateSchema = z.object({
+  id: z.string().uuid(),
+  code: z.string().min(1).max(120).optional(),
+  source: z.enum(["purchased", "raised", "produced"]).optional(),
+  openedOn: optionalDate.nullable().optional(),
+  expiresOn: optionalDate.nullable().optional(),
+  notes: z.string().max(5000).optional(),
+  enterpriseId: z.string().uuid().nullable().optional(),
+});
+
+export async function updateLotAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = lotUpdateSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  const { id, ...patch } = parsed.data;
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => updateLot(tx, ctxOf(ctx), id, patch),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "inventory.lot.updated",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "inventory_lot",
+      targetId: id,
+      // Which FIELDS moved, never their values — the code is a person's own
+      // wording and the notes are free text.
+      meta: { fields: Object.keys(patch).sort() },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function reopenLotAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => reopenLot(tx, ctxOf(ctx), parsed.data.id),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "inventory.lot.reopened",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "inventory_lot",
+      targetId: parsed.data.id,
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
   } catch (err) {
     return toResult(err);
   }

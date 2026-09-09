@@ -31,7 +31,7 @@ On a phone, one card per batch: the code with its badges, where it came from and
 - **`Good until`** turns red once the date is past and there is still something on hand, and a line under the date says `past its date`, `goes off today`, `goes off in 5 days` or `good until 2026-11-01`. Blank covers both "nobody dated it" and "it does not go off".
 - **`Carrying`** is what that batch cost and has not yet released. `No cost recorded` means nobody ever costed it, which is different from `$0.00`, meaning it was costed and has all been used. A minus in front of it, `−$8.00`, means a correction took more off the batch than was still standing in it. That is allowed and it is worth looking at.
 - **{badge:closed|outline}** and **{badge:split|outline}** mark a batch that has been closed elsewhere, or one cut off another.
-- **{button:Correct cost|ghost}**, **{button:Correct weight|ghost}** and **{button:Split|ghost}** sit under each card, or at the end of each row, for owners. `Correct weight` only appears on a batch that has a weight recorded. `Split` only while the batch is open and has something on hand.
+- **{button:Edit|ghost}**, **{button:Correct cost|ghost}**, **{button:Correct weight|ghost}**, **{button:Close|ghost}** and **{button:Split|ghost}** sit under each card, or at the end of each row, for owners. `Edit` is always there. `Correct weight` only appears on a batch that has a weight recorded. `Split` only while the batch is open and has something on hand. `Close` only once the batch is at zero or below, and it reads {button:Reopen|ghost} on a batch that is already closed.
 
 ## The recent entries
 
@@ -57,6 +57,29 @@ Cost is shown without a sign in both directions. An entry reading `Used · -20 p
 8. Tap {button:Start batch|primary}. You see `Batch started`.
 
 For a delivery that arrives as its own batch, skip this and start the batch inside {button:Record stock|primary} instead. See the next section.
+
+## How to put a batch right
+
+Everything in this dialog is what the batch *is*. Nothing you change here moves stock, changes a figure, or touches an entry that has already been recorded.
+
+1. Tap {button:Edit|ghost} on the batch. The dialog reads `Changes what this batch is, never what happened to it.`
+2. Change the `Batch code` if it is wrong. Under it: `Renamed everywhere, the books included.`
+3. `Where from` can only be changed while nothing has moved through the batch. Once something has, the picker is greyed and the line under it reads `Where it came from is fixed: stock has moved, and that answer decided how those entries posted.`
+4. Change `Started` or `Good until`. Clearing `Good until` takes the batch off what is going off soon; setting it puts it back.
+5. Change the line of business if you keep them. `Charged here from now on. What has posted does not move.`
+6. Change the `Notes`.
+7. Tap {button:Save|primary}. You see `Batch updated`.
+
+## How to finish a batch, and open it again
+
+Nothing decides this for you. A batch at zero is either one that finished last season or one somebody made a minute ago and is about to fill, and the record says the same about both.
+
+1. Tap {button:Close|ghost}. It only appears once the batch is at zero or below.
+2. The question reads `Finish PEN-3?` with `It stops being offered for new stock and stops being something to charge cost to. Everything already recorded against it keeps reporting, and you can open it again.`
+3. Tap {button:Close batch|primary}. You see `Batch closed`, and the batch wears {badge:closed|outline}.
+4. To undo it, tap {button:Reopen|ghost} on the same batch. You see `Batch reopened`. There is no question to answer.
+
+A batch with stock still in it cannot be closed, and the button is not offered. One that has gone below zero can be.
 
 ## How to record a delivery
 
@@ -163,6 +186,11 @@ Once a batch has a correction, a `Weight corrections` list appears above `Recent
 | `pick two different places — a transfer that starts and ends in the same place is not a move` | The same, caught on the way in. |
 | `Adjusted up` / `Adjusted down` | The correction is in. |
 | `Split — the total is unchanged` | Part of the batch is now a batch of its own. |
+| `Batch updated` | What the batch is called, or when it runs, is changed. Nothing recorded against it moved. |
+| `Batch closed` / `Batch reopened` | The batch is finished, or back in use. |
+| `a batch needs a code` | You cleared the `Batch code`. Every batch has one. |
+| `stock has already moved through this batch, and where it came from decided how those entries were posted — start a new batch instead` | `Where from` is fixed on this batch. |
+| `25 pounds is still in this batch — record what happened to it first` | You cannot close a batch holding stock. Record what left it, or count it. |
 | `Cost corrected.` | The batch is carried at a different figure. |
 | `Weight corrected — Baxter now reads 6 lb.` | The correction is in, and every figure in pounds reads through it. |
 | `nothing in this batch has been weighed yet — record a weight on a delivery first` | The batch has no weight to correct. Record a delivery with a weight instead. |
@@ -178,13 +206,14 @@ Once a batch has a correction, a `Weight corrections` list appears above `Recent
 | `that lot belongs to a different item` | The batch you picked is not this {{item|lower}}'s. Reload and pick again. |
 | `Use lowercase letters, numbers and underscores.` | Your own reason has a capital, a symbol, or starts with a digit. |
 | `Only an owner can change stock records.` | You are signed in as staff and pressed something an owner keeps — starting a batch, including with `New batch…`, splitting one, correcting a cost or weight, or editing the {{item|lower}}. Recording stock into an existing batch is not one of those. |
-| `Something went wrong saving that.` | Something unexpected. It also covers a date that falls in a closed accounting period, which the message does not say. Tell us if you see it. |
+| `That date falls in a closed period. Use a reversal, or reopen the period first.` | The date you typed is in a month the books have closed. |
+| `That date is before the day your books begin.` | The date is earlier than the day your books start. |
+| `Something went wrong saving that.` | Something unexpected. Tell us if you see it. |
 
 ## Not on this page
 
-- A batch cannot be edited once it is started. A wrong code, date or line of business is stuck.
-- A batch cannot be closed or merged from here.
-- Stock in a closed batch cannot be moved. You can see it and correct its cost, and nothing else.
+- Two batches cannot be merged from here.
+- Stock in a closed batch cannot be moved. You can see it, edit it and correct its cost, and nothing else.
 - Only the last twenty five entries are listed, and there is no way to see the rest.
 - The counted unit is locked the moment anything moves, even if the balance is back to zero.
 - Nothing traces a batch back through its splits, although the record is kept.
@@ -193,6 +222,6 @@ Once a batch has a correction, a `Weight corrections` list appears above `Recent
 
 ## Who can do what
 
-Only an owner can start a batch, from either dialog, split one, correct what one cost or weighs, edit the {{item|lower}}, or retire it. Each of those either creates something the accounts group by, or changes what it costs or what the till sells it by.
+Only an owner can start a batch, from either dialog, edit or close one, split one, correct what one cost or weighs, edit the {{item|lower}}, or retire it. Each of those either creates something the accounts group by, or changes what it costs or what the till sells it by.
 
 Recording stock in, out or adjusted is open to everyone, an accountant included. It is what the person unloading the pallet does, and it has to be recorded then rather than reported to somebody who can.

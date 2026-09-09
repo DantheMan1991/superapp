@@ -16,9 +16,11 @@ import {
   movementRowsForItem,
   onHandByItem,
   recordMovement,
+  reopenLot,
   restoreItem,
   splitLot,
   updateItem,
+  updateLot,
   lotAncestry,
   type InventoryCtx,
   listLocations,
@@ -1127,6 +1129,273 @@ d("inventory ops", () => {
     // Archived stops it being taggable while every existing tag keeps
     // reporting — what a finished batch wants.
     expect(member?.isActive).toBe(false);
+  });
+
+  describe("PUTTING A BATCH RIGHT", () => {
+    /**
+     * Everything here writes columns that have existed since slice 0 and
+     * touches no movement. What a batch IS can be corrected; what happened to
+     * it is the ledger and stays as recorded.
+     */
+    it("corrects the code, the dates and the notes, and moves no stock", async () => {
+      const item = await newItem("Correctable feed");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: "TPYO-1",
+          openedOn: "2026-09-01",
+          expiresOn: "2026-09-30",
+          notes: "first",
+        }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 40,
+          occurredOn: "2026-09-01",
+        }),
+      );
+
+      const updated = await asOwner((tx) =>
+        updateLot(tx, ownerCtx(), lot.id, {
+          code: "  TYPO-1  ",
+          openedOn: "2026-09-02",
+          expiresOn: "2026-10-15",
+          notes: "  put right  ",
+        }),
+      );
+      expect(updated.code).toBe("TYPO-1");
+      expect(updated.openedOn).toBe("2026-09-02");
+      expect(updated.expiresOn).toBe("2026-10-15");
+      expect(updated.notes).toBe("put right");
+
+      // The ledger is untouched: same rows, same balance.
+      const rows = await asOwner((tx) =>
+        movementRowsForItem(tx, tenantId, item.id),
+      );
+      expect(rows).toHaveLength(1);
+      expect(balanceOfLot(rows, lot.id)).toBe(40);
+    });
+
+    it("clears the expiry when it is set to null, rather than leaving it", async () => {
+      // Blank means two things the pack does not tell apart — nobody dated it,
+      // and it does not go off — and a batch dated by mistake needs the second.
+      const item = await newItem("Twine");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: "TWINE-1",
+          expiresOn: "2026-09-30",
+        }),
+      );
+      const updated = await asOwner((tx) =>
+        updateLot(tx, ownerCtx(), lot.id, { expiresOn: null }),
+      );
+      expect(updated.expiresOn).toBeNull();
+    });
+
+    it("RENAMES THE COST OBJECT WITH IT", async () => {
+      /**
+       * The batch code is half of the dimension member's display name. A batch
+       * renamed here and still called the old thing on a journal line would be
+       * two answers to one question.
+       */
+      const item = await newItem("Renamed feed");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: item.id, code: "OLD-CODE" }),
+      );
+      await asOwner((tx) =>
+        updateLot(tx, ownerCtx(), lot.id, { code: "NEW-CODE" }),
+      );
+      const member = (await lotMembers()).find((m) => m.packEntityId === lot.id);
+      expect(member?.displayName).toBe("Renamed feed · NEW-CODE");
+      // Renamed, never re-minted: the same row, so every existing tag follows.
+      expect((await lotMembers()).filter((m) => m.packEntityId === lot.id))
+        .toHaveLength(1);
+    });
+
+    it("RENAMING THE ITEM RENAMES EVERY BATCH OF IT", async () => {
+      /**
+       * The mirror of the test above, and the half that was missing: without
+       * it a business that renamed an item got a picker listing both names.
+       */
+      const item = await newItem("Broiler chicks");
+      const first = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: item.id, code: "HATCH-1" }),
+      );
+      const second = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: item.id, code: "HATCH-2" }),
+      );
+      await asOwner((tx) =>
+        updateItem(tx, ownerCtx(), item.id, { name: "Cornish Cross" }),
+      );
+      const members = await lotMembers();
+      expect(members.find((m) => m.packEntityId === first.id)?.displayName).toBe(
+        "Cornish Cross · HATCH-1",
+      );
+      expect(members.find((m) => m.packEntityId === second.id)?.displayName).toBe(
+        "Cornish Cross · HATCH-2",
+      );
+    });
+
+    it("refuses an empty code", async () => {
+      const item = await newItem("Nameless feed");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: item.id, code: "HAS-A-CODE" }),
+      );
+      await expect(
+        asOwner((tx) => updateLot(tx, ownerCtx(), lot.id, { code: "   " })),
+      ).rejects.toMatchObject({ code: "LOT_INVALID" });
+    });
+
+    it("lets WHERE FROM be fixed before anything moves, and not after", async () => {
+      /**
+       * `recordMovement` reads `lot.source` to decide the CREDIT side of a
+       * receipt, and stamps that decision into the entry at the time. Before
+       * the first movement there is nothing to disagree with and it is a typo;
+       * afterwards the batch would describe itself one way while its own
+       * postings say the other.
+       */
+      const item = await newItem("Raised feed");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: item.id, code: "SRC-1" }),
+      );
+      expect(lot.source).toBe("purchased");
+
+      const fixed = await asOwner((tx) =>
+        updateLot(tx, ownerCtx(), lot.id, { source: "raised" }),
+      );
+      expect(fixed.source).toBe("raised");
+
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 10,
+          occurredOn: "2026-09-01",
+        }),
+      );
+      await expect(
+        asOwner((tx) =>
+          updateLot(tx, ownerCtx(), lot.id, { source: "produced" }),
+        ),
+      ).rejects.toMatchObject({ code: "LOT_INVALID" });
+
+      // And the same call with the SAME source is not a change, so it passes —
+      // otherwise saving the dialog without touching the picker would fail.
+      const again = await asOwner((tx) =>
+        updateLot(tx, ownerCtx(), lot.id, { source: "raised", notes: "ok" }),
+      );
+      expect(again.source).toBe("raised");
+      expect(again.notes).toBe("ok");
+    });
+
+    it("REFUSES TO CLOSE A BATCH WITH STOCK STILL IN IT", async () => {
+      /**
+       * Closing archives the cost object, so a batch with stock in it would be
+       * hidden by it while the valuation went on counting it. `livestock` has
+       * refused this at its own door since its slice; the guard is now where
+       * the archiving happens.
+       */
+      const item = await newItem("Still full", "lb");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: item.id, code: "FULL-1" }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 25,
+          occurredOn: "2026-09-01",
+        }),
+      );
+      await expect(
+        asOwner((tx) => closeLot(tx, ownerCtx(), lot.id)),
+      ).rejects.toMatchObject({
+        code: "LOT_INVALID",
+        // The sentence carries the figure and its unit, so the reader knows
+        // how much has to be accounted for.
+        message:
+          "25 pounds is still in this batch — record what happened to it first",
+      });
+      // Still open, and its cost object still active.
+      const stillOpen = await asOwner((tx) =>
+        listLots(tx, tenantId, { itemId: item.id }),
+      );
+      expect(stillOpen.find((l) => l.id === lot.id)?.status).toBe("open");
+
+      // Empty it and the same call goes through.
+      await asOwner((tx) =>
+        issueStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 25,
+          occurredOn: "2026-09-02",
+        }),
+      );
+      const closed = await asOwner((tx) => closeLot(tx, ownerCtx(), lot.id));
+      expect(closed.status).toBe("closed");
+    });
+
+    it("lets a batch BELOW ZERO be closed, on purpose", async () => {
+      /**
+       * A batch at minus five hides nothing, and refusing it would strand a
+       * business that issued feed it never recorded a delivery for — the same
+       * reason negative stock is allowed in the first place.
+       */
+      const item = await newItem("Overdrawn", "lb");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: item.id, code: "NEG-1" }),
+      );
+      await asOwner((tx) =>
+        issueStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 5,
+          occurredOn: "2026-09-01",
+        }),
+      );
+      const closed = await asOwner((tx) => closeLot(tx, ownerCtx(), lot.id));
+      expect(closed.status).toBe("closed");
+    });
+
+    it("REOPENING PUTS THE COST OBJECT BACK", async () => {
+      /**
+       * **THE ASYMMETRY THIS EXISTS TO CLOSE.** Closing archives the member;
+       * for as long as the only reopen lived in `livestock` it set the status
+       * column directly and left the member archived, so a batch the screen
+       * showed as open had its cost object switched off —
+       * `assertDimensionsUsable` refuses to post against one of those.
+       */
+      const item = await newItem("Reopened feed");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: item.id, code: "AGAIN-1" }),
+      );
+      await asOwner((tx) => closeLot(tx, ownerCtx(), lot.id));
+      expect(
+        (await lotMembers()).find((m) => m.packEntityId === lot.id)?.isActive,
+      ).toBe(false);
+
+      const reopened = await asOwner((tx) => reopenLot(tx, ownerCtx(), lot.id));
+      expect(reopened.status).toBe("open");
+      const member = (await lotMembers()).find((m) => m.packEntityId === lot.id);
+      expect(member?.isActive).toBe(true);
+      expect(member?.displayName).toBe("Reopened feed · AGAIN-1");
+    });
+
+    it("is the owner's, both ways", async () => {
+      const item = await newItem("Guarded feed");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: item.id, code: "GUARD-1" }),
+      );
+      await expect(
+        asOwner((tx) => updateLot(tx, staffCtx(), lot.id, { code: "NOPE" })),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await expect(
+        asOwner((tx) => reopenLot(tx, staffCtx(), lot.id)),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
   });
 
   // ---- the ledger ------------------------------------------------------

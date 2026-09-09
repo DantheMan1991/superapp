@@ -25,6 +25,7 @@ import {
   createItem,
   createLot as createInventoryLot,
   closeLot as closeInventoryLot,
+  reopenLot as reopenInventoryLot,
   getLot as getInventoryLot,
   datedMovementsForLots,
   issueStock,
@@ -519,15 +520,15 @@ export async function reopenLivestockLot(
   if (!lot) {
     throw new LivestockError("NOT_FOUND", `lot ${input.livestockLotId}`);
   }
-  await tx
-    .update(schema.inventoryLots)
-    .set({ status: "open", updatedAt: new Date() })
-    .where(
-      and(
-        eq(schema.inventoryLots.tenantId, ctx.tenantId),
-        eq(schema.inventoryLots.id, lot.inventoryLotId),
-      ),
-    );
+  /**
+   * **THROUGH INVENTORY'S DOOR, the way the close already goes.** This wrote
+   * `inventory_lots.status` directly, so it flipped the column and left the
+   * dimension member `closeLot` had ARCHIVED still archived — a lot the screen
+   * showed as open with its cost object switched off, which
+   * `assertDimensionsUsable` refuses to post against. `reopenLot` restores the
+   * member in the same transaction. Fixed 2026-09-09 with inventory slice 7.
+   */
+  await reopenInventoryLot(tx, asInventory(ctx), lot.inventoryLotId);
 }
 
 // ------------------------------------------------------------ head events ---

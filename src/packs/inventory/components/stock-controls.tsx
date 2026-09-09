@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Combobox } from "@/components/app/combobox";
+import { useConfirm } from "@/components/app/use-confirm";
 import {
   Dialog,
   DialogContent,
@@ -34,11 +35,14 @@ import {
   adjustLotCostAction,
   adjustLotWeightAction,
   adjustStockAction,
+  closeLotAction,
   createLotAction,
   issueStockAction,
   receiveStockAction,
+  reopenLotAction,
   splitLotAction,
   transferStockAction,
+  updateLotAction,
 } from "../actions";
 import {
   ADJUSTMENT_REASON_LABELS,
@@ -284,6 +288,276 @@ export function LotForm({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Put a batch right: the code, the dates, the line of business, the notes.
+ *
+ * **NOTHING HERE TOUCHES A MOVEMENT.** What a batch IS can be corrected; what
+ * happened to it is the ledger and stays exactly as recorded. That is the whole
+ * difference between this dialog and `Correct cost` beside it, and it is why
+ * this one asks for no date and no reason.
+ *
+ * **EVERY FIELD IS RE-SEEDED ON OPEN, by remounting the form.** `LotForm` next
+ * door explains the trap in full: `router.refresh()` merges a new server
+ * payload *without losing client state*, so a form that read its defaults once
+ * would show yesterday's code after somebody else renamed the batch, and
+ * saving would write it straight back. Keying the form on an open counter makes
+ * `defaultValue` mean "as of now" rather than "as of the first render".
+ */
+export function EditLotForm({
+  lot,
+  enterprises,
+  enterpriseWord,
+}: {
+  lot: {
+    id: string;
+    code: string;
+    source: string;
+    openedOn: string | null;
+    expiresOn: string | null;
+    notes: string;
+    enterpriseId: string | null;
+    /**
+     * Whether any stock has ever moved through it. Only `Where from` cares:
+     * it decided how those entries were posted, so after the first movement it
+     * is a rewrite rather than a correction.
+     */
+    hasMovements: boolean;
+  };
+  enterprises: EnterpriseOption[];
+  enterpriseWord: string;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [opens, setOpens] = useState(0);
+  const [pending, startTransition] = useTransition();
+  const [enterprise, setEnterprise] = useState<string>(
+    lot.enterpriseId ?? NO_ENTERPRISE,
+  );
+
+  function onOpenChange(next: boolean) {
+    if (next) {
+      setEnterprise(lot.enterpriseId ?? NO_ENTERPRISE);
+      setOpens((n) => n + 1);
+    }
+    setOpen(next);
+  }
+
+  function submit(formData: FormData) {
+    startTransition(async () => {
+      const result = await updateLotAction({
+        id: lot.id,
+        code: String(formData.get("code") ?? ""),
+        // Absent from the form while it is locked, so an unchanged batch never
+        // sends a value the server would have to refuse.
+        source: lot.hasMovements
+          ? undefined
+          : String(formData.get("source") ?? lot.source),
+        openedOn: String(formData.get("openedOn") ?? "") || null,
+        expiresOn: String(formData.get("expiresOn") ?? "") || null,
+        // An existing batch has an ANSWER here, unlike a new one, so this is
+        // sent every time: `None` means untagged and is a decision.
+        enterpriseId: enterprise === NO_ENTERPRISE ? null : enterprise,
+        notes: String(formData.get("notes") ?? ""),
+      });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Batch updated");
+      setOpen(false);
+      router.refresh();
+    });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm">
+          Edit
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <form key={opens} action={submit}>
+          <DialogHeader>
+            <DialogTitle>Edit {lot.code}</DialogTitle>
+            {/* **ONE SENTENCE, AND THE HELP UNDER EACH FIELD IS ONE LINE.**
+                Measured at 375px before trimming: 839px of content in a 780px
+                dialog, with Save at y=787 in an 812px viewport — below the
+                fold, which is the same defect slice 3 fixed on `MovementForm`
+                and for the same reason. Nothing here was wrong; there was
+                simply too much of it. */}
+            <DialogDescription>
+              Changes what this batch is, never what happened to it.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor={`edit-code-${lot.id}`}>Batch code</Label>
+              <Input
+                id={`edit-code-${lot.id}`}
+                name="code"
+                required
+                maxLength={120}
+                defaultValue={lot.code}
+              />
+              <p className="text-xs text-muted-foreground">
+                Renamed everywhere, the books included.
+              </p>
+            </div>
+            {/* Two-up even on a phone, as `LotForm` has these same two. */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor={`edit-source-${lot.id}`}>Where from</Label>
+                <Select
+                  name="source"
+                  defaultValue={lot.source}
+                  disabled={lot.hasMovements}
+                >
+                  <SelectTrigger
+                    id={`edit-source-${lot.id}`}
+                    className="w-full"
+                    title={
+                      lot.hasMovements
+                        ? "Stock has already moved through this batch, and where it came from decided how those entries were posted."
+                        : undefined
+                    }
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LOT_SOURCES.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {LOT_SOURCE_LABELS[s]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor={`edit-opened-${lot.id}`}>Started</Label>
+                <Input
+                  id={`edit-opened-${lot.id}`}
+                  name="openedOn"
+                  type="date"
+                  defaultValue={lot.openedOn ?? ""}
+                />
+              </div>
+            </div>
+            {lot.hasMovements && (
+              <p className="-mt-2 text-xs text-muted-foreground">
+                {/* Said once, under the pair, rather than as a tooltip nobody
+                    on a phone can reach. */}
+                Where it came from is fixed: stock has moved, and that answer
+                decided how those entries posted.
+              </p>
+            )}
+            <div className="grid gap-2">
+              <Label htmlFor={`edit-expires-${lot.id}`}>Good until</Label>
+              <Input
+                id={`edit-expires-${lot.id}`}
+                name="expiresOn"
+                type="date"
+                defaultValue={lot.expiresOn ?? ""}
+              />
+              <p className="text-xs text-muted-foreground">
+                Blank if it does not go off. Dated, it shows under going off
+                soon.
+              </p>
+            </div>
+            <EnterprisePicker
+              id={`edit-lot-enterprise-${lot.id}`}
+              word={enterpriseWord}
+              options={enterprises}
+              value={enterprise}
+              onValue={setEnterprise}
+              hint="Charged here from now on. What has posted does not move."
+            />
+            <div className="grid gap-2">
+              <Label htmlFor={`edit-lot-notes-${lot.id}`}>Notes</Label>
+              <Textarea
+                id={`edit-lot-notes-${lot.id}`}
+                name="notes"
+                rows={2}
+                maxLength={5000}
+                defaultValue={lot.notes}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="submit" disabled={pending}>
+              {pending ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Finish a batch, or start it again.
+ *
+ * **CLOSING IS A JUDGEMENT AND THE APP MUST NOT MAKE IT.** A batch at zero is
+ * either a pen that finished last season or one somebody made ten seconds ago
+ * and is about to fill; the ledger says the same about both. So it is an act,
+ * and — because judgements are wrong sometimes — a reversible one, which is why
+ * the same button turns into `Reopen`.
+ *
+ * Shown only at zero or below. `closeLot` refuses stock that is still there,
+ * because closing archives the cost object and would hide it.
+ */
+export function CloseLotButton({
+  lot,
+}: {
+  lot: { id: string; code: string; status: string };
+}) {
+  const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
+  const [pending, startTransition] = useTransition();
+  const closed = lot.status === "closed";
+
+  // The guard is OUTSIDE the transition — see `useConfirm`.
+  async function act() {
+    if (!closed) {
+      const asked = await confirm({
+        title: `Finish ${lot.code}?`,
+        description:
+          "It stops being offered for new stock and stops being something to charge cost to. Everything already recorded against it keeps reporting, and you can open it again.",
+        confirmLabel: "Close batch",
+      });
+      if (!asked) return;
+    }
+    startTransition(async () => {
+      const result = closed
+        ? await reopenLotAction({ id: lot.id })
+        : await closeLotAction({ id: lot.id });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(closed ? "Batch reopened" : "Batch closed");
+      router.refresh();
+    });
+  }
+
+  return (
+    <>
+      {confirmDialog}
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={act}
+        disabled={pending}
+        className="text-muted-foreground"
+      >
+        {closed ? "Reopen" : "Close"}
+      </Button>
+    </>
   );
 }
 

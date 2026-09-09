@@ -33,6 +33,96 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-09-09 — A batch you can put right (`claude/a-batch-you-can-put-right`)
+
+**`createLot` HAS HAD NO OPPOSITE SINCE SLICE 0.** Every fact about a batch was
+typed once, on a phone, at a delivery, and was then permanent: a code with a
+typo in it, an expiry a day out, a line of business inherited from the item
+before anybody thought about it. `LotForm`'s own doc comment already named the
+consequence, in the middle of explaining a guard it needed *because* of the
+gap — a stale prefill would write the wrong tag onto a new batch *"permanently,
+because there is no `updateLot` to correct a batch with"*. Slice 7, no
+migration.
+
+**THE LOT AND MOVEMENT MODEL IS UNCHANGED, and that is the point.** Everything
+here writes columns that have existed since slice 0. No movement is inserted,
+edited or read differently; no balance moves; no posted entry is rewritten.
+What a batch **is** can now be corrected, and what happened to it stays exactly
+as recorded — which is the same line `Correct cost` draws from the other side,
+by appending rather than editing.
+
+- **`updateLot`** takes the code, `Started`, `Good until`, the line of business
+  and the notes. `Edit` is the first button on every batch card and row, for
+  owners, and it is the only one there that changes nothing about the record.
+- **The code is half of a cost object's name**, so changing it re-upserts the
+  dimension member — the same string `createLot` builds, in the same
+  transaction, so the two cannot drift. A batch renamed on this screen and
+  still called the old thing on a journal line would be two answers to one
+  question.
+- **`Where from` is fixed once anything has moved.** `recordMovement` reads
+  `lot.source` to decide the credit side of a receipt and stamps that decision
+  into the entry; changing it afterwards would leave the batch describing
+  itself one way while its own postings say the other. Before the first
+  movement there is nothing to disagree with and it is a typo. Same shape and
+  same reason as `updateItem`'s stocking-unit refusal, and the dialog says so
+  under the greyed picker rather than in a tooltip a phone cannot reach.
+- **`Close` is the first caller `closeLot` has ever had**, and it comes with a
+  guard the op did not have: **a batch with stock still in it is refused**,
+  naming the quantity. Closing ARCHIVES the cost object, so closing a full
+  batch would stop it being taggable and stop `livestock` offering it, while
+  the valuation went on counting stock nobody could reach. `livestock` has
+  refused exactly this since its own slice — *"closing a lot that still holds a
+  cow would hide her with it"* — but the guard was in `closeLivestockLot`, so
+  it protected livestock's door and not this one. It is where the archiving
+  happens now. **Below zero is allowed through**, deliberately: a batch at
+  minus five hides nothing, and refusing it would strand a business that issued
+  feed it never recorded a delivery for.
+- **`reopenLot`, and it fixes a live asymmetry in the shared spine.**
+  `reopenLivestockLot` set `inventory_lots.status` with a direct `update` —
+  bypassing this pack's door, which its own `closeLivestockLot` correctly uses
+  — so a lot closed and reopened came back with the dimension member `closeLot`
+  had archived **still archived**. `assertDimensionsUsable` throws
+  `DIMENSION_INVALID` on an archived member, so anything that ever tags a lot
+  would refuse to post against a batch the screen showed as open. Nothing tags
+  a lot today, which is the only reason this was latent rather than live.
+  `livestock` now reopens through `reopenLot`, one line, the way it already
+  closes.
+
+**Found while writing it: renaming an ITEM left every batch of it named after
+the old one.** A lot's cost object is `item · code`, and only `createLot` ever
+built that string — so a business that renamed *Broiler chicks* to *Cornish
+Cross* got a picker listing both, which is what a dimension exists to prevent.
+`updateItem` now re-upserts its lots' members on a real rename, bounded by the
+item's own batches.
+
+**Measured before shipping, at 375px:** the Edit dialog was 839px of content in
+a 780px box with `Save` at y=787 in an 812px viewport — below the fold, the
+same defect slice 3 fixed on `MovementForm` and for the same reason: nothing
+wrong, just too much of it. One-sentence description, one line of help under
+each field, `Where from` and `Started` two-up as `LotForm` already has them:
+717px, no scroll, `Save` at 731.
+
+**And one the batches table sat next to:** a 96-character correction note put
+the cost-corrections table at 1168px in a 961px column, pushing the money
+columns off the right. `whitespace-normal` with a width cap on the three
+free-text cells — cost corrections, weight corrections and recent entries —
+which is the fix the batch-code and Good-until cells already carry. All four
+tables now measure exactly their column.
+
+Guides: `item.md` gains the two how-tos, the buttons, six messages, and loses
+two Not-on-this-page bullets that are now false — plus the closed-period row,
+which slice 6 made accurate and did not sweep here. `overview.md` likewise.
+
+Tests: ten in `tests/inventory-ops.test.ts` under **PUTTING A BATCH RIGHT** —
+the fields and that the ledger is untouched, clearing an expiry, the cost
+object renaming with the code and with the item, the empty code, `Where from`
+before and after the first movement (and that re-sending the SAME source is not
+a change, or saving the dialog untouched would fail), the close refusal with
+its sentence, closing below zero on purpose, the reopen restoring the member,
+and the owner gate both ways. `tests/livestock-ops.test.ts` asserts the
+member is archived on close and active again on reopen, which fails on the old
+behaviour.
+
 ### 2026-09-09 — Messages that say what happened (`claude/messages-that-say-what-happened`)
 
 **Refusals and figures that told the reader the wrong thing.** Every one the
@@ -1860,6 +1950,36 @@ commitment against a live animal to delivered without sitting on a shelf.
 
 ## Decisions & gotchas
 
+- **WHAT A BATCH IS CAN BE CORRECTED; WHAT HAPPENED TO IT CANNOT.** That line
+  runs through the whole pack and `updateLot` (2026-09-09) sits on one side of
+  it: the code, the dates, the line of business and the notes are columns and
+  are editable, while a wrong quantity, cost or weight is answered by appending
+  a movement or a correction. A screen that let both be edited would make the
+  ledger a draft.
+- **A BATCH'S `source` IS FIXED ONCE ANYTHING HAS MOVED THROUGH IT.**
+  `recordMovement` reads it to decide the credit side of a receipt and stamps
+  that decision into the entry, so changing it later leaves the batch and its
+  own postings disagreeing with nothing to say which is meant. Before the first
+  movement it is a typo and `updateLot` allows it. Same rule and same shape as
+  `updateItem`'s stocking-unit refusal.
+- **CLOSING A LOT IS REFUSED WHILE STOCK IS STILL IN IT, and the guard belongs
+  to `closeLot`.** Closing archives the cost object, so a full batch would stop
+  being taggable and stop being offered while the valuation went on counting
+  it. `livestock` had this rule from its own slice but kept it in
+  `closeLivestockLot`, which protected one door of two. **Below zero passes on
+  purpose** — a batch at minus five hides nothing, and the same reasoning that
+  allows negative stock allows closing it.
+- **CLOSE ARCHIVES THE DIMENSION MEMBER, SO REOPEN MUST RESTORE IT.** Any path
+  that flips `inventory_lots.status` back to `open` without calling
+  `reopenLot` leaves a batch the screen shows as open whose cost object is
+  switched off, and `assertDimensionsUsable` throws `DIMENSION_INVALID` on one
+  of those. `reopenLivestockLot` did exactly that until 2026-09-09; it goes
+  through `reopenLot` now. Nothing tags a lot member today, which is the only
+  reason it was latent.
+- **A LOT'S COST OBJECT IS NAMED `item · code`, SO BOTH HALVES HAVE TO KEEP IT
+  UP TO DATE.** `updateLot` re-upserts on a code change and `updateItem` does
+  the same for every batch on a real rename. Miss either and one thing has two
+  names in the tag picker.
 - **`each`, `head` AND `pkg` ALL SIT AT `perBase: 1` IN THE `count` DIMENSION**,
   so `convert` will happily turn 70 head into 70 packages. There is a test
   asserting the nonsense so it is found here rather than in somebody's balance.
@@ -2151,9 +2271,10 @@ commitment against a live animal to delivered without sitting on a shelf.
   `formatMoney` twice, the way this pack's own screens did before 2026-09-09.
   It is livestock's fold, not `lotCarried`, so whether it can go negative wants
   reading first.
-- **A batch's expiry cannot be edited after it is created.** There is no
+- ~~**A batch's expiry cannot be edited after it is created.** There is no
   `updateLot` at all — the same shape as the four actions below — so a delivery
-  entered without a date, or with the wrong one, is stuck with it.
+  entered without a date, or with the wrong one, is stuck with it.~~ —
+  **closed 2026-09-09**: `updateLot` and `Edit` on every batch.
 - **A posted count cannot be corrected.** By design, and the screen says so: the
   variances are in the ledger and unwriting them would rewrite what happened.
   ~~What is missing is the honest remedy — count again — and nothing on the
@@ -2170,8 +2291,9 @@ commitment against a live animal to delivered without sitting on a shelf.
   the item page, along with a new `restoreItem`, so an item can be renamed,
   re-kinded, re-housed, retired and put back. The unit picker is disabled once
   anything has moved and enabled before then, which is the case that stung.
-  **`closeLot` and `mergeLot` still have none**, so a batch cannot be closed or
-  merged from any screen — splits are what `livestock` needed first.
+  ~~**`closeLot` and `mergeLot` still have none**, so a batch cannot be closed or
+  merged from any screen~~ — **`closeLot` has one since 2026-09-09**, with a
+  `reopenLot` beside it; `mergeLot` still has none.
 - ~~`listLocations` returns every active asset~~ — **fixed the same day** with
   `assets.is_storage_location`, a flag on the asset rather than a kind rule,
   because a freezer and a tractor are both `equipment`. See [assets.md](assets.md).

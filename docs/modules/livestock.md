@@ -133,6 +133,36 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-09-09 — Reopening a lot goes through inventory's door (`claude/a-batch-you-can-put-right`)
+
+**ONE LINE, AND IT CLOSES AN ASYMMETRY THAT HAD BEEN THERE SINCE THE CLOSE
+SHIPPED.** `closeLivestockLot` correctly calls inventory's `closeLot`, which
+ARCHIVES the lot's dimension member — *"archived members stop being taggable;
+existing tags keep reporting"*, which is what a finished pen wants.
+`reopenLivestockLot` did not have an opposite to call, so it set
+`inventory_lots.status` with a direct `update` and left the member archived. A
+pen closed and reopened came back looking open on every screen with its cost
+object switched off, and `assertDimensionsUsable` throws `DIMENSION_INVALID`
+on an archived member — so anything that ever tags a lot would refuse to post
+against it. Nothing tags a lot member today, which is the only reason this was
+latent rather than live.
+
+Inventory slice 7 added `reopenLot`, which flips the status and re-upserts the
+member in the same transaction; this reopen calls it, exactly as the close
+calls `closeLot`. The rule, now written in
+[inventory.md](inventory.md)'s decisions: **any path that reopens a lot without
+going through `reopenLot` reintroduces this.**
+
+`tests/livestock-ops.test.ts` asserts the member is archived on close and
+active again on reopen, which fails on the old behaviour. No migration, no
+schema change, and nothing a person sees is different.
+
+Note for anyone touching `closeLivestockLot`: its own head-and-members guard
+stays, and inventory's `closeLot` now refuses a positive balance too. The two
+agree — head IS the quantity on a livestock lot — so this adds a second check
+rather than a second rule, and livestock's is still the one that also refuses a
+lot with animals named into it.
+
 ### 2026-09-09 — The herd book, pasted or photographed (`claude/paste-anything`)
 
 Onboarding slice 2 ([onboarding.md](onboarding.md), [ADR 0036](../decisions/0036-a-pasted-list-is-proposed-by-the-model-reviewed-by-a-person-and-written-by-the-modules-own-verb.md)):

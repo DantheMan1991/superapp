@@ -53,6 +53,8 @@ The rows you can see, and when each one is there:
 | `Add the people you work with` | CRM is switched on and nobody has ever been added, here or as a customer or vendor in Accounting. | New record. |
 | `Set up your mailboxes` | Mail is switched on and no mailbox on your own domain exists yet. | Email setup. |
 
+Under the rows, `Not sure where to start? Walk through it with us and get a plan for your business.` opens a short conversation that writes you an ordered plan; see [Getting set up with us](setup.md). Owners only, like the card.
+
 A row clears however the thing arrives. Typing a new customer's name on an invoice clears `Add the people you work with` just as adding a record in CRM does. A tool that is switched off has no rows.
 
 ## How to open a page

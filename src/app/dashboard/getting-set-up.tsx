@@ -97,6 +97,19 @@ export async function GettingSetUp({
             </ul>
           </Panel>
         )}
+
+        {/* The card says WHAT is missing; the interview says what to do about
+            it for THIS business, and in what order (ADR 0040). */}
+        <p className="text-sm text-muted-foreground">
+          Not sure where to start?{" "}
+          <Link
+            href="/dashboard/setup"
+            className="font-medium text-foreground underline-offset-4 hover:underline"
+          >
+            Walk through it with us
+          </Link>{" "}
+          and get a plan for your business.
+        </p>
       </div>
     </SectionRow>
   );

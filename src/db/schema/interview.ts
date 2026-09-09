@@ -17,7 +17,64 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { audits } from "./platform";
+import { audits, tenants } from "./platform";
+
+/**
+ * The SETUP interview — the health check turned inward (ADR 0040).
+ *
+ * Same conversation machinery, opposite side of the sale: this one runs
+ * inside a tenant, for somebody who has already signed up, and produces a
+ * PLAN for setting their business up rather than an assessment written to
+ * win them. So it is tenant-scoped where `interview_sessions` is
+ * platform-level, and it carries no IP hash — the person is signed in.
+ *
+ * ONE ACTIVE PER TENANT, by partial unique index. A second half-finished
+ * conversation about the same business is two answers to "when do your books
+ * begin", and the plan is the thing that has to be single.
+ */
+export const setupInterviews = pgTable(
+  "setup_interviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** zod/CHECK: active | done. */
+    state: text("state").notNull().default("active"),
+    /** [{role: "user" | "assistant", content}, …] — starts with the opener. */
+    messages: jsonb("messages").notNull().default([]),
+    /** User turns processed. Server-enforced cap. */
+    exchangeCount: integer("exchange_count").notNull().default(0),
+    /** Per-session turn-cooldown claim (the `ai_last_*` pattern). */
+    lastTurnAt: timestamp("last_turn_at", { withTimezone: true }),
+    /**
+     * `{ summary, steps: [{ title, why, href, guide }] }`, or null until the
+     * conversation ends. WRITTEN, not derived: the Getting set up card
+     * already says what is MISSING, and this says what to do about it for
+     * this business, in an order somebody agreed to.
+     */
+    plan: jsonb("plan"),
+    /** Who walked it. Identifiers only. */
+    startedByClerkUserId: text("started_by_clerk_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("setup_interviews_tenant_id_idx").on(t.tenantId, t.id),
+    index("setup_interviews_tenant_created_idx").on(t.tenantId, t.createdAt),
+    uniqueIndex("setup_interviews_one_active_idx")
+      .on(t.tenantId)
+      .where(sql`${t.state} = 'active'`),
+    check(
+      "setup_interviews_state_check",
+      sql`${t.state} in ('active', 'done')`,
+    ),
+  ],
+);
 
 /**
  * Anonymous public health-check interview sessions — the conversation

@@ -85,7 +85,7 @@ rather than one wizard that tries to be all of them:
 | 4 | **The day the books begin**: `entities.books_start_on`, per company beside the close date (not on `accounting_settings` as first planned — the lock had already moved off it for the same reason); `assertPeriodOpen` refuses anything dated before it; the CSV import and the Plaid sync drop earlier lines and say how many; set on the Close page; the setup card asks for it first ([ADR 0035](../decisions/0035-the-books-begin-on-a-day-and-nothing-is-dated-before-it.md), migration `0280`; build log in [accounting.md](accounting.md)) | **shipped 2026-09-08** |
 | 5 | **The opening position**: open invoices and bills as of the start date as real documents with their income or expense leg to OBE, so they age and get paid like any other; equipment with "depreciation already taken through", posted as that asset's own entry; the opening trial balance on one screen with the equity plug visible; an export for the accountant | **shipped 2026-09-09** in two parts: 5a the Opening page, open invoices and bills ([ADR 0037](../decisions/0037-a-document-open-when-the-books-began-is-real-and-its-other-leg-is-opening-balance-equity.md), migration `0281`), the standing with the plug named, the export pointed at; 5b equipment owned before the day, cost and depreciation already taken, on the asset's own page ([ADR 0038](../decisions/0038-an-asset-owned-before-the-books-began-arrives-as-two-entries.md), no migration) |
 | 6 | **Tell it things**: one sentence box on the phone — "fed two bags to the broilers", "three chicks dead in pen two", "moved cows to paddock seven" — parsed into proposed record cards, one tap each to confirm, refusing where the packs already refuse | **shipped 2026-09-09**: `src/lib/tell-sources/`, the seventh declared extension point, with livestock as its first filler and the box on the daily round ([ADR 0039](../decisions/0039-a-pack-declares-what-it-can-be-told-in-one-sentence.md)). NOT on the Ask thread as first sketched — Ask answers, this records, and one box doing both is the ambiguity the confirm step exists to remove |
-| 7 | **The setup interview**: the health-check machinery turned inward — a conversation that produces the plan for THIS business (which packs, what to load, the start date), opening on "Is the farm's money in its own account?" | planned |
+| 7 | **The setup interview**: the health-check machinery turned inward — a conversation that produces the plan for THIS business (which packs, what to load, the start date), opening on "Is the farm's money in its own account?" | **shipped 2026-09-09**: `/dashboard/setup`, running on a digest of what the app can already see and forbidden to ask for any of it, ending in a stored plan whose steps link to real screens ([ADR 0040](../decisions/0040-the-setup-interview-runs-on-what-the-app-can-already-see.md), migrations `0283`–`0284`) |
 
 Two users for all of it: the founder, running a paid Tier 1 onboarding in an
 hour instead of a day, and the client, who needs to see what is next without
@@ -119,6 +119,56 @@ the farm's asset list until they say so.
 ## Build log
 
 Newest first. One entry per session/PR that touched this area.
+
+### 2026-09-09 — Slice 7: the setup interview (`claude/the-setup-interview`)
+
+The last slice, and the one whose case had to be argued before it was built:
+by the time it came round, six slices had shipped and each answered part of
+the same question in its own place, so a seventh screen asking them again
+would have been a fifth path to the same settings.
+[ADR 0040](../decisions/0040-the-setup-interview-runs-on-what-the-app-can-already-see.md)
+opens with that argument. What it adds is the facts the database cannot
+hold — the money is mixed, nobody tracked what feed cost, the accountant has
+a depreciation schedule, the books should start in January not today — and
+the ORDER those change.
+
+`buildDigest` reads the business's own rows (tools on, the start day,
+registers and how many are personal, counts, and what the Getting set up card
+is currently asking for) and the prompt hands it over with one instruction:
+never ask for any of this. That rule is the whole difference from both its
+neighbours — the public health check is talking to a stranger and must ask
+everything, and a wizard cannot skip what it can see.
+
+It ends in a stored plan of six to ten steps, each linking to a screen chosen
+from a fixed list by label, so a step can never point somewhere that does not
+exist. **It changes nothing by itself**, and the page says so: a conversation
+that quietly set the day the books begin would be the one place in the
+product where a misheard sentence rewrote the ledger's lower bound.
+
+Migrations `0283` (the table) and `0284` (RLS, tenant-scoped — its public
+cousin is superadmin-only because an anonymous visitor has no tenant). Tests:
+`tests/setup-interview.test.ts` (9, pure), `tests/setup-interview-db.test.ts`
+(5) and three more in `tests/isolation/interview.test.ts`. Guide:
+`workspace/setup.md`.
+
+**Driven on Hilltop (dev), with the real model, and it behaved as designed.**
+Four answers took it from the opener to the plan. The second reply read *"1
+January 2026 it is, which matches what's already set"* — the digest doing its
+one job, and the only proof that matters for it. The third turned "never
+tracked what the feed cost me" into *"the cost side of your livestock and
+stock stays blank rather than guessed"*, which is the founder's own settled
+answer coming back. The plan named the farm account, the two half-beef
+buyers, the December feed bill, the accountant's depreciation schedule and
+the morning round, in that order, and every step's button resolved to a real
+screen (Banking, Opening position, Inventory, Assets, Business settings,
+Daily round). It survived a reload, the box was gone, and the Overview's card
+links to it.
+
+**One thing to fix when somebody uses it for real:** the model wrote "£500"
+where the tenant's currency is dollars. The digest does not carry the
+currency symbol, and it should — one line in `buildDigest`.
+
+**With this the plan is finished.** Seven slices, ten pull requests, one day.
 
 ### 2026-09-09 — Slice 6: tell it what happened (`claude/tell-it-things`)
 
@@ -402,12 +452,14 @@ every button, the two messages, and the owners-only line.
 
 ## Data model
 
-None. The card is a fold over tables the modules already own; nothing is
-stored, and nothing may be ([ADR 0033](../decisions/0033-a-setup-step-is-a-prerequisite-the-data-proves-missing.md)).
+The card stores nothing and may not ([ADR 0033](../decisions/0033-a-setup-step-is-a-prerequisite-the-data-proves-missing.md)).
+The interview stores its own conversation, and that is the only table this
+area owns.
 
 | Table | Purpose | Notes |
 | --- | --- | --- |
-| — | — | Every step is a `LIMIT 1` over a module's own table, under the caller's RLS context |
+| — | The Getting set up card | Every step is a `LIMIT 1` over a module's own table, under the caller's RLS context. Derived, never stored |
+| `setup_interviews` | The setup interview and the plan it wrote ([ADR 0040](../decisions/0040-the-setup-interview-runs-on-what-the-app-can-already-see.md), `0283`–`0284`) | Tenant-scoped RLS, unlike its public cousin `interview_sessions`, which is superadmin-only because a visitor has no tenant. One active per tenant by partial unique index. `plan` is written once, when the conversation ends |
 
 ## Key files & seams
 
@@ -443,6 +495,13 @@ stored, and nothing may be ([ADR 0033](../decisions/0033-a-setup-step-is-a-prere
   page's read; `opening/actions.ts`; `src/app/dashboard/m/accounting/opening/`
   — the page and its two dialogs; `tests/opening-position.test.ts`;
   `docs/help/accounting/opening.md`
+- `src/lib/setup-interview/prompt.ts` — pure: the digest, the words, the two
+  tools, `PLAN_SCREENS` (the only screens a plan step may point at) and the
+  boundaries; `session.ts` — the digest built from the tenant's rows, the two
+  model calls, one turn; `actions.ts` — owners only;
+  `src/app/dashboard/setup/` — the page and the chat;
+  `tests/setup-interview.test.ts` · `tests/setup-interview-db.test.ts` ·
+  `tests/isolation/interview.test.ts`; `docs/help/workspace/setup.md`
 - `src/lib/tell-sources/types.ts` — the tell contract. **Read the header
   before adding a source**: actions as data plus the pack's verb, the model
   never writes, choices by label never nearest, all the cards or none
@@ -502,11 +561,22 @@ stored, and nothing may be ([ADR 0033](../decisions/0033-a-setup-step-is-a-prere
 
 ## Open items
 
-- **Only slice 7 is unbuilt.** Everything else has shipped: 3 and 4 on
-  2026-09-08; 2, 2b, 5 and 6 on 2026-09-09. All three of the plan's gaps are
-  closed, a business can be converted end to end, and the daily habit has its
-  first tool. What is left is the setup interview, which is the health-check
-  machinery turned inward and needs none of the above to change.
+- **THE SLICE ORDER IS FINISHED.** 3 and 4 shipped 2026-09-08; 2, 2b, 5, 6
+  and 7 on 2026-09-09. All three of the plan's gaps are closed, a business
+  can be converted end to end, the daily habit has its first tool, and the
+  interview writes the plan for doing it. What follows is no longer a
+  roadmap: it is whatever driving a real conversion turns up.
+- **Nothing here has been used on a real client yet.** Every slice was driven
+  on Hilltop (dev) as it was built, and the dossier entries say exactly what
+  was clicked, but a conversion done end to end by somebody who did not build
+  it is the test none of this has had.
+- **The digest does not carry the currency symbol**, and the interview wrote
+  "£500" for a dollar tenant on its first real run. One line in
+  `buildDigest`, and the first thing to fix in this area.
+- **The interview's plan goes stale on purpose.** It is what somebody agreed
+  to on a day; the Getting set up card stays the live answer to what is
+  missing. Switching a tool on after the plan is written does not change the
+  plan, and going through it again is one button.
 - **The tell box has one filler.** Livestock. Three packs could fill the slot
   next — inventory (stock used or counted), land (a paddock rested), and
   production (a run's yield) — and each is one file plus a registry line. The

@@ -319,7 +319,7 @@ Paste these into the PR. They are the actual gate.
 | `STRIPE_CONNECT_WEBHOOK_SECRET` | Connect events — the tenant's own connected accounts. A SEPARATE endpoint with a separate secret, because Stripe only delivers `account.updated` to a Connect-enabled one | Stripe dashboard |
 | `SQUARE_APPLICATION_ID`, `SQUARE_APPLICATION_SECRET` | The tenant's own Square account, via OAuth (ADR 0017). The secret is sent to Square at code exchange and on revoke, and never anywhere else. `SQUARE_ENVIRONMENT` picks sandbox (the default) or production | Square Developer Console |
 | `SQUARE_WEBHOOK_SIGNATURE_KEY` | Square events. HMAC-SHA256 over the notification URL plus the raw body, so `NEXT_PUBLIC_APP_URL` must match the URL registered in the console exactly | Square Developer Console |
-| `ANTHROPIC_API_KEY` | Copilot, extraction, the site copywriter and the page editor's assistant (Marketing 1, 12), the "Paste a list" dialog (ADR 0036) | Anthropic console |
+| `ANTHROPIC_API_KEY` | Copilot, extraction, the site copywriter and the page editor's assistant (Marketing 1, 12), the "Paste a list" dialog (ADR 0036), the "tell it what happened" box (ADR 0039), the setup interview (ADR 0040) | Anthropic console |
 | `PLAID_*` | Bank feed | Plaid dashboard |
 | Stalwart / JMAP creds | Mailbox access | Per-deployment |
 

@@ -27,6 +27,7 @@ import {
   recordMovement,
   restoreItem,
   splitLot,
+  transferStock,
   updateItem,
   type InventoryCtx,
 } from "./ops";
@@ -590,6 +591,60 @@ export async function issueStockAction(input: unknown) {
     });
     revalidatePath(BASE, "layout");
     return { ok: true, costCents: movement.costCents };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Move stock from one place to another, as ONE act.
+ *
+ * `member`: loading the truck is a chore. Two movements and no cost — see
+ * `transferStock`, which has done this for retail's truck since slice 3b and
+ * had no door in this pack until 2026-09-09. The audit line carries the
+ * places, the quantity and both legs' ids; never the notes.
+ */
+export async function transferStockAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      itemId: z.string().uuid(),
+      lotId: z.string().uuid().nullable().optional(),
+      quantity: quantity.positive(),
+      fromLocationAssetId: z.string().uuid().nullable().optional(),
+      toLocationAssetId: z.string().uuid().nullable().optional(),
+      occurredOn: requiredDate,
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const legs = await withTenant(
+      ctx.tenant.id,
+      (tx) => transferStock(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "inventory.stock.moved",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "inventory_item",
+      targetId: parsed.data.itemId,
+      meta: {
+        quantity: parsed.data.quantity,
+        lotId: parsed.data.lotId ?? null,
+        from: parsed.data.fromLocationAssetId ?? null,
+        to: parsed.data.toLocationAssetId ?? null,
+        outId: legs.out.id,
+        inId: legs.in.id,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    // The asset page lists what each place holds.
+    revalidatePath("/dashboard/m/assets", "layout");
+    return { ok: true as const };
   } catch (err) {
     return toResult(err);
   }

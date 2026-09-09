@@ -38,6 +38,7 @@ import {
   issueStockAction,
   receiveStockAction,
   splitLotAction,
+  transferStockAction,
 } from "../actions";
 import {
   ADJUSTMENT_REASON_LABELS,
@@ -84,7 +85,18 @@ export interface LotOption {
 export interface LocationOption {
   id: string;
   name: string;
+  /** What the item holds there, formatted — `9 packages` — or null for nothing. */
+  onHandLabel?: string | null;
 }
+
+/** The four things the Record stock dialog records. */
+type Door = "in" | "out" | "move" | "adjust";
+const DOORS: readonly { key: Door; label: string }[] = [
+  { key: "in", label: "In" },
+  { key: "out", label: "Out" },
+  { key: "move", label: "Move" },
+  { key: "adjust", label: "Adjust" },
+];
 
 /** Start a new batch of something. */
 export function LotForm({
@@ -276,7 +288,7 @@ export function LotForm({
 }
 
 /**
- * Record stock in or out.
+ * Record stock in or out — or moved.
  *
  * IN and OUT are two buttons rather than a signed number, because nobody
  * thinks "negative eighty pounds of feed". The sign is applied here, which is
@@ -293,6 +305,13 @@ export function LotForm({
  * start the delivery's batch inside the dialog (`New batch…`), which
  * `receiveStock` has supported since slice 1 and no screen offered: a delivery
  * IS a batch, and it was two dialogs.
+ *
+ * **A FOURTH DOOR, `Move`, since the same day.** `transferStock` has written
+ * both legs of a move as one act since slice 3b, and the only thing calling it
+ * was retail's truck — so moving a box between two freezers in THIS pack was an
+ * `Out` at one place and an `In` at the other, the exact shape that leaves one
+ * leg forgotten. The door asks `From` and `To` and nothing about money: a move
+ * carries no cost, because moving a box does not change what it cost.
  */
 export function MovementForm({
   itemId,
@@ -308,6 +327,7 @@ export function MovementForm({
   defaultLotId = null,
   defaultLocationId = null,
   canStartBatch = false,
+  unplacedLabel = null,
 }: {
   itemId: string;
   unitLabel: string;
@@ -324,6 +344,7 @@ export function MovementForm({
   /** The tenant's symbol, or null for the house style of none. */
   currencySymbol: string | null;
   lots: LotOption[];
+  /** The places things are kept, each with what this item holds there. */
   locations: LocationOption[];
   /**
    * Lots that can EAT this — pens, mostly, and deliberately across every item.
@@ -338,6 +359,8 @@ export function MovementForm({
   defaultLocationId?: string | null;
   /** Owners may start the delivery's batch here; a lot is a cost object. */
   canStartBatch?: boolean;
+  /** What this item holds with no place recorded, for the `From` picker. */
+  unplacedLabel?: string | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -345,10 +368,10 @@ export function MovementForm({
    * **A THIRD DOOR ON THE SAME FORM, NOT A SECOND FORM.** Slice 1 made the point
    * already: adding a separate "Adjust" button would leave three ways to move
    * stock and a person guessing which one this is. In carries a price, Out
-   * carries who ate it, and Adjust carries a REASON — the one thing an
-   * adjustment is for.
+   * carries who ate it, Adjust carries a REASON — the one thing an adjustment
+   * is for — and Move carries two places and nothing else.
    */
-  const [direction, setDirection] = useState<"in" | "out" | "adjust">("in");
+  const [direction, setDirection] = useState<Door>("in");
   const [reason, setReason] = useState<string>(SUGGESTED_ADJUSTMENT_REASONS[0]);
   // Which way an adjustment goes. Both are ordinary: a rat and a miscount are
   // the same act against the same column in opposite directions.
@@ -406,7 +429,7 @@ export function MovementForm({
     setOpen(next);
   }
 
-  function choose(next: "in" | "out" | "adjust") {
+  function choose(next: Door) {
     setDirection(next);
     // Only a delivery can start a batch; leaving the door leaves the option.
     if (next !== "in" && lotChoice === NEW_LOT) setLotChoice(startingLot);
@@ -428,6 +451,13 @@ export function MovementForm({
     }
     const chosenLotId =
       lotChoice === NO_LOT || lotChoice === NEW_LOT ? null : lotChoice;
+    const fromId = String(formData.get("fromLocationAssetId") ?? NO_LOCATION);
+    const toId = String(formData.get("toLocationAssetId") ?? NO_LOCATION);
+    if (direction === "move" && fromId === toId) {
+      // The server refuses this too; said here before the round trip.
+      toast.error("Pick two different places.");
+      return;
+    }
 
     startTransition(async () => {
       /**
@@ -489,6 +519,19 @@ export function MovementForm({
               locationAssetId: locationId === NO_LOCATION ? null : locationId,
               notes: String(formData.get("notes") ?? ""),
             })
+          : direction === "move"
+          ? await transferStockAction({
+              itemId,
+              lotId: chosenLotId,
+              quantity: Math.abs(raw),
+              // "Not recorded" is a real place to move FROM: stock a farm
+              // never placed, being placed now. Null both ways is the one
+              // combination the server refuses, and the check above says so.
+              fromLocationAssetId: fromId === NO_LOCATION ? null : fromId,
+              toLocationAssetId: toId === NO_LOCATION ? null : toId,
+              occurredOn: String(formData.get("occurredOn") ?? today),
+              notes: String(formData.get("notes") ?? ""),
+            })
           : await issueStockAction({
               itemId,
               lotId: chosenLotId,
@@ -516,9 +559,11 @@ export function MovementForm({
             : "Stock recorded in"
           : direction === "out"
             ? "Stock recorded out"
-            : adjustUp
-              ? "Adjusted up"
-              : "Adjusted down";
+            : direction === "move"
+              ? `Moved · ${formatQuantity(Math.abs(raw), unit)}`
+              : adjustUp
+                ? "Adjusted up"
+                : "Adjusted down";
       toast.success(headline + charged);
       setOpen(false);
       router.refresh();
@@ -563,6 +608,9 @@ export function MovementForm({
 
   const offerBatchPicker =
     lots.length > 0 || (direction === "in" && canStartBatch);
+  /** `Market truck · 9 packages` — the From picker says what is there. */
+  const placeLabel = (l: LocationOption) =>
+    l.onHandLabel ? `${l.name} · ${l.onHandLabel}` : l.name;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -581,30 +629,17 @@ export function MovementForm({
 
           <div className="grid gap-4 py-4">
             <div className="flex gap-2">
-              <Button
-                type="button"
-                variant={direction === "in" ? "default" : "outline"}
-                onClick={() => choose("in")}
-                className="flex-1"
-              >
-                In
-              </Button>
-              <Button
-                type="button"
-                variant={direction === "out" ? "default" : "outline"}
-                onClick={() => choose("out")}
-                className="flex-1"
-              >
-                Out
-              </Button>
-              <Button
-                type="button"
-                variant={direction === "adjust" ? "default" : "outline"}
-                onClick={() => choose("adjust")}
-                className="flex-1"
-              >
-                Adjust
-              </Button>
+              {DOORS.map((door) => (
+                <Button
+                  key={door.key}
+                  type="button"
+                  variant={direction === door.key ? "default" : "outline"}
+                  onClick={() => choose(door.key)}
+                  className="flex-1 px-2"
+                >
+                  {door.label}
+                </Button>
+              ))}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -874,22 +909,71 @@ export function MovementForm({
               </div>
             )}
 
-            <div className="grid gap-2">
-              <Label htmlFor="locationAssetId">Where</Label>
-              <Select name="locationAssetId" defaultValue={startingPlace}>
-                <SelectTrigger id="locationAssetId">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NO_LOCATION}>Not recorded</SelectItem>
-                  {locations.map((l) => (
-                    <SelectItem key={l.id} value={l.id}>
-                      {l.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {direction === "move" ? (
+              <>
+                {/* Stacked below `sm`: a From that reads `Not recorded · 46
+                    packages` is wider than half a phone's row, and two of them
+                    side by side ran into each other. */}
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label htmlFor="fromLocationAssetId">From</Label>
+                    <Select name="fromLocationAssetId" defaultValue={startingPlace}>
+                      <SelectTrigger id="fromLocationAssetId" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NO_LOCATION}>
+                          Not recorded{unplacedLabel ? ` · ${unplacedLabel}` : ""}
+                        </SelectItem>
+                        {locations.map((l) => (
+                          <SelectItem key={l.id} value={l.id}>
+                            {placeLabel(l)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="toLocationAssetId">To</Label>
+                    <Select name="toLocationAssetId" defaultValue={NO_LOCATION}>
+                      <SelectTrigger id="toLocationAssetId" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NO_LOCATION}>Not recorded</SelectItem>
+                        {locations.map((l) => (
+                          <SelectItem key={l.id} value={l.id}>
+                            {l.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Nothing is used up or bought: the same batch leaves one place
+                  and arrives at the other, and what it cost goes with it
+                  unchanged.
+                </p>
+              </>
+            ) : (
+              <div className="grid gap-2">
+                <Label htmlFor="locationAssetId">Where</Label>
+                <Select name="locationAssetId" defaultValue={startingPlace}>
+                  <SelectTrigger id="locationAssetId">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_LOCATION}>Not recorded</SelectItem>
+                    {locations.map((l) => (
+                      <SelectItem key={l.id} value={l.id}>
+                        {l.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="grid gap-2">
               <Label htmlFor="move-notes">Notes</Label>

@@ -33,6 +33,44 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-09-09 — Move stock (`claude/move-stock`)
+
+**`transferStock` has written both legs of a move as one act since slice 3b,
+and the only caller was retail's truck** — so in this pack, moving a box from
+the garage freezer to the market truck was an `Out` at one place and an `In`
+at the other, the exact shape the op was written to end ("one leg entered and
+the other forgotten"). Slice 4 of the improvement review. **No migration;
+nothing about lots or movements changes** — the door calls the op that exists.
+
+- **A fourth door on `Record stock`: `Move`.** `From` and `To` pickers, a
+  batch, a quantity, a date, and nothing about money: a move carries no cost,
+  because moving a box does not change what it cost (the op's own rule, from
+  2026-08-21). `From` reads what THIS item holds at each place —
+  `Market truck · 9 packages` — and offers `Not recorded` with what was never
+  placed, because a farm that has just started keeping places moves that into
+  a freezer first. Same place both ways is refused before the round trip
+  (`Pick two different places.`) and again by the op. The toast names the
+  quantity: `Moved · 9 packages`.
+- **`transferStockAction`** — `member`, the `quantity` primitive (scale
+  refused, not rounded), audit `inventory.stock.moved` with the places, the
+  quantity and both legs' ids, and the assets layout revalidated because its
+  page lists what each place holds.
+- `LocationOption` gained `onHandLabel`; the door buttons are a `DOORS` table.
+
+Tests: an ops test that a move from nowhere into a place is a placing (8 of 20
+land in the freezer, 12 stay unplaced, the total is unchanged); the same-place
+refusal was already pinned. Guide `item.md` gained *How to move stock between
+places* and lost its "cannot be moved here" line. Driven on the dev branch's
+Hilltop Farm (Ground beef 1 lb packs) at 375px and 1280px: the four door
+buttons at 68px each in a 326px row; `From` opened on `Market truck · 14
+packages` (the last place used) and offered `Not recorded · 46 packages` and
+`Chest freezer (garage)` (nothing there, no figure); moving 2 packages from
+`Not recorded` to the truck read `Moved · 2 packages`, `Where it is` went from
+46 / 12 to 44 / 14, and the entries showed `Moved out` and `Moved in · Market
+truck`; the same place both ways read `Pick two different places.` before any
+request. The two pickers stack below `sm` — side by side, a `From` reading a
+figure ran under `To` on a phone — and sit in one row on desktop.
+
 ### 2026-09-09 — A delivery in one dialog (`claude/a-delivery-in-one-dialog`)
 
 **The item page is where stock is recorded, and on a phone its three batch
@@ -1932,8 +1970,9 @@ commitment against a live animal to delivered without sitting on a shelf.
   like any other — the whole reason that design has no distributed-inventory
   problem in it. A transfer carries **no cost**: moving a box does not change
   what it cost, and stamping a figure would release cost from the lot and put a
-  different one back. **Still no UI in this pack** — the only caller is retail's
-  load/unload, so moving between two freezers is still two entries here.
+  different one back. ~~**Still no UI in this pack** — the only caller is
+  retail's load/unload, so moving between two freezers is still two entries
+  here.~~ **The `Move` door on `Record stock`, since 2026-09-09.**
 - **Item-specific purchase conversions are entered as free text.** "bag" is not
   validated against anything, so two items can spell it differently.
 - **`wouldGoNegative` has no caller.** Written for a warning the UI does not yet

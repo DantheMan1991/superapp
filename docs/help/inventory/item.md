@@ -11,7 +11,7 @@ Open **Inventory** and tap a name in the list. Every number on this page is adde
 The heading is the name. Under it sits the kind, then `counted in pounds` or whatever unit you chose. A badge shows if it has to be kept `Frozen`, `Refrigerated`, `Dry` or `Ambient`, and another reads `retired` once you have retired it.
 
 - **{button:New batch|outline}.** Starts a batch on its own, with a line of business and notes. Owners only, and gone once the {{item|lower}} is retired. A delivery can also start its batch from inside {button:Record stock|primary}.
-- **{button:Record stock|primary}.** Records a delivery, stock going out, or a correction. Anyone can, including an accountant, and gone once retired.
+- **{button:Record stock|primary}.** Records a delivery, stock going out, a move between places, or a correction. Anyone can, including an accountant, and gone once retired.
 - **{button:Edit|outline|pencil}.** Changes what it is and how it is bought. Owners only, and it stays available on a retired {{item|lower}}.
 - **{button:Retire|ghost}.** Takes it out of lists without changing anything else. Once retired the button reads {button:Put back|outline}.
 - **`On hand`.** The total, in the counted unit. A dash means nothing has ever been recorded. Underneath, how many entries it was added up from, and the average paid across everything that came in with a price. For something counted in packages, `about 55 lb` when deliveries were weighed.
@@ -84,6 +84,19 @@ You cannot type the cost. It is worked out at the average paid at that moment, a
 
 Nothing stops you recording more out than there is. The balance simply goes below zero and the page says so.
 
+## How to move stock between places
+
+1. Tap {button:Record stock|primary} and choose `Move`.
+2. Type how much and set the date.
+3. Pick the `Batch` it belongs to, if it has one.
+4. Pick `From`. Each place shows what this {{item|lower}} holds there, such as `Market truck · 9 packages`, and `Not recorded` shows what was never given a place. It starts on the place this {{item|lower}} went last time.
+5. Pick `To`. The help reads `Nothing is used up or bought: the same batch leaves one place and arrives at the other, and what it cost goes with it unchanged.`
+6. Tap {button:Record|primary}. You see `Moved · 9 packages`.
+
+`Where it is` moves the figure across, and `Recent entries` shows the two halves: `Moved out` at the first place and `Moved in` at the second. Nothing about cost changes, and the {{item|lower}}'s total stays the same.
+
+Moving from `Not recorded` into a place is how stock that was recorded before you kept places gets one. Moving something you never placed to nowhere is refused, because that is not a move.
+
 ## How to correct a quantity
 
 1. Tap {button:Record stock|primary} and choose `Adjust`.
@@ -145,6 +158,9 @@ Once a batch has a correction, a `Weight corrections` list appears above `Recent
 | `Batch started` | The batch exists and can be recorded against. |
 | `Stock recorded in` / `Stock recorded out` | The entry is in. Out also tells you the cost. |
 | `Stock recorded in · batch B-2026-09-09 started` | The delivery is in and its batch was started with it. |
+| `Moved · 9 packages` | The move is in: out of one place, into the other. |
+| `Pick two different places.` | `From` and `To` are the same. |
+| `pick two different places — a transfer that starts and ends in the same place is not a move` | The same, caught on the way in. |
 | `Adjusted up` / `Adjusted down` | The correction is in. |
 | `Split — the total is unchanged` | Part of the batch is now a batch of its own. |
 | `Cost corrected.` | The batch is carried at a different figure. |
@@ -173,7 +189,6 @@ Once a batch has a correction, a `Weight corrections` list appears above `Recent
 - The counted unit is locked the moment anything moves, even if the balance is back to zero.
 - Nothing traces a batch back through its splits, although the record is kept.
 - A cost correction cannot be undone. The remedy is an equal and opposite one. A weight correction cannot be undone either; state the right figure again.
-- Stock cannot be moved from one place to another here. Record it out of one place and in at the other.
 - If you need any of this, ask us.
 
 ## Who can do what

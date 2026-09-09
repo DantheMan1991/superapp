@@ -28,7 +28,11 @@ import {
 } from "../src/packs/inventory/ops";
 import { createEnterprise } from "../src/lib/enterprises";
 import { resolveTaxRule } from "../src/packs/inventory/core/tax-rules";
-import { balanceOfLot, balanceByItem } from "../src/packs/inventory/core/balances";
+import {
+  balanceByItem,
+  balanceByLocation,
+  balanceOfLot,
+} from "../src/packs/inventory/core/balances";
 import {
   adjustStock,
   adjustmentReasons,
@@ -858,6 +862,35 @@ d("inventory ops", () => {
     expect(onTruck.find((l) => l.itemId === item.id)?.onHand).toBe(40);
     const inFreezer = await asOwner((tx) => stockAtLocation(tx, tenantId, freezerId));
     expect(inFreezer.find((l) => l.itemId === item.id)?.onHand).toBe(60);
+  });
+
+  it("moves stock from nowhere into a place — a placing, not a refusal", async () => {
+    // A farm that has just started recording places has stock with none.
+    // Moving that into the freezer is the commonest move it will make, and the
+    // Move door offers `Not recorded` as a From for exactly this.
+    const item = await newItem("Placed late");
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 20,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      transferStock(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 8,
+        fromLocationAssetId: null,
+        toLocationAssetId: freezerId,
+        occurredOn: "2026-08-02",
+      }),
+    );
+    const rows = await asOwner((tx) => movementRowsForItem(tx, tenantId, item.id));
+    const byPlace = balanceByLocation(rows);
+    expect(byPlace.find((b) => b.locationAssetId === freezerId)?.quantity).toBe(8);
+    expect(byPlace.find((b) => b.locationAssetId === null)?.quantity).toBe(12);
+    // The item's total does not move: a move is two legs that cancel.
+    expect(balanceByItem(rows).get(item.id)).toBe(20);
   });
 
   it("refuses a transfer that starts and ends in the same place", async () => {

@@ -1143,20 +1143,72 @@ export async function mergeLot(
   });
 }
 
-/** Item kinds actually in use, for the filter bar. One grouped index scan. */
+/**
+ * Item kinds actually in use, for the filter bar. One grouped index scan.
+ *
+ * `status` narrows the population the way the list narrows it: counted over
+ * every status while the list showed active ones, a pill read `Feed 5` above
+ * four rows. The add-item form's suggestions still want every kind ever used,
+ * so the filter is optional.
+ */
 export async function listKindsInUse(
   tx: Tx,
   tenantId: string,
+  filter: { status?: string } = {},
 ): Promise<{ kind: string; count: number }[]> {
+  const where = [eq(schema.inventoryItems.tenantId, tenantId)];
+  if (filter.status) where.push(eq(schema.inventoryItems.status, filter.status));
   return tx
     .select({
       kind: schema.inventoryItems.itemKind,
       count: sql<number>`count(*)::int`,
     })
     .from(schema.inventoryItems)
-    .where(eq(schema.inventoryItems.tenantId, tenantId))
+    .where(and(...where))
     .groupBy(schema.inventoryItems.itemKind)
     .orderBy(asc(schema.inventoryItems.itemKind));
+}
+
+/** The key `onHandByPlace` files stock under when its entries named no place. */
+export const NO_PLACE = "none";
+
+/**
+ * On hand per PLACE per item, summed in SQL — "what is in the truck".
+ *
+ * One grouped query for the hub, `onHandByItem`'s shape and for its reason:
+ * every movement the business has recorded would otherwise be pulled to
+ * render one row of pills. Lines that net to zero are dropped, the rule
+ * `stockAtLocation` follows — stock that went out and came back is not "0 lb
+ * on the truck". A movement with no place is kept under `NO_PLACE`: "somewhere,
+ * uncounted" is honest, and hiding it would stop the parts adding up to the
+ * item's total.
+ */
+export async function onHandByPlace(
+  tx: Tx,
+  tenantId: string,
+): Promise<Map<string, Map<string, number>>> {
+  const rows = await tx
+    .select({
+      locationAssetId: schema.inventoryMovements.locationAssetId,
+      itemId: schema.inventoryMovements.itemId,
+      quantity: sql<string>`sum(${schema.inventoryMovements.quantity})`,
+    })
+    .from(schema.inventoryMovements)
+    .where(eq(schema.inventoryMovements.tenantId, tenantId))
+    .groupBy(
+      schema.inventoryMovements.locationAssetId,
+      schema.inventoryMovements.itemId,
+    );
+  const out = new Map<string, Map<string, number>>();
+  for (const row of rows) {
+    const quantity = roundQuantity(Number(row.quantity));
+    if (quantity === 0) continue;
+    const key = row.locationAssetId ?? NO_PLACE;
+    const items = out.get(key) ?? new Map<string, number>();
+    items.set(row.itemId, quantity);
+    out.set(key, items);
+  }
+  return out;
 }
 
 /** Lots for several items at once, keyed by item. One query for a list page. */

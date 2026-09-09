@@ -19,11 +19,21 @@ export interface EnterpriseInUse {
   count: number;
 }
 
+export interface PlaceInUse {
+  id: string;
+  name: string;
+  /** How many things have stock there. Zero renders the pill with no figure. */
+  count: number;
+}
+
 /** The pill key for "belongs to no line of business". */
 const UNTAGGED = "none";
+/** The pill key for stock whose entries named no place. Matches `ops.NO_PLACE`. */
+const NO_PLACE = "none";
 
 /**
- * Narrow the list: by kind, by name, and whether retired things show.
+ * Narrow the list: by kind, by line of business, by place, by name, and
+ * whether retired things show.
  *
  * **THE READ LAYER FOR THIS SHIPPED IN SLICE 0 AND THE CONTROL NEVER DID.**
  * `listItems` has taken a `kind` filter since the first commit, the page has
@@ -41,6 +51,11 @@ const UNTAGGED = "none";
  * between a closed choice and an open one. A tap is one round trip; typing is
  * not, so the box submits on Enter or on the button rather than on every
  * keystroke. A farm holds forty items — this does not need to be clever.
+ *
+ * **THE PLACE ROW IS THE DAY-ONE QUESTION.** "What do I have and where" was the
+ * hub's stated purpose from slice 0, and until 2026-09-09 the answer was one
+ * item page at a time. A place pill narrows the list to what has stock THERE
+ * and shows that figure, which is what a person standing in the freezer wants.
  */
 export function ItemFilters({
   base,
@@ -50,6 +65,9 @@ export function ItemFilters({
   untaggedCount,
   activeEnterprise,
   enterpriseWord,
+  places,
+  noPlaceCount,
+  activePlace,
   search,
   showArchived,
   shown,
@@ -67,6 +85,11 @@ export function ItemFilters({
   activeEnterprise?: string;
   /** What the installed profile calls one. Never hard-coded here. */
   enterpriseWord: string;
+  /** The places things are kept, with how many things have stock in each. */
+  places: PlaceInUse[];
+  /** How many things have stock that no entry ever placed. */
+  noPlaceCount: number;
+  activePlace?: string;
   search: string;
   showArchived: boolean;
   /** How many rows the current filter produced, for the summary line. */
@@ -76,10 +99,11 @@ export function ItemFilters({
 }) {
   const router = useRouter();
 
-  /** Every link on this bar keeps the other two choices. */
+  /** Every link on this bar keeps the other choices. */
   function urlWith(change: {
     kind?: string | null;
     enterprise?: string | null;
+    place?: string | null;
     q?: string | null;
     archived?: boolean;
   }): string {
@@ -87,11 +111,13 @@ export function ItemFilters({
     const kind = change.kind === undefined ? activeKind : change.kind;
     const ent =
       change.enterprise === undefined ? activeEnterprise : change.enterprise;
+    const place = change.place === undefined ? activePlace : change.place;
     const q = change.q === undefined ? search : change.q;
     const archived =
       change.archived === undefined ? showArchived : change.archived;
     if (kind) params.set("kind", kind);
     if (ent) params.set("enterprise", ent);
+    if (place) params.set("place", place);
     if (q) params.set("q", q);
     if (archived) params.set("archived", "1");
     const query = params.toString();
@@ -107,6 +133,7 @@ export function ItemFilters({
   const filtering =
     Boolean(activeKind) ||
     Boolean(activeEnterprise) ||
+    Boolean(activePlace) ||
     Boolean(search) ||
     showArchived;
   /**
@@ -116,6 +143,13 @@ export function ItemFilters({
    */
   const showEnterprises =
     enterprises.length > 0 && enterprises.some((e) => e.count > 0);
+  /**
+   * Same rule for places: a business that has never recorded where anything
+   * sits gets no row. The `No place` pill is the "what have I not placed yet"
+   * question, kept for the same reason `Not set` is.
+   */
+  const showPlaces =
+    places.length > 0 && (places.some((p) => p.count > 0) || noPlaceCount > 0);
 
   return (
     <div className="space-y-3">
@@ -140,6 +174,8 @@ export function ItemFilters({
             href: urlWith({ kind: k.kind }),
             // Free — `listKindsInUse` already groups — and it turns "is there
             // anything under Medicine" into a question the bar has answered.
+            // Counted over the same population as the list since 2026-09-09:
+            // retired things are in it only when they are showing.
             count: k.count,
           })),
         ]}
@@ -181,6 +217,34 @@ export function ItemFilters({
         </div>
       )}
 
+      {showPlaces && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Place</span>
+          <FilterPills
+            activeKey={activePlace ?? ""}
+            items={[
+              { key: "", label: "All", href: urlWith({ place: null }) },
+              ...places.map((p) => ({
+                key: p.id,
+                label: p.name,
+                href: urlWith({ place: p.id }),
+                count: p.count,
+              })),
+              ...(noPlaceCount > 0
+                ? [
+                    {
+                      key: NO_PLACE,
+                      label: "No place",
+                      href: urlWith({ place: NO_PLACE }),
+                      count: noPlaceCount,
+                    },
+                  ]
+                : []),
+            ]}
+          />
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-2">
         {/**
           * **UNCONTROLLED, AND KEYED ON THE SEARCH ITSELF.** The box has to
@@ -190,16 +254,19 @@ export function ItemFilters({
           * remounts it with the new `defaultValue`, which is React's own answer
           * to resetting state on a prop change and needs neither an effect nor
           * a second copy of the term in state.
+          *
+          * Full width below `sm`: a 224px box beside its button left a third
+          * of a phone's row empty and the box too narrow for a name.
           */}
         <form
           key={search}
-          className="flex items-center gap-2"
+          className="flex w-full items-center gap-2 sm:w-auto"
           onSubmit={(e) => {
             e.preventDefault();
             submit(e.currentTarget);
           }}
         >
-          <div className="relative">
+          <div className="relative min-w-0 flex-1 sm:flex-none">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               name="q"
@@ -224,7 +291,7 @@ export function ItemFilters({
               }}
               placeholder="Find by name"
               aria-label={`Find by name among the ${itemWord.toLowerCase()}s this business holds`}
-              className="h-9 w-56 pl-8"
+              className="h-9 w-full pl-8 sm:w-56"
               maxLength={200}
             />
           </div>

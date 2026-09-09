@@ -1,10 +1,10 @@
 # Everything you hold
 
-> The list of what the business holds, with what it is worth, what nobody has costed, and what is going off soon.
+> The list of what the business holds, what is on hand and where, what nobody has costed, and what is going off soon.
 > **Route:** /dashboard/m/inventory
 > **Order:** 10
 
-Open **Inventory** in the sidebar. The heading reads `What the business holds, where it is, and which batch it came from.` To add something new, click {button:Add item|primary}.
+Open **Inventory** in the sidebar. The heading reads `What the business holds, where it is, and which batch it came from.` To add something new, click {button:Add item|primary}. On a phone each {{item|lower}} is a card with its figure on the right. On a wide screen the same list is a table.
 
 ## What you see
 
@@ -12,14 +12,15 @@ Open **Inventory** in the sidebar. The heading reads `What the business holds, w
 - **The five tabs.** `Items` is this page. `Counting`, `What it is worth` and `Deliveries & invoices` are the other screens. `When it is deducted` only appears for an owner. The strip scrolls sideways on a narrow screen.
 - **`What it is worth`.** The cost standing in stock right now. Click the card to open the full valuation. Underneath it tells you whether every batch carries a cost, or how many are `Short by 2 batches nobody has costed`.
 - **`Not costed`.** How many batches nobody ever put a price on. `None` is the good answer. This card is also a link to the valuation.
-- **`Going off soon`.** How many batches are within six weeks of their date. It turns red when there are any. Unlike the other two cards this one is not clickable, and the list it points at is below.
-- **`Going off soon` table.** The soonest first: `What`, `Batch`, `On hand` and `Good until`. A date already past is in red. Only the first twelve are shown.
-- **The filter row.** Pills for each kind, pills for each line of business, a search box, and a link that shows or hides retired things.
-- **The table.** `{{item}}`, `Kind`, `Keeps` and `On hand`. Click a name to open it.
+- **`Going off soon`.** How many batches are past their date or within six weeks of it. It turns red when any batch is already past its date, and takes the accent color when something is close. The line under it says which: `2 past their date, 3 more within six weeks`. Click the card to jump to the list below.
+- **`Going off soon` list.** Soonest first, so anything past its date comes first. On a phone, one card per batch: the name, the batch, how much is on hand, and a badge reading `past its date`, `goes off today`, `goes off tomorrow` or `goes off in 5 days`, with the date beside it. On a wide screen the same as a table: `What`, `Batch`, `On hand` and `Good until`. Tap or click anywhere on a card or row to open the {{item|lower}}. The first twelve are shown, and the line under the list reads `12 of 27 shown` when there are more.
+- **The filter rows.** Pills for each kind, pills for each line of business, pills for each place, a search box, and a link that shows or hides retired things. The line-of-business row only appears once something is tagged. The place row only appears once something has been recorded in a place.
+- **The list.** On a phone, one card per {{item|lower}}: the name, the kind and how it has to be kept, the figure on the right, and a going-off badge when one of its batches is dated. Tap anywhere on the card to open it. On a wide screen: `{{item}}`, `Kind`, `Keeps` and `On hand`. Click anywhere on a row to open it.
 - **`Keeps`.** Whether it has to be `Frozen`, `Refrigerated`, `Dry` or `Ambient`. A dash means it does not matter.
-- **`On hand`.** How much there is, in the unit it is counted in. A dash means nothing has ever been recorded, which is not the same as zero.
+- **`On hand`.** How much there is, in the unit it is counted in. A dash means nothing has ever been recorded, which is not the same as zero. With a place picked, the column reads `On hand at Market truck` and shows only what is there.
+- **`managed in Livestock`.** Beside an {{item|lower}} whose kind is `Livestock`, when you have Livestock switched on. Animals are one thing seen from two pages; this is the pointer to the other one.
 
-The three cards only appear once you hold something. The `Going off soon` panel only appears when something actually is.
+The three cards only appear once you hold something. The `Going off soon` list only appears when something actually is.
 
 ## How to add something you hold
 
@@ -33,23 +34,31 @@ The three cards only appear once you hold something. The `Going off soon` panel 
 8. Add `Notes` if you want. Up to 5,000 characters.
 9. Click {button:Add item|primary}. You see `Item added` and the row appears in the list.
 
-The button stays greyed until you have picked both a `Kind` and a `Counted in`, and nothing on the screen says which one is missing. There is no cancel button, so close the dialog with the X.
+The button stays grayed until you have picked both a `Kind` and a `Counted in`, and nothing on the screen says which one is missing. There is no cancel button, so close the dialog with the X.
 
 The `Kind` and `Counted in` you picked stay selected the next time you open the dialog, even though the text boxes clear. Check them both before adding a second thing.
 
 **Animals are started in Livestock, not here.** Pick `Livestock` as the kind and the dialog says so and stops you, with a link across. That only happens when you have Livestock switched on.
 
+## How to see what is in one place
+
+1. In the `Place` row, tap the place: a freezer, a barn, the truck. The pills show how many things have stock in each.
+2. The list narrows to what has stock there, and the figure beside each {{item|lower}} is what is in that place, not the total. On a wide screen the column reads `On hand at Market truck`.
+3. Tap `No place` to see stock that was recorded without saying where it went. It only appears when there is some.
+4. Tap `All` to see everything again.
+
+A place is an asset with `Things are kept here` turned on, under [Assets](../assets/overview.md). The row only appears once something has been recorded in one.
+
 ## How to find something
 
-1. Type into the box marked `Find by name` and press Enter, or click {button:Find|outline}.
-2. To narrow by kind, click one of the pills. `All` puts them back.
-3. To narrow by line of business, click one of those pills. `Not set` finds things you never tagged.
-4. Click {button:Show retired|ghost} to include things you have retired. They carry an `archived` badge. The link then reads {button:Hide retired|ghost}.
-5. Click {button:Clear filters|ghost} to drop all of it at once.
+1. Type into the box marked `Find by name` and press Enter, or tap {button:Find|outline}. On a phone the box takes the whole row.
+2. To narrow by kind, tap one of the pills. `All` puts them back. The number on a pill is how many are in the list under it.
+3. To narrow by line of business, tap one of those pills. `Not set` finds things you never tagged.
+4. To narrow by place, tap one in the `Place` row.
+5. Tap {button:Show retired|ghost} to include things you have retired. They carry a `retired` badge, and the counts on the pills then include them. The link then reads {button:Hide retired|ghost}.
+6. Tap {button:Clear filters|ghost} to drop all of it at once. The line beside it says how many rows the filters left.
 
-The search looks at names only. A bag of feed for the beef herd is not called beef, and the empty state says so.
-
-The count of kinds on each pill includes retired things even when the list below is hiding them, so a pill reading `Feed 5` can produce four rows. We are fixing that.
+The search looks at names only. A bag of feed for the beef herd is not called beef, and the empty state says so. Kind, line of business, place and search combine, so `Meat` with the truck picked is the meat on the truck.
 
 ## Messages
 
@@ -58,8 +67,12 @@ The count of kinds on each pill includes retired things even when the list below
 | `Item added` | It worked. The new row is in the list. |
 | `Nothing tracked yet` | Nothing has been added. An owner adds the first one. |
 | `Nothing matches` | Your filter or search found nothing. Click {button:Clear filters|outline} to start again. |
+| `Nothing has stock at Market truck.` | The place you picked holds nothing that matches the other filters. |
+| `Everything with stock has a place recorded.` | You picked `No place` and nothing is left unplaced. |
 | `Every batch on hand carries a cost` | Nothing is missing a price. The valuation is complete. |
 | `Short by 2 batches nobody has costed` | Two batches have no price, so the total is understated by an unknown amount. |
+| `Nothing within six weeks` | No batch is past its date or close to it. |
+| `2 past their date, 3 more within six weeks` | Two batches are already past their date and three are close. Both are in the list below. |
 | `Check the details and try again.` | Something in the dialog is not right. Most often `How many, each` was left at zero. |
 | `Use lowercase letters, numbers and underscores.` | Your own kind has a capital, a symbol, or starts with a digit. |
 | `Only an owner can change stock records.` | You are signed in as staff and pressed something an owner keeps. Recording stock and counting are not among them. |
@@ -69,7 +82,7 @@ The count of kinds on each pill includes retired things even when the list below
 
 - You cannot edit, retire or record anything from a row. Open it first.
 - The list cannot be sorted. It is always kind first, then name.
-- The `Going off soon` list stops at twelve and does not say so, and it includes things that went off before today as well as things about to.
+- The figure on a card is the count in its unit. What it weighs is on the {{item|lower}}'s own page.
 - Nothing warns you at the moment you record something that it will take stock below zero.
 - Nothing can be brought in from a spreadsheet. Ask us if you have a long list.
 

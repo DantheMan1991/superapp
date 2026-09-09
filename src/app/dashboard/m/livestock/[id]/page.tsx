@@ -54,7 +54,7 @@ import {
   listMovements,
   movementKindsForLots,
 } from "@/packs/inventory/ops";
-import { formatMoney } from "@/lib/money";
+import { formatMoney, formatMoneySign } from "@/lib/money";
 import { carriedValue } from "@/packs/inventory/core/valuation";
 import { movementKindLabel, slugLabel } from "@/packs/inventory/vocabulary";
 import {
@@ -1094,7 +1094,11 @@ export default async function LivestockLotPage({
                 {formatMoney(feed.releasedCents, currencySymbol)} left with what
                 was processed ·{" "}
                 <span className="font-medium">
-                  {formatMoney(feed.remainingCents, currencySymbol)}
+                  {/* SIGNED. What left carried the animals' own purchase price as well
+                      as their feed, so on a pen of priced chicks this is under zero once
+                      they have gone — and `formatMoney` would show that as money still
+                      here. The feed page says the same figure the same way. */}
+                  {formatMoneySign(feed.remainingCents, currencySymbol)}
                 </span>{" "}
                 still on this lot.
               </p>

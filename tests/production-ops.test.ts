@@ -63,6 +63,7 @@ import {
   type LivestockCtx,
 } from "../src/packs/livestock/ops";
 import { summariseHead } from "../src/packs/livestock/core/herd";
+import { formatMoney, formatMoneySign } from "../src/lib/money";
 
 const RUN = !!process.env.DATABASE_URL;
 const d = RUN ? describe : describe.skip;
@@ -772,6 +773,165 @@ d("production ops", () => {
     // And the comparison figure does not budge: what this batch cost to raise
     // is not changed by some of it being processed and sold on.
     expect(rowAfter.centsPerHeadPlaced).toBe(rowBefore.centsPerHeadPlaced);
+  });
+
+  it("REPORTS THE REMAINDER BELOW ZERO ON A PERIOD THAT MISSES THE FEED", async () => {
+    /**
+     * **THE FIGURE THE FEED PAGE MUST SIGN, 2026-09-09.** `remainingCents` is
+     * this period's feed less everything that has EVER left the pen with a cost
+     * on it. The release is deliberately not windowed — what a pen still
+     * carries is a fact about now — and the feed deliberately is — what did
+     * this pen eat this month. So `Last 30 days` on a pen fed before the
+     * period and processed inside it is below zero, and `formatMoney`, which
+     * takes the absolute value, showed that as money still standing in the pen.
+     *
+     * The pure test in `livestock-feed.test.ts` proves the fold does not
+     * clamp; only this proves the ordinary screen reaches it — no correction,
+     * no mistake, just the period button.
+     */
+    const pen = await penWithCost("PEN-WINDOW", 200);
+    const birds = await meatItem("Window birds");
+    const run = await asOwner((tx) =>
+      startRun(tx, ownerCtx(), { code: "KILL-WINDOW", startedOn: TODAY }),
+    );
+    await asOwner((tx) =>
+      addRunInput(
+        tx,
+        ownerCtx(),
+        {
+          runId: run.id,
+          itemId: pen.itemId,
+          lotId: pen.inventoryLotId,
+          quantity: 100,
+          weightLb: 600,
+          occurredOn: TODAY,
+        },
+        TODAY,
+      ),
+    );
+    await asOwner((tx) =>
+      addRunOutput(tx, ownerCtx(), {
+        runId: run.id,
+        itemId: birds.id,
+        quantity: 360,
+      }),
+    );
+    await asOwner((tx) => completeRun(tx, ownerCtx(), run.id, TODAY));
+
+    // All time: $400 fed, half of it in the freezer, $200 still on the pen.
+    const allTime = await asOwner((tx) =>
+      feedReport(tx, tenantId, { from: LEDGER_EPOCH, to: TODAY }),
+    );
+    const whole = allTime.lots.find((l) => l.lotId === pen.livestockLotId)!;
+    expect(whole.remainingCents).toBe(20_000);
+
+    // The last 30 days: the feed went in on 2026-07-01, before the period,
+    // and the release is a fact about now. The line under Cost renders — the
+    // guard is `releasedCents > 0` — and the figure on it is minus the release.
+    const month = await asOwner((tx) =>
+      feedReport(tx, tenantId, { from: "2026-07-21", to: TODAY }),
+    );
+    const row = month.lots.find((l) => l.lotId === pen.livestockLotId)!;
+    expect(row.totalCents).toBe(0);
+    expect(row.releasedCents).toBe(20_000);
+    expect(row.remainingCents).toBe(-20_000);
+    // What the screen said, and what it says now.
+    expect(formatMoney(row.remainingCents, "$")).toBe("$200.00");
+    expect(formatMoneySign(row.remainingCents, "$")).toBe("−$200.00");
+  });
+
+  it("REPORTS THE REMAINDER BELOW ZERO ON A PEN WHOSE CHICKS HAD A PRICE", async () => {
+    /**
+     * The second ordinary route, and it needs no period button. A run stamps
+     * the pen's WHOLE carried cost onto the head it takes — `lotShareCents`
+     * over inventory's `remainingCents`, which is chicks and feed and
+     * corrections together — while the feed report's total is feed alone.
+     * Process a priced pen out and "left on the lot" is minus the chick bill,
+     * on `All time`.
+     */
+    const pen = await asOwner(async (tx) => {
+      const { lot, inventoryLotId } = await createLivestockLot(tx, ls(), {
+        newItemName: "Broilers PEN-PRICED",
+        code: "PEN-PRICED",
+        species: "poultry",
+        sex: "mixed",
+      });
+      const birds = await tx.query.inventoryLots.findFirst({
+        where: and(
+          eq(schema.inventoryLots.tenantId, tenantId),
+          eq(schema.inventoryLots.id, inventoryLotId),
+        ),
+      });
+      // Bought rather than placed: 200 chicks at $1.50 carry $300 of price.
+      await receiveStock(tx, inv(), {
+        itemId: birds!.itemId,
+        lotId: inventoryLotId,
+        quantity: 200,
+        costCents: 30_000,
+        occurredOn: "2026-06-01",
+      });
+      const feed = await createItem(tx, inv(), {
+        name: "Grower PEN-PRICED",
+        stockingUnit: "lb",
+        itemKind: "feed",
+      });
+      await receiveStock(tx, inv(), {
+        itemId: feed.id,
+        newLotCode: "FEED-PEN-PRICED",
+        quantity: 1000,
+        costCents: 50_000,
+        occurredOn: "2026-06-01",
+      });
+      await issueStock(tx, inv(), {
+        itemId: feed.id,
+        quantity: 800,
+        issuedToLotId: inventoryLotId,
+        occurredOn: "2026-07-01",
+      });
+      return { livestockLotId: lot.id, inventoryLotId, itemId: birds!.itemId };
+    });
+    const birds = await meatItem("Priced birds");
+    const run = await asOwner((tx) =>
+      startRun(tx, ownerCtx(), { code: "KILL-PRICED", startedOn: TODAY }),
+    );
+    await asOwner((tx) =>
+      addRunInput(
+        tx,
+        ownerCtx(),
+        {
+          runId: run.id,
+          itemId: pen.itemId,
+          lotId: pen.inventoryLotId,
+          quantity: 200,
+          weightLb: 1200,
+          occurredOn: TODAY,
+        },
+        TODAY,
+      ),
+    );
+    await asOwner((tx) =>
+      addRunOutput(tx, ownerCtx(), {
+        runId: run.id,
+        itemId: birds.id,
+        quantity: 720,
+      }),
+    );
+    await asOwner((tx) => completeRun(tx, ownerCtx(), run.id, TODAY));
+
+    const report = await asOwner((tx) =>
+      feedReport(tx, tenantId, { from: LEDGER_EPOCH, to: TODAY }),
+    );
+    const row = report.lots.find((l) => l.lotId === pen.livestockLotId)!;
+    // The feed bill is $400 and is still the feed bill...
+    expect(row.totalCents).toBe(40_000);
+    // ...but what left carried the chicks' $300 as well as the feed.
+    expect(row.releasedCents).toBe(70_000);
+    expect(row.remainingCents).toBe(-30_000);
+    // Nothing standing, so no per-head figure rather than a negative one.
+    expect(row.centsPerHead).toBeNull();
+    // Rendered: "$300.00 left on the lot" before; "−$300.00" now.
+    expect(formatMoney(row.remainingCents, "$")).toBe("$300.00");
+    expect(formatMoneySign(row.remainingCents, "$")).toBe("−$300.00");
   });
 
   it("refuses to finish a run with nothing to land", async () => {

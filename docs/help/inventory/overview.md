@@ -4,7 +4,7 @@
 > **Route:** /dashboard/m/inventory/**
 > **Order:** 0
 
-Open **Inventory** in the sidebar. This is where what you hold is recorded: how much there is, where it sits, what it cost, and when it goes off. Five pages sit along the top of every screen in it.
+Open **Inventory** in the sidebar. This is where what you hold is recorded: how much there is, where it sits, what it cost, and when it goes off. Six pages sit along the top of every screen in it.
 
 ## What you see
 
@@ -13,6 +13,7 @@ Open **Inventory** in the sidebar. This is where what you hold is recorded: how 
 - **Counted in.** Every {{item|lower}} is counted in one unit, and that never changes once anything has moved. Buy feed in bags and count it in pounds. Count meat in packages, because a package is what gets handed over.
 - **`Items`.** Everything you hold, what is on hand, what is in each place, what it is worth, and what is going off soon. See [Everything you hold](items.md).
 - **One {{item|lower}}'s page.** Its batches, where the stock is, every entry ever recorded against it, and the buttons that record more. See [One {{item|lower}}](item.md).
+- **`What happened`.** Every entry ever recorded, across everything, newest first, with a search and pages. See [What happened](what-happened.md).
 - **`Counting`.** Walking the shelf and writing down what is really there. See [Counting stock](counting.md) and [One count](count.md).
 - **`What it is worth`.** The cost standing in stock on a chosen day, batch by batch. See [What it is worth](what-it-is-worth.md).
 - **`Deliveries & invoices`.** What has arrived, what you have been billed for, and the gap. See [Deliveries and invoices](deliveries-and-invoices.md).

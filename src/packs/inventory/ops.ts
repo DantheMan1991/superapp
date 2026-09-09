@@ -10,8 +10,10 @@ import {
   isNotNull,
   isNull,
   lte,
+  or,
   sql,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
@@ -43,6 +45,7 @@ import {
 import { enterpriseForMovement } from "./core/enterprise";
 import { postedOnAllowed } from "./core/counts";
 import type { MovementRow } from "./core/balances";
+import { ilikePattern } from "@/lib/list-query";
 import {
   averageCostRate,
   issueCostCents,
@@ -177,10 +180,11 @@ function requireWrite(ctx: InventoryCtx, level: WriteLevel): void {
  * **`%` AND `_` ARE WILDCARDS, AND A PERSON TYPING ONE MEANS THE CHARACTER.**
  * Unescaped, a search box is a way to match every row by typing one key — and
  * `_` is worse than `%` because nothing about the result looks wrong.
+ *
+ * The escaping itself is `ilikePattern` in `@/lib/list-query`, shared by every
+ * list in the product. This file carried its own copy until 2026-09-09 — the
+ * same regex, written twice — and the entries log needed a third. One.
  */
-function escapeLike(term: string): string {
-  return term.replace(/[\\%_]/g, (c) => `\\${c}`);
-}
 
 export async function listItems(
   tx: Tx,
@@ -230,7 +234,7 @@ export async function listItems(
    */
   const term = filter.search?.trim();
   if (term) {
-    where.push(ilike(schema.inventoryItems.name, `%${escapeLike(term)}%`));
+    where.push(ilike(schema.inventoryItems.name, ilikePattern(term)));
   }
   return tx.query.inventoryItems.findMany({
     where: and(...where),
@@ -1563,16 +1567,115 @@ export async function lotAncestry(
   return chain;
 }
 
-/** Recent movements across everything, for the module's activity read. */
-export async function recentMovements(
+/** What the entries log asks for. Every part is optional; none is a mode. */
+export interface EntriesFilter {
+  itemId?: string;
+  /** A search term, already trimmed and capped by `searchTerm`. */
+  q?: string;
+  /** An `item_kind` slug. */
+  kind?: string;
+  /** An asset id, or `NO_PLACE` for entries that named no place. */
+  locationAssetId?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/** One line of the log: the movement, and the names a person reads it by. */
+export interface EntryRow {
+  movement: InventoryMovement;
+  itemName: string;
+  unit: string;
+  lotCode: string | null;
+  /** The batch that ate it, for an issue that named one. */
+  consumerCode: string | null;
+  placeName: string | null;
+}
+
+/**
+ * The predicate the log and its count share, so the two cannot disagree about
+ * what is in the list. Returns `null` for a filter that can match nothing — a
+ * hand-typed place that is not a uuid — which both callers read as "no rows".
+ */
+function entriesWhere(tenantId: string, filter: EntriesFilter) {
+  const where = [eq(schema.inventoryMovements.tenantId, tenantId)];
+  if (filter.itemId) {
+    where.push(eq(schema.inventoryMovements.itemId, filter.itemId));
+  }
+  if (filter.kind) where.push(eq(schema.inventoryItems.itemKind, filter.kind));
+  if (filter.locationAssetId === NO_PLACE) {
+    where.push(isNull(schema.inventoryMovements.locationAssetId));
+  } else if (filter.locationAssetId) {
+    // Same rule as `listItems`' enterprise: a malformed uuid is NO rows, never
+    // every row under a bar that claims to be filtered.
+    if (!UUID_FORMAT.test(filter.locationAssetId)) return null;
+    where.push(
+      eq(schema.inventoryMovements.locationAssetId, filter.locationAssetId),
+    );
+  }
+  if (filter.q) {
+    /**
+     * **THE FIVE THINGS A PERSON REMEMBERS ABOUT AN ENTRY.** What it was, which
+     * batch, which batch ate it, why, and whatever they wrote. NOT the date —
+     * a date has its own column, sorts the list, and a search for `09` would
+     * match every row of September. The item list searches by name only, on
+     * purpose, and says why; a log is the opposite case, because the question
+     * here is *when did I write that*, and the note is where it was written.
+     */
+    const pattern = ilikePattern(filter.q);
+    where.push(
+      or(
+        ilike(schema.inventoryItems.name, pattern),
+        ilike(schema.inventoryLots.code, pattern),
+        ilike(consumerLot.code, pattern),
+        ilike(schema.inventoryMovements.notes, pattern),
+        ilike(schema.inventoryMovements.reason, pattern),
+      )!,
+    );
+  }
+  return and(...where);
+}
+
+/**
+ * **`inventory_lots` TWICE, because an issue names two batches**: the one the
+ * stock left and the one that ate it. The second join has to be aliased or
+ * Drizzle folds the two into one and the consumer's code comes back as the
+ * batch's own.
+ */
+const consumerLot = alias(schema.inventoryLots, "consumer_lot");
+
+/**
+ * **THE WHOLE HISTORY**, newest first, in pages.
+ *
+ * Every figure in this pack is a fold over these rows and nothing anywhere
+ * writes a balance down — so this is not a log of what the pack did, it IS the
+ * record, and the item page showed twenty five rows of it with nothing saying
+ * the rest existed. The same read serves that page (with `itemId`) and the
+ * business-wide screen, so an entry reads the same on both.
+ *
+ * **THE ORDER IS A TOTAL ORDER, and the third key is the one that matters.**
+ * `occurred_on` is a date, so a day's entries tie; `created_at` breaks most of
+ * those, but a split's `split_out`/`split_in` pair and a move's two legs are
+ * written in ONE transaction and share `now()` to the microsecond. Without the
+ * id, a page boundary between two such rows shows one of them twice or never —
+ * the exact defect slice 8 fixed on the deliveries list.
+ *
+ * Replaces `recentMovements`, which nothing called.
+ */
+export async function listEntries(
   tx: Tx,
   tenantId: string,
-  limit = 15,
-): Promise<{ movement: InventoryMovement; itemName: string }[]> {
-  return tx
+  filter: EntriesFilter = {},
+): Promise<EntryRow[]> {
+  const where = entriesWhere(tenantId, filter);
+  if (where === null) return [];
+  const rows = await tx
     .select({
       movement: schema.inventoryMovements,
       itemName: schema.inventoryItems.name,
+      unit: schema.inventoryItems.stockingUnit,
+      lotCode: schema.inventoryLots.code,
+      consumerCode: consumerLot.code,
+      placeName: schema.assets.name,
     })
     .from(schema.inventoryMovements)
     .innerJoin(
@@ -1582,12 +1685,76 @@ export async function recentMovements(
         eq(schema.inventoryItems.id, schema.inventoryMovements.itemId),
       ),
     )
-    .where(eq(schema.inventoryMovements.tenantId, tenantId))
+    .leftJoin(
+      schema.inventoryLots,
+      and(
+        eq(schema.inventoryLots.tenantId, schema.inventoryMovements.tenantId),
+        eq(schema.inventoryLots.id, schema.inventoryMovements.lotId),
+      ),
+    )
+    .leftJoin(
+      consumerLot,
+      and(
+        eq(consumerLot.tenantId, schema.inventoryMovements.tenantId),
+        eq(consumerLot.id, schema.inventoryMovements.issuedToLotId),
+      ),
+    )
+    .leftJoin(
+      schema.assets,
+      and(
+        eq(schema.assets.tenantId, schema.inventoryMovements.tenantId),
+        eq(schema.assets.id, schema.inventoryMovements.locationAssetId),
+      ),
+    )
+    .where(where)
     .orderBy(
       desc(schema.inventoryMovements.occurredOn),
       desc(schema.inventoryMovements.createdAt),
+      desc(schema.inventoryMovements.id),
     )
-    .limit(limit);
+    .limit(filter.limit ?? 50)
+    .offset(filter.offset ?? 0);
+  return rows;
+}
+
+/**
+ * How many entries the same filter matches — the pager's total, over
+ * everything rather than a page. Same joins, same predicate, so it and the
+ * list cannot disagree.
+ */
+export async function countEntries(
+  tx: Tx,
+  tenantId: string,
+  filter: Omit<EntriesFilter, "limit" | "offset"> = {},
+): Promise<number> {
+  const where = entriesWhere(tenantId, filter);
+  if (where === null) return 0;
+  const [row] = await tx
+    .select({ count: sql<number>`count(*)::int` })
+    .from(schema.inventoryMovements)
+    .innerJoin(
+      schema.inventoryItems,
+      and(
+        eq(schema.inventoryItems.tenantId, schema.inventoryMovements.tenantId),
+        eq(schema.inventoryItems.id, schema.inventoryMovements.itemId),
+      ),
+    )
+    .leftJoin(
+      schema.inventoryLots,
+      and(
+        eq(schema.inventoryLots.tenantId, schema.inventoryMovements.tenantId),
+        eq(schema.inventoryLots.id, schema.inventoryMovements.lotId),
+      ),
+    )
+    .leftJoin(
+      consumerLot,
+      and(
+        eq(consumerLot.tenantId, schema.inventoryMovements.tenantId),
+        eq(consumerLot.id, schema.inventoryMovements.issuedToLotId),
+      ),
+    )
+    .where(where);
+  return row?.count ?? 0;
 }
 
 // -------------------------------------------------- receipts and issues ---
@@ -3689,6 +3856,23 @@ export async function valueStock(
   const kindFilter = opts.kind
     ? eq(schema.inventoryItems.itemKind, opts.kind)
     : undefined;
+  /**
+   * **A HAND-TYPED `?place=all` 500'D THIS PAGE FOR A DAY.** Slice 8 sent the
+   * two id filters straight to uuid columns, and Postgres refuses
+   * `invalid input syntax for type uuid` rather than returning nothing — the
+   * same defect `listItems` fixed on its enterprise filter and wrote a comment
+   * about. Same answer here: a malformed id is NO rows, which is what a valid
+   * id belonging to another tenant already produces, and never every row under
+   * a bar claiming to be filtered. Found reading `listItems` for slice 9.
+   */
+  const malformedId = (value: string | undefined, sentinel: string) =>
+    Boolean(value) && value !== sentinel && !UUID_FORMAT.test(value!);
+  if (
+    malformedId(opts.enterpriseId, NO_ENTERPRISE_FILTER) ||
+    malformedId(opts.locationAssetId, NO_PLACE)
+  ) {
+    return { rows: [], total: valuationTotal([]), asOf: opts.asOf ?? "" };
+  }
   const enterpriseFilter = opts.enterpriseId
     ? opts.enterpriseId === NO_ENTERPRISE_FILTER
       ? sql`coalesce(${schema.inventoryLots.enterpriseId}, ${schema.inventoryItems.enterpriseId}) is null`

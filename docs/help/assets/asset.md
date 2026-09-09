@@ -34,6 +34,22 @@ Owners also see one of two things at the bottom. Either `Up to date through 2026
 
 Staff and accountants see all the figures but none of this, so they cannot tell from here whether anything is outstanding.
 
+- **`Owned before your books began`.** A section at the foot of the panel, shown only while it is a real question: you keep books, and this thing was acquired before the day they begin. It reads `Put its cost and the depreciation already taken on the books, dated 2026-01-01.`, and adds `Months up to 2025-12 then count as already posted.` when it has a schedule. Owners see {button:Put it on the books|outline}. When something is missing an amber line says which, and the button is not shown. Once it is done the section reads `On the books as of 2026-01-01, at 12,000.00 less what had been written off by then.` and nothing more. Something bought since the books began does not get this section at all — it reaches your accounts through its bill.
+
+## How to put something you already owned on the books
+
+Do this once per thing, when you are moving an existing business into Yosher. It is what puts your equipment and buildings on the balance sheet you are starting from.
+
+1. Set the day your books begin first, on [Opening position](../accounting/opening.md). Everything below is dated on that day.
+2. Make sure the asset has a cost and an account for it to sit in. `Edit` holds both: `Cost` and `Cost sits in`. Give it an `Acquired` date too, and it must be before the day your books begin.
+3. Click {button:Put it on the books|outline}. The dialog is headed `Owned before your books began` and reads `Two entries dated 2026-01-01: its cost of 12,000.00 against Opening Balance Equity, and what had been written off by then against accumulated depreciation. Nothing before that day is touched.`
+4. Fill in `Depreciation already taken`. It starts at what this schedule would have taken by then, and the line under it says so: `This schedule would have taken 2,400.00 through 2025-12 — use your own figure if it differs, and the asset finishes that much above or below its salvage value.` **Your old books are the truth.** If your accountant used a different method, type their figure. With no schedule the line reads `What your old books had written off by then. Leave it at zero if none was taken.`
+5. Click {button:Put it on the books|primary}. You see `Put on the books as of 2026-01-01`.
+
+Two entries appear in your accounts, both dated that day: `Opening balance — Kubota L3901`, and `Depreciation already taken — Kubota L3901 (through 2025-12)`. Every month up to that one then counts as posted, so `Post depreciation` only ever offers the months your new books own. Nothing before the day is touched.
+
+It can only be done once. To correct it afterwards, make a journal entry.
+
 ## How to set up depreciation
 
 1. Click {button:Set up|outline}. The dialog is headed `Depreciation schedule`, and tells you the cost it is working from.
@@ -154,6 +170,14 @@ Emptying the `Acquired` box does not clear the date. It keeps whatever it had, a
 | `Enter a whole number.` | The meter reading had a decimal in it. |
 | `Choose the account the sale proceeds went into.` | You entered an amount under `Sold for` but left `Money went into` on `Nothing received`. |
 | `Set a method, in-service date, life and cost first.` | Depreciation was posted before the schedule was complete. |
+| `Put on the books as of 2026-01-01` | Its cost and the depreciation already taken are now in your accounts. |
+| `Say when your books begin first, on the Opening position page. That is the day this lands on.` | No first day has been set for this company's books. |
+| `Record what it cost first. An opening balance is that figure going onto the books.` | The asset has no cost. Add it under {button:Edit|outline}. |
+| `Choose the account its cost sits in first, under Edit.` | `Cost sits in` is empty, so there is nowhere for the cost to land. |
+| `Give it an acquired date before the day your books begin. Anything bought since then reaches the books through its bill.` | The `Acquired` date is missing, or it is on or after the day the books begin. |
+| `This is already on the books. A correction is a journal entry.` | It has been put on the books once, or depreciation has already been posted for it. |
+| `Depreciation already taken cannot be negative, or more than what it cost.` | The figure typed is outside what is possible. |
+| `This asset's depreciation starts on or after the day your books begin, so none was taken before it.` | A figure was typed for something whose schedule begins on or after that day. Leave it at zero. |
 | `Something went wrong saving that.` | Something unexpected. Most often a depreciation schedule on an asset with no cost. Tell us if it keeps happening. |
 
 ## Not on this page

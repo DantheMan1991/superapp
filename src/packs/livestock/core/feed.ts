@@ -47,6 +47,16 @@ function fromEpochDay(day: number): string {
 export const FCR_NEEDS_WEIGHTS =
   "Feed conversion needs weights, and nothing has been weighed yet. Feed per head is below; feed per pound of gain is not a number this farm can produce until weights are recorded.";
 
+/**
+ * Why "a head now" is a dash on a priced pen once some of it has been processed.
+ *
+ * One string for the same reason as `FCR_NEEDS_WEIGHTS`: it is said on the feed
+ * report and on the lot page, and a refusal with no reason is indistinguishable
+ * from a bug. See `FeedLotRow.feedRemainingCents` for the arithmetic it refuses.
+ */
+export const PER_HEAD_NEEDS_THE_SPLIT =
+  "Some of this lot has been processed, and what left carried more than feed — what the animals cost to buy, medicine, a correction — with the ledger recording the total rather than its parts. Feed a head standing is not a number this farm can produce for this lot.";
+
 // ------------------------------------------------------- head, day by day ---
 
 export interface DatedQuantity {
@@ -356,7 +366,22 @@ export interface FeedLotInput {
   /** Issues into this lot that carried no price at all — see `unpricedNote`. */
   unpricedMovements: number;
   /**
-   * **COST THAT HAS ALREADY LEFT THIS LOT, carrying stock with it.**
+   * **FEED OVER THE LOT'S WHOLE LIFE**, measured and allocated, where
+   * `measuredCents` and `allocatedCents` above are the report's period.
+   *
+   * What is still standing in the pen is a fact about now, and a fact about
+   * now cannot be worked out from a month's feed. On `Last 30 days` a pen fed
+   * in June and processed in August had $0 of feed in the window and $200 of
+   * release, and the old subtraction read −$200 "still on the lot" about a pen
+   * carrying $200. The period answers "what did this pen eat this month"; the
+   * remainder needs "what has this pen eaten, ever". Both are on the row, and
+   * neither is derived from the other.
+   */
+  lifetimeMeasuredCents: number;
+  lifetimeAllocatedCents: number;
+  /**
+   * **COST THAT HAS ALREADY LEFT THIS LOT, carrying stock with it — THE WHOLE
+   * OF IT, not the feed.**
    *
    * Added 2026-08-20, and it exists because `production` shipped. Until then
    * nothing could take cost OUT of a pen, so "what was fed to this lot" and
@@ -371,26 +396,68 @@ export interface FeedLotInput {
    * share of a shared feeder is worked out at read time and was never on a
    * movement, so it cannot be released and stays with the pen — the
    * measured/allocated line this pack draws everywhere else, drawn once more.
+   *
+   * And a stamp is pro rata over EVERYTHING the lot carried at the time:
+   * `production` takes its share of inventory's `remainingCents`, which is the
+   * chicks' price, the feed, the medicine and any correction together. The
+   * ledger records the stamp and not its parts, so this figure cannot be split
+   * into "the feed that left" and "the rest that left". See `nonFeedCents`.
    */
   releasedCents: number;
+  /**
+   * **WHAT THE LOT IS CARRIED AT NOW** — inventory's `remainingCents`:
+   * everything ever stamped onto it, less everything that has left. The whole
+   * cost, feed and all, and the only "still on this lot" figure the ledger can
+   * state once something has been processed.
+   *
+   * Signed for the same reason inventory leaves it signed: a correction landing
+   * after the stock had left takes it below zero, and that is a disagreement
+   * for somebody to see rather than a number to tidy away.
+   */
+  carriedCents: number;
+  /**
+   * **COST ON THIS LOT'S LEDGER THAT IS NOT FEED**: what the animals cost to
+   * buy, corrections on stock still on hand, medicine or anything else issued
+   * to the pen with a price. Zero means every cent that has ever left was feed,
+   * which is the one case where "feed still on the lot" can be told exactly.
+   */
+  nonFeedCents: number;
 }
 
 export interface FeedLotRow extends FeedLotInput {
+  /** This period's feed, measured plus allocated. */
   totalCents: number;
+  /** The lot's whole life of feed, measured plus allocated. */
+  lifetimeCents: number;
   /**
-   * What is still on the pen: everything fed, less what has already left with
-   * stock. Equal to `totalCents` until something is processed out.
+   * **FEED STILL ON THE PEN, WHEN THAT IS KNOWABLE.** Everything ever fed, less
+   * what has left with stock — and null when the ledger cannot say.
    *
-   * **NOT CLAMPED AT ZERO.** A lot whose whole balance has been processed
-   * carries nothing and reads as such; a negative would mean more cost left than
-   * was ever recorded going in, which is a real disagreement somebody should
-   * see rather than a number to tidy away.
+   * It cannot say once something has left a pen that carried more than feed. A
+   * run stamps the pen's WHOLE carried cost onto the head it takes, the chicks'
+   * price and the medicine included, and records the stamp rather than its
+   * parts. "Feed less the whole stamp" is then neither the feed remaining nor
+   * anything else: a pen of chicks bought for $300, fed $400 and processed out
+   * came to −$300 by that arithmetic, and was rendered as $300 still standing
+   * in it. The whole-cost remainder, `carriedCents`, is always knowable and is
+   * what the screens show; this feed-only one exists for `centsPerHead`.
+   *
+   * **NOT CLAMPED AT ZERO** when it is known. A lot whose whole balance has
+   * been processed carries nothing and reads as such; a negative would mean
+   * more cost left than was ever recorded going in, which is a real
+   * disagreement somebody should see rather than a number to tidy away.
    */
-  remainingCents: number;
+  feedRemainingCents: number | null;
   quantities: FeedQuantity[];
   provenance: FeedProvenance;
   /** Null rather than zero when there is nothing to divide by. */
   centsPerHead: number | null;
+  /**
+   * Why `centsPerHead` is null when the reason is the ledger rather than the
+   * arithmetic — `PER_HEAD_NEEDS_THE_SPLIT`. Set only with head standing: an
+   * empty pen has no per-head figure for the plainer reason, as before.
+   */
+  centsPerHeadNote: string | null;
   centsPerHeadPlaced: number | null;
   /**
    * Difference in cost per head placed against the previous lot of the SAME
@@ -440,18 +507,37 @@ function perUnit(cents: number, units: number): number | null {
 export function feedReportRows(lots: FeedLotInput[]): FeedLotRow[] {
   const rows: FeedLotRow[] = lots.map((lot) => {
     const totalCents = lot.measuredCents + lot.allocatedCents;
+    const lifetimeCents = lot.lifetimeMeasuredCents + lot.lifetimeAllocatedCents;
+    /**
+     * **OVER THE WHOLE LIFE, AND ONLY WHEN THE LEDGER CAN SAY.**
+     *
+     * Nothing has left: every cent ever fed is still here, whatever else the
+     * pen carries. Something has left and the pen carried nothing but feed: the
+     * stamp was feed, so the subtraction is exact — and the allocated share,
+     * which was never on a movement, is still all here. Something has left and
+     * the pen carried more than feed: the stamp took a share of all of it and
+     * the ledger did not write down which part was which, so there is no
+     * number, and saying so beats the −$300 the old subtraction produced.
+     */
+    const feedRemainingCents =
+      lot.releasedCents === 0
+        ? lifetimeCents
+        : lot.nonFeedCents === 0
+          ? lifetimeCents - lot.releasedCents
+          : null;
     return {
       ...lot,
       totalCents,
-      remainingCents: totalCents - lot.releasedCents,
+      lifetimeCents,
+      feedRemainingCents,
       quantities: mergeQuantities([
         ...lot.measuredQuantities,
         ...lot.allocatedQuantities,
       ]),
       provenance: provenanceOf(lot.measuredCents, lot.allocatedCents),
       /**
-       * **AT TODAY'S COUNT, OVER WHAT THE PEN STILL CARRIES — both halves, or
-       * the figure lies in a new direction.**
+       * **AT TODAY'S COUNT, OVER THE FEED THE PEN STILL CARRIES — both halves,
+       * or the figure lies in a new direction.**
        *
        * The old version divided the WHOLE bill by the head standing, which was
        * right while the only way to lose head was to lose birds. Process a
@@ -459,13 +545,19 @@ export function feedReportRows(lots: FeedLotInput[]): FeedLotRow[] {
        * halves, so a pen that just sent most of its cost to the freezer reads as
        * having got twice as expensive. Netting the released cost off first is
        * what keeps this number meaning "what each bird standing here is
-       * carrying".
+       * carrying" — and refusing when the release cannot be netted honestly is
+       * what keeps it from lying in the third direction, a priced pen half
+       * processed reading fifty cents a head of feed against a truth of two
+       * dollars.
        *
        * `centsPerHeadPlaced` deliberately keeps the GROSS total: it is the
        * lot-against-lot comparison, and what a lot cost to raise does not
        * change because some of it has been sold on.
        */
-      centsPerHead: perUnit(totalCents - lot.releasedCents, lot.head),
+      centsPerHead:
+        feedRemainingCents === null ? null : perUnit(feedRemainingCents, lot.head),
+      centsPerHeadNote:
+        feedRemainingCents === null && lot.head > 0 ? PER_HEAD_NEEDS_THE_SPLIT : null,
       centsPerHeadPlaced: perUnit(totalCents, lot.intake),
       vsPreviousCents: null,
       previousCode: null,

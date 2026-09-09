@@ -19,7 +19,7 @@ A badge on every row tells you which you are looking at.
 
 - **{button:Record a draw|primary}.** Records feed leaving stock, by name or for a shared feeder. It is there whenever the farm has animals and something to feed them.
 - **{button:New feeder|outline}.** Sets up a shared feeder. Owners only.
-- **`Last 30 days`, `Last 90 days`, `All time`.** The period every figure on the page is worked out over. `All time` is where it starts.
+- **`Last 30 days`, `Last 90 days`, `All time`.** The period the feed figures are worked out over. `All time` is where it starts. Two figures are facts about today rather than about the period, and read the same on every button: `A head now`, and the `still on the lot` line under the cost.
 - **`Fed`, `Measured`, `Allocated`.** What the period cost, split by how it is known. Two-up on a phone.
 - **`Feed conversion`.** Pounds of feed per pound of gain, with a badge reading {badge:Measured|outline} or {badge:Estimated|primary}.
 - **`By lot`.** On a wide screen, a row per group with twelve columns. On a phone, a card per group with the same figures.
@@ -31,14 +31,14 @@ On a wide screen the columns are `Lot`, `Age`, `Head`, `Fed`, `Cost`, `A head no
 
 Two of those need explaining, and the footnote does it:
 
-- **`A head now`** is the cost over what the group still carries. It falls as birds die, which makes a bad group look cheaper the worse it goes.
+- **`A head now`** is the feed still on the group, over the animals standing in it today, whatever period you chose. It rises as animals die, because the same feed is spread over fewer. Once some of the group has been processed and the animals were bought with a price, or had medicine or a cost correction on them, it shows a dash instead: what left carried those as well as feed, and the ledger does not say how much of each. Rest on the dash and it says so.
 - **`A head placed`** is over everything ever placed. **That is the comparison figure.**
 
 **`Feed : gain`** is pounds of feed per pound of gain, over the period between each group's own first and last weighing. Feed fed before anything was weighed is left out, because the gain it made was never measured. When there is no ratio the figure shows a dash and tells you why when you rest on it.
 
 A ratio below 1 : 1 means some of what they ate is not recorded here, most likely pasture. Read it as a floor.
 
-When some of a group has been processed, `$12.00 left on the lot` under the cost says how much of the bill is still standing in the pen. It can read below zero, as `−$10.20 left on the lot`. What leaves with processed animals is everything they were carrying, their own purchase price included, while the cost above it is only the feed in the period you chose. So a group whose animals had a price reads below zero once they have gone, and `Last 30 days` reads below zero for a group fed before the period and processed inside it. `All time` sets the whole feed bill against what left.
+When some of a group has been processed, `$200.00 still on the lot` under the cost says what the group is carried at today: everything ever spent on it, less what left with the processed animals. It is a fact about today, worked out over the group's whole life whatever period you chose, so `Last 30 days` reads the same as `All time`. When the animals were bought with a price, or had medicine or a cost correction on them, the line adds `everything they cost, not feed alone`: what left carried those too, and the ledger records the total rather than its parts, so the feed alone cannot be told. The figure can read below zero, as `−$10.20`, only when a cost correction landed after the stock had left.
 
 ## How to record feed
 
@@ -92,7 +92,7 @@ When something did not land cleanly you see a dashed panel:
 
 - There is no ration, recipe or mix. Feed is any stock item that is not an animal.
 - A closed feeder cannot be reopened here.
-- Allocated cost stays with the group when animals are processed out. Only measured cost travels with the meat, and the `left on the lot` line tells you how much stayed.
+- Allocated cost stays with the group when animals are processed out. Only measured cost travels with the meat, and the `still on the lot` line tells you what the group is carried at.
 - If you need any of this, ask us.
 
 ## Who can do what

@@ -1069,9 +1069,12 @@ export default async function LivestockLotPage({
                       feed && feed.quantities.length > 0
                         ? formatQuantities(feed.quantities)
                         : null;
+                    // A dash comes with its reason. Once a priced pen has been
+                    // processed, feed a head standing is not knowable, and the
+                    // row says so in the words the feed page uses.
                     const rate =
                       perHead === null
-                        ? "Fed to this lot."
+                        ? (feed?.centsPerHeadNote ?? "Fed to this lot.")
                         : `${formatMoney(perHead, currencySymbol)} a head at today's count.`;
                     return quantity ? `${quantity} · ${rate}` : rate;
                   })()}
@@ -1086,21 +1089,26 @@ export default async function LivestockLotPage({
              * leave a lot, because until that week it could not.
              *
              * The headline stays the full bill, because the feed WAS fed and
-             * that is what "Fed" means. The line below says how much of it is
-             * still standing in the pen.
+             * that is what "Fed" means. The line below says what left and what
+             * the pen is carried at now — THE WHOLE COST, because a run takes
+             * its share of everything the pen carried and the ledger keeps the
+             * stamp rather than its parts, so the whole is the only remainder
+             * it can state. `core/feed.ts` has the arithmetic this replaced.
              */}
             {feed && feed.releasedCents > 0 && (
               <p className="mt-1 text-xs text-muted-foreground">
                 {formatMoney(feed.releasedCents, currencySymbol)} left with what
                 was processed ·{" "}
                 <span className="font-medium">
-                  {/* SIGNED. What left carried the animals' own purchase price as well
-                      as their feed, so on a pen of priced chicks this is under zero once
-                      they have gone — and `formatMoney` would show that as money still
-                      here. The feed page says the same figure the same way. */}
-                  {formatMoneySign(feed.remainingCents, currencySymbol)}
+                  {/* Signed: a correction landing after the stock left is the
+                      one way under zero, and inventory leaves it showing for
+                      the same reason. The feed page says the same figure the
+                      same way. */}
+                  {formatMoneySign(feed.carriedCents, currencySymbol)}
                 </span>{" "}
                 still on this lot.
+                {feed.nonFeedCents !== 0 &&
+                  " Both count what the animals cost to buy and anything else spent on them, not feed alone."}
               </p>
             )}
             {feed && feed.allocatedCents > 0 && (

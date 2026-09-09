@@ -133,6 +133,95 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-09-09 — What the pen still carries (`claude/what-the-pen-still-carries`)
+
+**Closes the open paragraph of the entry below.** PR #471 signed the feed
+page's remainder so that −$300 at least stopped rendering as `$300.00`, and
+recorded why the subtraction went below zero on an ordinary farm:
+`remainingCents = totalCents − releasedCents` set THIS PERIOD's feed against a
+release that is (rightly) never windowed, and set FEED against a release that
+is the pen's WHOLE stamped cost. Two routes, two fixes, one decision.
+
+- **The window route, fixed as prescribed.** `feedReport` runs `foldGroups` a
+  third time, over `LEDGER_EPOCH..to` (skipped when the report's own window
+  already is the whole life — `All time`, and the lot page), and sums the
+  lifetime measured feed from `fedDated`, the dated per-movement read it already
+  held for FCR and the same population inventory's `lotCarried` folds as
+  `consumedCents`. `FeedLotInput` gains `lifetimeMeasuredCents` and
+  `lifetimeAllocatedCents`; the period's `measuredCents`/`allocatedCents` are
+  untouched, and so are the Fed/Measured/Allocated cards, the Cost column,
+  `centsPerHeadPlaced` and `vsPreviousCents`. **`centsPerHead` ("A head now")
+  is now a fact about now on every period**, as the release has been since
+  2026-08-20: on `Last 30 days` a pen fed in June reads its lifetime feed per
+  head standing rather than a dash. That is the only coherent reading of "what
+  each bird standing here is carrying", and the guide says so.
+- **The price route, decided as (a): the line says what left and what is still
+  carried for the WHOLE cost.** A run stamps `lotShareCents` over inventory's
+  `remainingCents` — chicks, feed, medicine and corrections together — and the
+  ledger keeps the stamp, not its parts. So "feed less the whole stamp" was
+  neither the feed remaining nor anything else, and no windowing fixes it. The
+  whole-cost remainder IS knowable, to the cent, from `lotCarried`: the row now
+  carries `carriedCents` (inventory's `remainingCents`), and the `still on the
+  lot` / `still on this lot` figure on both screens is that. `releasedCents`
+  was always the whole cost; now the line says so. When the pen's ledger carries
+  anything but feed — `nonFeedCents` = purchased + corrections on hand +
+  not-feed issues, from the same two reads — the line adds "everything they
+  cost, not feed alone" (feed page) / "Both count what the animals cost to buy
+  and anything else spent on them, not feed alone." (lot page). A pen placed
+  without a price — BATCH-2, every fixture, Hilltop's PEN-1 — reads exactly as
+  before, because for it the whole cost is the feed.
+- **And feed a head standing is REFUSED, with the reason, when the ledger
+  cannot say.** `feedRemainingCents` (was `remainingCents`, now
+  `number | null`) is lifetime feed when nothing has left; lifetime feed less
+  the release when the pen carried nothing but feed (exact — the stamp was
+  feed, and the allocated share, never on a movement, is all still here); and
+  null once something has left a pen that carried more than feed.
+  `centsPerHead` follows it, and `centsPerHeadNote` carries
+  `PER_HEAD_NEEDS_THE_SPLIT`, rendered as the dash's title on the feed page and
+  as the card's sentence on the lot page — the `conversionBlockedBy` shape.
+  The number this refuses: 200 chicks bought for $300, fed $400, half
+  processed — the old arithmetic gave fifty cents a head of feed against a
+  truth of two dollars, silently.
+- **Why (a), not (b) or (c).** (c), the feed-only framing with words around a
+  minus, keeps a figure on screen that means nothing: with priced animals a
+  negative is not a disagreement, it is two pots subtracted, and a number that
+  does not survive being checked is the one the founder's bar rejects. (b),
+  splitting the stamp by what it carried, is the right long-term shape and
+  needs the ledger to record it — a per-part breakdown on the outgoing
+  movement, written by every releaser — or a dated replay in this pack under
+  the rule that cost leaves in the proportions it is carried in, exact for
+  production's pro-rata stamp and an assumption for any other releaser.
+  Neither belongs in a fix PR; (b) is an open item below. (a) is ledger-true
+  today, needs no migration, and reads identically to before on every pen that
+  carries only feed. **Not decided with the founder**, who was not in the
+  session: it is the assumption this PR states, and moving the line to (c) is a
+  two-line render change if he prefers it.
+- **Signing.** `carriedCents` keeps `formatMoneySign`, for inventory's reason:
+  a correction landing after stock has left is the one way under zero, and it
+  should show. `releasedCents` is a sum of stamps at or above zero and stays
+  `formatMoney`.
+- **Tests.** Pure, `livestock-feed.test.ts`: the window route; the price route
+  (half processed → refused with the note; nothing processed → the chicks'
+  price is beside the point); the allocated share staying put when every
+  measured cent has left. The three existing remainder cases moved to
+  `feedRemainingCents`/`carriedCents`, and "nothing was fed to" now means
+  nothing was fed EVER. Db-backed, `production-ops.test.ts`: the two tests
+  #471 added are renamed and their expectations changed deliberately — the
+  window one asserts the remainder is the same fact on `Last 30 days` as on
+  `All time` and that the feed-only remainder equals inventory's carried figure
+  plus the allocated share; the price one takes half the pen and asserts the
+  refusal, the note and `$350.00 still on this lot`.
+- **Guides.** `feed.md`: `A head now` and the `still on the lot` line are facts
+  about today on every period; what the line's suffix means; and the bullet no
+  longer claims the figure falls as birds die (it rises — the same feed over
+  fewer). `lot.md`: the Fed panel's per-head line, the two-figure line, the
+  sentence that replaces the per-head figure on a processed priced pen, and
+  when a minus can appear. "left on the lot" became "still on the lot" on both
+  screens, because the lot page's next words use "left" to mean departed.
+- **Not driven in the browser**, for the reason the entry below gives; `tsc`
+  cold is clean and the two suites above are the proof (39 pure, 66 db-backed
+  against the dev branch, all green). No migration, no schema change.
+
 ### 2026-09-09 — The feed remainder is signed (`claude/feed-figures-signed`)
 
 **Asked by the inventory review's sweep of unsigned figures**: can the feed
@@ -2939,11 +3028,18 @@ This pack is the one that forced the change; the full reasoning is in
   carrying" were the same number. They are not any more. `centsPerHead` nets off
   what has been released; `centsPerHeadPlaced` deliberately does not. If a future
   slice adds a third per-head figure, decide which of those two it is before
-  writing it.
+  writing it. **And what leaves is the WHOLE cost, unsplit** (2026-09-09): a
+  run's stamp is chicks, feed, medicine and corrections pro rata, and the
+  ledger keeps the total. So the remainder the screens show is inventory's
+  whole-cost `carriedCents`; `centsPerHead` nets the release off feed only when
+  the pen carried nothing but feed (`nonFeedCents === 0`) and refuses with
+  `PER_HEAD_NEEDS_THE_SPLIT` otherwise; and both are over the lot's whole life,
+  never the report's period — "what is still here" is a fact about now.
 - **ONLY STAMPED COST CAN BE RELEASED.** `releasedCents` is the sum of cost on a
   lot's outgoing movements. An allocated share of a shared feeder was never on a
   movement, so it cannot leave and stays with the pen — which is also the reason
-  a production run carries less than the Fed card's headline.
+  a production run carries less than the Fed card's headline, and why the
+  feed-only remainder, when it is knowable, still holds the whole share.
 - **MEASURED AND ALLOCATED ARE DIFFERENT KINDS OF FACT, permanently.** A bag
   issued to a named lot is measured and its cost was stamped when it happened; a
   share of a shared feeder is spread by head × days at read time and is an
@@ -3088,6 +3184,16 @@ This pack is the one that forced the change; the full reasoning is in
 
 ## Open items
 
+- **The feed share of a release is not recorded.** A run stamps one total onto
+  the head it takes, pro rata over everything the pen carried — chicks, feed,
+  medicine, corrections — and the ledger keeps the total. Until it records the
+  parts (a breakdown on the outgoing movement, written by every releaser), or
+  this pack replays the dated ledger under a stated rule that cost leaves in
+  the proportions it is carried in, feed a head standing on a priced pen that
+  has been partly processed is refused with `PER_HEAD_NEEDS_THE_SPLIT` rather
+  than estimated, and the `still on this lot` line is the whole cost. Option
+  (b) in the 2026-09-09 entry "What the pen still carries"; the founder has not
+  yet chosen between it and the (a) that shipped.
 - ~~**Head is counted two ways, and it hides controls.**~~ — **closed 2026-09-07
   by `summarisePen`**: one fold for the hub, the lot page and the round, with a
   split between a pen and its member treated as internal. See the build log.

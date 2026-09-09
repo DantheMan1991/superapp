@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   FCR_NEEDS_WEIGHTS,
+  PER_HEAD_NEEDS_THE_SPLIT,
   allocateCents,
   allocateQuantity,
   daysOnFeed,
@@ -254,15 +255,23 @@ describe("feedReportRows", () => {
     allocatedCents: 0,
     allocatedQuantities: [],
     unpricedMovements: 0,
+    // Placed rather than bought, and fed once: the whole life is the period,
+    // nothing has left, and the pen carries nothing but its feed.
+    lifetimeMeasuredCents: 20_000,
+    lifetimeAllocatedCents: 0,
     releasedCents: 0,
+    carriedCents: 20_000,
+    nonFeedCents: 0,
   };
 
   it("divides by head placed as well as by head standing", () => {
     const [row] = feedReportRows([base]);
     expect(row.totalCents).toBe(20_000);
-    expect(row.remainingCents).toBe(20_000);
+    expect(row.lifetimeCents).toBe(20_000);
+    expect(row.feedRemainingCents).toBe(20_000);
     // 200 cents a head at today's count of 190, 100 a head over the 200 placed.
     expect(row.centsPerHead).toBe(105);
+    expect(row.centsPerHeadNote).toBeNull();
     expect(row.centsPerHeadPlaced).toBe(100);
   });
 
@@ -280,10 +289,10 @@ describe("feedReportRows", () => {
      * carrying.
      */
     const [row] = feedReportRows([
-      { ...base, head: 100, releasedCents: 10_000 },
+      { ...base, head: 100, releasedCents: 10_000, carriedCents: 10_000 },
     ]);
     expect(row.totalCents).toBe(20_000);
-    expect(row.remainingCents).toBe(10_000);
+    expect(row.feedRemainingCents).toBe(10_000);
     // $100 left over 100 birds standing, not $200 over 100.
     expect(row.centsPerHead).toBe(100);
     // Unchanged: the batch still cost $200 to raise 200 birds.
@@ -294,22 +303,120 @@ describe("feedReportRows", () => {
     // Everything fed has left with the meat and no birds remain. "Nothing left
     // on this pen" is the truth; "$0.00 a head" would read as free.
     const [row] = feedReportRows([
-      { ...base, head: 0, releasedCents: 20_000 },
+      { ...base, head: 0, releasedCents: 20_000, carriedCents: 0 },
     ]);
-    expect(row.remainingCents).toBe(0);
+    expect(row.feedRemainingCents).toBe(0);
     expect(row.centsPerHead).toBeNull();
+    // Nothing standing is the plainer reason, and it is the one given.
+    expect(row.centsPerHeadNote).toBeNull();
   });
 
   it("does not clamp a released figure that exceeds what went in", () => {
     // A correction on a receipt after stock has left. A negative here is a real
     // disagreement somebody should see, not a number to tidy away.
     const [row] = feedReportRows([
-      { ...base, releasedCents: 25_000 },
+      { ...base, releasedCents: 25_000, carriedCents: -5_000 },
     ]);
-    expect(row.remainingCents).toBe(-5_000);
+    expect(row.feedRemainingCents).toBe(-5_000);
     // And it refuses to state a per-head figure rather than showing a negative
     // one, because `perUnit` returns null for a non-positive amount.
     expect(row.centsPerHead).toBeNull();
+  });
+
+  it("MEASURES THE REMAINDER OVER THE LOT'S WHOLE LIFE, NOT THE PERIOD'S", () => {
+    /**
+     * **THE WINDOW ROUTE, 2026-09-09.** `Last 30 days` on a pen fed in June
+     * and processed in August: $0 of feed in the window, $200 of release, and
+     * the old subtraction read −$200 "still on the lot" about a pen carrying
+     * $200. What is still standing in the pen is a fact about now, and the
+     * period's feed cannot produce it — only everything the pen ever ate can.
+     */
+    const [row] = feedReportRows([
+      {
+        ...base,
+        head: 100,
+        // Nothing eaten in the period...
+        measuredCents: 0,
+        measuredQuantities: [],
+        // ...$400 eaten over its life, half of it gone with the meat.
+        lifetimeMeasuredCents: 40_000,
+        releasedCents: 20_000,
+        carriedCents: 20_000,
+      },
+    ]);
+    expect(row.totalCents).toBe(0);
+    expect(row.lifetimeCents).toBe(40_000);
+    expect(row.feedRemainingCents).toBe(20_000);
+    // $200 over the 100 standing — the same answer `All time` gives.
+    expect(row.centsPerHead).toBe(200);
+    // The period's own figures stay the period's: nothing fed this month.
+    expect(row.provenance).toBe("none");
+    expect(row.centsPerHeadPlaced).toBeNull();
+  });
+
+  it("REFUSES FEED A HEAD ONCE WHAT LEFT WAS NOT ONLY FEED, AND SAYS WHY", () => {
+    /**
+     * **THE PRICE ROUTE, 2026-09-09.** 200 chicks bought for $300 and fed
+     * $400; a run takes 100 of them and, pro rata over everything the pen
+     * carried, $350. "Feed less what left" is then $50 over 100 birds — fifty
+     * cents a head of feed against a truth of two dollars — and on a pen
+     * processed out entirely it is −$300, which the screen showed as $300
+     * still standing in it. The ledger records the stamp and not its parts, so
+     * the honest answer is no number and the reason.
+     */
+    const [half] = feedReportRows([
+      {
+        ...base,
+        head: 100,
+        measuredCents: 40_000,
+        lifetimeMeasuredCents: 40_000,
+        nonFeedCents: 30_000,
+        releasedCents: 35_000,
+        carriedCents: 35_000,
+      },
+    ]);
+    expect(half.feedRemainingCents).toBeNull();
+    expect(half.centsPerHead).toBeNull();
+    expect(half.centsPerHeadNote).toBe(PER_HEAD_NEEDS_THE_SPLIT);
+    // What the screen shows instead is the whole cost, which IS knowable.
+    expect(half.carriedCents).toBe(35_000);
+    // The comparison figure is the gross feed bill and does not move.
+    expect(half.centsPerHeadPlaced).toBe(200);
+
+    // Before anything has left, the chicks' price is beside the point: every
+    // cent of feed is still here, and the figure says so.
+    const [whole] = feedReportRows([
+      {
+        ...base,
+        head: 200,
+        measuredCents: 40_000,
+        lifetimeMeasuredCents: 40_000,
+        nonFeedCents: 30_000,
+        carriedCents: 70_000,
+      },
+    ]);
+    expect(whole.feedRemainingCents).toBe(40_000);
+    expect(whole.centsPerHead).toBe(200);
+    expect(whole.centsPerHeadNote).toBeNull();
+  });
+
+  it("keeps the allocated share on the pen when the measured half has all left", () => {
+    // Only stamped cost can travel. A share of a shared feeder was never on a
+    // movement, so a run that carried every measured cent out leaves the share
+    // exactly where it was — and the feed-only remainder is the whole share.
+    const [row] = feedReportRows([
+      {
+        ...base,
+        head: 50,
+        allocatedCents: 5_000,
+        lifetimeAllocatedCents: 5_000,
+        releasedCents: 20_000,
+        carriedCents: 0,
+      },
+    ]);
+    expect(row.lifetimeCents).toBe(25_000);
+    expect(row.feedRemainingCents).toBe(5_000);
+    expect(row.centsPerHead).toBe(100);
   });
 
   it("returns null rather than zero when there is nothing to divide by", () => {
@@ -323,7 +430,15 @@ describe("feedReportRows", () => {
     // batch cost nothing", which is the same lie `mortalityRate` refuses when it
     // returns null instead of 0% for a pen no chick has been placed in.
     const [row] = feedReportRows([
-      { ...base, measuredCents: 0, measuredQuantities: [] },
+      {
+        ...base,
+        measuredCents: 0,
+        measuredQuantities: [],
+        // Nothing fed EVER, not just nothing this period: "a head now" is a
+        // fact about now and reads the whole life, as the window test shows.
+        lifetimeMeasuredCents: 0,
+        carriedCents: 0,
+      },
     ]);
     expect(row.provenance).toBe("none");
     expect(row.centsPerHead).toBeNull();
@@ -335,6 +450,7 @@ describe("feedReportRows", () => {
       {
         ...base,
         allocatedCents: 5_000,
+        lifetimeAllocatedCents: 5_000,
         allocatedQuantities: [{ unit: "lb", quantity: 200 }],
       },
     ]);

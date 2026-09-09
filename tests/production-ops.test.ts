@@ -63,7 +63,8 @@ import {
   type LivestockCtx,
 } from "../src/packs/livestock/ops";
 import { summariseHead } from "../src/packs/livestock/core/herd";
-import { formatMoney, formatMoneySign } from "../src/lib/money";
+import { PER_HEAD_NEEDS_THE_SPLIT } from "../src/packs/livestock/core/feed";
+import { formatMoneySign } from "../src/lib/money";
 
 const RUN = !!process.env.DATABASE_URL;
 const d = RUN ? describe : describe.skip;
@@ -726,7 +727,8 @@ d("production ops", () => {
     const rowBefore = before.lots.find((l) => l.lotId === pen.livestockLotId)!;
     expect(rowBefore.totalCents).toBe(40_000);
     expect(rowBefore.releasedCents).toBe(0);
-    expect(rowBefore.remainingCents).toBe(40_000);
+    expect(rowBefore.feedRemainingCents).toBe(40_000);
+    expect(rowBefore.carriedCents).toBe(40_000);
     // $400 over 200 birds standing.
     expect(rowBefore.centsPerHead).toBe(200);
 
@@ -766,7 +768,11 @@ d("production ops", () => {
     expect(rowAfter.totalCents).toBe(40_000);
     // ...but half of it is in the freezer now.
     expect(rowAfter.releasedCents).toBe(20_000);
-    expect(rowAfter.remainingCents).toBe(20_000);
+    expect(rowAfter.feedRemainingCents).toBe(20_000);
+    // Placed rather than bought, so the pen carried nothing but feed, and the
+    // whole-cost remainder inventory folds is the same figure to the cent.
+    expect(rowAfter.nonFeedCents).toBe(0);
+    expect(rowAfter.carriedCents).toBe(20_000);
     expect(rowAfter.head).toBe(100);
     // **THE NUMBER THAT WAS WRONG.** $200 over the 100 standing, not $400.
     expect(rowAfter.centsPerHead).toBe(200);
@@ -775,19 +781,20 @@ d("production ops", () => {
     expect(rowAfter.centsPerHeadPlaced).toBe(rowBefore.centsPerHeadPlaced);
   });
 
-  it("REPORTS THE REMAINDER BELOW ZERO ON A PERIOD THAT MISSES THE FEED", async () => {
+  it("MEASURES THE REMAINDER OVER THE PEN'S WHOLE LIFE ON A PERIOD THAT MISSES THE FEED", async () => {
     /**
-     * **THE FIGURE THE FEED PAGE MUST SIGN, 2026-09-09.** `remainingCents` is
-     * this period's feed less everything that has EVER left the pen with a cost
-     * on it. The release is deliberately not windowed — what a pen still
-     * carries is a fact about now — and the feed deliberately is — what did
-     * this pen eat this month. So `Last 30 days` on a pen fed before the
-     * period and processed inside it is below zero, and `formatMoney`, which
-     * takes the absolute value, showed that as money still standing in the pen.
+     * **THE WINDOW ROUTE, 2026-09-09.** The remainder used to be this period's
+     * feed less everything that has EVER left the pen with a cost on it. The
+     * release is deliberately not windowed — what a pen still carries is a
+     * fact about now — and the feed deliberately is — what did this pen eat
+     * this month. So `Last 30 days` on a pen fed before the period and
+     * processed inside it came to −$200 about a pen carrying $200, and
+     * `formatMoney`, which takes the absolute value, showed that as $200.00.
      *
-     * The pure test in `livestock-feed.test.ts` proves the fold does not
-     * clamp; only this proves the ordinary screen reaches it — no correction,
-     * no mistake, just the period button.
+     * Now the remainder is worked out from the pen's whole life of feed, on
+     * every period, and the period's own figures stay the period's. The pure
+     * test in `livestock-feed.test.ts` proves the fold; only this proves the
+     * report runs it over the widest window as well as the one asked for.
      */
     const pen = await penWithCost("PEN-WINDOW", 200);
     const birds = await meatItem("Window birds");
@@ -823,31 +830,44 @@ d("production ops", () => {
       feedReport(tx, tenantId, { from: LEDGER_EPOCH, to: TODAY }),
     );
     const whole = allTime.lots.find((l) => l.lotId === pen.livestockLotId)!;
-    expect(whole.remainingCents).toBe(20_000);
+    expect(whole.lifetimeCents).toBe(40_000);
+    expect(whole.feedRemainingCents).toBe(20_000);
+    expect(whole.carriedCents).toBe(20_000);
 
-    // The last 30 days: the feed went in on 2026-07-01, before the period,
-    // and the release is a fact about now. The line under Cost renders — the
-    // guard is `releasedCents > 0` — and the figure on it is minus the release.
+    // The last 30 days: the feed went in on 2026-07-01, before the period, so
+    // the period's own figures are empty — and the remainder is the same fact
+    // about now that `All time` reports, not that fact minus the period.
     const month = await asOwner((tx) =>
       feedReport(tx, tenantId, { from: "2026-07-21", to: TODAY }),
     );
     const row = month.lots.find((l) => l.lotId === pen.livestockLotId)!;
     expect(row.totalCents).toBe(0);
+    expect(row.lifetimeCents).toBe(40_000);
     expect(row.releasedCents).toBe(20_000);
-    expect(row.remainingCents).toBe(-20_000);
-    // What the screen said, and what it says now.
-    expect(formatMoney(row.remainingCents, "$")).toBe("$200.00");
-    expect(formatMoneySign(row.remainingCents, "$")).toBe("−$200.00");
+    expect(row.feedRemainingCents).toBe(20_000);
+    expect(row.carriedCents).toBe(20_000);
+    // $200 over the 100 standing, the same answer on every period.
+    expect(row.centsPerHead).toBe(200);
+    expect(row.centsPerHeadNote).toBeNull();
+    // A pen carrying nothing but feed: the feed-only remainder and inventory's
+    // whole-cost one are the same number, and the screen shows the second.
+    expect(row.feedRemainingCents).toBe(row.carriedCents + row.lifetimeAllocatedCents);
+    expect(formatMoneySign(row.carriedCents, "$")).toBe("$200.00");
   });
 
-  it("REPORTS THE REMAINDER BELOW ZERO ON A PEN WHOSE CHICKS HAD A PRICE", async () => {
+  it("SAYS WHAT A PRICED PEN STILL CARRIES, AND REFUSES FEED A HEAD ONCE THE PRICE HAS LEFT", async () => {
     /**
-     * The second ordinary route, and it needs no period button. A run stamps
-     * the pen's WHOLE carried cost onto the head it takes — `lotShareCents`
-     * over inventory's `remainingCents`, which is chicks and feed and
-     * corrections together — while the feed report's total is feed alone.
-     * Process a priced pen out and "left on the lot" is minus the chick bill,
-     * on `All time`.
+     * **THE PRICE ROUTE, 2026-09-09**, and it needs no period button. A run
+     * stamps the pen's WHOLE carried cost onto the head it takes —
+     * `lotShareCents` over inventory's `remainingCents`, which is chicks and
+     * feed and corrections together — while the feed report's total is feed
+     * alone, and the ledger keeps the stamp rather than its parts. "Feed less
+     * what left" on a priced pen was therefore neither the feed remaining nor
+     * anything else: fifty cents a head against a truth of two dollars after
+     * half the pen, and −$300 rendered as $300.00 after all of it.
+     *
+     * What the ledger CAN state is what the pen is carried at, so that is what
+     * the line shows; and feed a head standing is refused with the reason.
      */
     const pen = await asOwner(async (tx) => {
       const { lot, inventoryLotId } = await createLivestockLot(tx, ls(), {
@@ -902,8 +922,9 @@ d("production ops", () => {
           runId: run.id,
           itemId: pen.itemId,
           lotId: pen.inventoryLotId,
-          quantity: 200,
-          weightLb: 1200,
+          // Half the pen, so there are birds standing to ask "a head" about.
+          quantity: 100,
+          weightLb: 600,
           occurredOn: TODAY,
         },
         TODAY,
@@ -913,7 +934,7 @@ d("production ops", () => {
       addRunOutput(tx, ownerCtx(), {
         runId: run.id,
         itemId: birds.id,
-        quantity: 720,
+        quantity: 360,
       }),
     );
     await asOwner((tx) => completeRun(tx, ownerCtx(), run.id, TODAY));
@@ -924,14 +945,23 @@ d("production ops", () => {
     const row = report.lots.find((l) => l.lotId === pen.livestockLotId)!;
     // The feed bill is $400 and is still the feed bill...
     expect(row.totalCents).toBe(40_000);
-    // ...but what left carried the chicks' $300 as well as the feed.
-    expect(row.releasedCents).toBe(70_000);
-    expect(row.remainingCents).toBe(-30_000);
-    // Nothing standing, so no per-head figure rather than a negative one.
+    expect(row.lifetimeCents).toBe(40_000);
+    // ...but the pen carried $700, chicks and feed, and half of that left.
+    expect(row.nonFeedCents).toBe(30_000);
+    expect(row.releasedCents).toBe(35_000);
+    expect(row.carriedCents).toBe(35_000);
+    // Feed still on the pen is not a number the ledger can produce...
+    expect(row.feedRemainingCents).toBeNull();
+    // ...so feed a head standing is refused, with the reason, rather than the
+    // $0.50 the old subtraction gave over the 100 standing.
+    expect(row.head).toBe(100);
     expect(row.centsPerHead).toBeNull();
-    // Rendered: "$300.00 left on the lot" before; "−$300.00" now.
-    expect(formatMoney(row.remainingCents, "$")).toBe("$300.00");
-    expect(formatMoneySign(row.remainingCents, "$")).toBe("−$300.00");
+    expect(row.centsPerHeadNote).toBe(PER_HEAD_NEEDS_THE_SPLIT);
+    // The comparison figure is the gross feed bill and does not move.
+    expect(row.centsPerHeadPlaced).toBe(200);
+    // Rendered: "$350.00 still on this lot", with the line saying it counts
+    // what the animals cost to buy — not "$300.00" about minus $300.
+    expect(formatMoneySign(row.carriedCents, "$")).toBe("$350.00");
   });
 
   it("refuses to finish a run with nothing to land", async () => {

@@ -464,11 +464,13 @@ export default async function FeedPage({
                         <p className="text-xs text-muted-foreground tabular-nums">
                           {formatQuantities(row.quantities)}
                         </p>
-                        {/* Signed — the table's comment below says why this is under zero on
-                            an ordinary farm. */}
+                        {/* What the pen is carried at, once something has left — the
+                            table's comment below says why it is the whole cost. */}
                         {row.releasedCents > 0 && (
                           <p className="text-xs text-muted-foreground">
-                            {formatMoneySign(row.remainingCents, currencySymbol)} left on the lot
+                            {formatMoneySign(row.carriedCents, currencySymbol)} still on the lot
+                            {row.nonFeedCents !== 0 &&
+                              " — everything they cost, not feed alone"}
                           </p>
                         )}
                       </div>
@@ -477,9 +479,11 @@ export default async function FeedPage({
                       <div>
                         <dt className="text-muted-foreground">A head now</dt>
                         <dd className="tabular-nums">
-                          {row.centsPerHead === null
-                            ? "—"
-                            : formatMoney(row.centsPerHead, currencySymbol)}
+                          {row.centsPerHead === null ? (
+                            <span title={row.centsPerHeadNote ?? ""}>—</span>
+                          ) : (
+                            formatMoney(row.centsPerHead, currencySymbol)
+                          )}
                         </dd>
                       </div>
                       <div>
@@ -601,31 +605,43 @@ export default async function FeedPage({
                       {row.totalCents === 0
                         ? "—"
                         : formatMoney(row.totalCents, currencySymbol)}
-                      {/* WHAT HAS LEFT, under what was spent. A pen processed
-                          out still ate the feed — the total is right — but the
-                          money is in the freezer now, and a report that only
-                          showed the total would have it in both places.
+                      {/* WHAT THE PEN IS STILL CARRYING, under what was spent.
+                          A pen processed out still ate the feed — the total is
+                          right — but the money is in the freezer now, and a
+                          report that only showed the total would have it in
+                          both places.
 
-                          **SIGNED, BECAUSE IT IS BELOW ZERO ON AN ORDINARY FARM.**
-                          `remainingCents` is this period's feed less everything that has
-                          ever left the pen with a cost on it — and a run stamps the pen's
-                          WHOLE carried cost onto the head it takes, the animals' own
-                          purchase price included. A pen of priced chicks processed out
-                          reads minus the chick bill here; a 30-day period on a pen fed and
-                          processed before it reads minus the release. `formatMoney` takes
-                          the absolute value, so each of those showed as money still standing
-                          in the pen — the opposite of the fact. */}
+                          **THE WHOLE COST, NOT THE FEED, AND OVER THE PEN'S
+                          WHOLE LIFE.** A run stamps everything the pen carried
+                          onto the head it takes — the animals' own price, the
+                          medicine and the feed together — and the ledger keeps
+                          the stamp, not its parts. So "this period's feed less
+                          everything that ever left" was neither figure: a pen
+                          of priced chicks processed out came to −$300, and a
+                          30-day period on a pen fed before it came to minus the
+                          release. What the pen is carried at now is a fact the
+                          ledger can state, so that is the line; the suffix says
+                          when it counts more than feed. Signed, because a
+                          correction landing after the stock left is a real
+                          disagreement to see rather than tidy away. */}
                       {row.releasedCents > 0 && (
                         <div className="text-xs text-muted-foreground">
-                          {formatMoneySign(row.remainingCents, currencySymbol)} left
+                          {formatMoneySign(row.carriedCents, currencySymbol)} still
                           on the lot
+                          {row.nonFeedCents !== 0 &&
+                            " — everything they cost, not feed alone"}
                         </div>
                       )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">
-                      {row.centsPerHead === null
-                        ? "—"
-                        : formatMoney(row.centsPerHead, currencySymbol)}
+                      {/* A dash with a reason: once a priced pen has been
+                          processed, feed a head standing is not knowable, and
+                          the title says so — the same shape as the ratio's. */}
+                      {row.centsPerHead === null ? (
+                        <span title={row.centsPerHeadNote ?? ""}>—</span>
+                      ) : (
+                        formatMoney(row.centsPerHead, currencySymbol)
+                      )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">
                       {row.centsPerHeadPlaced === null

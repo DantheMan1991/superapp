@@ -33,6 +33,59 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-09-09 — What is in this place (`claude/what-is-in-this-place`)
+
+**The hub's stated purpose was "what do I have and where", and it answered the
+second half one item page at a time.** Slice 2 of the improvement review, and
+the one for the person standing in the freezer with a phone: at 375px the items
+table was 574px wide in a 343px column, so `On hand` — the one figure a
+stockroom wants — sat off the right edge; three stat cards stacked one per row
+and, with five rows of pills under them, pushed the first item to y=998.
+**No migration; nothing about lots or movements changes.**
+
+- **A card per item below `md`** (name, kind and keeps, the figure on the
+  right, a going-off badge when a batch of it is dated), the whole card a link;
+  the table above `md` is a `LinkRow` per item. Stat cards go two-up on a
+  phone with the third spanning. The search box takes the whole row below
+  `sm`.
+- **A place row.** `onHandByPlace` (one grouped query, `onHandByItem`'s shape)
+  gives every place its pill with how many things have stock there, plus a
+  `No place` pill for stock no entry ever placed — kept because "somewhere,
+  uncounted" is honest and the parts must still add up. Picking a place
+  narrows the list to what has stock THERE and the column reads `On hand at
+  Market truck` with THAT figure. An unknown `?place=` narrows to nothing,
+  the same answer `listItems` gives a malformed enterprise. The row is hidden
+  until something has a place.
+- **`Going off soon` is honest about what is already lost.** `core/expiry.ts`
+  (pure) splits past-its-date from soon, labels each row in words (`past its
+  date`, `goes off today`, `goes off in 5 days`) and writes the card's sentence
+  (`2 past their date, 3 more within six weeks`). The card counts everything
+  the panel holds, turns red only when something is past its date, and links
+  to the panel; the panel shows twelve and says `12 of 27 shown` rather than
+  stopping silently; the list is read to 200. Each item row wears its soonest
+  date as a badge.
+- **Kind pill counts agree with the list**: `listKindsInUse` takes the same
+  `status` the list uses, so `Feed 5` no longer sits above four rows.
+- The badge on a retired item reads `retired`, the word every control uses.
+
+Tests: `tests/inventory-expiry.test.ts` (pure — day arithmetic across a
+daylight-saving change, the five labels, the split, the four sentences) and two
+ops tests (`onHandByPlace` across a freezer, a truck and no place with a
+net-zero line dropped; kind counts under `status`). Guide `items.md` rewritten;
+`overview.md` names the place. Driven on the dev branch's Hilltop Farm at 375px
+and 1280px: the stat cards two-up (166px each, the third spanning 343px), the
+place row reading `Market truck 2` / `No place 8`, the truck view narrowing to
+Ground beef (9 packages) and Whole broilers (40 pounds) under `On hand at
+Market truck`, `No place` listing the eight things with unplaced stock (Ground
+beef 46, Whole broilers 218 — the parts add up), `Meat` + `Market truck`
+composing to two rows, and every row a `LinkRow` (the Keeps cell opened Grower
+crumble). Two dated batches were made on Penicillin G to drive the panel —
+`PEN-PAST-REVIEW` (good until 2026-09-01, 2 fl oz) and `PEN-EXP-REVIEW`
+(2026-09-20, 6 fl oz), both uncosted — after which the card read `2`, red,
+`1 past its date, 1 more within six weeks`, linked to the panel, the panel's
+rows read `past its date` (red) and `goes off in 11 days` (outline), and the
+Penicillin G row wore `past its date`. Both batches stay as dev fixtures.
+
 ### 2026-09-09 — The count walk (`claude/the-count-walk`)
 
 **Counting is the one chore the pack lets everybody do, and it was built for a
@@ -1669,9 +1722,11 @@ commitment against a live animal to delivered without sitting on a shelf.
   with the box empty wipes the earlier note.~~ — **fixed 2026-09-09**: the
   notes show under the strip, and the dialog names the shelf already on the
   count and prefills its note before it is replaced.
-- **Kind pill counts disagree with the list they filter.**
-- **`Going off soon` includes stock that already went off, and caps at 12
-  silently.**
+- ~~**Kind pill counts disagree with the list they filter.**~~ — **fixed
+  2026-09-09** (what is in this place): counted under the list's own toggle.
+- ~~**`Going off soon` includes stock that already went off, and caps at 12
+  silently.**~~ — **fixed 2026-09-09**: past its date is split out and named,
+  the panel says `12 of N shown`.
 - **Money is rendered unsigned in three places where the value may be negative.**
 - **`capitalised_on` is set by `livestock` and by nothing else yet.** The column
   is neutral — a batch whose cost has been capitalised elsewhere is not a farm

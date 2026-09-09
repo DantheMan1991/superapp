@@ -50,6 +50,9 @@ import {
   adjustLotWeight,
   weightAdjustmentsForLots,
   lineCountsByCount,
+  listKindsInUse,
+  onHandByPlace,
+  NO_PLACE,
 } from "../src/packs/inventory/ops";
 
 const RUN = !!process.env.DATABASE_URL;
@@ -956,6 +959,97 @@ d("inventory ops", () => {
     );
 
   // ---- the claim the pack rests on -------------------------------------
+
+  it("answers WHAT IS IN THIS PLACE in one query, and keeps the unplaced honest", async () => {
+    const item = await newItem("Placed feed");
+    const truck = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.assets)
+        .values({
+          tenantId,
+          kind: "equipment",
+          name: "Market truck",
+          isStorageLocation: true,
+        })
+        .returning();
+      return rows[0].id;
+    });
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 100,
+        occurredOn: "2026-08-01",
+        locationAssetId: freezerId,
+      }),
+    );
+    await asOwner((tx) =>
+      transferStock(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 30,
+        fromLocationAssetId: freezerId,
+        toLocationAssetId: truck,
+        occurredOn: "2026-08-02",
+      }),
+    );
+    // A delivery nobody placed: kept, under its own key, so the parts still
+    // add up to the item's 105.
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 5,
+        occurredOn: "2026-08-03",
+      }),
+    );
+    // In and straight back out again: not "0 on the truck", not on the truck.
+    const gone = await newItem("Came and went");
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: gone.id,
+        quantity: 4,
+        occurredOn: "2026-08-01",
+        locationAssetId: truck,
+      }),
+    );
+    await asOwner((tx) =>
+      issueStock(tx, ownerCtx(), {
+        itemId: gone.id,
+        quantity: 4,
+        occurredOn: "2026-08-02",
+        locationAssetId: truck,
+      }),
+    );
+
+    const byPlace = await asOwner((tx) => onHandByPlace(tx, tenantId));
+    expect(byPlace.get(freezerId)?.get(item.id)).toBe(70);
+    expect(byPlace.get(truck)?.get(item.id)).toBe(30);
+    expect(byPlace.get(NO_PLACE)?.get(item.id)).toBe(5);
+    expect(byPlace.get(truck)?.has(gone.id) ?? false).toBe(false);
+  });
+
+  it("counts kinds over the same population the list shows", async () => {
+    const gone = await asOwner((tx) =>
+      createItem(tx, ownerCtx(), {
+        name: "Kind gone",
+        stockingUnit: "each",
+        itemKind: "kindtest",
+      }),
+    );
+    await asOwner((tx) =>
+      createItem(tx, ownerCtx(), {
+        name: "Kind live",
+        stockingUnit: "each",
+        itemKind: "kindtest",
+      }),
+    );
+    await asOwner((tx) => archiveItem(tx, ownerCtx(), gone.id));
+    const all = await asOwner((tx) => listKindsInUse(tx, tenantId));
+    const active = await asOwner((tx) =>
+      listKindsInUse(tx, tenantId, { status: "active" }),
+    );
+    expect(all.find((k) => k.kind === "kindtest")?.count).toBe(2);
+    // The list hides retired things unless asked, so the pill does too.
+    expect(active.find((k) => k.kind === "kindtest")?.count).toBe(1);
+  });
 
   it("a LOT is the cost object, and an item is not", async () => {
     // "What did this pen of broilers cost" is a lot question. Nobody asks what

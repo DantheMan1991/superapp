@@ -11,7 +11,7 @@ Open **Inventory** in the sidebar. This is where what you hold is recorded: how 
 - **An {{item|lower}}.** A kind of thing you hold a quantity of. Feed, cartons, ground beef. It is not one bag or one box, it is the kind.
 - **A batch.** A particular lot of an {{item|lower}}, with a history. One delivery, one hatch, one pen. A batch is what a cost attaches to, so `what did this pen cost` has an answer.
 - **Counted in.** Every {{item|lower}} is counted in one unit, and that never changes once anything has moved. Buy feed in bags and count it in pounds. Count meat in packages, because a package is what gets handed over.
-- **`Items`.** Everything you hold, what is on hand, what it is worth, and what is going off soon. See [Everything you hold](items.md).
+- **`Items`.** Everything you hold, what is on hand, what is in each place, what it is worth, and what is going off soon. See [Everything you hold](items.md).
 - **One {{item|lower}}'s page.** Its batches, where the stock is, every entry ever recorded against it, and the buttons that record more. See [One {{item|lower}}](item.md).
 - **`Counting`.** Walking the shelf and writing down what is really there. See [Counting stock](counting.md) and [One count](count.md).
 - **`What it is worth`.** The cost standing in stock on a chosen day, batch by batch. See [What it is worth](what-it-is-worth.md).

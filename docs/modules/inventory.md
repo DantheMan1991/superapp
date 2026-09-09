@@ -33,6 +33,60 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-09-09 — A delivery in one dialog (`claude/a-delivery-in-one-dialog`)
+
+**The item page is where stock is recorded, and on a phone its three batch
+buttons sat 300px off the right edge.** Slice 3 of the improvement review: at
+375px the batches table was 908px wide (`Correct cost` / `Correct weight` /
+`Split` at x=656–912), recent entries 505px, corrections 595px, and the
+`Record stock` dialog's `In` door held 901px of content in a 780px box — a
+three-line description, two four-line help paragraphs, and the Record button
+at y=846, below the fold. Every delivery also opened on `No batch` and `Not
+recorded`, and starting the delivery's batch was a second dialog.
+**No migration; nothing about lots or movements changes.**
+
+- **Batches, recent entries, cost corrections and weight corrections are cards
+  below `md`** (one fold each, `hidden md:block` on the table). A batch card
+  carries the code and its badges, from/started/good-until with the expiry
+  sentence from `core/expiry.ts`, on hand with its `about … lb`, carrying, and
+  the owner's three buttons where a thumb reaches them.
+- **The `Record stock` dialog fits.** One-sentence description, one-sentence
+  help under the cost and weight boxes (the read-back lines carry the
+  explanation), `inputMode="decimal"` on the number boxes.
+- **It opens on the answer.** `core/entry-defaults.ts` (pure): the `Batch`
+  picker starts on the only open batch, the `Where` picker on the place this
+  item went last time — or the only place there is. Both stay visible and both
+  can be set back to nothing; a default is a suggestion the person sees, so
+  neither is applied server-side. Re-seeded on every open, because
+  `router.refresh()` updates props and not state (the `LotForm` trap).
+- **A delivery starts its batch in the same act.** `receiveStock` has taken
+  `newLotCode` since slice 1 and no screen offered it. The `Batch` picker gains
+  `New batch…` for owners on the `In` door, revealing `Batch code` and `Good
+  until`; `receiveStock` gained `newLotExpiresOn` and hands it to `createLot`,
+  because meat and medicine arrive dated. Owner-only one layer down, as before.
+  The toast reads `Stock recorded in · batch B-2026-09-09 started`.
+- **`Fed to` is a `Combobox`** — the list is every open batch of every other
+  item, which on a farm is every pen.
+
+Not built: a `?record=in` deep link so the hub could open the dialog from a
+row — nothing calls it yet, and the hub's cards are whole-card links.
+
+Tests: `tests/inventory-entry-defaults.test.ts` (pure — last place used,
+retired place skipped, the one-place default, the one-batch default) and an
+ops test (a receipt with `newLotCode` + `newLotExpiresOn` makes the batch with
+its date and its stock). Guide `item.md` rewritten. Driven on the dev branch's
+Hilltop Farm (Ground beef 1 lb packs) at 375px and 1280px: the batch card's
+three buttons at x=79–343; the `In` dialog's content down from 901px to 801
+with Record at y=751–781, inside the viewport; `Batch` opened on
+`GB-2026-08-25 · 10 packages` (the only open batch) and `Where` on `Market
+truck` (the last place used); `New batch…` revealed the two boxes, the
+read-backs read `3 packages, $12.00 in all.` and `3 packages, 3 lb in all.`,
+and recording it made `GB-REVIEW-2026-09-09` (3 packages, about 3 lb, good
+until 2026-10-15, `goes off in 36 days`) with On hand at 58 — a dev fixture
+that stays; with two open batches the `Out` door then opened on `No batch`,
+as the rule says, and its `Fed to` narrowed to three pens on `pen`. Desktop
+keeps the tables with the buttons in the row.
+
 ### 2026-09-09 — Kinds of stock from a pasted list (`claude/paste-anything`)
 
 Onboarding slice 2 ([onboarding.md](onboarding.md), [ADR 0036](../decisions/0036-a-pasted-list-is-proposed-by-the-model-reviewed-by-a-person-and-written-by-the-modules-own-verb.md)):

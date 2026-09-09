@@ -40,6 +40,11 @@ import {
 import { carriedValue } from "@/packs/inventory/core/valuation";
 import { formatQuantity, getUnit } from "@/packs/inventory/core/units";
 import { formatLb, formatWeight, weightOf } from "@/packs/inventory/core/weight";
+import { expiryLabel } from "@/packs/inventory/core/expiry";
+import {
+  defaultBatch,
+  defaultPlace,
+} from "@/packs/inventory/core/entry-defaults";
 import {
   LOT_SOURCE_LABELS,
   isLotSource,
@@ -75,6 +80,11 @@ export const dynamic = "force-dynamic";
  *
  * Every number here is folded from the ledger by `core/balances.ts`. Nothing on
  * this page reads a stored quantity, because there is not one.
+ *
+ * **CARDS BELOW `md`, since 2026-09-09.** This is the page stock is recorded
+ * on, and at 375px its batches table was 908px wide with the three owner
+ * buttons 300px off the right edge. Every list on it — batches, corrections,
+ * entries — is one fold rendered twice, and CSS picks.
  */
 export default async function InventoryItemPage({
   params,
@@ -244,6 +254,128 @@ export default async function InventoryItemPage({
       id: l.id,
       label: `${l.code} · ${itemNames.get(l.itemId) ?? "—"}`,
     }));
+  /**
+   * What the dialog opens on: the only open batch, and where this item went
+   * last time (`movements` is newest first) or the only place there is. Pure,
+   * pinned in tests, and shown rather than assumed — see `core/entry-defaults.ts`.
+   */
+  const defaultLotId = defaultBatch(lotOptions.map((l) => l.id));
+  const defaultLocationId = defaultPlace(
+    movements.map((m) => ({ locationAssetId: m.locationAssetId })),
+    locations.map((l) => l.id),
+  );
+
+  /**
+   * One fold per batch, rendered as a card below `md` and a row above it.
+   */
+  const batchRows = lots.map((lot) => {
+    const balance = balanceOfLot(rows, lot.id);
+    /**
+     * **`carriedValue`, NEVER `remainingCents`.** A batch nobody costed and a
+     * batch whose cost has all been released both fold to zero, and only the
+     * second is worth nothing. Since ADR 0012 §A.4 an appended correction
+     * counts as having costed it too — which is what stops a batch corrected
+     * into existence reading as "No cost recorded".
+     */
+    const cost = carried.get(lot.id);
+    const carriedCents = cost ? carriedValue(cost) : null;
+    // Same rule as the card above: shown only when it says something the
+    // quantity does not.
+    const reading = weightOf({
+      unit,
+      quantity: balance,
+      rate: weights.byLot.get(lot.id) ?? null,
+    });
+    // Present only for a batch that has been weighed — which is the only kind
+    // that can be corrected.
+    const weightDetail = weights.byLotDetail.get(lot.id);
+    const weightLabel = reading.approximate ? formatWeight(reading) : null;
+    const received = rows
+      .filter((r) => r.lotId === lot.id && r.quantity > 0)
+      .reduce((sum, r) => sum + r.quantity, 0);
+    /* Past its date AND still on the shelf is the only combination worth
+       colouring: an empty batch cannot go off into a loss. */
+    const pastDate = Boolean(
+      lot.expiresOn && lot.expiresOn < today && balance > 0,
+    );
+    return {
+      lot,
+      balance,
+      carriedCents,
+      weightLabel,
+      weightDetail,
+      received,
+      pastDate,
+      source: isLotSource(lot.source) ? LOT_SOURCE_LABELS[lot.source] : lot.source,
+      expiry: lot.expiresOn ? expiryLabel(lot.expiresOn, today) : null,
+    };
+  });
+
+  /** The owner's three buttons for a batch, in one place for both shapes. */
+  function batchActions(row: (typeof batchRows)[number]) {
+    if (!isOwner) return null;
+    const { lot, balance, carriedCents, weightDetail, received } = row;
+    return (
+      <>
+        {/* **A CORRECTION IS OFFERED ON AN EMPTY BATCH TOO**, and on a closed
+            one. The invoice for a delivery routinely arrives after the feed has
+            been eaten, and a screen that only offers the correction while stock
+            is still on the shelf refuses the commonest case there is. */}
+        <LotCostForm
+          lot={{
+            id: lot.id,
+            code: lot.code,
+            carriedLabel:
+              carriedCents === null
+                ? null
+                : formatMoney(carriedCents, currencySymbol),
+            quantityOnHand: balance,
+            quantityReceived: received,
+            onHandLabel: formatQuantity(balance, unit),
+            receivedLabel: formatQuantity(received, unit),
+          }}
+          currencySymbol={currencySymbol}
+          today={today}
+        />
+        {/* **CORRECT WEIGHT, ONLY WHERE THERE IS ONE.** A batch nobody weighed
+            gets its first weight on a delivery, the way it always has; a
+            correction needs a figure to correct. Offered on a closed or empty
+            batch too, like the cost correction — what the packages weighed is
+            true after they are sold. */}
+        {weightDetail && (
+          <LotWeightForm
+            lot={{
+              id: lot.id,
+              code: lot.code,
+              quantityWeighed: weightDetail.quantityWeighed,
+              recordedLb: weightDetail.recordedLb,
+              unit,
+              unitSingular,
+            }}
+            today={today}
+          />
+        )}
+        {lot.status === "open" && balance > 0 && (
+          <SplitLotForm
+            lot={{
+              id: lot.id,
+              code: lot.code,
+              balanceLabel: formatQuantity(balance, unit),
+            }}
+            unitLabel={unitLabel}
+            locations={locationOptions}
+            today={today}
+          />
+        )}
+      </>
+    );
+  }
+
+  /** `+$12.00` / `−$12.00` / a dash for nothing, for the correction columns. */
+  function signedMoney(cents: number) {
+    if (cents === 0) return "—";
+    return (cents > 0 ? "+" : "−") + formatMoney(Math.abs(cents), currencySymbol);
+  }
 
   return (
     <div className="space-y-6">
@@ -258,7 +390,7 @@ export default async function InventoryItemPage({
             {item.storageRequirement && (
               <Badge variant="outline">{slugLabel(item.storageRequirement)}</Badge>
             )}
-            {item.status === "archived" && <Badge variant="outline">archived</Badge>}
+            {item.status === "archived" && <Badge variant="outline">retired</Badge>}
           </span>
         }
         actions={
@@ -297,6 +429,9 @@ export default async function InventoryItemPage({
                       stockedByMass={getUnit(unit)?.dimension === "mass"}
                       currencySymbol={currencySymbol}
                       today={today}
+                      defaultLotId={defaultLotId}
+                      defaultLocationId={defaultLocationId}
+                      canStartBatch={isOwner}
                     />
                   )}
                 </>
@@ -430,173 +565,171 @@ export default async function InventoryItemPage({
         <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
           Batches {lots.length > 0 && `(${lots.length})`}
         </h2>
-        <DataTable
-          isEmpty={lots.length === 0}
-          empty={
-            <EmptyState
-              icon={<Layers className="h-5 w-5" />}
-              title="No batches yet"
-              description="A batch is what traceability follows, and what a cost attaches to — one delivery, one hatch, one pen."
-            />
-          }
-        >
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Batch</TableHead>
-                <TableHead>From</TableHead>
-                <TableHead>Started</TableHead>
-                <TableHead>Good until</TableHead>
-                <TableHead className="text-right">On hand</TableHead>
-                <TableHead className="text-right">Carrying</TableHead>
-                <TableHead className="w-72" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {lots.map((lot) => {
-                const balance = balanceOfLot(rows, lot.id);
-                /**
-                 * **`carriedValue`, NEVER `remainingCents`.** A batch nobody
-                 * costed and a batch whose cost has all been released both fold
-                 * to zero, and only the second is worth nothing. Since
-                 * ADR 0012 §A.4 an appended correction counts as having costed
-                 * it too — which is what stops a batch corrected into
-                 * existence reading as "No cost recorded".
-                 */
-                const cost = carried.get(lot.id);
-                const carriedCents = cost ? carriedValue(cost) : null;
-                // Same rule as the card above: shown only when it says
-                // something the quantity does not.
-                const reading = weightOf({
-                  unit,
-                  quantity: balance,
-                  rate: weights.byLot.get(lot.id) ?? null,
-                });
-                // Present only for a batch that has been weighed — which is
-                // the only kind that can be corrected.
-                const weightDetail = weights.byLotDetail.get(lot.id);
-                const weightLabel = reading.approximate
-                  ? formatWeight(reading)
-                  : null;
-                const received = rows
-                  .filter((r) => r.lotId === lot.id && r.quantity > 0)
-                  .reduce((sum, r) => sum + r.quantity, 0);
-                return (
-                  <TableRow key={lot.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-2 font-medium">
-                        {lot.code}
-                        {lot.status === "closed" && (
+        {batchRows.length === 0 ? (
+          <DataTable
+            isEmpty
+            empty={
+              <EmptyState
+                icon={<Layers className="h-5 w-5" />}
+                title="No batches yet"
+                description="A batch is what traceability follows, and what a cost attaches to — one delivery, one hatch, one pen."
+              />
+            }
+          >
+            {null}
+          </DataTable>
+        ) : (
+          <>
+            {/* Phone: a card per batch, the owner's buttons at its foot. */}
+            <ul className="space-y-3 md:hidden">
+              {batchRows.map((row) => (
+                <li
+                  key={row.lot.id}
+                  className="rounded-2xl bg-card p-4 shadow-elevation-1"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 font-medium">
+                        <span className="truncate">{row.lot.code}</span>
+                        {row.lot.status === "closed" && (
                           <Badge variant="outline">closed</Badge>
                         )}
-                        {lot.parentLotId && (
+                        {row.lot.parentLotId && (
                           <Badge variant="outline">split</Badge>
                         )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {isLotSource(lot.source)
-                        ? LOT_SOURCE_LABELS[lot.source]
-                        : lot.source}
-                    </TableCell>
-                    <TableCell className="tabular-nums text-muted-foreground">
-                      {lot.openedOn ?? "—"}
-                    </TableCell>
-                    <TableCell
-                      className={`tabular-nums ${
-                        /* Past its date AND still on the shelf is the only
-                           combination worth colouring: an empty batch cannot go
-                           off into a loss. */
-                        lot.expiresOn && lot.expiresOn < today && balance > 0
-                          ? "text-destructive"
-                          : "text-muted-foreground"
-                      }`}
-                    >
-                      {lot.expiresOn ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatQuantity(balance, unit)}
-                      {/* **PER BATCH, AND THAT IS THE WHOLE REASON THE RATE IS
-                          KEPT PER LOT.** A run packed in 1 lb bags and a run
-                          packed in 2 lb bags are different batches; one figure
-                          across the item would be true of neither. */}
-                      {weightLabel && (
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {row.source}
+                        {row.lot.openedOn && ` · started ${row.lot.openedOn}`}
+                      </p>
+                    </div>
+                    <p className="shrink-0 text-right tabular-nums">
+                      <span className="font-medium">
+                        {formatQuantity(row.balance, unit)}
+                      </span>
+                      {row.weightLabel && (
                         <span className="block text-xs text-muted-foreground">
-                          {weightLabel}
+                          {row.weightLabel}
                         </span>
                       )}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {carriedCents === null ? (
-                        <span className="text-muted-foreground">
-                          No cost recorded
-                        </span>
-                      ) : (
-                        formatMoney(carriedCents, currencySymbol)
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {/* **A CORRECTION IS OFFERED ON AN EMPTY BATCH TOO**, and
-                          on a closed one. The invoice for a delivery routinely
-                          arrives after the feed has been eaten, and a screen
-                          that only offers the correction while stock is still
-                          on the shelf refuses the commonest case there is. */}
-                      {isOwner && (
-                        <LotCostForm
-                          lot={{
-                            id: lot.id,
-                            code: lot.code,
-                            carriedLabel:
-                              carriedCents === null
-                                ? null
-                                : formatMoney(carriedCents, currencySymbol),
-                            quantityOnHand: balance,
-                            quantityReceived: received,
-                            onHandLabel: formatQuantity(balance, unit),
-                            receivedLabel: formatQuantity(received, unit),
-                          }}
-                          currencySymbol={currencySymbol}
-                          today={today}
-                        />
-                      )}
-                      {/* **CORRECT WEIGHT, ONLY WHERE THERE IS ONE.** A batch
-                          nobody weighed gets its first weight on a delivery,
-                          the way it always has; a correction needs a figure to
-                          correct. Offered on a closed or empty batch too, like
-                          the cost correction — what the packages weighed is
-                          true after they are sold. */}
-                      {isOwner && weightDetail && (
-                        <LotWeightForm
-                          lot={{
-                            id: lot.id,
-                            code: lot.code,
-                            quantityWeighed: weightDetail.quantityWeighed,
-                            recordedLb: weightDetail.recordedLb,
-                            unit,
-                            unitSingular,
-                          }}
-                          today={today}
-                        />
-                      )}
-                      {isOwner && lot.status === "open" && balance > 0 && (
-                        <SplitLotForm
-                          lot={{
-                            id: lot.id,
-                            code: lot.code,
-                            balanceLabel: formatQuantity(balance, unit),
-                          }}
-                          unitLabel={unitLabel}
-                          locations={locationOptions}
-                          today={today}
-                        />
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </DataTable>
+                    </p>
+                  </div>
+                  <dl className="mt-3 grid grid-cols-2 gap-2 border-t border-divider pt-3 text-sm">
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Good until</dt>
+                      <dd
+                        className={`tabular-nums ${row.pastDate ? "text-destructive" : ""}`}
+                      >
+                        {row.lot.expiresOn ?? "—"}
+                        {row.expiry && (
+                          <span className="block text-xs text-muted-foreground">
+                            {row.expiry}
+                          </span>
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Carrying</dt>
+                      <dd className="tabular-nums">
+                        {row.carriedCents === null ? (
+                          <span className="text-muted-foreground">
+                            No cost recorded
+                          </span>
+                        ) : (
+                          formatMoney(row.carriedCents, currencySymbol)
+                        )}
+                      </dd>
+                    </div>
+                  </dl>
+                  {isOwner && (
+                    <div className="mt-2 flex flex-wrap justify-end gap-1">
+                      {batchActions(row)}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+
+            {/* Wide screen: the table. */}
+            <div className="hidden md:block">
+              <DataTable>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Batch</TableHead>
+                      <TableHead>From</TableHead>
+                      <TableHead>Started</TableHead>
+                      <TableHead>Good until</TableHead>
+                      <TableHead className="text-right">On hand</TableHead>
+                      <TableHead className="text-right">Carrying</TableHead>
+                      <TableHead className="w-72" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {batchRows.map((row) => (
+                      <TableRow key={row.lot.id}>
+                        {/* Both of these may wrap: a long batch code and the
+                            expiry sentence were what pushed the table past
+                            its column at 1280px. */}
+                        <TableCell className="whitespace-normal">
+                          <div className="flex flex-wrap items-center gap-2 font-medium">
+                            {row.lot.code}
+                            {row.lot.status === "closed" && (
+                              <Badge variant="outline">closed</Badge>
+                            )}
+                            {row.lot.parentLotId && (
+                              <Badge variant="outline">split</Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {row.source}
+                        </TableCell>
+                        <TableCell className="tabular-nums text-muted-foreground">
+                          {row.lot.openedOn ?? "—"}
+                        </TableCell>
+                        <TableCell
+                          className={`tabular-nums whitespace-normal ${
+                            row.pastDate ? "text-destructive" : "text-muted-foreground"
+                          }`}
+                        >
+                          {row.lot.expiresOn ?? "—"}
+                          {row.expiry && (
+                            <span className="block text-xs">{row.expiry}</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatQuantity(row.balance, unit)}
+                          {/* **PER BATCH, AND THAT IS THE WHOLE REASON THE RATE IS
+                              KEPT PER LOT.** A run packed in 1 lb bags and a run
+                              packed in 2 lb bags are different batches; one figure
+                              across the item would be true of neither. */}
+                          {row.weightLabel && (
+                            <span className="block text-xs text-muted-foreground">
+                              {row.weightLabel}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {row.carriedCents === null ? (
+                            <span className="text-muted-foreground">
+                              No cost recorded
+                            </span>
+                          ) : (
+                            formatMoney(row.carriedCents, currencySymbol)
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {batchActions(row)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </DataTable>
+            </div>
+          </>
+        )}
       </section>
 
       {corrections.length > 0 && (
@@ -616,62 +749,91 @@ export default async function InventoryItemPage({
            * batch went up by less than the correction, and it is the figure
            * that was frozen at the moment it was written.
            */}
-          <DataTable>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>When</TableHead>
-                <TableHead>Batch</TableHead>
-                <TableHead>Why</TableHead>
-                <TableHead className="text-right">Correction</TableHead>
-                <TableHead className="text-right">To the batch</TableHead>
-                <TableHead className="text-right">To cost of goods</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {corrections.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell className="tabular-nums text-muted-foreground">
-                    {c.occurredOn}
-                  </TableCell>
-                  <TableCell>{lotCodes.get(c.lotId) ?? "—"}</TableCell>
-                  <TableCell>
-                    {costAdjustmentReasonLabel(c.reason)}
+          <ul className="space-y-3 md:hidden">
+            {corrections.map((c) => (
+              <li key={c.id} className="rounded-2xl bg-card p-4 shadow-elevation-1">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-medium">{costAdjustmentReasonLabel(c.reason)}</p>
+                    <p className="text-xs text-muted-foreground tabular-nums">
+                      {c.occurredOn} · {lotCodes.get(c.lotId) ?? "—"}
+                    </p>
                     {c.notes && (
-                      <div className="text-xs text-muted-foreground">
-                        {c.notes}
-                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">{c.notes}</p>
                     )}
-                    <div className="text-xs text-muted-foreground">
-                      {/* WHAT THE LEDGER BELIEVED, stamped. This is the whole
-                          reason the two quantity columns are stored, and the
-                          only place a person can check the split against it. */}
-                      {formatQuantity(c.quantityOnHand, unit)} of{" "}
-                      {formatQuantity(c.quantityReceived, unit)} still on hand
-                      then
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {c.amountCents > 0 ? "+" : "−"}
-                    {formatMoney(Math.abs(c.amountCents), currencySymbol)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {c.onHandCents === 0
-                      ? "—"
-                      : (c.onHandCents > 0 ? "+" : "−") +
-                        formatMoney(Math.abs(c.onHandCents), currencySymbol)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {c.issuedCents === 0
-                      ? "—"
-                      : (c.issuedCents > 0 ? "+" : "−") +
-                        formatMoney(Math.abs(c.issuedCents), currencySymbol)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          </DataTable>
+                  </div>
+                  <p className="shrink-0 font-medium tabular-nums">
+                    {signedMoney(c.amountCents)}
+                  </p>
+                </div>
+                <dl className="mt-3 grid grid-cols-2 gap-2 border-t border-divider pt-3 text-sm">
+                  <div>
+                    <dt className="text-xs text-muted-foreground">To the batch</dt>
+                    <dd className="tabular-nums">{signedMoney(c.onHandCents)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">To cost of goods</dt>
+                    <dd className="tabular-nums">{signedMoney(c.issuedCents)}</dd>
+                  </div>
+                </dl>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {formatQuantity(c.quantityOnHand, unit)} of{" "}
+                  {formatQuantity(c.quantityReceived, unit)} still on hand then
+                </p>
+              </li>
+            ))}
+          </ul>
+          <div className="hidden md:block">
+            <DataTable>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>When</TableHead>
+                    <TableHead>Batch</TableHead>
+                    <TableHead>Why</TableHead>
+                    <TableHead className="text-right">Correction</TableHead>
+                    <TableHead className="text-right">To the batch</TableHead>
+                    <TableHead className="text-right">To cost of goods</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {corrections.map((c) => (
+                    <TableRow key={c.id}>
+                      <TableCell className="tabular-nums text-muted-foreground">
+                        {c.occurredOn}
+                      </TableCell>
+                      <TableCell>{lotCodes.get(c.lotId) ?? "—"}</TableCell>
+                      <TableCell>
+                        {costAdjustmentReasonLabel(c.reason)}
+                        {c.notes && (
+                          <div className="text-xs text-muted-foreground">
+                            {c.notes}
+                          </div>
+                        )}
+                        <div className="text-xs text-muted-foreground">
+                          {/* WHAT THE LEDGER BELIEVED, stamped. This is the whole
+                              reason the two quantity columns are stored, and the
+                              only place a person can check the split against it. */}
+                          {formatQuantity(c.quantityOnHand, unit)} of{" "}
+                          {formatQuantity(c.quantityReceived, unit)} still on hand
+                          then
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {signedMoney(c.amountCents)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {signedMoney(c.onHandCents)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {signedMoney(c.issuedCents)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </DataTable>
+          </div>
         </section>
       )}
 
@@ -686,48 +848,82 @@ export default async function InventoryItemPage({
            * row, so a person can check the correction against what it
            * corrected — and `After` is what it read once this one landed.
            */}
-          <DataTable>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>When</TableHead>
-                <TableHead>Batch</TableHead>
-                <TableHead>Why</TableHead>
-                <TableHead className="text-right">Correction</TableHead>
-                <TableHead className="text-right">After</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {weightCorrections.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell className="tabular-nums text-muted-foreground">
-                    {c.occurredOn}
-                  </TableCell>
-                  <TableCell>{lotCodes.get(c.lotId) ?? "—"}</TableCell>
-                  <TableCell>
-                    {weightAdjustmentReasonLabel(c.reason)}
+          <ul className="space-y-3 md:hidden">
+            {weightCorrections.map((c) => (
+              <li key={c.id} className="rounded-2xl bg-card p-4 shadow-elevation-1">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-medium">
+                      {weightAdjustmentReasonLabel(c.reason)}
+                    </p>
+                    <p className="text-xs text-muted-foreground tabular-nums">
+                      {c.occurredOn} · {lotCodes.get(c.lotId) ?? "—"}
+                    </p>
                     {c.notes && (
-                      <div className="text-xs text-muted-foreground">
-                        {c.notes}
-                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">{c.notes}</p>
                     )}
-                    <div className="text-xs text-muted-foreground">
-                      Read {formatLb(c.recordedLb)} across{" "}
-                      {formatQuantity(c.quantityWeighed, unit)} then
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {c.deltaLb > 0 ? "+" : "−"}
-                    {formatLb(Math.abs(c.deltaLb))}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {formatLb(c.recordedLb + c.deltaLb)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          </DataTable>
+                  </div>
+                  <p className="shrink-0 text-right tabular-nums">
+                    <span className="font-medium">
+                      {c.deltaLb > 0 ? "+" : "−"}
+                      {formatLb(Math.abs(c.deltaLb))}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      after {formatLb(c.recordedLb + c.deltaLb)}
+                    </span>
+                  </p>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Read {formatLb(c.recordedLb)} across{" "}
+                  {formatQuantity(c.quantityWeighed, unit)} then
+                </p>
+              </li>
+            ))}
+          </ul>
+          <div className="hidden md:block">
+            <DataTable>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>When</TableHead>
+                    <TableHead>Batch</TableHead>
+                    <TableHead>Why</TableHead>
+                    <TableHead className="text-right">Correction</TableHead>
+                    <TableHead className="text-right">After</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {weightCorrections.map((c) => (
+                    <TableRow key={c.id}>
+                      <TableCell className="tabular-nums text-muted-foreground">
+                        {c.occurredOn}
+                      </TableCell>
+                      <TableCell>{lotCodes.get(c.lotId) ?? "—"}</TableCell>
+                      <TableCell>
+                        {weightAdjustmentReasonLabel(c.reason)}
+                        {c.notes && (
+                          <div className="text-xs text-muted-foreground">
+                            {c.notes}
+                          </div>
+                        )}
+                        <div className="text-xs text-muted-foreground">
+                          Read {formatLb(c.recordedLb)} across{" "}
+                          {formatQuantity(c.quantityWeighed, unit)} then
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {c.deltaLb > 0 ? "+" : "−"}
+                        {formatLb(Math.abs(c.deltaLb))}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatLb(c.recordedLb + c.deltaLb)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </DataTable>
+          </div>
         </section>
       )}
 
@@ -736,65 +932,105 @@ export default async function InventoryItemPage({
           <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
             Recent entries
           </h2>
-          <DataTable>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>When</TableHead>
-                <TableHead>What happened</TableHead>
-                <TableHead>Where</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead className="text-right">Cost</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {movements.map((m) => (
-                <TableRow key={m.id}>
-                  <TableCell className="tabular-nums text-muted-foreground">
-                    {m.occurredOn}
-                  </TableCell>
-                  <TableCell>
-                    {movementKindLabel(m.movementKind)}
-                    {/**
-                     * **THE REASON, BESIDE THE ENTRY.** Found by clicking: the
-                     * ledger said "Adjusted · −20 pounds · $10.00" and nothing
-                     * at all about why, on the one screen somebody looks at
-                     * when they wonder where the feed went. The reason is the
-                     * whole point of an adjustment; a row that hides it is a row
-                     * that turned a diagnostic back into a correction.
-                     */}
+          {/* Phone: a card per entry — what happened and how much, the place
+              and the money under it. */}
+          <ul className="space-y-3 md:hidden">
+            {movements.map((m) => (
+              <li key={m.id} className="rounded-2xl bg-card p-4 shadow-elevation-1">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-medium">{movementKindLabel(m.movementKind)}</p>
+                    <p className="text-xs text-muted-foreground tabular-nums">
+                      {m.occurredOn}
+                      {m.locationAssetId &&
+                        ` · ${locationNames.get(m.locationAssetId) ?? "—"}`}
+                      {m.lotId && lotCodes.get(m.lotId) && ` · ${lotCodes.get(m.lotId)}`}
+                    </p>
                     {m.reason && (
-                      <div className="text-xs text-muted-foreground">
+                      <p className="text-xs text-muted-foreground">
                         {adjustmentReasonLabel(m.reason)}
-                      </div>
+                      </p>
                     )}
                     {m.notes && (
-                      <div className="text-xs text-muted-foreground">
-                        {m.notes}
-                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">{m.notes}</p>
                     )}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {m.locationAssetId
-                      ? (locationNames.get(m.locationAssetId) ?? "—")
-                      : "—"}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {m.quantity > 0 ? "+" : ""}
-                    {formatQuantity(m.quantity, unit)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {/* **THE PAGE THAT OWNS THE MONEY HAS TO SHOW IT.** Slice 1
-                        stored a cost on every receipt and issue and this table
-                        listed neither, so a $340 delivery landed and the item
-                        page never mentioned it. Found by driving it. */}
-                    {m.costCents === null ? "—" : formatMoney(m.costCents, currencySymbol)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          </DataTable>
+                  </div>
+                  <p className="shrink-0 text-right tabular-nums">
+                    <span className="font-medium">
+                      {m.quantity > 0 ? "+" : ""}
+                      {formatQuantity(m.quantity, unit)}
+                    </span>
+                    {m.costCents !== null && (
+                      <span className="block text-xs text-muted-foreground">
+                        {formatMoney(m.costCents, currencySymbol)}
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <div className="hidden md:block">
+            <DataTable>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>When</TableHead>
+                    <TableHead>What happened</TableHead>
+                    <TableHead>Where</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead className="text-right">Cost</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {movements.map((m) => (
+                    <TableRow key={m.id}>
+                      <TableCell className="tabular-nums text-muted-foreground">
+                        {m.occurredOn}
+                      </TableCell>
+                      <TableCell>
+                        {movementKindLabel(m.movementKind)}
+                        {/**
+                         * **THE REASON, BESIDE THE ENTRY.** Found by clicking: the
+                         * ledger said "Adjusted · −20 pounds · $10.00" and nothing
+                         * at all about why, on the one screen somebody looks at
+                         * when they wonder where the feed went. The reason is the
+                         * whole point of an adjustment; a row that hides it is a row
+                         * that turned a diagnostic back into a correction.
+                         */}
+                        {m.reason && (
+                          <div className="text-xs text-muted-foreground">
+                            {adjustmentReasonLabel(m.reason)}
+                          </div>
+                        )}
+                        {m.notes && (
+                          <div className="text-xs text-muted-foreground">
+                            {m.notes}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {m.locationAssetId
+                          ? (locationNames.get(m.locationAssetId) ?? "—")
+                          : "—"}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {m.quantity > 0 ? "+" : ""}
+                        {formatQuantity(m.quantity, unit)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {/* **THE PAGE THAT OWNS THE MONEY HAS TO SHOW IT.** Slice 1
+                            stored a cost on every receipt and issue and this table
+                            listed neither, so a $340 delivery landed and the item
+                            page never mentioned it. Found by driving it. */}
+                        {m.costCents === null ? "—" : formatMoney(m.costCents, currencySymbol)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </DataTable>
+          </div>
         </section>
       )}
     </div>

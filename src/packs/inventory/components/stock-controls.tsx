@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { formatMoney } from "@/lib/money";
@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Combobox } from "@/components/app/combobox";
 import {
   Dialog,
   DialogContent,
@@ -68,6 +69,8 @@ import { deliveryCostCents } from "../core/costing";
 import { formatQuantity, type EntryBasis } from "../core/units";
 
 const NO_LOT = "__none__";
+/** The Batch picker's "start one now" choice, offered to owners on a delivery. */
+const NEW_LOT = "__new__";
 const CUSTOM_REASON = "__custom__";
 const NO_CONSUMER = "__nobody__";
 const NO_LOCATION = "__none__";
@@ -278,6 +281,18 @@ export function LotForm({
  * IN and OUT are two buttons rather than a signed number, because nobody
  * thinks "negative eighty pounds of feed". The sign is applied here, which is
  * the last place the human meaning is still visible.
+ *
+ * **BUILT TO FIT A PHONE, since 2026-09-09.** The `In` door was 901px of
+ * content in a 780px dialog — a three-line description, two four-line help
+ * paragraphs, and the Record button below the fold. The description is one
+ * sentence, each help note is one, and the read-back lines under the boxes
+ * carry the explanation. The dialog opens on the only open batch and on the
+ * place this item went last time (`core/entry-defaults.ts`), so the two
+ * pickers a delivery always needed are already answered — and both stay
+ * visible, because a default is a suggestion the person sees. An owner can
+ * start the delivery's batch inside the dialog (`New batch…`), which
+ * `receiveStock` has supported since slice 1 and no screen offered: a delivery
+ * IS a batch, and it was two dialogs.
  */
 export function MovementForm({
   itemId,
@@ -290,6 +305,9 @@ export function MovementForm({
   stockedByMass,
   currencySymbol,
   today,
+  defaultLotId = null,
+  defaultLocationId = null,
+  canStartBatch = false,
 }: {
   itemId: string;
   unitLabel: string;
@@ -314,6 +332,12 @@ export function MovementForm({
    */
   consumers: { id: string; label: string }[];
   today: string;
+  /** The batch to open on — the only open one, or null. */
+  defaultLotId?: string | null;
+  /** The place to open on — where this item went last time, or the only place. */
+  defaultLocationId?: string | null;
+  /** Owners may start the delivery's batch here; a lot is a cost object. */
+  canStartBatch?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -347,7 +371,46 @@ export function MovementForm({
   const [quantityTyped, setQuantityTyped] = useState("");
   const [costTyped, setCostTyped] = useState("");
   const [weightTyped, setWeightTyped] = useState("");
+  /**
+   * The batch and the place the dialog opens on. Checked against what is
+   * offered, because a default pointing at a closed batch or a retired place
+   * would render a blank picker. Re-seeded on every open — `router.refresh()`
+   * updates the props and not this state, the trap `LotForm` documents.
+   */
+  const startingLot =
+    defaultLotId && lots.some((l) => l.id === defaultLotId) ? defaultLotId : NO_LOT;
+  const startingPlace =
+    defaultLocationId && locations.some((l) => l.id === defaultLocationId)
+      ? defaultLocationId
+      : NO_LOCATION;
+  const [lotChoice, setLotChoice] = useState<string>(startingLot);
+  const [consumer, setConsumer] = useState<string>(NO_CONSUMER);
   const [pending, startTransition] = useTransition();
+
+  const consumerOptions = useMemo(
+    () => [
+      { value: NO_CONSUMER, label: "Nothing — waste or sold" },
+      ...consumers.map((c) => ({ value: c.id, label: c.label })),
+    ],
+    [consumers],
+  );
+
+  function onOpenChange(next: boolean) {
+    if (next) {
+      setLotChoice(startingLot);
+      setConsumer(NO_CONSUMER);
+      setQuantityTyped("");
+      setCostTyped("");
+      setWeightTyped("");
+    }
+    setOpen(next);
+  }
+
+  function choose(next: "in" | "out" | "adjust") {
+    setDirection(next);
+    // Only a delivery can start a batch; leaving the door leaves the option.
+    if (next !== "in" && lotChoice === NEW_LOT) setLotChoice(startingLot);
+  }
 
   function submit(formData: FormData) {
     const raw = Number(String(formData.get("quantity") ?? "0"));
@@ -355,8 +418,16 @@ export function MovementForm({
       toast.error("Enter a quantity other than zero.");
       return;
     }
-    const lotId = String(formData.get("lotId") ?? NO_LOT);
     const locationId = String(formData.get("locationAssetId") ?? NO_LOCATION);
+    const newLotCode = String(formData.get("newLotCode") ?? "").trim();
+    const newLotExpiresOn = String(formData.get("newLotExpiresOn") ?? "") || null;
+    const startingNew = direction === "in" && lotChoice === NEW_LOT;
+    if (startingNew && !newLotCode) {
+      toast.error("Name the new batch, or pick one.");
+      return;
+    }
+    const chosenLotId =
+      lotChoice === NO_LOT || lotChoice === NEW_LOT ? null : lotChoice;
 
     startTransition(async () => {
       /**
@@ -367,7 +438,6 @@ export function MovementForm({
        */
       const money = String(formData.get("cost") ?? "").trim();
       const weighed = String(formData.get("weightLb") ?? "").trim();
-      const consumedBy = String(formData.get("issuedToLotId") ?? NO_CONSUMER);
       const chosenReason =
         reason === CUSTOM_REASON
           ? String(formData.get("customReason") ?? "")
@@ -380,7 +450,7 @@ export function MovementForm({
         direction === "adjust"
           ? await adjustStockAction({
               itemId,
-              lotId: lotId === NO_LOT ? null : lotId,
+              lotId: chosenLotId,
               // SIGNED here and only here. The form asks for a positive number
               // and a direction, because "how much" and "which way" are two
               // questions and a minus sign typed into a box is not an answer to
@@ -394,7 +464,10 @@ export function MovementForm({
           : direction === "in"
           ? await receiveStockAction({
               itemId,
-              lotId: lotId === NO_LOT ? undefined : lotId,
+              lotId: chosenLotId ?? undefined,
+              // The batch started in the same act, owner-only one layer down.
+              newLotCode: startingNew ? newLotCode : undefined,
+              newLotExpiresOn: startingNew ? newLotExpiresOn : undefined,
               quantity: Math.abs(raw),
               // Dollars in, cents stored, and a per-package price multiplied
               // out HERE — the action takes an integer total and nothing else.
@@ -418,9 +491,9 @@ export function MovementForm({
             })
           : await issueStockAction({
               itemId,
-              lotId: lotId === NO_LOT ? null : lotId,
+              lotId: chosenLotId,
               quantity: Math.abs(raw),
-              issuedToLotId: consumedBy === NO_CONSUMER ? null : consumedBy,
+              issuedToLotId: consumer === NO_CONSUMER ? null : consumer,
               occurredOn: String(formData.get("occurredOn") ?? today),
               locationAssetId: locationId === NO_LOCATION ? null : locationId,
               notes: String(formData.get("notes") ?? ""),
@@ -429,8 +502,6 @@ export function MovementForm({
         toast.error(result.error);
         return;
       }
-      // The stamped cost is worth saying out loud: it is what the pen was
-      // charged, and it will not change when the next delivery arrives.
       // The stamped cost is worth saying out loud on the way out AND on a
       // downward adjustment: spoilage that cost $42 is a number somebody acts
       // on, and "Adjusted" on its own is not.
@@ -440,7 +511,9 @@ export function MovementForm({
           : "";
       const headline =
         direction === "in"
-          ? "Stock recorded in"
+          ? startingNew
+            ? `Stock recorded in · batch ${newLotCode} started`
+            : "Stock recorded in"
           : direction === "out"
             ? "Stock recorded out"
             : adjustUp
@@ -488,8 +561,11 @@ export function MovementForm({
           )} each.`
       : null;
 
+  const offerBatchPicker =
+    lots.length > 0 || (direction === "in" && canStartBatch);
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         <Button size="sm">Record stock</Button>
       </DialogTrigger>
@@ -498,8 +574,8 @@ export function MovementForm({
           <DialogHeader>
             <DialogTitle>Record stock</DialogTitle>
             <DialogDescription>
-              Every quantity on this page is the sum of these, so nothing is
-              counted twice and a correction is just another entry.
+              Every figure on this page is the sum of these entries, so a
+              correction is just another entry.
             </DialogDescription>
           </DialogHeader>
 
@@ -508,7 +584,7 @@ export function MovementForm({
               <Button
                 type="button"
                 variant={direction === "in" ? "default" : "outline"}
-                onClick={() => setDirection("in")}
+                onClick={() => choose("in")}
                 className="flex-1"
               >
                 In
@@ -516,7 +592,7 @@ export function MovementForm({
               <Button
                 type="button"
                 variant={direction === "out" ? "default" : "outline"}
-                onClick={() => setDirection("out")}
+                onClick={() => choose("out")}
                 className="flex-1"
               >
                 Out
@@ -524,7 +600,7 @@ export function MovementForm({
               <Button
                 type="button"
                 variant={direction === "adjust" ? "default" : "outline"}
-                onClick={() => setDirection("adjust")}
+                onClick={() => choose("adjust")}
                 className="flex-1"
               >
                 Adjust
@@ -538,6 +614,7 @@ export function MovementForm({
                   id="quantity"
                   name="quantity"
                   type="number"
+                  inputMode="decimal"
                   min="0"
                   step="0.0001"
                   required
@@ -658,6 +735,7 @@ export function MovementForm({
                     id="cost"
                     name="cost"
                     type="number"
+                    inputMode="decimal"
                     min="0"
                     step="0.01"
                     placeholder={entryBasis === "each" ? "5.00" : "340.00"}
@@ -672,13 +750,12 @@ export function MovementForm({
                   )}
                   <p className="text-xs text-muted-foreground">
                     {/* The total on the ticket is what is stored, whichever way
-                        it was typed. The per-unit figure is derived from it and
-                        never stored. */}
+                        it was typed. One sentence: the read-back above does
+                        the explaining. */}
                     {entryBasis === "each"
-                      ? `The price of one ${unitSingular} — the app multiplies by how many arrived. `
-                      : "The whole delivery, the way the invoice reads. "}
-                    Leave it empty if the invoice has not arrived — the stock
-                    still counts.
+                      ? `The price of one ${unitSingular}. `
+                      : "The whole delivery, as the invoice reads. "}
+                    Blank if the invoice has not come — the stock still counts.
                   </p>
                 </div>
                 {/**
@@ -698,6 +775,7 @@ export function MovementForm({
                       id="weightLb"
                       name="weightLb"
                       type="number"
+                      inputMode="decimal"
                       min="0"
                       step="0.0001"
                       placeholder={entryBasis === "each" ? "1.25" : "47.5"}
@@ -713,12 +791,9 @@ export function MovementForm({
                     )}
                     <p className="text-xs text-muted-foreground">
                       {entryBasis === "each"
-                        ? `One ${unitSingular} on the scale — the app multiplies by how many arrived. `
-                        : "Everything in this entry on the scale together, the way a plant's ticket reads. "}
-                      This is what lets the app say roughly what a freezer holds
-                      in pounds. Leave it empty if nobody weighed it — an
-                      unweighed batch says nothing rather than
-                      nothing-at-all-pounds.
+                        ? `One ${unitSingular} on the scale. `
+                        : "Everything in this entry on the scale together, as a plant's ticket reads. "}
+                      Blank if nobody weighed it.
                     </p>
                   </div>
                 )}
@@ -727,33 +802,30 @@ export function MovementForm({
               consumers.length > 0 && (
                 <div className="grid gap-2">
                   <Label htmlFor="issuedToLotId">Fed to</Label>
-                  <Select name="issuedToLotId" defaultValue={NO_CONSUMER}>
-                    <SelectTrigger id="issuedToLotId">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NO_CONSUMER}>Nothing — waste or sold</SelectItem>
-                      {consumers.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {/* A type-ahead, because the list is every open batch of
+                      every other item — on a farm, every pen. */}
+                  <Combobox
+                    id="issuedToLotId"
+                    aria-label="Fed to"
+                    options={consumerOptions}
+                    value={consumer}
+                    onValueChange={setConsumer}
+                    searchPlaceholder="Type a batch or item…"
+                    emptyText="No open batch is called that."
+                  />
                   <p className="text-xs text-muted-foreground">
-                    This is what makes &ldquo;what did this pen cost&rdquo; a
-                    question with an answer. The cost is worked out now, at
-                    today&rsquo;s average, and does not move when the next
-                    delivery arrives.
+                    The batch that ate it carries the cost, at today&rsquo;s
+                    average, and it does not move when the next delivery
+                    arrives.
                   </p>
                 </div>
               )
             ) : null}
 
-            {lots.length > 0 && (
+            {offerBatchPicker && (
               <div className="grid gap-2">
                 <Label htmlFor="lotId">Batch</Label>
-                <Select name="lotId" defaultValue={NO_LOT}>
+                <Select value={lotChoice} onValueChange={setLotChoice}>
                   <SelectTrigger id="lotId">
                     <SelectValue />
                   </SelectTrigger>
@@ -764,14 +836,47 @@ export function MovementForm({
                         {l.code} · {l.balanceLabel}
                       </SelectItem>
                     ))}
+                    {/* A delivery IS a batch. Owners only, one layer down. */}
+                    {direction === "in" && canStartBatch && (
+                      <SelectItem value={NEW_LOT}>New batch…</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
+                {lotChoice === NEW_LOT && (
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="grid gap-2">
+                        <Label htmlFor="newLotCode">Batch code</Label>
+                        <Input
+                          id="newLotCode"
+                          name="newLotCode"
+                          required
+                          maxLength={120}
+                          autoFocus
+                          placeholder="e.g. B-2026-04-15"
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="newLotExpiresOn">Good until</Label>
+                        <Input
+                          id="newLotExpiresOn"
+                          name="newLotExpiresOn"
+                          type="date"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Starts the batch and puts this delivery in it. Good until
+                      is optional.
+                    </p>
+                  </>
+                )}
               </div>
             )}
 
             <div className="grid gap-2">
               <Label htmlFor="locationAssetId">Where</Label>
-              <Select name="locationAssetId" defaultValue={NO_LOCATION}>
+              <Select name="locationAssetId" defaultValue={startingPlace}>
                 <SelectTrigger id="locationAssetId">
                   <SelectValue />
                 </SelectTrigger>

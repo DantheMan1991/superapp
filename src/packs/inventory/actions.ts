@@ -450,6 +450,7 @@ export async function receiveStockAction(input: unknown) {
       itemId: z.string().uuid(),
       lotId: z.string().uuid().optional(),
       newLotCode: z.string().min(1).max(120).optional(),
+      newLotExpiresOn: optionalDate.nullable(),
       quantity: z.number().positive().max(1_000_000_000),
       // Cents, and an integer: money that arrives as 12.5 cents is money that
       // has already been divided somewhere it should not have been.

@@ -8,7 +8,7 @@ Open **Land** in the sidebar and click a {{parcel|lower}}'s name. This page hold
 
 ## What you see
 
-- **The top of the page.** `All land` takes you back to the list. The title is the {{parcel|lower}}'s name, and the line under it reads, for example, `Owned · 40.12 acres`. A retired {{parcel|lower}} carries {badge:retired|outline} and has no buttons. On an active one, owners see {button:Edit|outline} and {button:Retire|outline}.
+- **The top of the page.** `All land` takes you back to the list. The title is the {{parcel|lower}}'s name, and the line under it reads, for example, `Owned · 40.12 acres`. On an active one, owners see {button:Edit|outline} and {button:Retire|outline}. A retired {{parcel|lower}} carries {badge:retired|outline} and owners see {button:Put it back|outline} instead.
 - **`Boundary`.** What was measured off the map against what the deed says. When a boundary has been traced, the heading continues `· measures 39.8 acres`, and a box shows `Measured` and `Recorded` side by side. If the two are more than 5% apart, a badge such as {badge:8% apart|outline} appears and the text reads `Worth a look. A deed figure and a fence line disagree for real reasons — an easement, a creek, a boundary drawn casually — so neither number is corrected here.` If they agree: `Close enough to the recorded figure. Both are kept as they are.` With no recorded area: `Nothing to compare it against — no area is recorded here.` Nothing here ever changes the recorded area. The words `the site plan` in this section are a link that scrolls to the map. Owners also see {button:Add a boundary|outline}, or {button:Replace boundary|outline} once one exists.
 - **`Site plan`.** `What is on the ground — and what is only proposed.` The aerial map. See [The site plan](site-plan.md), which also covers the `What it will take` panel that counts posts and wire off the drawing.
 - **`Details`.** `Tenure`, `Deed or lease` and `Area`, as recorded. `In {{zone|plural|lower}}`, the total area of the active {{zone|plural|lower}}, with a note of how many have no area recorded. `Not divided up` or `Over by`, the difference between the {{parcel|lower}}'s area and its {{zone|plural|lower}}, shown only when every figure is known. `Notes`.
@@ -29,7 +29,15 @@ Open **Land** in the sidebar and click a {{parcel|lower}}'s name. This page hold
 ## How to retire the {{parcel|lower}}
 
 1. Click {button:Retire|outline}. The dialog is `Retire [name]?` and reads `Ground that has been sold, or a lease that has ended. Nothing is deleted — every cost recorded against it keeps reporting, and it stops being offered anywhere new.` If it has active {{zone|plural|lower}}, a line says how many will be retired with it.
-2. Click {button:Retire parcel|primary}. It reads `Retiring…`. Retiring is one way.
+2. Click {button:Retire parcel|primary}. It reads `Retiring…`.
+
+## How to put a retired {{parcel|lower}} back
+
+1. Open it — retired {{parcel|plural|lower}} are hidden on the Land list, so add `?retired=1` to the address to find it — and click {button:Put it back|outline}.
+2. The dialog is `Put [name] back?` and reads `It goes back to being ground the business holds, and it can be reported on and built on again. Its {{zone|plural|lower}} stay retired — put each one back from the table when you want it. If this {{parcel|lower}} was combined into another, this does not undo that: the ground moved across and does not come back with it.`
+3. Click {button:Put it back|primary}. You see `[name] is back`, and where some of its {{zone|plural|lower}} are still retired it says how many.
+
+**Its {{zone|plural|lower}} do not come back with it, and that is on purpose.** Retiring a {{parcel|lower}} retires the {{zone|plural|lower}} on it, but nothing records which of the retired ones went that way and which you retired months earlier for their own reasons. Bringing them all back would invent that. Put each one back from the table instead, which is also the only way to tell them apart.
 
 ## How to paste a boundary you already have
 
@@ -64,6 +72,15 @@ The box cannot edit a shape. To move a corner, use {button:Move the corners|outl
 2. `Retire {{zone|lower}}` asks `Retire [name]?`: `Its history stays, and so does every cost recorded against it. It stops being offered anywhere new, and whatever it is currently for is closed today.`
 3. To retire several, check their rows and click {button:Retire|outline}. It asks once more, `Retire 3? Their history is kept`.
 
+## How to put a retired {{zone|lower}} back
+
+1. Set the `Status` filter above the table to `Retired`, or to both.
+2. Click {button:Put back|ghost} on its row — a card on a phone, the last column on a computer. It is also on the {{zone|lower}}'s own page as {button:Put the {{zone|lower}} back|outline}.
+3. The dialog is `Put [name] back?` and reads `It can be used and reported on again, and everything already recorded against it is unchanged. Whatever it was for stays closed — that was true on the day it was retired — so say what it is for now once it is back.`
+4. Click {button:Put it back|primary}. You see `[name] is back`.
+
+**Whatever it was for stays closed.** Retiring closed it on that day and that was true, so the {{zone|lower}} comes back with nothing declared. Set what it is for again from its menu.
+
 ## Messages
 
 | Message | What it means |
@@ -73,8 +90,8 @@ The box cannot edit a shape. To move a corner, use {button:Move the corners|outl
 
 ## Not on this page
 
-Nothing here changes the recorded area from a measurement. A measurement stays a measurement. Retiring is one way.
+Nothing here changes the recorded area from a measurement. A measurement stays a measurement. Putting a {{parcel|lower}} back never undoes a combine — the ground moved across to the survivor and stays there.
 
 ## Who can do what
 
-Owners edit and retire the {{parcel|lower}}, add or replace the boundary, add, retire and set the use of {{zone|plural|lower}}, and accept or discard proposals. Staff see everything without those buttons. Anyone can draw on the site plan.
+Owners edit, retire and put back the {{parcel|lower}}, add or replace the boundary, add, retire, put back and set the use of {{zone|plural|lower}}, and accept or discard proposals. Staff see everything without those buttons. Anyone can draw on the site plan.

@@ -74,4 +74,4 @@ Setting what the {{zone|lower}} is for is done from its menu on the {{parcel|low
 
 ## Who can do what
 
-Everyone can record a stay, move something off and remove a stay. Owners can also add or replace the boundary. A retired {{zone|lower}} has no buttons.
+Everyone can record a stay, move something on or off, and remove a stay. Owners can also add or replace the boundary. A retired {{zone|lower}} shows owners {button:Put the {{zone|lower}} back|outline} and nothing else.

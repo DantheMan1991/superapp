@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Check, Navigation, Plus, Trash2, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/app/use-confirm";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -83,6 +84,7 @@ export function FeaturePanel({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [editing, setEditing] = useState(false);
+  const { confirm, confirmDialog } = useConfirm();
   const [details, setDetails] = useState<[string, string][]>(
     Object.entries(feature.attributes).map(([k, v]) => [k, String(v)]),
   );
@@ -153,7 +155,29 @@ export function FeaturePanel({
     });
   }
 
-  function remove() {
+  async function remove() {
+    /**
+     * **THE ONE-CLICK DELETE WAS THE ODD ONE OUT, and it sat beside `Edit
+     * details`.** Deleting the SAME fence from the list below needs a tick and
+     * then a second click on `Delete 1? This cannot be undone`; deleting it
+     * from here needed one tap, on a phone, next to the button you actually
+     * wanted. There is no undo and a drawn fence can be twenty walked corners.
+     *
+     * ASK FIRST, THEN START THE TRANSITION — never `await confirm` inside one.
+     * See `use-confirm.tsx`: the dialog's own state update cannot commit while
+     * the transition is parked on the promise it would resolve.
+     */
+    if (
+      !(await confirm({
+        title: `Delete ${feature.name || featureKindLabel(feature.kind)}?`,
+        description:
+          "It comes off the plan for good, and what was drawn cannot be got back. To keep the record that it was once there, mark it as removed instead.",
+        confirmLabel: "Delete",
+        destructive: true,
+      }))
+    ) {
+      return;
+    }
     startTransition(async () => {
       const result = await deleteFeatureAction({ id: feature.id });
       if ("error" in result) {
@@ -168,6 +192,7 @@ export function FeaturePanel({
 
   return (
     <div className="rounded-md border p-4">
+      {confirmDialog}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">

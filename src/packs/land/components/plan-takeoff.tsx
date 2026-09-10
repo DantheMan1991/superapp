@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/app/use-confirm";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -79,6 +80,7 @@ export function PlanTakeoff({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [adding, setAdding] = useState(false);
+  const { confirm, confirmDialog } = useConfirm();
 
   // The SAME function the action will validate against, so the numbers on
   // screen are the ones that get stored.
@@ -192,7 +194,20 @@ export function PlanTakeoff({
     });
   }
 
-  function removeItem(id: string) {
+  async function removeItem(id: string, label: string) {
+    // A saved line is what somebody ordered from. Taking it off the list is
+    // small, and it is still not something to do by brushing a button.
+    if (
+      !(await confirm({
+        title: `Remove ${label} from the list?`,
+        description:
+          "It comes off this saved list. Anything the drawing produces is counted again the next time you take it off.",
+        confirmLabel: "Remove",
+        destructive: true,
+      }))
+    ) {
+      return;
+    }
     startTransition(async () => {
       const result = await deletePlanItemAction({ id });
       if ("error" in result) {
@@ -203,7 +218,24 @@ export function PlanTakeoff({
     });
   }
 
-  function removePlan() {
+  async function removePlan() {
+    /**
+     * **THIS ONE FIRED ON A SINGLE CLICK AND TAKES THE WHOLE SAVED LIST WITH
+     * IT** — every line, every price somebody typed, and the quantities an
+     * order was placed against. What it proposes stays on the plan, which is
+     * the one reassuring thing about it and the sentence the dialog leads with.
+     */
+    if (
+      !(await confirm({
+        title: `Remove the ${plan.name} plan?`,
+        description:
+          "The saved list goes with it — every line and every price typed on it. What it proposed stays on the plan; only the costing is lost.",
+        confirmLabel: "Remove plan",
+        destructive: true,
+      }))
+    ) {
+      return;
+    }
     startTransition(async () => {
       const result = await deletePlanAction({ id: plan.id });
       if ("error" in result) {
@@ -247,6 +279,7 @@ export function PlanTakeoff({
 
   return (
     <div className="rounded-md border p-4">
+      {confirmDialog}
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="text-sm font-medium">
           {plan.name}
@@ -310,7 +343,7 @@ export function PlanTakeoff({
                       className="text-muted-foreground"
                       aria-label={`Remove ${row.total.label}`}
                       disabled={pending}
-                      onClick={() => removeItem(row.item!.id)}
+                      onClick={() => removeItem(row.item!.id, row.total.label)}
                     >
                       <Trash2 className="mr-2 h-4 w-4" />
                       Remove
@@ -369,7 +402,7 @@ export function PlanTakeoff({
                       variant="ghost"
                       aria-label={`Remove ${row.total.label}`}
                       disabled={pending}
-                      onClick={() => removeItem(row.item!.id)}
+                      onClick={() => removeItem(row.item!.id, row.total.label)}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>

@@ -61,6 +61,8 @@ import {
   listZones,
   retireParcel,
   retireZone,
+  unretireParcel,
+  unretireZone,
   setParcelBoundary,
   setZoneBoundary,
   zoneAtPoint,
@@ -852,6 +854,91 @@ d("land ops", () => {
   });
 
   // ---- retirement ------------------------------------------------------
+
+  it("puts a retired zone back, cost object and all", async () => {
+    const parcel = await newParcel("Mis-clicked");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "North 40" }),
+    );
+    await asOwner((tx) => retireZone(tx, ownerCtx(), zone.id, "2026-05-01"));
+
+    const archived = (await membersOf(ZONE_DIMENSION)).find(
+      (m) => m.packEntityId === zone.id,
+    );
+    expect(archived?.isActive).toBe(false);
+
+    const back = await asOwner((tx) => unretireZone(tx, ownerCtx(), zone.id));
+    expect(back.status).toBe("active");
+
+    /**
+     * **THE MEMBER HAS TO COME BACK WITH IT.** A zone that is active while its
+     * dimension member is archived is the defect `reopenLivestockLot` shipped
+     * with: everything tagged to it silently stops being taggable.
+     */
+    const revived = (await membersOf(ZONE_DIMENSION)).find(
+      (m) => m.packEntityId === zone.id,
+    );
+    expect(revived?.isActive).toBe(true);
+  });
+
+  it("leaves what it was for closed, because that was true on the day", async () => {
+    const parcel = await newParcel("Use Stays Closed");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Hayfield" }),
+    );
+    await asOwner((tx) =>
+      startZoneUse(tx, ownerCtx(), zone.id, {
+        use: "hay",
+        startedOn: "2026-04-01",
+      }),
+    );
+    await asOwner((tx) => retireZone(tx, ownerCtx(), zone.id, "2026-05-01"));
+    await asOwner((tx) => unretireZone(tx, ownerCtx(), zone.id));
+
+    const uses = await asOwner((tx) => listZoneUses(tx, tenantId, zone.id));
+    expect(uses).toHaveLength(1);
+    expect(uses[0].endedOn).toBe("2026-05-01");
+  });
+
+  it("refuses to bring a zone back onto retired ground", async () => {
+    const parcel = await newParcel("Whole Farm Sold");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Bottom" }),
+    );
+    await asOwner((tx) => retireParcel(tx, ownerCtx(), parcel.id));
+    await expect(
+      asOwner((tx) => unretireZone(tx, ownerCtx(), zone.id)),
+    ).rejects.toThrow(LandError);
+
+    // The right order works, and the parcel comes back ALONE.
+    const back = await asOwner((tx) =>
+      unretireParcel(tx, ownerCtx(), parcel.id),
+    );
+    expect(back.parcel.status).toBe("active");
+    // **THE CASCADE IS NOT REVERSED**, because nothing recorded which retired
+    // zones went with it. They come back one at a time, which is also the only
+    // way anybody can tell them apart.
+    expect(back.zonesStillRetired).toBe(1);
+    const still = await asOwner((tx) => getZone(tx, tenantId, zone.id));
+    expect(still?.status).toBe("retired");
+
+    const revived = await asOwner((tx) => unretireZone(tx, ownerCtx(), zone.id));
+    expect(revived.status).toBe("active");
+  });
+
+  it("refuses to put back something that is not retired", async () => {
+    const parcel = await newParcel("Still Here");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Live" }),
+    );
+    await expect(
+      asOwner((tx) => unretireZone(tx, ownerCtx(), zone.id)),
+    ).rejects.toThrow(LandError);
+    await expect(
+      asOwner((tx) => unretireParcel(tx, ownerCtx(), parcel.id)),
+    ).rejects.toThrow(LandError);
+  });
+
 
   it("retiring a parcel retires its zones and archives every cost object", async () => {
     const parcel = await newParcel("Sold Ground");

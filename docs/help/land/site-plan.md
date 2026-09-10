@@ -55,7 +55,7 @@ Nothing here changes the drawing. Grouping, filtering and finding only change wh
 3. `Details` are free pairs of a name and a value: `Anything worth recording — strands, whether it is hot, how deep it is buried. Lowercase names with underscores.` Add a row with {button:Add a detail|outline|plus} and remove one with its {icon:x}. Two names matter: `post_spacing` and `wire_count` are what the materials list counts posts and wire from.
 4. Click {button:Save|primary}. You see `Saved`.
 
-{button:It is built|outline|check} marks a proposal as built. {button:Mark as removed|outline} marks a built feature as gone. {button:It is back|outline} restores a removed one. {button:Delete|destructive|trash} removes the feature at once, with no confirmation.
+{button:It is built|outline|check} marks a proposal as built. {button:Mark as removed|outline} marks a built feature as gone. {button:It is back|outline} restores a removed one. {button:Delete|destructive|trash} asks first — `Delete [name]?`, `It comes off the plan for good, and what was drawn cannot be got back. To keep the record that it was once there, mark it as removed instead.` — and then takes it off the plan.
 
 ## How to walk to a corner with the phone
 
@@ -79,8 +79,8 @@ What arrives on the plan, all as proposals: one {{zone|lower}} each, named `{{zo
 
 1. Read `What it will take`. On a computer it is a table of `Material`, the quantity and the price; on a phone each material is a card carrying the same things, with {button:Remove|ghost|trash} at the bottom of the ones you can remove. A point counts as one of its kind. A line counts as its length. A fence also yields `Posts` and `Wire`, but only when its details carry `post_spacing` and `wire_count`; otherwise an amber note says which fence `needs a post_spacing before posts can be counted`. A feature not drawn yet is noted too. Areas count nothing.
 2. Owners click {button:Save this list|primary} to keep today's figures as the order. You see `List saved`. After that the columns read `Saved` and `Now`, so if the drawing changes the difference shows in amber, with the note `The drawing has changed since this list was saved. Both figures are kept as they are — take it off again when you are ready to reorder.` {button:Take it off again|primary} saves the new figures.
-3. Click {button:Add a line|outline|plus} for something the drawing cannot count, such as insulators: `Material`, `Called`, `How many`, `Unit` and `Each costs`. A saved line can be removed with its {button:Remove [line]|ghost|trash}. When any line has a price, a total reads `$412.00 for the lines that have a price`. Prices are what you typed on that day. There is no catalog.
-4. {button:Remove plan|ghost} removes the plan and its list. You see `Plan removed — what it proposed is still on the plan`.
+3. Click {button:Add a line|outline|plus} for something the drawing cannot count, such as insulators: `Material`, `Called`, `How many`, `Unit` and `Each costs`. A saved line can be removed with its {button:Remove [line]|ghost|trash}, which asks `Remove [line] from the list?` first. When any line has a price, a total reads `$412.00 for the lines that have a price`. Prices are what you typed on that day. There is no catalog.
+4. {button:Remove plan|ghost} removes the plan and its list. It asks first: `Remove the [name] plan?`, `The saved list goes with it — every line and every price typed on it. What it proposed stays on the plan; only the costing is lost.` Then you see `Plan removed — what it proposed is still on the plan`.
 
 ## Messages
 

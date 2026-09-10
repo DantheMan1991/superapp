@@ -65,6 +65,7 @@ import { PlannedZones } from "@/packs/land/components/planned-zones";
 import { PlanTakeoff } from "@/packs/land/components/plan-takeoff";
 import { ZoneTable } from "@/packs/land/components/zone-table";
 import { BoundarySummary } from "@/packs/land/components/boundary-summary";
+import { UnretireParcel } from "@/packs/land/components/unretire-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -329,7 +330,22 @@ export default async function ParcelDetailPage({
         }
         actions={
           isOwner ? (
-            <ParcelControls parcel={view} unit={unit} zoneWord={zoneWord} />
+            parcel.status === "retired" ? (
+              /**
+               * **A RETIRED PARCEL USED TO HAVE NO BUTTONS AT ALL**, which made
+               * a mis-click permanent. Retiring is not a delete — the row and
+               * every cost tagged to it are still here — so the way back
+               * belongs where the way out was.
+               */
+              <UnretireParcel
+                id={parcel.id}
+                name={parcel.name}
+                parcelWord={labelFor(pack.labels, "parcel", "Parcel")}
+                zoneWord={zoneWord}
+              />
+            ) : (
+              <ParcelControls parcel={view} unit={unit} zoneWord={zoneWord} />
+            )
           ) : null
         }
       />

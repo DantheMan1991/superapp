@@ -578,6 +578,70 @@ grounds, which were never about optimisation as such.
 
 ## Build log
 
+### 2026-09-10 — Deleting is deliberate, and retiring is not (`claude/deleting-is-deliberate`)
+
+Module-improvement review slice 6, and it closes the oldest open item in this
+dossier: *"a retired zone cannot be un-retired, and neither can a parcel …
+a harsher rule than intended for what is often a mis-click."*
+
+**Three one-click deletes, and the inconsistency was the tell.** Deleting a
+fence from the LIST needs a tick and then a second click on `Delete 1? This
+cannot be undone`. Deleting the SAME fence from its panel needed one tap — on a
+phone, immediately beside `Edit details`. Two more behaved the same way and
+neither was on the review's list: a saved takeoff line's `Remove`, and
+`Remove plan`, which takes every line and every price somebody typed with it.
+All three now go through the kit's `useConfirm`, which is what the accounting
+module standardised on and what land had never used.
+
+**`await confirm` NEVER inside `startTransition`** — the hook's own file says
+why and it is worth repeating here: opening the dialog is a state update, and
+one made inside a transition cannot commit while that transition is parked on
+the promise only the answered dialog resolves. Ask first, then start the
+transition.
+
+**Retirement was never meant to be a one-way door.** The pack retires rather
+than deletes precisely because the history is worth keeping — the row is all
+still there and every cost tagged to it still reports. The only thing between a
+mis-click and its undo was that nobody had written `unretireZone` and
+`unretireParcel`.
+
+**THE COST OBJECT COMES BACK WITH IT**, and there is a shipped bug that says why
+that needs stating: `reopenLivestockLot` set `status` with a direct `update` and
+left the dimension member archived, so a lot could be active while nothing could
+be tagged to it. Both ops here call `upsertDimensionMember`, and a test asserts
+the member is active again.
+
+**Three decisions, each stated in the dialog rather than left to be discovered:**
+
+  - **Whatever a zone was for stays closed.** `retireZone` closed the open use
+    on the day it retired, and that is a fact about a date rather than a side
+    effect to unwind. The ground comes back with nothing declared.
+  - **A parcel comes back ALONE.** Retiring cascades to its zones; nothing
+    records which of the retired ones went with the cascade and which were
+    retired months earlier on their own account, so reactivating them all would
+    invent that history and asking a timestamp would be the same guess wearing
+    a query. The count comes back so the screen can say how many stay retired.
+  - **This never undoes a combine.** `combineParcels` retires the absorbed
+    parcels AFTER moving their zones and merging their geometry, so bringing one
+    back gives you an active parcel with no ground. The dialog says exactly that,
+    and the guides stopped claiming retirement is one-way in the same breath.
+
+A zone cannot come back onto retired ground — the common case is somebody
+undoing a cascade from the wrong end, and the refusal names the fix.
+
+**Driven on Hilltop (dev) at 375 and 1280.** Retired `Pen 3` from its row menu,
+found it under the `Retired` filter with `Put back` at x=242–343 in a 375px
+screen and at x=1120 in the desktop table, put it back both times, and saw
+`Paddocks (4)` again. Opened all three delete confirms and CANCELLED each, with
+`15 shown` unchanged afterwards. Created a parcel, retired it, put it back
+(`Its paddocks stay retired… If this parcel was combined into another, this does
+not undo that`), and confirmed `Edit`/`Retire` returned in place of
+`Put it back`.
+
+**Dev fixture:** `Review — retired parcel` on Hilltop, left RETIRED on purpose —
+nothing on this farm was in that state before, and the Land list hides it, so it
+is also a live example of the `?retired=1` gap the review noted.
+
 ### 2026-09-10 — The tenant's own word (`claude/the-tenants-own-word`)
 
 Module-improvement review slice 5. `zone` and `parcel` are RENAMEABLE (ADR
@@ -1790,6 +1854,10 @@ rented ground, and retrofitting it means rewriting the report.
   state was initialised once at mount, so clicking from one fence to the next
   left the edit form holding the previous fence's name and attributes while
   `save` targeted the new one
+- `src/packs/land/components/unretire-controls.tsx` — putting retired ground
+  back, the other half of a door that only opened one way. Both buttons ask
+  first, and each dialog says what putting it back does NOT do — a parcel's
+  zones stay retired, a zone's use stays closed, and neither undoes a combine
 - `src/packs/land/components/plan-legend.tsx` — the key. Only the kinds
   actually on this parcel, drawn from the same `featureStyle` the map uses
 - `src/packs/land/core/survey.ts` — pure, and deliberately free of `navigator`
@@ -1899,6 +1967,19 @@ rented ground, and retrofitting it means rewriting the report.
   is right and made moving impossible from the occupant's own page, which is a
   reminder that a correct refusal can still be a broken workflow. The day the
   move happens belongs to the NEW paddock only; see the 2026-08-16 entry.
+- **RETIRING IS REVERSIBLE; DELETING IS NOT, AND THE SCREENS HAVE TO SAY WHICH
+  IS WHICH.** Every destructive act in the pack now asks first — the feature
+  panel's `Delete`, a takeoff line's `Remove`, `Remove plan`, and the two bulk
+  acts that already did. Retirement asks too, and then can be undone.
+  `unretireZone` / `unretireParcel` **call `upsertDimensionMember`**: a row
+  active while its dimension member is archived is the defect
+  `reopenLivestockLot` shipped with, and nothing can be tagged to it.
+- **PUTTING A PARCEL BACK BRINGS BACK THE PARCEL AND NOTHING ELSE.** Retiring
+  cascaded; nothing recorded which retired zones went with it, so reactivating
+  them all would invent history and inferring it from `updated_at` would be the
+  same guess wearing a query. The count travels back so a screen can say so.
+  **It never undoes a combine either** — the absorbed parcel's ground moved to
+  the survivor and stays there.
 - **A RENAMEABLE WORD TRAVELS AS DATA, NEVER AS A LOOKUP.** `core/` and
   `ops.ts` resolve no labels and must not start: `subdivide` takes `zoneWord` in
   its options beside `laneWidthM`, `layoutPaddocks` takes it in `LayoutInput`,
@@ -2068,11 +2149,11 @@ rented ground, and retrofitting it means rewriting the report.
 - **A fenced area cannot be turned into a zone directly.** You can divide it;
   you cannot say "this loop is North Pasture" in one act. Drawing the paddock
   by hand still works, so this is a shortcut rather than a gap.
-- **A retired paddock still cannot be un-retired, and now a discarded one is
-  simply gone.** 2b.6 added the delete that proposals needed; it deliberately
-  did not touch retirement, which stays one-way. The asymmetry is defensible —
-  a proposal has no history to lose — but "discard" and "retire" sitting a
-  centimetre apart on the same screen is worth watching somebody use.
+- ~~A retired paddock still cannot be un-retired~~ — **closed 2026-09-10.** It
+  can, from its row or its own page, and so can a parcel. A DISCARDED proposal
+  is still simply gone, and that asymmetry is still the right one — a proposal
+  has no history to lose — but "discard" and "retire" sitting a centimetre apart
+  on the same screen is still worth watching somebody use.
 - ~~Nothing bulk-acts on paddocks~~ — **closed the same day, in 2b.7.** The
   paddock table has the same filter, sort and multi-select; its bulk act is
   RETIRE rather than delete, for the reason that slice's entry gives.
@@ -2213,12 +2294,13 @@ rented ground, and retrofitting it means rewriting the report.
   `assets`'s kinds are. They should come from profile `packConfig` once P5
   exists — and now two packs are waiting on it rather than one.
 - **Retired parcels are opt-in on the list** (`?retired=1`) with no UI control to
-  set it. The query param works and nothing renders a toggle.
-- **A retired zone cannot be un-retired**, and neither can a parcel. Retirement
-  is deliberately not a delete, but it is currently also not reversible, which is
-  a harsher rule than intended for what is often a mis-click — and it now also
-  means **a combine cannot be undone**. The dialog says so; reversing a
-  retirement is worth more than it was.
+  set it. The query param works and nothing renders a toggle — **and this now
+  matters more**, because a retired parcel has a `Put it back` button on its
+  page and the only way to reach that page is the address trick.
+- ~~A retired zone cannot be un-retired~~ — **closed 2026-09-10**, for a zone
+  and a parcel both. **A combine still cannot be undone**, and that is now said
+  on the button rather than left to be discovered: putting the absorbed parcel
+  back gives you an active parcel with no ground.
 - **Combining does not merge notes or dissolve the seam** between adjacent
   deeds. Both are cosmetic against a boundary that already measures correctly.
 - **No bulk entry.** Twenty paddocks is twenty dialogs. The design's *schema at

@@ -79,11 +79,11 @@ export default async function AdminClientsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Clients"
-        description="Your whole book of business — prospects through paying clients."
+        description="Every workspace on the platform. The relationship — people, deals, notes — is the party in the operator's CRM."
         actions={
           <Button asChild size="sm">
             <Link href="/admin/clients/new">
-              <Plus className="size-4" /> Add business
+              <Plus className="size-4" /> New workspace
             </Link>
           </Button>
         }
@@ -107,8 +107,8 @@ export default async function AdminClientsPage() {
         {unlinked > 0 && (
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm">
             <span className="text-muted-foreground">
-              {unlinked} workspace{unlinked === 1 ? " has" : "s have"} no party
-              in the operator&apos;s CRM yet.
+              {unlinked} workspace{unlinked === 1 ? " has" : "s have"}{" "}
+              no party in the operator&apos;s CRM yet.
             </span>
             <CreatePartiesButton count={unlinked} />
           </div>
@@ -132,7 +132,7 @@ export default async function AdminClientsPage() {
                     colSpan={6}
                     className="py-10 text-center text-muted-foreground"
                   >
-                    No clients yet. Create the first one to get moving.
+                    No workspaces yet. Provision the first one from a party in the CRM.
                   </TableCell>
                 </TableRow>
               )}

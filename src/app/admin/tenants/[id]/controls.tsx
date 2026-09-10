@@ -13,7 +13,6 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import {
-  convertProspectToClient,
   installProfile,
   setTenantLabels,
   setTenantStatus,
@@ -21,7 +20,9 @@ import {
 } from "../../actions";
 import { operatorRefusal } from "@/lib/operator-guard";
 
-const STATUSES = ["prospect", "onboarding", "active", "paused", "churned"] as const;
+// `prospect` left with back-office slice 3: a business without a workspace is
+// a party in the operator's CRM, never a tenant row.
+const STATUSES = ["onboarding", "active", "paused", "churned"] as const;
 
 export function TenantStatusSelect({
   tenantId,
@@ -110,41 +111,6 @@ export function ModuleToggle({
       }
       aria-label={`Toggle ${moduleId}`}
     />
-  );
-}
-
-export function ConvertProspectForm({
-  tenantId,
-  contactEmail,
-}: {
-  tenantId: string;
-  contactEmail: string | null;
-}) {
-  const [pending, startTransition] = useTransition();
-
-  return (
-    <form
-      action={(formData) =>
-        startTransition(async () => {
-          const res = await convertProspectToClient(formData);
-          if (res?.error) toast.error(res.error);
-          else if (res?.warning) toast.warning(res.warning);
-          else toast.success("Converted — they're a client now");
-        })
-      }
-      className="space-y-2"
-    >
-      <input type="hidden" name="tenantId" value={tenantId} />
-      <Input
-        name="ownerEmail"
-        type="email"
-        defaultValue={contactEmail ?? ""}
-        placeholder="owner@business.com (optional invite)"
-      />
-      <Button type="submit" size="sm" disabled={pending} className="w-full">
-        {pending ? "Converting…" : "Convert to client"}
-      </Button>
-    </form>
   );
 }
 

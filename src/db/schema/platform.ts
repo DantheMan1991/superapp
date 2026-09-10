@@ -20,6 +20,12 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
+/**
+ * `prospect` is RETIRED (back-office slice 3, ADR 0041): a business without a
+ * workspace is a party in the operator's CRM, never a tenant row. The value
+ * stays because Postgres cannot drop one from an enum; nothing writes it and
+ * the console's schema refuses it.
+ */
 export const tenantStatus = pgEnum("tenant_status", [
   "prospect",
   "onboarding",
@@ -63,10 +69,14 @@ export const moduleStatus = pgEnum("module_status", [
 ]);
 
 /**
- * A business in the CRM — the record that spans the whole lifecycle.
- * status "prospect" + null clerkOrgId = CRM-only (discovery stage);
- * converting to a client attaches a Clerk Organization to the SAME row,
- * which is what makes it a tenant (the unit of data isolation).
+ * A WORKSPACE — the unit of data isolation: one Clerk Organization, one set
+ * of modules, one subscription, one RLS boundary. Not the relationship: since
+ * ADR 0041 a client is a party in the operator tenant's CRM, and
+ * `operator_party_id` below is the one pointer from here to there. Until
+ * September 2026 this row doubled as the CRM record ("a business in the CRM
+ * — the record that spans the whole lifecycle", with `status = 'prospect'`
+ * meaning no workspace yet), which was right before the CRM existed and
+ * wrong after.
  */
 export const tenants = pgTable(
   "tenants",
@@ -451,23 +461,6 @@ export const subscriptions = pgTable(
   ],
 );
 
-/** Admin CRM notes about a client. Super-admin eyes only (enforced by RLS). */
-export const tenantNotes = pgTable(
-  "tenant_notes",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    tenantId: uuid("tenant_id")
-      .notNull()
-      .references(() => tenants.id, { onDelete: "cascade" }),
-    authorClerkUserId: text("author_clerk_user_id").notNull(),
-    body: text("body").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [index("tenant_notes_tenant_idx").on(t.tenantId)],
-);
-
 /** Append-only log of sensitive actions. */
 export const auditLog = pgTable(
   "audit_log",
@@ -632,7 +625,6 @@ export type TenantModule = typeof tenantModules.$inferSelect;
 
 export type Subscription = typeof subscriptions.$inferSelect;
 
-export type TenantNote = typeof tenantNotes.$inferSelect;
 
 export type AuditEntry = typeof auditLog.$inferSelect;
 

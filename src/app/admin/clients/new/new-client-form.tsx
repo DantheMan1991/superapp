@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -13,32 +14,54 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { createClientBusiness } from "../../actions";
+import { provisionWorkspace } from "../../actions";
 
-const INDUSTRIES = [
-  { value: "real-estate", label: "Real estate (flipping / rentals)" },
-  { value: "construction", label: "Construction / trades" },
-  { value: "farm", label: "Farm / agriculture" },
-  { value: "general", label: "Other / general" },
-];
+export interface PartyOption {
+  id: string;
+  name: string;
+}
 
-export function NewClientForm() {
+export interface ProfileOption {
+  slug: string;
+  name: string;
+  description: string;
+}
+
+const NO_PROFILE = "general";
+
+/**
+ * New workspace — provisioned FROM a party (ADR 0041, slice 3). The
+ * relationship already exists in the operator's CRM; this makes the Clerk
+ * organization, the tenant row and the pointer, installs a profile when one
+ * is chosen, and invites the owner when an address is given.
+ */
+export function NewWorkspaceForm({
+  parties,
+  profiles,
+}: {
+  parties: PartyOption[];
+  profiles: ProfileOption[];
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [industry, setIndustry] = useState("construction");
-  const [kind, setKind] = useState<"prospect" | "client">("prospect");
+  const [partyId, setPartyId] = useState("");
+  const [profileSlug, setProfileSlug] = useState(NO_PROFILE);
 
   function onSubmit(formData: FormData) {
-    formData.set("industry", industry);
-    formData.set("kind", kind);
+    if (!partyId) {
+      toast.error("Pick the business from the CRM first");
+      return;
+    }
+    formData.set("partyId", partyId);
+    formData.set("profileSlug", profileSlug === NO_PROFILE ? "" : profileSlug);
     startTransition(async () => {
-      const result = await createClientBusiness(formData);
+      const result = await provisionWorkspace(formData);
       if (result?.error) {
         toast.error(result.error);
         return;
       }
       if (result?.warning) toast.warning(result.warning);
-      else toast.success(kind === "prospect" ? "Prospect added" : "Client created");
+      else toast.success("Workspace created");
       router.push(
         result?.tenantId ? `/admin/tenants/${result.tenantId}` : "/admin",
       );
@@ -48,77 +71,61 @@ export function NewClientForm() {
   return (
     <form action={onSubmit} className="space-y-5">
       <div className="space-y-2">
-        <Label>Stage</Label>
-        <Select
-          value={kind}
-          onValueChange={(v) => setKind(v as "prospect" | "client")}
-        >
+        <Label>Business</Label>
+        <Select value={partyId} onValueChange={setPartyId}>
           <SelectTrigger className="w-full">
-            <SelectValue />
+            <SelectValue placeholder="Pick from the operator's CRM…" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="prospect">
-              Prospect — CRM record only, no platform access yet
-            </SelectItem>
-            <SelectItem value="client">
-              Client — creates their workspace, ready to onboard
-            </SelectItem>
-          </SelectContent>
-        </Select>
-        <p className="text-xs text-muted-foreground">
-          Prospects can be converted to clients later with one click — same
-          record, history intact.
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="name">Business name</Label>
-        <Input
-          id="name"
-          name="name"
-          placeholder="Maple Street Properties LLC"
-          required
-          minLength={2}
-          maxLength={120}
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label>Industry</Label>
-        <Select value={industry} onValueChange={setIndustry}>
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {INDUSTRIES.map((i) => (
-              <SelectItem key={i.value} value={i.value}>
-                {i.label}
+            {parties.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.name}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
+        <p className="text-xs text-muted-foreground">
+          Only businesses without a workspace are listed. Not there yet? Add the
+          company in the CRM first — a workspace is made for a relationship
+          that already exists. Back to{" "}
+          <Link href="/admin" className="underline hover:text-foreground">
+            Clients
+          </Link>
+          .
+        </p>
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="contactName">
-          Contact person{" "}
-          <span className="font-normal text-muted-foreground">(optional)</span>
-        </Label>
-        <Input
-          id="contactName"
-          name="contactName"
-          placeholder="Mike Rossi, owner"
-          maxLength={120}
-        />
+        <Label>Industry profile</Label>
+        <Select value={profileSlug} onValueChange={setProfileSlug}>
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NO_PROFILE}>
+              General — no profile, core tools only
+            </SelectItem>
+            {profiles.map((p) => (
+              <SelectItem key={p.slug} value={p.slug}>
+                {p.name}
+                <span className="ml-2 text-xs text-muted-foreground">
+                  {p.description}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          A profile switches on its packs and sets the vocabulary. It can be
+          installed later from the workspace&apos;s page.
+        </p>
       </div>
 
       <div className="space-y-2">
         <Label htmlFor="ownerEmail">
-          {kind === "client" ? "Owner email" : "Contact email"}{" "}
+          Owner email{" "}
           <span className="font-normal text-muted-foreground">
-            {kind === "client"
-              ? "(optional — sends an invitation to join)"
-              : "(optional — used when you convert them later)"}
+            (optional — sends an invitation to join)
           </span>
         </Label>
         <Input
@@ -129,12 +136,8 @@ export function NewClientForm() {
         />
       </div>
 
-      <Button type="submit" disabled={pending} className="w-full">
-        {pending
-          ? "Saving…"
-          : kind === "prospect"
-            ? "Add prospect"
-            : "Create client"}
+      <Button type="submit" disabled={pending || !partyId} className="w-full">
+        {pending ? "Creating…" : "Create workspace"}
       </Button>
     </form>
   );

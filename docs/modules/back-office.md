@@ -6,12 +6,64 @@
 > `/admin` shrinks to what only a superadmin can do — provision a workspace,
 > switch features on, watch, support. Plan and slice order below; the decision
 > under it is [ADR 0041](../decisions/0041-a-tenant-is-a-workspace-and-a-client-is-a-party-in-the-operator-tenant.md).
-> Status: partial — slices 0–2 built 2026-09-09 (the operator tenant exists; a client is a party; Discovery comes home and a lead lands as a lead); slices 3–7 planned below · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: partial — slices 0–3 built (the operator tenant exists; a client is a party; Discovery comes home and a lead lands as a lead; a workspace is provisioned from a party and prospects retire); slices 4–7 planned below · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this area. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-10 — Slice 3: a workspace is provisioned from a party; prospects retire (`claude/back-office-3-provision-from-a-party`)
+
+**Slices 1 and 2 were DRIVEN first, on production, in the pane with the
+founder signed in, after #476 deployed.** *Create its party* on Hilltop Farm
+made the party, and the breadcrumb attached its July transcript on the spot;
+*Open in CRM* switched the active organization and landed on the record
+(`platform` source, the contact email as main). A full health check as a
+stranger landed in Yosher App — both parties, the contact point, both records
+with source `health-check`, the affiliation, the note, the follow-up on the
+CRM's Follow-ups tab (`/dashboard/m/crm/tasks`), the attached discovery record
+with the assessment as its intake notes — and the visitor got the written
+health check. **No deal**, because Yosher App had no pipeline yet: the Board's
+first visit (`/dashboard/m/crm/deals`) made *Sales*, so the next lead gets one
+— a prerequisite worth knowing, recorded under Open items. **The lead email
+failed**: Resend reports `mail.yosherapp.com` is not a verified sending
+domain, so EVERY platform notification fails until the founder verifies it
+(`outbound_emails.status = failed`). And "haveno" on the Clients page — a
+JSX newline after `}` collapsing to nothing — fixed here.
+
+- **A workspace is provisioned FROM a party.** `/admin/clients/new` is *New
+  workspace*: the operator's organization parties that no workspace points at,
+  an industry profile (or none), an owner's email. `provisionWorkspace`
+  (actions.ts) composes `resolveProvisionTarget` → Clerk → `upsertTenantFromOrg`
+  → `attachWorkspaceToParty` (`src/app/admin/provision.ts`). Everything the
+  console can check is checked before Clerk is asked for anything — the party
+  is the operator's, is a business, has no workspace — and Clerk is handed an
+  explicit, deduped slug (the carried gotcha, closed) with Clerk's own suffix
+  as the fallback when the slug is taken on its side by an organization this
+  database no longer knows. Then the pointer (once), the party's email as the
+  contact, a *Workspace provisioned* note on the timeline, the profile install,
+  the invitation. `createClientBusiness`, `convertProspectToClient`, the
+  Stage select, the Prospect card and *Convert to client* are gone.
+- **Prospects retire.** `status = 'prospect'` is refused by the console's
+  schema and documented retired on the enum (Postgres cannot drop a value).
+  `npm run db:retire-prospects [-- --dev] [-- --delete]` lists the rows with
+  no Clerk organization and deletes on `--delete` — dry run by default,
+  because the judgment is the founder's. Nothing cascades from them any more:
+  slice 2 moved every audit home. Dev: the three deleted. Production: the same
+  three listed (`test`, `greenline-test-landscaping`, `butt-fuck`), deleted
+  on the founder's word.
+- **`tenant_notes` dropped** (migration 0289): it held nothing on either
+  database. The notes machinery left with it — `ensureOperatorParty` no
+  longer carries notes, the Relationship card no longer lists them, and a note
+  about a client is the party's.
+- **Tests.** `tests/operator-provision.test.ts` (db-backed): refuses an
+  unknown party, a person, a business with a workspace; resolves name, email
+  and a deduped slug; attaches once with the note and links nothing the second
+  time. `operator-relationship.test.ts` without the notes;
+  `tests/isolation/core.test.ts` loses its `tenant_notes` block.
+- **Not driven in a browser** — creating a workspace makes a real Clerk
+  organization. The founder provisions the first real client from its party.
 
 ### 2026-09-09 — Slice 2: Discovery comes home, and a lead lands as a lead (`claude/back-office-2-discovery-comes-home`)
 
@@ -381,7 +433,7 @@ in no other tenant. **Docs.** This file; `health-check.md`; `crm.md`;
 operator's CRM: the party, the deal at New, the assessment on the timeline,
 the follow-up on `/tasks`.
 
-#### Slice 3 — Provision from a party; prospects retire
+#### Slice 3 — Provision from a party; prospects retire — BUILT 2026-09-10
 
 **What.** `/admin/clients/new` becomes *New workspace*: a type-ahead over the
 operator's parties (`searchReachableParties` through the shared door under the
@@ -474,7 +526,7 @@ RLS and an isolation test, per `security.md` §4.
 | `tenants.operator_party_id` | 1 — built, migration 0287 | The party in the operator tenant this workspace was provisioned for | Soft pointer, no FK; written once at conversion; null when the party is gone |
 | `audits.tenant_id`, `audits.party_id`, `audits.origin_tenant_id` | 2 — built, migration 0288 | Discovery becomes the operator's, attached to the party; the origin is a breadcrumb for attaching later | `member_all` added beside `superadmin_all`; `won`/`lost` retired; the migration refuses a database with audits and no operator |
 | `src/lib/leads/` | 2 — built | The slot a stranger's arrival passes through (ADR 0042) | No table. CRM fills it |
-| `tenant_notes` | 3 | Dropped | After slice 1's move has deployed |
+| `tenant_notes` | 3 — dropped, migration 0289 | Dropped | It held nothing on either database by then |
 | `support_sessions` | 4 | A superadmin's time-boxed read-only view of a tenant | Honoured for renders only |
 | `operator_postings` | 5 | Stripe object → operator invoice | `stripe_object_id UNIQUE` is the idempotency arbiter |
 | `memberships.last_seen_at` | 6 | Health signal | Stamped at most hourly |
@@ -488,6 +540,7 @@ RLS and an isolation test, per `security.md` §4.
 - `src/lib/interview.ts` — `promoteSession` is a landing, not a provisioning; `notifyOperator` the email.
 - `src/lib/sites/enquiries.ts`, `bookings.ts` — on the slot, no proposition.
 - `src/app/admin/audits/` — every action through `asOperator`; `audit-controls.tsx` attach and delete.
+- `src/app/admin/provision.ts` (slice 3) — resolve the party, attach the workspace; `provisionWorkspace` in actions.ts is the only place Clerk is asked; `scripts/retire-prospects.ts`.
 - `src/app/admin/actions.ts` — provisioning from a party; the guard.
 - `src/lib/auth.ts` — `resolveTenantContext()` learns support sessions (slice 4), renders only.
 - `src/app/api/webhooks/stripe/route.ts`, `src/lib/retainer-billing.ts` — the money loop's sources.
@@ -517,6 +570,15 @@ RLS and an isolation test, per `security.md` §4.
   test transcripts to pass the guard; naming one (a Yosher org on the
   development Clerk instance, then `db:operator-tenant -- <slug> --dev`) is
   the founder's, and the db-backed tests mint their own until then.
+- **Platform email is down until Resend verifies `mail.yosherapp.com`.**
+  Found by the slice-2 drive: the lead email was attempted and refused;
+  enquiries and digests fail the same way. Nothing in the code.
+- **The operator's default pipeline must exist before the first lead**, or
+  the lead lands without a deal (by design — ADR 0042). The Board's first
+  visit makes it; it exists on production now.
+- **Drive residue in Yosher App's CRM**: *Yosher Drive Test Plumbing*, the
+  person *Drive Test*, its discovery record and follow-up — delete on the
+  founder's word.
 - **Retainer time as revenue or WIP**, and whether the client-facing meter
   becomes a projection of the pack's engagements — deferred (ADR 0041, Notes).
 - **Yosher's own public site** is the `(marketing)` route group in code, not a

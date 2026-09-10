@@ -74,15 +74,7 @@ export function CreatePartyButton({ tenantId }: { tenantId: string }) {
             toast.error(res.error);
             return;
           }
-          if (!res.created) {
-            toast.success("Already linked to its party");
-            return;
-          }
-          toast.success(
-            res.notesMoved > 0
-              ? `Party created — ${plural(res.notesMoved, "note", "notes")} moved onto its timeline`
-              : "Party created",
-          );
+          toast.success(res.created ? "Party created" : "Already linked to its party");
         })
       }
     >
@@ -107,10 +99,7 @@ export function CreatePartiesButton({ count }: { count: number }) {
             toast.error(res.error);
             return;
           }
-          toast.success(
-            `${plural(res.created, "party", "parties")} created` +
-              (res.notesMoved > 0 ? `, ${plural(res.notesMoved, "note", "notes")} moved` : ""),
-          );
+          toast.success(`${plural(res.created, "party", "parties")} created`);
         })
       }
     >

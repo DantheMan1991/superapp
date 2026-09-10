@@ -10,6 +10,7 @@
     "db:create-role": "tsx scripts/create-app-role.ts",
     "db:create-mail-role": "tsx scripts/create-mail-role.ts",
     "db:operator-tenant": "tsx scripts/operator-tenant.ts",
+    "db:retire-prospects": "tsx scripts/retire-prospects.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed.ts",

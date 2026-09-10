@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { desc } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { Plus } from "lucide-react";
-import { withSystem, schema } from "@/db";
+import { withSystem, withTenant, schema } from "@/db";
+import { getOperatorTenant } from "@/lib/operator-tenant";
 import type { AuditMessage } from "@/db/schema";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,9 +34,41 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 export default async function AuditsPage() {
-  const audits = await withSystem((tx) =>
-    tx.query.audits.findMany({ orderBy: desc(schema.audits.updatedAt) }),
-  );
+  // Discovery is the operator's (ADR 0041, slice 2): read through its own
+  // context as staff, with the party each record is about and — when a
+  // workspace points at that party — the workspace, for the link.
+  const operator = await getOperatorTenant();
+  const rows = operator
+    ? await withTenant(
+        operator.id,
+        (tx) =>
+          tx
+            .select({ audit: schema.audits, partyName: schema.parties.displayName })
+            .from(schema.audits)
+            .leftJoin(
+              schema.parties,
+              and(
+                eq(schema.parties.tenantId, schema.audits.tenantId),
+                eq(schema.parties.id, schema.audits.partyId),
+              ),
+            )
+            .where(eq(schema.audits.tenantId, operator.id))
+            .orderBy(desc(schema.audits.updatedAt)),
+        { role: "staff" },
+      )
+    : [];
+  const partyIds = rows.flatMap((r) => (r.audit.partyId ? [r.audit.partyId] : []));
+  const workspaces =
+    partyIds.length > 0
+      ? await withSystem((tx) =>
+          tx
+            .select({ id: schema.tenants.id, partyId: schema.tenants.operatorPartyId })
+            .from(schema.tenants)
+            .where(inArray(schema.tenants.operatorPartyId, partyIds)),
+        )
+      : [];
+  const workspaceByParty = new Map(workspaces.map((w) => [w.partyId, w.id]));
+  const audits = rows.map((r) => r.audit);
   const selfServeCount = audits.filter((a) => a.source === "self_serve").length;
 
   return (
@@ -115,13 +148,17 @@ export default async function AuditsPage() {
                       )}
                       <div className="text-xs text-muted-foreground">
                         {audit.contactName && <>{audit.contactName} · </>}
-                        {audit.tenantId && (
+                        {audit.partyId && workspaceByParty.get(audit.partyId) ? (
                           <Link
-                            href={`/admin/tenants/${audit.tenantId}`}
+                            href={`/admin/tenants/${workspaceByParty.get(audit.partyId)}`}
                             className="underline hover:text-foreground"
                           >
-                            CRM record
+                            Workspace
                           </Link>
+                        ) : audit.partyId ? (
+                          <span>In the CRM</span>
+                        ) : (
+                          <span>Not attached to a business yet</span>
                         )}
                       </div>
                     </TableCell>

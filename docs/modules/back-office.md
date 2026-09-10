@@ -6,12 +6,83 @@
 > `/admin` shrinks to what only a superadmin can do — provision a workspace,
 > switch features on, watch, support. Plan and slice order below; the decision
 > under it is [ADR 0041](../decisions/0041-a-tenant-is-a-workspace-and-a-client-is-a-party-in-the-operator-tenant.md).
-> Status: partial — slices 0–1 built 2026-09-09 (the operator tenant exists; a client is a party); slices 2–7 planned below · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: partial — slices 0–2 built 2026-09-09 (the operator tenant exists; a client is a party; Discovery comes home and a lead lands as a lead); slices 3–7 planned below · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this area. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-09 — Slice 2: Discovery comes home, and a lead lands as a lead (`claude/back-office-2-discovery-comes-home`)
+
+- **`audits` is the operator's table now** (migration 0288): `tenant_id` is
+  the OPERATOR (NOT NULL), `party_id` the party the record is about,
+  `origin_tenant_id` the tenant it used to be about — a breadcrumb
+  `ensureOperatorParty` reads to attach the record the day that business
+  gets its party, and nothing reads for access. Policies: `superadmin_all`
+  kept, `member_all` added — Yosher's staff read discovery, like the sales
+  team they are.
+- **One migration, and it refuses where it must.** The rows move and the
+  member policy land in the same file, because either half alone is wrong: a
+  member policy before the move lets a client's staff read a transcript about
+  themselves; the move before the policy hides the rows from the operator.
+  And it RAISES on a database that has audits but no named operator, rather
+  than leave a transcript under its old tenant. The dev branch tripped that
+  guard on the first run — four test transcripts, no operator — and the four
+  were deleted rather than an operator named for a fixture; the founder
+  names the dev operator when convenient.
+- **The leads slot** — `src/lib/leads/` (types, registry, resolve), the
+  eighth declared extension point and the first whose caller is a public door
+  with nobody at the keyboard (ADR 0042). A door that has written the party
+  calls `landLead(tx, ctx, { partyId, contactPartyId?, source, proposition? })`
+  inside its own transaction; `src/modules/crm/leads.ts` fills it — record
+  with source, the person joined to the business, a deal in the opening stage
+  when there is a proposition, a note. It never fails the arrival and never
+  lets a database error escape (that poisons the transaction): an affiliation
+  is looked up before it is added and is never primary, and a missing default
+  pipeline is a deal not opened. **The enquiry and the booking moved onto the
+  slot** with no proposition — behaviour unchanged, and neither file names a
+  CRM table any more.
+- **The health check lands in the operator tenant.** `promoteSession` stops
+  writing `tenants` and `subscriptions`. It claims the session atomically
+  (only `awaiting_contact` flips to `completed`, so a double submit answers
+  with the first landing), then, as `staff` with no user inside
+  `withTenant(operator, …)`: the business party, the person (matched by
+  email when the operator already knows the inbox), the contact point, the
+  discovery record with `party_id`, the slot with a proposition, a follow-up
+  due today, an audit-log row — one transaction. A failed landing hands the
+  claim back so the visitor can retry. Then the operator's owners are
+  emailed (`kind: health_check`, Reply-To the visitor — the Open item "no
+  notification on promotion" closes), and the assessment, once written, is
+  also the record's intake notes so the founder's discovery starts from what
+  the visitor was told. No operator named → `unavailable`, logged.
+- **Console.** Every Discovery action runs through the operator's context as
+  an owner (`asOperator` in `audits/actions.ts`) — never `withSystem`. A new
+  engagement is for a PARTY (the operator's organizations; the tenant page's
+  *Start discovery* passes its party, or says to create one first). The list
+  links to the workspace that points at the party; the record page has *Open
+  in CRM*, a *Workspace* link, an *Attach* picker for a record nothing points
+  at, and *Delete* (`interview_sessions.audit_id` is SET NULL, so the public
+  session keeps its own transcript). `won`/`lost` are no longer written —
+  the outcome is the deal's; the enum keeps them because Postgres cannot drop
+  a value, and the Zod schema refuses them.
+- **Tests.** `tests/leads-db.test.ts` (off → nothing; plain message → record
+  with source; proposition → deal in the opening stage, affiliation, note;
+  second arrival → no duplicate, and a write after the slot in the same
+  transaction still succeeds). `tests/interview.test.ts` promotion rewritten:
+  lands in the operator, mints no workspace, deal + affiliation + note when
+  CRM is on, same inbox is the same person, double submit is one landing,
+  assessment failure still lands. `tests/isolation/interview.test.ts` gains
+  the audits block: the operator's members read and write, another tenant
+  sees and changes nothing, no context sees nothing. All obtain the operator
+  rather than mint one.
+- **Not driven in a browser** — same reason as slices 0 and 1. What to try by
+  hand after merge: one health check end to end on yosherapp.com, then Yosher
+  App's CRM — the business, the person, the deal at *New*, the note, the
+  follow-up on `/tasks` — and the email to the owners.
+- **Carried from slice 0** (again, since #475 merged before it could be
+  written): Clerk auto-suffixes the slug of an organization created through
+  its API, and the console shows the slug nowhere.
 
 ### 2026-09-09 — Slice 1: a client is a party (`claude/back-office-1-a-client-is-a-party`)
 
@@ -264,7 +335,7 @@ after this one has deployed and been read.
 the name resolver answers null for a pointer whose party is gone. **Docs.**
 This file; `crm.md` gets a paragraph on the operator's records.
 
-#### Slice 2 — Discovery comes home, and a lead lands as a lead
+#### Slice 2 — Discovery comes home, and a lead lands as a lead — BUILT 2026-09-09
 
 **The slot.** `src/lib/leads/` — `types.ts`, `registry.ts`, `resolve.ts`,
 under the same lint rule as the other registries (only `registry.ts` may
@@ -401,8 +472,8 @@ RLS and an isolation test, per `security.md` §4.
 | --- | --- | --- | --- |
 | `tenants.is_operator` | 0 — built, migration 0286 | Names the operator tenant | Partial unique index `WHERE is_operator`; set by script under `withSystem`, never by a console action |
 | `tenants.operator_party_id` | 1 — built, migration 0287 | The party in the operator tenant this workspace was provisioned for | Soft pointer, no FK; written once at conversion; null when the party is gone |
-| `audits.tenant_id`, `audits.party_id` | 2 | Discovery becomes the operator's, attached to the party | Standard tenant policies replace `audits_superadmin_all`; `won`/`lost` retired |
-| `src/lib/leads/` | 2 | The slot a stranger's arrival passes through | No table. CRM fills it |
+| `audits.tenant_id`, `audits.party_id`, `audits.origin_tenant_id` | 2 — built, migration 0288 | Discovery becomes the operator's, attached to the party; the origin is a breadcrumb for attaching later | `member_all` added beside `superadmin_all`; `won`/`lost` retired; the migration refuses a database with audits and no operator |
+| `src/lib/leads/` | 2 — built | The slot a stranger's arrival passes through (ADR 0042) | No table. CRM fills it |
 | `tenant_notes` | 3 | Dropped | After slice 1's move has deployed |
 | `support_sessions` | 4 | A superadmin's time-boxed read-only view of a tenant | Honoured for renders only |
 | `operator_postings` | 5 | Stripe object → operator invoice | `stripe_object_id UNIQUE` is the idempotency arbiter |
@@ -414,8 +485,9 @@ RLS and an isolation test, per `security.md` §4.
 - `src/lib/operator-tenant.ts` (slice 1) — the operator, read once: id and Clerk org id.
 - `src/app/admin/relationship.ts` + `relationship-controls.tsx` (slice 1) — a client is a party: ensure, read, the three buttons.
 - `src/lib/leads/` (slice 2) — types, registry, resolve; `src/modules/crm/leads.ts` fills it.
-- `src/lib/interview.ts` — `promoteSession` becomes a landing, not a provisioning.
-- `src/lib/sites/enquiries.ts` — moves onto the slot with no proposition.
+- `src/lib/interview.ts` — `promoteSession` is a landing, not a provisioning; `notifyOperator` the email.
+- `src/lib/sites/enquiries.ts`, `bookings.ts` — on the slot, no proposition.
+- `src/app/admin/audits/` — every action through `asOperator`; `audit-controls.tsx` attach and delete.
 - `src/app/admin/actions.ts` — provisioning from a party; the guard.
 - `src/lib/auth.ts` — `resolveTenantContext()` learns support sessions (slice 4), renders only.
 - `src/app/api/webhooks/stripe/route.ts`, `src/lib/retainer-billing.ts` — the money loop's sources.
@@ -441,6 +513,10 @@ RLS and an isolation test, per `security.md` §4.
 
 - **No estimate/quote in Accounting** — core, not this area; the first
   proposal Yosher sends will want one.
+- **The dev branch has no operator.** Slice 2's migration deleted its four
+  test transcripts to pass the guard; naming one (a Yosher org on the
+  development Clerk instance, then `db:operator-tenant -- <slug> --dev`) is
+  the founder's, and the db-backed tests mint their own until then.
 - **Retainer time as revenue or WIP**, and whether the client-facing meter
   becomes a projection of the pack's engagements — deferred (ADR 0041, Notes).
 - **Yosher's own public site** is the `(marketing)` route group in code, not a

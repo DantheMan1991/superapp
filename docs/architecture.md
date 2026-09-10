@@ -254,9 +254,10 @@ Not everything is tenant-scoped, and mixing them up is a security bug.
 
 - **Tenant-scoped** — has `tenant_id`, RLS-policied, reached via `withTenant`.
   Nearly everything.
-- **Platform-level** — `modules` (the catalogue), `audits` (Discovery copilot
-  data, superadmin-only policy), `audit_log`. Reached via `withSystem` after
-  `requireSuperAdmin()`.
+- **Platform-level** — `modules` (the catalogue), `interview_sessions` (an
+  anonymous visitor's conversation, superadmin-only), `audit_log`. Reached
+  via `withSystem` after `requireSuperAdmin()`. `audits` left this list with
+  back-office slice 2: a discovery record is the operator tenant's row.
 - **The operator tenant's rows are tenant-scoped**, like any tenant's (ADR
   0041). When the console must read one — a party's name beside a workspace,
   back-office slice 1 — it goes through `withTenant(operatorTenantId, …)`:

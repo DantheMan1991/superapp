@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { asc } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
-import { withSystem, schema } from "@/db";
+import { withTenant, schema } from "@/db";
+import { getOperatorTenant } from "@/lib/operator-tenant";
 import {
   Card,
   CardContent,
@@ -16,16 +17,31 @@ export const dynamic = "force-dynamic";
 export default async function NewAuditPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tenant?: string }>;
+  searchParams: Promise<{ party?: string }>;
 }) {
-  const { tenant: preselectedId } = await searchParams;
+  const { party: preselectedId } = await searchParams;
 
-  const businesses = await withSystem((tx) =>
-    tx.query.tenants.findMany({
-      columns: { id: true, name: true, industry: true, status: true },
-      orderBy: asc(schema.tenants.name),
-    }),
-  );
+  // The businesses a discovery can be about: the operator's organization
+  // parties (ADR 0041, slice 2), read through its own context as staff.
+  const operator = await getOperatorTenant();
+  const businesses = operator
+    ? await withTenant(
+        operator.id,
+        (tx) =>
+          tx
+            .select({ id: schema.parties.id, name: schema.parties.displayName })
+            .from(schema.parties)
+            .where(
+              and(
+                eq(schema.parties.tenantId, operator.id),
+                eq(schema.parties.kind, "organization"),
+                eq(schema.parties.isActive, true),
+              ),
+            )
+            .orderBy(asc(schema.parties.displayName)),
+        { role: "staff" },
+      )
+    : [];
 
   return (
     <div className="mx-auto max-w-lg space-y-6">
@@ -40,8 +56,8 @@ export default async function NewAuditPage({
         <CardHeader>
           <CardTitle>New discovery engagement</CardTitle>
           <CardDescription>
-            Pick the business from your CRM — prospects and clients both work.
-            The copilot gets everything the CRM knows about them.
+            Pick the business from the operator&apos;s CRM. The copilot starts
+            from its name and whatever you type below.
           </CardDescription>
         </CardHeader>
         <CardContent>

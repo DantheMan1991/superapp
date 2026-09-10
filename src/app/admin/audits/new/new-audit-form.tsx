@@ -19,8 +19,6 @@ import { createAuditEngagement } from "../actions";
 export interface BusinessOption {
   id: string;
   name: string;
-  industry: string;
-  status: string;
 }
 
 export function NewAuditForm({
@@ -32,14 +30,14 @@ export function NewAuditForm({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [tenantId, setTenantId] = useState(preselectedId ?? "");
+  const [partyId, setPartyId] = useState(preselectedId ?? "");
 
   function onSubmit(formData: FormData) {
-    if (!tenantId) {
+    if (!partyId) {
       toast.error("Pick a business from the CRM first");
       return;
     }
-    formData.set("tenantId", tenantId);
+    formData.set("partyId", partyId);
     startTransition(async () => {
       const result = await createAuditEngagement(formData);
       if (result?.error) {
@@ -56,7 +54,7 @@ export function NewAuditForm({
     <form action={onSubmit} className="space-y-5">
       <div className="space-y-2">
         <Label>Business</Label>
-        <Select value={tenantId} onValueChange={setTenantId}>
+        <Select value={partyId} onValueChange={setPartyId}>
           <SelectTrigger className="w-full">
             <SelectValue placeholder="Pick from the CRM…" />
           </SelectTrigger>
@@ -64,22 +62,17 @@ export function NewAuditForm({
             {businesses.map((b) => (
               <SelectItem key={b.id} value={b.id}>
                 {b.name}
-                <span className="ml-2 text-xs text-muted-foreground capitalize">
-                  {b.industry} · {b.status.replace("_", " ")}
-                </span>
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">
-          Not in the CRM yet?{" "}
-          <Link
-            href="/admin/clients/new"
-            className="underline hover:text-foreground"
-          >
-            Add the business first
-          </Link>{" "}
-          — every engagement hangs off a CRM record.
+          Every engagement hangs off a party in the operator&apos;s CRM. Not
+          there yet? Create it from the workspace&apos;s page in{" "}
+          <Link href="/admin" className="underline hover:text-foreground">
+            Clients
+          </Link>
+          , or in the CRM itself.
         </p>
       </div>
 
@@ -99,7 +92,7 @@ export function NewAuditForm({
 
       <Button
         type="submit"
-        disabled={pending || !tenantId}
+        disabled={pending || !partyId}
         className="w-full"
       >
         {pending ? "Creating…" : "Start discovery"}

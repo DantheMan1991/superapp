@@ -4,7 +4,7 @@ import { schema, withSystem, withTenant, type Tx } from "@/db";
 import type { SiteEnquiry } from "@/db/schema";
 import { logAuditInTx } from "@/lib/audit";
 import { sendEmail } from "@/lib/email/send";
-import { isModuleEnabled } from "@/lib/modules";
+import { landLead } from "@/lib/leads/resolve";
 import { createParty, PartyError } from "@/lib/parties";
 import { addContactPoint, findPartiesByContact } from "@/lib/parties/contacts";
 import { ipKey, overPublicCap, startOfUtcDay } from "@/lib/public-caps";
@@ -148,7 +148,6 @@ export async function receiveSiteEnquiry(
   const ipHash = ipKey(ip);
   if (await overPublicCap(CAP, ipHash)) return { ok: false, reason: "capped" };
 
-  const crmOn = await isModuleEnabled(hit.tenantId, "crm");
 
   let outcome: Outcome;
   try {
@@ -211,12 +210,16 @@ export async function receiveSiteEnquiry(
 
         // 2. CRM's record, only when CRM is on. Existing details keep their
         //    own source; the website is where a NEW record came from.
-        if (crmOn) {
-          await tx
-            .insert(schema.crmPartyDetails)
-            .values({ tenantId: hit.tenantId, partyId: party.id, source: "website" })
-            .onConflictDoNothing();
-        }
+        // The CRM's record — through the slot the CRM fills (ADR 0042), so
+        // this file no longer names a CRM table. Whether CRM is on is the
+        // slot's question, answered in this transaction.
+        const crmOn = (
+          await landLead(
+            tx,
+            { tenantId: hit.tenantId, userId: "" },
+            { partyId: party.id, source: "website" },
+          )
+        ).includes("crm");
 
         // 3. The follow-up, due today so it reaches the morning digest.
         const words: EnquiryWords = {

@@ -54,7 +54,9 @@ export type EmailKind =
    * recipient is the site's contact email or the owners' profiles, never
    * anything the visitor typed. Reply-To is the visitor, so answering works.
    */
-  | "enquiry";
+  | "enquiry"
+  /** A health-check lead landing in the operator tenant (ADR 0041, slice 2). */
+  | "health_check";
 
 /** Per tenant, per hour. A valve, not accounting. */
 export const TENANT_HOURLY_CAP = 100;

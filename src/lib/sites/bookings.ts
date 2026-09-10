@@ -3,6 +3,7 @@ import { and, eq, gte, isNotNull, sql } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { logAuditInTx } from "@/lib/audit";
 import { sendEmail } from "@/lib/email/send";
+import { landLead } from "@/lib/leads/resolve";
 import { isModuleEnabled } from "@/lib/modules";
 import { createParty } from "@/lib/parties";
 import { findPartiesByContact } from "@/lib/parties/contacts";
@@ -161,7 +162,6 @@ export async function receiveSiteBooking(
   const start = new Date(input.start);
   if (Number.isNaN(start.getTime())) return { ok: false, reason: "fields", fieldErrors: { start: "Pick a time." } };
 
-  const crmOn = await isModuleEnabled(hit.tenantId, "crm");
 
   let outcome: Outcome;
   try {
@@ -222,13 +222,15 @@ export async function receiveSiteBooking(
         await tryAddContactPoint(tx, hit.tenantId, party.id, "email", input.email);
         if (input.phone) await tryAddContactPoint(tx, hit.tenantId, party.id, "phone", input.phone);
 
-        // 2. CRM's record, only when CRM is on.
-        if (crmOn) {
-          await tx
-            .insert(schema.crmPartyDetails)
-            .values({ tenantId: hit.tenantId, partyId: party.id, source: "website" })
-            .onConflictDoNothing();
-        }
+        // 2. CRM's record, only when CRM is on — through the slot the CRM
+        //    fills (ADR 0042), which answers whether it ran.
+        const crmOn = (
+          await landLead(
+            tx,
+            { tenantId: hit.tenantId, userId: "" },
+            { partyId: party.id, source: "website" },
+          )
+        ).includes("crm");
 
         const words: EnquiryWords = {
           siteTitle: site.title || tenant?.name || "your website",

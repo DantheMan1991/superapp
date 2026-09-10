@@ -254,6 +254,23 @@ What is **not** sanctioned: adding a column to a core table for one industry,
 branching on `tenant.industry` inside core, or a pack reading another pack's
 tables directly.
 
+**Used an eighth time on 2026-09-09, and for the first time by a PUBLIC door
+with nobody at the keyboard: a stranger's arrival.** The site's enquiry
+form, its booking form and the health check each write a party into a
+tenant as `staff` (ADR 0021), and each then wanted the CRM to know — a record
+with a source, and for the health check a deal at the top of the pipeline
+with the contact joined to the business. Two of them had been inserting into
+`crm_party_details` directly; a deal done that way would be the last-write-
+wins bug the party door's header warns about, and importing CRM from a lib
+inverts the graph. [src/lib/leads/](../src/lib/leads/types.ts) holds the slot
+(types only), `registry.ts` names CRM, and a door calls `resolve.ts` inside
+its own transaction; `src/modules/crm/leads.ts` fills it
+([ADR 0042](decisions/0042-a-strangers-arrival-is-a-lead-the-crm-fills-in.md)).
+Two rules the filler keeps that the others did not need: it never fails the
+arrival, and it never lets a database error escape — inside a transaction
+that poisons everything after it — so anything that could meet a constraint
+is looked up before it is written.
+
 ---
 
 ## 4b. Work is raised and worked where it lives

@@ -45,9 +45,10 @@ that matter for code:
   or an isolation test.
 - **Claude API calls** go through `getClaude()` (`src/lib/claude.ts`, lazy,
   model `claude-opus-4-8`, adaptive thinking, streamed). The Discovery
-  copilot (`/admin/audits`, prompts in `src/lib/discovery.ts`) is
-  superadmin-only; `audits` is platform-level data with a superadmin-only
-  RLS policy.
+  copilot (`/admin/audits`, prompts in `src/lib/discovery.ts`) is reached
+  only from the console, and runs inside the OPERATOR tenant's context —
+  `audits` is the operator's table (member policies) since back-office
+  slice 2, never `withSystem`.
 
 ## Adding a module (the Phase 2 workflow)
 

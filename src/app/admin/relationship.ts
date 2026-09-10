@@ -139,6 +139,19 @@ export async function ensureOperatorParty(
         }
       }
 
+      // Discovery records that moved home before this business had a party
+      // (slice 2's migration) remember where they came from; now they attach.
+      await tx
+        .update(schema.audits)
+        .set({ partyId: party.id, updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.audits.tenantId, operator.id),
+            eq(schema.audits.originTenantId, tenantId),
+            isNull(schema.audits.partyId),
+          ),
+        );
+
       let notesMoved = 0;
       if (crmOn) {
         await tx

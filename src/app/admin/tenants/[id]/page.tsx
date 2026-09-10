@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
-import { withSystem, schema } from "@/db";
+import { withSystem, withTenant, schema } from "@/db";
 import { getFeature, isRenderable } from "@/lib/features";
 import { getIndustryProfile, listIndustryProfiles } from "@/industries";
 import { collectLabelDefinitions, labelRows } from "@/lib/packs/resolve";
@@ -60,7 +60,7 @@ export default async function TenantDetailPage({
     });
     if (!tenant) return null;
 
-    const [allModules, tenantMods, subscription, notes, audit, members, discoveries, retainerView, timeEntries] =
+    const [allModules, tenantMods, subscription, notes, audit, members, retainerView, timeEntries] =
       await Promise.all([
         tx.query.modules.findMany({ orderBy: asc(schema.modules.sortOrder) }),
         tx.query.tenantModules.findMany({
@@ -90,10 +90,6 @@ export default async function TenantDetailPage({
             eq(schema.memberships.profileId, schema.profiles.id),
           )
           .where(eq(schema.memberships.tenantId, tenant.id)),
-        tx.query.audits.findMany({
-          where: eq(schema.audits.tenantId, tenant.id),
-          orderBy: desc(schema.audits.updatedAt),
-        }),
         loadRetainerView(tx, tenant.id),
         tx.query.retainerTimeEntries.findMany({
           where: eq(schema.retainerTimeEntries.tenantId, tenant.id),
@@ -114,11 +110,11 @@ export default async function TenantDetailPage({
       ? await getLedgerIntegrity(tx, tenant.id)
       : null;
 
-    return { tenant, allModules, tenantMods, subscription, notes, audit, members, discoveries, ledgerIntegrity, retainerView, timeEntries };
+    return { tenant, allModules, tenantMods, subscription, notes, audit, members, ledgerIntegrity, retainerView, timeEntries };
   });
 
   if (!data) notFound();
-  const { tenant, allModules, tenantMods, subscription, notes, audit, members, discoveries, ledgerIntegrity, retainerView, timeEntries } =
+  const { tenant, allModules, tenantMods, subscription, notes, audit, members, ledgerIntegrity, retainerView, timeEntries } =
     data;
   const today = todayInRetainerTz();
   const isProspect = !tenant.clerkOrgId;
@@ -132,6 +128,25 @@ export default async function TenantDetailPage({
   const party = tenant.operatorPartyId
     ? await readOperatorParty(tenant.operatorPartyId)
     : null;
+
+  // Discovery is the operator's (slice 2): the records about this workspace's
+  // party, read through the operator's context as staff.
+  const pointer = tenant.operatorPartyId;
+  const discoveries =
+    operator && pointer
+      ? await withTenant(
+          operator.id,
+          (tx) =>
+            tx.query.audits.findMany({
+              where: and(
+                eq(schema.audits.tenantId, operator.id),
+                eq(schema.audits.partyId, pointer),
+              ),
+              orderBy: desc(schema.audits.updatedAt),
+            }),
+          { role: "staff" },
+        )
+      : [];
 
   const enabledBySlug = new Map(
     tenantMods.map((tm) => [tm.moduleId, tm.enabled]),
@@ -221,6 +236,7 @@ export default async function TenantDetailPage({
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
+          {!tenant.isOperator && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Discovery</CardTitle>
@@ -250,13 +266,21 @@ export default async function TenantDetailPage({
                   </Badge>
                 </Link>
               ))}
-              <Button asChild variant="secondary" size="sm">
-                <Link href={`/admin/audits/new?tenant=${tenant.id}`}>
-                  Start discovery
-                </Link>
-              </Button>
+              {pointer ? (
+                <Button asChild variant="secondary" size="sm">
+                  <Link href={`/admin/audits/new?party=${pointer}`}>
+                    Start discovery
+                  </Link>
+                </Button>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Discovery hangs off the party in the operator&apos;s CRM —
+                  create it below first.
+                </p>
+              )}
             </CardContent>
           </Card>
+          )}
 
           <Card>
             <CardHeader>

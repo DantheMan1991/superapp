@@ -17,6 +17,7 @@ Click an {{engagement|lower}}'s name in the list to open it. Everything about on
 - **`Worth`.** The fee, large. Under it, `$120.00 an hour beyond the retainer`, or `no rate set`.
 - **`Extra this month`.** What the overage comes to at the rate. On an {{engagement|lower}} with no hours included the heading changes to `Logged at the rate` and the figure is everything logged. Under it, `nothing is invoiced automatically` — this is a figure to bill from, not a bill.
 - **`Move it along:`** and the buttons beside it. Owners only. Which buttons appear depends on where the {{engagement|lower}} is: see below.
+- **`Onboarding`.** The steps a new {{engagement|lower}} of this kind starts with, and everything already raised from them. Only appears once there is something to show. See below.
 - **`Scope`.** What you agreed to do, shown as you typed it. Only appears when there is one.
 - **`Time`.** Every entry, newest day first: `Day`, `What`, `Who` and `How long`. Each row has {button:Edit|ghost} at the end when you are allowed to change it.
 - **`Month by month`.** Only appears once there is more than one month. Each row is `Month`, `Included`, `Logged`, `Over` and `At the rate`.
@@ -53,6 +54,25 @@ The buttons beside `Move it along:` are only the moves this {{engagement|lower}}
 
 Ending stamps today as the end date, unless you already set one. It also stops the {{engagement|lower}} being offered when you tag something in your accounts — what is already tagged keeps reporting. Reopening puts it back. Nothing asks you to confirm, because every one of these can be undone.
 
+## How to start the onboarding list
+
+The steps come from your industry profile, so they are the ones your business decided a new {{engagement|lower}} needs — not a list we wrote.
+
+1. Find the `Onboarding` panel. Before anything is raised it reads `The steps your profile says a new one starts with.`
+2. Click {button:Start onboarding (6 steps)|outline}. The number is how many it will raise, so you know before you press it.
+3. You see `6 steps raised` and the steps appear underneath, each with a due date worked out from the day the {{engagement|lower}} starts.
+4. Tick each one off as it is done, hand it to somebody, or change its date — the same controls as any other job.
+
+Each step is an ordinary job on your **Work** list. It shows up on the What needs you page, it reaches the daily email, and anyone can tick it off. There is no separate checklist to keep in step.
+
+**Due dates count from the later of the start date and today.** A {{engagement|lower}} you set up three months late does not arrive with every step already overdue.
+
+**You can press it again.** It only ever adds what is missing, so if your profile gains a step next month, pressing it adds that one and leaves the rest alone. The button then reads {button:Add 1 missing step|outline}. A step you have already ticked off does not come back.
+
+If you rename a raised step, pressing the button again adds the original wording back, because the profile still says that step should happen. Change the step in the profile instead, or leave the name alone.
+
+If the panel reads `No list is set up for this kind of work yet`, your profile has no steps for this kind of {{engagement|lower}} — the agency profile deliberately leaves ad-hoc hourly work alone. Ask us to add one.
+
 ## How to change the terms
 
 1. Click {button:Edit terms|outline}.
@@ -69,6 +89,8 @@ Changing `Hours a month` takes effect **from this month onward**. Every earlier 
 | `Entry saved` / `Entry deleted` | Your correction went through. |
 | `Terms saved` | The new terms are in. A changed retainer applies from this month. |
 | `Started` / `Paused` / `Resumed` / `Reopened` / `Ended` | The status moved. |
+| `6 steps raised` | The onboarding steps are now jobs on your Work list. |
+| `No list is set up for this kind of work yet.` | Your profile has no onboarding steps for this kind. Nothing is wrong. |
 | `How long? Try 1:30, 1.5 or 90m.` | The duration box was empty or in a shape it could not read. |
 | `Log between 1 minute and 24 hours.` | One entry cannot be longer than a day. Split it across the days you actually worked. |
 | `That {{engagement|lower}} has ended. Reopen it to log time against it.` | Reopen it first, or log the time against the right one. |
@@ -82,6 +104,8 @@ Changing `Hours a month` takes effect **from this month onward**. Every earlier 
 
 - Nothing is invoiced from here. `Extra this month` is a figure to bill from; you raise the invoice in Accounting.
 - There is no timer to start and stop.
+- You cannot edit the onboarding steps here. They come from your industry profile, and changing them is something we do for you.
+- Onboarding does not start on its own when you start an {{engagement|lower}}. You press the button.
 - You cannot change who the work is for.
 - You cannot attach files or notes to a single entry beyond the one line.
 - Entries cannot be filtered by person or by month, and there is no way to export them.
@@ -90,8 +114,10 @@ Changing `Hours a month` takes effect **from this month onward**. Every earlier 
 
 ## Who can do what
 
-Changing terms and moving the {{engagement|lower}} along belong to the owner.
+Changing terms, moving the {{engagement|lower}} along, and starting the onboarding list belong to the owner. Raising the list puts jobs on other people's plates, which is a decision.
 
 Logging time, correcting an entry and deleting one are open to everyone, an accountant included. The person who did the work is the person who knows how long it took, and a slip is fixed by whoever made it.
+
+Ticking off an onboarding step, handing it to somebody or changing its date is open to everyone too, because it is an ordinary job like any other.
 
 Everyone can see the whole page, the fee and the rate included.

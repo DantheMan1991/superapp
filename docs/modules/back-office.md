@@ -6,12 +6,25 @@
 > `/admin` shrinks to what only a superadmin can do — provision a workspace,
 > switch features on, watch, support. Plan and slice order below; the decision
 > under it is [ADR 0041](../decisions/0041-a-tenant-is-a-workspace-and-a-client-is-a-party-in-the-operator-tenant.md).
-> Status: partial — slices 0–6, 7a and 7b built (the operator tenant exists; a client is a party; Discovery comes home and a lead lands as a lead; a workspace is provisioned from a party and prospects retire; support access; the money loop; health signals; the agency profile and the seed applier; engagements and time); slices 7c–7d planned below · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: partial — slices 0–6, 7a, 7b and 7c built (the operator tenant exists; a client is a party; Discovery comes home and a lead lands as a lead; a workspace is provisioned from a party and prospects retire; support access; the money loop; health signals; the agency profile and the seed applier; engagements and time; onboarding as a Work list); slice 7d planned below · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this area. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-10 — Slice 7c: onboarding as a Work list (`claude/back-office-7c-onboarding-lists`)
+
+- **The steps a new engagement starts with**, contributed by the profile and
+  raised as ORDINARY WORK ITEMS linked to the engagement — never a checklist
+  of the pack's own (extension-model.md §4b). **No new table and no
+  migration**: the work links are the record of what has been raised, which
+  makes the button idempotent and additive with nothing stored.
+- The agency profile contributes six steps for retainers and projects. They
+  reach *What needs you* and the daily digest for free, because they are
+  Work's rows and not this pack's.
+- Full dossier: [professional-services.md](professional-services.md). Guides
+  updated.
 
 ### 2026-09-10 — Slice 7b: engagements and time (`claude/back-office-7b-engagements-and-time`)
 
@@ -689,9 +702,10 @@ profile seed applier [packs-and-profiles.md](packs-and-profiles.md) recorded
 as unbuilt, so that came first.
 
 **In four PRs**, the order and each one's shape in [agency.md](agency.md):
-7a the seed applier and the profile (built); 7b engagements and time (built —
-[professional-services.md](professional-services.md)); 7c onboarding as a
-Work list; 7d Discovery leaves the console.
+7a the seed applier and the profile (built); 7b engagements and time and 7c
+onboarding as a Work list (both built —
+[professional-services.md](professional-services.md)); 7d Discovery leaves
+the console.
 
 **Nothing in it is named Yosher.** Yosher is the pilot, as Hilltop Farm is the
 homestead profile's.

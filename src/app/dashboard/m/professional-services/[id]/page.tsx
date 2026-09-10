@@ -29,6 +29,9 @@ import {
   PACK,
   whoLogged,
 } from "@/packs/professional-services/ops";
+import { previewOnboarding } from "@/packs/professional-services/onboarding-ops";
+import { OnboardingPanel } from "@/packs/professional-services/components/onboarding-panel";
+import { listAssignableMembers, memberLabel } from "@/lib/team";
 import {
   engagementKindLabel,
   engagementStatusLabel,
@@ -73,18 +76,20 @@ export default async function EngagementPage({
     async (tx) => {
       const detail = await getEngagementDetail(tx, ctx.tenant.id, id, month);
       if (!detail) return null;
-      const [clients, pack, names] = await Promise.all([
+      const [clients, pack, names, onboarding, team] = await Promise.all([
         listClientCandidates(tx, ctx.tenant.id),
         packContext(tx, ctx.tenant.id, ctx.tenant.industry, PACK),
         whoLogged(tx, detail.entries.map((e) => e.actorClerkUserId)),
+        previewOnboarding(tx, ctx.tenant.id, ctx.tenant.industry, detail.engagement),
+        listAssignableMembers(tx, ctx.tenant.id),
       ]);
-      return { detail, clients, labels: pack.labels, names };
+      return { detail, clients, labels: pack.labels, names, onboarding, team };
     },
     { role: ctx.role },
   );
   if (!data) notFound();
 
-  const { detail, clients, labels, names } = data;
+  const { detail, clients, labels, names, onboarding, team } = data;
   const { engagement, clientName, thisMonth, months, entries } = detail;
   const engagementWord = labelFor(labels, "engagement", "Engagement");
   const clientWord = labelFor(labels, "client", "Client");
@@ -217,6 +222,26 @@ export default async function EngagementPage({
           <StatusButtons engagementId={engagement.id} from={status} to={nextStatuses(status)} />
         </div>
       )}
+
+      {/* What starting this engagement sets in motion (slice 7c). The steps are
+          ORDINARY WORK ITEMS through the Layer 0 verbs, linked to the
+          engagement — never a checklist of this pack's own. */}
+      <OnboardingPanel
+        engagementId={engagement.id}
+        work={onboarding.work.map((w) => ({
+          id: w.id,
+          title: w.title,
+          dueOn: w.dueOn,
+          assigneeClerkUserId: w.assigneeClerkUserId,
+          completedAt: w.completedAt,
+          version: w.version,
+        }))}
+        missingCount={onboarding.missing.length}
+        noListConfigured={onboarding.noListConfigured}
+        members={team.map((m) => ({ clerkUserId: m.clerkUserId, label: memberLabel(m) }))}
+        revalidate={`${BASE}/${engagement.id}`}
+        canStart={isOwner && status !== "ended"}
+      />
 
       {engagement.scope && (
         <Panel className="p-4">

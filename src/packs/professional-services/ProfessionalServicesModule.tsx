@@ -187,6 +187,13 @@ export async function ProfessionalServicesModule({
       </DataTable>
 
       <p className="text-sm text-muted-foreground">
+        <Link
+          href="/dashboard/m/professional-services/discovery"
+          className="hover:underline"
+        >
+          Discovery
+        </Link>
+        {" · "}
         {showEnded ? (
           <Link href="/dashboard/m/professional-services" className="hover:underline">
             Hide ended

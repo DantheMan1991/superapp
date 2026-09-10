@@ -341,7 +341,7 @@ export async function notifyOperator(
   const text = [
     `${contact.contactName} (${contact.email}) finished the health check for ${contact.businessName} — ${exchanges} exchanges.`,
     "",
-    `Discovery: ${appUrl(`/admin/audits/${landed.auditId}`)}`,
+    `Discovery: ${appUrl(`/dashboard/m/professional-services/discovery/${landed.auditId}`)}`,
     landed.crm
       ? "The business and the contact are in the CRM, with a deal on the pipeline and a follow-up due today."
       : "A follow-up is due today.",
@@ -479,7 +479,7 @@ export async function promoteSession(
               title: `${contact.businessName}: the outsourced back office`,
               note: {
                 subject: "Health check",
-                body: `${contact.contactName} completed the health check interview (${session.exchangeCount} exchanges). Transcript and assessment: Discovery, ${appUrl(`/admin/audits/${audit.id}`)}.`,
+                body: `${contact.contactName} completed the health check interview (${session.exchangeCount} exchanges). Transcript and assessment: Discovery, ${appUrl(`/dashboard/m/professional-services/discovery/${audit.id}`)}.`,
               },
             },
           },

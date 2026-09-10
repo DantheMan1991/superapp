@@ -18,25 +18,40 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
-  generateAuditReport,
-  sendAuditMessage,
-  setAuditStatus,
-} from "../actions";
+  generateDiscoveryReportAction,
+  sendDiscoveryMessageAction,
+  setDiscoveryStatusAction,
+} from "../discovery-actions";
 
-// `won` and `lost` left with back-office slice 2: an outcome belongs to the
-// deal in the operator's CRM, which the lead opened.
+/**
+ * The discovery conversation and its two deliverables.
+ *
+ * Lifted from the console's `AuditWorkspace` when Discovery moved into the
+ * pack (back-office slice 7d). The shape is unchanged because it was right;
+ * what changed is who may reach it — this runs in the tenant's own workspace,
+ * for anybody on the team, instead of behind `requireSuperAdmin()`.
+ */
+
 const STATUSES = ["open", "report_ready"] as const;
 
-export function AuditWorkspace({
-  auditId,
+export function DiscoveryWorkspace({
+  discoveryId,
   status,
   messages,
   report,
+  briefed,
 }: {
-  auditId: string;
+  discoveryId: string;
   status: string;
   messages: AuditMessage[];
   report: string | null;
+  /**
+   * Whether anybody has told the copilot what this business sells. When they
+   * have not it still works — it is told to ask rather than invent — and the
+   * page says so once, here, rather than letting somebody wonder why the
+   * pricing is vague.
+   */
+  briefed: boolean;
 }) {
   const [draft, setDraft] = useState("");
   const [sending, startSending] = useTransition();
@@ -52,8 +67,8 @@ export function AuditWorkspace({
     const message = draft.trim();
     if (!message || sending) return;
     startSending(async () => {
-      const res = await sendAuditMessage({ auditId, message });
-      if (res?.error) toast.error(res.error);
+      const res = await sendDiscoveryMessageAction({ discoveryId, message });
+      if (res && "error" in res) toast.error(res.error);
       else setDraft("");
     });
   }
@@ -77,11 +92,11 @@ export function AuditWorkspace({
             disabled={statusPending}
             onValueChange={(next) =>
               startStatus(async () => {
-                const res = await setAuditStatus({
-                  auditId,
+                const res = await setDiscoveryStatusAction({
+                  discoveryId,
                   status: next as (typeof STATUSES)[number],
                 });
-                if (res?.error) toast.error(res.error);
+                if (res && "error" in res) toast.error(res.error);
               })
             }
           >
@@ -102,9 +117,9 @@ export function AuditWorkspace({
             disabled={reporting || messages.length === 0}
             onClick={() =>
               startReporting(async () => {
-                const res = await generateAuditReport({ auditId });
-                if (res?.error) toast.error(res.error);
-                else toast.success("Report generated — see the Report tab");
+                const res = await generateDiscoveryReportAction({ discoveryId });
+                if (res && "error" in res) toast.error(res.error);
+                else toast.success("Report written — see the Report tab");
               })
             }
           >
@@ -115,12 +130,20 @@ export function AuditWorkspace({
             ) : (
               <>
                 <Sparkles className="size-4" />
-                {report ? "Regenerate report" : "Generate report"}
+                {report ? "Write it again" : "Write the report"}
               </>
             )}
           </Button>
         </div>
       </div>
+
+      {!briefed && (
+        <p className="mt-3 rounded-md border px-3 py-2 text-sm text-muted-foreground">
+          The copilot has not been told what your business sells or what it charges, so it
+          will ask instead of guessing at prices. Ask us to fill that in and every
+          discovery after it gets sharper.
+        </p>
+      )}
 
       <TabsContent value="conversation" className="mt-4 space-y-4">
         <Card>
@@ -128,9 +151,9 @@ export function AuditWorkspace({
             <div className="max-h-[55vh] space-y-4 overflow-y-auto pr-1">
               {messages.length === 0 && (
                 <p className="py-8 text-center text-sm text-muted-foreground">
-                  Tell the copilot what you know or what the prospect said —
-                  it will analyze the pain, do the ROI math, and suggest what
-                  to ask next.
+                  Tell the copilot what you know, or what they said — it will work out
+                  what the pain is costing them, do the arithmetic, and tell you what to
+                  ask next.
                 </p>
               )}
               {messages.map((m, i) => (
@@ -155,7 +178,7 @@ export function AuditWorkspace({
               {sending && (
                 <div className="mr-8 flex items-center gap-2 rounded-lg border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
                   <Loader2 className="size-4 animate-spin" />
-                  Analyzing…
+                  Thinking…
                 </div>
               )}
               <div ref={bottomRef} />
@@ -173,7 +196,7 @@ export function AuditWorkspace({
                 }}
                 rows={3}
                 maxLength={20000}
-                placeholder='e.g. "He spends every Sunday doing quotes in Excel, about 5 hours. Loses maybe 1 in 3 jobs because he quotes too slow." (Ctrl+Enter to send)'
+                placeholder='e.g. "He spends every Sunday doing quotes in a spreadsheet, about 5 hours. Loses maybe 1 in 3 jobs because he quotes too slow." (Ctrl+Enter to send)'
                 disabled={sending}
               />
               <Button onClick={send} disabled={sending || !draft.trim()}>
@@ -187,17 +210,17 @@ export function AuditWorkspace({
       <TabsContent value="report" className="mt-4">
         <Card>
           <CardContent className="p-6">
-          {report ? (
-            <div className="prose prose-sm dark:prose-invert max-w-none">
-              <ReactMarkdown>{report}</ReactMarkdown>
-            </div>
-          ) : (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              No report yet. Have the discovery conversation, then hit
-              &ldquo;Generate report&rdquo; — you&apos;ll get the client-facing
-              health check and your internal build spec.
-            </p>
-          )}
+            {report ? (
+              <div className="prose prose-sm dark:prose-invert max-w-none">
+                <ReactMarkdown>{report}</ReactMarkdown>
+              </div>
+            ) : (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                No report yet. Have the conversation, then click{" "}
+                <strong>Write the report</strong> — you get the half you send them and
+                the half you keep.
+              </p>
+            )}
           </CardContent>
         </Card>
       </TabsContent>

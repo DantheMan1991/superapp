@@ -547,6 +547,41 @@ d("land ops", () => {
     ).rejects.toMatchObject({ code: "DATE_ORDER" });
   });
 
+  it("lists zones and features in the order a person reads names in", async () => {
+    // The names `layoutPaddocks` mints. A plain sort puts 10 before 2, so the
+    // pack's flagship act produced exactly the order this refuses.
+    const parcel = await newParcel("Numbered Ground");
+    for (const name of ["Paddock 10", "Paddock 2", "Paddock 1"]) {
+      await asOwner((tx) => createZone(tx, ownerCtx(), { parcelId: parcel.id, name }));
+    }
+    const zones = await asOwner((tx) =>
+      listZones(tx, tenantId, { parcelId: parcel.id }),
+    );
+    expect(zones.map((z) => z.name)).toEqual([
+      "Paddock 1",
+      "Paddock 2",
+      "Paddock 10",
+    ]);
+
+    for (const name of ["North division 10", "North division 2"]) {
+      await asOwner((tx) =>
+        createFeature(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          kind: "fence",
+          name,
+          status: "planned",
+        }),
+      );
+    }
+    const features = await asOwner((tx) =>
+      listFeatures(tx, tenantId, { parcelId: parcel.id }),
+    );
+    expect(features.map((f) => f.name)).toEqual([
+      "North division 2",
+      "North division 10",
+    ]);
+  });
+
   // ---- retirement ------------------------------------------------------
 
   it("retiring a parcel retires its zones and archives every cost object", async () => {

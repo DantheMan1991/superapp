@@ -58,9 +58,26 @@ The pack's first slice. Migrations **0295** (tables) and **0296** (RLS).
   nobody logs two minutes, everybody logs ninety.
 - **Three guides** (`docs/help/professional-services/`), and the two labels
   the pack declares mean they are written in each business's own words.
-- **Not driven** — another session holds the checkout. What to try by hand:
-  agree one, log `1:30` against it, watch the month go over, edit the terms
-  and check the earlier month did not move.
+- **DRIVEN on the dev branch** (Hilltop Farm, 2026-09-10), and it found two
+  things no test would have:
+  - **The summary card and the month table disagreed about the same figure.**
+    The card priced everything logged at the rate whenever the month was not
+    over — *"Logged at the rate $180.00"* beside a table row reading $0.00 for
+    the same month. Hours INSIDE a retainer are already paid for by the fee,
+    so pricing them again invites somebody to bill them twice. The card now
+    uses the table's rule: a retainer engagement always shows its OVERAGE, and
+    only an engagement with no hours included prices everything logged. The
+    two were written minutes apart from the same data and still drifted, which
+    is the argument for driving a screen rather than reading it.
+  - **The kind picker opened on "Hourly"**, because the options are sorted
+    alphabetically and the form took the first. The schema defaults `kind` to
+    `retainer`; the form now agrees with it (`DEFAULT_KIND`).
+  - What passed: the empty state and the owner-only button; agreeing an
+    engagement against an existing party; `1:30` read as 1.5 h and `9` as nine
+    hours; the meter going over (10.5 h of 10.0 h → *"over 10.0 h by 0.5 h"*,
+    $60.00 at $120/h, card and table agreeing); and the claim the slice rests
+    on — raising the retainer to 20 h moved September to 20.0 h and **left
+    August at 10.0 h**.
 
 ## Data model
 

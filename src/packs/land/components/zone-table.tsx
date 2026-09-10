@@ -26,6 +26,7 @@ import {
 import { retireZonesAction } from "../actions";
 import { ZoneControls } from "./zone-controls";
 import { formatArea, fromAcres, type AreaUnit } from "../core/area";
+import { compareNames } from "../core/list";
 import { formatDays } from "../core/rest";
 import { zoneUseLabel } from "../vocabulary";
 
@@ -129,7 +130,7 @@ export function ZoneTable({
     );
     return [...present]
       .map((use) => ({ use, label: zoneUseLabel(use) }))
-      .sort((a, b) => a.label.localeCompare(b.label));
+      .sort((a, b) => compareNames(a.label, b.label));
   }, [zones]);
 
   /**
@@ -169,11 +170,11 @@ export function ZoneTable({
           sortKey === "area" ? a.areaAcres : (a.rest?.restDays ?? null);
         const right =
           sortKey === "area" ? b.areaAcres : (b.rest?.restDays ?? null);
-        if (left === null && right === null) return a.name.localeCompare(b.name);
+        if (left === null && right === null) return compareNames(a.name, b.name);
         if (left === null) return 1;
         if (right === null) return -1;
         const order = left - right;
-        return order === 0 ? a.name.localeCompare(b.name) : order * direction;
+        return order === 0 ? compareNames(a.name, b.name) : order * direction;
       }
 
       const key = (zone: ZoneRow) =>
@@ -184,9 +185,9 @@ export function ZoneTable({
       const right = key(b);
       if (left === "" && right !== "") return 1;
       if (right === "" && left !== "") return -1;
-      const order = left.localeCompare(right);
+      const order = compareNames(left, right);
       return order === 0
-        ? a.name.localeCompare(b.name)
+        ? compareNames(a.name, b.name)
         : order * direction;
     });
   }, [ascending, effectiveUse, sortKey, statusFilter, zones]);

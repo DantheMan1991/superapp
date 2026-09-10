@@ -31,6 +31,7 @@ import {
   type LinearRing,
   type Position,
 } from "./core/geo";
+import { compareNames } from "./core/list";
 import { subdivide, type LanePlacement } from "./core/subdivide";
 import { enclosuresFrom, type FenceRun } from "./core/enclosure";
 import {
@@ -458,6 +459,23 @@ export async function combineParcels(
 
 // ------------------------------------------------------------------ zones ---
 
+/**
+ * Rows in the order a person reads names in: `Paddock 2` before `Paddock 10`.
+ *
+ * **A JS SORT AFTER A SQL READ, AND IT IS EXACT ONLY BECAUSE THE READ IS
+ * UNBOUNDED.** Postgres has no natural collation without an extension, so the
+ * ordering has to happen here — and it is correct only while every row is in
+ * hand. **The day a `limit` arrives on either of these reads, the ordering has
+ * to move into SQL with it**, or the sort will reorder one page of the wrong
+ * rows. That is the same family as the truncations inventory slice 5 found.
+ *
+ * The SQL `orderBy` stays: it is what makes the read deterministic before this
+ * touches it, which is what keeps the result stable across two identical calls.
+ */
+function byName<T extends { name: string }>(rows: readonly T[]): T[] {
+  return [...rows].sort((a, b) => compareNames(a.name, b.name));
+}
+
 export async function listZones(
   tx: Tx,
   tenantId: string,
@@ -466,10 +484,11 @@ export async function listZones(
   const where = [eq(schema.landZones.tenantId, tenantId)];
   if (filter.parcelId) where.push(eq(schema.landZones.parcelId, filter.parcelId));
   if (filter.status) where.push(eq(schema.landZones.status, filter.status));
-  return tx.query.landZones.findMany({
+  const rows = await tx.query.landZones.findMany({
     where: and(...where),
     orderBy: (z, { asc: byAsc }) => [byAsc(z.name)],
   });
+  return byName(rows);
 }
 
 export async function getZone(
@@ -1908,7 +1927,7 @@ export async function listFeatures(
   }
   if (filter.status) where.push(eq(schema.landFeatures.status, filter.status));
   if (filter.kind) where.push(eq(schema.landFeatures.kind, filter.kind));
-  return tx.query.landFeatures.findMany({
+  const rows = await tx.query.landFeatures.findMany({
     where: and(...where),
     // Kind then name, so a list of forty features reads as a legend rather than
     // as whatever order somebody happened to draw them in.
@@ -1918,6 +1937,9 @@ export async function listFeatures(
       byAsc(f.createdAt),
     ],
   });
+  return [...rows].sort(
+    (a, b) => compareNames(a.kind, b.kind) || compareNames(a.name, b.name),
+  );
 }
 
 export async function getFeature(

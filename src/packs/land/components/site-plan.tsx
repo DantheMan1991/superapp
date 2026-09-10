@@ -35,6 +35,7 @@ export function SitePlan({
   parcelBoundary,
   zones,
   features,
+  plans,
   kinds,
   basemap,
   areaUnit,
@@ -55,6 +56,8 @@ export function SitePlan({
     areaAcres: number | null;
   }[];
   features: PanelFeature[];
+  /** Named sets of proposals. The list groups by them; the map does not. */
+  plans: { id: string; name: string }[];
   kinds: TenantFeatureKind[];
   basemap: Basemap;
   areaUnit: AreaUnit;
@@ -129,6 +132,7 @@ export function SitePlan({
 
       <FeatureList
         features={features}
+        plans={plans}
         lengthUnit={lengthUnit}
         canEdit={canEdit}
         selectedId={selectedId}

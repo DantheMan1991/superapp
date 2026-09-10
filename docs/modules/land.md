@@ -578,6 +578,82 @@ grounds, which were never about optimisation as such.
 
 ## Build log
 
+### 2026-09-10 — A plan list you can read (`claude/a-plan-list-you-can-read`)
+
+Module-improvement review slice 1, from the founder's own reading of the site
+plan: *"under the map, the list of what is drawn is a single long flat list. It
+would be nicer if things collapsed under a category you could open — all the
+paddocks' fences under a paddocks heading, say, rather than thirty rows in a
+row."* The list's own doc comment had been anticipating this since 2026-08-30,
+and it is not hypothetical: laying out twelve paddocks on this parcel while
+driving took it from 15 rows to **39**.
+
+**The grouping decision, argued before it was written.** Three ways to earn a
+"paddocks" heading were on the table and they are not equal:
+
+| | Costs | What it answers |
+| --- | --- | --- |
+| **by kind** | nothing | *how much fence is there* |
+| **by plan** | nothing — `plan_id` since 2b.4 | *what did that one decision draw* |
+| by paddock, stamping `zone_id` | a migration, and only helps layouts made after it | — |
+| by paddock, from the enclosure walk | free-ish, helps hand-drawn plans | — |
+
+**Both free ones shipped and neither paddock one did, and the reason is not the
+migration.** A dividing fence bounds TWO paddocks, so "which paddock is this
+fence in" is not a function: any by-paddock grouping has to duplicate the row
+under two headings or pick one arbitrarily. Stamping a `zone_id` picks one
+silently; `core/enclosure.ts` answers *what ground do these fences enclose*,
+which is a different question. Gates are the exception, one paddock each, which
+is why the idea looks right until you try it on a fence.
+
+**`plan` turned out to be the founder's own example, already recorded.**
+`land_features.plan_id` has been there since 2b.4, nullable and indexed, and
+`layoutPaddocks` stamps EVERY feature it emits with the plan it creates — so
+the thirty rows from one decision already shared a key AND the name the person
+typed. Driven on Hilltop: `North  8 · 3,939 ft`, `Review  24 · 9,180 ft`, and
+`Not in a plan  7 · 10,037 ft` last, because the residual is not a peer of the
+plans above it.
+
+**Headings start CLOSED, and that is the whole point.** An open-by-default list
+of six headings and fifteen rows is longer than the flat list it replaced. A
+closed heading carries the count and the length total, which answers more at a
+glance than eight rows do — and a group whose rows are all points shows the
+count alone rather than `0 ft`, because four gates have a number and no length.
+One group is open (nothing to choose between), and `Find by name` opens every
+heading that matched, or typing a fence's name would leave you looking at a
+closed heading.
+
+**Selection is narrowed to what is VISIBLE**, extending the rule the filters
+already followed. Ticking a heading takes everything under it; closing the
+heading takes those ticks back out of `Delete 24`; opening it puts them back.
+A heading's own tick only renders while it is open. Driven, both directions.
+
+**`Paddock 1, 10, 11, 12, 2, 3`** — found while measuring, and it is worse here
+than anywhere else in the product because **this is the pack that mints numbered
+names**: `layoutPaddocks` emits `${prefix} ${n}`, `${prefix} division ${n}`,
+`${prefix} lane fence ${n}` and `${prefix} ${n} gate`. Plain `localeCompare` was
+in `zone-table.tsx` (5 sites), `feature-list.tsx` (5) and behind `orderBy
+asc(name)` in `listZones`/`listFeatures`; nothing in the repo had ever used
+`numeric: true`. One pure `compareNames` now serves all of them, and `byName`
+folds it over the two ops reads — **a JS sort after a SQL read, exact ONLY
+because these reads are unbounded. The day a `limit` arrives the ordering has
+to move into SQL with it**, or a page of the wrong rows gets reordered; the
+helper says so in place.
+
+New pure `core/list.ts` (`compareNames`, `groupRows`, `matchesTerm`) with
+`tests/land-list.test.ts` (12), an ops test for the two reads, and the list as
+**cards below `md`** — the table had put `Length`, the one number a fence has,
+at x=399 in a 375px screen.
+
+**Driven on Hilltop Farm (dev) at 375 and 1280**, including a 12-paddock layout
+that put 39 features on the parcel, the plan grouping, the group tick, the
+close-drops-the-ticks rule, `Delete 24`, and the discard of all twelve
+proposals afterwards — the fixture is back where it started apart from one
+closed `Cow herd` stay on Creek field, recorded because no zone on this farm had
+ever had one. **No screenshot: the browser pane on this machine is not
+compositing the page**, so everything here was measured through the DOM rather
+than looked at.
+
 ### 2026-09-09 — Paddocks from a pasted list (`claude/paste-the-rest`)
 
 Onboarding slice 2, the last three targets ([onboarding.md](onboarding.md),
@@ -1279,7 +1355,7 @@ tested outdoors.
 | `land_zone_uses` | What a zone is for, over a date range | Composite FK to the zone, **CASCADE**. `ended_on` is **INCLUSIVE**; null means current. CHECK `ended_on >= started_on`; `use` matches `^[a-z][a-z0-9_]{0,62}$` (**format only**) |
 | `land_occupancy` | What was actually ON a zone, in what structure, and when | Composite FK to the zone, **CASCADE**. `ended_on` inclusive; null means still there, which is what makes a zone read as occupied. `extension_slug` + `occupant_type` + `occupant_id` describe the occupant (P3); `occupant_label` is a **copy**. `area_acres` null means the whole zone |
 | `land_zones` (2b.2) | `status` gained **`planned`** — ground a layout proposed and nobody has fenced. Syncs no `dimension_members` row until `activateZone`; refused by `startOccupancy`; excluded from `zoneAtPoint`, rest and every paddock count | Widening the CHECK changed no query: every read that must not see unfenced ground already filtered `active` explicitly. `startOccupancy` was the one guard that had to be added |
-| `land_plans` (2b.4) | A named set of proposals and the materials list taken off them. **Laying out a field creates one.** `taken_off_at` null means the figures are still live | **No status column**: its features carry `planned`/`built`/`removed`, so "is it built" is derivable. Composite FK to the parcel |
+| `land_plans` (2b.4) | A named set of proposals and the materials list taken off them. **Laying out a field creates one.** `taken_off_at` null means the figures are still live. **Since 2026-09-10 it also names a heading in the plan list**, which is the second reader `plan_id` has | **No status column**: its features carry `planned`/`built`/`removed`, so "is it built" is derivable. Composite FK to the parcel |
 | `land_plan_items` (2b.4) | One line of a saved list. `source_feature_id` NULL means hand-added — insulators and staples are not in the geometry | Quantities are a **SNAPSHOT**; the drawing may drift and nothing corrects either, the `area_acres` rule. CHECKs: `unit` in `each\|ft\|m`; quantity > 0; `unit_cost` null or ≥ 0. **`saveTakeoff` refuses a counted line with no source**, or it would survive every re-take and double the order |
 | `land_features` | **Slice 2b.0.** Things ON the ground: fences, gates, buildings, woods, waterlines, buried cable. One table for points, lines AND areas — `geometry` jsonb, read through `asFeatureGeometry`, nullable meaning "not drawn yet" | Composite FK `land_features_parcel_fk` → the parcel, **RESTRICT**. Attached to a PARCEL, never a zone: a fence runs *between* paddocks. `land_features_fed_by_fk` is the same shape pointed at **its own table**. CHECKs: `status` in `planned\|built\|removed`; `kind` format-only; `fed_by_id` is distinct from `id`; `line_width` null or 0.5–12. **No posts** — a fence is one row with a spacing. `line_width` is a DRAWING property and deliberately not in `attributes`, which the takeoff will compute from |
 
@@ -1325,12 +1401,20 @@ rented ground, and retrofitting it means rewriting the report.
   stop managing has a history and costs tagged to it. Deleting ground is
   `discardZones`, on the Proposed panel, and it only ever touches proposals.
   Retired rows are shown by a filter and have neither a tick nor a menu
-- `src/packs/land/components/feature-list.tsx` — the plan's inventory: filter by
-  kind and state, sort on any column, tick rows and delete them together. Split
-  out of `site-plan.tsx` in 2b.6 — the parent keeps only the thing genuinely
-  shared with the map, which is which feature is selected. **The delete count is
-  narrowed to what is currently listed**, so a filter change can never leave a
-  tick counting towards something off screen
+- `src/packs/land/components/feature-list.tsx` — the plan's inventory: GROUP by
+  kind or by plan, filter by kind and state, find by name, sort on any column,
+  tick rows and delete them together. Split out of `site-plan.tsx` in 2b.6 — the
+  parent keeps only the thing genuinely shared with the map, which is which
+  feature is selected. **The delete count is narrowed to what is currently
+  VISIBLE** — listed, and under an open heading — so neither a filter change nor
+  a closed heading can leave a tick counting towards something off screen. Cards
+  below `md`
+- `src/packs/land/core/list.ts` — pure. How names order, how rows fall into
+  headings, and what a typed word matches. **`compareNames` is the one that
+  matters**: this pack mints `Paddock 1 … 12` and `North division 1 … 11`, and a
+  plain `localeCompare` puts 10 before 2. `groupRows` explains in place why
+  there is no `by paddock` — a dividing fence bounds two of them, so it is not
+  a function
 - `src/packs/land/core/weather.ts` — pure. Degree days, season accumulation, the
   comparison against the same window in previous years, and the rain figures.
   **Gaps are counted, never filled**, and a degree day is scaled but not
@@ -1546,9 +1630,29 @@ rented ground, and retrofitting it means rewriting the report.
   cannot read, so a bad row degrades to "no boundary" rather than a broken page.
 - **Winding order is ignored when measuring**, deliberately. Trusting it would
   make a valid but clockwise boundary measure negative.
+- **NAMES SORT BY NUMBER, and this pack needs it more than any other.** Every
+  list of ground goes through `compareNames` (`core/list.ts`,
+  `localeCompare(…, { numeric: true })`), because `layoutPaddocks` mints
+  `Paddock 1 … 12`, `North division 1 … 11` and `North 1 … 12 gate` in one act
+  and a plain comparison reads them 1, 10, 11, 12, 2. The two ops reads fold it
+  in JS after the query, which is **exact only while those reads are unbounded**
+  — the day either takes a `limit`, the ordering has to move into SQL with it.
+- **THE PLAN LIST GROUPS BY KIND OR BY PLAN, AND NEVER BY PADDOCK.** Not a cost
+  question: a dividing fence bounds two paddocks, so grouping by paddock is not
+  a function — it would have to duplicate a row or pick one of the two silently.
+  `plan_id` is the honest key for "these came from one decision", and
+  `layoutPaddocks` has been writing it since 2b.4.
 
 ## Open items
 
+- **Nothing else in the repo sorts names by number.** `compareNames` was the
+  first use of `numeric: true` anywhere here, and land is not the only place
+  that mints numbered names — batch codes, invoice numbers and lot codes all
+  read the same way. It is a pack-local helper until a second consumer wants
+  it, and then it belongs in `src/lib/`.
+- **The plan list's headings are the only grouping in the pack.** The paddock
+  table has the same shape and the same scale problem — a farm at 10x has two
+  hundred rows — and got only the ordering fix.
 - **Weather predicts nothing yet, on purpose.** Slice 3 reports the season and
   the comparison; the brief's *"16 days, not 21"* needs a regrowth model, and
   that needs ground somebody has measured. The data now accumulates whether or

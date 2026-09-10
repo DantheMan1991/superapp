@@ -38,6 +38,15 @@ export interface PanelFeature extends PlanFeature {
   notes: string;
   attributes: Record<string, string | number | boolean>;
   fedById: string | null;
+  /**
+   * The plan this was proposed as part of, or null for one drawn on its own.
+   *
+   * Here rather than on `PlanFeature` because the MAP does not need it — a
+   * proposal draws ghosted whether or not it belongs to a set. The LIST groups
+   * by it, which is how thirty rows from one `layoutPaddocks` run collapse
+   * under the name the person typed.
+   */
+  planId: string | null;
 }
 
 /**

@@ -438,8 +438,13 @@ export default async function ParcelDetailPage({
               // same total-by-construction discipline as everything else here.
               attributes: readAttributes(feature.attributes),
               fedById: feature.fedById,
+              planId: feature.planId,
               lineWidth: feature.lineWidth,
             }))}
+            // The list groups by plan, so it needs their names. A layout
+            // creates one, so this is how thirty rows from one decision get a
+            // heading carrying the name the founder typed.
+            plans={plans.map((plan) => ({ id: plan.id, name: plan.name }))}
             kinds={availableFeatureKinds(pack.config)}
             basemap={basemapFrom(pack.config)}
             areaUnit={unit}

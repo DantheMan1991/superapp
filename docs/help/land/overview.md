@@ -14,6 +14,7 @@ Open **Land** in the sidebar. Land is where the ground your business holds is re
 - **A {{parcel|lower}}'s page.** Its details, its boundary measured against the deed figure, the site plan where fences, gates, lanes, water and every {{zone|lower}} are drawn, a growing-weather panel, the rotation arithmetic, and the table of {{zone|plural|lower}} with what each is for and how long it has rested. See [One {{parcel|lower}}](parcel.md) and [The site plan](site-plan.md).
 - **A {{zone|lower}}'s page.** Where stays are recorded: what is on it, from when to when, and where it goes next. Moving something to the next {{zone|lower}} is one act, which is what keeps a day from being counted as grazing on two pieces of ground. Every rest and rotation figure is worked out from those records. See [One {{zone|lower}}](zone.md).
 - **Find my parcels.** Searches the county's own parcel records and brings your ground in with its boundary and acreage already drawn. Ohio only today. See [Find my parcels](find-my-parcels.md).
+- **What is here.** Standing anywhere on the farm, it says which {{zone|lower}} you are on and lists everything built within 100 ft of you, with whatever is recorded about each — how deep a cable is buried, how many strands a fence has. See [Your {{parcel|plural|lower}}](parcels.md).
 - **Units.** Areas are shown in acres or hectares, lengths in feet or meters, and the weather panel in Fahrenheit or Celsius, according to how your business was set up. An unknown figure always shows as a dash, never as zero. A total with nothing known reads `not recorded` for area and `not drawn` for length.
 
 ## How to set up your ground
@@ -41,4 +42,4 @@ The shape of the farm belongs to the owner. Only an owner can add, edit, combine
 
 The chores are open to everyone. Any member can draw fences, gates, water and the rest on the site plan, mark them built or removed, walk to a corner with the phone, and record what is on a {{zone|lower}} and when it moved off.
 
-Staff see the same pages without the owner's buttons. On the Land list, staff see no buttons at all.
+Staff see the same pages without the owner's buttons. On the Land list, staff see the two that only read the phone's position — {button:Which paddock am I in?|outline} and {button:What is here?|outline} — and none of the others.

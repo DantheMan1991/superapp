@@ -17,10 +17,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { listParcels, mappedZoneCount, zoneCountsByParcel } from "./ops";
+import {
+  drawnFeatureCount,
+  listParcels,
+  mappedZoneCount,
+  zoneCountsByParcel,
+} from "./ops";
 import { TENURE_LABELS, isTenure } from "./vocabulary";
 import { PARCEL_SOURCES, parcelSourceFrom } from "./core/parcel-lookup";
 import { WhereAmIShortcut } from "./components/where-am-i";
+import { WhatIsHere } from "./components/what-is-here";
 import { CombineParcelsBar } from "./components/combine-parcels";
 
 const BASE = "/dashboard/m/land";
@@ -30,6 +36,7 @@ import {
   formatAreaTotal,
   totalArea,
 } from "./core/area";
+import { lengthUnitFrom } from "./core/length";
 import { ParcelForm } from "./components/parcel-form";
 import { PasteListButton } from "@/components/app/paste-list-button";
 
@@ -55,10 +62,10 @@ export async function LandModule({
 }) {
   const showRetired = searchParams.retired === "1";
 
-  const { parcels, zoneCounts, mapped, labels, config } = await withTenant(
+  const { parcels, zoneCounts, mapped, drawn, labels, config } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
-      const [parcels, zoneCounts, mapped, pack] = await Promise.all([
+      const [parcels, zoneCounts, mapped, drawn, pack] = await Promise.all([
         listParcels(tx, ctx.tenant.id, {
           // Retired ground stays in the books forever but is noise in the list,
           // so it is opt-in rather than filtered out of existence.
@@ -66,12 +73,14 @@ export async function LandModule({
         }),
         zoneCountsByParcel(tx, ctx.tenant.id),
         mappedZoneCount(tx, ctx.tenant.id),
+        drawnFeatureCount(tx, ctx.tenant.id),
         packContext(tx, ctx.tenant.id, ctx.tenant.industry, "land"),
       ]);
       return {
         parcels,
         zoneCounts,
         mapped,
+        drawn,
         labels: pack.labels,
         config: pack.config,
       };
@@ -82,6 +91,8 @@ export async function LandModule({
   const unit = areaUnitFrom(config);
   /** No boundaries, no answer — see the button below. */
   const hasGeometry = mapped > 0;
+  /** Anything traced at all — a fence counts, not only a paddock's outline. */
+  const hasDrawing = mapped > 0 || drawn > 0;
   /**
    * **THE BUTTON MUST FOLLOW THE PAGE, NOT THE CONFIG.** This was gated on a
    * PINNED source while `/land/find` itself falls back to letting the person
@@ -108,37 +119,56 @@ export async function LandModule({
             : "The ground the business holds, and what each part of it is for."
         }
         actions={
-          isOwner ? (
-            <div className="flex flex-wrap items-center gap-2">
-              {/* Only useful once something is mapped, and honest about it:
-                  offering it against a farm with no boundaries would answer
-                  "not inside any paddock" every time. */}
-              {/* A STRING, NEVER A FUNCTION. This is a Server Component and
-                  `WhereAmIShortcut` is a client one, so a `zoneHref` builder
-                  could not be serialised and threw on render — taking the
-                  whole page down for any farm that had traced a boundary. */}
-              {hasGeometry && <WhereAmIShortcut basePath={BASE} />}
-              {/* Only when a source covers this tenant. A button that leads to
-                  a 404 is worse than no button. */}
-              {hasParcelSource && (
-                <Button asChild variant="outline">
-                  <Link href={`${BASE}/find`}>
-                    <Search className="mr-2 h-4 w-4" />
-                    Find my parcels
-                  </Link>
-                </Button>
-              )}
-              {/* The paddocks, pasted (ADR 0036). Says so itself when there is
-                  no parcel for them to be on. */}
-              <PasteListButton
-                slug="land.paddocks"
-                label={`${zoneWord.toLowerCase()}s`}
-                noun={{ one: zoneWord.toLowerCase(), many: `${zoneWord.toLowerCase()}s` }}
-                example={"North 40, 38 acres\nCreek field, 12.5 acres\nPen 3"}
-              />
-              <ParcelForm unit={unit} />
-            </div>
-          ) : null
+          <div className="flex flex-wrap items-center gap-2">
+            {/*
+              **THE TWO LOCATION BUTTONS ARE NOT OWNER-GATED, and that changed
+              on 2026-09-10.** Everything else here creates or finds a parcel,
+              which is a decision about how the books are grouped. These two
+              WRITE NOTHING — they read the phone's position, answer a question
+              and forget it — and the person standing in the field is very often
+              not the owner. This pack already decided that drawing a fence is a
+              chore rather than a decision; reading your surroundings is less of
+              a decision than that.
+            */}
+            {/* Only useful once something is mapped, and honest about it:
+                offering it against a farm with no boundaries would answer
+                "not inside any paddock" every time. */}
+            {/* A STRING, NEVER A FUNCTION. This is a Server Component and
+                `WhereAmIShortcut` is a client one, so a `zoneHref` builder
+                could not be serialised and threw on render — taking the
+                whole page down for any farm that had traced a boundary. */}
+            {hasGeometry && <WhereAmIShortcut basePath={BASE} />}
+            {/* What is on the ground where you are standing. Offered once
+                anything is DRAWN, which is a wider test than `hasGeometry`:
+                a farm can have fences and waterlines traced before any
+                paddock has an outline. */}
+            {hasDrawing && (
+              <WhatIsHere basePath={BASE} lengthUnit={lengthUnitFrom(config)} />
+            )}
+            {isOwner && (
+              <>
+                {/* Only when a source covers this tenant. A button that leads
+                    to a 404 is worse than no button. */}
+                {hasParcelSource && (
+                  <Button asChild variant="outline">
+                    <Link href={`${BASE}/find`}>
+                      <Search className="mr-2 h-4 w-4" />
+                      Find my parcels
+                    </Link>
+                  </Button>
+                )}
+                {/* The paddocks, pasted (ADR 0036). Says so itself when there
+                    is no parcel for them to be on. */}
+                <PasteListButton
+                  slug="land.paddocks"
+                  label={`${zoneWord.toLowerCase()}s`}
+                  noun={{ one: zoneWord.toLowerCase(), many: `${zoneWord.toLowerCase()}s` }}
+                  example={"North 40, 38 acres\nCreek field, 12.5 acres\nPen 3"}
+                />
+                <ParcelForm unit={unit} />
+              </>
+            )}
+          </div>
         }
       />
 

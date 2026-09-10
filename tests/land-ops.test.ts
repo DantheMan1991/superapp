@@ -48,6 +48,7 @@ import {
   endZoneUse,
   listOccupancy,
   listStructures,
+  featuresNear,
   moveOccupant,
   occupantLabelsUsed,
   openStaysOnParcel,
@@ -748,6 +749,106 @@ d("land ops", () => {
       occupantLabelsUsed(tx, tenantId, parcel.id),
     );
     expect(names).toEqual(["Cow herd", "Ewes"]);
+  });
+
+  it("finds what is BUILT within a hundred feet, nearest first, and nothing else", async () => {
+    // A spot on the pilot farm, so the latitude scaling is a real one.
+    const here: Position = [-82.4, 40.4];
+    const mPerLon =
+      (Math.PI / 180) * 6_378_137 * Math.cos((40.4 * Math.PI) / 180);
+    const east = (metres: number): Position => [
+      here[0] + metres / mPerLon,
+      here[1],
+    ];
+
+    const parcel = await newParcel("Standing Here");
+    // A boundary around the fix, so the bounding-box pass keeps this parcel.
+    await asOwner((tx) =>
+      setParcelBoundary(
+        tx,
+        ownerCtx(),
+        parcel.id,
+        JSON.stringify({
+          type: "Polygon",
+          coordinates: [
+            [east(-300), [east(300)[0], here[1] - 0.003], east(300), [east(-300)[0], here[1] + 0.003], east(-300)],
+          ],
+        }),
+      ),
+    );
+
+    const make = async (name: string, metres: number, status: string) =>
+      asOwner((tx) =>
+        createFeature(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          kind: "gate",
+          name,
+          status,
+          geometry: { type: "Point", coordinates: east(metres) },
+        }),
+      );
+
+    await make("Near gate", 5, "built");
+    await make("Middle gate", 25, "built");
+    await make("Far gate", 200, "built");
+    // **THE ONE THE STATUS COLUMN EXISTS FOR.** A proposal five metres away
+    // must not be reported as something on the ground.
+    await make("Proposed gate", 6, "planned");
+    await make("Pulled gate", 7, "removed");
+    // Listed and never traced: it has no position at all.
+    await asOwner((tx) =>
+      createFeature(tx, ownerCtx(), {
+        parcelId: parcel.id,
+        kind: "gate",
+        name: "Undrawn gate",
+        status: "built",
+      }),
+    );
+
+    const found = await asOwner((tx) => featuresNear(tx, tenantId, here));
+    expect(found.map((f) => f.feature.name)).toEqual([
+      "Near gate",
+      "Middle gate",
+    ]);
+    expect(found[0].metres).toBeLessThan(found[1].metres);
+    expect(found[0].parcelName).toBe("Standing Here");
+  });
+
+  it("answers nothing when you are standing miles away", async () => {
+    const parcel = await newParcel("Somewhere Else");
+    await asOwner((tx) =>
+      setParcelBoundary(
+        tx,
+        ownerCtx(),
+        parcel.id,
+        JSON.stringify({
+          type: "Polygon",
+          coordinates: [
+            [
+              [-82.4, 40.4],
+              [-82.39, 40.4],
+              [-82.39, 40.41],
+              [-82.4, 40.41],
+              [-82.4, 40.4],
+            ],
+          ],
+        }),
+      ),
+    );
+    await asOwner((tx) =>
+      createFeature(tx, ownerCtx(), {
+        parcelId: parcel.id,
+        kind: "gate",
+        name: "A gate",
+        status: "built",
+        geometry: { type: "Point", coordinates: [-82.395, 40.405] },
+      }),
+    );
+    // Ten kilometres north: the bounding-box pass drops the parcel entirely.
+    const found = await asOwner((tx) =>
+      featuresNear(tx, tenantId, [-82.395, 40.495]),
+    );
+    expect(found).toEqual([]);
   });
 
   // ---- retirement ------------------------------------------------------

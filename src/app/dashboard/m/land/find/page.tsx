@@ -5,6 +5,7 @@ import { withTenant } from "@/db";
 import { requireTenantOwner } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { packContext } from "@/lib/packs/tenant-context";
+import { labelFor } from "@/lib/packs/resolve";
 import { PageHeader } from "@/components/app/page-header";
 import { areaUnitFrom } from "@/packs/land/core/area";
 import {
@@ -42,6 +43,9 @@ export default async function FindParcelsPage() {
     { role: ctx.role },
   );
 
+  // The page's own vocabulary. `land` renames `zone`, and this page tells
+  // somebody what they will be tracing inside the ground they import.
+  const zoneWord = labelFor(pack.labels, "zone", "Zone");
   const pinned = parcelSourceFrom(pack.config);
   const sources = pinned ? [pinned] : PARCEL_SOURCES;
   if (sources.length === 0) notFound();
@@ -59,10 +63,11 @@ export default async function FindParcelsPage() {
       <PageHeader
         icon={<Search />}
         title="Find my parcels"
-        description="The county has already drawn your boundaries. Take the ones that are yours, with their acreage, and trace paddocks inside them afterwards."
+        description={`The county has already drawn your boundaries. Take the ones that are yours, with their acreage, and trace ${zoneWord.toLowerCase()}s inside them afterwards.`}
       />
 
       <ParcelFinder
+        zoneWord={zoneWord}
         sources={sources.map((source) => ({
           id: source.id,
           label: source.label,

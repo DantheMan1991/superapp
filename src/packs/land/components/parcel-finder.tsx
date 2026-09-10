@@ -52,6 +52,7 @@ export function ParcelFinder({
   sources,
   defaultRegion,
   unit,
+  zoneWord,
 }: {
   /** Every service this tenant may search. IDs only — never URLs. */
   sources: {
@@ -62,6 +63,8 @@ export function ParcelFinder({
   }[];
   defaultRegion: string;
   unit: AreaUnit;
+  /** What the tenant calls a piece of ground. */
+  zoneWord: string;
 }) {
   const router = useRouter();
   const [sourceId, setSourceId] = useState(sources[0]?.id ?? "");
@@ -343,7 +346,8 @@ export function ParcelFinder({
           </p>
           <p className="mt-1">
             Search for them and they arrive with their acreage, ready to have
-            paddocks traced inside them. Nothing is added until you tick it.
+            {zoneWord.toLowerCase()}s traced inside them. Nothing is added until
+            you tick it.
           </p>
           <Badge variant="outline" className="mt-3">
             {source?.label ?? "No source"}

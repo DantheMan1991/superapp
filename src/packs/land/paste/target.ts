@@ -8,6 +8,8 @@ import {
   type PasteSaved,
   type PasteTarget,
 } from "@/lib/paste-targets/types";
+import { packContext } from "@/lib/packs/tenant-context";
+import { labelFor } from "@/lib/packs/resolve";
 import { createZone, LandError, listParcels, listZones } from "../ops";
 
 /**
@@ -33,7 +35,17 @@ function refusal(err: unknown): unknown {
   return err instanceof LandError ? new PasteRefusal(err.message) : err;
 }
 
-const NO_PARCEL = "Add a parcel first, so a paddock has somewhere to be.";
+/**
+ * **THE STATIC HALF OF THIS TARGET CANNOT SPEAK THE TENANT'S WORD, AND THE
+ * DIALOG DOES NOT NEED IT TO.** `label`, `noun` and `about` are read off the
+ * object at module load, with no tenant in hand — but `PasteListButton` is
+ * given the tenant's word by `LandModule` and overrides the first two, and
+ * `about` only ever reaches the model's system prompt. What a person actually
+ * READS comes out of `describe`, which has a `Tx` and a tenant, so that is
+ * where the word is resolved.
+ */
+const noParcel = (zoneWord: string) =>
+  `Add a parcel first, so a ${zoneWord.toLowerCase()} has somewhere to be.`;
 
 export const paddocksPasteTarget: PasteTarget = {
   slug: "land.paddocks",
@@ -43,8 +55,17 @@ export const paddocksPasteTarget: PasteTarget = {
   about:
     "paddocks — the named fields, pens and plots the business grazes, grows or works, each with its size where known",
   async describe(tx: Tx, ctx: PasteCtx) {
-    const parcels = await listParcels(tx, ctx.tenantId);
-    if (parcels.length === 0) return { fields: [], blocked: NO_PARCEL };
+    const [parcels, pack] = await Promise.all([
+      listParcels(tx, ctx.tenantId),
+      // `industry` is nullable here and `packContext` degrades on an unknown
+      // one, which is the same shape `livestock`'s target uses to read its
+      // species list.
+      packContext(tx, ctx.tenantId, ctx.industry ?? "", "land"),
+    ]);
+    const zoneWord = labelFor(pack.labels, "zone", "Zone");
+    if (parcels.length === 0) {
+      return { fields: [], blocked: noParcel(zoneWord) };
+    }
     const one = parcels.length === 1;
     const fields: PasteField[] = [
       {
@@ -52,7 +73,7 @@ export const paddocksPasteTarget: PasteTarget = {
         label: "Name",
         kind: "text",
         required: true,
-        hint: "What the paddock is called — North 40, Creek field, Pen 3.",
+        hint: `What the ${zoneWord.toLowerCase()} is called — North 40, Creek field, Pen 3.`,
       },
       {
         key: "parcel",

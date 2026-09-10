@@ -132,18 +132,24 @@ export async function LandModule({
             */}
             {/* Only useful once something is mapped, and honest about it:
                 offering it against a farm with no boundaries would answer
-                "not inside any paddock" every time. */}
+                "not inside any of them" every time. */}
             {/* A STRING, NEVER A FUNCTION. This is a Server Component and
                 `WhereAmIShortcut` is a client one, so a `zoneHref` builder
                 could not be serialised and threw on render — taking the
                 whole page down for any farm that had traced a boundary. */}
-            {hasGeometry && <WhereAmIShortcut basePath={BASE} />}
+            {hasGeometry && (
+              <WhereAmIShortcut basePath={BASE} zoneWord={zoneWord} />
+            )}
             {/* What is on the ground where you are standing. Offered once
                 anything is DRAWN, which is a wider test than `hasGeometry`:
                 a farm can have fences and waterlines traced before any
                 paddock has an outline. */}
             {hasDrawing && (
-              <WhatIsHere basePath={BASE} lengthUnit={lengthUnitFrom(config)} />
+              <WhatIsHere
+                basePath={BASE}
+                zoneWord={zoneWord}
+                lengthUnit={lengthUnitFrom(config)}
+              />
             )}
             {isOwner && (
               <>
@@ -178,6 +184,7 @@ export async function LandModule({
       {isOwner && parcels.length > 1 && (
         <CombineParcelsBar
           unit={unit}
+          zoneWord={zoneWord}
           parcels={parcels.map((parcel) => ({
             id: parcel.id,
             name: parcel.name,

@@ -26,7 +26,12 @@ export const landSetupSource: SetupSource = {
         key: "land.parcels",
         title: "Add your ground",
         detail:
-          "Bring it in from the county's records with the boundary already drawn, or add it by hand and trace it. Paddocks and rotation come after.",
+          // **NO RENAMEABLE NOUN, which is what the note above already says
+          // this file does** — and it said `Paddocks` anyway. Rewritten around
+          // the word rather than interpolating one: the card is plain text on
+          // the Overview and adding a lookup for one sentence is the wrong
+          // trade.
+          "Bring it in from the county's records with the boundary already drawn, or add it by hand and trace it. Dividing it up and the rotation come after.",
         href: "/dashboard/m/land",
         cta: "Add ground",
         guide: "land/parcels",

@@ -21,6 +21,7 @@ import {
   listPlans,
   listUsesInUse,
   listZones,
+  openStaysOnParcel,
   restByZone,
   usesByZone,
 } from "@/packs/land/ops";
@@ -132,8 +133,17 @@ export default async function ParcelDetailPage({
         status: "retired",
       });
       const zoneIds = zones.map((z) => z.id);
-      const [current, history, usesInUse, pack, rest, stayDays, features, plans] =
-        await Promise.all([
+      const [
+        current,
+        history,
+        usesInUse,
+        pack,
+        rest,
+        stayDays,
+        features,
+        plans,
+        onParcel,
+      ] = await Promise.all([
           currentUses(tx, ctx.tenant.id, zoneIds),
           usesByZone(tx, ctx.tenant.id, zoneIds),
           listUsesInUse(tx, ctx.tenant.id),
@@ -148,6 +158,10 @@ export default async function ParcelDetailPage({
           // a plan with no list and a plan whose list has drifted look
           // different on screen, and both need the items to tell.
           listPlans(tx, ctx.tenant.id, { parcelId: id }),
+          // What is on this parcel today, so a paddock's row menu can bring
+          // one of them onto it in ONE act. `today`, because a stay recorded
+          // ahead has not happened and a closed one is not there to move.
+          openStaysOnParcel(tx, ctx.tenant.id, id, today),
         ]);
       const planItems = await Promise.all(
         plans.map((plan) => listPlanItems(tx, ctx.tenant.id, plan.id)),
@@ -166,6 +180,7 @@ export default async function ParcelDetailPage({
         features,
         plans,
         planItems,
+        onParcel,
       };
     },
     { role: ctx.role },
@@ -186,6 +201,7 @@ export default async function ParcelDetailPage({
     features,
     plans,
     planItems,
+    onParcel,
   } = data;
 
   // The finding this whole category was argued for. Returns null rather than
@@ -695,6 +711,7 @@ export default async function ParcelDetailPage({
             today={today}
             usesInUse={usesInUse.map((u) => u.use)}
             canEdit={isOwner && parcel.status === "active"}
+            movableStays={onParcel}
             zones={[...zones, ...retiredZones].map((zone) => {
               const use = current.get(zone.id) ?? null;
               const zoneRestInfo = rest.get(zone.id);

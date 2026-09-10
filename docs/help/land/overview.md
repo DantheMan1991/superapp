@@ -12,7 +12,7 @@ Open **Land** in the sidebar. Land is where the ground your business holds is re
 - **A {{zone|lower}}.** A management area inside a {{parcel|lower}}. A grazier calls it a paddock, a market garden calls it a bed. It is what the rest of Yosher points at when it records what happened where, and what each cost is charged to.
 - **The Land list.** Every {{parcel|lower}}, its tenure, how many {{zone|plural|lower}} it has, and its area. Owners add {{parcel|plural|lower}} here, combine two deeds that are really one block of ground, and jump to the county's parcel records. See [Your {{parcel|plural|lower}}](parcels.md).
 - **A {{parcel|lower}}'s page.** Its details, its boundary measured against the deed figure, the site plan where fences, gates, lanes, water and every {{zone|lower}} are drawn, a growing-weather panel, the rotation arithmetic, and the table of {{zone|plural|lower}} with what each is for and how long it has rested. See [One {{parcel|lower}}](parcel.md) and [The site plan](site-plan.md).
-- **A {{zone|lower}}'s page.** Where stays are recorded: what is on it, from when to when. Every rest and rotation figure is worked out from those records. See [One {{zone|lower}}](zone.md).
+- **A {{zone|lower}}'s page.** Where stays are recorded: what is on it, from when to when, and where it goes next. Moving something to the next {{zone|lower}} is one act, which is what keeps a day from being counted as grazing on two pieces of ground. Every rest and rotation figure is worked out from those records. See [One {{zone|lower}}](zone.md).
 - **Find my parcels.** Searches the county's own parcel records and brings your ground in with its boundary and acreage already drawn. Ohio only today. See [Find my parcels](find-my-parcels.md).
 - **Units.** Areas are shown in acres or hectares, lengths in feet or meters, and the weather panel in Fahrenheit or Celsius, according to how your business was set up. An unknown figure always shows as a dash, never as zero. A total with nothing known reads `not recorded` for area and `not drawn` for length.
 
@@ -22,7 +22,7 @@ Open **Land** in the sidebar. Land is where the ground your business holds is re
 2. Open a {{parcel|lower}} and trace its boundary on the site plan, or paste one you already have.
 3. Draw the lanes and fences, then divide the ground into {{zone|plural|lower}} on the site plan, or add {{zone|plural|lower}} one at a time by name.
 4. Set what each {{zone|lower}} is for, from a date.
-5. Record stays on each {{zone|lower}} as animals or crops go on and come off. Rest and rotation figures follow from those.
+5. Record stays on each {{zone|lower}} as animals or crops go on, move them to the next one as they go, and move them off when they leave. Rest and rotation figures follow from those.
 
 ## Not on this page
 

@@ -26,6 +26,8 @@ import {
   retireZones,
   deleteOccupancy,
   endOccupancy,
+  getOccupancy,
+  moveOccupant,
   endZoneUse,
   retireParcel,
   retireZone,
@@ -494,6 +496,89 @@ export async function deleteOccupancyAction(input: unknown) {
     });
     revalidatePath(BASE, "layout");
     return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Move what is on one zone onto another, as ONE act.
+ *
+ * **WHY THE ROW AND NOT THE NAME.** `moveOccupant` displaces an existing stay
+ * by `occupantId`, and nothing entered through a Land screen has one — so this
+ * hands it `fromOccupancyId` instead and the op resolves the row. The dialog
+ * lists what is actually on the ground, so the person points at a stay rather
+ * than retyping a name that has to match.
+ *
+ * **THE LABEL IS READ OFF THE ROW, NEVER OFF THE FORM.** A move that let the
+ * herd be renamed on the way would be two acts wearing one button, and the new
+ * name would silently start its own rest history.
+ *
+ * A CHORE, NOT A DECISION — `member`, like recording a stay. Moving stock is
+ * what the person who opened the gate does.
+ */
+export async function moveOccupantAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      occupancyId: z.string().uuid(),
+      toZoneId: z.string().uuid(),
+      startedOn: requiredDate,
+      areaAcres: acres,
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const result = await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        const stay = await getOccupancy(tx, ctx.tenant.id, parsed.data.occupancyId);
+        if (!stay) {
+          throw new LandError("NOT_FOUND", "that stay is not there any more");
+        }
+        return moveOccupant(
+          tx,
+          landCtx(ctx),
+          parsed.data.toZoneId,
+          {
+            occupantLabel: stay.occupantLabel,
+            startedOn: parsed.data.startedOn,
+            // A strip on the paddock they LEFT says nothing about the one they
+            // are going to, so this is what the dialog offered rather than
+            // anything inherited.
+            areaAcres: parsed.data.areaAcres,
+            notes: parsed.data.notes,
+            extensionSlug: stay.extensionSlug,
+            occupantType: stay.occupantType,
+            // Deliberately NOT `stay.occupantId`: another pack's record moves
+            // through that pack, which owns whatever else has to happen. This
+            // path is for the stays Land itself holds.
+            occupantId: null,
+          },
+          { fromOccupancyId: parsed.data.occupancyId },
+        );
+      },
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.occupancy.moved",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_zone",
+      targetId: parsed.data.toZoneId,
+      // Identifiers and dates only. The label is the tenant's own words for an
+      // animal group and has no business in the platform-wide log.
+      meta: {
+        from: result.movedOff?.zoneId ?? null,
+        endedOn: result.movedOff?.endedOn ?? null,
+        startedOn: parsed.data.startedOn,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true, endedOn: result.movedOff?.endedOn ?? null };
   } catch (err) {
     return toResult(err);
   }

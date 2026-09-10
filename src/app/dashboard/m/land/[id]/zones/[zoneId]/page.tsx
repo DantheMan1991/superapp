@@ -25,11 +25,15 @@ import {
   getZone,
   listOccupancy,
   listZoneUses,
+  listZones,
+  occupantLabelsUsed,
+  openStaysOnParcel,
 } from "@/packs/land/ops";
 import { zoneUseLabel } from "@/packs/land/vocabulary";
 import { areaUnitFrom, formatArea } from "@/packs/land/core/area";
 import { daysOccupied, formatDays, zoneRest } from "@/packs/land/core/rest";
 import { BoundarySummary } from "@/packs/land/components/boundary-summary";
+import { MoveOccupant } from "@/packs/land/components/move-occupant";
 import {
   DeleteOccupancy,
   EndOccupancy,
@@ -74,20 +78,37 @@ export default async function ZoneDetailPage({
       // The neighbouring paddocks were only ever context for the map that used
       // to live here; they are drawn on the parcel's site plan now, so this
       // page no longer loads them.
-      const [parcel, stays, uses, pack] = await Promise.all([
-        getParcel(tx, ctx.tenant.id, id),
-        listOccupancy(tx, ctx.tenant.id, zoneId),
-        listZoneUses(tx, ctx.tenant.id, zoneId),
-        packContext(tx, ctx.tenant.id, ctx.tenant.industry, "land"),
-      ]);
+      const [parcel, stays, uses, pack, onParcel, siblings, namesUsed] =
+        await Promise.all([
+          getParcel(tx, ctx.tenant.id, id),
+          listOccupancy(tx, ctx.tenant.id, zoneId),
+          listZoneUses(tx, ctx.tenant.id, zoneId),
+          packContext(tx, ctx.tenant.id, ctx.tenant.industry, "land"),
+          // What is on this whole parcel today, so a move can name a ROW
+          // rather than a name that has to match. See `moveOccupantAction`.
+          openStaysOnParcel(tx, ctx.tenant.id, id, today),
+          listZones(tx, ctx.tenant.id, { parcelId: id, status: "active" }),
+          // Names this ground has carried, for the datalist on Record a stay.
+          occupantLabelsUsed(tx, ctx.tenant.id, id),
+        ]);
       if (!parcel) return null;
-      return { zone, parcel, stays, uses, pack };
+      return {
+        zone,
+        parcel,
+        stays,
+        uses,
+        pack,
+        onParcel,
+        siblings,
+        namesUsed,
+      };
     },
     { role: ctx.role },
   );
 
   if (!data) notFound();
-  const { zone, parcel, stays, uses, pack } = data;
+  const { zone, parcel, stays, uses, pack, onParcel, siblings, namesUsed } =
+    data;
 
   const unit = areaUnitFrom(pack.config);
   const zoneWord = labelFor(pack.labels, "zone", "Zone");
@@ -165,7 +186,43 @@ export default async function ZoneDetailPage({
         }
         actions={
           zone.status === "active" ? (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {/*
+                **ONE DIRECTION AT A TIME, and which one follows from the
+                state.** While something is on this ground the useful act is
+                "where are they going"; while nothing is, it is "what is coming
+                here" — which is the field flow, because `Which paddock am I
+                in?` lands you on the paddock you just let them into. Offering
+                both at once would put four buttons in a 375px header to say
+                one thing twice.
+              */}
+              {openStay ? (
+                <MoveOccupant
+                  mode="away"
+                  zoneId={zone.id}
+                  zoneName={zone.name}
+                  zoneWord={zoneWord}
+                  stays={onParcel.filter((s) => s.zoneId === zone.id)}
+                  targets={siblings
+                    .filter((z) => z.id !== zone.id)
+                    .map((z) => ({ id: z.id, name: z.name }))}
+                  unit={unit}
+                  today={today}
+                />
+              ) : (
+                onParcel.length > 0 && (
+                  <MoveOccupant
+                    mode="here"
+                    zoneId={zone.id}
+                    zoneName={zone.name}
+                    zoneWord={zoneWord}
+                    stays={onParcel.filter((s) => s.zoneId !== zone.id)}
+                    targets={[]}
+                    unit={unit}
+                    today={today}
+                  />
+                )
+              )}
               {openStay && (
                 <EndOccupancy
                   stay={rows.find((r) => r.id === openStay.id)!}
@@ -178,6 +235,7 @@ export default async function ZoneDetailPage({
                 unit={unit}
                 today={today}
                 occupied={openStay !== null}
+                namesUsed={namesUsed}
               />
             </div>
           ) : null

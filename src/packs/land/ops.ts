@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
@@ -1004,6 +1004,21 @@ export interface OccupancyInput {
   occupantId?: string | null;
 }
 
+/** One stay by its id. The move needs the label and the shape off the row. */
+export async function getOccupancy(
+  tx: Tx,
+  tenantId: string,
+  occupancyId: string,
+): Promise<LandOccupancy | null> {
+  const row = await tx.query.landOccupancy.findFirst({
+    where: and(
+      eq(schema.landOccupancy.tenantId, tenantId),
+      eq(schema.landOccupancy.id, occupancyId),
+    ),
+  });
+  return row ?? null;
+}
+
 export async function listOccupancy(
   tx: Tx,
   tenantId: string,
@@ -1255,6 +1270,22 @@ export async function moveOccupant(
   ctx: LandCtx,
   zoneId: string,
   input: OccupancyInput,
+  /**
+   * The stay being moved, named by its own row.
+   *
+   * **THIS IS HOW LAND'S OWN SCREENS MOVE ANYTHING, AND IT HAD TO EXIST.**
+   * Everything below keys the displacement on `occupantId` — an identity only
+   * another pack supplies. A stay somebody typed into Land has no id and is
+   * exempt from that guard ON PURPOSE, so calling this from a Land screen did
+   * exactly what `startOccupancy` does: opened a second stay and left the herd
+   * recorded on two paddocks at once.
+   *
+   * Naming the ROW sidesteps identity altogether. The dialog lists what is
+   * actually on the ground and the person points at one of them, so there is
+   * nothing to match and nothing to mistype. **The label comes off the row, not
+   * off the form** — a move that renamed the herd would not be a move.
+   */
+  options: { fromOccupancyId?: string } = {},
 ): Promise<MoveResult> {
   requireWrite(ctx, "member");
 
@@ -1262,8 +1293,18 @@ export async function moveOccupant(
   // happened last month must not move them off the paddock they are on today —
   // and this is exactly the condition under which `startOccupancy`'s guard
   // fires, so the two stay in step by construction.
-  const open =
-    !input.endedOn && input.occupantId
+  const open = options.fromOccupancyId
+    ? await tx.query.landOccupancy.findFirst({
+        where: and(
+          eq(schema.landOccupancy.tenantId, ctx.tenantId),
+          eq(schema.landOccupancy.id, options.fromOccupancyId),
+          // An ENDED stay is not something you can move. Somebody already
+          // decided when it finished, and reopening that is an edit rather
+          // than a move — `deleteOccupancy` is the honest way back.
+          isNull(schema.landOccupancy.endedOn),
+        ),
+      })
+    : !input.endedOn && input.occupantId
       ? await tx.query.landOccupancy.findFirst({
           where: and(
             eq(schema.landOccupancy.tenantId, ctx.tenantId),
@@ -1276,6 +1317,13 @@ export async function moveOccupant(
           ),
         })
       : null;
+
+  if (options.fromOccupancyId && !open) {
+    throw new LandError(
+      "NOT_FOUND",
+      "that stay is not there any more, or it has already been closed",
+    );
+  }
 
   let movedOff: MoveResult["movedOff"] = null;
   if (open) {
@@ -1311,6 +1359,110 @@ export async function moveOccupant(
   }
 
   return { occupancy: await startOccupancy(tx, ctx, zoneId, input), movedOff };
+}
+
+/** One stay on the ground now, and where it is. */
+export interface OpenStay {
+  id: string;
+  zoneId: string;
+  zoneName: string;
+  occupantLabel: string;
+  startedOn: string;
+  areaAcres: number | null;
+}
+
+/**
+ * What is on this parcel today and could therefore be moved.
+ *
+ * **OPEN AND BEGUN.** No end date, because a stay somebody has already closed
+ * is not something to move; and started on or before today, because a stay
+ * recorded ahead has not happened — the pack has been bitten by both halves of
+ * that before (see the two 2026-08-16 entries) and every read that asks "where
+ * is it now" takes `today` for this reason.
+ *
+ * Ordered by the occupant's name so a picker reads the way a person thinks
+ * about it, not the way rows landed.
+ */
+export async function openStaysOnParcel(
+  tx: Tx,
+  tenantId: string,
+  parcelId: string,
+  today: string,
+): Promise<OpenStay[]> {
+  const rows = await tx
+    .select({
+      id: schema.landOccupancy.id,
+      zoneId: schema.landOccupancy.zoneId,
+      zoneName: schema.landZones.name,
+      occupantLabel: schema.landOccupancy.occupantLabel,
+      startedOn: schema.landOccupancy.startedOn,
+      areaAcres: schema.landOccupancy.areaAcres,
+    })
+    .from(schema.landOccupancy)
+    .innerJoin(
+      schema.landZones,
+      and(
+        eq(schema.landZones.tenantId, schema.landOccupancy.tenantId),
+        eq(schema.landZones.id, schema.landOccupancy.zoneId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.landOccupancy.tenantId, tenantId),
+        eq(schema.landZones.parcelId, parcelId),
+        isNull(schema.landOccupancy.endedOn),
+        lte(schema.landOccupancy.startedOn, today),
+      ),
+    );
+  return rows.sort(
+    (a, b) =>
+      compareNames(a.occupantLabel, b.occupantLabel) ||
+      compareNames(a.zoneName, b.zoneName),
+  );
+}
+
+/**
+ * Names this ground has carried before, newest first.
+ *
+ * A DATALIST, NOT A CLOSED LIST — the same treatment livestock gives breeds and
+ * treatment products. The occupant is a name somebody types, and it stays that
+ * way; this only saves them typing `Cow herd` for the twelfth time, and a typo
+ * that invents a second herd is the thing it exists to prevent.
+ */
+export async function occupantLabelsUsed(
+  tx: Tx,
+  tenantId: string,
+  parcelId: string,
+): Promise<string[]> {
+  const rows = await tx
+    .select({
+      occupantLabel: schema.landOccupancy.occupantLabel,
+      startedOn: schema.landOccupancy.startedOn,
+    })
+    .from(schema.landOccupancy)
+    .innerJoin(
+      schema.landZones,
+      and(
+        eq(schema.landZones.tenantId, schema.landOccupancy.tenantId),
+        eq(schema.landZones.id, schema.landOccupancy.zoneId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.landOccupancy.tenantId, tenantId),
+        eq(schema.landZones.parcelId, parcelId),
+      ),
+    )
+    .orderBy(desc(schema.landOccupancy.startedOn));
+
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const row of rows) {
+    if (seen.has(row.occupantLabel)) continue;
+    seen.add(row.occupantLabel);
+    out.push(row.occupantLabel);
+  }
+  return out;
 }
 
 /** Remove a stay entered by mistake. Correcting a record is not rewriting history. */

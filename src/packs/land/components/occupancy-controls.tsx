@@ -55,6 +55,7 @@ export function RecordOccupancy({
   unit,
   today,
   occupied,
+  namesUsed = [],
 }: {
   zoneId: string;
   zoneWord: string;
@@ -63,6 +64,15 @@ export function RecordOccupancy({
   today: string;
   /** Something is already here. The form still opens — for a past stay. */
   occupied: boolean;
+  /**
+   * Names this parcel has carried before.
+   *
+   * **A DATALIST, NOT A CLOSED LIST** — the treatment livestock gives breeds
+   * and treatment products. The occupant stays a name somebody types; this only
+   * saves typing `Cow herd` for the twelfth time, and a typo that quietly
+   * invents a second herd is the thing it exists to prevent.
+   */
+  namesUsed?: string[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -117,7 +127,15 @@ export function RecordOccupancy({
                 maxLength={200}
                 autoFocus
                 placeholder="e.g. Cow herd"
+                list={namesUsed.length > 0 ? `occupants-${zoneId}` : undefined}
               />
+              {namesUsed.length > 0 && (
+                <datalist id={`occupants-${zoneId}`}>
+                  {namesUsed.map((name) => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-4">

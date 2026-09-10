@@ -49,6 +49,8 @@ import {
   listOccupancy,
   listStructures,
   moveOccupant,
+  occupantLabelsUsed,
+  openStaysOnParcel,
   restByZone,
   startOccupancy,
   getParcel,
@@ -580,6 +582,172 @@ d("land ops", () => {
       "North division 2",
       "North division 10",
     ]);
+  });
+
+  it("moves a hand-entered stay by naming its ROW, which is the only handle it has", async () => {
+    // The whole reason `fromOccupancyId` exists: nothing typed into Land
+    // carries an `occupantId`, so the identity path cannot displace anything.
+    const parcel = await newParcel("Move By Row");
+    const from = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "From" }),
+    );
+    const to = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "To" }),
+    );
+    const stay = await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), from.id, {
+        occupantLabel: "Cow herd",
+        startedOn: "2026-05-01",
+      }),
+    );
+
+    // Without the row it is not a move at all — it opens a second stay and
+    // leaves them recorded on two paddocks at once.
+    const notAMove = await asOwner((tx) =>
+      moveOccupant(tx, ownerCtx(), to.id, {
+        occupantLabel: "Cow herd",
+        startedOn: "2026-05-10",
+      }),
+    );
+    expect(notAMove.movedOff).toBeNull();
+    await asOwner((tx) => deleteOccupancy(tx, ownerCtx(), notAMove.occupancy.id));
+
+    const moved = await asOwner((tx) =>
+      moveOccupant(
+        tx,
+        ownerCtx(),
+        to.id,
+        { occupantLabel: "Cow herd", startedOn: "2026-05-10" },
+        { fromOccupancyId: stay.id },
+      ),
+    );
+    // INCLUSIVE bound: moving on the 10th means the last day on `From` was the
+    // 9th. Closing it on the 10th would count that day's grazing twice.
+    expect(moved.movedOff).toEqual({ zoneId: from.id, endedOn: "2026-05-09" });
+    expect(moved.occupancy.zoneId).toBe(to.id);
+    expect(moved.occupancy.occupantLabel).toBe("Cow herd");
+
+    const left = await asOwner((tx) => listOccupancy(tx, tenantId, from.id));
+    expect(left.map((o) => o.endedOn)).toEqual(["2026-05-09"]);
+  });
+
+  it("refuses to move a stay that has already been closed", async () => {
+    const parcel = await newParcel("Move Closed");
+    const from = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "From" }),
+    );
+    const to = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "To" }),
+    );
+    const stay = await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), from.id, {
+        occupantLabel: "Cow herd",
+        startedOn: "2026-05-01",
+        endedOn: "2026-05-05",
+      }),
+    );
+    await expect(
+      asOwner((tx) =>
+        moveOccupant(
+          tx,
+          ownerCtx(),
+          to.id,
+          { occupantLabel: "Cow herd", startedOn: "2026-05-10" },
+          { fromOccupancyId: stay.id },
+        ),
+      ),
+    ).rejects.toThrow(LandError);
+  });
+
+  it("refuses a move onto the ground they are already on", async () => {
+    const parcel = await newParcel("Move Nowhere");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Here" }),
+    );
+    const stay = await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), zone.id, {
+        occupantLabel: "Cow herd",
+        startedOn: "2026-05-01",
+      }),
+    );
+    await expect(
+      asOwner((tx) =>
+        moveOccupant(
+          tx,
+          ownerCtx(),
+          zone.id,
+          { occupantLabel: "Cow herd", startedOn: "2026-05-10" },
+          { fromOccupancyId: stay.id },
+        ),
+      ),
+    ).rejects.toThrow(LandError);
+  });
+
+  it("offers what is on the ground TODAY, and nothing recorded ahead or closed", async () => {
+    const parcel = await newParcel("What Is Here");
+    const one = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "One" }),
+    );
+    const two = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Two" }),
+    );
+    await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), one.id, {
+        occupantLabel: "Cow herd",
+        startedOn: "2026-05-01",
+      }),
+    );
+    // Closed last month: not on the ground.
+    await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), two.id, {
+        occupantLabel: "Ewes",
+        startedOn: "2026-04-01",
+        endedOn: "2026-04-20",
+      }),
+    );
+    // Booked for next week: has not happened.
+    await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), two.id, {
+        occupantLabel: "Broilers",
+        startedOn: "2026-06-01",
+      }),
+    );
+
+    const here = await asOwner((tx) =>
+      openStaysOnParcel(tx, tenantId, parcel.id, "2026-05-15"),
+    );
+    expect(here.map((r) => r.occupantLabel)).toEqual(["Cow herd"]);
+    expect(here[0].zoneName).toBe("One");
+
+    // Once the booked arrival has come round, it is there too.
+    const later = await asOwner((tx) =>
+      openStaysOnParcel(tx, tenantId, parcel.id, "2026-06-02"),
+    );
+    expect(later.map((r) => r.occupantLabel)).toEqual(["Broilers", "Cow herd"]);
+  });
+
+  it("suggests names this ground has carried, newest first and each once", async () => {
+    const parcel = await newParcel("Names Used");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "One" }),
+    );
+    for (const [label, startedOn, endedOn] of [
+      ["Cow herd", "2026-03-01", "2026-03-10"],
+      ["Ewes", "2026-04-01", "2026-04-10"],
+      ["Cow herd", "2026-05-01", "2026-05-10"],
+    ] as const) {
+      await asOwner((tx) =>
+        startOccupancy(tx, ownerCtx(), zone.id, {
+          occupantLabel: label,
+          startedOn,
+          endedOn,
+        }),
+      );
+    }
+    const names = await asOwner((tx) =>
+      occupantLabelsUsed(tx, tenantId, parcel.id),
+    );
+    expect(names).toEqual(["Cow herd", "Ewes"]);
   });
 
   // ---- retirement ------------------------------------------------------

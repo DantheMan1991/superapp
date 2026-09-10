@@ -23,6 +23,7 @@ import {
   asFeatureGeometry,
   boundaryAreaAcres,
   boundaryAreaSqM,
+  boundingBox,
   parseBoundary,
   parseFeatureGeometry,
   pointInBoundary,
@@ -32,6 +33,12 @@ import {
   type Position,
 } from "./core/geo";
 import { compareNames } from "./core/list";
+import {
+  NEARBY_RADIUS_M,
+  boxReaches,
+  nearbyFeatures,
+  type Nearby,
+} from "./core/nearby";
 import { subdivide, type LanePlacement } from "./core/subdivide";
 import { enclosuresFrom, type FenceRun } from "./core/enclosure";
 import {
@@ -1465,6 +1472,76 @@ export async function occupantLabelsUsed(
   return out;
 }
 
+/** A thing on the ground and how far away it is, for the field screen. */
+export interface FeatureHere {
+  feature: LandFeature;
+  parcelName: string;
+  metres: number;
+}
+
+/**
+ * What is on the ground within `radiusM` of where somebody is standing.
+ *
+ * **THE STATUS FILTER IS THE WHOLE REASON `land_features.status` EXISTS**, and
+ * the design says so in as many words: *"standing in a field, the app must
+ * never tell you there is a buried electric line under you when that line is a
+ * proposal."* So `built` only. A proposal is not on the ground, and a pulled
+ * fence is not either — this screen answers *what am I standing next to*, and
+ * anything else on it is the map lying about the ground.
+ *
+ * **TWO PASSES, AND THE FIRST ONE IS CHEAP.** A farm has a handful of parcels
+ * and possibly hundreds of features, so the parcels are read first and their
+ * bounding boxes decide which ones could reach the fix. A parcel with NO
+ * boundary cannot be ruled out and is kept — the alternative is silently
+ * hiding the features of ground nobody has traced yet, which is the state every
+ * new farm starts in.
+ *
+ * Nothing is written and nothing about the position is stored. The design's
+ * rule for every use of a phone's location in this pack: a button, not a
+ * background service.
+ */
+export async function featuresNear(
+  tx: Tx,
+  tenantId: string,
+  point: [number, number],
+  radiusM: number = NEARBY_RADIUS_M,
+): Promise<FeatureHere[]> {
+  const parcels = await listParcels(tx, tenantId, { status: "active" });
+  const reachable = parcels.filter((parcel) => {
+    const boundary = asBoundary(parcel.geometry);
+    if (!boundary) return true;
+    return boxReaches(point, boundingBox(boundary), radiusM);
+  });
+  if (reachable.length === 0) return [];
+
+  const names = new Map(reachable.map((parcel) => [parcel.id, parcel.name]));
+  const rows = await tx.query.landFeatures.findMany({
+    where: and(
+      eq(schema.landFeatures.tenantId, tenantId),
+      inArray(
+        schema.landFeatures.parcelId,
+        reachable.map((parcel) => parcel.id),
+      ),
+      eq(schema.landFeatures.status, "built"),
+    ),
+  });
+
+  const measurable = rows.map((row) => ({
+    row,
+    geometry: asFeatureGeometry(row.geometry),
+  }));
+  const found: Nearby<(typeof measurable)[number]>[] = nearbyFeatures(
+    point,
+    measurable,
+    radiusM,
+  );
+  return found.map(({ feature, metres }) => ({
+    feature: feature.row,
+    parcelName: names.get(feature.row.parcelId) ?? "",
+    metres,
+  }));
+}
+
 /** Remove a stay entered by mistake. Correcting a record is not rewriting history. */
 export async function deleteOccupancy(
   tx: Tx,
@@ -1938,6 +2015,32 @@ export async function mappedZoneCount(tx: Tx, tenantId: string): Promise<number>
         eq(schema.landZones.tenantId, tenantId),
         eq(schema.landZones.status, "active"),
         sql`${schema.landZones.geometry} is not null`,
+      ),
+    );
+  return rows[0]?.count ?? 0;
+}
+
+/**
+ * How many BUILT things are drawn on this farm.
+ *
+ * The predicate behind `What is here`, and it is a wider test than
+ * `mappedZoneCount`: a farm can have fences, waterlines and a barn traced off
+ * the aerial long before any paddock has an outline, and that farm has plenty
+ * for the field screen to answer with. Built only, for the same reason the
+ * screen itself is: a proposal is not on the ground.
+ */
+export async function drawnFeatureCount(
+  tx: Tx,
+  tenantId: string,
+): Promise<number> {
+  const rows = await tx
+    .select({ count: sql<number>`count(*)::int` })
+    .from(schema.landFeatures)
+    .where(
+      and(
+        eq(schema.landFeatures.tenantId, tenantId),
+        eq(schema.landFeatures.status, "built"),
+        sql`${schema.landFeatures.geometry} is not null`,
       ),
     );
   return rows[0]?.count ?? 0;

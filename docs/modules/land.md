@@ -35,7 +35,7 @@ the first act of building it. Agreed 2026-08-15:
 | **2b.5** | **Snap, and the ground inside the fences** — a drawn point joins what is already there, and the loops the fences make become ground you can divide | **shipped 2026-08-29** |
 | **2b.6** | **Getting rid of things** — discard a proposed paddock, and sort/filter/bulk-delete the plan list | **shipped 2026-08-30** |
 | **2b.7** | **The paddock table gets it too** — same filter/sort/select, and the bulk act is RETIRE | **shipped 2026-08-30** |
-| ~~2b.x~~ | ~~**"What is here"** — the phone screen~~ — **absorbed into 2b.1/2b.3 on 2026-08-29.** It was always the same machinery, and it is far more trustworthy once the boundary was WALKED rather than traced | |
+| ~~2b.x~~ | ~~**"What is here"** — the phone screen~~ — absorbed into 2b.1/2b.3 on 2026-08-29 — **and then built after all, 2026-09-10.** The absorption was half right: walking and navigating are the same machinery, but *what is within a hundred feet of me, and what is recorded about it* is a question neither of them answers | **shipped 2026-09-10** |
 | **3** | **Weather + GDD** — Open-Meteo by parcel centroid, no table and no cron | **shipped 2026-08-30** |
 | 4 | Lease screens, haul movement and cost, the improvement-payback warning | |
 
@@ -577,6 +577,82 @@ grounds, which were never about optimisation as such.
   - **Assuming RTK.** Everything here must be useful at 3 m.
 
 ## Build log
+
+### 2026-09-10 — What is here (`claude/what-is-here`)
+
+Module-improvement review slice 4, and it is the last unbuilt item on the 2b
+design's own list. The founder's words were *"it auto displays relevant
+information to whatever is at your location"*, the design called it *the
+strongest item on the list*, and the answer it gave was one paragraph: which
+zone you are in, everything within a fixed hundred feet, and the attribute bag
+— *three strands hot, buried electric here, this trough is on the north line*.
+`where-am-i.tsx` had shipped the first third in 2a.2 and nothing ever asked for
+the rest. The dossier's open item said as much: *"`haversineM` has one consumer
+of the three it was written for."*
+
+**BUILT ONLY, AND THAT IS THE STATUS COLUMN FINALLY EARNING ITS KEEP.** The
+design justified `land_features.status` on precisely this screen: *"standing in
+a field, the app must never tell you there is a buried electric line under you
+when that line is a proposal."* So `featuresNear` reads `status = 'built'` and
+the dialog says so out loud. `removed` is out for the same reason: a fence that
+is gone is not something you are standing next to.
+
+**The frame does the geometry and haversine does the answer.** `geo.ts` is
+explicit that reported figures never come out of the local frame, so
+`distanceToGeometryM` finds the nearest point on a fence in the frame — where
+plane geometry is valid — converts it back with `fromLocal`, and measures with
+`haversineM`. A distance on this screen is the same kind of number as a fence's
+length. **Standing inside a building is zero metres from it**, not the distance
+to its nearest wall; an area you are in is a thing you are ON.
+
+**`nearestOnSegment` moved from `snap.ts` to `geo.ts`** rather than being
+written twice. The dossier's rule about the frame — *a second nearly-identical
+projection is how they would stop agreeing* — applies just as much to the maths
+done inside it.
+
+**Two passes, and the first is cheap.** A farm has a handful of parcels and
+possibly hundreds of features, so `featuresNear` reads the parcels first and
+their bounding boxes (padded by the radius) decide which could reach the fix. A
+parcel with NO boundary cannot be ruled out and is kept — the alternative is
+silently hiding the features of ground nobody has traced, which is the state
+every new farm starts in.
+
+**THE TWO LOCATION BUTTONS ARE NO LONGER OWNER-GATED.** Everything else on the
+Land list creates or finds a parcel, which is a decision about how the books are
+grouped. These two write nothing — they read a position, answer a question and
+forget it — and the person standing in the field is very often not the owner.
+This pack already decided drawing a fence is a chore rather than a decision;
+reading your surroundings is less of a decision than that. The guides said
+*"staff see no buttons at all"* and now say which two they do see.
+
+**Driven on Hilltop Farm (dev) at 375×812 and 1280×900, with a STUBBED
+`navigator.geolocation`** standing at North 1's own centroid:
+
+> You are on **North 1**, on Home Farm. The phone puts you within ±14 ft.
+> **Buried electric to the barn** · Buried electric · **90 ft**
+> voltage 240 · buried depth in 30
+> Nothing is recorded about where you were.
+
+The four PLANNED gates on North 1 are correctly absent, which is the whole
+argument above rendered. The dialog is 457px of an 812px viewport at 375 and
+426×400 at 1280; `document.body` measures 375, so nothing scrolls sideways.
+Standing at the PARCEL's centroid instead gives the honest empty answer —
+*not inside any mapped area*, *nothing built is drawn within 100 ft* — because
+that spot is in no paddock and near nothing.
+
+**WHAT IS NOT PROVED, and it is the same sentence this pack has been carrying
+since 2b.1: nothing here has run on a real phone.** The arithmetic is pinned by
+thirteen pure tests and two ops tests; the FEEL of a real fix — how long it
+takes under a tree line, whether ±60 ft makes the screen useless — is not. The
+`you are on it` badge, which needs a fix within a metre of something drawn, was
+not reachable with a stub either: placing a marker at the stubbed position needs
+walk mode, and walk mode would not start in the browser pane. It is a `< 1`
+branch on a number the tests already pin, and it is an open item rather than a
+claim.
+
+**Dev fixture:** Hilltop's buried electric line is now named `Buried electric to
+the barn` and carries `voltage 240` and `buried_depth_in 30`, so this screen and
+the feature panel both have an attribute bag to show.
 
 ### 2026-09-10 — A move is one act (`claude/a-move-is-one-act`)
 
@@ -1586,6 +1662,15 @@ rented ground, and retrofitting it means rewriting the report.
   day-long revalidate because a day that has happened never changes. The
   centroid is rounded to about a hundred metres, which is what makes the cache
   work across parcels on one farm
+- `src/packs/land/core/nearby.ts` — pure. How far a fix is from a thing on the
+  ground, and what falls inside a fixed hundred feet of it. **The frame does the
+  geometry and haversine does the answer**, the rule `geo.ts` states; standing
+  inside an area is ZERO metres from it, not the distance to its nearest wall.
+  `boxReaches` is the cheap first pass that keeps `featuresNear` from measuring
+  the whole farm
+- `src/packs/land/components/what-is-here.tsx` — the field screen the 2b design
+  ranked highest. One fix, one answer, nothing stored, and the accuracy figure
+  is part of the answer rather than decoration
 - `src/packs/land/core/navigate.ts` — pure. Bearing, compass point, the trend,
   and **arrival judged against the live accuracy rather than a fixed distance**.
   `targetsOf` turns a geometry into the ordered list of places to stand: the
@@ -1742,6 +1827,16 @@ rented ground, and retrofitting it means rewriting the report.
   is right and made moving impossible from the occupant's own page, which is a
   reminder that a correct refusal can still be a broken workflow. The day the
   move happens belongs to the NEW paddock only; see the 2026-08-16 entry.
+- **THE FIELD SCREEN SHOWS `built` AND NOTHING ELSE.** It is the reason
+  `land_features.status` exists at all — *"the app must never tell you there is
+  a buried electric line under you when that line is a proposal"* — so
+  `featuresNear` filters in SQL and the dialog says so on its face. A pulled
+  fence is out for the same reason.
+- **READING YOUR SURROUNDINGS IS NOT AN OWNER'S DECISION.** The two buttons on
+  the Land list that only read the phone's position are open to any member,
+  while everything else there stays owner-only: they write nothing, and the
+  person standing in the field is very often not the owner. Same line the pack
+  already drew when it made drawing a fence a chore.
 - **LAND'S OWN SCREENS MOVE BY NAMING THE ROW, NEVER THE OCCUPANT.** Every
   displacement inside `moveOccupant` keys on `occupantId`, which only another
   pack supplies — so calling it from a Land screen with just a label opened a
@@ -1925,14 +2020,24 @@ rented ground, and retrofitting it means rewriting the report.
   the dev branch's Hilltop Farm — drawn, measured, saved, promoted — and every
   bug it found is written up in the build log. Production has the table, the RLS
   and the screen, and nothing on it.
-- **`haversineM` has one consumer of the three it was written for.** Fence
-  lengths use it; the takeoff (2b.1) and "what is within 100 ft of me" (2b.2) do
-  not exist yet. That is the same shape as `zoneAtPoint` shipping ahead of 2a.2,
-  and it is deliberate for the same reason — but it is a debt until they land.
-- **Nothing reads `attributes`.** The panel displays whatever is in the bag and
-  the pack computes from none of it. Per-kind fields (`spacing_ft`, strand
-  counts) wait for 2b.1, because that is the slice where a wrong key stops being
-  cosmetic and starts producing a wrong materials list.
+- ~~`haversineM` has one consumer of the three it was written for~~ — **closed
+  2026-09-10.** Fence lengths, the takeoff (2b.4) and *what is within 100 ft of
+  me* (`core/nearby.ts`) all use it now. The debt this item named is paid.
+- **Nobody has stood in a field with `What is here` open.** It was driven
+  against a STUBBED `navigator.geolocation` at a known coordinate, so the
+  arithmetic and the screen are proved and the feel is not — how long a fix
+  takes under a tree line, and whether a ±60 ft reading makes the list useless.
+  The `you are on it` badge (a fix within a metre of something drawn) was not
+  reachable with a stub either.
+- **`What is here` reads every parcel on every press.** The bounding-box pass
+  is cheap and the feature read is narrowed to what could reach you, but the
+  parcel list itself is unbounded — the same thing every other read in this
+  pack does, and the same thing that stops being free at a hundred parcels.
+- **Two things read `attributes` now**, and neither validates a key: the takeoff
+  computes posts and wire from `post_spacing` and `wire_count`, and the field
+  screen DISPLAYS the whole bag, which is what the design said that screen was
+  for. Per-kind fields are still not a thing — a wrong key is a line nobody
+  wanted on a phone, or a missing post count with a note saying so.
 - **`fed_by_id` has a column and a picker and no screen that uses it.** "Show me
   everything on the north energizer" is one query away and nothing asks it yet.
 - ~~Nobody has pasted a boundary yet~~ — **closed 2026-08-19.** Driven on

@@ -8,6 +8,7 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { logAudit } from "@/lib/audit";
 import { packContext } from "@/lib/packs/tenant-context";
 import { asBoundary, boundaryAreaAcres } from "./core/geo";
+import { readAttributes } from "./core/features";
 import {
   parcelSourceById,
   parcelSourceFrom,
@@ -26,6 +27,7 @@ import {
   retireZones,
   deleteOccupancy,
   endOccupancy,
+  featuresNear,
   getOccupancy,
   moveOccupant,
   endZoneUse,
@@ -878,6 +880,77 @@ export async function zoneAtPointAction(input: unknown) {
       { role: ctx.role },
     );
     return { ok: true, zone: found };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * What is on the ground where somebody is standing.
+ *
+ * **THE SCREEN THE 2b DESIGN RANKED HIGHEST**, in the founder's words: *"it
+ * auto displays relevant information to whatever is at your location."* Which
+ * ground you are on, and everything built within a hundred feet of you, with
+ * whatever is recorded about each — three strands hot, buried thirty inches.
+ *
+ * **A MEMBER VERB, AND THAT IS NOT AN OVERSIGHT.** It writes nothing, and the
+ * person standing in the field is very often not the owner. Reading your
+ * surroundings is less of a decision than drawing a fence, which this pack
+ * already opened to everyone.
+ *
+ * NOTHING ABOUT THE POSITION IS STORED. It arrives in the request, answers one
+ * question and is gone — the pack's standing rule for every use of a phone's
+ * location, and the reason there is no breadcrumb trail anywhere in it.
+ */
+export async function whatIsHereAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      // Longitude first, as GeoJSON has it everywhere else in this pack.
+      lon: z.number().min(-180).max(180),
+      lat: z.number().min(-90).max(90),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "That location did not make sense." };
+
+  const point: [number, number] = [parsed.data.lon, parsed.data.lat];
+
+  try {
+    const found = await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        const zone = await zoneAtPoint(tx, ctx.tenant.id, point);
+        const parcel = zone
+          ? await getParcel(tx, ctx.tenant.id, zone.parcelId)
+          : null;
+        const near = await featuresNear(tx, ctx.tenant.id, point);
+        return {
+          zone: zone
+            ? {
+                zoneId: zone.id,
+                zoneName: zone.name,
+                parcelId: zone.parcelId,
+                parcelName: parcel?.name ?? "",
+                areaAcres: zone.areaAcres,
+              }
+            : null,
+          features: near.map(({ feature, parcelName, metres }) => ({
+            id: feature.id,
+            kind: feature.kind,
+            name: feature.name,
+            parcelName,
+            metres,
+            notes: feature.notes,
+            // The bag is what the design said this screen is FOR. It is read
+            // through the same total parser every other reader uses.
+            attributes: readAttributes(feature.attributes),
+          })),
+        };
+      },
+      { role: ctx.role },
+    );
+    return { ok: true, ...found };
   } catch (err) {
     return toResult(err);
   }

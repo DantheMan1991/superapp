@@ -490,6 +490,29 @@ export function fromLocal(frame: Frame, point: XY): Position {
   ];
 }
 
+/**
+ * The nearest point ON a segment to a point beside it, in the local frame.
+ *
+ * Clamped to the segment: past either end the answer is that end, which is what
+ * makes a point beyond the top of a fence measure to its corner rather than to
+ * an imaginary continuation of the run.
+ *
+ * **IT LIVES HERE BECAUSE TWO FILES NEED IT** — `snap.ts` moves a placed point
+ * onto what is already drawn, and `nearby.ts` asks how far away a fence is —
+ * and the dossier's rule about the frame applies just as much to the maths done
+ * inside it: a second nearly-identical projection is how two answers start
+ * disagreeing.
+ */
+export function nearestOnSegment(point: XY, a: XY, b: XY): XY {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const lengthSq = dx * dx + dy * dy;
+  if (lengthSq === 0) return a;
+  const t = ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / lengthSq;
+  const clamped = Math.max(0, Math.min(1, t));
+  return [a[0] + clamped * dx, a[1] + clamped * dy];
+}
+
 function pathLengthM(path: Position[]): number {
   let total = 0;
   for (let i = 1; i < path.length; i += 1) {

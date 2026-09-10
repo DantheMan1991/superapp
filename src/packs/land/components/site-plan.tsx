@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { SitePlanMap } from "./site-plan-map";
 import { FeaturePanel, type PanelFeature } from "./feature-panel";
 import { FeatureList } from "./feature-list";
@@ -71,6 +71,47 @@ export function SitePlan({
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /**
+   * Whether the next panel to mount should be scrolled to.
+   *
+   * **TAPPING A FENCE ON THE MAP USED TO DO NOTHING VISIBLE.** Measured at
+   * 375px: the map ends at y=1069 and this panel starts at y=1512 — 443px
+   * below it, under the legend — and nothing moved the page. You tapped the
+   * thing you wanted and the screen sat still.
+   *
+   * **ONLY FROM THE MAP.** A click in the LIST is already looking at the row
+   * it came from, and yanking the page out from under a finger that is working
+   * down a list is worse than not scrolling at all. So the two callers are two
+   * handlers rather than one, which also costs the map file nothing.
+   *
+   * A ref rather than state: it is a fact about the click that just happened,
+   * not something to render, and putting it in state would re-render the whole
+   * plan to record it.
+   */
+  const scrollToPanel = useRef(false);
+
+  const selectFromMap = useCallback((id: string | null) => {
+    scrollToPanel.current = id !== null;
+    setSelectedId(id);
+  }, []);
+
+  const selectFromList = useCallback((id: string | null) => {
+    scrollToPanel.current = false;
+    setSelectedId(id);
+  }, []);
+
+  /**
+   * Scrolls the panel into view as it mounts, once, if the map asked for it.
+   *
+   * A callback ref rather than an effect, because "when this element appears"
+   * is exactly what a callback ref means — and the wrapper is KEYED ON THE
+   * FEATURE below, so it really does mount again for each one.
+   */
+  const panelRef = useCallback((node: HTMLDivElement | null) => {
+    if (!node || !scrollToPanel.current) return;
+    scrollToPanel.current = false;
+    node.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, []);
+  /**
    * Which paddock's outline is being worked on, or null for the parcel's.
    *
    * Held beside the feature selection rather than folded into it: a feature and
@@ -110,7 +151,7 @@ export function SitePlan({
         zoneWord={zoneWord}
         declaredAcres={declaredAcres}
         selectedId={selectedId}
-        onSelect={setSelectedId}
+        onSelect={selectFromMap}
         selectedZoneId={selectedZoneId}
         onSelectZone={setSelectedZoneId}
       />
@@ -120,14 +161,27 @@ export function SitePlan({
       <PlanLegend features={features} />
 
       {selected && (
-        <FeaturePanel
-          feature={selected}
-          kinds={kinds}
-          sources={sources}
-          lengthUnit={lengthUnit}
-          canEdit={canEdit}
-          onClose={() => setSelectedId(null)}
-        />
+        /**
+         * **KEYED ON THE FEATURE, AND IT IS NOT ONLY ABOUT THE SCROLL.** The
+         * panel used to stay mounted while you clicked from one fence to the
+         * next — its own `navigatingId` comment says so — and two pieces of its
+         * state were initialised once and never again: `editing`, and
+         * `details`, which is seeded from `feature.attributes` at mount. So
+         * opening `Edit details` on a second fence showed the FIRST one's
+         * attributes, and saving wrote them onto the second. A key makes each
+         * feature its own instance, which is what the state was assuming all
+         * along.
+         */
+        <div key={selected.id} ref={panelRef}>
+          <FeaturePanel
+            feature={selected}
+            kinds={kinds}
+            sources={sources}
+            lengthUnit={lengthUnit}
+            canEdit={canEdit}
+            onClose={() => setSelectedId(null)}
+          />
+        </div>
       )}
 
       <FeatureList
@@ -136,7 +190,7 @@ export function SitePlan({
         lengthUnit={lengthUnit}
         canEdit={canEdit}
         selectedId={selectedId}
-        onSelect={setSelectedId}
+        onSelect={selectFromList}
       />
     </div>
   );

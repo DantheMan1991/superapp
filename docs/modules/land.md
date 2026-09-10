@@ -578,6 +578,71 @@ grounds, which were never about optimisation as such.
 
 ## Build log
 
+### 2026-09-10 — Every table on a phone (`claude/every-table-on-a-phone`)
+
+Module-improvement review slice 2. Land was the last pack whose screens were
+all desktop tables at 375px — there was not one `md:hidden` in
+`src/packs/land` or `src/app/dashboard/m/land`, where accounting, livestock and
+inventory had all been given cards. Measured before, at 375×812:
+
+| Table | Width in its column | The control off the edge |
+| --- | --- | --- |
+| Stays, on a {{zone}} | 533px in 343 | `Remove` at **x=466** — 91px past the screen |
+| Paddocks, on a {{parcel}} | 427px in 343 | the row menu at **x=399** |
+| What it will take | 362px in 269 | `Remove …` at **x=375** |
+
+All three are cards below `md` now, and measured after: `Remove` on a stay at
+x=273, the paddock's menu at x=311 (its items opening at x=222–336), and the
+takeoff's `Remove` at x=210. Nothing horizontal-scrolls; `document.body`
+measures 375 on both pages. **On a paddock card the body is the link and the
+menu sits outside it** — a menu nested inside a link opens the link — which
+gives the phone the whole-card tap the desktop table still does not have.
+
+**The map's own panel had no feedback at all.** Measured at 375: the map ends
+at y=1069 and the selected feature's panel starts at y=1512, 443px below it and
+under the legend, with no `scrollIntoView` anywhere in the pack. You tapped a
+fence and the screen sat still. It scrolls now — **but only from the MAP**: a
+click in the LIST is already looking at the row it came from, and yanking the
+page out from under a finger working down a list is worse than not scrolling.
+Two handlers rather than one, which costs the 1,900-line map file nothing.
+Driven: a list click leaves the card at exactly the same viewport position
+(354 → 354) with the panel off-screen above. **The map half is wired and NOT
+driven** — the pane will not let a MapLibre canvas click be synthesised
+reliably.
+
+**AND IT FOUND A REAL ONE, PROVED BY REVERTING THE FIX AND WATCHING IT.** The
+feature panel stays mounted while you click from one fence to the next — its
+own `navigatingId` comment says exactly that, and keys that state on the
+feature id for exactly this reason. Two other pieces of its state were not:
+`editing`, and `details`, which is seeded from `feature.attributes` **once, at
+mount**. So:
+
+  - open `Edit details` on `South line`, then select `North division 1`;
+  - the panel heading reads `North division 1` and **the Name box still says
+    `South line`** — observed on the shipped code, not argued;
+  - `save` posts `id: feature.id`, the NEW fence, with the OLD one's name,
+    notes and attribute bag. Pressing Save there renames the wrong fence and
+    replaces what is recorded about it.
+
+The fix is one key on the panel's wrapper, which makes each feature its own
+instance — which is what that state was assuming all along. Driven after: the
+form closes and the new feature's panel comes up clean.
+
+**A trap worth writing down: `tsc` does not catch a `\u00b7` escape in JSX
+text.** Turbopack refuses it outright (`Expected '</', got 'jsx name'`) and a
+cold `tsc --noEmit` passed over it, because a backslash is ordinary text to the
+TypeScript JSX parser — it would simply have rendered the six characters on
+screen. Found by driving, not by the typechecker.
+
+Also in passing: `plan-takeoff.tsx` now folds its rows ONCE and renders them in
+two shapes, so the table and the cards cannot disagree about what a line says.
+
+Driven on Hilltop Farm (dev) at 375×812 and 1280×900; the desktop shape is
+unchanged — all three tables render at their old widths inside their columns
+and no card list is visible above `md`. **No screenshot: the browser pane on
+this machine is not compositing the page**, so everything here was measured
+through the DOM.
+
 ### 2026-09-10 — A plan list you can read (`claude/a-plan-list-you-can-read`)
 
 Module-improvement review slice 1, from the founder's own reading of the site
@@ -1463,6 +1528,14 @@ rented ground, and retrofitting it means rewriting the report.
   point/line/polygon modes.
   **The map handlers read the draw mode from a REF**, because they are
   registered once and would otherwise close over the mode at creation
+- `src/packs/land/components/site-plan.tsx` — the map, what is selected, and the
+  list. **It owns two select handlers rather than one**, because a click on the
+  map has to scroll the panel into view and a click in the list must not — and
+  splitting them here costs the map file nothing. **The panel's wrapper is KEYED
+  ON THE FEATURE**, which is not cosmetic: the panel's `editing` and `details`
+  state was initialised once at mount, so clicking from one fence to the next
+  left the edit form holding the previous fence's name and attributes while
+  `save` targeted the new one
 - `src/packs/land/components/plan-legend.tsx` — the key. Only the kinds
   actually on this parcel, drawn from the same `featureStyle` the map uses
 - `src/packs/land/core/survey.ts` — pure, and deliberately free of `navigator`
@@ -1630,6 +1703,17 @@ rented ground, and retrofitting it means rewriting the report.
   cannot read, so a bad row degrades to "no boundary" rather than a broken page.
 - **Winding order is ignored when measuring**, deliberately. Trusting it would
   make a valid but clockwise boundary measure negative.
+- **A PANEL THAT SURVIVES A SELECTION CHANGE MUST BE KEYED.** `FeaturePanel`
+  stays mounted while you click from one feature to the next, so any state it
+  seeds from its props at mount — `details` from `feature.attributes`, and
+  `editing` — silently belongs to whichever feature was selected first. It was
+  already keyed for `navigatingId` and not for the other two. **The general
+  rule: state derived from a prop at mount is a bug unless the component is
+  keyed on that prop.**
+- **`tsc` DOES NOT CATCH A BACKSLASH ESCAPE IN JSX TEXT.** `<span> \u00b7 x</span>`
+  typechecks clean — a backslash is ordinary text to the JSX parser — and would
+  render the six characters literally; Turbopack refuses it outright. Write the
+  character, and do not trust a cold typecheck to have looked at your strings.
 - **NAMES SORT BY NUMBER, and this pack needs it more than any other.** Every
   list of ground goes through `compareNames` (`core/list.ts`,
   `localeCompare(…, { numeric: true })`), because `layoutPaddocks` mints
@@ -1652,7 +1736,16 @@ rented ground, and retrofitting it means rewriting the report.
   it, and then it belongs in `src/lib/`.
 - **The plan list's headings are the only grouping in the pack.** The paddock
   table has the same shape and the same scale problem — a farm at 10x has two
-  hundred rows — and got only the ordering fix.
+  hundred rows — and got cards and the ordering fix but no headings.
+- **Nobody has tapped a feature on the MAP since the panel learned to scroll to
+  it.** The list half is driven — a list click leaves the card exactly where it
+  was — and the map half is the same code with a flag set, unproven because a
+  MapLibre canvas click cannot be synthesised reliably in the browser pane.
+- **A {{parcel}}'s page is 4,722px at 375px**, and the {{zone|plural}} — the
+  thing somebody standing in a field wants — are at the bottom of it, below the
+  plan, the takeoff, the details, the weather and the rotation. Cards made it
+  taller than the 4,204px the grouping left. Reordering the page is a design
+  decision nobody has taken.
 - **Weather predicts nothing yet, on purpose.** Slice 3 reports the season and
   the comparison; the brief's *"16 days, not 21"* needs a regrowth model, and
   that needs ground somebody has measured. The data now accumulates whether or

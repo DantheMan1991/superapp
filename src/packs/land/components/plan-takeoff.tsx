@@ -215,6 +215,36 @@ export function PlanTakeoff({
     });
   }
 
+  /**
+   * One row per material, folded once and rendered in two shapes.
+   *
+   * The table was 362px in a 269px column at 375, which put `Remove` at x=375
+   * — exactly on the edge of the screen and unreachable. The phone gets cards;
+   * the fold is shared so the two can never disagree about what a line says.
+   */
+  const rows = (plan.takenOffAt ? savedTotals : computedTotals).map((total) => {
+    const key = `${total.material}:${total.unit}`;
+    const item = plan.items.find(
+      (i) => i.material === total.material && i.unit === total.unit,
+    );
+    const moved = drift.find(
+      (d) => d.material === total.material && d.unit === total.unit,
+    );
+    return {
+      key,
+      total,
+      item,
+      moved,
+      /** Nothing recomputes a hand-added line, so it has no "now". */
+      counted: counted.has(key),
+      quantityLabel: `${total.quantity.toLocaleString("en-US")} ${total.unit}`,
+      priceLabel:
+        item?.unitCost != null
+          ? money.format(item.unitCost * item.quantity)
+          : null,
+    };
+  });
+
   return (
     <div className="rounded-md border p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -237,7 +267,62 @@ export function PlanTakeoff({
           Nothing to count yet — draw what this plan proposes.
         </p>
       ) : (
-        <Table className="mt-3">
+        <>
+          <ul className="mt-3 space-y-3 md:hidden">
+            {rows.map((row) => (
+              <li
+                key={row.key}
+                className="rounded-2xl bg-card p-4 shadow-elevation-1"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{row.total.label}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {plan.takenOffAt ? "Saved" : "From the drawing"}
+                      {plan.takenOffAt &&
+                        (!row.counted ? (
+                          <span> · typed in</span>
+                        ) : row.moved ? (
+                          <span className="text-warning">
+                            {" · now "}
+                            {row.moved.now.toLocaleString("en-US")}{" "}
+                            {row.total.unit}
+                          </span>
+                        ) : (
+                          <span> · same</span>
+                        ))}
+                    </p>
+                  </div>
+                  <p className="shrink-0 text-right tabular-nums">
+                    {row.quantityLabel}
+                    {row.priceLabel && (
+                      <span className="block text-xs text-muted-foreground">
+                        {row.priceLabel}
+                      </span>
+                    )}
+                  </p>
+                </div>
+                {canEdit && row.item && (
+                  <div className="mt-2 flex justify-end">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-muted-foreground"
+                      aria-label={`Remove ${row.total.label}`}
+                      disabled={pending}
+                      onClick={() => removeItem(row.item!.id)}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Remove
+                    </Button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+
+          <div className="hidden md:block">
+            <Table className="mt-3">
           <TableHeader>
             <TableRow>
               <TableHead>Material</TableHead>
@@ -252,57 +337,50 @@ export function PlanTakeoff({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {(plan.takenOffAt ? savedTotals : computedTotals).map((total) => {
-              const item = plan.items.find(
-                (i) => i.material === total.material && i.unit === total.unit,
-              );
-              const moved = drift.find(
-                (d) => d.material === total.material && d.unit === total.unit,
-              );
-              return (
-                <TableRow key={`${total.material}:${total.unit}`}>
-                  <TableCell className="font-medium">{total.label}</TableCell>
+            {rows.map((row) => (
+              <TableRow key={row.key}>
+                <TableCell className="font-medium">{row.total.label}</TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {row.quantityLabel}
+                </TableCell>
+                {plan.takenOffAt && (
                   <TableCell className="text-right tabular-nums">
-                    {total.quantity.toLocaleString("en-US")} {total.unit}
-                  </TableCell>
-                  {plan.takenOffAt && (
-                    <TableCell className="text-right tabular-nums">
-                      {!counted.has(`${total.material}:${total.unit}`) ? (
-                        // Nothing recomputes a hand-added line, so there is no
-                        // "now" to compare against — not a zero.
-                        <span className="text-muted-foreground">typed in</span>
-                      ) : moved ? (
-                        <span className="text-warning">
-                          {moved.now.toLocaleString("en-US")} {total.unit}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">same</span>
-                      )}
-                    </TableCell>
-                  )}
-                  <TableCell className="text-right tabular-nums">
-                    {item?.unitCost != null
-                      ? money.format(item.unitCost * item.quantity)
-                      : "—"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {canEdit && item && (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        aria-label={`Remove ${total.label}`}
-                        disabled={pending}
-                        onClick={() => removeItem(item.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                    {!row.counted ? (
+                      // Nothing recomputes a hand-added line, so there is no
+                      // "now" to compare against — not a zero.
+                      <span className="text-muted-foreground">typed in</span>
+                    ) : row.moved ? (
+                      <span className="text-warning">
+                        {row.moved.now.toLocaleString("en-US")}{" "}
+                        {row.total.unit}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">same</span>
                     )}
                   </TableCell>
-                </TableRow>
-              );
-            })}
+                )}
+                <TableCell className="text-right tabular-nums">
+                  {row.priceLabel ?? "—"}
+                </TableCell>
+                <TableCell className="text-right">
+                  {canEdit && row.item && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      aria-label={`Remove ${row.total.label}`}
+                      disabled={pending}
+                      onClick={() => removeItem(row.item!.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
           </TableBody>
-        </Table>
+            </Table>
+          </div>
+        </>
       )}
 
       {priced && (

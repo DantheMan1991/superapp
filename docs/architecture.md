@@ -274,13 +274,13 @@ platform-level table that should have been tenant-scoped is a cross-tenant leak.
 src/
   app/
     (auth)/            sign-in, sign-up
-    admin/             superadmin: clients, modules, retainers, audits, docs
+    admin/             the operations console: workspaces, modules, retainers, discovery, docs
     api/               route handlers — webhooks, blob, inbound mail
     dashboard/         the tenant product
       m/[slug]/        registry-rendered modules
       m/<slug>/        modules with their own route trees
     onboarding/        idempotent tenant sync
-    health-check/      public AI interview funnel (prospects)
+    health-check/      public AI interview funnel (leads land in the operator tenant)
     s/[token]/         public document share links
   components/          shared UI + app shell
   db/

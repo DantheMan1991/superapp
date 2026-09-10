@@ -11,9 +11,9 @@ import { obtainOperator } from "./isolation/_shared";
 
 /**
  * A client is a party in the operator tenant (ADR 0041, back-office slice 1):
- * `ensureOperatorParty` writes the party, its contact point, the CRM record
- * and the carried notes under the OPERATOR's context, then the one pointer
- * under `withSystem`; `readOperatorParty` reads it back the same narrow way.
+ * `ensureOperatorParty` writes the party, its contact point and the CRM
+ * record under the OPERATOR's context, then the one pointer under
+ * `withSystem`; `readOperatorParty` reads it back the same narrow way.
  *
  * Runs against the named operator when the database has one — so on the dev
  * branch it writes a real party into Yosher's CRM for a few seconds and takes
@@ -24,7 +24,6 @@ import { obtainOperator } from "./isolation/_shared";
 const RUN = !!process.env.DATABASE_URL;
 const d = RUN ? describe : describe.skip;
 const STAMP = `rel-test-${process.pid}`;
-const NOTE = "Called about onboarding; wants the books to start in January.";
 
 let operator: string;
 let operatorMinted = false;
@@ -64,11 +63,6 @@ d("a client is a party in the operator tenant", () => {
         })
         .returning();
       client = c.id;
-      await tx.insert(schema.tenantNotes).values({
-        tenantId: client,
-        authorClerkUserId: "user-note",
-        body: NOTE,
-      });
     });
   });
 
@@ -76,7 +70,7 @@ d("a client is a party in the operator tenant", () => {
     await withSystem(async (tx) => {
       await tx.delete(schema.tenants).where(eq(schema.tenants.id, client));
       for (const partyId of createdParties) {
-        // Details, activities and contact points cascade from the party.
+        // Details and contact points cascade from the party.
         await tx
           .delete(schema.parties)
           .where(
@@ -89,11 +83,10 @@ d("a client is a party in the operator tenant", () => {
     });
   });
 
-  it("makes an organization party in the operator's CRM, carries the notes, and points the workspace at it", async () => {
+  it("makes an organization party in the operator's CRM and points the workspace at it", async () => {
     const result = await ensureOperatorParty(client, { userId: "user-actor" });
     createdParties.push(result.partyId);
     expect(result.created).toBe(true);
-    expect(result.notesMoved).toBe(crmOn ? 1 : 0);
 
     const party = await withTenant(
       operator,
@@ -139,24 +132,6 @@ d("a client is a party in the operator tenant", () => {
         { role: "owner" },
       );
       expect(details?.source).toBe("platform");
-
-      const activities = await withTenant(
-        operator,
-        (tx) =>
-          tx
-            .select({
-              kind: schema.crmActivities.kind,
-              subject: schema.crmActivities.subject,
-              body: schema.crmActivities.body,
-              by: schema.crmActivities.createdByClerkUserId,
-            })
-            .from(schema.crmActivities)
-            .where(eq(schema.crmActivities.partyId, result.partyId)),
-        { role: "owner" },
-      );
-      expect(activities).toEqual([
-        { kind: "note", subject: "Console note", body: NOTE, by: "user-note" },
-      ]);
     }
   });
 
@@ -164,20 +139,6 @@ d("a client is a party in the operator tenant", () => {
     const again = await ensureOperatorParty(client, { userId: "user-actor" });
     expect(again.created).toBe(false);
     expect(again.partyId).toBe(createdParties[0]);
-    expect(again.notesMoved).toBe(0);
-
-    if (crmOn) {
-      const activities = await withTenant(
-        operator,
-        (tx) =>
-          tx
-            .select({ id: schema.crmActivities.id })
-            .from(schema.crmActivities)
-            .where(eq(schema.crmActivities.partyId, createdParties[0])),
-        { role: "owner" },
-      );
-      expect(activities).toHaveLength(1);
-    }
   });
 
   it("refuses to make the operator a client of itself", async () => {

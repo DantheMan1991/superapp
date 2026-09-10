@@ -14,7 +14,13 @@ import {
   relationshipMessage,
   type EnsureResult,
 } from "./relationship";
-import { uniqueTenantSlug } from "@/lib/slug";
+import {
+  attachWorkspaceToParty,
+  ProvisionError,
+  provisionMessage,
+  resolveProvisionTarget,
+  type ProvisionTarget,
+} from "./provision";
 import { upsertTenantFromOrg } from "@/lib/tenant-sync";
 import { provisionAccounting } from "@/modules/accounting/templates/apply";
 import { provisionDocuments } from "@/modules/documents/templates/apply";
@@ -312,7 +318,9 @@ export async function installProfile(
 
 const setStatusSchema = z.object({
   tenantId: z.string().uuid(),
-  status: z.enum(["prospect", "onboarding", "active", "paused", "churned"]),
+  // `prospect` is retired (back-office slice 3): the enum keeps the value
+  // because Postgres cannot drop one, and nothing writes it.
+  status: z.enum(["onboarding", "active", "paused", "churned"]),
 });
 
 export async function setTenantStatus(
@@ -356,14 +364,12 @@ const partySchema = z.object({ tenantId: z.string().uuid() });
 
 type PartyOutcome =
   | { error: string }
-  | { ok: true; partyId: string; created: boolean; notesMoved: number };
+  | { ok: true; partyId: string; created: boolean };
 
 /**
  * A client is a party (ADR 0041, back-office slice 1): make this workspace's
  * party in the operator's CRM and point the row at it. Idempotent — a linked
- * workspace answers with its party and writes nothing. Console notes stopped
- * being written here in the same slice; the ones that exist ride across onto
- * the party's timeline.
+ * workspace answers with its party and writes nothing.
  */
 export async function createOperatorPartyAction(
   input: z.infer<typeof partySchema>,
@@ -389,7 +395,6 @@ export async function createOperatorPartyAction(
       actorLabel: "admin-console",
       targetType: "party",
       targetId: result.partyId,
-      meta: { notesMoved: result.notesMoved },
     });
   }
 
@@ -400,7 +405,7 @@ export async function createOperatorPartyAction(
 
 type BackfillOutcome =
   | { error: string }
-  | { ok: true; considered: number; created: number; notesMoved: number };
+  | { ok: true; considered: number; created: number };
 
 /**
  * The backfill: every WORKSPACE (a Clerk organization behind it) with no
@@ -422,7 +427,6 @@ export async function createOperatorPartiesAction(): Promise<BackfillOutcome> {
   );
 
   let created = 0;
-  let notesMoved = 0;
   for (const t of unlinked) {
     let result: EnsureResult;
     try {
@@ -435,7 +439,6 @@ export async function createOperatorPartiesAction(): Promise<BackfillOutcome> {
     }
     if (!result.created) continue;
     created += 1;
-    notesMoved += result.notesMoved;
     await logAudit({
       action: "tenant.party_linked",
       tenantId: t.id,
@@ -443,104 +446,94 @@ export async function createOperatorPartiesAction(): Promise<BackfillOutcome> {
       actorLabel: "admin-console",
       targetType: "party",
       targetId: result.partyId,
-      meta: { notesMoved: result.notesMoved, backfill: true },
+      meta: { backfill: true },
     });
   }
 
   revalidatePath("/admin");
-  return { ok: true, considered: unlinked.length, created, notesMoved };
+  return { ok: true, considered: unlinked.length, created };
 }
 
-const createClientSchema = z.object({
-  name: z.string().trim().min(2).max(120),
-  industry: z.string().trim().min(1).max(64),
-  kind: z.enum(["prospect", "client"]).default("prospect"),
-  contactName: z.string().trim().max(120).optional().or(z.literal("")),
+const provisionSchema = z.object({
+  partyId: z.string().uuid("Pick the business from the CRM"),
+  profileSlug: z.string().trim().max(64).optional().or(z.literal("")),
   ownerEmail: z.string().trim().email().optional().or(z.literal("")),
 });
 
 /**
- * Add a business to the CRM. As a "prospect" it's a CRM-only record (no
- * Clerk org, no platform access) — the discovery stage. As a "client" it
- * gets its Clerk organization immediately and the owner can be invited.
+ * Provision a workspace FROM a party (ADR 0041, back-office slice 3).
+ *
+ * The relationship exists first, in the operator's CRM; this makes the thing
+ * the platform provides for it: the Clerk organization, the tenant row, the
+ * pointer back to the party, a profile when one is chosen, an invitation
+ * when an owner's address is given. The prospect row and the convert step
+ * that used to live here are gone — a business without a workspace is a
+ * party, never a tenant.
+ *
+ * Clerk is asked for nothing until everything the console can check has
+ * been checked (provision.ts), and it is handed an explicit slug — the one
+ * a person would type — because the one it makes for an API-created
+ * organization is suffixed and the console shows slugs nowhere.
  */
-export async function createClientBusiness(formData: FormData) {
+export async function provisionWorkspace(formData: FormData) {
   const { userId } = await requireSuperAdmin();
-  const parsed = createClientSchema.safeParse({
-    name: formData.get("name"),
-    industry: formData.get("industry"),
-    kind: formData.get("kind") ?? "prospect",
-    contactName: formData.get("contactName"),
+  const parsed = provisionSchema.safeParse({
+    partyId: formData.get("partyId"),
+    profileSlug: formData.get("profileSlug"),
     ownerEmail: formData.get("ownerEmail"),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
 
-  if (parsed.data.kind === "prospect") {
-    const tenant = await withSystem(async (tx) => {
-      const slug = await uniqueTenantSlug(tx, parsed.data.name);
-      const [row] = await tx
-        .insert(schema.tenants)
-        .values({
-          clerkOrgId: null,
-          name: parsed.data.name,
-          slug,
-          industry: parsed.data.industry,
-          status: "prospect",
-          contactName: parsed.data.contactName || null,
-          contactEmail: parsed.data.ownerEmail || null,
-        })
-        .returning();
-      await tx
-        .insert(schema.subscriptions)
-        .values({ tenantId: row.id })
-        .onConflictDoNothing();
-      return row;
-    });
+  const profileSlug = parsed.data.profileSlug || "";
+  const profile = profileSlug ? getIndustryProfile(profileSlug) : null;
+  if (profileSlug && !profile) return { error: "No such industry profile." };
 
-    await logAudit({
-      action: "prospect.created",
-      tenantId: tenant.id,
-      actorClerkUserId: userId,
-      actorLabel: "admin-console",
-    });
-
-    revalidatePath("/admin");
-    return { ok: true, tenantId: tenant.id };
+  let target: ProvisionTarget;
+  try {
+    target = await resolveProvisionTarget(parsed.data.partyId);
+  } catch (err) {
+    if (err instanceof ProvisionError) return { error: provisionMessage(err.code) };
+    throw err;
   }
 
   const client = await clerkClient();
   const me = await currentUser();
-
   let org;
   try {
     org = await client.organizations.createOrganization({
-      name: parsed.data.name,
+      name: target.name,
+      slug: target.slug,
       createdBy: me?.id,
     });
   } catch (err) {
-    console.error("clerk org creation failed", err);
-    return { error: "Could not create the organization in Clerk." };
+    // The slug is taken on Clerk's side by an organization this database no
+    // longer knows about. Clerk's own suffix beats no workspace.
+    console.error("clerk org creation with an explicit slug failed", err);
+    try {
+      org = await client.organizations.createOrganization({
+        name: target.name,
+        createdBy: me?.id,
+      });
+    } catch (again) {
+      console.error("clerk org creation failed", again);
+      return { error: "Could not create the organization in Clerk." };
+    }
   }
 
   const tenant = await upsertTenantFromOrg({
     id: org.id,
-    name: parsed.data.name,
+    name: target.name,
     slug: org.slug,
   });
+  await attachWorkspaceToParty(tenant.id, target, { userId });
 
-  await withSystem((tx) =>
-    tx
-      .update(schema.tenants)
-      .set({
-        industry: parsed.data.industry,
-        contactName: parsed.data.contactName || null,
-        contactEmail: parsed.data.ownerEmail || null,
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.tenants.id, tenant.id)),
-  );
+  const warnings: string[] = [];
+  if (profile) {
+    const installed = await installProfile({ tenantId: tenant.id, profileSlug: profile.slug });
+    if ("error" in installed && installed.error) warnings.push(installed.error);
+  }
 
   if (parsed.data.ownerEmail) {
     try {
@@ -552,12 +545,7 @@ export async function createClientBusiness(formData: FormData) {
       });
     } catch (err) {
       console.error("clerk invitation failed", err);
-      // Tenant still created; surface a soft warning.
-      return {
-        ok: true,
-        tenantId: tenant.id,
-        warning: "Client created, but the email invitation failed to send.",
-      };
+      warnings.push("Workspace created, but the email invitation failed to send.");
     }
   }
 
@@ -566,96 +554,22 @@ export async function createClientBusiness(formData: FormData) {
     tenantId: tenant.id,
     actorClerkUserId: userId,
     actorLabel: "admin-console",
-    meta: { invited: parsed.data.ownerEmail || null },
+    targetType: "party",
+    targetId: target.partyId,
+    meta: {
+      partyId: target.partyId,
+      profile: profile?.slug ?? null,
+      invited: parsed.data.ownerEmail || null,
+    },
   });
 
   revalidatePath("/admin");
-  return { ok: true, tenantId: tenant.id };
-}
-
-const convertSchema = z.object({
-  tenantId: z.string().uuid(),
-  ownerEmail: z.string().trim().email().optional().or(z.literal("")),
-});
-
-/**
- * Prospect → client: create the Clerk organization and attach it to the
- * SAME CRM row, so audits, notes, and history stay connected.
- */
-export async function convertProspectToClient(formData: FormData) {
-  const { userId } = await requireSuperAdmin();
-  const parsed = convertSchema.safeParse({
-    tenantId: formData.get("tenantId"),
-    ownerEmail: formData.get("ownerEmail"),
-  });
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
-  }
-
-  const tenant = await withSystem((tx) =>
-    tx.query.tenants.findFirst({
-      where: eq(schema.tenants.id, parsed.data.tenantId),
-    }),
-  );
-  if (!tenant) return { error: "Business not found" };
-  if (tenant.clerkOrgId) return { error: "Already a client." };
-
-  const client = await clerkClient();
-  const me = await currentUser();
-
-  let org;
-  try {
-    org = await client.organizations.createOrganization({
-      name: tenant.name,
-      createdBy: me?.id,
-    });
-  } catch (err) {
-    console.error("clerk org creation failed", err);
-    return { error: "Could not create the organization in Clerk." };
-  }
-
-  // Attach immediately so the org.created webhook's upsert finds this row
-  // by clerkOrgId instead of creating a duplicate.
-  await withSystem((tx) =>
-    tx
-      .update(schema.tenants)
-      .set({
-        clerkOrgId: org.id,
-        status: "onboarding",
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.tenants.id, tenant.id)),
-  );
-
-  const invite = parsed.data.ownerEmail || tenant.contactEmail;
-  let warning: string | undefined;
-  if (invite) {
-    try {
-      await client.organizations.createOrganizationInvitation({
-        organizationId: org.id,
-        emailAddress: invite,
-        role: "org:admin",
-        inviterUserId: me?.id,
-      });
-    } catch (err) {
-      console.error("clerk invitation failed", err);
-      warning = "Converted, but the email invitation failed to send.";
-    }
-  }
-
-  await logAudit({
-    action: "prospect.converted",
+  return {
+    ok: true,
     tenantId: tenant.id,
-    actorClerkUserId: userId,
-    meta: { invited: invite || null },
-  });
-
-  revalidatePath(`/admin/tenants/${tenant.id}`);
-  revalidatePath("/admin");
-  return { ok: true, warning };
+    warning: warnings.length > 0 ? warnings.join(" ") : undefined,
+  };
 }
-
-// ------------------------------------------------------------ vocabulary ---
 
 const setLabelsSchema = z.object({
   tenantId: z.string().uuid(),

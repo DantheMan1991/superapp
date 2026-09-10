@@ -21,7 +21,6 @@ import {
   TenantStatusBadge,
 } from "@/components/status-badge";
 import {
-  ConvertProspectForm,
   ModuleToggle,
   ProfileInstaller,
   TenantStatusSelect,
@@ -60,7 +59,7 @@ export default async function TenantDetailPage({
     });
     if (!tenant) return null;
 
-    const [allModules, tenantMods, subscription, notes, audit, members, retainerView, timeEntries] =
+    const [allModules, tenantMods, subscription, audit, members, retainerView, timeEntries] =
       await Promise.all([
         tx.query.modules.findMany({ orderBy: asc(schema.modules.sortOrder) }),
         tx.query.tenantModules.findMany({
@@ -68,11 +67,6 @@ export default async function TenantDetailPage({
         }),
         tx.query.subscriptions.findFirst({
           where: eq(schema.subscriptions.tenantId, tenant.id),
-        }),
-        tx.query.tenantNotes.findMany({
-          where: eq(schema.tenantNotes.tenantId, tenant.id),
-          orderBy: desc(schema.tenantNotes.createdAt),
-          limit: 20,
         }),
         tx.query.auditLog.findMany({
           where: eq(schema.auditLog.tenantId, tenant.id),
@@ -110,14 +104,13 @@ export default async function TenantDetailPage({
       ? await getLedgerIntegrity(tx, tenant.id)
       : null;
 
-    return { tenant, allModules, tenantMods, subscription, notes, audit, members, ledgerIntegrity, retainerView, timeEntries };
+    return { tenant, allModules, tenantMods, subscription, audit, members, ledgerIntegrity, retainerView, timeEntries };
   });
 
   if (!data) notFound();
-  const { tenant, allModules, tenantMods, subscription, notes, audit, members, ledgerIntegrity, retainerView, timeEntries } =
+  const { tenant, allModules, tenantMods, subscription, audit, members, ledgerIntegrity, retainerView, timeEntries } =
     data;
   const today = todayInRetainerTz();
-  const isProspect = !tenant.clerkOrgId;
 
   // The relationship half of the seam (ADR 0041): the party this workspace
   // points at, read through the OPERATOR's own context — narrower than the
@@ -220,7 +213,7 @@ export default async function TenantDetailPage({
             )}
             <span>·</span>
             <span>
-              {isProspect ? "Added" : "Client since"}{" "}
+              Client since{" "}
               {tenant.createdAt.toLocaleDateString()}
             </span>
             <TenantStatusBadge status={tenant.status} />
@@ -470,9 +463,8 @@ export default async function TenantDetailPage({
 
           {/* Where the relationship lives now (ADR 0041). The console holds
               the workspace and ONE link; people, deals, notes and follow-ups
-              are the party's, in the operator's CRM. Console notes stopped
-              here in slice 1: the ones already written are listed only until
-              the party exists, and ride onto its timeline when it does. */}
+              are the party's, in the operator's CRM. Console notes were
+              retired with slice 3; a note about the client is the party's. */}
           {!tenant.isOperator && (
             <Card>
               <CardHeader>
@@ -482,7 +474,7 @@ export default async function TenantDetailPage({
                     ? "This business is a party in the operator's CRM — people, deals, notes and follow-ups live there."
                     : tenant.operatorPartyId
                       ? "This workspace points at a party that no longer exists in the operator's CRM."
-                      : "No party in the operator's CRM yet. Creating one carries the console notes below onto its timeline."}
+                      : "No party in the operator's CRM yet. Creating one links this workspace to it."}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -503,21 +495,6 @@ export default async function TenantDetailPage({
                         No operator tenant is named yet.
                       </p>
                     )}
-                    {notes.length > 0 && (
-                      <>
-                        <Separator />
-                        <ul className="space-y-3">
-                          {notes.map((note) => (
-                            <li key={note.id} className="rounded-md bg-muted/60 p-3">
-                              <p className="whitespace-pre-wrap text-sm">{note.body}</p>
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                {note.createdAt.toLocaleString()}
-                              </p>
-                            </li>
-                          ))}
-                        </ul>
-                      </>
-                    )}
                   </>
                 ) : null}
               </CardContent>
@@ -526,31 +503,6 @@ export default async function TenantDetailPage({
         </div>
 
         <div className="space-y-6">
-          {/*
-            `--brand` is a surface colour (2.81:1 as a foreground); as a border at
-            40% it was barely visible. `--module-accent` rather than
-            `--accent-brand` directly, because only the former is registered in
-            `@theme` — `ring-accent-brand` would not generate a class at all.
-            Outside a module route it resolves to the same colour.
-          */}
-          {isProspect && (
-            <Card className="ring-2 ring-module-accent/40">
-              <CardHeader>
-                <CardTitle className="text-base">Prospect</CardTitle>
-                <CardDescription>
-                  CRM record only — no platform workspace yet. Converting
-                  creates their login workspace and keeps all history.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ConvertProspectForm
-                  tenantId={tenant.id}
-                  contactEmail={tenant.contactEmail}
-                />
-              </CardContent>
-            </Card>
-          )}
-
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Subscription</CardTitle>

@@ -169,21 +169,6 @@ d("tenant isolation (RLS)", () => {
     expect(mods.every((m) => m.tenantId === tenantA)).toBe(true);
   });
 
-  it("tenants can never see admin CRM notes", async () => {
-    await withSystem((tx) =>
-      tx.insert(schema.tenantNotes).values({
-        tenantId: tenantA,
-        authorClerkUserId: "admin",
-        body: "private admin note",
-      }),
-    );
-    // Even about *their own tenant*, notes are invisible to members.
-    const rows = await withTenant(tenantA, (tx) =>
-      tx.select().from(schema.tenantNotes),
-    );
-    expect(rows).toHaveLength(0);
-  });
-
   it("sets ALL FOUR context settings, from one statement", async () => {
     // THE REGRESSION GUARD FOR A LATENCY FIX. `withTenant` used to issue four
     // separate `set_config` round trips; they are now one statement, which is

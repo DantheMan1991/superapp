@@ -1,11 +1,10 @@
 import "server-only";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { withSystem, withTenant, schema } from "@/db";
 import { isModuleEnabled } from "@/lib/modules";
 import { getOperatorTenant } from "@/lib/operator-tenant";
 import { createParty, loadParty, PartyError } from "@/lib/parties";
 import { addContactPoint } from "@/lib/parties/contacts";
-import { logActivity } from "@/modules/crm/timeline-ops";
 
 /**
  * A client is a party in the operator tenant (ADR 0041, back-office slice 1).
@@ -13,41 +12,39 @@ import { logActivity } from "@/modules/crm/timeline-ops";
  * The console's half of the seam. `tenants` holds the workspace; the
  * relationship — who they are, what was said, what comes next — is a party
  * in the operator's own CRM, and `tenants.operator_party_id` is the one
- * pointer between them, written here and nowhere else. The CRM never writes
- * `tenants`; this file never writes anything of the CRM's except through the
- * CRM's own door.
+ * pointer between them, written here and by provisioning (slice 3) and
+ * nowhere else. The CRM never writes `tenants`.
  *
- * WHY THIS FILE LIVES UNDER src/app/admin AND NOT src/lib. It imports CRM's
- * own door (`logActivity`) beside the shared party doors, and the house rule
- * is that `src/lib` never imports a module — only a registry may know an
- * implementation exists. The console is Layer 0 shell code and already
- * imports module code to provision (accounting's chart of accounts,
- * documents' folders, in actions.ts); this is the same permission, used the
- * same way.
+ * WHY THIS FILE LIVES UNDER src/app/admin AND NOT src/lib. It writes a CRM
+ * record beside the shared party doors — the enquiry's shape (ADR 0021) —
+ * and until slice 3 carried console notes through CRM's own `logActivity`.
+ * The house rule is that `src/lib` never imports a module; the console is
+ * Layer 0 shell code and already imports module code to provision, so it
+ * may. provision.ts, beside this file, still does.
  *
  * WHY A CONSOLE ACTION AND NOT A SCRIPT. Every door here is `server-only` —
- * the party subsystem, CRM's ops, `logAudit` — and a tsx script cannot load
- * one. The plan said "a backfill script"; it was wrong about the tooling, not
- * the job. `createOperatorPartiesAction` IS the backfill, run from the
- * Clients page, audited per workspace.
+ * the party subsystem, `logAudit` — and a tsx script cannot load one. The
+ * plan said "a backfill script"; it was wrong about the tooling, not the
+ * job. `createOperatorPartiesAction` IS the backfill, run from the Clients
+ * page, audited per workspace.
  *
  * WHAT IT WRITES, AND IN WHOSE CONTEXT. Under the OPERATOR's context as an
  * owner — not `withSystem`, because the party table is the operator's and
  * RLS should be the one deciding what a superadmin may put in it: an
  * organization party named for the business; its contact email as a contact
  * point; when CRM is switched on for the operator, a CRM record with
- * `source = 'platform'` (the enquiry's shape, ADR 0021) and every console
- * note as a `note` activity by its original author, dated when it was
- * written. Then, under `withSystem`, the pointer — the only platform-level
- * write, and the only one this file makes.
+ * `source = 'platform'`; and any discovery record that moved home before
+ * this business had a party (slice 2) attaches by its breadcrumb. Then,
+ * under `withSystem`, the pointer — the only platform-level write.
+ *
+ * Console notes (`tenant_notes`) were carried across as timeline notes in
+ * slice 1 and the table was dropped in slice 3 with nothing left in it.
  */
 
 export interface EnsureResult {
   partyId: string;
   /** False when the workspace was already linked; nothing was written. */
   created: boolean;
-  /** Console notes carried onto the party's timeline (0 when CRM is off). */
-  notesMoved: number;
 }
 
 export type RelationshipRefusal = "NO_OPERATOR" | "NOT_FOUND" | "IS_OPERATOR";
@@ -103,18 +100,9 @@ export async function ensureOperatorParty(
     );
   }
   if (tenant.operatorPartyId) {
-    return { partyId: tenant.operatorPartyId, created: false, notesMoved: 0 };
+    return { partyId: tenant.operatorPartyId, created: false };
   }
 
-  // Read under withSystem: `tenant_notes` is superadmin-only by policy. They
-  // are carried across, never deleted here — the table's DROP is slice 3's,
-  // after this move has been read on production.
-  const notes = await withSystem((tx) =>
-    tx.query.tenantNotes.findMany({
-      where: eq(schema.tenantNotes.tenantId, tenantId),
-      orderBy: asc(schema.tenantNotes.createdAt),
-    }),
-  );
   const crmOn = await isModuleEnabled(operator.id, "crm");
 
   const written = await withTenant(
@@ -152,28 +140,13 @@ export async function ensureOperatorParty(
           ),
         );
 
-      let notesMoved = 0;
       if (crmOn) {
         await tx
           .insert(schema.crmPartyDetails)
           .values({ tenantId: operator.id, partyId: party.id, source: "platform" })
           .onConflictDoNothing();
-        for (const note of notes) {
-          await logActivity(
-            tx,
-            { tenantId: operator.id, userId: note.authorClerkUserId, role: "owner" },
-            {
-              partyId: party.id,
-              kind: "note",
-              subject: "Console note",
-              body: note.body,
-              occurredAt: note.createdAt,
-            },
-          );
-          notesMoved += 1;
-        }
       }
-      return { partyId: party.id, notesMoved };
+      return { partyId: party.id };
     },
     { role: "owner", userId: actor.userId },
   );
@@ -201,13 +174,9 @@ export async function ensureOperatorParty(
         columns: { operatorPartyId: true },
       }),
     );
-    return {
-      partyId: now?.operatorPartyId ?? written.partyId,
-      created: false,
-      notesMoved: written.notesMoved,
-    };
+    return { partyId: now?.operatorPartyId ?? written.partyId, created: false };
   }
-  return { partyId: written.partyId, created: true, notesMoved: written.notesMoved };
+  return { partyId: written.partyId, created: true };
 }
 
 export interface OperatorPartyView {

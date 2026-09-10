@@ -302,6 +302,60 @@ export async function retireParcel(
 
 
 /**
+ * Bring a retired parcel back.
+ *
+ * **IT BRINGS BACK THE PARCEL AND NOTHING ELSE, AND THAT IS THE HONEST
+ * ANSWER.** `retireParcel` cascades to every active zone, and nothing records
+ * which of the retired zones went with it and which had been retired months
+ * earlier for their own reasons. Reactivating them all would invent that
+ * history; asking the database to guess from a timestamp would be the same
+ * guess wearing a query. So the zones stay retired, the count comes back so a
+ * screen can say so, and `unretireZone` brings them back one at a time —
+ * which is also the only way anybody can tell them apart.
+ *
+ * **THIS DOES NOT UNDO A COMBINE.** `combineParcels` retires the absorbed
+ * parcels AFTER moving their zones and merging their geometry into the
+ * survivor. Bringing one back gives you an active parcel with no zones and no
+ * boundary, not the arrangement you had before. The dialog says so.
+ */
+export async function unretireParcel(
+  tx: Tx,
+  ctx: LandCtx,
+  id: string,
+): Promise<{ parcel: LandParcel; zonesStillRetired: number }> {
+  requireWrite(ctx, "owner");
+  const existing = await getParcel(tx, ctx.tenantId, id);
+  if (!existing) throw new LandError("NOT_FOUND", `parcel ${id} not found`);
+  if (existing.status !== "retired") {
+    throw new LandError("LAYOUT_INVALID", "that ground is not retired");
+  }
+
+  const rows = await tx
+    .update(schema.landParcels)
+    .set({ status: "active", updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.landParcels.tenantId, ctx.tenantId),
+        eq(schema.landParcels.id, id),
+      ),
+    )
+    .returning();
+  const parcel = rows[0];
+
+  await upsertDimensionMember(tx, ctx, {
+    dimensionType: PARCEL_DIMENSION,
+    packEntityId: parcel.id,
+    displayName: parcel.name,
+  });
+
+  const retired = await listZones(tx, ctx.tenantId, {
+    parcelId: id,
+    status: "retired",
+  });
+  return { parcel, zonesStillRetired: retired.length };
+}
+
+/**
  * Combine several parcels into one operational block.
  *
  * **TWO DEEDS, ONE PIECE OF GROUND.** The founder imported five parcels from
@@ -664,6 +718,73 @@ export async function retireZone(
 
   await archiveMember(tx, ctx, ZONE_DIMENSION, id);
   return rows[0];
+}
+
+/**
+ * Bring a retired piece of ground back.
+ *
+ * **RETIREMENT IS NOT A DELETE, AND IT SHOULD NOT HAVE BEEN A ONE-WAY DOOR
+ * EITHER.** The dossier carried this as an open item from the start: retiring is
+ * deliberately reversible in principle — the row is all still there — and the
+ * only reason it was not reversible in practice is that nobody wrote this. It
+ * is most often a mis-click, and until now the answer was to make a second
+ * paddock with the same name and lose the history.
+ *
+ * **WHATEVER IT WAS FOR STAYS CLOSED.** `retireZone` closed the open use on the
+ * day it retired, and that is a fact about a date rather than a side effect to
+ * unwind — the ground came out of production that day whether or not somebody
+ * changes their mind later. It comes back with nothing declared, and the next
+ * `startZoneUse` says what it is for now.
+ *
+ * **THE PARCEL HAS TO BE BACK FIRST.** A paddock cannot be active on ground the
+ * business no longer holds, and `retireParcel` cascades — so the common case
+ * here is somebody trying to undo one zone of a cascade from the wrong end.
+ */
+export async function unretireZone(
+  tx: Tx,
+  ctx: LandCtx,
+  id: string,
+): Promise<LandZone> {
+  requireWrite(ctx, "owner");
+  const existing = await getZone(tx, ctx.tenantId, id);
+  if (!existing) throw new LandError("NOT_FOUND", `zone ${id} not found`);
+  if (existing.status !== "retired") {
+    throw new LandError(
+      "LAYOUT_INVALID",
+      "that ground is not retired",
+    );
+  }
+  const parcel = await getParcel(tx, ctx.tenantId, existing.parcelId);
+  if (!parcel || parcel.status !== "active") {
+    throw new LandError(
+      "LAYOUT_INVALID",
+      "the ground it is on is retired — bring that back first",
+    );
+  }
+
+  const rows = await tx
+    .update(schema.landZones)
+    .set({ status: "active", updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.landZones.tenantId, ctx.tenantId),
+        eq(schema.landZones.id, id),
+      ),
+    )
+    .returning();
+  const zone = rows[0];
+
+  // **THE COST OBJECT COMES BACK WITH IT.** `retireZone` archived the member,
+  // and a zone that is active while its member is archived is the defect
+  // `reopenLivestockLot` shipped with — everything tagged to it silently stops
+  // being taggable. Same call `activateZone` makes.
+  await upsertDimensionMember(tx, ctx, {
+    dimensionType: ZONE_DIMENSION,
+    packEntityId: zone.id,
+    displayName: zone.name,
+  });
+
+  return zone;
 }
 
 /**

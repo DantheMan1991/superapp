@@ -34,6 +34,8 @@ import {
   endZoneUse,
   retireParcel,
   retireZone,
+  unretireParcel,
+  unretireZone,
   activateZone,
   addPlanItem,
   createPlan,
@@ -368,6 +370,67 @@ const useSchema = z.object({
   isProductive: z.boolean().optional(),
   notes: z.string().max(5000).optional(),
 });
+
+/**
+ * Bring a retired parcel back. **The other half of a door that only opened one
+ * way**, and the dossier had been carrying it as an open item since slice 0.
+ *
+ * OWNER, like the retirement it reverses: the parcel is a cost object, and
+ * `upsertDimensionMember` is the owner's call either way.
+ */
+export async function unretireParcelAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const result = await withTenant(
+      ctx.tenant.id,
+      (tx) => unretireParcel(tx, landCtx(ctx), parsed.data.id),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.parcel.unretired",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_parcel",
+      targetId: parsed.data.id,
+      meta: { zonesStillRetired: result.zonesStillRetired },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true, zonesStillRetired: result.zonesStillRetired };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** The same for one piece of ground inside a parcel. */
+export async function unretireZoneAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const zone = await withTenant(
+      ctx.tenant.id,
+      (tx) => unretireZone(tx, landCtx(ctx), parsed.data.id),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.zone.unretired",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_zone",
+      targetId: zone.id,
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
 
 export async function startZoneUseAction(input: unknown) {
   const ctx = await requireTenant();

@@ -26,6 +26,7 @@ import {
 import { retireZonesAction } from "../actions";
 import { ZoneControls } from "./zone-controls";
 import { type MovableStay } from "./move-occupant";
+import { UnretireZone } from "./unretire-controls";
 import { formatArea, fromAcres, type AreaUnit } from "../core/area";
 import { compareNames } from "../core/list";
 import { formatDays } from "../core/rest";
@@ -412,6 +413,14 @@ export function ZoneTable({
                     )}
                   />
                 )}
+                {canEdit && zone.status === "retired" && (
+                  <UnretireZone
+                    id={zone.id}
+                    name={zone.name}
+                    zoneWord={zoneWord}
+                    trigger="row"
+                  />
+                )}
               </div>
             </div>
           </li>
@@ -521,6 +530,14 @@ export function ZoneTable({
                 {formatArea(zone.areaAcres, unit)}
               </TableCell>
               <TableCell>
+                {canEdit && zone.status === "retired" && (
+                  <UnretireZone
+                    id={zone.id}
+                    name={zone.name}
+                    zoneWord={zoneWord}
+                    trigger="row"
+                  />
+                )}
                 {canEdit && zone.status === "active" && (
                   <ZoneControls
                     zone={{

@@ -34,6 +34,7 @@ import { areaUnitFrom, formatArea } from "@/packs/land/core/area";
 import { daysOccupied, formatDays, zoneRest } from "@/packs/land/core/rest";
 import { BoundarySummary } from "@/packs/land/components/boundary-summary";
 import { MoveOccupant } from "@/packs/land/components/move-occupant";
+import { UnretireZone } from "@/packs/land/components/unretire-controls";
 import {
   DeleteOccupancy,
   EndOccupancy,
@@ -238,6 +239,15 @@ export default async function ZoneDetailPage({
                 namesUsed={namesUsed}
               />
             </div>
+          ) : ctx.role === "owner" && parcel.status === "active" ? (
+            // Retired, and this is where somebody lands from a link. The way
+            // back has to be here or the page is a dead end.
+            <UnretireZone
+              id={zone.id}
+              name={zone.name}
+              zoneWord={zoneWord}
+              trigger="header"
+            />
           ) : null
         }
       />

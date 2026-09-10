@@ -32,7 +32,7 @@ Open **Land** in the sidebar. Land is where the ground your business holds is re
 - It does not count head. Land supplies acreage; animal numbers belong to Livestock.
 - The weather panel predicts nothing. It tells you how the season is running against past years, not when to move the herd.
 - Nothing is refused for being under your rest target. The target is a comparison, not a rule.
-- Retiring a {{parcel|lower}} or {{zone|lower}} is one way. History is kept, but it cannot be brought back, and combining two {{parcel|plural|lower}} cannot be undone.
+- Retiring a {{parcel|lower}} or {{zone|lower}} keeps its history and can be undone — put it back from its own page or its row. Combining two {{parcel|plural|lower}} still cannot be undone: putting the absorbed one back gives you an empty {{parcel|lower}}, because its ground moved across.
 - There is no bulk entry. Twenty {{zone|plural|lower}} is twenty dialogs, unless you divide ground on the site plan, which creates them together.
 - If you need a different unit, ask us.
 

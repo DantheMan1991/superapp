@@ -90,6 +90,8 @@ No tables. This is infrastructure — the module's tables are in
 
 | Record | Purpose | Rule |
 | --- | --- | --- |
+| `mail.yosherapp.com` — `resend._domainkey.mail` TXT, `send.mail` TXT + MX | **Resend, the PLATFORM's own sending domain** (`EMAIL_FROM_DOMAIN`) | Live 2026-09-10. Subdomain-scoped on purpose: touches no apex record. See [platform-email.md](../runbooks/platform-email.md) |
+| `in.yosherapp.com` MX | Resend inbound — receipts emailed into Accounting | Live |
 | `<token>._domainkey.yosherapp.com` CNAME ×3 | SES DKIM | Live |
 | `bounce.yosherapp.com` MX + TXT | SES custom MAIL FROM | Live — the reason root SPF is untouched |
 | `yosherapp.com` SPF | Still `include:spf.migadu.com -all` | **Do not edit** |
@@ -97,8 +99,16 @@ No tables. This is infrastructure — the module's tables are in
 | `m.yosherapp.com` | The mail domain Stalwart serves | Apex MX stays on Migadu |
 | `jmap.yosherapp.com` | The app's JMAP endpoint (TLS, no MX) | Needs matching reverse DNS on the VPS IP |
 
+**Four systems share this domain and are easy to confuse**: `mail.` is Resend
+sending for the platform, `in.` is Resend receiving, `m.`/`jmap.` are
+Stalwart serving a tenant's own mailboxes, `bounce.` is SES relaying
+Stalwart's outbound, and the apex is Migadu holding the founder's mail.
+[platform-email.md](../runbooks/platform-email.md) is the table to read before
+touching any of it.
+
 ## Key files & seams
 
+- `docs/runbooks/platform-email.md` — the platform's own sending domain: which subdomain owns what, and how a silent failure looks
 - `docs/runbooks/mail-server.md` — the operational procedure, step by step
 - `scripts/mail-register-client.ts` (`npm run mail:register-client`)
 - `STALWART_BASE_URL`, `STALWART_CLIENT_ID` — the app's side of the seam

@@ -1286,6 +1286,16 @@ every morning now produces failed rows until the domain is verified. See
 
 ## Open items
 
+- **NOTHING WATCHES A FAILED SEND.** `outbound_emails` records every refusal
+  with its reason, and no surface reads it — so a rejected send is invisible
+  until somebody queries the table. Proved expensive on 2026-09-10: the
+  platform's sending domain had never been verified in Resend, and **44
+  messages failed over two days**, the daily digest among them, with no banner
+  and no alert anywhere. A failed-send count on the console's health signals
+  (`src/app/admin/health.ts`), or an alert on the first failure of a day,
+  would turn a two-day silence into a two-minute one. The runbook
+  ([platform-email.md](../runbooks/platform-email.md)) documents the query;
+  documenting a query is not the same as watching.
 - **One transport only.** The seam exists but there is a single implementation
   (provider API, tenant domain or platform domain). The strategic next one is
   **send through the tenant's connected Microsoft 365 mailbox** — the message

@@ -5,9 +5,44 @@
 > installs a set of them, and where vocabulary comes from. This is the plumbing
 > under [extension-model.md](../extension-model.md) — read that first for *why*,
 > read this for *how*.
-> Status: partial — registry, dependency enforcement and profile install are built; seed application is not · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: live — registry, dependency enforcement, profile install and seed application are built; P5 nav contributions are not · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## Build log
+
+### 2026-09-10 — Seed application is built (`claude/back-office-7a-seeds-and-the-agency-profile`)
+
+The largest gap in the installer, open since Layer 2 shipped on 2026-08-14,
+closed by the first profile that needed it: [agency](agency.md), back-office
+slice 7a. `IndustryProfile.seed` had been declared and read by nothing.
+
+- **`src/app/admin/profile-seed.ts` applies it** — the chart through
+  `provisionAccounting` as the tenant, the folders through `provisionDocuments`
+  under `withSystem` — beside the console's actions rather than in `src/lib`,
+  because it calls two modules' provisioners and a lib may not.
+- **A seed lands only in a module that is ON, and is not lost when it is
+  off.** Two doors call the applier: `installProfile`, with every module the
+  tenant has on, and `toggleModule`, for the one module being switched on,
+  reading the installed profile off `tenants.industry`. Install the profile a
+  week before Accounting: the chart arrives with Accounting. The report names
+  what waits, the toast says so, the audit row carries the counts, and a seed
+  landing later writes `profile.seeded`.
+- **`seed.accounts` became a `CoaTemplate`, not a slug.** A slug would have
+  meant registering an industry's chart in core's `COA_TEMPLATES` — the
+  inversion the extension model forbids. The manifest carries the data and
+  `provisionAccounting` accepts a template as well as a slug. A profile's
+  chart is written as ADDITIONS over the general one (parents it names are
+  general accounts; codes it uses are ones general does not), because
+  Accounting is provisioned with `general` when switched on and the profile
+  lands on top. **`seed.docKinds` is gone**: `documents.doc_kind` is an open
+  taxonomy nothing lists, so a seeded list would have had no reader.
+- **Additive and re-runnable, and the tenant's rows win** — inherited from the
+  provisioners, which skip a code or a root folder the tenant has. Proved in
+  `tests/profile-seed.test.ts` by a tenant that numbered 6320 *Conferences*
+  first and kept it.
+- The "needs a farm chart of accounts written first" reasoning in the older
+  entries was the wrong dependency: it needed a profile whose pilot would
+  notice the chart missing. The homestead profile still carries no seed, and
+  writing its chart is the farm's accountant's question, not this slice's.
 
 ### 2026-09-04 — A switched-off feature stops its work (`claude/a-switched-off-feature-stops-its-work`)
 
@@ -387,7 +422,7 @@ cost dimensions all land in tables that already exist and already have RLS.
 | 1 | `src/packs/` + merged runtime registry | **built** — `src/packs/index.ts`, merged in `src/lib/features.ts` |
 | 2 | `src/industries/<slug>.ts` manifests | **built** — `homestead-farm` is the first |
 | 3 | Dependency declaration + enforcement | **built** — declared in `PackDefinition.requires`, enforced in `toggleModule` |
-| 4 | The install action | **partly** — `installProfile` enables packs and stamps `tenants.industry`. **Seed application is not built** |
+| 4 | The install action | **built** — `installProfile` enables packs, stamps `tenants.industry` and applies the seed; `toggleModule` applies it for a module switched on later (2026-09-10, `src/app/admin/profile-seed.ts`) |
 | 5 | Label resolution | **built, in use, and now DECLARED** — see the vocabulary registry below. Was: **built and in use** — `resolveLabels` / `labelFor` in `src/lib/packs/resolve.ts`, reached through `packContext` in `src/lib/packs/tenant-context.ts`. First caller: `land`, 2026-08-15 |
 | 6 | Nav grouping by `category` | **built** — the pack group takes the installed profile's name |
 | 7 | **P5 extension points** | **not built.** Two packs now hardcode a suggestion list that should come from profile `packConfig` (`assets.kind`, `land`'s zone uses). Config-shaped tailoring already works via `packContext`; what is still missing is a pack CONTRIBUTING nav or registering an entity type |
@@ -501,10 +536,10 @@ Pack-owned tables follow the ordinary rules: `tenant_id`, FORCE RLS, a
   renders the control is already behind `requireModuleEnabled` for the same
   feature, so nothing a reader can see was stopped.
 
-- **Seed application is not built.** `IndustryProfile.seed` is declared and
-  unread, so `installProfile` enables packs and stamps the profile but ships no
-  chart of accounts, folders or doc kinds. Needs a farm chart of accounts
-  written first. **This is the largest gap in the installer.**
+- ~~**Seed application is not built.**~~ — **closed 2026-09-10** by the agency
+  profile (back-office slice 7a); see the build log. What remains of it: the
+  homestead profile carries no seed, and a farm chart of accounts is its
+  accountant's question.
 - **P5 extension points** (#7 above) — the primitive ADR 0004 named and nobody
   has built. Nothing has forced it yet because no pack renders; the first pack
   that ships will.

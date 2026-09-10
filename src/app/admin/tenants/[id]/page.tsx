@@ -33,6 +33,7 @@ import { loadPlatformRevenue, SKIP_REASONS } from "@/lib/platform-revenue";
 import { describeAgo } from "@/lib/last-seen";
 import { CONCERN_WORDS, loadHealthSignals } from "../../health";
 import { readOperatorParty } from "../../relationship";
+import { seedSummary } from "../../profile-seed";
 import { getOperatorTenant } from "@/lib/operator-tenant";
 import {
   AllotmentForm,
@@ -392,6 +393,7 @@ export default async function TenantDetailPage({
                   name: p.name,
                   description: p.description,
                   packs: p.packs,
+                  seed: seedSummary(p),
                 }))}
               />
             </CardContent>

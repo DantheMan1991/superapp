@@ -1,3 +1,5 @@
+import type { CoaTemplate } from "@/modules/accounting/templates/general";
+
 /**
  * Layer 2b — an industry profile.
  *
@@ -32,17 +34,29 @@ export interface IndustryProfile {
    */
   labels: Record<string, string>;
   /**
-   * Data contributed on install: chart of accounts, folders, document kinds.
+   * Data contributed on install: chart of accounts and folders.
    *
-   * NOT YET APPLIED — the installer currently enables packs and stamps the
-   * profile. Seed application is the next slice, and needs a farm chart of
-   * accounts written first. Declared now so the manifest shape does not change
-   * when it lands.
+   * Applied by `src/app/admin/profile-seed.ts` (back-office slice 7a) — at
+   * install for every module that is on, and again for a module switched on
+   * later, so a profile installed first loses nothing. Additive over what the
+   * tenant has: a code or a root folder that already exists is skipped, never
+   * renamed.
+   *
+   * `accounts` is the template ITSELF, not a slug into core's
+   * `COA_TEMPLATES`: registering an industry's chart there would make core
+   * know an industry, which is the inversion the extension model forbids. A
+   * profile's chart is written as ADDITIONS to the general one — parents it
+   * names are general accounts, codes it uses are ones the general chart does
+   * not — because Accounting is provisioned with `general` when it is
+   * switched on and the profile lands on top.
+   *
+   * No document kinds: `documents.doc_kind` is an open taxonomy typed freely,
+   * and nothing lists its values, so a seeded list would have no reader.
    */
   seed?: {
-    accounts?: string;
+    accounts?: CoaTemplate;
+    /** Root folders, beside the platform's starter cabinet, in this order. */
     folders?: string[];
-    docKinds?: string[];
   };
   /**
    * Config handed to packs on install. A pack reads ITS OWN KEY and never the

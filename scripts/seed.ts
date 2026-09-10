@@ -240,6 +240,17 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
     status: "available",
     sortOrder: 260,
   },
+  {
+    id: "professional-services",
+    name: "Professional services",
+    description:
+      "Engagements — what each client has agreed to, the hours against it, and what starting one sets in motion.",
+    category: "pack",
+    // Declared with the `agency` profile (back-office slice 7a) and unbuilt:
+    // `coming_soon` until engagements land, the arrangement `crops` has.
+    status: "coming_soon",
+    sortOrder: 270,
+  },
 ];
 
 /**

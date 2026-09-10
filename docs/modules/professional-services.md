@@ -17,6 +17,58 @@ pilots it**, and `tests/packs.test.ts` fails if it ever is.
 
 ## Build log
 
+### 2026-09-10 — Slice 7d: Discovery leaves the console (`claude/back-office-7d-discovery-leaves-the-console`)
+
+**NO MIGRATION.** `audits` has been the operator tenant's table since
+back-office slice 2 — ordinary rows under `audits_member_all`. What was still
+true until this slice is that the only way to reach them was `/admin/audits`
+behind `requireSuperAdmin()`, so somebody doing sales had to be handed the
+god view of every client on the platform to write down what a prospect said.
+The rows did not move; the surface did, and the guard became the pack's.
+
+- **THE PROMPT IS WHY THIS WAS NOT A COPY.** The one it replaces
+  (`src/lib/discovery.ts`, now deleted) named the business it worked for,
+  described its four pricing tiers and quoted their dollar figures. A pack
+  carrying that would know which business it runs inside — the boundary
+  [ADR 0004](../decisions/0004-capability-packs-and-industry-profiles.md)
+  draws. So `core/discovery-prompt.ts` keeps the SKELETON, which is true of
+  any services business doing discovery (turn notes into findings, do the ROI
+  arithmetic out loud, name the next questions, flag anything license-gated,
+  say plainly when a prospect is a bad fit), and takes the FACTS from the
+  tenant.
+- **The facts are LAYER 3, not the profile.** An agency's price list is its
+  own, and a second agency installing the same profile must not inherit the
+  first's — so they live in `tenant_modules.config.discovery`, which
+  extension-model.md §5 has always said is where one company's tailoring
+  goes. This is that rule's first real reader. `tenant_modules` is
+  `member_read` only, so the pack READS the brief and a superadmin writes it;
+  no policy was widened and no migration was needed.
+- **It degrades honestly.** A business that has told us nothing still gets a
+  working copilot — one explicitly told it has not been briefed and must ask
+  rather than invent a price. The workspace says so once, in a line above the
+  conversation, so nobody wonders why the pricing is vague. A prompt that
+  invents a price list is worse than one that admits it has none.
+- **Running discovery is a CHORE** (src/lib/packs/authorize.ts): the person
+  talking to a prospect is the person who should be writing it down, and they
+  are rarely the owner — which is the whole point of taking it out of the
+  console. Deleting one is the owner's, because it destroys a conversation
+  somebody had.
+- **The console shrank and links out** (ADR 0041). `/admin/audits` and
+  `src/lib/discovery.ts` are DELETED, the *Discovery* nav item with them; the
+  tenant page still LISTS what exists for a client — saying what is there is
+  the console's job — and each row opens in the operator's own workspace
+  through `OpenInOperatorButton`, the setActive hop `OpenInCrmButton` already
+  made (both now share one implementation). The health check's notification
+  email follows the same path.
+- **Tests.** `tests/discovery-prompt.test.ts` (pure): the brief parses
+  tolerantly, the prompt carries the business's own facts, and — the one that
+  matters — a SCAN of every file the pack ships for the piloting company's
+  name and for any currency figure, so neither can creep back in as the file
+  is edited. `tests/discovery-ops.test.ts` (db-backed): **staff can run a
+  discovery end to end**, only an owner deletes, an unattached record shows
+  its own snapshot and can be attached, another workspace's business is
+  refused, and the brief goes from unbriefed to briefed.
+
 ### 2026-09-10 — Slice 7c: onboarding as a Work list (`claude/back-office-7c-onboarding-lists`)
 
 **NO NEW TABLE AND NO MIGRATION**, which is the shape of the whole slice: the
@@ -136,6 +188,8 @@ The pack's first slice. Migrations **0295** (tables) and **0296** (RLS).
 | `ps_time_entries` | Minutes against an engagement, on a bookkeeping day, by one person | Cascades from the engagement. `minutes > 0` CHECK; the action caps a single entry at 24 h. `version` for optimistic concurrency |
 | `dimension_members` | The cost object, type `engagement` | Core's table, written through `upsertDimensionMember` in the same transaction. Core never learns this pack exists |
 | `parties` | The client | The shared identity — never a name on the engagement |
+| `audits` | A discovery: the intake notes, the conversation with the copilot, the report (slice 7d) | The TENANT's own rows since back-office slice 2 — `superadmin_all` + `member_all`. `party_id` is a soft pointer with no FK, so a record whose business was merged away is re-attachable rather than cascaded. **No migration in 7d**: only the surface moved |
+| `tenant_modules.config.discovery` | What the copilot is told about the business it works for (slice 7d) | Layer 3, read by the pack (`member_read`) and written by a superadmin. Absent is a legal state and the prompt says so |
 | `work_items` + `work_item_links` | The onboarding steps (slice 7c) | Layer 0's tables, written through `createWorkForEntity`. The link carries `extension_slug = professional-services` and `entity_type = engagement` (P3). **No table of this pack's own, and no migration** — what is raised is what is linked |
 
 ## Key files & seams
@@ -145,6 +199,8 @@ The pack's first slice. Migrations **0295** (tables) and **0296** (RLS).
 - `src/packs/professional-services/core/meter.ts` — PURE. The month, the rounding, the history.
 - `src/packs/professional-services/core/onboarding.ts` — PURE. Parsing a profile's list, which steps are missing, when each is due.
 - `src/packs/professional-services/onboarding-ops.ts` — raises them through the Layer 0 work verbs; `components/onboarding-panel.tsx` renders the shared row.
+- `src/packs/professional-services/core/discovery-prompt.ts` — PURE, and the file that keeps the pack industry-blind: the neutral skeleton, and the tenant's own facts read tolerantly out of config.
+- `src/packs/professional-services/discovery-ops.ts` + `discovery-actions.ts` — discovery in the tenant's context; `components/discovery-workspace.tsx` and `discovery-controls.tsx` are the screens, at `/dashboard/m/professional-services/discovery`.
 - `src/packs/professional-services/vocabulary.ts` — import-free: kinds, statuses, the transition table, `parseDuration`.
 - `src/packs/professional-services/actions.ts` — the four gates, the tenant's own today, audited.
 - `src/packs/professional-services/ProfessionalServicesModule.tsx` — the list; `src/app/dashboard/m/professional-services/[id]/page.tsx` — one engagement.
@@ -201,7 +257,15 @@ The pack's first slice. Migrations **0295** (tables) and **0296** (RLS).
   the ordering comment there is revisited.
 - **No timer.** The platform's own retainer has one; this does not, because
   nobody has asked and the duration box takes `1:30`.
-- **Discovery (7d)** — the rest of the slice order in [agency.md](agency.md).
+- **No screen edits the discovery brief.** What the copilot is told about the
+  business lives in `tenant_modules.config.discovery`, which only a superadmin
+  may write — so today a tenant asks us and we set it, and the guide says so
+  plainly. The console is the obvious home for a small editor beside the
+  vocabulary one; nobody has needed it badly enough yet.
+- **The copilot spends tokens with no cap.** The public health check has
+  per-IP and per-session limits because strangers reach it; this is behind a
+  tenant's own login, so it has none. A workspace that ran discovery in a loop
+  would simply cost money.
 - **Onboarding steps are not editable in the product.** They come from the
   installed profile, so a tenant who wants one changed asks us — the guide
   says so plainly. `tenant_modules.config` already overrides `packConfig` per

@@ -6,12 +6,33 @@
 > `/admin` shrinks to what only a superadmin can do — provision a workspace,
 > switch features on, watch, support. Plan and slice order below; the decision
 > under it is [ADR 0041](../decisions/0041-a-tenant-is-a-workspace-and-a-client-is-a-party-in-the-operator-tenant.md).
-> Status: partial — slices 0–6, 7a, 7b and 7c built (the operator tenant exists; a client is a party; Discovery comes home and a lead lands as a lead; a workspace is provisioned from a party and prospects retire; support access; the money loop; health signals; the agency profile and the seed applier; engagements and time; onboarding as a Work list); slice 7d planned below · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: COMPLETE — slices 0–7 built (the operator tenant exists; a client is a party; Discovery comes home and a lead lands as a lead; a workspace is provisioned from a party and prospects retire; support access; the money loop; health signals; the agency profile and the seed applier; engagements and time; onboarding as a Work list; Discovery leaves the console) · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this area. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-10 — Slice 7d: Discovery leaves the console (`claude/back-office-7d-discovery-leaves-the-console`)
+
+**The last slice of the plan.** Discovery is now the
+`professional-services` pack's screen in the tenant's own workspace, open to
+the whole team; `/admin/audits` and `src/lib/discovery.ts` are deleted and
+the console links out. **No migration** — `audits` has been the operator
+tenant's table since slice 2, so only the surface moved.
+
+- **The real work was the prompt.** It named the business it worked for and
+  quoted its four pricing tiers, so a pack could not carry it. The skeleton
+  that is true of any services business stays in the pack; the facts move to
+  `tenant_modules.config.discovery` — Layer 3, one company's own tailoring —
+  and a business that has said nothing gets a copilot told to ask rather than
+  invent. A test scans every file the pack ships for the piloting company's
+  name and for any currency figure.
+- **The operator's staff can now run discovery without the god view**, which
+  is what the slice was for and what the db-backed test certifies first.
+- Full dossier: [professional-services.md](professional-services.md). Two new
+  guides. `AGENTS.md` and [health-check.md](health-check.md) corrected —
+  both described Discovery as console-only.
 
 ### 2026-09-10 — Slice 7c: onboarding as a Work list (`claude/back-office-7c-onboarding-lists`)
 
@@ -702,10 +723,9 @@ profile seed applier [packs-and-profiles.md](packs-and-profiles.md) recorded
 as unbuilt, so that came first.
 
 **In four PRs**, the order and each one's shape in [agency.md](agency.md):
-7a the seed applier and the profile (built); 7b engagements and time and 7c
-onboarding as a Work list (both built —
-[professional-services.md](professional-services.md)); 7d Discovery leaves
-the console.
+7a the seed applier and the profile, 7b engagements and time, 7c onboarding
+as a Work list, and 7d Discovery leaves the console — **all built**, dossier
+in [professional-services.md](professional-services.md).
 
 **Nothing in it is named Yosher.** Yosher is the pilot, as Hilltop Farm is the
 homestead profile's.
@@ -734,7 +754,7 @@ RLS and an isolation test, per `security.md` §4.
 - `src/lib/leads/` (slice 2) — types, registry, resolve; `src/modules/crm/leads.ts` fills it.
 - `src/lib/interview.ts` — `promoteSession` is a landing, not a provisioning; `notifyOperator` the email.
 - `src/lib/sites/enquiries.ts`, `bookings.ts` — on the slot, no proposition.
-- `src/app/admin/audits/` — every action through `asOperator`; `audit-controls.tsx` attach and delete.
+- ~~`src/app/admin/audits/`~~ — DELETED in slice 7d. Discovery is `src/packs/professional-services/discovery-*`, in the tenant's own workspace; the console lists and links out.
 - `src/app/admin/provision.ts` (slice 3) — resolve the party, attach the workspace; `provisionWorkspace` in actions.ts is the only place Clerk is asked; `scripts/retire-prospects.ts`.
 - `src/app/admin/health.ts` (slice 6) — the signals and the concerns; `src/lib/last-seen.ts` the hourly rule and the words.
 - `src/app/admin/profile-seed.ts` (slice 7a) — a profile's seed lands in the modules that are on; `src/industries/agency/` the profile and its chart.

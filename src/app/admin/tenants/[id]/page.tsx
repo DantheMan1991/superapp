@@ -7,7 +7,6 @@ import { getFeature, isRenderable } from "@/lib/features";
 import { getIndustryProfile, listIndustryProfiles } from "@/industries";
 import { collectLabelDefinitions, labelRows } from "@/lib/packs/resolve";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -26,7 +25,11 @@ import {
   TenantStatusSelect,
   VocabularyEditor,
 } from "./controls";
-import { CreatePartyButton, OpenInCrmButton } from "../../relationship-controls";
+import {
+  CreatePartyButton,
+  OpenInCrmButton,
+  OpenInOperatorButton,
+} from "../../relationship-controls";
 import { SupportViewForm } from "../../support-controls";
 import { PlatformRevenueButtons } from "../../platform-revenue-controls";
 import { loadPlatformRevenue, SKIP_REASONS } from "@/lib/platform-revenue";
@@ -272,27 +275,39 @@ export default async function TenantDetailPage({
                   No discovery yet.
                 </p>
               )}
+              {/* Discovery LEFT THE CONSOLE in back-office slice 7d: it is the
+                  operator's own screen in the operator's own workspace, so
+                  anybody on that team can run one without being handed the god
+                  view. This card still lists what exists for this client — the
+                  console's job is to say what is there — and links out. */}
               {discoveries.map((d) => (
-                <Link
+                <div
                   key={d.id}
-                  href={`/admin/audits/${d.id}`}
-                  className="flex items-center justify-between rounded-md border px-3 py-2 text-sm hover:bg-muted/60"
+                  className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
                 >
                   <span>
                     Started {d.createdAt.toLocaleDateString()}
                     {d.report && " · report ready"}
                   </span>
-                  <Badge variant="secondary" className="capitalize">
-                    {d.status.replace("_", " ")}
-                  </Badge>
-                </Link>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="capitalize">
+                      {d.status.replace("_", " ")}
+                    </Badge>
+                    <OpenInOperatorButton
+                      href={`/dashboard/m/professional-services/discovery/${d.id}`}
+                      label="Open"
+                      operatorClerkOrgId={operator?.clerkOrgId ?? null}
+                      variant="outline"
+                    />
+                  </div>
+                </div>
               ))}
               {pointer ? (
-                <Button asChild variant="secondary" size="sm">
-                  <Link href={`/admin/audits/new?party=${pointer}`}>
-                    Start discovery
-                  </Link>
-                </Button>
+                <OpenInOperatorButton
+                  href="/dashboard/m/professional-services/discovery"
+                  label="Start discovery"
+                  operatorClerkOrgId={operator?.clerkOrgId ?? null}
+                />
               ) : (
                 <p className="text-xs text-muted-foreground">
                   Discovery hangs off the party in the operator&apos;s CRM —

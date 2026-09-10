@@ -4,10 +4,24 @@
 > about how their business runs, gets a written assessment, and — if they
 > leave contact details — lands in the OPERATOR tenant's CRM as a business, a
 > contact, a deal, a follow-up and a Discovery record (ADR 0041, ADR 0042).
-> The public front of the same machinery `/admin/audits` uses internally.
+> The public front of the same machinery the `professional-services` pack
+> uses internally (back-office slice 7d).
 > Status: live · Scope: `platform`
 
 ## Build log
+
+### 2026-09-10 — The link in the notification follows Discovery out of the console (`claude/back-office-7d-discovery-leaves-the-console`)
+
+Discovery moved into the `professional-services` pack (back-office slice 7d),
+so the email that tells the operator a stranger finished the interview now
+points at `/dashboard/m/professional-services/discovery/<id>` instead of
+`/admin/audits/<id>`. Same row, same tenant; the surface that reads it is no
+longer superadmin-only, which is the point — whoever handles new enquiries
+can open one without the god view.
+
+Nothing else about the funnel changed: the session is still claimed
+atomically, the landing still writes through the ordinary doors, and
+`audits` is still the operator tenant's table.
 
 Newest first. One entry per session/PR that touched this area. Every PR
 that changes it MUST add an entry here (rule in AGENTS.md).

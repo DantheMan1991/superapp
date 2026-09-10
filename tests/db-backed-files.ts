@@ -28,6 +28,7 @@ export const DB_BACKED_TESTS = [
   "tests/profile-seed.test.ts",
   "tests/engagements-ops.test.ts",
   "tests/engagement-onboarding.test.ts",
+  "tests/discovery-ops.test.ts",
   "tests/crm-automation-ops.test.ts",
   "tests/crm-merge-ops.test.ts",
   "tests/crm-reports-ops.test.ts",

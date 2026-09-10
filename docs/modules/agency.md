@@ -7,7 +7,7 @@
 > services business keeps beyond the general chart of accounts. Nothing in it
 > is named after that business; clients, engagements, retainers, discovery
 > and onboarding are any services firm's.
-> Status: partial — the profile, its seed and the pack's first slice are built (back-office 7a and 7b); onboarding lists and Discovery are not · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: live — the profile, its seed and all three of the pack's slices are built (back-office 7a–7d) · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 **Pilot tenant: the operator tenant.** The plan in
 [back-office.md](back-office.md) says the pack is worth more once a fortnight
@@ -134,11 +134,13 @@ pack's own dossier when the first one lands.
   lists an engagement starts with; starting one raises the items through the
   Layer 0 work verbs, linked to the engagement (P3), never a task engine of
   the pack's own (extension-model.md §4b).
-- **7d — Discovery leaves the console.** `/admin/audits` becomes the pack's
-  screen, in the tenant's own context, so the operator's staff run discovery
-  without being superadmins — and any services business runs an intake
-  interview with the same copilot. The health check keeps landing where it
-  does; `audits` is already the operator tenant's table.
+- ~~**7d — Discovery leaves the console.**~~ **BUILT 2026-09-10** — see
+  [professional-services.md](professional-services.md). It cost no migration,
+  as predicted, because `audits` was already the tenant's table. What the plan
+  did NOT anticipate is the size of the real work: the copilot's prompt named
+  one business and quoted its price list, so the slice was mostly making the
+  prompt industry-blind and moving those facts to Layer 3 —
+  `tenant_modules.config.discovery` — where one company's tailoring belongs.
 
 ## Decisions & gotchas
 
@@ -157,7 +159,10 @@ pack's own dossier when the first one lands.
 
 ## Open items
 
-- **The pack is part-built** — 7b and 7c shipped; 7d above.
+- ~~**The pack is part-built**~~ — **7b, 7c and 7d have all shipped**, which
+  finishes the slice order this dossier was written around. What comes next is
+  whatever running the agency on it turns up; the open items in
+  [professional-services.md](professional-services.md) are the honest list.
 - **Core modules declare no vocabulary**, so *Client* cannot yet replace
   *Customer* on an invoice; the profile's `labels` is empty until they do
   (the open item [packs-and-profiles.md](packs-and-profiles.md) already

@@ -48,10 +48,14 @@ that matter for code:
   or an isolation test.
 - **Claude API calls** go through `getClaude()` (`src/lib/claude.ts`, lazy,
   model `claude-opus-4-8`, adaptive thinking, streamed). The Discovery
-  copilot (`/admin/audits`, prompts in `src/lib/discovery.ts`) is reached
-  only from the console, and runs inside the OPERATOR tenant's context —
-  `audits` is the operator's table (member policies) since back-office
-  slice 2, never `withSystem`.
+  copilot LEFT THE CONSOLE in back-office slice 7d: it is the
+  `professional-services` pack's screen at
+  `/dashboard/m/professional-services/discovery`, in the TENANT's own context
+  and open to its whole team, never `withSystem` and never behind
+  `requireSuperAdmin()`. Its prompt is built per tenant from that business's
+  own facts (`core/discovery-prompt.ts`, and the facts are Layer 3 in
+  `tenant_modules.config`) — **a pack must never carry one business's name or
+  price list**, which `tests/discovery-prompt.test.ts` scans for.
 
 ## Adding a module (the Phase 2 workflow)
 

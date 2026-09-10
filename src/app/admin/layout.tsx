@@ -35,7 +35,6 @@ export default async function AdminLayout({
         {
           label: "Platform",
           items: [
-            { href: "/admin/audits", label: "Discovery", icon: "sparkles" },
             { href: "/admin/modules", label: "Modules", icon: "boxes" },
           ],
         },

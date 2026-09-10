@@ -22,6 +22,12 @@ import {
   type ProvisionTarget,
 } from "./provision";
 import { endSupportSession, openSupportSession } from "@/lib/support-view";
+import { getOperatorTenant } from "@/lib/operator-tenant";
+import {
+  backfillPlatformRevenue,
+  retrySkippedPostings,
+  type PostingCounts,
+} from "@/lib/platform-revenue";
 import { upsertTenantFromOrg } from "@/lib/tenant-sync";
 import { provisionAccounting } from "@/modules/accounting/templates/apply";
 import { provisionDocuments } from "@/modules/documents/templates/apply";
@@ -638,6 +644,49 @@ export async function endSupportViewAction(): Promise<
   }
   return { ok: true, tenantId: ended?.tenantId ?? null };
 }
+
+type RevenueOutcome = ({ ok: true } & PostingCounts) | { error: string };
+
+/**
+ * The platform's own revenue, into the operator's books (ADR 0043, slice 5):
+ * post every paid Stripe invoice and every hour block the platform knows.
+ * Idempotent — running it twice posts nothing twice.
+ */
+export async function backfillPlatformRevenueAction(): Promise<RevenueOutcome> {
+  const { userId } = await requireSuperAdmin();
+  const operator = await getOperatorTenant();
+  if (!operator) return { error: NO_OPERATOR_MESSAGE };
+  const counts = await backfillPlatformRevenue();
+  await logAudit({
+    action: "billing.revenue_backfilled",
+    tenantId: operator.id,
+    actorClerkUserId: userId,
+    actorLabel: "admin-console",
+    meta: { ...counts },
+  });
+  revalidatePath(`/admin/tenants/${operator.id}`);
+  return { ok: true, ...counts };
+}
+
+/** Attempt every skipped posting again — a party made since, books started, accounting on. */
+export async function retrySkippedPostingsAction(): Promise<RevenueOutcome> {
+  const { userId } = await requireSuperAdmin();
+  const operator = await getOperatorTenant();
+  if (!operator) return { error: NO_OPERATOR_MESSAGE };
+  const counts = await retrySkippedPostings();
+  await logAudit({
+    action: "billing.revenue_retried",
+    tenantId: operator.id,
+    actorClerkUserId: userId,
+    actorLabel: "admin-console",
+    meta: { ...counts },
+  });
+  revalidatePath(`/admin/tenants/${operator.id}`);
+  return { ok: true, ...counts };
+}
+
+const NO_OPERATOR_MESSAGE =
+  "No operator tenant is named yet — run scripts/operator-tenant.ts first.";
 
 const setLabelsSchema = z.object({
   tenantId: z.string().uuid(),

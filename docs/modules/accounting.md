@@ -13,6 +13,23 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-10 — The platform's own revenue posts through the ordinary invoice (`claude/back-office-5-the-money-loop`)
+
+Back-office slice 5, [ADR 0043](../decisions/0043-the-platforms-revenue-is-posted-by-the-webhook-as-the-operators-owner.md).
+Nothing in this module changed; what changed is that a caller with nobody at
+the keyboard now uses it. `src/lib/platform-revenue.ts` turns a paid Stripe
+invoice or hour block into `createInvoiceDraft` → `issueInvoice` →
+`recordPayment` in the OPERATOR tenant's books, with
+`{ role: "owner", userId: "" }`: every posting verb requires an owner, and the
+platform posting its own sales into its own books is not the elevation ADR
+0011 refused. The line goes to 4010 (else 4000), the payment to Undeposited
+Funds, the day is Stripe's paid day in the operator's timezone, the memo is
+`stripe:<id>`. A day before the books begin is refused by `assertPeriodOpen`
+as it would be for anyone, and the caller records it as skipped rather than
+retrying blindly. The customer role is hung on the client's existing party by
+a direct `customers` insert — `createCustomer` mints a new party, which the
+client already has.
+
 ### 2026-09-09 — Vendors from a register's payees (`claude/vendors-from-the-bank`)
 
 Onboarding slice 2b ([onboarding.md](onboarding.md)), and the last piece of

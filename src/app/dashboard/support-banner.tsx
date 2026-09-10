@@ -74,7 +74,6 @@ export function SupportBanner({
               return;
             }
             router.push(`/admin/tenants/${tenantId}`);
-            router.refresh();
           })
         }
       >

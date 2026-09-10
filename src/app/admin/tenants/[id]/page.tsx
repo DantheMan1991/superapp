@@ -28,6 +28,8 @@ import {
 } from "./controls";
 import { CreatePartyButton, OpenInCrmButton } from "../../relationship-controls";
 import { SupportViewForm } from "../../support-controls";
+import { PlatformRevenueButtons } from "../../platform-revenue-controls";
+import { loadPlatformRevenue, SKIP_REASONS } from "@/lib/platform-revenue";
 import { readOperatorParty } from "../../relationship";
 import { getOperatorTenant } from "@/lib/operator-tenant";
 import {
@@ -141,6 +143,10 @@ export default async function TenantDetailPage({
           { role: "staff" },
         )
       : [];
+
+  // The platform's own revenue, in the operator's books (slice 5): only the
+  // operator's page shows it, because only the operator's books hold it.
+  const revenue = tenant.isOperator ? await loadPlatformRevenue() : null;
 
   const enabledBySlug = new Map(
     tenantMods.map((tm) => [tm.moduleId, tm.enabled]),
@@ -460,6 +466,62 @@ export default async function TenantDetailPage({
               )}
             </CardContent>
           </Card>
+          )}
+
+          {revenue && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Platform revenue</CardTitle>
+                <CardDescription>
+                  What clients pay Stripe, as paid invoices in this
+                  workspace&apos;s own books — one per Stripe invoice and hour
+                  block, never twice. Into Undeposited Funds; the bank feed
+                  matches the payout.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+                  <span>
+                    <span className="font-medium">{formatCents(revenue.postedCents)}</span>{" "}
+                    <span className="text-muted-foreground">
+                      posted across {revenue.posted} charge{revenue.posted === 1 ? "" : "s"}
+                    </span>
+                    {revenue.skipped > 0 && (
+                      <span className="text-muted-foreground">
+                        {" · "}
+                        {revenue.skipped} skipped
+                      </span>
+                    )}
+                  </span>
+                  <PlatformRevenueButtons skipped={revenue.skipped} />
+                </div>
+                {revenue.recent.length > 0 && (
+                  <div className="divide-y">
+                    {revenue.recent.map((p) => (
+                      <div
+                        key={p.id}
+                        className="flex items-start justify-between gap-3 py-2 text-sm"
+                      >
+                        <div>
+                          <div>{p.description}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {p.clientName ?? "unknown client"} · {p.paidOn}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="tabular-nums">{formatCents(p.amountCents)}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {p.status === "posted"
+                              ? "posted"
+                              : SKIP_REASONS[p.reason ?? "pending"]}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           )}
 
           {/* Where the relationship lives now (ADR 0041). The console holds

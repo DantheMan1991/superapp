@@ -13,7 +13,7 @@ Open a {{parcel|lower}} from the Land list, then click a {{zone|lower}}'s name i
 - **`Grazing days`.** The total days something has been on it, `Across 6 stays, all time.`
 - **`What it is for`.** The last five uses with their dates, or `Nothing declared yet.` A use is set from the {{zone|lower}}'s menu on the {{parcel|lower}}'s page.
 - **`Boundary`.** The same reading as on the {{parcel|lower}}'s page: the measured area against the recorded one. The boundary itself is traced on the {{parcel|lower}}'s site plan, and `the site plan` in this section is a link there. Owners can also paste a boundary with {button:Add a boundary|outline} or {button:Replace boundary|outline}.
-- **`Stays`.** A table with a count. `What`, with any notes under it; `On`; `Off`, which shows {badge:still on it|outline} for an open stay and {badge:not yet|outline} for one that has not started; `Days`, counted with both ends included, or a dash while open; `Area used`, or `all of it`; and {button:Remove|outline} on each row.
+- **`Stays`.** A list with a count. On a computer it is a table: `What`, with any notes under it; `On`; `Off`, which shows {badge:still on it|outline} for an open stay and {badge:not yet|outline} for one that has not started; `Days`, counted with both ends included, or a dash while open; `Area used`, or `all of it`; and {button:Remove|outline} on each row. On a phone each stay is a card carrying the same things — the name, the dates, the days, the area and the notes — with {button:Remove|outline} at the bottom of it.
 
 ## How to record a stay
 

@@ -287,6 +287,50 @@ export default async function ZoneDetailPage({
             />
           }
         >
+          {/*
+            Phone: a card per stay.
+
+            The table is 533px in a 343px column at 375 — `Area used` starts at
+            x=374 and `Remove` lands at x=466, ninety-one pixels past the edge
+            of the screen. Taking a stay off that never happened is a
+            correction somebody makes from wherever they are, and it was the
+            furthest-away control in the pack.
+          */}
+          <ul className="space-y-3 md:hidden">
+            {rows.map((row) => (
+              <li
+                key={row.id}
+                className="rounded-2xl bg-card p-4 shadow-elevation-1"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{row.occupantLabel}</p>
+                    <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">
+                      {row.startedOn} –{" "}
+                      {row.endedOn ??
+                        (row.startedOn > today ? "not yet" : "still on it")}
+                    </p>
+                  </div>
+                  <p className="shrink-0 text-right tabular-nums">
+                    {row.daysLabel ?? (
+                      <Badge variant="outline">
+                        {row.startedOn > today ? "not yet" : "still on it"}
+                      </Badge>
+                    )}
+                  </p>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {row.areaLabel ?? "all of it"}
+                  {row.notes && ` · ${row.notes}`}
+                </p>
+                <div className="mt-2 flex justify-end">
+                  <DeleteOccupancy stay={row} />
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          <div className="hidden md:block">
           <Table>
             <TableHeader>
               <TableRow>
@@ -336,6 +380,7 @@ export default async function ZoneDetailPage({
               ))}
             </TableBody>
           </Table>
+          </div>
         </DataTable>
       </div>
     </div>

@@ -321,6 +321,94 @@ export function ZoneTable({
         )}
       </div>
 
+      {/*
+        Phone: a card each, and the whole card opens the paddock.
+
+        The table is 427px in a 343px column at 375, which put the row's own
+        menu — `Set what it is for`, `Edit`, `Retire` — at x=399, off the right
+        edge of the screen. Standing in a field is exactly when somebody wants
+        that menu, and it was the one control they could not reach.
+      */}
+      <ul className="space-y-3 md:hidden">
+        {listed.map((zone) => (
+          <li key={zone.id} className="flex items-start gap-2">
+            {canEdit && zone.status === "active" && (
+              <span className="pt-4">
+                <Checkbox
+                  checked={checked.has(zone.id)}
+                  onCheckedChange={() => toggle(zone.id)}
+                  aria-label={`Select ${zone.name}`}
+                />
+              </span>
+            )}
+            <div className="min-w-0 flex-1 rounded-2xl bg-card shadow-elevation-1">
+              <div className="flex items-start gap-1 p-4">
+                {/* The card body is the link and the menu sits OUTSIDE it: a
+                    menu nested inside a link opens the link. */}
+                <Link
+                  href={`${basePath}/${parcelId}/zones/${zone.id}`}
+                  className="min-w-0 flex-1"
+                >
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1 font-medium">
+                    <span className="truncate">{zone.name}</span>
+                    {zone.status === "retired" && (
+                      <Badge variant="outline">retired</Badge>
+                    )}
+                  </span>
+                  <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                    {zone.use ? (
+                      <>
+                        <span>{zoneUseLabel(zone.use.use)}</span>
+                        {!zone.use.isProductive && (
+                          <Badge variant="outline">not productive</Badge>
+                        )}
+                        <span>since {zone.use.startedOn}</span>
+                      </>
+                    ) : (
+                      <span>Not set</span>
+                    )}
+                  </span>
+                  <span className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                    <span className="tabular-nums">
+                      {formatArea(zone.areaAcres, unit)}
+                    </span>
+                    {zone.rest?.status === "occupied" ? (
+                      <Badge variant="outline">occupied</Badge>
+                    ) : zone.rest?.status === "never_grazed" ? (
+                      <span className="text-muted-foreground">never used</span>
+                    ) : (
+                      <span className="tabular-nums text-muted-foreground">
+                        rested {formatDays(zone.rest?.restDays ?? null)}
+                        {zone.underTarget && " · under target"}
+                      </span>
+                    )}
+                  </span>
+                </Link>
+                {canEdit && zone.status === "active" && (
+                  <ZoneControls
+                    zone={{
+                      id: zone.id,
+                      name: zone.name,
+                      areaInput:
+                        zone.areaAcres === null
+                          ? ""
+                          : String(fromAcres(zone.areaAcres, unit)),
+                      notes: zone.notes,
+                      history: zone.history,
+                    }}
+                    unit={unit}
+                    zoneWord={zoneWord}
+                    today={today}
+                    usesInUse={usesInUse}
+                  />
+                )}
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      <div className="hidden md:block">
       <Table>
         <TableHeader>
           <TableRow>
@@ -446,6 +534,7 @@ export function ZoneTable({
           ))}
         </TableBody>
       </Table>
+      </div>
 
       {listed.length === 0 && (
         <p className="py-6 text-center text-sm text-muted-foreground">

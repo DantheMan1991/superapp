@@ -241,6 +241,14 @@ export const memberships = pgTable(
      * Nullable: rows written before this column existed have never been
      * confirmed, and NULL says exactly that rather than implying a sync.
      */
+    /**
+     * The newest request this member made with their own session (back-office
+     * slice 6). Stamped by src/lib/auth.ts at most once an hour, never by a
+     * support view (that is the superadmin's request, not theirs). The
+     * console reads the newest across a workspace's members as "last seen".
+     * Null: never, or before this column existed.
+     */
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     clerkRoleSyncedAt: timestamp("clerk_role_synced_at", {
       withTimezone: true,
     }),

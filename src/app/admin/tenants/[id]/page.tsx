@@ -30,6 +30,8 @@ import { CreatePartyButton, OpenInCrmButton } from "../../relationship-controls"
 import { SupportViewForm } from "../../support-controls";
 import { PlatformRevenueButtons } from "../../platform-revenue-controls";
 import { loadPlatformRevenue, SKIP_REASONS } from "@/lib/platform-revenue";
+import { describeAgo } from "@/lib/last-seen";
+import { CONCERN_WORDS, loadHealthSignals } from "../../health";
 import { readOperatorParty } from "../../relationship";
 import { getOperatorTenant } from "@/lib/operator-tenant";
 import {
@@ -147,6 +149,24 @@ export default async function TenantDetailPage({
   // The platform's own revenue, in the operator's books (slice 5): only the
   // operator's page shows it, because only the operator's books hold it.
   const revenue = tenant.isOperator ? await loadPlatformRevenue() : null;
+
+  // Health (slice 6): the same signals the Clients list sorts by, for this
+  // one workspace. Not for the operator — it is not a client.
+  const now = new Date();
+  const health = tenant.isOperator
+    ? null
+    : (
+        await loadHealthSignals(
+          [
+            {
+              id: tenant.id,
+              operatorPartyId: tenant.operatorPartyId,
+              subscriptionStatus: subscription?.status ?? null,
+            },
+          ],
+          now,
+        )
+      ).get(tenant.id) ?? null;
 
   const enabledBySlug = new Map(
     tenantMods.map((tm) => [tm.moduleId, tm.enabled]),
@@ -566,6 +586,68 @@ export default async function TenantDetailPage({
         </div>
 
         <div className="space-y-6">
+          {health && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Health</CardTitle>
+                <CardDescription>
+                  Derived, never typed: their own sign-ins, what the audit log
+                  saw in thirty days, the retainer&apos;s month, what they owe.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                {health.concerns.length > 0 && (
+                  <div className="flex flex-wrap gap-1 pb-1">
+                    {health.concerns.map((c) => (
+                      <Badge
+                        key={c}
+                        variant={c === "past_due" || c === "over_retainer" ? "destructive" : "outline"}
+                      >
+                        {CONCERN_WORDS[c]}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Last seen</span>
+                  <span>{describeAgo(health.lastSeenAt, now)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Last thirty days</span>
+                  <span>
+                    {health.activity.count} action{health.activity.count === 1 ? "" : "s"}
+                    {health.activity.features.length > 0 && (
+                      <span className="text-muted-foreground">
+                        {" · "}
+                        {health.activity.features.map((f) => getFeature(f)?.name ?? f).join(", ")}
+                      </span>
+                    )}
+                  </span>
+                </div>
+                {health.retainer?.hasAny && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Retainer</span>
+                    <span>
+                      {health.retainer.isOver
+                        ? `over by ${formatMinutesAsHours(health.retainer.unpaidOverageMinutes)}`
+                        : health.retainer.isNearLimit
+                          ? "near the limit"
+                          : "within the month"}
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Owes the operator</span>
+                  <span>
+                    {health.owesCents === null
+                      ? "no party yet"
+                      : formatCents(health.owesCents)}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Look at it as they see it (back-office slice 4): read-only, an
               hour, every page logged. Not for the operator — the superadmin
               is already inside it. */}

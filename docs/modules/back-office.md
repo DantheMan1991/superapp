@@ -6,12 +6,47 @@
 > `/admin` shrinks to what only a superadmin can do — provision a workspace,
 > switch features on, watch, support. Plan and slice order below; the decision
 > under it is [ADR 0041](../decisions/0041-a-tenant-is-a-workspace-and-a-client-is-a-party-in-the-operator-tenant.md).
-> Status: partial — slices 0–5 built (the operator tenant exists; a client is a party; Discovery comes home and a lead lands as a lead; a workspace is provisioned from a party and prospects retire; support access; the money loop); slices 6–7 planned below · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: partial — slices 0–6 built (the operator tenant exists; a client is a party; Discovery comes home and a lead lands as a lead; a workspace is provisioned from a party and prospects retire; support access; the money loop; health signals); slice 7 planned below · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this area. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-10 — Slice 6: health signals on the console (`claude/back-office-6-health-signals`)
+
+- **Last seen.** `memberships.last_seen_at` (migration 0294), stamped by the
+  member's own request in `requireTenant`/`resolveTenantContext` — at most
+  once an hour (`shouldStampSeen`, pure, `src/lib/last-seen.ts`) and once per
+  request (`cache`), never by a support view, which is the superadmin's
+  request and not the client's sign-in. The membership row is now read for
+  every role, an owner's too; Clerk still decides owner-vs-member.
+- **The signals** (`src/app/admin/health.ts`), derived and never typed: the
+  newest last-seen across a workspace's members; audit-log rows in the last
+  thirty days, when the last was, and which FEATURES they belonged to — a
+  best-effort map of action prefixes to feature slugs (`ledger`, `books`,
+  `bill`, `invoice`, `banking`, `close` → accounting; `mail` → email; and so
+  on), because the prefixes were named by hand over two months and do not
+  all match a slug, so a prefix the map does not know is counted and never
+  attributed; the retainer's month from the existing math; and what the
+  client owes the operator — open invoices less what was paid or credited,
+  per party, read through the operator's own context (slice 5 put them
+  there). Each becomes a CONCERN — past due, over retainer, owes, quiet
+  thirty days, never signed in — with a weight.
+- **The Clients list** sorts by concern first, then the operator's row, then
+  newest; a concern is a badge under the name (`Over retainer by 1.5 h`,
+  `Owes $250.00`); the columns are Status, Subscription, Last seen, the
+  thirty days (count and features), Modules, Since. The stats trade "Active"
+  for "Need a look". The tenant page gains a *Health* card with the same
+  numbers.
+- **Tests.** `tests/last-seen.test.ts` (pure): the hourly rule, the words,
+  quiet. `tests/health-signals.test.ts` (db-backed): a busy client seen three
+  hours ago with three audit rows (two features the map knows, one it does
+  not), a one-hour retainer with two hours logged (over by an hour), and —
+  against a minted operator only — a $250 issued invoice it owes; a silent
+  client past due reads never-signed-in, past due first, score 9.
+- **Not driven** — same reason as before. What to try by hand: `/admin` sorted
+  by concern, and a client's Health card.
 
 ### 2026-09-10 — Slice 5: the money loop (`claude/back-office-5-the-money-loop`)
 
@@ -589,7 +624,7 @@ meter stays at Layer 0 (ADR 0041, Notes).
 
 **Docs.** This file; `accounting.md`; `security.md` §6's Stripe row.
 
-#### Slice 6 — Health signals on the console
+#### Slice 6 — Health signals on the console — BUILT 2026-09-10
 
 **What.** The Clients list stops being a table of names: last sign-in
 (`memberships.last_seen_at`, stamped by `requireTenant()` at most once an
@@ -627,7 +662,7 @@ RLS and an isolation test, per `security.md` §4.
 | `tenant_notes` | 3 — dropped, migration 0289 | Dropped | It held nothing on either database by then |
 | `support_sessions` | 4 — built, migrations 0290/0291 | A superadmin's time-boxed read-only view of a tenant | Superadmin-only; honoured for a GET and nothing else |
 | `operator_postings` | 5 — built, migrations 0292/0293 | Stripe object → operator invoice, or the reason it is not one yet | `stripe_object_id UNIQUE` claims the object; the invoice memo finds a half-finished posting; superadmin-only |
-| `memberships.last_seen_at` | 6 | Health signal | Stamped at most hourly |
+| `memberships.last_seen_at` | 6 — built, migration 0294 | Health signal | Stamped at most hourly by the member's own request; never by a support view |
 
 ## Key files & seams
 
@@ -639,6 +674,7 @@ RLS and an isolation test, per `security.md` §4.
 - `src/lib/sites/enquiries.ts`, `bookings.ts` — on the slot, no proposition.
 - `src/app/admin/audits/` — every action through `asOperator`; `audit-controls.tsx` attach and delete.
 - `src/app/admin/provision.ts` (slice 3) — resolve the party, attach the workspace; `provisionWorkspace` in actions.ts is the only place Clerk is asked; `scripts/retire-prospects.ts`.
+- `src/app/admin/health.ts` (slice 6) — the signals and the concerns; `src/lib/last-seen.ts` the hourly rule and the words.
 - `src/app/admin/actions.ts` — provisioning from a party; the guard.
 - `src/lib/auth.ts` — `requireTenant`/`resolveTenantContext` honour a live support session for a GET only (slice 4); `src/lib/support-view.ts` the sessions, `support-view-decide.ts` the pure wall, `src/proxy.ts` the stamp.
 - `src/app/api/webhooks/stripe/route.ts`, `src/lib/retainer-billing.ts` — the money loop's sources; `src/lib/platform-revenue.ts` the posting, the backfill, the retry; `platform-revenue-controls.tsx` the operator's two buttons.

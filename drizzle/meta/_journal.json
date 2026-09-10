@@ -2059,6 +2059,13 @@
       "when": 1789019089665,
       "tag": "0293_operator_postings_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 294,
+      "version": "7",
+      "when": 1789020414819,
+      "tag": "0294_membership_last_seen",
+      "breakpoints": true
     }
   ]
 }

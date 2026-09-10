@@ -11,6 +11,15 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-10 — A member's own request leaves a mark (`claude/back-office-6-health-signals`)
+
+Back-office slice 6. `memberships.last_seen_at` is stamped by
+`requireTenant()`/`resolveTenantContext()` on the ordinary path — at most once
+an hour, once per request — and never by a support view. The membership row
+is now read for every role, an owner's included, so the stamp has a row to
+land on; owner-vs-member is still Clerk's decision. The console reads the
+newest across a workspace's members as "last seen".
+
 ### 2026-09-10 — A superadmin may look, and only look (`claude/back-office-4-support-access`)
 
 Back-office slice 4 ([back-office.md](back-office.md)). `requireTenant()` and

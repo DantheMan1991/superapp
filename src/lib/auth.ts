@@ -13,6 +13,7 @@ import {
   type SupportView,
 } from "@/lib/support-view";
 import { decideSupportView } from "@/lib/support-view-decide";
+import { shouldStampSeen } from "@/lib/last-seen";
 
 /**
  * Server-side authorization helpers. Every page/action that touches data goes
@@ -97,7 +98,21 @@ export async function requireTenant(): Promise<TenantContext> {
   // onboarding, which creates the row idempotently.
   if (!found.resolved) redirect("/onboarding");
 
-  return { ...found.resolved, userId, support: null };
+  await stampSeen(found.resolved.membership);
+  return {
+    tenant: found.resolved.tenant,
+    role: found.resolved.role,
+    userId,
+    support: null,
+  };
+}
+
+/** What one lookup answers for the ordinary path. */
+interface Resolved {
+  tenant: Tenant;
+  role: TenantRole;
+  /** The caller's own membership row, for the last-seen stamp; null when unsynced. */
+  membership: { id: string; lastSeenAt: Date | null } | null;
 }
 
 /**
@@ -114,7 +129,7 @@ async function lookup(
   orgRole: string | null | undefined,
 ): Promise<{
   session: SupportSession | null;
-  resolved: { tenant: Tenant; role: TenantRole } | null;
+  resolved: Resolved | null;
 }> {
   return withSystem(async (tx) => {
     const session = await liveSupportSessionInTx(tx, userId);
@@ -129,15 +144,21 @@ async function lookupTenantAndRole(
   userId: string,
   orgId: string,
   orgRole: string | null | undefined,
-): Promise<{ tenant: Tenant; role: TenantRole } | null> {
+): Promise<Resolved | null> {
   const tenant = await tx.query.tenants.findFirst({
     where: eq(schema.tenants.clerkOrgId, orgId),
   });
   if (!tenant) return null;
-  if (orgRole === "org:admin") return { tenant, role: "owner" };
 
+  // The membership row is read for every role now — an owner's too — because
+  // the last-seen stamp (slice 6) needs it. Clerk still owns owner-vs-member:
+  // org:admin is "owner" whatever the row says.
   const [membership] = await tx
-    .select({ role: schema.memberships.role })
+    .select({
+      id: schema.memberships.id,
+      role: schema.memberships.role,
+      lastSeenAt: schema.memberships.lastSeenAt,
+    })
     .from(schema.memberships)
     .innerJoin(
       schema.profiles,
@@ -150,8 +171,41 @@ async function lookupTenantAndRole(
       ),
     )
     .limit(1);
-  const role: TenantRole = membership?.role === "expert" ? "expert" : "staff";
-  return { tenant, role };
+  const role: TenantRole =
+    orgRole === "org:admin"
+      ? "owner"
+      : membership?.role === "expert"
+        ? "expert"
+        : "staff";
+  return {
+    tenant,
+    role,
+    membership: membership ? { id: membership.id, lastSeenAt: membership.lastSeenAt } : null,
+  };
+}
+
+/**
+ * Last seen (back-office slice 6): a member's own request stamps their
+ * membership at most once an hour — `shouldStampSeen` decides — and once per
+ * request, `cache` collapsing the layout's and the page's calls. Only the
+ * ordinary path calls this: a support view is the superadmin's request, not
+ * the client's sign-in, and never stamps.
+ */
+const stampSeenOnce = cache(async (membershipId: string) => {
+  await withSystem((tx) =>
+    tx
+      .update(schema.memberships)
+      .set({ lastSeenAt: new Date() })
+      .where(eq(schema.memberships.id, membershipId)),
+  );
+});
+
+async function stampSeen(
+  membership: { id: string; lastSeenAt: Date | null } | null,
+): Promise<void> {
+  if (membership && shouldStampSeen(membership.lastSeenAt, new Date())) {
+    await stampSeenOnce(membership.id);
+  }
 }
 
 /**
@@ -233,7 +287,13 @@ export async function resolveTenantContext(): Promise<TenantContext | null> {
   if (support.kind === "refuse") return null;
   if (support.kind === "view") return support.ctx;
   if (!found.resolved) return null;
-  return { ...found.resolved, userId, support: null };
+  await stampSeen(found.resolved.membership);
+  return {
+    tenant: found.resolved.tenant,
+    role: found.resolved.role,
+    userId,
+    support: null,
+  };
 }
 
 /** Like requireTenant, but restricted to the business owner. */

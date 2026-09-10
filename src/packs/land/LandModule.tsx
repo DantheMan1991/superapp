@@ -21,6 +21,7 @@ import {
   drawnFeatureCount,
   listParcels,
   mappedZoneCount,
+  retiredParcelCount,
   zoneCountsByParcel,
 } from "./ops";
 import { TENURE_LABELS, isTenure } from "./vocabulary";
@@ -39,6 +40,10 @@ import {
 import { lengthUnitFrom } from "./core/length";
 import { ParcelForm } from "./components/parcel-form";
 import { PasteListButton } from "@/components/app/paste-list-button";
+import { ListSearch } from "@/components/app/list-search";
+import { matchesAny, searchTerm } from "@/lib/list-query";
+import { statusFrom } from "./core/list";
+import { ParcelStatusSelect } from "./components/parcel-filters";
 
 /**
  * The `land` pack's home: parcels, and what is inside each.
@@ -60,20 +65,35 @@ export async function LandModule({
   ctx: TenantContext;
   searchParams: Record<string, string | string[] | undefined>;
 }) {
-  const showRetired = searchParams.retired === "1";
+  /**
+   * **`?retired=1` STILL WORKS AND IS NOT THE CONTROL ANY MORE.** It was the
+   * only way to see retired ground, with nothing on the page to set it, and a
+   * tenant guide that had to tell people to edit the address. `statusFrom`
+   * reads either parameter so a bookmark keeps working while
+   * `ParcelStatusSelect` writes the new one.
+   */
+  const status = statusFrom(
+    typeof searchParams.status === "string" ? searchParams.status : null,
+    typeof searchParams.retired === "string" ? searchParams.retired : null,
+  );
+  const term = searchTerm(
+    typeof searchParams.q === "string" ? searchParams.q : null,
+  );
 
-  const { parcels, zoneCounts, mapped, drawn, labels, config } = await withTenant(
+  const { parcels, zoneCounts, mapped, drawn, retired, labels, config } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
-      const [parcels, zoneCounts, mapped, drawn, pack] = await Promise.all([
+      const [parcels, zoneCounts, mapped, drawn, retired, pack] =
+        await Promise.all([
         listParcels(tx, ctx.tenant.id, {
           // Retired ground stays in the books forever but is noise in the list,
           // so it is opt-in rather than filtered out of existence.
-          status: showRetired ? undefined : "active",
+          status: status === "all" ? undefined : status,
         }),
         zoneCountsByParcel(tx, ctx.tenant.id),
         mappedZoneCount(tx, ctx.tenant.id),
         drawnFeatureCount(tx, ctx.tenant.id),
+        retiredParcelCount(tx, ctx.tenant.id),
         packContext(tx, ctx.tenant.id, ctx.tenant.industry, "land"),
       ]);
       return {
@@ -81,6 +101,7 @@ export async function LandModule({
         zoneCounts,
         mapped,
         drawn,
+        retired,
         labels: pack.labels,
         config: pack.config,
       };
@@ -106,7 +127,22 @@ export async function LandModule({
   const zonesWord = `${zoneWord}s`;
   const isOwner = ctx.role === "owner";
 
-  const total = totalArea(parcels.map((p) => p.areaAcres));
+  /**
+   * **THE SEARCH IS IN MEMORY, AND THAT IS THE RIGHT TOOL HERE.** `matchesAny`
+   * says so itself — *for a list short enough to filter in memory* — and a farm
+   * holds a handful of deeds, not a chart of accounts. Doing it in SQL would
+   * cost a round trip per keystroke to narrow five rows.
+   *
+   * Name AND the deed or lease reference, because the county's parcel number is
+   * what somebody has in their hand when they are looking for one.
+   */
+  const listed = parcels.filter((parcel) =>
+    matchesAny(term, [parcel.name, parcel.identifier]),
+  );
+
+  // **THE TOTAL DESCRIBES WHAT IS ON SCREEN.** A figure for rows a filter has
+  // hidden would be a number nobody can check against the list under it.
+  const total = totalArea(listed.map((p) => p.areaAcres));
 
   return (
     <div className="space-y-6">
@@ -115,7 +151,18 @@ export async function LandModule({
         icon={<MapIcon />}
         description={
           parcels.length > 0
-            ? `${parcels.length} ${parcels.length === 1 ? parcelWord.toLowerCase() : `${parcelWord.toLowerCase()}s`} · ${formatAreaTotal(total, unit)}`
+            ? `${
+                listed.length === parcels.length
+                  ? listed.length
+                  : `${listed.length} of ${parcels.length}`
+              } ${
+                // **THE PLURAL FOLLOWS THE TOTAL, not the number shown.**
+                // Filtered to one of two, the phrase is "1 of 2 parcels" —
+                // agreeing with the 1 gives "1 of 2 parcel".
+                parcels.length === 1
+                  ? parcelWord.toLowerCase()
+                  : `${parcelWord.toLowerCase()}s`
+              } · ${formatAreaTotal(total, unit)}`
             : "The ground the business holds, and what each part of it is for."
         }
         actions={
@@ -178,14 +225,28 @@ export async function LandModule({
         }
       />
 
+      {/*
+        The controls, and they only appear once there is something to work
+        THROUGH. A search box over one parcel is furniture.
+      */}
+      {(parcels.length > 1 || retired > 0) && (
+        <div className="flex flex-wrap items-center gap-2">
+          <ListSearch
+            placeholder={`Find a ${parcelWord.toLowerCase()}`}
+            className="w-full sm:w-64"
+          />
+          <ParcelStatusSelect />
+        </div>
+      )}
+
       {/* Two deeds are frequently one block of ground, and a zone belongs to
           exactly one parcel — so combining is what makes a fence line that
           crosses a deed boundary drawable at all. */}
-      {isOwner && parcels.length > 1 && (
+      {isOwner && listed.length > 1 && (
         <CombineParcelsBar
           unit={unit}
           zoneWord={zoneWord}
-          parcels={parcels.map((parcel) => ({
+          parcels={listed.map((parcel) => ({
             id: parcel.id,
             name: parcel.name,
             identifier: parcel.identifier,
@@ -196,7 +257,7 @@ export async function LandModule({
       )}
 
       <DataTable
-        isEmpty={parcels.length === 0}
+        isEmpty={listed.length === 0}
         empty={
           <EmptyState
             icon={<MapIcon className="h-5 w-5" />}
@@ -219,7 +280,7 @@ export async function LandModule({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {parcels.map((parcel) => (
+            {listed.map((parcel) => (
               <TableRow key={parcel.id}>
                 <TableCell>
                   <div className="flex items-center gap-2 font-medium">

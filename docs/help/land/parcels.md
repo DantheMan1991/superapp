@@ -8,11 +8,12 @@ Open **Land** in the sidebar. This page lists every {{parcel|lower}} the busines
 
 ## What you see
 
-- **The line under the title.** A count and a total, such as `5 parcels · 142.5 acres`. If some {{parcel|plural|lower}} have no area recorded it says so, `142.5 acres (2 not recorded)`, and if none do it reads `not recorded`. Before anything is added it reads `The ground the business holds, and what each part of it is for.`
+- **The line under the title.** A count and a total, such as `5 parcels · 142.5 acres`, **for what is on screen**. Narrow the list and it says so: `2 of 5 parcels · 60 acres`. If some {{parcel|plural|lower}} have no area recorded it adds `(2 not recorded)`, and if none do it reads `not recorded`. Before anything is added it reads `The ground the business holds, and what each part of it is for.`
 - **The buttons.** Up to five at the right of the title. **Two of them are for everyone**, because they only read your phone's position and write nothing: {button:Which {{zone|lower}} am I in?|outline}, which appears once at least one {{zone|lower}} has a boundary traced, and {button:What is here?|outline}, which appears once anything at all has been drawn — a fence counts, not only a {{zone|lower}}'s outline. The other three are the owner's: {button:Find my parcels|outline|search} opens the county parcel search; {button:Paste a list|outline|sparkles} reads a list of {{zone|plural|lower}}, or a photo of one, and proposes a row each for you to check before anything is added, see how to paste your {{zone|plural|lower}} below; and {button:Add parcel|primary} opens the dialog.
+- **The controls.** Above the table, once there is more than one {{parcel|lower}} or some retired ground. `Find a {{parcel|lower}}` matches the name and the deed or lease reference — the parcel number off a tax bill finds it. `Status` shows `In use` to begin with, or `Retired`, or `Both`. Both travel in the address, so a narrowed list survives a refresh and can be sent to somebody.
 - **`Combine`.** When the list holds more than one {{parcel|lower}}, owners see a strip above the table with a check box for each {{parcel|lower}} and its area. Check two or more and the button at the right reads {button:Combine 2 parcels|primary}.
 - **The table.** `{{parcel}}`, the name, which opens the {{parcel|lower}}'s page, with the deed or lease reference in small text under it when one is recorded; `Tenure`, which is `Owned`, `Leased` or `Crop share`; `{{zone|plural}}`, how many active {{zone|plural|lower}} it holds, not counting proposed or retired ones; and `Area`, or a dash when none is recorded.
-- **Retired {{parcel|plural|lower}}.** Hidden. To see them, add `?retired=1` to the end of the page's address. Each carries {badge:retired|outline}. There is no button for this yet.
+- **Retired {{parcel|plural|lower}}.** Hidden to begin with. Set `Status` to `Retired` or `Both` to see them; each carries {badge:retired|outline}, and opening one gives you {button:Put it back|outline}. The old address trick, `?retired=1`, still works and means `Both`.
 
 ## How to add a {{parcel|lower}}
 
@@ -83,9 +84,18 @@ A {{zone|lower}} added this way has no boundary. Draw it on the [site plan](site
 | `Location is blocked for this site. Allow it in the browser to use this.` | The phone is refusing to share its position. Allow it in the browser. |
 | `Could not get a location. Under trees it can take a moment — try again.` | The phone could not get a fix. Try again in the open. |
 
+## How to find one {{parcel|lower}} among many
+
+1. Type into `Find a {{parcel|lower}}`. The list narrows as you type and the line under the title says how many of how many.
+2. It matches the name and the deed or lease reference, so the parcel number from a tax bill finds it.
+3. To look at ground you have retired, set `Status` to `Retired`, or to `Both` to see everything at once.
+4. Clear the box to see them all again.
+
+**The list is never cut short.** However many {{parcel|plural|lower}} the business holds, every one of them is on this page — the total beside the count is a total of what you are looking at, so the two always agree.
+
 ## Not on this page
 
-There is no button for seeing retired {{parcel|plural|lower}}, only the address trick above. Ask us if you need one.
+There are no pages to click through. The list shows everything that matches, because the acreage beside the count is added up from the rows under it and a total that only counted the first fifty would be wrong.
 
 {button:What is here?|outline} never runs on its own. It takes one reading when you press it and forgets it — there is no tracking, no trail, and no record of where anybody was.
 

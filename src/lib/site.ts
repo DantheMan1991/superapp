@@ -63,6 +63,9 @@ export interface NavLink {
 }
 
 export const NAV: readonly NavLink[] = [
+  // The industries we serve, one page each, from `src/lib/verticals/`. First
+  // in the nav because "is this for me?" is the first question a stranger has.
+  { href: "/for", label: "Who it's for" },
   { href: "/about", label: "About" },
   { href: "/health-check", label: "Free health check" },
   { href: "/contact", label: "Contact" },

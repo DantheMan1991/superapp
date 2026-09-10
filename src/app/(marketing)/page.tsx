@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IMAGES } from "@/lib/site";
+import { listVerticals } from "@/lib/verticals";
 
 const PILLARS = [
   {
@@ -227,6 +228,67 @@ export default async function LandingPage() {
             maintained. You get software fitted to your business without owning
             a one-off system that nobody updates once the developer moves on.
           </p>
+
+          {/* The middle layer, made concrete. Every row is a row of
+              `src/lib/verticals/` — so this list can never name a page that
+              isn't there, and a new industry appears here the day its data
+              file lands. It sits INSIDE the layers section rather than beside
+              it, which keeps the plain/muted band alternation intact. */}
+          <div className="mt-14 rounded-xl border bg-card p-6 shadow-sm sm:p-8">
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                  The middle layer, today
+                </p>
+                <h3 className="mt-2 font-medium">
+                  The industries built out so far
+                </h3>
+              </div>
+              <Button asChild variant="ghost" className="h-9 px-3">
+                <Link href="/for">
+                  See who it&apos;s for <ArrowRight className="size-4" />
+                </Link>
+              </Button>
+            </div>
+
+            <ul className="mt-6 grid gap-4 sm:grid-cols-2">
+              {listVerticals().map((vertical) => (
+                <li key={vertical.slug}>
+                  <Link
+                    href={`/for/${vertical.slug}`}
+                    className="group flex h-full gap-4 rounded-lg border p-4 transition-colors outline-none hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50"
+                  >
+                    <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      <vertical.card.icon className="size-5" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-1.5 font-medium">
+                        {vertical.card.heading}
+                        <ArrowRight className="size-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                      </span>
+                      <span className="mt-1 block text-sm leading-relaxed text-muted-foreground">
+                        {vertical.card.body}
+                      </span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+              <li className="flex items-center rounded-lg border border-dashed p-4 text-sm leading-relaxed text-muted-foreground">
+                <span>
+                  More as they are built — an industry gets a page once the
+                  tools behind it are real. The core runs any business today,
+                  so{" "}
+                  <Link
+                    href="/health-check"
+                    className="font-medium text-brand-foreground underline underline-offset-4"
+                  >
+                    tell us what you run
+                  </Link>
+                  .
+                </span>
+              </li>
+            </ul>
+          </div>
         </div>
       </section>
 

@@ -8,6 +8,7 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
 import { todayInTimezone } from "@/lib/timezone";
 import { monthOf } from "@/lib/retainer-core";
+import { startOnboarding } from "./onboarding-ops";
 import {
   createEngagement,
   deleteTimeEntry,
@@ -283,6 +284,47 @@ export async function updateTimeEntryAction(input: unknown) {
     );
     revalidatePath(`${BASE}/${engagementId}`);
     return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Raise whatever the installed profile says a new engagement of this kind
+ * starts with (back-office slice 7c). Additive and re-runnable — pressing it
+ * twice adds nothing the second time, and a step added to the profile later
+ * arrives by pressing it again. Owner-level: it puts work on other people's
+ * lists.
+ */
+export async function startOnboardingAction(input: unknown) {
+  try {
+    const { ctx, today } = await gate();
+    const parsed = z.object({ engagementId: z.string().uuid() }).safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+
+    const raised = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const result = await startOnboarding(tx, ctx, {
+          engagementId: parsed.data.engagementId,
+          today,
+        });
+        if (result.raised.length > 0) {
+          await logAuditInTx(tx, {
+            action: "engagement.onboarding_started",
+            tenantId: ctx.tenantId,
+            actorClerkUserId: ctx.userId,
+            targetType: "engagement",
+            targetId: parsed.data.engagementId,
+            meta: { steps: result.raised.length },
+          });
+        }
+        return result.raised.length;
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidatePath(`${BASE}/${parsed.data.engagementId}`);
+    return { ok: true as const, raised };
   } catch (err) {
     return toResult(err);
   }

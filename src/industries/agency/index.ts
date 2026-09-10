@@ -39,6 +39,53 @@ export const agency: IndustryProfile = {
   packConfig: {
     "professional-services": {
       kinds: ["retainer", "project", "hourly"],
+      /**
+       * WHAT A NEW ENGAGEMENT SETS IN MOTION (back-office slice 7c).
+       *
+       * Here rather than in the pack for the reason `livestock.species` is:
+       * a pack that knew a new client needs an engagement letter would know
+       * what industry it was in. These are an agency's; a bookkeeping firm's
+       * profile would name a chart of accounts review, and a law practice's
+       * a conflicts check.
+       *
+       * They become ordinary work items linked to the engagement, so they
+       * are ticked off in the same row as anything else and reach the digest
+       * and *What needs you* without this pack knowing either exists.
+       *
+       * `dueInDays` counts from the LATER of the engagement's start and the
+       * day the list is raised — a late start should not arrive already
+       * overdue. A step with none is simply undated.
+       */
+      onboarding: [
+        {
+          name: "New client",
+          /**
+           * Not `hourly`: a block of ad-hoc advice does not need a kickoff
+           * call and a folder of its own, and a list that fires on every
+           * small piece of work is a list people learn to ignore.
+           */
+          appliesTo: ["retainer", "project"],
+          steps: [
+            {
+              title: "Signed agreement on file",
+              notes: "Countersigned, in Documents, before any work starts.",
+            },
+            { title: "Kickoff call booked", dueInDays: 3 },
+            {
+              title: "Access and logins collected",
+              notes: "Whatever we need to do the work, and who to ask when it stops working.",
+              dueInDays: 5,
+            },
+            { title: "Main contact confirmed", dueInDays: 5 },
+            {
+              title: "First invoice raised",
+              notes: "Bill the first period, so the arrangement is real on both sides.",
+              dueInDays: 7,
+            },
+            { title: "Two-week check-in", dueInDays: 14 },
+          ],
+        },
+      ],
     },
   },
   /**

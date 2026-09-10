@@ -16,6 +16,7 @@ Open **Professional services** in the sidebar. This is where you record what you
 - **Rate an hour.** What an hour is worth beyond the hours a month. On an {{engagement|lower}} with no hours included, it prices everything logged.
 - **Status.** `Proposed` is agreed with nobody yet. `Active` is live work. `Paused` is on hold. `Ended` is finished. Ending can be undone.
 - **Time.** Minutes against one {{engagement|lower}}, on one day, by one person. Anyone on the team can log it, including an accountant.
+- **Onboarding.** The steps a new {{engagement|lower}} starts with, taken from your industry profile. They become ordinary jobs on your **Work** list, linked to the {{engagement|lower}}.
 - **Money and blanks.** Figures show with your currency symbol. Anything not set shows as a dash, never as zero, because "no rate" and "free" are different.
 
 ## How to get going
@@ -25,7 +26,8 @@ Open **Professional services** in the sidebar. This is where you record what you
 3. Give it a `Name`, pick a `Kind`, and set `Starts`.
 4. Fill in `Hours a month`, `Fee` and `Rate an hour` if you have agreed them. Any of them can be blank.
 5. Click {button:Add {{engagement|lower}}|primary}.
-6. Open it and click {button:Log time|primary} each time you do some of the work.
+6. Open it and click {button:Start onboarding|outline} to raise the steps your profile says a new one needs.
+7. Click {button:Log time|primary} each time you do some of the work.
 
 ## Not on this page
 
@@ -34,6 +36,7 @@ Open **Professional services** in the sidebar. This is where you record what you
 - There is no timer. You type how long something took.
 - {{engagement|plural}} cannot be deleted. One you are finished with is ended, and that keeps its history.
 - There is no report across {{client|plural|lower}} yet, and no way to see what is unbilled across everything.
+- You cannot edit your onboarding steps yourself. They live in your industry profile; ask us to change them.
 - If you need any of this, ask us.
 
 ## Who can do what

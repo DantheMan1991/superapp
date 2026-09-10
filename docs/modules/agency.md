@@ -88,6 +88,7 @@ has said what a line should read.
 | `labels` | none — the pack's fallbacks are this industry's words; a law practice's profile would say `engagement: "Matter"` |
 | `seed.accounts` | `AGENCY_COA` — twelve additions over the general chart, below |
 | `seed.folders` | Clients, Proposals |
+| `packConfig` | `kinds` (retainer, project, hourly) and `onboarding` — six steps a new retainer or project starts with (slice 7c) |
 | `display.currencySymbol` | `$` — a card reading *Retainer · 2500.00* has no column header to say it is money |
 
 ## The chart additions
@@ -116,6 +117,12 @@ their own is a posting-rule change for the day the accountant asks.
 Declared in `src/packs/index.ts`; each slice below is its own PR and gets the
 pack's own dossier when the first one lands.
 
+- ~~**7c — Onboarding as a Work list.**~~ **BUILT 2026-09-10** — see
+  [professional-services.md](professional-services.md). It landed as designed
+  and cost NO migration: the profile names the steps, they become ordinary
+  work items linked to the engagement, and the links themselves are the
+  record of what has been raised. This profile contributes six steps, for
+  retainers and projects only.
 - ~~**7b — Engagements and time.**~~ **BUILT 2026-09-10** — see
   [professional-services.md](professional-services.md). It landed as
   designed: the engagement is a cost object synced in the same transaction,
@@ -150,7 +157,7 @@ pack's own dossier when the first one lands.
 
 ## Open items
 
-- **The pack is part-built** — 7b shipped; 7c and 7d above.
+- **The pack is part-built** — 7b and 7c shipped; 7d above.
 - **Core modules declare no vocabulary**, so *Client* cannot yet replace
   *Customer* on an invoice; the profile's `labels` is empty until they do
   (the open item [packs-and-profiles.md](packs-and-profiles.md) already

@@ -31,6 +31,9 @@ import {
 } from "@/packs/land/ops";
 import { zoneUseLabel } from "@/packs/land/vocabulary";
 import { areaUnitFrom, formatArea } from "@/packs/land/core/area";
+import { asFeatureGeometry } from "@/packs/land/core/geo";
+import { lengthUnitFrom } from "@/packs/land/core/length";
+import { NavigateTo } from "@/packs/land/components/navigate-to";
 import { daysOccupied, formatDays, zoneRest } from "@/packs/land/core/rest";
 import { BoundarySummary } from "@/packs/land/components/boundary-summary";
 import { MoveOccupant } from "@/packs/land/components/move-occupant";
@@ -112,6 +115,8 @@ export default async function ZoneDetailPage({
     data;
 
   const unit = areaUnitFrom(pack.config);
+  /** Null when nobody has drawn it — there is nowhere to be walked to. */
+  const navigable = asFeatureGeometry(zone.geometry);
   const zoneWord = labelFor(pack.labels, "zone", "Zone");
   /**
    * Moving an occupant on or off is a chore — anyone in the workspace records
@@ -273,6 +278,34 @@ export default async function ZoneDetailPage({
         canEdit={ctx.role === "owner" && zone.status === "active"}
         drawnAt={`${BASE}/${parcel.id}#site-plan`}
       />
+
+      {/*
+        **WALKING TO THE GROUND ITSELF, WHICH NOTHING COULD DO BEFORE.** The
+        navigator handled polygons from its first commit — a ring's corners are
+        the posts — and the only button that opened it was on a feature. This is
+        also where `Which paddock am I in?` lands, so it is the page somebody is
+        already on when they want to reach the next one.
+
+        Not owner-gated and not status-gated: walking to a corner changes
+        nothing, and a retired paddock is still somewhere you might have to go.
+      */}
+      {navigable && (
+        <Panel className="p-5">
+          <h2 className="font-heading text-base font-semibold tracking-heading">
+            Walk to it
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Its corners, nearest first. Nothing is recorded about where you were.
+          </p>
+          <div className="mt-3">
+            <NavigateTo
+              name={zone.name}
+              geometry={navigable}
+              lengthUnit={lengthUnitFrom(pack.config)}
+            />
+          </div>
+        </Panel>
+      )}
 
       <div className="grid gap-6 md:grid-cols-3">
         <Panel className="p-5">

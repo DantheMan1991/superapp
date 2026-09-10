@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, Navigation, Plus, Trash2, X } from "lucide-react";
+import { Check, Plus, Trash2, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/app/use-confirm";
@@ -31,7 +31,7 @@ import {
   type TenantFeatureKind,
 } from "../core/features";
 import { asFeatureGeometry, geometryLengthM, shapeOf } from "../core/geo";
-import { NavigatePanel } from "./navigate-panel";
+import { NavigateTo } from "./navigate-to";
 import { formatLength, type LengthUnit } from "../core/length";
 import type { PlanFeature } from "./site-plan-map";
 
@@ -94,15 +94,13 @@ export function FeaturePanel({
     feature.lineWidth === null ? "default" : String(feature.lineWidth);
 
   /**
-   * Whether the field screen is open for this feature.
-   *
-   * **KEYED ON THE FEATURE ID, NOT A BOOLEAN.** The panel stays mounted while
-   * you click from one fence to the next, and a plain flag would leave you
-   * being navigated to the thing you just stopped looking at — with the
-   * geolocation watch still running under a heading naming something else.
+   * **THE KEYED `navigatingId` FLAG IS GONE, and slice 2 is why.** It existed
+   * because this panel stayed mounted while you clicked from one fence to the
+   * next, so a boolean would have left you being navigated to the thing you had
+   * stopped looking at. `site-plan.tsx` now keys the panel's wrapper on the
+   * feature — for a worse bug in the same family — so the panel does not
+   * survive a selection change and `NavigateTo` can hold a plain flag.
    */
-  const [navigatingId, setNavigatingId] = useState<string | null>(null);
-  const navigating = navigatingId === feature.id;
 
   const geometry = asFeatureGeometry(feature.geometry);
   const length = geometry ? geometryLengthM(geometry) : null;
@@ -252,23 +250,11 @@ export function FeaturePanel({
       */}
       {geometry && !editing && (
         <div className="mt-4">
-          {navigating ? (
-            <NavigatePanel
-              name={feature.name || featureKindLabel(feature.kind)}
-              geometry={geometry}
-              lengthUnit={lengthUnit}
-              onClose={() => setNavigatingId(null)}
-            />
-          ) : (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setNavigatingId(feature.id)}
-            >
-              <Navigation className="mr-2 h-4 w-4" />
-              Take me there
-            </Button>
-          )}
+          <NavigateTo
+            name={feature.name || featureKindLabel(feature.kind)}
+            geometry={geometry}
+            lengthUnit={lengthUnit}
+          />
         </div>
       )}
 

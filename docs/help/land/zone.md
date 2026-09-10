@@ -13,6 +13,7 @@ Open a {{parcel|lower}} from the Land list, then click a {{zone|lower}}'s name i
 - **`Grazing days`.** The total days something has been on it, `Across 6 stays, all time.`
 - **`What it is for`.** The last five uses with their dates, or `Nothing declared yet.` A use is set from the {{zone|lower}}'s menu on the {{parcel|lower}}'s page.
 - **`Boundary`.** The same reading as on the {{parcel|lower}}'s page: the measured area against the recorded one. The boundary itself is traced on the {{parcel|lower}}'s site plan, and `the site plan` in this section is a link there. Owners can also paste a boundary with {button:Add a boundary|outline} or {button:Replace boundary|outline}.
+- **`Walk to it`.** Only once its shape is drawn. `Its corners, nearest first. Nothing is recorded about where you were.` and {button:Take me there|outline}. See below.
 - **`Stays`.** A list with a count. On a computer it is a table: `What`, with any notes under it; `On`; `Off`, which shows {badge:still on it|outline} for an open stay and {badge:not yet|outline} for one that has not started; `Days`, counted with both ends included, or a dash while open; `Area used`, or `all of it`; and {button:Remove|outline} on each row. On a phone each stay is a card carrying the same things — the name, the dates, the days, the area and the notes — with {button:Remove|outline} at the bottom of it.
 
 ## How to record a stay
@@ -51,6 +52,17 @@ Use this when they are leaving the {{parcel|lower}} altogether — sold, or gone
 
 The day it moves off counts as a day on this {{zone|lower}}. On Monday and off Monday is one grazing day.
 
+## How to walk to this {{zone|lower}}
+
+1. Click {button:Take me there|outline} under `Walk to it`. The phone starts reading its position.
+2. The panel names the {{zone|lower}} and which corner you are heading for — `corner 4 of 4`, the nearest one first. Under that: the distance in large type, whether you are `getting closer` or `further away`, the bearing as a compass point and degrees `from true north`, and how well the phone knows where you are.
+3. {button:Back|outline} and {button:Next corner|outline} step round the shape. {button:Stop|outline} ends it, and nothing runs after that.
+4. You have arrived when the corner is inside the phone's own accuracy circle: the distance turns green, the note reads `Within ±10 ft — as close as the phone can tell today`, and {badge:you are on it|outline} appears.
+
+The footnote applies here too: `Good enough for polywire. For a permanent corner post, check it against something you can see — a fence you can touch beats a reading you cannot.`
+
+Anyone can use this — walking to a corner changes nothing. A retired {{zone|lower}} can still be walked to.
+
 ## How to remove a stay that did not happen
 
 1. Click {button:Remove|outline} on the row. The dialog is `Remove this stay?` and repeats what it was and when, then: `Every rest and rotation figure for this area is computed from these records, so remove it only if it did not happen.`
@@ -74,4 +86,4 @@ Setting what the {{zone|lower}} is for is done from its menu on the {{parcel|low
 
 ## Who can do what
 
-Everyone can record a stay, move something on or off, and remove a stay. Owners can also add or replace the boundary. A retired {{zone|lower}} shows owners {button:Put the {{zone|lower}} back|outline} and nothing else.
+Everyone can record a stay, move something on or off, remove a stay, and walk to the {{zone|lower}}. Owners can also add or replace the boundary. A retired {{zone|lower}} shows owners {button:Put the {{zone|lower}} back|outline} and nothing else.

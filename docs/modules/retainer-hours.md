@@ -8,6 +8,14 @@
 
 ## Build log
 
+### 2026-09-10 — An hour block reaches the operator's books (`claude/back-office-5-the-money-loop`)
+
+- `creditHourBlockFromSession` posts after it credits (ADR 0043, back-office
+  slice 5): the paid session becomes a paid invoice in the operator tenant's
+  Accounting, keyed on the session id so the webhook, a redelivery and the
+  checkout-return reconcile all post it exactly once. `CheckoutSessionLike`
+  gained `created` and `currency`. The client-facing meter is untouched.
+
 ### 2026-09-09 — The operator tenant holds no retainer (`claude/back-office-plan`)
 
 - Yosher is now a tenant of its own platform (ADR 0041, back-office slice 0),

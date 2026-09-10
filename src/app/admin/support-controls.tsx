@@ -32,7 +32,6 @@ export function SupportViewForm({ tenantId }: { tenantId: string }) {
               return;
             }
             router.push("/dashboard");
-            router.refresh();
           })
         }
       >

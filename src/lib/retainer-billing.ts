@@ -2,6 +2,7 @@ import "server-only";
 import { z } from "zod";
 import { withSystem, schema } from "@/db";
 import { logAudit } from "@/lib/audit";
+import { chargeFromHourBlock, postPlatformCharge } from "@/lib/platform-revenue";
 import { getStripe, hourBlockForKey } from "@/lib/stripe";
 
 /**
@@ -22,6 +23,9 @@ interface CheckoutSessionLike {
   id: string;
   payment_status: string | null;
   amount_total: number | null;
+  currency?: string | null;
+  /** Unix seconds — when Stripe made the session; the day the block was paid. */
+  created?: number | null;
   metadata: Record<string, string> | null | undefined;
 }
 
@@ -73,6 +77,19 @@ export async function creditHourBlockFromSession(
       },
     });
   }
+  // The platform's own revenue reaches the operator's books (ADR 0043,
+  // back-office slice 5). Idempotent on the session id, so a redelivery that
+  // credited nothing still posts exactly once.
+  await postPlatformCharge(
+    chargeFromHourBlock({
+      stripeSessionId: session.id,
+      tenantId,
+      amountCents: session.amount_total ?? 0,
+      currency: session.currency ?? "usd",
+      paidAt: new Date((session.created ?? Math.floor(Date.now() / 1000)) * 1000),
+      blockKey: block.key,
+    }),
+  );
   return { credited: rows.length > 0 };
 }
 

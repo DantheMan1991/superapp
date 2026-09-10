@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { logAudit } from "@/lib/audit";
 import { syncSubscription } from "@/lib/billing-sync";
+import {
+  chargeFromStripeInvoice,
+  postPlatformCharge,
+  tenantForStripeCustomer,
+} from "@/lib/platform-revenue";
 import { creditHourBlockFromSession } from "@/lib/retainer-billing";
 import { getStripe } from "@/lib/stripe";
 
@@ -71,6 +76,23 @@ export async function POST(req: NextRequest) {
           actorLabel: "stripe-webhook",
         });
       }
+      break;
+    }
+    case "invoice.paid": {
+      // The platform's own revenue reaches the operator's books (ADR 0043,
+      // back-office slice 5): a paid subscription invoice becomes a paid
+      // invoice in Yosher's own accounting, idempotent on Stripe's id. WHICH
+      // workspace it was for comes from OUR subscriptions row by customer id,
+      // never from anything in the payload's metadata.
+      const invoice = event.data.object;
+      const customerId =
+        typeof invoice.customer === "string"
+          ? invoice.customer
+          : (invoice.customer?.id ?? null);
+      const known = customerId ? await tenantForStripeCustomer(customerId) : null;
+      await postPlatformCharge(
+        chargeFromStripeInvoice(invoice, known?.tenantId ?? null, known?.planName ?? null),
+      );
       break;
     }
     default:

@@ -6,6 +6,7 @@
  * re-exports every domain, so `@/db/schema` still resolves exactly as before.
  */
 import {
+  bigint,
   boolean,
   date,
   index,
@@ -498,6 +499,54 @@ export const supportSessions = pgTable(
 );
 
 export type SupportSession = typeof supportSessions.$inferSelect;
+
+/**
+ * What became of each Stripe charge in the OPERATOR's books (ADR 0043,
+ * back-office slice 5). One row per Stripe object — a subscription invoice, a
+ * checkout session for an hour block — claimed once by the unique index, so
+ * the webhook, a redelivery, the backfill and a retry all meet the same row.
+ * `status` is posted (with the operator invoice) or skipped (with the reason,
+ * one of `SKIP_REASONS` in src/lib/platform-revenue.ts); a skipped row is
+ * attempted again on retry. Platform-level and superadmin-only.
+ *
+ * `invoice_id` is a soft pointer into the operator tenant's `invoices` —
+ * across tenants by design, like `tenants.operator_party_id`. The client is
+ * kept by id with SET NULL: a deleted workspace does not erase the record of
+ * what it paid.
+ */
+export const operatorPostings = pgTable(
+  "operator_postings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** `subscription_invoice` | `hour_block` — an open word, like a source. */
+    kind: text("kind").notNull(),
+    stripeObjectId: text("stripe_object_id").notNull(),
+    clientTenantId: uuid("client_tenant_id").references(() => tenants.id, {
+      onDelete: "set null",
+    }),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    currency: text("currency").notNull(),
+    paidAt: timestamp("paid_at", { withTimezone: true }).notNull(),
+    description: text("description").notNull(),
+    status: text("status").notNull(),
+    reason: text("reason"),
+    invoiceId: uuid("invoice_id"),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("operator_postings_stripe_idx").on(t.stripeObjectId),
+    index("operator_postings_status_idx").on(t.status),
+    index("operator_postings_client_idx").on(t.clientTenantId),
+  ],
+);
+
+export type OperatorPosting = typeof operatorPostings.$inferSelect;
 
 /** Append-only log of sensitive actions. */
 export const auditLog = pgTable(

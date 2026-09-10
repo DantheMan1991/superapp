@@ -6,12 +6,63 @@
 > `/admin` shrinks to what only a superadmin can do — provision a workspace,
 > switch features on, watch, support. Plan and slice order below; the decision
 > under it is [ADR 0041](../decisions/0041-a-tenant-is-a-workspace-and-a-client-is-a-party-in-the-operator-tenant.md).
-> Status: partial — slices 0–4 built (the operator tenant exists; a client is a party; Discovery comes home and a lead lands as a lead; a workspace is provisioned from a party and prospects retire; support access); slices 5–7 planned below · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: partial — slices 0–5 built (the operator tenant exists; a client is a party; Discovery comes home and a lead lands as a lead; a workspace is provisioned from a party and prospects retire; support access; the money loop); slices 6–7 planned below · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this area. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-10 — Slice 5: the money loop (`claude/back-office-5-the-money-loop`)
+
+**Slice 4 was DRIVEN on production first, with the founder signed in.** The
+Support card opened a session (`support.opened`), `/dashboard` was answered
+as Hilltop Farm's workspace with the banner and `support.viewed` (the GET path
+of the wall works), and the founder opened his own view meanwhile, which
+ended mine — one live per person, as designed. What the drive found: the
+console's *Opening…* stayed stuck because `router.refresh()` right after
+`router.push()` aborted the navigation it had just started
+(`ERR_ABORTED` on the `/dashboard` RSC request); both buttons lose the
+refresh here. The founder then drove the view himself — six pages, a journal
+form among them — and ended it; my later press of *Add record* ran eleven
+minutes after that, in Yosher App's own workspace, which is exactly right
+with no session live. The wall's refusal was therefore not exercised in the
+pane; it is certified by the pure test and stands unchanged.
+
+- **A charge becomes a paid invoice in the operator's books** ([ADR 0043](../decisions/0043-the-platforms-revenue-is-posted-by-the-webhook-as-the-operators-owner.md)).
+  `src/lib/platform-revenue.ts`: `postPlatformCharge` claims the Stripe
+  object once in `operator_postings` (migrations 0292 + 0293, superadmin-only),
+  then — as the operator's owner with no user, through Accounting's own verbs
+  — a draft with one line to Service Revenue (4010, else Sales 4000), issued,
+  and paid into Undeposited Funds on the day Stripe says it was paid, for the
+  customer role on the client's party (made if missing — the party is the
+  identity, the role is what an invoice is for). The invoice's memo carries
+  `stripe:<id>`, so a crash between the ledger write and the posting row is
+  found on the next attempt, never posted twice.
+- **Two sources.** The webhook's new `invoice.paid` case, which finds the
+  workspace by OUR `subscriptions.stripe_customer_id` and never by the
+  payload's metadata; and the hour-block credit (`creditHourBlockFromSession`,
+  webhook and reconcile alike), which posts after it credits, keyed on the
+  session id so both paths meet the same row.
+- **Skipped, never dropped.** `SKIP_REASONS`: no operator, Accounting off,
+  unknown customer, no party, nothing paid, a foreign currency, no 4010/4000
+  or no Undeposited Funds, before the books begin (ADR 0035), a ledger
+  refusal. The operator's tenant page gains a *Platform revenue* card — total
+  posted, skipped count, the latest postings with the client and the reason —
+  and two verbs: *Post what Stripe holds* (every paid invoice of every known
+  customer, every hour block ever credited; idempotent) and *Retry N skipped*.
+- **Tests.** `tests/platform-revenue.test.ts` (db-backed): posts a charge as
+  a paid invoice for the client's customer role with a `stripe` payment; the
+  same object again posts nothing twice; a client with no party is skipped
+  and posts on retry once it has one; nothing paid, a foreign currency and a
+  day before the books begin are skipped. **It runs only against a MINTED
+  operator** — it writes real invoices, and a database where the founder has
+  named one holds Yosher's own books — and says so; CI builds from zero and
+  always runs it. `tests/isolation/platform-revenue.test.ts`: superadmin-only.
+- **Not driven** — posting needs a real Stripe charge. The first real one is
+  the drive: a client subscribes, and an invoice appears in Yosher App's
+  Accounting. Until then *Post what Stripe holds* on the operator's page
+  posts the Test workspace's history, if any.
 
 ### 2026-09-10 — Slice 4: look at it as they see it — support access (`claude/back-office-4-support-access`)
 
@@ -520,7 +571,7 @@ the only answer today is a `withSystem` query by hand.
 is refused; the session expires. **Docs.** This file; `security.md` §6 gains
 the row and §3 the invariant; `identity-and-roles.md`.
 
-#### Slice 5 — The money loop
+#### Slice 5 — The money loop — BUILT 2026-09-10
 
 **What.** The operator's books see the platform's revenue. From the verified
 Stripe webhook, `invoice.paid` on a subscription and the hour-block Checkout
@@ -575,7 +626,7 @@ RLS and an isolation test, per `security.md` §4.
 | `src/lib/leads/` | 2 — built | The slot a stranger's arrival passes through (ADR 0042) | No table. CRM fills it |
 | `tenant_notes` | 3 — dropped, migration 0289 | Dropped | It held nothing on either database by then |
 | `support_sessions` | 4 — built, migrations 0290/0291 | A superadmin's time-boxed read-only view of a tenant | Superadmin-only; honoured for a GET and nothing else |
-| `operator_postings` | 5 | Stripe object → operator invoice | `stripe_object_id UNIQUE` is the idempotency arbiter |
+| `operator_postings` | 5 — built, migrations 0292/0293 | Stripe object → operator invoice, or the reason it is not one yet | `stripe_object_id UNIQUE` claims the object; the invoice memo finds a half-finished posting; superadmin-only |
 | `memberships.last_seen_at` | 6 | Health signal | Stamped at most hourly |
 
 ## Key files & seams
@@ -590,7 +641,7 @@ RLS and an isolation test, per `security.md` §4.
 - `src/app/admin/provision.ts` (slice 3) — resolve the party, attach the workspace; `provisionWorkspace` in actions.ts is the only place Clerk is asked; `scripts/retire-prospects.ts`.
 - `src/app/admin/actions.ts` — provisioning from a party; the guard.
 - `src/lib/auth.ts` — `requireTenant`/`resolveTenantContext` honour a live support session for a GET only (slice 4); `src/lib/support-view.ts` the sessions, `support-view-decide.ts` the pure wall, `src/proxy.ts` the stamp.
-- `src/app/api/webhooks/stripe/route.ts`, `src/lib/retainer-billing.ts` — the money loop's sources.
+- `src/app/api/webhooks/stripe/route.ts`, `src/lib/retainer-billing.ts` — the money loop's sources; `src/lib/platform-revenue.ts` the posting, the backfill, the retry; `platform-revenue-controls.tsx` the operator's two buttons.
 
 ## Decisions & gotchas
 
@@ -634,6 +685,13 @@ RLS and an isolation test, per `security.md` §4.
 - **Clients cannot see their own support-access history.** `support_sessions`
   is superadmin-only. Showing a workspace who looked and why would be the
   honest thing; nobody has asked yet.
+- **Sales tax on the platform's own invoices** is not applied (ADR 0043). SaaS
+  in the operator's home state is a question for the accountant, and the
+  invoice line is untaxed until it is answered.
+- **Stripe's fee** is not recorded per charge; the payout the bank feed
+  matches is net of it, so the difference lands where the feed codes it.
+  A fee line per charge would need `balance_transaction` — one more Stripe
+  read per posting — when somebody wants the gross/net split.
 - **Retainer time as revenue or WIP**, and whether the client-facing meter
   becomes a projection of the pack's engagements — deferred (ADR 0041, Notes).
 - **Yosher's own public site** is the `(marketing)` route group in code, not a

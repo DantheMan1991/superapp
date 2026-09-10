@@ -59,6 +59,8 @@ Nothing here changes the drawing. Grouping, filtering and finding only change wh
 
 ## How to walk to a corner with the phone
 
+This works for anything with a shape: a fence or a gate here, a {{zone|lower}} from its own page, and a proposed {{zone|lower}} from the box under the table.
+
 1. Click the feature, then {button:Take me there|outline}. Anyone can use it. The panel becomes a compass for reaching the feature's corners in order, starting with the nearest: the distance in large type, `240 ft`, whether you are `getting closer` or `further away`, the bearing as a compass point and degrees `from true north`, and the phone's accuracy.
 2. Walk. {button:Back|outline} and {button:Next corner|outline} step through the corners. {button:Stop|outline} ends it.
 3. You have arrived when the corner is within the phone's own accuracy circle: the distance turns green, the note reads `Within ±10 ft — as close as the phone can tell today`, and {badge:you are on it|outline} appears.

@@ -8,6 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { activateZoneAction, discardZonesAction } from "../actions";
 import { formatArea, type AreaUnit } from "../core/area";
+import { type LengthUnit } from "../core/length";
+import { type FeatureGeometry } from "../core/geo";
+import { NavigateTo } from "./navigate-to";
 
 /**
  * Ground a layout proposed, waiting for somebody to go and fence it.
@@ -33,11 +36,20 @@ import { formatArea, type AreaUnit } from "../core/area";
 export function PlannedZones({
   zones,
   unit,
+  lengthUnit,
   zoneWord,
   canActivate,
 }: {
-  zones: { id: string; name: string; areaAcres: number | null }[];
+  zones: {
+    id: string;
+    name: string;
+    areaAcres: number | null;
+    /** Read through the total parser; null means nothing was drawn. */
+    geometry: FeatureGeometry | null;
+  }[];
   unit: AreaUnit;
+  /** For the navigator's distances. */
+  lengthUnit: LengthUnit;
   zoneWord: string;
   canActivate: boolean;
 }) {
@@ -101,12 +113,28 @@ export function PlannedZones({
             key={zone.id}
             className="flex flex-wrap items-center justify-between gap-2 text-sm"
           >
-            <span className="flex items-center gap-2">
+            <span className="flex flex-wrap items-center gap-2">
               <Badge variant="outline">Proposed</Badge>
               <span>{zone.name}</span>
               <span className="tabular-nums text-muted-foreground">
                 {formatArea(zone.areaAcres, unit)}
               </span>
+              {/*
+                **THIS IS THE POINT OF THE WHOLE 2b DESIGN, and it was the one
+                shape you could not walk to.** A proposal exists so somebody can
+                go and build it; its corners ARE the posts. Not owner-gated —
+                the person setting them is often not the person who laid them
+                out.
+              */}
+              {zone.geometry && (
+                <NavigateTo
+                  name={zone.name}
+                  geometry={zone.geometry}
+                  lengthUnit={lengthUnit}
+                  variant="ghost"
+                  label="Take me there"
+                />
+              )}
             </span>
             {canActivate && (
               <span className="flex items-center gap-1">

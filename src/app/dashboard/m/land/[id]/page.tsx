@@ -694,8 +694,12 @@ export default async function ParcelDetailPage({
               id: zone.id,
               name: zone.name,
               areaAcres: zone.areaAcres,
+              // Its corners are the posts somebody is about to set, which is
+              // the whole reason a proposal exists.
+              geometry: asFeatureGeometry(zone.geometry),
             }))}
             unit={unit}
+            lengthUnit={lengthUnitFrom(pack.config)}
             zoneWord={zoneWord}
             canActivate={isOwner && parcel.status === "active"}
           />

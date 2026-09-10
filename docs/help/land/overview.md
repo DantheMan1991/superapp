@@ -40,6 +40,6 @@ Open **Land** in the sidebar. Land is where the ground your business holds is re
 
 The shape of the farm belongs to the owner. Only an owner can add, edit, combine or retire a {{parcel|lower}}, add or retire a {{zone|lower}}, set what a {{zone|lower}} is for, trace or replace a boundary, divide ground into {{zone|plural|lower}}, or save a materials list.
 
-The chores are open to everyone. Any member can draw fences, gates, water and the rest on the site plan, mark them built or removed, walk to a corner with the phone, and record what is on a {{zone|lower}} and when it moved off.
+The chores are open to everyone. Any member can draw fences, gates, water and the rest on the site plan, mark them built or removed, walk to the corners of anything with a shape — a fence, a {{zone|lower}}, or one that is only proposed — and record what is on a {{zone|lower}} and when it moved off.
 
 Staff see the same pages without the owner's buttons. On the Land list, staff see the two that only read the phone's position — {button:Which {{zone|lower}} am I in?|outline} and {button:What is here?|outline} — and none of the others.

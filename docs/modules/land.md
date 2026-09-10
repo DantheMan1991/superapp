@@ -578,6 +578,65 @@ grounds, which were never about optimisation as such.
 
 ## Build log
 
+### 2026-09-10 — Take me there, for ground (`claude/take-me-to-the-ground`)
+
+Module-improvement review slice 7, and it is the smallest one in the run because
+the hard half was already done and nobody had noticed.
+
+**`targetsOf` HAS HANDLED POLYGONS SINCE 2b.3's FIRST COMMIT** — *"the vertices
+are the posts, and a ring's closing repeat is dropped"* — and
+`tests/land-navigate.test.ts` has been asserting it ever since, under the name
+*does not send you back to the corner you started at*. The navigator takes a
+`FeatureGeometry`, which a paddock's boundary is. The only thing missing was a
+button: `Take me there` lived in the feature panel and nowhere else, so the two
+shapes a person most wants to walk to could not be walked to.
+
+  - **A paddock**, from its own page — which is where `Which paddock am I in?`
+    lands you, so it is the page you are already on when you want to reach the
+    next one.
+  - **A PROPOSED paddock**, from the box under the table. This is the point of
+    the whole 2b design: a proposal exists so somebody can go and build it, and
+    its corners ARE the posts.
+
+New `components/navigate-to.tsx` — button plus panel for anything with a shape —
+used by the feature panel, the zone page's new `Walk to it`, and each proposed
+row. Not owner-gated and not status-gated, the rule the feature panel already
+set: walking to a corner changes nothing, and a retired paddock is still
+somewhere you might have to go.
+
+**IT ALSO RETIRED A FLAG SLICE 2 HAD MADE REDUNDANT.** `FeaturePanel` keyed the
+open navigator on the feature id, because the panel used to stay mounted while
+you clicked from one fence to the next and a boolean would have left you being
+navigated to the thing you had stopped looking at — with the geolocation watch
+still running under a heading naming something else. Slice 2 keyed the panel's
+whole wrapper on the feature, for a worse bug in the same family, so the panel
+no longer survives a selection change and `NavigateTo` can hold a plain flag.
+**Driven, because the flag existed to prevent something real:** with `Centre
+lane` being navigated, selecting `South line` closed the navigator, showed the
+new panel and offered `Take me there` again — no watch left running.
+
+**Driven on Hilltop (dev) at 375×812 and 1280×900**, with a STUBBED
+`navigator.geolocation` at North 1's centroid:
+
+  - the zone page's `Walk to it` panel → `North 1 · corner 4 of 4 · 463 ft ·
+    Keep going · NE 45° from true north · ±14 ft`, four corners for a
+    four-cornered ring;
+  - `Back` stepped to corner 3 with a different bearing (SE 135°); `Stop` ended
+    it and the button came back;
+  - each proposed paddock's `Take me there` at x=29–161 in a 375px screen →
+    `North 3 · corner 4 of 4 · 475 ft · NW 314°`;
+  - no horizontal scroll on either width.
+
+**No new tests, and that is the honest report:** the arithmetic this slice
+exposes was already covered — `targetsOf` on a Polygon, the dropped closing
+repeat, `nearestTarget`, the arrival band — and what the slice adds is three
+call sites. **Nothing here has run on a real phone**, the same sentence 2b.1 has
+carried since August: the numbers are proved and the feel is not.
+
+**Noticed, not changed:** `Next corner` on the LAST corner stays put rather than
+wrapping to the first. Clamping at both ends is defensible and it is 2b.3's
+behaviour, not this slice's.
+
 ### 2026-09-10 — Deleting is deliberate, and retiring is not (`claude/deleting-is-deliberate`)
 
 Module-improvement review slice 6, and it closes the oldest open item in this
@@ -1812,6 +1871,10 @@ rented ground, and retrofitting it means rewriting the report.
   `targetsOf` turns a geometry into the ordered list of places to stand: the
   vertices are the posts, and a ring's closing repeat is dropped. It knows
   nothing about units — the radius arrives already formatted
+- `src/packs/land/components/navigate-to.tsx` — `Take me there`, for ANYTHING
+  with a shape: a feature, a paddock from its own page, and a PROPOSED paddock
+  from the box under the table. `targetsOf` handled polygons from 2b.3's first
+  commit and only a button was missing
 - `src/packs/land/components/navigate-panel.tsx` — the field screen, opened by
   **Take me there** on any drawn feature. Not owner-gated: the person setting
   the posts is often not the person who drew them. Watches only while it is
@@ -2206,6 +2269,10 @@ rented ground, and retrofitting it means rewriting the report.
   wanted on a phone, or a missing post count with a note saying so.
 - **`fed_by_id` has a column and a picker and no screen that uses it.** "Show me
   everything on the north energizer" is one query away and nothing asks it yet.
+- **`Next corner` clamps at the last corner rather than wrapping.** Walking a
+  four-sided paddock and pressing it a fifth time does nothing. Clamping at both
+  ends is defensible; wrapping would suit a closed ring better than an open
+  fence, so the answer probably differs by shape and nobody has decided.
 - ~~Nobody has pasted a boundary yet~~ — **closed 2026-08-19.** Driven on
   production; the measured acreage, the disagreement badge and both refusal
   paths all behaved. It found the empty Replace box, now fixed.

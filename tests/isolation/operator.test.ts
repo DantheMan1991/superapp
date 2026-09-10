@@ -1,18 +1,19 @@
 import "dotenv/config";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../../src/db";
-import { d, seedParty } from "./_shared";
+import { d, obtainOperator, seedParty } from "./_shared";
 
 /**
  * The operator tenant (ADR 0041) is an ORDINARY tenant to the database.
  *
- * This file is what keeps it that way. It flags one of two tenants as the
- * operator and proves the same things core.test.ts proves for any pair —
- * nothing about it is special except the flag, and the flag itself is out of
- * a member's reach. If this file ever needs an exception for the operator,
- * the boundary has leaked; that is the invariant (security.md S13), not a
- * limitation of the test.
+ * This file is what keeps it that way. It takes the operator — the named one
+ * when the database has it, a minted one otherwise (`obtainOperator`) — and
+ * proves the same things core.test.ts proves for any pair: nothing about it
+ * is special except the flag and the pointer, and both are out of a member's
+ * reach. If this file ever needs an exception for the operator, the boundary
+ * has leaked; that is the invariant (security.md S13), not a limitation of
+ * the test.
  */
 
 const STAMP = `iso-operator-${process.pid}`;
@@ -28,39 +29,46 @@ function names(err: unknown, needle: string): boolean {
 }
 
 let operator: string;
+let operatorMinted = false;
+let operatorParty: string;
 let client: string;
 
 d("the operator tenant is an ordinary tenant (RLS)", () => {
   beforeAll(async () => {
-    [operator, client] = await withSystem(async (tx) => {
-      const rows = await tx
-        .insert(schema.tenants)
-        .values([
-          {
-            clerkOrgId: `${STAMP}-op`,
-            name: "Isolation Operator",
-            slug: `${STAMP}-op`,
-            isOperator: true,
-          },
-          {
-            clerkOrgId: `${STAMP}-c`,
-            name: "Isolation Client",
-            slug: `${STAMP}-c`,
-          },
-        ])
-        .returning();
-      return [rows[0].id, rows[1].id];
-    });
     await withSystem(async (tx) => {
-      await seedParty(tx, operator, "The operator's own party");
+      const op = await obtainOperator(tx, STAMP);
+      operator = op.id;
+      operatorMinted = op.minted;
+      const [c] = await tx
+        .insert(schema.tenants)
+        .values({
+          clerkOrgId: `${STAMP}-c`,
+          name: "Isolation Client",
+          slug: `${STAMP}-c`,
+        })
+        .returning();
+      client = c.id;
+      operatorParty = await seedParty(tx, operator, "The operator's own party");
       await seedParty(tx, client, "The client's own party");
     });
   });
 
   afterAll(async () => {
     await withSystem(async (tx) => {
-      await tx.delete(schema.tenants).where(eq(schema.tenants.id, operator));
       await tx.delete(schema.tenants).where(eq(schema.tenants.id, client));
+      if (operatorMinted) {
+        await tx.delete(schema.tenants).where(eq(schema.tenants.id, operator));
+      } else {
+        // A real operator: take back exactly the row this file put in it.
+        await tx
+          .delete(schema.parties)
+          .where(
+            and(
+              eq(schema.parties.tenantId, operator),
+              eq(schema.parties.id, operatorParty),
+            ),
+          );
+      }
     });
   });
 
@@ -88,37 +96,59 @@ d("the operator tenant is an ordinary tenant (RLS)", () => {
     expect(row.isOperator).toBe(false);
   });
 
-  it("a member cannot write the flag — from inside the operator or from outside it", async () => {
-    // `tenants` is SELECT-only for members (0001); this column inherits that
-    // and the test says so, because the flag is what the console trusts.
-    const fromInside = await withTenant(operator, (tx) =>
+  it("a member cannot write the flag or the pointer — from inside the operator or from outside it", async () => {
+    // `tenants` is SELECT-only for members (0001); both columns inherit that
+    // and the test says so, because they are what the console trusts.
+    const flagFromInside = await withTenant(operator, (tx) =>
       tx
         .update(schema.tenants)
         .set({ isOperator: false })
         .where(eq(schema.tenants.id, operator))
         .returning(),
     );
-    expect(fromInside).toHaveLength(0);
+    expect(flagFromInside).toHaveLength(0);
 
-    const fromOutside = await withTenant(client, (tx) =>
+    const flagFromOutside = await withTenant(client, (tx) =>
       tx
         .update(schema.tenants)
         .set({ isOperator: true })
         .where(eq(schema.tenants.id, client))
         .returning(),
     );
-    expect(fromOutside).toHaveLength(0);
+    expect(flagFromOutside).toHaveLength(0);
 
-    const flags = await withSystem((tx) =>
+    const pointerFromInside = await withTenant(client, (tx) =>
       tx
-        .select({ id: schema.tenants.id, isOperator: schema.tenants.isOperator })
+        .update(schema.tenants)
+        .set({ operatorPartyId: operatorParty })
+        .where(eq(schema.tenants.id, client))
+        .returning(),
+    );
+    expect(pointerFromInside).toHaveLength(0);
+
+    const pointerFromOperator = await withTenant(operator, (tx) =>
+      tx
+        .update(schema.tenants)
+        .set({ operatorPartyId: operatorParty })
+        .where(eq(schema.tenants.id, client))
+        .returning(),
+    );
+    expect(pointerFromOperator).toHaveLength(0);
+
+    const rows = await withSystem((tx) =>
+      tx
+        .select({
+          id: schema.tenants.id,
+          isOperator: schema.tenants.isOperator,
+          operatorPartyId: schema.tenants.operatorPartyId,
+        })
         .from(schema.tenants)
         .where(inArray(schema.tenants.id, [operator, client])),
     );
-    expect(Object.fromEntries(flags.map((f) => [f.id, f.isOperator]))).toEqual({
-      [operator]: true,
-      [client]: false,
-    });
+    const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
+    expect(byId[operator].isOperator).toBe(true);
+    expect(byId[client].isOperator).toBe(false);
+    expect(byId[client].operatorPartyId).toBeNull();
   });
 
   it("each side sees only its own rows, and neither sees the other in `tenants`", async () => {

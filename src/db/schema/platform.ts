@@ -154,6 +154,20 @@ export const tenants = pgTable(
      * tests/isolation/operator.test.ts is what keeps it that way.
      */
     isOperator: boolean("is_operator").notNull().default(false),
+    /**
+     * THE ONE POINTER BETWEEN A WORKSPACE AND ITS RELATIONSHIP (ADR 0041,
+     * back-office slice 1): the party in the OPERATOR tenant's CRM that this
+     * business is. Written once, by the console (`ensureOperatorParty` in
+     * src/app/admin/relationship.ts), and by nothing in any module — the CRM
+     * never writes `tenants`.
+     *
+     * A soft pointer, deliberately: `parties` is keyed `(tenant_id, id)` and
+     * this crosses tenants by design, so a real FK would need the operator's
+     * id inside the platform row. Resolved under the operator's context and
+     * null-safe — a party deleted in the CRM leaves a dangling id the console
+     * reads as "gone", the `site_enquiries.party_id` precedent.
+     */
+    operatorPartyId: uuid("operator_party_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

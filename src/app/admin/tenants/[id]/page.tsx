@@ -21,13 +21,15 @@ import {
   TenantStatusBadge,
 } from "@/components/status-badge";
 import {
-  AddNoteForm,
   ConvertProspectForm,
   ModuleToggle,
   ProfileInstaller,
   TenantStatusSelect,
   VocabularyEditor,
 } from "./controls";
+import { CreatePartyButton, OpenInCrmButton } from "../../relationship-controls";
+import { readOperatorParty } from "../../relationship";
+import { getOperatorTenant } from "@/lib/operator-tenant";
 import {
   AllotmentForm,
   EntryEditRow,
@@ -120,6 +122,16 @@ export default async function TenantDetailPage({
     data;
   const today = todayInRetainerTz();
   const isProspect = !tenant.clerkOrgId;
+
+  // The relationship half of the seam (ADR 0041): the party this workspace
+  // points at, read through the OPERATOR's own context — narrower than the
+  // god view this page otherwise uses — and null when nothing points yet or
+  // the party is gone. The operator's Clerk org id is what lets the button
+  // switch a person into that workspace before opening the record.
+  const operator = tenant.isOperator ? null : await getOperatorTenant();
+  const party = tenant.operatorPartyId
+    ? await readOperatorParty(tenant.operatorPartyId)
+    : null;
 
   const enabledBySlug = new Map(
     tenantMods.map((tm) => [tm.moduleId, tm.enabled]),
@@ -432,33 +444,61 @@ export default async function TenantDetailPage({
           </Card>
           )}
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Notes</CardTitle>
-              <CardDescription>
-                Private CRM notes — never visible to the client.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <AddNoteForm tenantId={tenant.id} />
-              <Separator />
-              <ul className="space-y-3">
-                {notes.length === 0 && (
-                  <li className="text-sm text-muted-foreground">
-                    No notes yet.
-                  </li>
-                )}
-                {notes.map((note) => (
-                  <li key={note.id} className="rounded-md bg-muted/60 p-3">
-                    <p className="whitespace-pre-wrap text-sm">{note.body}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {note.createdAt.toLocaleString()}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
+          {/* Where the relationship lives now (ADR 0041). The console holds
+              the workspace and ONE link; people, deals, notes and follow-ups
+              are the party's, in the operator's CRM. Console notes stopped
+              here in slice 1: the ones already written are listed only until
+              the party exists, and ride onto its timeline when it does. */}
+          {!tenant.isOperator && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Relationship</CardTitle>
+                <CardDescription>
+                  {party
+                    ? "This business is a party in the operator's CRM — people, deals, notes and follow-ups live there."
+                    : tenant.operatorPartyId
+                      ? "This workspace points at a party that no longer exists in the operator's CRM."
+                      : "No party in the operator's CRM yet. Creating one carries the console notes below onto its timeline."}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {party ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <span className="text-sm font-medium">{party.displayName}</span>
+                    <OpenInCrmButton
+                      partyId={party.id}
+                      operatorClerkOrgId={operator?.clerkOrgId ?? null}
+                    />
+                  </div>
+                ) : !tenant.operatorPartyId ? (
+                  <>
+                    {operator ? (
+                      <CreatePartyButton tenantId={tenant.id} />
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        No operator tenant is named yet.
+                      </p>
+                    )}
+                    {notes.length > 0 && (
+                      <>
+                        <Separator />
+                        <ul className="space-y-3">
+                          {notes.map((note) => (
+                            <li key={note.id} className="rounded-md bg-muted/60 p-3">
+                              <p className="whitespace-pre-wrap text-sm">{note.body}</p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {note.createdAt.toLocaleString()}
+                              </p>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                  </>
+                ) : null}
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         <div className="space-y-6">

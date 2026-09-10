@@ -2010,6 +2010,13 @@
       "when": 1789005995147,
       "tag": "0286_operator_tenant",
       "breakpoints": true
+    },
+    {
+      "idx": 287,
+      "version": "7",
+      "when": 1789010241181,
+      "tag": "0287_operator_party",
+      "breakpoints": true
     }
   ]
 }

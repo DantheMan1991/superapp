@@ -1,7 +1,7 @@
 # 0041 — A tenant is a workspace; a client is a party in the operator tenant
 
 - **Date:** 2026-09-09
-- **Status:** Proposed — becomes Accepted with the PR that builds slice 0 of
+- **Status:** Accepted — 2026-09-09, with slice 0 of
   [back-office.md](../modules/back-office.md)
 - **Affects:** Layer 0 (`tenants`, `audits`, `tenant_notes`, `subscriptions`,
   the console at `/admin`), the health check (`src/lib/interview.ts`), CRM (a

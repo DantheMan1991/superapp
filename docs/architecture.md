@@ -121,6 +121,18 @@ Three things follow for anything written from here on:
   intercompany transaction needing a linked pair of entries, and until that
   exists it is refused rather than recorded as one wrong entry.
 
+### The operator tenant
+
+The business that runs the platform runs on it: Yosher is a tenant, flagged by
+`tenants.is_operator` — one per database, by partial unique index (ADR
+[0041](decisions/0041-a-tenant-is-a-workspace-and-a-client-is-a-party-in-the-operator-tenant.md)).
+Its clients are parties in its own CRM and its money is in its own books; the
+platform holds only each client's workspace. To RLS it is an ordinary tenant.
+The flag is read by the console to refuse its own buttons
+(`src/lib/operator-guard.ts`) and, from slice 2, by the health check to know
+where a lead lands — and by nothing else. The plan that follows from this is
+[modules/back-office.md](modules/back-office.md).
+
 ---
 
 ## 5. Request lifecycle
@@ -245,6 +257,10 @@ Not everything is tenant-scoped, and mixing them up is a security bug.
 - **Platform-level** — `modules` (the catalogue), `audits` (Discovery copilot
   data, superadmin-only policy), `audit_log`. Reached via `withSystem` after
   `requireSuperAdmin()`.
+- **The operator tenant's rows are tenant-scoped**, like any tenant's (ADR
+  0041). When the console must read one — a party's name beside a workspace,
+  back-office slice 1 — it goes through `withTenant(operatorTenantId, …)`:
+  narrower than the god view, never wider.
 
 When adding a table, decide which it is *before* writing the migration. A
 platform-level table that should have been tenant-scoped is a cross-tenant leak.

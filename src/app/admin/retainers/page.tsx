@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { asc, isNotNull } from "drizzle-orm";
+import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { withSystem, schema } from "@/db";
 import {
   Card,
@@ -32,7 +32,12 @@ export default async function AdminRetainersPage() {
   const [tenants, views] = await withSystem(async (tx) =>
     Promise.all([
       tx.query.tenants.findMany({
-        where: isNotNull(schema.tenants.clerkOrgId),
+        // Workspaces only, and never the operator: it cannot hold a retainer
+        // with itself (ADR 0041), and a row for it here would invite a timer.
+        where: and(
+          isNotNull(schema.tenants.clerkOrgId),
+          eq(schema.tenants.isOperator, false),
+        ),
         orderBy: [asc(schema.tenants.name)],
       }),
       loadAllRetainerViews(tx),

@@ -1,0 +1,2 @@
+ALTER TABLE "tenants" ADD COLUMN "is_operator" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "tenants_operator_idx" ON "tenants" USING btree ("is_operator") WHERE "tenants"."is_operator" = true;

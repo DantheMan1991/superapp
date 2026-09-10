@@ -6,6 +6,7 @@ import { z } from "zod";
 import { withSystem, schema } from "@/db";
 import { requireSuperAdmin } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { operatorRefusal } from "@/lib/operator-guard";
 import { isValidIsoDate } from "@/modules/accounting/lib/money";
 import {
   currentMonth,
@@ -22,6 +23,23 @@ import {
 function revalidate(tenantId: string) {
   revalidatePath("/admin/retainers");
   revalidatePath(`/admin/tenants/${tenantId}`);
+}
+
+/**
+ * The operator tenant cannot hold a retainer with itself (ADR 0041). Every
+ * action that would CREATE retainer state asks first; the ones that edit an
+ * existing entry need not, because none can exist for it.
+ */
+async function operatorRetainerRefusal(
+  tenantId: string,
+): Promise<string | null> {
+  const tenant = await withSystem((tx) =>
+    tx.query.tenants.findFirst({
+      where: eq(schema.tenants.id, tenantId),
+      columns: { isOperator: true },
+    }),
+  );
+  return tenant ? operatorRefusal(tenant, "retainer") : "No such business.";
 }
 
 /** Ensure the tenant's retainers row exists (lazy creation). */
@@ -52,6 +70,8 @@ export async function setRetainerAllotment(formData: FormData) {
   });
   if (!parsed.success) return { error: "Invalid allotment" };
   const { tenantId, includedHours } = parsed.data;
+  const refusal = await operatorRetainerRefusal(tenantId);
+  if (refusal) return { error: refusal };
   const includedMinutes = Math.round(includedHours * 60);
   const month = currentMonth();
 
@@ -95,6 +115,8 @@ export async function startTimer(input: z.infer<typeof startTimerSchema>) {
   const parsed = startTimerSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   const { tenantId, note } = parsed.data;
+  const refusal = await operatorRetainerRefusal(tenantId);
+  if (refusal) return { error: refusal };
 
   await ensureRetainerRow(tenantId);
   const rows = await withSystem((tx) =>
@@ -235,6 +257,8 @@ export async function logManualTime(formData: FormData) {
     };
   }
   const { tenantId, hours, workDate, note } = parsed.data;
+  const refusal = await operatorRetainerRefusal(tenantId);
+  if (refusal) return { error: refusal };
 
   await ensureRetainerRow(tenantId);
   await withSystem((tx) =>

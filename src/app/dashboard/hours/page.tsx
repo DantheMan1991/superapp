@@ -2,6 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { withTenant, schema } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { isNativeApp } from "@/lib/native-app";
+import { operatorRefusal } from "@/lib/operator-guard";
 import { reconcileHourBlockPurchase } from "@/lib/retainer-billing";
 import { loadRetainerView } from "@/lib/retainer";
 import {
@@ -74,6 +75,34 @@ export default async function HoursPage({
 }) {
   const ctx = await requireTenant();
   const { status, session_id } = await searchParams;
+
+  // The operator tenant cannot hold a retainer with itself (ADR 0041): no
+  // meter, no log, and above all no hour block to buy from itself.
+  if (ctx.tenant.isOperator) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Hours"
+          description="Retainer hours and the work log."
+        />
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">No retainer</CardTitle>
+            <CardDescription>
+              {operatorRefusal(ctx.tenant, "retainer")}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            <p>
+              Hours are logged against each client&apos;s retainer from the
+              console, and each client reads their own meter here. This
+              workspace is the platform&apos;s own and has none.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   // Heal a missed webhook on checkout return. Idempotent; the session is
   // re-retrieved from Stripe and must belong to this tenant.

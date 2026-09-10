@@ -6,12 +6,59 @@
 > `/admin` shrinks to what only a superadmin can do — provision a workspace,
 > switch features on, watch, support. Plan and slice order below; the decision
 > under it is [ADR 0041](../decisions/0041-a-tenant-is-a-workspace-and-a-client-is-a-party-in-the-operator-tenant.md).
-> Status: planned — nothing built; the plan was proposed to the founder 2026-09-09 · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: partial — slice 0 (the operator tenant exists) built 2026-09-09; slices 1–7 planned below · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this area. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-09 — Slice 0: the operator tenant exists (`claude/back-office-plan`)
+
+- **`tenants.is_operator`** (migration 0286) with the partial unique index
+  `tenants_operator_idx WHERE is_operator = true` — at most one per database,
+  proved by the index. `tenants` stays SELECT-only for members, so the flag is
+  out of any member's reach. `tests/isolation/operator.test.ts` proves that
+  from inside the operator and from outside it, proves the index refuses a
+  second operator, and re-proves ordinary isolation with the operator as one
+  half of the pair. It must never grow an exception (security.md S13).
+- **`npm run db:operator-tenant -- <slug> [--dev] [--unset]`**
+  (`scripts/operator-tenant.ts`) names the operator: refuses a prospect row
+  (no Clerk organization behind it), refuses a second operator by name, sets
+  `status` to `active`, and writes `tenant.operator_set` /
+  `tenant.operator_cleared` to the audit log in the same transaction. Not
+  through `logAudit`, which is `server-only`. The script points
+  `DATABASE_URL` at the chosen database BEFORE it loads `src/db` — the trap
+  a dotenv script walks into otherwise is reading production.
+- **The guard is one pure predicate, `operatorRefusal(tenant, act)`**
+  (`src/lib/operator-guard.ts`), import-free so the client components that
+  draw a control and the server actions that refuse the press call the same
+  function. Four acts, four sentences: `status`, `moduleOff`, `retainer`,
+  `billing`.
+- **What the console does with it.** The Clients list shows the row with an
+  `Operator` badge and counts it in nothing — not Clients, Active, Paying or
+  MRR. On the tenant page: the badge in the header; the status select is not
+  drawn (the sentence stands in its place) and `setTenantStatus` refuses in
+  the transaction it would have written; a switched-on feature's off-switch
+  is disabled and `toggleModule` refuses before the dependency walk; the
+  Retainer card is the sentence, and `setRetainerAllotment`, `startTimer`
+  and `logManualTime` refuse; the Subscription card is the sentence.
+  `/admin/retainers` leaves the operator out of its table.
+- **What the operator's own workspace does with it.** `/dashboard/billing`
+  says it is not billed and offers no plan, no portal and no Stripe read;
+  `/dashboard/hours` says it has no retainer and offers no hour block. Both
+  guides carry the line.
+- **Two departures from the plan as written.** `getOperatorTenantId()` is
+  NOT built: nothing in slice 0 calls it, and the health check (slice 2) is
+  its first caller. And the status select refuses every change rather than
+  only `paused` and `churned` — simpler, and the script sets the one value
+  the row should hold.
+- **Not driven in a browser** — Next 16 refuses a second `next dev` in a
+  directory where one is already running, and another session's server held
+  this one; the console is behind superadmin sign-in besides. Lint, `tsc`, the pure suite and the two
+  isolation files against the dev branch are green. What to try by hand once
+  the script has run: the Yosher row on `/admin`, its tenant page, and the
+  operator's own Billing and Hours pages.
 
 ### 2026-09-09 — The plan (`claude/back-office-plan`)
 
@@ -103,23 +150,23 @@ letter: `db:migrate -- --dev`, `db:migrate`, `db:verify-rls -- --dev`,
 `db:verify-rls`, then merge. Every slice adds an entry to this build log and
 touches the docs it names.
 
-#### Slice 0 — The operator tenant exists
+#### Slice 0 — The operator tenant exists — BUILT 2026-09-09
 
 **What.** `tenants.is_operator boolean NOT NULL DEFAULT false` and a partial
 unique index `WHERE is_operator` — at most one per database. A one-time
 script, `scripts/operator-tenant.ts` (the `create-app-role.ts` shape: run by
 hand, under `withSystem`, audited as `tenant.operator_set`), rather than a
-console button: moving the flag is not a routine act. `src/lib/operator-tenant.ts`
-exports `getOperatorTenantId()` (one `withSystem` lookup, identifiers only)
-and `isOperatorTenant(id)`.
+console button: moving the flag is not a routine act. The lookup,
+`getOperatorTenantId()`, arrives with its first caller (the health check,
+slice 2) rather than here.
 
 **The guard.** A pure predicate the console's actions call before acting on
-the operator row: the status select refuses `paused` and `churned`; the
-module toggle refuses to switch a feature off; `/admin/retainers` and the
+the operator row: the status select is not drawn and the action refuses
+any change; the module toggle refuses to switch a feature off; `/admin/retainers` and the
 retainer card leave it out (a retainer with itself); the MRR stat and the
 Subscription card leave it out; the operator's own `/dashboard/billing` says
-it is the operator and offers no plan. `markTenantChurned` from the Clerk
-webhook is left alone — a deleted organization is a fact, not a button.
+it is the operator and offers no plan, and `/dashboard/hours` no hour block.
+`markTenantChurned` from the Clerk webhook is left alone — a deleted organization is a fact, not a button.
 
 **By hand, once.** Create the Yosher organization on the production Clerk
 instance, be its owner, run the script on dev and on prod, switch on
@@ -289,12 +336,12 @@ homestead profile's.
 
 ## Data model
 
-Planned, none built. Every table below carries `tenant_id`, FORCE RLS and an
-isolation test, per `security.md` §4.
+Slice 0 built, the rest planned. Every table below carries `tenant_id`, FORCE
+RLS and an isolation test, per `security.md` §4.
 
 | Table / column | Slice | Purpose | Notes |
 | --- | --- | --- | --- |
-| `tenants.is_operator` | 0 | Names the operator tenant | Partial unique index `WHERE is_operator`; set by script under `withSystem`, never by a console action |
+| `tenants.is_operator` | 0 — built, migration 0286 | Names the operator tenant | Partial unique index `WHERE is_operator`; set by script under `withSystem`, never by a console action |
 | `tenants.operator_party_id` | 1 | The party in the operator tenant this workspace was provisioned for | Soft pointer, no FK; written once at conversion; null when the party is gone |
 | `audits.tenant_id`, `audits.party_id` | 2 | Discovery becomes the operator's, attached to the party | Standard tenant policies replace `audits_superadmin_all`; `won`/`lost` retired |
 | `src/lib/leads/` | 2 | The slot a stranger's arrival passes through | No table. CRM fills it |
@@ -305,7 +352,7 @@ isolation test, per `security.md` §4.
 
 ## Key files & seams
 
-- `src/lib/operator-tenant.ts` (slice 0) — the flag, read once.
+- `src/lib/operator-guard.ts` (slice 0) — the one predicate both sides of the console call; `scripts/operator-tenant.ts` names the operator.
 - `src/lib/leads/` (slice 2) — types, registry, resolve; `src/modules/crm/leads.ts` fills it.
 - `src/lib/interview.ts` — `promoteSession` becomes a landing, not a provisioning.
 - `src/lib/sites/enquiries.ts` — moves onto the slot with no proposition.

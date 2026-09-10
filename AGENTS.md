@@ -37,6 +37,12 @@ that matter for code:
   server.
 - **Audit sensitive actions** via `logAudit()` — identifiers only, never
   secrets/PII.
+- **Yosher runs on Yosher.** The business that operates the platform is a
+  tenant of it — the operator tenant, `tenants.is_operator` — and its clients
+  are parties in its own CRM (ADR 0041, `docs/modules/back-office.md`). To
+  RLS it is an ordinary tenant; the console reads the flag to refuse its own
+  buttons (`src/lib/operator-guard.ts`). Never special-case it in a policy
+  or an isolation test.
 - **Claude API calls** go through `getClaude()` (`src/lib/claude.ts`, lazy,
   model `claude-opus-4-8`, adaptive thinking, streamed). The Discovery
   copilot (`/admin/audits`, prompts in `src/lib/discovery.ts`) is

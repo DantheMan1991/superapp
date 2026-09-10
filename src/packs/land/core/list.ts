@@ -125,3 +125,30 @@ export function matchesTerm(term: string, ...values: (string | null)[]): boolean
     (value) => value !== null && value.toLowerCase().includes(needle),
   );
 }
+
+/** What the Land list shows. `active` is the default and is not in the URL. */
+export type ParcelStatusFilter = "active" | "retired" | "all";
+
+/**
+ * Which ground the Land list shows, from either parameter.
+ *
+ * **IT LIVES IN A PURE FILE BECAUSE BOTH SIDES CALL IT**, and the first version
+ * did not: it was exported from the `"use client"` component that renders the
+ * control, and `LandModule` — a Server Component — called it. That compiles,
+ * typechecks AND builds clean, then throws `Attempted to call statusFrom() from
+ * the server but statusFrom is on the client` the first time somebody opens the
+ * page. The route is `force-dynamic`, so `npm run build` never renders it and
+ * never finds out.
+ *
+ * **`?retired=1` IS HONOURED FOREVER.** It was the only way to see retired
+ * ground before there was a control, and a tenant guide told people to edit the
+ * address to get it. It meant "show both".
+ */
+export function statusFrom(
+  status: string | null | undefined,
+  retired: string | null | undefined,
+): ParcelStatusFilter {
+  if (status === "retired" || status === "all") return status;
+  if (status === "active") return "active";
+  return retired === "1" ? "all" : "active";
+}

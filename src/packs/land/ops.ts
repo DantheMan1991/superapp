@@ -2127,6 +2127,31 @@ export async function zoneAtPoint(
  * farm to decide whether to render one button would be a strange way to find
  * out.
  */
+/**
+ * How much retired ground the business holds.
+ *
+ * **THE CONTROL THAT SHOWS IT HAS TO KNOW IT EXISTS.** The Land list reads
+ * ACTIVE parcels, so a farm with one active parcel and one retired one looks
+ * like a farm with one parcel — and gating the status control on the length of
+ * that list would hide the only route to the retired one. Which is exactly the
+ * hole `?retired=1` was papering over.
+ */
+export async function retiredParcelCount(
+  tx: Tx,
+  tenantId: string,
+): Promise<number> {
+  const rows = await tx
+    .select({ count: sql<number>`count(*)::int` })
+    .from(schema.landParcels)
+    .where(
+      and(
+        eq(schema.landParcels.tenantId, tenantId),
+        eq(schema.landParcels.status, "retired"),
+      ),
+    );
+  return rows[0]?.count ?? 0;
+}
+
 export async function mappedZoneCount(tx: Tx, tenantId: string): Promise<number> {
   const rows = await tx
     .select({ count: sql<number>`count(*)::int` })

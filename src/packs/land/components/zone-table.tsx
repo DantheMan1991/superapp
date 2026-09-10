@@ -16,6 +16,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -28,7 +29,7 @@ import { ZoneControls } from "./zone-controls";
 import { type MovableStay } from "./move-occupant";
 import { UnretireZone } from "./unretire-controls";
 import { formatArea, fromAcres, type AreaUnit } from "../core/area";
-import { compareNames } from "../core/list";
+import { compareNames, matchesTerm } from "../core/list";
 import { formatDays } from "../core/rest";
 import { zoneUseLabel } from "../vocabulary";
 
@@ -124,6 +125,7 @@ export function ZoneTable({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [term, setTerm] = useState("");
   const [useFilter, setUseFilter] = useState<string>(EVERY_USE);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [sortKey, setSortKey] = useState<SortKey>("name");
@@ -159,6 +161,11 @@ export function ZoneTable({
     const matchesStatus = STATUS_FILTERS[statusFilter].match;
     const rows = zones.filter((zone) => {
       if (!matchesStatus(zone.status)) return false;
+      // The name AND what it is for, because "hay" is as likely a search as
+      // "North" on a farm that names its ground after what grows on it.
+      if (!matchesTerm(term, zone.name, zone.use ? zoneUseLabel(zone.use.use) : null)) {
+        return false;
+      }
       if (effectiveUse === EVERY_USE) return true;
       if (effectiveUse === NO_USE) return zone.use === null;
       return zone.use?.use === effectiveUse;
@@ -198,7 +205,7 @@ export function ZoneTable({
         ? compareNames(a.name, b.name)
         : order * direction;
     });
-  }, [ascending, effectiveUse, sortKey, statusFilter, zones]);
+  }, [ascending, effectiveUse, sortKey, statusFilter, term, zones]);
 
   /**
    * What "Retire 5" would actually retire.
@@ -306,6 +313,21 @@ export function ZoneTable({
             ))}
           </SelectContent>
         </Select>
+
+        {/*
+          **CLIENT-SIDE, DELIBERATELY, and the reason is this table's own
+          design.** It holds every row to sort any column and to keep a tick set
+          across a filter change; a server search would either round-trip on
+          every keystroke or break both. The plan list above it does the same, for the
+          same reason.
+        */}
+        <Input
+          value={term}
+          onChange={(event) => setTerm(event.target.value)}
+          placeholder={`Find a ${word}`}
+          aria-label={`Find a ${word}`}
+          className="h-8 w-full text-xs sm:w-44"
+        />
 
         <span className="text-xs text-muted-foreground">
           {listed.length === zones.length

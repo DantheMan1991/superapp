@@ -578,6 +578,74 @@ grounds, which were never about optimisation as such.
 
 ## Build log
 
+### 2026-09-10 — Lists you can work (`claude/lists-you-can-work`)
+
+Module-improvement review slice 8. The finding was *"no search anywhere in land
+and no paging — `.limit()` appears nowhere in `ops.ts`"*, and half of it turned
+out to be wrong.
+
+**LAND SHOULD NOT PAGE, AND THE UNBOUNDED READS ARE RIGHT.** Every list in this
+pack feeds a figure computed from the rows under it: the Land list's acreage
+total, `zoneCoverage`, the rotation arithmetic, the takeoff, the map. Bounding
+any of those reads would truncate the total, which is precisely the defect class
+inventory slice 5 wrote up — *any read that bounds rows then folds them into a
+total is capping the total*. A `Pager` here would buy scrolling and cost
+correctness. **What was actually missing was SEARCH**, and the guides now say so
+in as many words: *there are no pages to click through, because the acreage
+beside the count is added up from the rows under it*.
+
+**Two searches, and they are deliberately different.**
+
+  - **The Land list** searches on the server-rendered page, over `?q=` in the
+    URL with the kit's `ListSearch`, so a narrowed list survives a refresh and
+    travels in a link. The filtering is IN MEMORY via `matchesAny` — whose own
+    doc says *for a list short enough to filter in memory* — because a farm
+    holds a handful of deeds and a round trip per keystroke to narrow five rows
+    is not a trade. It matches the name AND the deed reference, since the parcel
+    number off a tax bill is what somebody has in their hand.
+  - **The paddock table** searches on the client, like the plan list above it.
+    That table holds every row to sort any column and to keep a tick set across
+    a filter change; a server search would round-trip on every keystroke or
+    break both. It matches the name and what the ground is FOR, because `hay` is
+    as likely a search as `North` on a farm that names ground after what grows
+    on it.
+
+**THE `?retired=1` TRICK IS NOW A CONTROL**, and slice 6 is why it had to be.
+Retired parcels were opt-in via an address parameter with nothing on the page to
+set it, and the tenant guide told people to edit the URL. Then slice 6 gave a
+retired parcel a `Put it back` button — and left the address trick as the only
+route to the page holding it. `Status` is `In use` / `Retired` / `Both`, and
+**`?retired=1` still works** because a guide told people to use it; it means
+`Both`, and the control shows `Both` when it is set.
+
+**THE GATE ON THAT CONTROL WAS WRONG THE FIRST TIME, AND DRIVING CAUGHT IT.**
+It rendered only when the list held more than one parcel — but the list reads
+ACTIVE parcels, so a farm with one active and one retired looked like a farm
+with one parcel, and the control that reveals the retired one was hidden by the
+retired one being hidden. New `retiredParcelCount` decides it instead.
+
+**A TRAP WORTH MORE THAN THE SLICE: `statusFrom` STARTED LIFE IN THE
+`"use client"` FILE, AND NOTHING CAUGHT IT.** `LandModule` is a Server
+Component and called it directly. Cold `tsc` passed. **`npm run build` passed**
+— which is the interesting half, because this repo's standing note is that the
+build is what catches server-only violations. It does not catch this one: the
+route is `force-dynamic`, so the build never renders it and never finds out. The
+page 500s the first time somebody opens it, with *Attempted to call statusFrom()
+from the server but statusFrom is on the client*. It lives in `core/list.ts` now,
+which is pure and has no directive, and a test pins it. **The only thing that
+found this was opening the page.**
+
+Also fixed while driving: the header read **`1 of 2 parcel`** — the plural was
+agreeing with the number SHOWN rather than the total.
+
+**Driven on Hilltop (dev) at 375×812 and 1280×900:** the controls appearing only
+once there is something to work through; `Status` → `Both` giving `?status=all`,
+two rows and an honest `2 parcels · 40 acres (1 not recorded)`; `Find a parcel` →
+`Review` giving `?status=all&q=Review`, one row and `1 of 2 parcels`; a bare
+`?retired=1` still showing both with the control reading `Both`; and the paddock
+table's `Find a paddock` narrowing four rows to two on `north` with its counter
+reading `2 of 4`.
+
 ### 2026-09-10 — Take me there, for ground (`claude/take-me-to-the-ground`)
 
 Module-improvement review slice 7, and it is the smallest one in the run because
@@ -1843,7 +1911,10 @@ rented ground, and retrofitting it means rewriting the report.
   a closed heading can leave a tick counting towards something off screen. Cards
   below `md`
 - `src/packs/land/core/list.ts` — pure. How names order, how rows fall into
-  headings, and what a typed word matches. **`compareNames` is the one that
+  headings, what a typed word matches, and which ground the Land list shows.
+  **`statusFrom` lives here because BOTH sides call it** — it was exported from
+  the `"use client"` filter component once, and neither `tsc` nor
+  `npm run build` said a word about the Server Component calling it. **`compareNames` is the one that
   matters**: this pack mints `Paddock 1 … 12` and `North division 1 … 11`, and a
   plain `localeCompare` puts 10 before 2. `groupRows` explains in place why
   there is no `by paddock` — a dividing fence bounds two of them, so it is not
@@ -2030,6 +2101,20 @@ rented ground, and retrofitting it means rewriting the report.
   is right and made moving impossible from the occupant's own page, which is a
   reminder that a correct refusal can still be a broken workflow. The day the
   move happens belongs to the NEW paddock only; see the 2026-08-16 entry.
+- **LAND'S READS ARE UNBOUNDED ON PURPOSE, AND THE PACK MUST NOT LEARN TO
+  PAGE.** Every list here feeds a figure computed from the rows under it — the
+  acreage total, `zoneCoverage`, the rotation arithmetic, the takeoff, the map —
+  so a `limit` would cap the total, which is the defect class inventory slice 5
+  wrote up. What a long list needs is SEARCH, and it has one. If a `Pager` ever
+  becomes unavoidable, every total on the same screen has to move into SQL with
+  it in the same commit.
+- **A PURE HELPER EXPORTED FROM A `"use client"` FILE IS A RUNTIME BOMB THAT
+  NOTHING CATCHES.** `statusFrom` started there and `LandModule` — a Server
+  Component — called it. Cold `tsc` passed; **`npm run build` passed too**,
+  because the route is `force-dynamic` and the build never renders it. The page
+  500s on first open. **Put anything both sides call in a file with no
+  directive**, and remember that the build is not the safety net this repo's
+  notes suggest for dynamic routes — only opening the page is.
 - **RETIRING IS REVERSIBLE; DELETING IS NOT, AND THE SCREENS HAVE TO SAY WHICH
   IS WHICH.** Every destructive act in the pack now asks first — the feature
   panel's `Delete`, a takeoff line's `Remove`, `Remove plan`, and the two bulk
@@ -2167,7 +2252,11 @@ rented ground, and retrofitting it means rewriting the report.
   it, and then it belongs in `src/lib/`.
 - **The plan list's headings are the only grouping in the pack.** The paddock
   table has the same shape and the same scale problem — a farm at 10x has two
-  hundred rows — and got cards and the ordering fix but no headings.
+  hundred rows — and got cards, the ordering fix and a search, but no headings.
+- **Nobody has opened a land screen holding two hundred paddocks.** The reads
+  are unbounded by design and the search is client-side over all of them, which
+  is right for the totals and untested at that size: the render cost of two
+  hundred cards and two hundred map polygons is an argument, not a measurement.
 - **Nobody has tapped a feature on the MAP since the panel learned to scroll to
   it.** The list half is driven — a list click leaves the card exactly where it
   was — and the map half is the same code with a flag set, unproven because a
@@ -2360,10 +2449,9 @@ rented ground, and retrofitting it means rewriting the report.
 - **Zone use suggestions are hardcoded** in `vocabulary.ts`, exactly as
   `assets`'s kinds are. They should come from profile `packConfig` once P5
   exists — and now two packs are waiting on it rather than one.
-- **Retired parcels are opt-in on the list** (`?retired=1`) with no UI control to
-  set it. The query param works and nothing renders a toggle — **and this now
-  matters more**, because a retired parcel has a `Put it back` button on its
-  page and the only way to reach that page is the address trick.
+- ~~Retired parcels are opt-in on the list (`?retired=1`) with no UI control~~ —
+  **closed 2026-09-10.** `Status` is a control now, and `?retired=1` is honoured
+  forever because a guide told people to use it.
 - ~~A retired zone cannot be un-retired~~ — **closed 2026-09-10**, for a zone
   and a parcel both. **A combine still cannot be undone**, and that is now said
   on the button rather than left to be discovered: putting the absorbed parcel

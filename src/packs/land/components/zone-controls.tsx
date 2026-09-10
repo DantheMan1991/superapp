@@ -35,6 +35,7 @@ import {
   startZoneUseAction,
   updateZoneAction,
 } from "../actions";
+import { MoveOccupant, type MovableStay } from "./move-occupant";
 import {
   SUGGESTED_ZONE_USES,
   defaultProductive,
@@ -82,6 +83,7 @@ export function ZoneControls({
   zoneWord,
   today,
   usesInUse,
+  movableStays = [],
 }: {
   zone: ZoneRowView;
   unit: AreaUnit;
@@ -90,11 +92,20 @@ export function ZoneControls({
   today: string;
   /** Uses this tenant has already used, so its own vocabulary comes first. */
   usesInUse: string[];
+  /**
+   * What is on this parcel today and is NOT already on this row's ground.
+   *
+   * The row menu's `Move something here` picks one of these, so the person
+   * points at a stay that exists instead of retyping a name that has to match.
+   * Empty means there is nothing to bring, and the item does not render.
+   */
+  movableStays?: MovableStay[];
 }) {
   const router = useRouter();
   const [settingUse, setSettingUse] = useState(false);
   const [editing, setEditing] = useState(false);
   const [retiring, setRetiring] = useState(false);
+  const [moving, setMoving] = useState(false);
   const [pending, startTransition] = useTransition();
 
   // NOT SORTED, and that is the fix rather than an oversight.
@@ -193,6 +204,11 @@ export function ZoneControls({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          {movableStays.length > 0 && (
+            <DropdownMenuItem onSelect={() => setMoving(true)}>
+              Move something here
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onSelect={() => setSettingUse(true)}>
             Set what it is for
           </DropdownMenuItem>
@@ -204,6 +220,21 @@ export function ZoneControls({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {movableStays.length > 0 && (
+        <MoveOccupant
+          mode="here"
+          zoneId={zone.id}
+          zoneName={zone.name}
+          zoneWord={zoneWord}
+          stays={movableStays}
+          targets={[]}
+          unit={unit}
+          today={today}
+          open={moving}
+          onOpenChange={setMoving}
+        />
+      )}
 
       <Dialog open={settingUse} onOpenChange={setSettingUse}>
         <DialogContent className="sm:max-w-md">

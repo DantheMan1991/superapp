@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/select";
 import { retireZonesAction } from "../actions";
 import { ZoneControls } from "./zone-controls";
+import { type MovableStay } from "./move-occupant";
 import { formatArea, fromAcres, type AreaUnit } from "../core/area";
 import { compareNames } from "../core/list";
 import { formatDays } from "../core/rest";
@@ -104,6 +105,7 @@ export function ZoneTable({
   usesInUse,
   canEdit,
   basePath,
+  movableStays = [],
 }: {
   parcelId: string;
   zones: ZoneRow[];
@@ -113,6 +115,11 @@ export function ZoneTable({
   usesInUse: string[];
   canEdit: boolean;
   basePath: string;
+  /**
+   * What is on this parcel today, so a row's menu can bring one of them onto
+   * that row's ground. Filtered per row: nothing already there is offered.
+   */
+  movableStays?: MovableStay[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -400,6 +407,9 @@ export function ZoneTable({
                     zoneWord={zoneWord}
                     today={today}
                     usesInUse={usesInUse}
+                    movableStays={movableStays.filter(
+                      (stay) => stay.zoneId !== zone.id,
+                    )}
                   />
                 )}
               </div>
@@ -527,6 +537,9 @@ export function ZoneTable({
                     zoneWord={zoneWord}
                     today={today}
                     usesInUse={usesInUse}
+                    movableStays={movableStays.filter(
+                      (stay) => stay.zoneId !== zone.id,
+                    )}
                   />
                 )}
               </TableCell>

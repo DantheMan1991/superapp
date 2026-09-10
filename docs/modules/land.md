@@ -578,6 +578,96 @@ grounds, which were never about optimisation as such.
 
 ## Build log
 
+### 2026-09-10 — A move is one act (`claude/a-move-is-one-act`)
+
+Module-improvement review slice 3, and it closes an open item this dossier has
+carried since the pack shipped: *"Moving a herd across ten paddocks is ten
+dialogs."*
+
+**THE PACK HAD THE OP AND NOT THE BUTTON.** `moveOccupant` has been in `ops.ts`
+since 2026-08-16, with a comment saying a move is one act and that doing it as
+two invents a gap in ground nobody left — and only `livestock` could reach it.
+Land's own screens did it the long way: `Move off` here, find the other
+paddock, `Record a stay`, retype the name.
+
+**And it could not simply be called, which is the part worth writing down.**
+Every displacement in `moveOccupant` keys on `occupantId`, an identity only
+another pack supplies. A stay somebody typed into Land has none and is exempt
+from that guard **on purpose** (see `startOccupancy`), so calling the op from a
+Land screen did exactly what `startOccupancy` does: opened a second stay and
+left the herd recorded on two paddocks at once. There is now an ops test that
+pins that — `notAMove.movedOff` is `null` — because it is the trap the next
+person will walk into.
+
+**The fix is to name the ROW, not the occupant.** `moveOccupant` gained
+`options.fromOccupancyId`; the dialog lists what is actually on the ground and
+the person points at one of them, so there is no identity to match and nothing
+to mistype. **The label is read off the row, never off the form** — a move that
+let the herd be renamed on the way would be two acts wearing one button, and
+the new name would silently start its own rest history. Livestock's call is
+untouched. An ended stay is refused: somebody already decided when it finished,
+and reopening that is an edit rather than a move.
+
+**TWO DIRECTIONS, ONE DIALOG, AND NEVER BOTH ON A PAGE AT ONCE.** Which one a
+screen offers follows from what it knows, which also keeps a 375px header to
+three buttons:
+
+| Where | What it offers | Why |
+| --- | --- | --- |
+| A zone with something on it | `Move to…` | you are standing where they are |
+| A zone with nothing on it | `Move something here` | **the field flow** — `Which paddock am I in?` lands you on the paddock you just let them into |
+| A paddock's row menu | `Move something here` | the same act from the table |
+
+The row-menu path needed the dialog to be controllable: **a
+`DropdownMenuItem` cannot be a `DialogTrigger`**, because choosing the item
+closes the menu and unmounts the trigger before the dialog it was meant to open
+ever mounts. The menu owns the flag and `MoveOccupant` takes it.
+
+**The toast says the half you cannot see.** `Cow herd is on Creek field — last
+day on the old one was 2026-09-09`. That closing date IS the reason to do this
+in one act, and it was previously buried in `dayBefore`.
+
+Two new reads: `openStaysOnParcel` (open AND begun — `ended_on is null` and
+`started_on <= today`, because a stay recorded ahead has not happened and a
+closed one is not there to move) and `occupantLabelsUsed`, which feeds a
+**datalist** on `Record a stay` — the treatment livestock already gives breeds
+and treatment products. The occupant stays a name somebody types; this only
+stops a typo quietly inventing a second herd.
+
+**The zone guide's `Cow herd is already somewhere…` row is gone**, and it was
+one of the review's findings: that message needs an `occupantId`, hand-entered
+stays are exempt, and the Land UI never sends one — so it documented something
+that screen cannot produce.
+
+**Driven on Hilltop Farm (dev) at 375×812 and 1280×900**, both directions and
+both dates:
+
+  - `Cow herd` recorded onto North 40 from 2026-09-05, the datalist offering
+    the name the parcel already carried;
+  - `Move to…` → Creek field on 2026-09-10 → *last day on the old one was
+    2026-09-09*, and North 40 then read `Rested 1 day · Since 2026-09-09` with
+    a five-day stay (the 5th to the 9th, both ends counted);
+  - the row menu's `Move something here` on North 40 → `Move` → *last day on
+    the old one was 2026-09-10*, which is the **same-day clamp**: they arrived
+    on Creek field on the 10th, so the old stay cannot end on the 9th and a
+    one-day stay is the honest record;
+  - the header flipping direction on its own as each paddock emptied and
+    filled;
+  - the row menu's items at x=222–336 in a 375px screen, and the dialog 630px
+    of an 812px viewport with `Move` visible at y=675.
+
+**`ALREADY_THERE` has no clickable path**, by construction — the row menu
+filters out stays already on that row and `Move to…` never offers the zone you
+are on — so the ops tests pin it instead.
+
+**No screenshot: the browser pane on this machine is not compositing the
+page**, so all of the above was measured through the DOM and read back out of
+the records.
+
+**Dev fixture left behind:** `Cow herd` is on North 40 from 2026-09-10, having
+been walked North 40 → Creek field → North 40, so both a closed and an open
+stay exist to look at.
+
 ### 2026-09-10 — Every table on a phone (`claude/every-table-on-a-phone`)
 
 Module-improvement review slice 2. Land was the last pack whose screens were
@@ -1441,7 +1531,14 @@ rented ground, and retrofitting it means rewriting the report.
 - `src/packs/land/ops.ts` — all reads and writes. Takes a `Tx` so the caller
   owns the transaction; that is what keeps a write and its dimension sync atomic.
   **`moveOccupant` is the one other packs call** — `startOccupancy` puts
-  something somewhere, `moveOccupant` takes it off wherever it was first
+  something somewhere, `moveOccupant` takes it off wherever it was first. It
+  displaces by `occupantId` for a pack that has one and by
+  `options.fromOccupancyId` for Land's own screens, which do not
+- `src/packs/land/components/move-occupant.tsx` — the one-act move, in two
+  directions from one dialog: `here` (this is the destination, pick what is
+  coming — the field flow) and `away` (this is where they are, pick where they
+  are going). A zone's page offers exactly one of them, decided by whether
+  anything is on it, so a 375px header never carries both
 - `src/packs/land/core/area.ts` — pure. Unit conversion, formatting, totals that
   report their unknowns, and parcel-vs-zone coverage
 - `src/packs/land/core/geo.ts` — pure. Parsing what somebody pasted, spherical
@@ -1645,6 +1742,16 @@ rented ground, and retrofitting it means rewriting the report.
   is right and made moving impossible from the occupant's own page, which is a
   reminder that a correct refusal can still be a broken workflow. The day the
   move happens belongs to the NEW paddock only; see the 2026-08-16 entry.
+- **LAND'S OWN SCREENS MOVE BY NAMING THE ROW, NEVER THE OCCUPANT.** Every
+  displacement inside `moveOccupant` keys on `occupantId`, which only another
+  pack supplies — so calling it from a Land screen with just a label opened a
+  SECOND stay and left the herd on two paddocks at once. `fromOccupancyId` is
+  the handle a hand-entered stay actually has, and the label is read off the
+  row rather than off the form: a move that renamed the herd would start a
+  second rest history under the new name.
+- **A `DropdownMenuItem` CANNOT BE A `DialogTrigger`.** Choosing the item closes
+  the menu, which unmounts the trigger before the dialog it was supposed to open
+  ever mounts. The menu holds the open flag and the dialog takes it as a prop.
 - **A day count is inclusive at both ends.** On Monday, off Monday is one day of
   grazing. It feeds the paddock arithmetic, so an off-by-one there reaches every
   rotation figure on the page.
@@ -1890,11 +1997,20 @@ rented ground, and retrofitting it means rewriting the report.
   head count belongs to `livestock`, so animal-units-per-acre cannot be computed
   until that pack exists. Deliberate — a `head` column here would be this pack
   growing an opinion about its neighbours.
-- **Moving a herd across ten paddocks is ten dialogs.** The design's *"move
-  every pen to the next paddock is one action"* is exactly what this does not do
-  yet, and it is the entry-cost problem the 10× target names. Purely additive.
-- **A stay cannot be edited**, only ended or removed. Fixing a wrong start date
-  means deleting and re-recording.
+- ~~Moving a herd across ten paddocks is ten dialogs~~ — **half closed
+  2026-09-10.** A move is one act now, from either end. What is still ten
+  dialogs is moving TEN THINGS at once: the design's *"move every pen to the
+  next paddock is one action"* wants a multi-select, and the dialog moves one
+  stay.
+- **A stay cannot be edited**, only ended, moved or removed. Fixing a wrong
+  start date means deleting and re-recording.
+- **A move only reaches zones on the same parcel.** `openStaysOnParcel` and the
+  destination list are both scoped to the parcel, which is right for a rotation
+  and wrong for a farm that moves stock between two blocks it holds. Widening it
+  is a read change and a picker that has to say which parcel each option is on.
+- **Nothing offers `ALREADY_THERE` a clickable path**, by construction: the row
+  menu filters out stays already on that row and `Move to…` never offers the
+  zone you are standing on. The refusal is pinned by tests rather than seen.
 - **The rotation finding is per parcel and needs three completed stays.** Below
   that it says nothing, which is right, but it also means the pilot's most
   interesting number does not appear until the habit has held for a week.

@@ -75,23 +75,34 @@ one row under a search box.
   code, and unmounting — because a camera left running is a light on somebody's
   phone.
 
-**NOT DRIVEN, and neither was slice 9.** The browser pane's Clerk session is
-still expired; every route redirects to sign-in and only the founder can
-complete it. So **nothing in this slice has been clicked**, and the camera path
-could not be verified even signed in: the pane has no camera, and
-`BarcodeDetector` is Chromium-on-Android. What stands in:
+**DRIVEN on the dev branch's Hilltop Farm** once the founder signed the pane
+back in, at 375px and 1280px:
 
-- five ops tests — the exact trimmed lookup and its refusal to match a prefix,
-  the duplicate refusal naming its holder, the retired holder saying so, keeping
-  your own code while emptying the box clears it, and many things with no code;
-- an isolation test asserting the **database** refuses a blank and a duplicate
-  under `withSystem`, and that the index is per tenant — two businesses buying
-  the same feed carry the same UPC;
-- migration state: `PENDING: none` on both databases, `db:verify-rls` green on
-  both (172 tables).
+- `012345678905` typed into the Edit box **with padding on both sides** saved as
+  the trimmed code, and typing it into the hub's search **went straight to
+  Ground beef 1 lb packs** rather than listing one row.
+- The same code offered to Penicillin G was refused:
+  `Ground beef 1 lb packs already has that code.`
+- A second thing given `RETIRED-CODE-1` and then retired refused the code to
+  Penicillin G as `Scan fixture (retired) already has that code.` — the word
+  that stops the message naming something the reader cannot see.
+- `PEN-TEMP-CODE` on Penicillin G opened it, and **emptying the box freed the
+  code**: the same search then stayed on the list and found nothing.
+- `0123`, a PARTIAL code, stayed on the list and searched by name, so a
+  half-scan is a narrowed list rather than a redirect to the wrong thing.
+- **`ScanButton` rendered nothing**, correctly: the pane's browser has
+  `getUserMedia` and no `BarcodeDetector`, which is the exact case the feature
+  detection exists for.
 
-**The camera is the one part of this pack nothing has ever exercised.** It is
-named in Open items and it wants a phone.
+**The camera itself is still the one part of this pack nothing has ever
+exercised**, and it cannot be from this machine — `BarcodeDetector` is
+Chromium-on-Android. It is named in Open items and it wants a phone.
+
+The tests behind all of the above: five ops tests, and an isolation test
+asserting the **database** refuses a blank and a duplicate under `withSystem`
+and that the index is per tenant — two businesses buying the same feed carry
+the same UPC. Migration state: `PENDING: none` on both databases,
+`db:verify-rls` green on both (172 tables).
 
 ### 2026-09-09 — The whole history (`claude/the-whole-history`)
 
@@ -139,14 +150,28 @@ malformed id is no rows, never every row under a bar claiming to be filtered.
 `escapeLike` — the same regex as `ilikePattern` in `@/lib/list-query`, written
 twice — is now the shared one; a third copy for the log was the moment to stop.
 
-**NOT DRIVEN, and the PR says so.** The browser pane's Clerk session expired
-between slice 8 and this one, every route redirects to sign-in, and only the
-founder can complete it. The screens are covered by five ops tests (the total
-order across pages, the two batch codes, search across all five fields with a
-literal `%`, kind and place with the uuid guard, and `valueStock`'s guard), the
-route builds, and the guides test passes. The 375px measurement this review
-insists on has not been taken for `/entries`; it is the first thing to do when
-the pane is signed in again.
+**DRIVEN once the pane was signed back in**, at 375px and 1280px, on Hilltop's
+60 entries:
+
+- `Showing 1–50 of 60 entries`, `Older` to page two showing the last ten, and
+  the oldest rows dated 2020 and 2024 — the whole history, newest first.
+- **`?page=99` landed on page two**, not on an empty page: `pageWindow` clamps,
+  which is why the count is read before the offset is chosen.
+- The search found a NOTE (`frozen`), a BATCH CODE (`GB-REVIEW`, six rows) and a
+  REASON (`correction`). `?kind=medicine` narrowed to Penicillin G alone;
+  `?place=none` to the fifty-one entries that named no place.
+- **`?place=all` showed the empty state rather than a 500**, which is the guard
+  slice 8 was missing.
+- `fed to HATCH-4A` renders beside `FEED-2026-08-22`, so the aliased second join
+  to `inventory_lots` is doing its job.
+- At 375px the cards render with no horizontal scroll, and the item page's
+  section is headed `Entries` with no pager on an item whose fourteen entries
+  fit one page.
+
+**One thing a reader might expect and should not:** the words *fed to* are
+rendered by the page, not stored, so searching `fed` finds nothing. The guide
+says what the search covers — the item, the batch, the batch that ate it, the
+reason and the note — and `HATCH-4A` finds that row.
 
 Guides: `what-happened.md` (new), `overview.md` (six pages, the bullet),
 `item.md` (*Entries*, paged, the `fed to` line, two twenty-five claims gone).
@@ -2389,6 +2414,12 @@ commitment against a live animal to delivered without sitting on a shelf.
 
 ## Open items
 
+**Dev-branch scanning fixtures (2026-09-09).** `Ground beef 1 lb packs` carries
+the barcode `012345678905`, so typing it into the hub's search opens that item.
+`Scan fixture` is a retired supply holding `RETIRED-CODE-1`, kept so the
+`(retired)` refusal has something to name; it holds no stock and is retired, so
+it is out of every list unless asked for.
+
 - ~~**A recorded weight cannot be corrected.**~~ — **fixed the same day,
   2026-09-08.** `Correct weight` beside `Correct cost`, over
   `inventory_weight_adjustments`; the Baxter receipt itself had been put right
@@ -2447,16 +2478,13 @@ commitment against a live animal to delivered without sitting on a shelf.
 - **The filter does not reach COUNTING or MATCHING.** The valuation and the
   entries log gained kind and place on 2026-09-09; the counting screen and the
   bills list still cannot be narrowed at all.
-- **`/entries`, the barcode boxes and the camera have not been driven at all.**
-  The pane's Clerk session expired before slice 9 and is still expired. Slices 9
-  and 10 are covered by tests and by the build; nothing in them has been
-  clicked, and no 375px measurement has been taken. First thing when the pane is
-  signed in again.
-- **THE CAMERA SCAN HAS NEVER RUN.** `ScanButton` needs `BarcodeDetector` and a
-  real camera — Chrome on Android or the mobile app. It cannot be exercised from
-  this machine at all, signed in or not, so it wants a phone and a printed code.
-  Everything around it (the column, the lookup, the refusals, the hub's redirect)
-  is tested.
+- **THE CAMERA SCAN HAS NEVER RUN, and cannot be run from this machine.**
+  `ScanButton` needs `BarcodeDetector` and a real camera — Chrome on Android or
+  the mobile app. The pane's browser has `getUserMedia` and no detector, so the
+  button correctly renders nothing there, which is itself the only part of it
+  that has been observed. It wants a phone and a printed code. Everything around
+  it — the column, the lookup, the refusals, the hub's redirect, the trimming —
+  was driven on 2026-09-09.
 
 - ~~Nobody has driven slice 0 yet~~ — **closed 2026-08-19.** Driven on
   production; the fold, the split, the location split and the return to zero all

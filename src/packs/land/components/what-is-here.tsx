@@ -64,9 +64,12 @@ interface Answer {
  */
 export function WhatIsHere({
   basePath,
+  zoneWord,
   lengthUnit,
 }: {
   basePath: string;
+  /** What the tenant calls a piece of ground. A string, not a resolver. */
+  zoneWord: string;
   lengthUnit: LengthUnit;
 }) {
   const [pending, setPending] = useState(false);
@@ -155,8 +158,8 @@ export function WhatIsHere({
                     {/* Two different reasons, one message, because from here
                         they are indistinguishable: nothing is traced near you,
                         or you are genuinely off the mapped ground. */}
-                    You are not inside any mapped area. Trace its boundary and
-                    this will say where you are.
+                    You are not inside any mapped {zoneWord.toLowerCase()}.
+                    Trace its boundary and this will say where you are.
                   </p>
                 )}
                 <p className="mt-1 text-xs text-muted-foreground">

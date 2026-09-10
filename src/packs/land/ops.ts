@@ -2549,8 +2549,17 @@ export interface LayoutInput {
   placement?: LanePlacement;
   /** Metres. The corridor is clipped out of the ground in either placement. */
   laneWidthM?: number;
-  /** "North" gives "North 1", "North 2"… Defaults to "Paddock". */
+  /** "North" gives "North 1", "North 2"… Defaults to `zoneWord`. */
   namePrefix?: string;
+  /**
+   * What the tenant calls a piece of ground — "Paddock", "Bed", "Field".
+   *
+   * **IT NAMES REAL ROWS, which is why it matters more here than in a
+   * sentence.** With nothing typed into `Called`, a layout used to mint
+   * `Paddock 1 … 12` on a market garden. The word arrives as data because ops
+   * resolves no labels — `layoutPaddocksAction` does that and hands it down.
+   */
+  zoneWord?: string;
 }
 
 export interface LayoutResult {
@@ -2670,7 +2679,7 @@ export async function layoutPaddocks(
     if (!area) {
       throw new LandError(
         "LAYOUT_INVALID",
-        "that paddock has no boundary drawn, so there is nothing to divide",
+        `that ${(input.zoneWord?.trim() || "zone").toLowerCase()} has no boundary drawn, so there is nothing to divide`,
       );
     }
   } else {
@@ -2695,11 +2704,13 @@ export async function layoutPaddocks(
   const outcome = subdivide(area, lane, input.count, {
     placement: input.placement ?? "split",
     laneWidthM: input.laneWidthM,
+    zoneWord: input.zoneWord,
   });
   if (!outcome.ok) throw new LandError("LAYOUT_INVALID", outcome.error);
   const { paddocks, cuts, laneFences, warnings } = outcome.result;
 
-  const prefix = (input.namePrefix ?? "Paddock").trim() || "Paddock";
+  const fallback = input.zoneWord?.trim() || "Zone";
+  const prefix = (input.namePrefix ?? fallback).trim() || fallback;
 
   /**
    * **A LAYOUT IS A PLAN, and it is created here rather than by hand.**

@@ -49,9 +49,12 @@ export interface CombinableParcel {
 export function CombineParcelsBar({
   parcels,
   unit,
+  zoneWord,
 }: {
   parcels: CombinableParcel[];
   unit: AreaUnit;
+  /** What the tenant calls a piece of ground. */
+  zoneWord: string;
 }) {
   const router = useRouter();
   const [chosen, setChosen] = useState<Set<string>>(new Set());
@@ -214,7 +217,8 @@ export function CombineParcelsBar({
                 </li>
                 {totals.zones > 0 && (
                   <li>
-                    {totals.zones} paddock{totals.zones === 1 ? "" : "s"} move
+                    {totals.zones} {zoneWord.toLowerCase()}
+                    {totals.zones === 1 ? "" : "s"} move
                     across and stay active.
                   </li>
                 )}

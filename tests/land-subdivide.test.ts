@@ -245,7 +245,7 @@ describe("gates and reachability", () => {
     }
   });
 
-  it("WARNS when the cows cannot reach one, rather than refusing", () => {
+  it("WARNS when one cannot be reached, rather than refusing", () => {
     // A lane that only runs along the bottom third leaves the far strips with
     // no frontage. The shapes are still real and a drag handle can fix them;
     // silently calling them fine is what must not happen.
@@ -258,8 +258,65 @@ describe("gates and reachability", () => {
     };
     const { paddocks, warnings } = split(FIELD, stub, 4);
     expect(paddocks.length).toBeGreaterThan(0);
-    expect(warnings.some((w) => /cannot get to it/.test(w))).toBe(true);
+    expect(warnings.some((w) => /no way in from it/.test(w))).toBe(true);
+    // **NOT "the cows".** A bed, a plot and a bay are all things this lays out.
+    expect(warnings.some((w) => /cows/.test(w))).toBe(false);
     expect(paddocks.filter((p) => p.gate === null).length).toBeGreaterThan(0);
+  });
+});
+
+describe("it says what the tenant calls a piece of ground", () => {
+  /**
+   * **`zone` AND `parcel` ARE RENAMEABLE (ADR 0004)**, and this file had four
+   * refusals and a warning with `paddock` written into them — one of which told
+   * a market gardener that *the cows* could not get to their bed. The word
+   * arrives as data, the way `laneWidthM` does, because a core geometry file
+   * has no business resolving a label and no business knowing an industry.
+   */
+  const stub: FeatureGeometry = {
+    type: "LineString",
+    coordinates: [
+      [WEST + 0.0002, SOUTH],
+      [WEST + 0.0002, SOUTH + 0.0008],
+    ],
+  };
+
+  it("uses the word in the too-few and too-many refusals", () => {
+    const few = subdivide(FIELD, LANE_NS, 1, {
+      placement: "split",
+      zoneWord: "Bed",
+    });
+    expect(few.ok).toBe(false);
+    if (!few.ok) expect(few.error).toBe("Two or more beds.");
+
+    const many = subdivide(FIELD, LANE_NS, MAX_PADDOCKS + 1, {
+      placement: "split",
+      zoneWord: "Bed",
+    });
+    expect(many.ok).toBe(false);
+    if (!many.ok) expect(many.error).toMatch(/beds\.$/);
+  });
+
+  it("uses the word in the unreachable warning", () => {
+    const outcome = subdivide(FIELD, stub, 4, {
+      placement: "split",
+      zoneWord: "Bed",
+    });
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(
+        outcome.result.warnings.some((w) => /^Bed \d+ does not touch/.test(w)),
+      ).toBe(true);
+    }
+  });
+
+  it("falls back to the PACK's neutral word, never to a farm's", () => {
+    const outcome = subdivide(FIELD, LANE_NS, 1);
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.error).toBe("Two or more zones.");
+      expect(outcome.error).not.toMatch(/paddock/i);
+    }
   });
 });
 
@@ -267,7 +324,7 @@ describe("what it refuses, and how it says so", () => {
   it("wants two or more", () => {
     const outcome = subdivide(FIELD, LANE_NS, 1);
     expect(outcome.ok).toBe(false);
-    if (!outcome.ok) expect(outcome.error).toMatch(/Two or more/);
+    if (!outcome.ok) expect(outcome.error).toMatch(/^Two or more /);
   });
 
   it("refuses a silly number rather than trying", () => {

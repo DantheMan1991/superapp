@@ -4,7 +4,7 @@
 > **Route:** /dashboard/m/land/find
 > **Order:** 50
 
-Open **Land** in the sidebar and click {button:Find my parcels|outline|search}. Owners only. The page reads `The county has already drawn your boundaries. Take the ones that are yours, with their acreage, and trace paddocks inside them afterwards.` It searches a public parcel service, today `Ohio statewide parcels`. Ground in another state is added by hand on the Land list and traced on the site plan.
+Open **Land** in the sidebar and click {button:Find my parcels|outline|search}. Owners only. The page reads `The county has already drawn your boundaries. Take the ones that are yours, with their acreage, and trace {{zone|plural|lower}} inside them afterwards.` It searches a public parcel service, today `Ohio statewide parcels`. Ground in another state is added by hand on the Land list and traced on the site plan.
 
 ## What you see
 
@@ -12,7 +12,7 @@ Open **Land** in the sidebar and click {button:Find my parcels|outline|search}. 
 - **`County`.** The county the ground is in, such as `Knox`. It may already be filled in for you.
 - **`Mailing address`** or **`Parcel number`**, depending on what you chose. For an address, type the street address the tax bill goes to, such as `11729 Leedy Rd`. For a parcel number, type it as it appears on the bill. Dashes and spaces are ignored.
 - **{button:Search|primary|search}.** It needs at least three characters.
-- **Before the first search.** The box in the middle reads `The county already drew your boundaries.` and `Search for them and they arrive with their acreage, ready to have paddocks traced inside them. Nothing is added until you tick it.`
+- **Before the first search.** The box in the middle reads `The county already drew your boundaries.` and `Search for them and they arrive with their acreage, ready to have {{zone|plural|lower}} traced inside them. Nothing is added until you tick it.`
 - **The results.** A heading counts them, `6 found`, and once you check some, `· 2 chosen, 84.1 acres`. Up to 50 are shown. The columns: a check box; `Parcel`, a suggested name, usually the street address, or `Parcel [number]`, with the county's parcel number under it; `Where`, the mailing address; `County acres`, the acreage on the county's record; and `Measured`, the acreage measured from the county's drawn boundary.
 - **Under the results.** How current the county's records are, for example `County records here are as of 2023-05-16. Anything split, sold or re-parcelled since then will be missing, or will still show its previous owner — search the parent parcel number and adjust the boundary, or trace it on the map.`
 

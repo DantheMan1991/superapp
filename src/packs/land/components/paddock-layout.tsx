@@ -250,7 +250,7 @@ export function PaddockLayout({
               <Label htmlFor="namePrefix">Called</Label>
               <Input
                 id="namePrefix"
-                placeholder="Paddock"
+                placeholder={zoneWord}
                 maxLength={60}
                 value={namePrefix}
                 onChange={(event) => setNamePrefix(event.target.value)}

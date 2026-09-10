@@ -578,6 +578,78 @@ grounds, which were never about optimisation as such.
 
 ## Build log
 
+### 2026-09-10 — The tenant's own word (`claude/the-tenants-own-word`)
+
+Module-improvement review slice 5. `zone` and `parcel` are RENAMEABLE (ADR
+0004) and this pack had been saying `paddock` to everybody anyway. The review
+found five places; a proper sweep found **twelve**, in four layers, and one of
+them was worse than a noun.
+
+| Where | What it said |
+| --- | --- |
+| `where-am-i.tsx` | the button — `Which paddock am I in?` — and its refusal |
+| `core/subdivide.ts` | **five** refusals and warnings, one of them *"the cows cannot get to it"* |
+| `ops.ts` | the `"Paddock"` default name prefix, and a no-boundary refusal |
+| `paddock-layout.tsx` | the `Called` placeholder |
+| `find/page.tsx` · `parcel-finder.tsx` | *"trace paddocks inside them"*, twice |
+| `combine-parcels.tsx` | *"N paddocks move"* |
+| `paste/target.ts` | the blocked message and the name hint |
+| `setup/source.ts` | *"Paddocks and rotation come after"* — in a file whose own comment says it avoids renameable labels |
+| the guides | ten strings quoting those messages, outside the `{{zone}}` tokens |
+
+**"THE COWS CANNOT GET TO IT" IS THE ONE THAT MATTERS.** It is not a synonym
+problem: a core geometry file was telling a market gardener that cattle could
+not reach their bed. It now reads *"there is no way in from it"*, and a test
+asserts the string contains no `cows`.
+
+**THE WORD TRAVELS AS DATA, NEVER AS A LOOKUP.** `core/` and `ops.ts` resolve
+no labels and should not start — so `subdivide` takes `zoneWord` in
+`SubdivideOptions` beside `laneWidthM`, `layoutPaddocks` takes it in
+`LayoutInput` and hands it down, and `layoutPaddocksAction` is the one layer
+that calls `packContext` and `labelFor`. Each fallback is the PACK's own
+neutral word (`Zone`), never a farm's.
+
+**IT REACHES REAL ROWS, WHICH IS WHY THE LAYOUT MATTERED MOST.** With nothing
+typed into `Called`, dividing ground used to mint `Paddock 1 … 12` on a market
+garden. It now mints `Bed 1 … 12`, and the gates and division fences with them.
+
+**Two things could NOT be fixed and are not pretended otherwise.** A paste
+target's `label`, `noun` and `about` are read off the object at module load,
+with no tenant in hand. `PasteListButton` is already handed the tenant's word
+by `LandModule` and overrides the first two, and `about` only ever reaches the
+model's system prompt — so what a person READS comes out of `describe`, which
+has a `Tx` and a tenant, and that is where the word is now resolved. The setup
+card took the other route: its own doc comment already said it avoids
+renameable labels, so the sentence was rewritten around the noun rather than
+given a lookup for one line.
+
+**PROVED END TO END ON A REAL TENANT, not argued.** Hilltop's `zone` label was
+renamed to `Bed` from the superadmin vocabulary panel and every land screen
+read back:
+
+  - `Which bed am I in?`, the list heading `Beds`, and **`paddock` appearing
+    nowhere on the Land list**;
+  - the find page — *"trace beds inside them afterwards"*;
+  - the divide dialog — `Divide into beds`, `Where the beds go`, `Called`
+    placeholder `Bed`, and no `paddock` in it anywhere;
+  - **a layout run with `Called` left blank produced the rows `Bed 1` and
+    `Bed 2`.**
+
+Then the override was cleared and the farm read `Which paddock am I in?` and
+`Paddocks` again, with no `bed` anywhere. The four features and two proposals
+that proof created were deleted and the `Bed` plan removed, so the fixture is
+where it started.
+
+Tests: `land-subdivide` gained a `it says what the tenant calls a piece of
+ground` block (the two refusals, the warning, and the neutral fallback), and
+`land-ops` gained the two naming tests — `Bed 1`/`Bed 2` with a word, `Zone
+1`/`Zone 2` without one.
+
+**Not changed, deliberately:** `layoutPaddocks`, `MAX_PADDOCKS`,
+`PaddockLayout`, `land.paddocks.laid_out` and the rest of the internal names.
+They are identifiers, not copy, and the audit action is a stored string with
+history behind it.
+
 ### 2026-09-10 — What is here (`claude/what-is-here`)
 
 Module-improvement review slice 4, and it is the last unbuilt item on the 2b
@@ -1827,6 +1899,19 @@ rented ground, and retrofitting it means rewriting the report.
   is right and made moving impossible from the occupant's own page, which is a
   reminder that a correct refusal can still be a broken workflow. The day the
   move happens belongs to the NEW paddock only; see the 2026-08-16 entry.
+- **A RENAMEABLE WORD TRAVELS AS DATA, NEVER AS A LOOKUP.** `core/` and
+  `ops.ts` resolve no labels and must not start: `subdivide` takes `zoneWord` in
+  its options beside `laneWidthM`, `layoutPaddocks` takes it in `LayoutInput`,
+  and the ACTION is the single layer that calls `packContext`/`labelFor`. Every
+  fallback is the pack's own neutral word (`Zone`) — **never a farm's**, because
+  a default that reads correctly on the pilot farm is exactly how twelve strings
+  said `paddock` to everyone for a month.
+- **A PASTE TARGET'S STATIC HALF CANNOT SPEAK THE TENANT'S WORD.** `label`,
+  `noun` and `about` are read off the object at module load with no tenant.
+  `PasteListButton` is handed the word and overrides the first two, `about` only
+  reaches the model's prompt, and everything a person READS comes out of
+  `describe`, which has a `Tx` and a tenant. Do not widen the Layer 0 contract
+  for this.
 - **THE FIELD SCREEN SHOWS `built` AND NOTHING ELSE.** It is the reason
   `land_features.status` exists at all — *"the app must never tell you there is
   a buried electric line under you when that line is a proposal"* — so
@@ -2119,6 +2204,11 @@ rented ground, and retrofitting it means rewriting the report.
 - **The rotation finding is per parcel and needs three completed stays.** Below
   that it says nothing, which is right, but it also means the pilot's most
   interesting number does not appear until the habit has held for a week.
+- **A paste target's `label`, `noun` and `about` are still fixed strings.** The
+  button overrides the first two with the tenant's word and `about` only reaches
+  a model prompt, so nothing a person reads is wrong — but a target that were
+  ever rendered from its own declaration would say `Paddocks` to a market
+  garden. It is a Layer 0 contract question, not a pack one.
 - **Zone use suggestions are hardcoded** in `vocabulary.ts`, exactly as
   `assets`'s kinds are. They should come from profile `packConfig` once P5
   exists — and now two packs are waiting on it rather than one.

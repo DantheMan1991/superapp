@@ -42,4 +42,4 @@ The shape of the farm belongs to the owner. Only an owner can add, edit, combine
 
 The chores are open to everyone. Any member can draw fences, gates, water and the rest on the site plan, mark them built or removed, walk to a corner with the phone, and record what is on a {{zone|lower}} and when it moved off.
 
-Staff see the same pages without the owner's buttons. On the Land list, staff see the two that only read the phone's position — {button:Which paddock am I in?|outline} and {button:What is here?|outline} — and none of the others.
+Staff see the same pages without the owner's buttons. On the Land list, staff see the two that only read the phone's position — {button:Which {{zone|lower}} am I in?|outline} and {button:What is here?|outline} — and none of the others.

@@ -7,6 +7,7 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAudit } from "@/lib/audit";
 import { packContext } from "@/lib/packs/tenant-context";
+import { labelFor } from "@/lib/packs/resolve";
 import { asBoundary, boundaryAreaAcres } from "./core/geo";
 import { readAttributes } from "./core/features";
 import {
@@ -1374,7 +1375,26 @@ export async function layoutPaddocksAction(input: unknown) {
   try {
     const result = await withTenant(
       ctx.tenant.id,
-      (tx) => layoutPaddocks(tx, landCtx(ctx), parsed.data),
+      async (tx) => {
+        /**
+         * **THE LAYOUT NAMES REAL ROWS, so the tenant's word has to reach it.**
+         * With nothing typed into `Called` it used to mint `Paddock 1 … 12` on
+         * a market garden. Ops resolves no labels — that is this layer's job —
+         * so the word is looked up here and handed down as data, exactly the
+         * way `laneWidthM` is. It also reaches `subdivide`'s refusals, one of
+         * which told a gardener the cows could not get to their bed.
+         */
+        const pack = await packContext(
+          tx,
+          ctx.tenant.id,
+          ctx.tenant.industry,
+          PACK,
+        );
+        return layoutPaddocks(tx, landCtx(ctx), {
+          ...parsed.data,
+          zoneWord: labelFor(pack.labels, "zone", "Zone"),
+        });
+      },
       { role: ctx.role },
     );
     await logAudit({

@@ -2827,6 +2827,47 @@ d("land ops", () => {
       }
     });
 
+    it("names what it creates with the TENANT's word, not with a farm's", async () => {
+      // `zone` is renameable (ADR 0004), and this is the one place vocabulary
+      // reaches actual rows rather than a sentence: with nothing typed into
+      // `Called`, a layout used to mint `Paddock 1 … 12` on a market garden.
+      const { parcel, lane } = await fieldWithLane("Beds Not Paddocks");
+      const result = await asOwner((tx) =>
+        layoutPaddocks(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          laneFeatureId: lane.id,
+          count: 2,
+          zoneWord: "Bed",
+        }),
+      );
+      const zones = await asOwner((tx) =>
+        listZones(tx, tenantId, { parcelId: parcel.id, status: "planned" }),
+      );
+      expect(zones.map((z) => z.name)).toEqual(["Bed 1", "Bed 2"]);
+
+      const features = await asOwner((tx) =>
+        listFeatures(tx, tenantId, { parcelId: parcel.id, status: "planned" }),
+      );
+      expect(features.every((f) => !/paddock/i.test(f.name))).toBe(true);
+      expect(features.some((f) => /^Bed \d+ gate$/.test(f.name))).toBe(true);
+      expect(result.zoneIds).toHaveLength(2);
+    });
+
+    it("falls back to the PACK's neutral word when nobody supplies one", async () => {
+      const { parcel, lane } = await fieldWithLane("No Word Given");
+      await asOwner((tx) =>
+        layoutPaddocks(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          laneFeatureId: lane.id,
+          count: 2,
+        }),
+      );
+      const zones = await asOwner((tx) =>
+        listZones(tx, tenantId, { parcelId: parcel.id, status: "planned" }),
+      );
+      expect(zones.map((z) => z.name)).toEqual(["Zone 1", "Zone 2"]);
+    });
+
     it("makes everything PLANNED, because none of it is built yet", async () => {
       const { parcel, lane } = await fieldWithLane("All Planned");
       await asOwner((tx) =>

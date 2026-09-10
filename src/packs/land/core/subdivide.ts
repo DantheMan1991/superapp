@@ -155,6 +155,18 @@ export const MAX_PADDOCKS = 60;
 export interface SubdivideOptions {
   placement: LanePlacement;
   laneWidthM?: number;
+  /**
+   * What the tenant calls a piece of ground — "Paddock", "Bed", "Field".
+   *
+   * **THIS FILE HAD FOUR REFUSALS AND A WARNING WITH `paddock` WRITTEN INTO
+   * THEM**, and one of those told a market gardener that *the cows* could not
+   * get to their bed. `zone` and `parcel` are RENAMEABLE (ADR 0004) and a core
+   * geometry file has no business knowing which industry is looking at it — but
+   * it also has no business resolving a label, so the word ARRIVES as data, the
+   * way `laneWidthM` does. The default is the pack's own neutral fallback, not
+   * a farm's.
+   */
+  zoneWord?: string;
 }
 
 /**
@@ -174,11 +186,13 @@ export function subdivide(
   count: number,
   options: SubdivideOptions = { placement: "split" },
 ): SubdivideOutcome {
+  const zoneWord = options.zoneWord?.trim() || "zone";
+  const zones = `${zoneWord.toLowerCase()}s`;
   if (!Number.isInteger(count) || count < 2) {
-    return { ok: false, error: "Two or more paddocks." };
+    return { ok: false, error: `Two or more ${zones}.` };
   }
   if (count > MAX_PADDOCKS) {
-    return { ok: false, error: `That is more than ${MAX_PADDOCKS} paddocks.` };
+    return { ok: false, error: `That is more than ${MAX_PADDOCKS} ${zones}.` };
   }
   if (area.type !== "Polygon") {
     return {
@@ -295,6 +309,7 @@ export function subdivide(
       laneAt: laneOffset + side.sign * half,
       laneRange,
       startIndex: paddocks.length + 1,
+      zoneWord,
     });
     if (!outcome.ok) return outcome;
     paddocks.push(...outcome.paddocks);
@@ -332,7 +347,7 @@ export function subdivide(
       warnings.push(
         `These cannot come out equal: the biggest is ${
           Math.round((largest / smallest) * 10) / 10
-        } times the smallest. Ask for more paddocks, or put them all on one side of the lane.`,
+        } times the smallest. Ask for more ${zoneWord.toLowerCase()}s, or put them all on one side of the lane.`,
       );
     }
   }
@@ -415,10 +430,17 @@ function stripsOf(
   across: XY,
   count: number,
   frame: Frame,
-  context: { laneAt: number; laneRange: [number, number]; startIndex: number },
+  context: {
+    laneAt: number;
+    laneRange: [number, number];
+    startIndex: number;
+    /** The tenant's word for a piece of ground. See `SubdivideOptions`. */
+    zoneWord: string;
+  },
 ):
   | { ok: true; paddocks: Paddock[]; cuts: SubdivideResult["cuts"]; warnings: string[] }
   | { ok: false; error: string } {
+  const zoneWord = context.zoneWord;
   const ts = ring.map((p) => p[0] * axis[0] + p[1] * axis[1]);
   const tMin = Math.min(...ts);
   const tMax = Math.max(...ts);
@@ -444,7 +466,7 @@ function stripsOf(
       return {
         ok: false,
         error:
-          "That came out with an empty paddock. Try fewer, or a lane that crosses the ground.",
+          `That came out with an empty ${zoneWord.toLowerCase()}. Try fewer, or a lane that crosses the ground.`,
       };
     }
     const positions = strip.map((p) => fromLocal(frame, p));
@@ -476,7 +498,9 @@ function stripsOf(
     const reachable = withinLane && nearRing(onFence, strip, 1);
     if (!reachable) {
       warnings.push(
-        `Paddock ${index} does not touch the lane — the cows cannot get to it.`,
+        // **NOT "the cows"**: a bed, a plot and a bay are all things this can
+        // lay out, and none of them has cattle standing in it.
+        `${zoneWord} ${index} does not touch the lane — there is no way in from it.`,
       );
     }
 

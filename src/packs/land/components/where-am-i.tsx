@@ -32,11 +32,21 @@ export interface ZoneHere {
 export function WhereAmIButton({
   onFound,
   label = "Use where I am",
+  zoneWord = "zone",
   size = "sm",
   variant = "outline",
 }: {
   onFound: (zone: ZoneHere) => void;
   label?: string;
+  /**
+   * What the tenant calls a piece of ground.
+   *
+   * **THE BUTTON SAID `Which paddock am I in?` TO EVERY TENANT**, including a
+   * market garden with beds. `zone` is renameable (ADR 0004) and this is the
+   * most-looked-at control in the pack. A STRING, not a resolver: this is a
+   * client component and the server that renders it owns the vocabulary.
+   */
+  zoneWord?: string;
   size?: "sm" | "default";
   variant?: "outline" | "ghost" | "default";
 }) {
@@ -65,7 +75,7 @@ export function WhereAmIButton({
           // indistinguishable: no boundary is drawn near you, or you are
           // genuinely off the mapped ground.
           toast.error(
-            "You are not inside any mapped paddock. Trace its boundary and this will find it.",
+            `You are not inside any mapped ${zoneWord.toLowerCase()}. Trace its boundary and this will find it.`,
           );
           return;
         }
@@ -86,7 +96,7 @@ export function WhereAmIButton({
       // the only one that produces a usable fix — and it is slower.
       { enableHighAccuracy: true, timeout: 20_000, maximumAge: 30_000 },
     );
-  }, [onFound]);
+  }, [onFound, zoneWord]);
 
   return (
     <Button type="button" size={size} variant={variant} onClick={locate} disabled={pending}>
@@ -105,11 +115,18 @@ export function WhereAmIButton({
  * Standing on the ground and having the app open the right page is the whole
  * of what geometry buys somebody who is not at a desk.
  */
-export function WhereAmIShortcut({ basePath }: { basePath: string }) {
+export function WhereAmIShortcut({
+  basePath,
+  zoneWord,
+}: {
+  basePath: string;
+  zoneWord: string;
+}) {
   const router = useRouter();
   return (
     <WhereAmIButton
-      label="Which paddock am I in?"
+      label={`Which ${zoneWord.toLowerCase()} am I in?`}
+      zoneWord={zoneWord}
       /**
        * **`basePath` IS A STRING BECAUSE THIS PROP CROSSES A SERVER/CLIENT
        * BOUNDARY, AND THE FUNCTION IT REPLACES TOOK THE LAND PAGE DOWN.**

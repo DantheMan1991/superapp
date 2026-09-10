@@ -578,6 +578,57 @@ grounds, which were never about optimisation as such.
 
 ## Build log
 
+### 2026-09-10 — What it is for, where you are standing (`claude/what-it-is-for-where-you-stand`)
+
+Module-improvement review slice 9, and it is the third in this run to find the
+pack had the thing and not the reach.
+
+**SETTING A USE LIVED ONLY IN A ROW MENU, TWO SCREENS FROM THE GROUND.** `Set
+what it is for` was an item in the paddock table's per-row dropdown on the
+PARCEL's page. The zone's own page — the one `Which paddock am I in?` lands on,
+and the one slices 3, 6 and 7 have been filling with the acts you do while
+standing on the ground — showed the last five uses and offered no way to add
+one. So deciding *this is hay now*, in the field, meant leaving the field's
+page, finding its row and opening a menu.
+
+The dialog is `ZoneUseForm` now, EXTRACTED rather than copied, and the reason is
+in the picker: its option order carries a bug fix from 2026-08-15 —
+`SUGGESTED_ZONE_USES` is deliberately not sorted, because sorting put
+`building_site` first and a hurried tap recorded good ground as a house site
+that earns nothing. A second copy of that list is a second place for that fix
+to be lost. Both callers render the same component; the row menu drives it
+controlled, the way `MoveOccupant` is.
+
+**Owner-only, and that is the pack's line rather than this button's.** A use is
+a dated fact about a cost object, which is why `startZoneUse` is `owner` while
+recording a stay is `member`. The button reads `Say what it is for` on ground
+that has never had one and `Change it` once it has.
+
+**A SILENT TRUNCATION FIXED WHILE THE PANEL WAS OPEN.** `What it is for` showed
+`uses.slice(0, 5)` and said nothing about the rest — one of the review's UI
+findings. It now says `5 of 9 — the rest are in the dialog above`, which is
+true: the dialog's `History` block lists every one.
+
+**Driven on Hilltop (dev) at 375×812 and 1280×900:** `Say what it is for` at
+x=217 in a 375px screen; the dialog 503px of an 812px viewport with `Record use`
+**correctly disabled** until something is picked (the no-preselection rule);
+`Pasture` first in the list, ahead of `Hay`, `Crop`, `Garden`, `Orchard` — the
+unsorted order intact; recording it turned the panel into `2026-09-10 – now ·
+Pasture`, the button into `Change it`, and the page header into `North 40 · 38
+acres · Pasture`. The row-menu path still opens `What is Creek field for?` with
+the same four fields, which is the regression the extraction risked.
+
+**NOT DRIVEN: the `5 of N` line.** Hilltop has one declared use, and
+manufacturing five superseded ones would mean five future-dated records that
+misrepresent the farm — a use recorded on the day the last one started REPLACES
+it rather than closing it, so a believable history cannot be typed in one
+sitting. It is a conditional on `uses.length`, and it is written down here
+rather than claimed.
+
+**Dev fixture:** North 40 is now down to `Pasture` from 2026-09-10 — the first
+declared use on this farm, so every screen that reads a zone's use has something
+to show instead of `Not set`.
+
 ### 2026-09-10 — Lists you can work (`claude/lists-you-can-work`)
 
 Module-improvement review slice 8. The finding was *"no search anywhere in land
@@ -1942,6 +1993,12 @@ rented ground, and retrofitting it means rewriting the report.
   `targetsOf` turns a geometry into the ordered list of places to stand: the
   vertices are the posts, and a ring's closing repeat is dropped. It knows
   nothing about units — the radius arrives already formatted
+- `src/packs/land/components/zone-use-form.tsx` — saying what ground is for,
+  from a date. **Extracted rather than copied**, because the picker's option
+  order carries a 2026-08-15 fix — `SUGGESTED_ZONE_USES` is deliberately
+  unsorted so `building_site` is not the first thing a hurried tap lands on —
+  and a second copy is a second place to lose it. The row menu drives it
+  controlled; the zone page renders its own trigger
 - `src/packs/land/components/navigate-to.tsx` — `Take me there`, for ANYTHING
   with a shape: a feature, a paddock from its own page, and a PROPOSED paddock
   from the box under the table. `targetsOf` handled polygons from 2b.3's first
@@ -2253,6 +2310,10 @@ rented ground, and retrofitting it means rewriting the report.
 - **The plan list's headings are the only grouping in the pack.** The paddock
   table has the same shape and the same scale problem — a farm at 10x has two
   hundred rows — and got cards, the ordering fix and a search, but no headings.
+- **The `5 of N` line on a zone's uses has never been seen with data.** Hilltop
+  has one declared use, and a believable history of five cannot be typed in one
+  sitting: a use recorded on the day the previous one started REPLACES it rather
+  than closing it, so faking it would mean future-dated records.
 - **Nobody has opened a land screen holding two hundred paddocks.** The reads
   are unbounded by design and the search is client-side over all of them, which
   is right for the totals and untested at that size: the render cost of two

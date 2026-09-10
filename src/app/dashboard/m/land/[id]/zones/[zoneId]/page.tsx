@@ -24,6 +24,7 @@ import {
   getParcel,
   getZone,
   listOccupancy,
+  listUsesInUse,
   listZoneUses,
   listZones,
   occupantLabelsUsed,
@@ -34,6 +35,8 @@ import { areaUnitFrom, formatArea } from "@/packs/land/core/area";
 import { asFeatureGeometry } from "@/packs/land/core/geo";
 import { lengthUnitFrom } from "@/packs/land/core/length";
 import { NavigateTo } from "@/packs/land/components/navigate-to";
+import { ZoneUseForm } from "@/packs/land/components/zone-use-form";
+import { Button } from "@/components/ui/button";
 import { daysOccupied, formatDays, zoneRest } from "@/packs/land/core/rest";
 import { BoundarySummary } from "@/packs/land/components/boundary-summary";
 import { MoveOccupant } from "@/packs/land/components/move-occupant";
@@ -82,11 +85,23 @@ export default async function ZoneDetailPage({
       // The neighbouring paddocks were only ever context for the map that used
       // to live here; they are drawn on the parcel's site plan now, so this
       // page no longer loads them.
-      const [parcel, stays, uses, pack, onParcel, siblings, namesUsed] =
-        await Promise.all([
+      const [
+        parcel,
+        stays,
+        uses,
+        usesInUse,
+        pack,
+        onParcel,
+        siblings,
+        namesUsed,
+      ] = await Promise.all([
           getParcel(tx, ctx.tenant.id, id),
           listOccupancy(tx, ctx.tenant.id, zoneId),
           listZoneUses(tx, ctx.tenant.id, zoneId),
+          // What this business already calls things, for the use picker. The
+          // parcel page has always read it; this page needed it once the
+          // dialog moved within reach of the ground it is about.
+          listUsesInUse(tx, ctx.tenant.id),
           packContext(tx, ctx.tenant.id, ctx.tenant.industry, "land"),
           // What is on this whole parcel today, so a move can name a ROW
           // rather than a name that has to match. See `moveOccupantAction`.
@@ -101,6 +116,7 @@ export default async function ZoneDetailPage({
         parcel,
         stays,
         uses,
+        usesInUse,
         pack,
         onParcel,
         siblings,
@@ -111,8 +127,20 @@ export default async function ZoneDetailPage({
   );
 
   if (!data) notFound();
-  const { zone, parcel, stays, uses, pack, onParcel, siblings, namesUsed } =
-    data;
+  const {
+    zone,
+    parcel,
+    stays,
+    uses,
+    usesInUse,
+    pack,
+    onParcel,
+    siblings,
+    namesUsed,
+  } = data;
+
+  /** How many declared uses the panel shows before it says there are more. */
+  const SHOWN_USES = 5;
 
   const unit = areaUnitFrom(pack.config);
   /** Null when nobody has drawn it — there is nowhere to be walked to. */
@@ -353,23 +381,69 @@ export default async function ZoneDetailPage({
         </Panel>
 
         <Panel className="p-5">
-          <h2 className="font-heading text-base font-semibold tracking-heading">What it is for</h2>
+          <div className="flex items-baseline justify-between gap-2">
+            <h2 className="font-heading text-base font-semibold tracking-heading">What it is for</h2>
+            {/*
+              **THE ONE PLACE TO SAY IT WAS TWO SCREENS AWAY.** Setting a use
+              lived only in the paddock table's row menu, back on the parcel's
+              page — so deciding this ground is hay now, while standing on it,
+              meant leaving it. This page is where `Which paddock am I in?`
+              lands, which makes it the page somebody is already on.
+
+              Owner-only, and that is the pack's line rather than this button's:
+              a use is a dated fact about a cost object, which is why
+              `startZoneUse` is `owner` while recording a stay is `member`.
+            */}
+            {ctx.role === "owner" && zone.status === "active" && (
+              <ZoneUseForm
+                zoneId={zone.id}
+                zoneName={zone.name}
+                today={today}
+                usesInUse={usesInUse.map((u) => u.use)}
+                history={uses.map((u) => ({
+                  id: u.id,
+                  use: u.use,
+                  isProductive: u.isProductive,
+                  startedOn: u.startedOn,
+                  endedOn: u.endedOn,
+                }))}
+                trigger={
+                  <Button size="sm" variant="outline">
+                    {uses.length === 0 ? "Say what it is for" : "Change it"}
+                  </Button>
+                }
+              />
+            )}
+          </div>
           <div className="mt-3">
             {uses.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 Nothing declared yet.
               </p>
             ) : (
-              <ul className="space-y-1 text-sm">
-                {uses.slice(0, 5).map((use) => (
-                  <li key={use.id} className="tabular-nums">
-                    <span className="text-muted-foreground">
-                      {use.startedOn} – {use.endedOn ?? "now"}
-                    </span>{" "}
-                    {zoneUseLabel(use.use)}
-                  </li>
-                ))}
-              </ul>
+              <>
+                <ul className="space-y-1 text-sm">
+                  {uses.slice(0, SHOWN_USES).map((use) => (
+                    <li key={use.id} className="tabular-nums">
+                      <span className="text-muted-foreground">
+                        {use.startedOn} – {use.endedOn ?? "now"}
+                      </span>{" "}
+                      {zoneUseLabel(use.use)}
+                    </li>
+                  ))}
+                </ul>
+                {/* **A SILENT TRUNCATION IS A LIE ABOUT THE HISTORY.** It
+                    showed five and said nothing; the whole list is in the
+                    dialog, so say how many are not here and where they are. */}
+                {uses.length > SHOWN_USES && (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {SHOWN_USES} of {uses.length}
+                    {ctx.role === "owner" && zone.status === "active"
+                      ? " — the rest are in the dialog above."
+                      : "."}
+                  </p>
+                )}
+              </>
             )}
           </div>
         </Panel>

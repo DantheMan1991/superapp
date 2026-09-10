@@ -11,6 +11,7 @@ import {
 } from "@/lib/packs/resolve";
 import { packRegistry } from "@/packs";
 import { industryRegistry, getIndustryProfile, NO_PROFILE } from "@/industries";
+import { GENERAL_COA } from "@/modules/accounting/templates/general";
 
 /**
  * Layer 2 dependency and vocabulary rules.
@@ -288,6 +289,57 @@ describe("the real industry registry", () => {
 
   it("returns null for an unknown slug rather than throwing", () => {
     expect(getIndustryProfile("does-not-exist")).toBeNull();
+  });
+});
+
+describe("the agency profile", () => {
+  const profile = getIndustryProfile("agency");
+
+  it("is registered and lists the professional-services pack", () => {
+    expect(profile).not.toBeNull();
+    expect(profile!.packs).toEqual(["professional-services"]);
+    expect(packRegistry["professional-services"].requires).toEqual([]);
+  });
+
+  it("names no business — the operator is only the pilot", () => {
+    const text = JSON.stringify(profile);
+    expect(/yosher/i.test(text)).toBe(false);
+  });
+
+  describe("its chart of accounts, written as additions over the general one", () => {
+    const template = profile!.seed!.accounts!;
+    const generalCodes = new Set(GENERAL_COA.accounts.map((a) => a.code));
+
+    it("uses no code the general chart uses, and no code twice", () => {
+      const codes = template.accounts.map((a) => a.code);
+      expect(codes.filter((c) => generalCodes.has(c))).toEqual([]);
+      expect(new Set(codes).size).toBe(codes.length);
+    });
+
+    it("names only parents the tenant will have — general accounts, or its own earlier ones", () => {
+      const seen = new Set<string>();
+      for (const account of template.accounts) {
+        if (account.parentCode) {
+          expect(
+            generalCodes.has(account.parentCode) || seen.has(account.parentCode),
+            `${account.code} names parent ${account.parentCode}`,
+          ).toBe(true);
+        }
+        seen.add(account.code);
+      }
+    });
+
+    it("keeps a parent's type", () => {
+      // A child under 4000 Sales is income; the applier does not check, so the
+      // manifest has to be right.
+      const typeByCode = new Map(GENERAL_COA.accounts.map((a) => [a.code, a.type]));
+      for (const account of template.accounts) {
+        typeByCode.set(account.code, account.type);
+        if (account.parentCode) {
+          expect(account.type, account.code).toBe(typeByCode.get(account.parentCode));
+        }
+      }
+    });
   });
 });
 

@@ -106,6 +106,7 @@ export function ModuleToggle({
         startTransition(async () => {
           const res = await toggleModule({ tenantId, moduleId, enabled: next });
           if (res?.error) toast.error(res.error);
+          else if (res?.warning) toast.warning(res.warning);
           else toast.success(`${moduleId} ${next ? "enabled" : "disabled"}`);
         })
       }
@@ -130,7 +131,14 @@ export function ProfileInstaller({
 }: {
   tenantId: string;
   currentIndustry: string;
-  profiles: { slug: string; name: string; description: string; packs: string[] }[];
+  profiles: {
+    slug: string;
+    name: string;
+    description: string;
+    packs: string[];
+    /** What the profile contributes on install, counted (slice 7a). */
+    seed: { accounts: number; folders: number };
+  }[];
 }) {
   const [pending, startTransition] = useTransition();
   const [slug, setSlug] = useState(
@@ -163,6 +171,23 @@ export function ProfileInstaller({
                 sees. */}
             Switches on: {chosen.packs.join(", ")}.
           </p>
+          {(chosen.seed.accounts > 0 || chosen.seed.folders > 0) && (
+            <p>
+              {/* The seed, named before the button too: a chart of accounts
+                  landing in a client's books is a change they will notice. */}
+              Adds{" "}
+              {[
+                chosen.seed.accounts > 0 &&
+                  `${chosen.seed.accounts} account${chosen.seed.accounts === 1 ? "" : "s"} to the chart`,
+                chosen.seed.folders > 0 &&
+                  `${chosen.seed.folders} folder${chosen.seed.folders === 1 ? "" : "s"}`,
+              ]
+                .filter(Boolean)
+                .join(" and ")}
+              , when those modules are on — and when they are switched on
+              later.
+            </p>
+          )}
           <p>
             Installing is additive and can be re-run — it never switches
             anything off, because a pack the tenant disabled is a decision
@@ -186,10 +211,21 @@ export function ProfileInstaller({
             // button look like it had done something.
             const on = result.switchedOn?.length ?? 0;
             const listed = result.installed?.length ?? 0;
+            const seeded = result.seeded;
+            const added = [
+              seeded && seeded.accountsCreated > 0 && `${seeded.accountsCreated} accounts added`,
+              seeded && seeded.foldersCreated > 0 && `${seeded.foldersCreated} folders added`,
+            ].filter(Boolean);
+            const waiting =
+              seeded && seeded.waitingOn.length > 0
+                ? `; the seed for ${seeded.waitingOn.join(" and ")} waits until switched on`
+                : "";
             toast.success(
-              on === 0
+              (on === 0
                 ? `Installed — nothing to change, all ${listed} packs were already on`
-                : `Installed — ${on} of ${listed} packs switched on`,
+                : `Installed — ${on} of ${listed} packs switched on`) +
+                (added.length > 0 ? `; ${added.join(", ")}` : "") +
+                waiting,
             );
           })
         }

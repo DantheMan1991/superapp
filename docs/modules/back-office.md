@@ -6,12 +6,36 @@
 > `/admin` shrinks to what only a superadmin can do — provision a workspace,
 > switch features on, watch, support. Plan and slice order below; the decision
 > under it is [ADR 0041](../decisions/0041-a-tenant-is-a-workspace-and-a-client-is-a-party-in-the-operator-tenant.md).
-> Status: partial — slices 0–6 built (the operator tenant exists; a client is a party; Discovery comes home and a lead lands as a lead; a workspace is provisioned from a party and prospects retire; support access; the money loop; health signals); slice 7 planned below · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: partial — slices 0–6 and 7a built (the operator tenant exists; a client is a party; Discovery comes home and a lead lands as a lead; a workspace is provisioned from a party and prospects retire; support access; the money loop; health signals; the agency profile and the seed applier); slices 7b–7d planned below · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this area. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-10 — Slice 7a: seeds land, and the agency profile exists (`claude/back-office-7a-seeds-and-the-agency-profile`)
+
+- Slice 7 split into four, because the plan itself says the engagement model
+  is worth more once a fortnight of running the agency inside the product has
+  said what an engagement is: **7a** the platform gap and the profile (this),
+  **7b** engagements and time, **7c** onboarding as a Work list, **7d**
+  Discovery leaves the console. The order is in [agency.md](agency.md).
+- **The profile seed applier is built** (`src/app/admin/profile-seed.ts`) —
+  the gap [packs-and-profiles.md](packs-and-profiles.md) had carried since
+  Layer 2 shipped. A seed lands only in a module that is on and is not lost
+  when it is off: `installProfile` applies it for what is on, `toggleModule`
+  for a module switched on later. Additive; the tenant's own rows win.
+- **The `agency` profile** (`src/industries/agency/`): one pack,
+  `professional-services`, declared and unbuilt in `src/packs/index.ts` and
+  seeded `coming_soon`; a chart of twelve additions over the general one
+  (Work in Progress, Client Retainers Held, five income lines under Sales,
+  two direct costs, three expenses); folders *Clients* and *Proposals*; the
+  dollar sign. No labels: the pack's fallbacks are this industry's words.
+  Nothing in it is named after the business that pilots it.
+- **Not driven.** After the merge: *Install profile → Agency* on the
+  operator tenant's page; its chart gains the twelve and Documents two
+  folders. `db:seed` run on dev and prod before opening the PR, because the
+  pack's `modules` row is what an install writes against.
 
 ### 2026-09-10 — Slice 6: health signals on the console (`claude/back-office-6-health-signals`)
 
@@ -633,17 +657,20 @@ retainer overage (the existing math), and what the client owes Yosher (the
 operator's open invoices, by `operator_party_id`). Nothing new to write by
 hand; every column is derived.
 
-#### Slice 7 — The `professional-services` pack and the `agency` profile
+#### Slice 7 — The `professional-services` pack and the `agency` profile — 7a BUILT 2026-09-10, 7b–7d planned
 
 **What.** The pack every services business would recognise: an
 *engagement* (a client's agreement — scope, retainer hours, rate, start),
 time against an engagement, onboarding templates as Work lists. The
 Discovery screen leaves the console for the pack, so the operator's staff
 can run discovery without being superadmins. The `agency` profile lists the
-pack, supplies vocabulary (*Client*, *Engagement*) and a service-business
-chart of accounts — which needs the profile seed applier that
-[packs-and-profiles.md](packs-and-profiles.md) records as unbuilt, so that
-comes first inside this slice.
+pack and contributes a service-business chart of accounts — which needed the
+profile seed applier [packs-and-profiles.md](packs-and-profiles.md) recorded
+as unbuilt, so that came first.
+
+**In four PRs**, the order and each one's shape in [agency.md](agency.md):
+7a the seed applier and the profile (built); 7b engagements and time; 7c
+onboarding as a Work list; 7d Discovery leaves the console.
 
 **Nothing in it is named Yosher.** Yosher is the pilot, as Hilltop Farm is the
 homestead profile's.
@@ -675,6 +702,7 @@ RLS and an isolation test, per `security.md` §4.
 - `src/app/admin/audits/` — every action through `asOperator`; `audit-controls.tsx` attach and delete.
 - `src/app/admin/provision.ts` (slice 3) — resolve the party, attach the workspace; `provisionWorkspace` in actions.ts is the only place Clerk is asked; `scripts/retire-prospects.ts`.
 - `src/app/admin/health.ts` (slice 6) — the signals and the concerns; `src/lib/last-seen.ts` the hourly rule and the words.
+- `src/app/admin/profile-seed.ts` (slice 7a) — a profile's seed lands in the modules that are on; `src/industries/agency/` the profile and its chart.
 - `src/app/admin/actions.ts` — provisioning from a party; the guard.
 - `src/lib/auth.ts` — `requireTenant`/`resolveTenantContext` honour a live support session for a GET only (slice 4); `src/lib/support-view.ts` the sessions, `support-view-decide.ts` the pure wall, `src/proxy.ts` the stamp.
 - `src/app/api/webhooks/stripe/route.ts`, `src/lib/retainer-billing.ts` — the money loop's sources; `src/lib/platform-revenue.ts` the posting, the backfill, the retry; `platform-revenue-controls.tsx` the operator's two buttons.

@@ -1,7 +1,7 @@
 import "server-only";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
-import { COA_TEMPLATES } from "./general";
+import { COA_TEMPLATES, type CoaTemplate } from "./general";
 import { provisionEntity } from "../core/entities";
 import { provisionCatalogue } from "./catalogue";
 
@@ -11,13 +11,23 @@ import { provisionCatalogue } from "./catalogue";
  * Fully idempotent — re-running creates nothing and never renames or
  * reactivates accounts the tenant has since modified. Runs inside a
  * withTenant transaction (withSystem never writes accounting rows).
+ *
+ * Takes a template as well as a slug (back-office slice 7a): an industry
+ * profile carries its chart as data, written as ADDITIONS over the general
+ * one, and hands it here rather than registering it in `COA_TEMPLATES` — core
+ * must not know an industry. The additive loop below is what makes that safe:
+ * a code the tenant has is skipped, and a parent the template names resolves
+ * against the accounts already there.
  */
 export async function provisionAccounting(
   tx: Tx,
   tenantId: string,
-  templateSlug = "general",
+  templateOrSlug: string | CoaTemplate = "general",
 ): Promise<{ accountsCreated: number }> {
-  const template = COA_TEMPLATES[templateSlug] ?? COA_TEMPLATES.general;
+  const template =
+    typeof templateOrSlug === "string"
+      ? (COA_TEMPLATES[templateOrSlug] ?? COA_TEMPLATES.general)
+      : templateOrSlug;
 
   await tx
     .insert(schema.accountingSettings)

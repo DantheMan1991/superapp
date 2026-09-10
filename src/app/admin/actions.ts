@@ -33,6 +33,7 @@ import { provisionAccounting } from "@/modules/accounting/templates/apply";
 import { provisionDocuments } from "@/modules/documents/templates/apply";
 import { dependencyGraph, getFeature } from "@/lib/features";
 import { getIndustryProfile } from "@/industries";
+import { applyProfileSeed, type SeedReport } from "./profile-seed";
 import {
   blockingDependents,
   installOrder,
@@ -214,9 +215,48 @@ export async function toggleModule(input: z.infer<typeof toggleModuleSchema>) {
     });
   }
 
+  // The installed profile's seed for THIS module (back-office slice 7a): a
+  // profile installed before Accounting or Documents was switched on has a
+  // chart or folders waiting, and this is the moment they can land. After the
+  // row is enabled, so the base provisioning above stays the invariant it is;
+  // a failure here is reported, not fatal — the module is on, and re-running
+  // the install adds what is missing.
+  let warning: string | undefined;
+  if (enabled && (moduleId === "accounting" || moduleId === "documents")) {
+    const tenant = await withSystem((tx) =>
+      tx.query.tenants.findFirst({
+        where: eq(schema.tenants.id, tenantId),
+        columns: { industry: true },
+      }),
+    );
+    const profile = tenant ? getIndustryProfile(tenant.industry) : null;
+    if (profile?.seed) {
+      try {
+        const seeded = await applyProfileSeed(tenantId, profile, [moduleId]);
+        if (seeded.accountsCreated > 0 || seeded.foldersCreated > 0) {
+          await logAudit({
+            action: "profile.seeded",
+            tenantId,
+            actorClerkUserId: userId,
+            targetType: "industry_profile",
+            targetId: profile.slug,
+            meta: {
+              module: moduleId,
+              accountsCreated: seeded.accountsCreated,
+              foldersCreated: seeded.foldersCreated,
+            },
+          });
+        }
+      } catch (err) {
+        console.error("profile seed failed", err);
+        warning = `${featureName(moduleId)} is on, but the ${profile.name} profile's seed did not land. Re-run the profile install to add it.`;
+      }
+    }
+  }
+
   revalidatePath(`/admin/tenants/${tenantId}`);
   revalidatePath("/admin");
-  return { ok: true };
+  return { ok: true, warning };
 }
 
 const installProfileSchema = z.object({
@@ -233,9 +273,11 @@ const installProfileSchema = z.object({
  * safe and additive — it never switches anything off, because a pack the
  * tenant deliberately disabled is a decision, not drift to repair.
  *
- * NOT YET DOING: applying `profile.seed` (chart of accounts, folders, doc
- * kinds). That is the next slice and needs a farm chart of accounts written
- * first. Deliberately shipped in two steps rather than half-seeding.
+ * Then the profile's SEED lands (back-office slice 7a): its chart of accounts
+ * and folders, for every module the tenant has on, through
+ * `applyProfileSeed` — additive, so a re-run adds what is missing and touches
+ * nothing else. A module that is off is reported as waiting, and
+ * `toggleModule` applies the seed for it when it is switched on.
  */
 export async function installProfile(
   input: z.infer<typeof installProfileSchema>,
@@ -285,7 +327,7 @@ export async function installProfile(
   // point of the button — reporting the list either way said "7 packs switched
   // on" when nothing had changed.
   const switchedOn: string[] = [];
-  await withSystem(async (tx) => {
+  const enabledAfter = await withSystem(async (tx) => {
     for (const slug of order) {
       if (await enableRow(tx, tenantId, slug, true)) switchedOn.push(slug);
     }
@@ -306,7 +348,32 @@ export async function installProfile(
       .update(schema.tenants)
       .set({ industry: profile.slug, currencySymbol, updatedAt: new Date() })
       .where(eq(schema.tenants.id, tenantId));
+
+    // What is on now, packs just enabled included, for the seed below.
+    const rows = await tx
+      .select({ moduleId: schema.tenantModules.moduleId })
+      .from(schema.tenantModules)
+      .where(
+        and(
+          eq(schema.tenantModules.tenantId, tenantId),
+          eq(schema.tenantModules.enabled, true),
+        ),
+      );
+    return rows.map((r) => r.moduleId);
   });
+
+  // After the install commits, in its own transactions: the chart goes in as
+  // the tenant (withSystem never writes accounting rows) and the folders under
+  // withSystem, which is why this cannot share the transaction above.
+  let seeded: SeedReport;
+  try {
+    seeded = await applyProfileSeed(tenantId, profile, enabledAfter);
+  } catch (err) {
+    console.error("profile seed failed", err);
+    return {
+      error: `Profile "${profile.name}" installed, but its seed did not land. Re-run the install to add it.`,
+    };
+  }
 
   await logAudit({
     action: "profile.installed",
@@ -314,13 +381,19 @@ export async function installProfile(
     actorClerkUserId: userId,
     targetType: "industry_profile",
     targetId: profile.slug,
-    meta: { packs: order, switchedOn },
+    meta: {
+      packs: order,
+      switchedOn,
+      accountsCreated: seeded.accountsCreated,
+      foldersCreated: seeded.foldersCreated,
+      waitingOn: seeded.waitingOn,
+    },
   });
 
   revalidatePath(`/admin/tenants/${tenantId}`);
   revalidatePath("/admin/modules");
   revalidatePath("/admin");
-  return { ok: true, installed: order, switchedOn };
+  return { ok: true, installed: order, switchedOn, seeded };
 }
 
 const setStatusSchema = z.object({

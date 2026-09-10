@@ -16,7 +16,7 @@ import { RetailModule } from "./retail/RetailModule";
  * allowed to know both exist.
  *
  * `assets`, `land`, `inventory`, `livestock`, `production` and `retail` are
- * built; `crops` alone is DECLARED AND UNBUILT. That is not a placeholder state: a
+ * built; `crops` and `professional-services` are DECLARED AND UNBUILT. That is not a placeholder state: a
  * declared pack has a real dependency graph, installs with a profile, and
  * shows as an empty slot in the admin registry — exactly how `scheduling` and
  * `work` were carried before they shipped. Each
@@ -245,6 +245,31 @@ export const packRegistry: Record<string, PackDefinition> = {
       },
     ],
     Component: RetailModule,
+  },
+
+  // ---- Services ----
+
+  /**
+   * What a services business sells: an ENGAGEMENT — a client's agreement
+   * (scope, retainer hours, rate, start) — the time against it, and the
+   * onboarding list starting one sets in motion. Declared with the `agency`
+   * profile (back-office slice 7a) so the profile's manifest is complete and
+   * its install order exercised before the pack's own slices land; the slice
+   * order is in docs/modules/agency.md.
+   *
+   * Requires nothing. A client is a PARTY, and the party door is Layer 0 —
+   * the CRM being on makes the client easier to find, not the engagement
+   * possible.
+   *
+   * Neutral on purpose and it earns the name: a bookkeeping firm, a law
+   * practice and a design studio all have engagements, and the business that
+   * runs this platform is only the pilot (ADR 0041).
+   */
+  "professional-services": {
+    slug: "professional-services",
+    name: "Professional services",
+    icon: "briefcase",
+    requires: [],
   },
 };
 

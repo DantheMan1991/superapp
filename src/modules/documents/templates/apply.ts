@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { schema, type Tx } from "@/db";
 import { buildFolderPath, folderNameKey } from "../core/tree";
-import { DEFAULT_FOLDERS } from "./defaults";
+import { DEFAULT_FOLDERS, type DefaultFolder } from "./defaults";
 
 /**
  * Provision Documents for a tenant: a settings row plus the default folders.
@@ -23,6 +23,10 @@ import { DEFAULT_FOLDERS } from "./defaults";
 export async function provisionDocuments(
   tx: Tx,
   tenantId: string,
+  // An industry profile's own root folders (back-office slice 7a) go through
+  // the same loop, so they land beside the starter cabinet with the same
+  // idempotency: a root name the tenant already has is skipped.
+  folders: readonly DefaultFolder[] = DEFAULT_FOLDERS,
 ): Promise<{ foldersCreated: number }> {
   await tx
     .insert(schema.documentSettings)
@@ -30,7 +34,7 @@ export async function provisionDocuments(
     .onConflictDoNothing();
 
   let created = 0;
-  for (const folder of DEFAULT_FOLDERS) {
+  for (const folder of folders) {
     const id = randomUUID();
     const rows = await tx
       .insert(schema.documentFolders)

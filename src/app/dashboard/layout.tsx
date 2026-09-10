@@ -20,6 +20,7 @@ import {
 } from "@/lib/enterprises/vocabulary";
 import { AfterHydration } from "@/components/app/after-hydration";
 import { PushRegistration } from "@/components/app/push-registration";
+import { SupportBanner } from "./support-banner";
 
 export const dynamic = "force-dynamic";
 
@@ -220,6 +221,15 @@ export default async function DashboardLayout({
         </div>
       }
     >
+      {/* A support view says so on every page (back-office slice 4). */}
+      {ctx.support && (
+        <SupportBanner
+          tenantId={ctx.support.tenantId}
+          tenantName={ctx.support.tenantName}
+          reason={ctx.support.reason}
+          expiresAt={ctx.support.expiresAt.toISOString()}
+        />
+      )}
       {children}
     </AppShell>
     </>

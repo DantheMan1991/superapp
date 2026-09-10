@@ -27,6 +27,7 @@ import {
   VocabularyEditor,
 } from "./controls";
 import { CreatePartyButton, OpenInCrmButton } from "../../relationship-controls";
+import { SupportViewForm } from "../../support-controls";
 import { readOperatorParty } from "../../relationship";
 import { getOperatorTenant } from "@/lib/operator-tenant";
 import {
@@ -503,6 +504,25 @@ export default async function TenantDetailPage({
         </div>
 
         <div className="space-y-6">
+          {/* Look at it as they see it (back-office slice 4): read-only, an
+              hour, every page logged. Not for the operator — the superadmin
+              is already inside it. */}
+          {!tenant.isOperator && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Support</CardTitle>
+                <CardDescription>
+                  Open this workspace as its staff see it — read-only, for an
+                  hour, every page logged. Owners-only pages and folders stay
+                  closed; nothing can be changed from a support view.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <SupportViewForm tenantId={tenant.id} />
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Subscription</CardTitle>

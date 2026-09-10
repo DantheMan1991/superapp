@@ -242,6 +242,15 @@ Extensions add tables and columns. They do not get to relax a core policy,
 bypass `effective_visibility`, or read another pack's rows. See
 [extension-model.md](extension-model.md).
 
+**S14 — A support view never writes.**
+A superadmin may look at a client's workspace as its staff see it
+(back-office slice 4): a live `support_sessions` row, honoured by
+`requireTenant`/`resolveTenantContext` for a GET carrying no `next-action`
+header and for NOTHING else — every server action and every other method is
+refused while one is live, never answered under another tenant. The method
+and path are stamped by the middleware, never read from the client; the RLS
+role is `staff`; every render is audited with its path; sixty minutes.
+
 **S13 — The operator tenant is an ordinary tenant.**
 Yosher runs on its own platform (ADR
 [0041](decisions/0041-a-tenant-is-a-workspace-and-a-client-is-a-party-in-the-operator-tenant.md)).
@@ -360,6 +369,7 @@ Every path into the system, and what makes it trustworthy.
 | Entry point | Authenticated by | Notes |
 | --- | --- | --- |
 | Dashboard pages | Clerk session → `requireTenant()` | Middleware only checks signed-in |
+| A support view of a client's workspace | Clerk session → superadmin + a live `support_sessions` row, GET only (S14) | **The console looking at a client's workspace as its staff see it** (back-office slice 4). Opened from the tenant page with a reason, audited `support.opened`; every render audited `support.viewed` with the path; ended from the banner or by expiry. A server action or a non-GET route while one is live is refused outright — `SupportViewError` / 401 — so nothing can be changed from a support view. Role `staff`: owners-only pages and folders stay closed |
 | Server actions | Clerk session → `require*()` | Re-checked per action (S4) |
 | `src/app/api/**` | `resolveTenantContext()` | JSON 401/404, no redirects |
 | Clerk webhook | Svix signature | Trusted sync → `withSystem()` legal. Deliveries are **not ordered**: when an event's prerequisite hasn't arrived, answer 5xx so svix retries. A 200 that wrote nothing loses the row for good |

@@ -1,9 +1,18 @@
 import "server-only";
+import { cache } from "react";
 import { auth, currentUser } from "@clerk/nextjs/server";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
-import { withSystem, schema } from "@/db";
-import type { Tenant } from "@/db/schema";
+import { withSystem, schema, type Tx } from "@/db";
+import type { SupportSession, Tenant } from "@/db/schema";
+import {
+  endSupportSession,
+  liveSupportSessionInTx,
+  recordSupportView,
+  type SupportView,
+} from "@/lib/support-view";
+import { decideSupportView } from "@/lib/support-view-decide";
 
 /**
  * Server-side authorization helpers. Every page/action that touches data goes
@@ -16,6 +25,28 @@ export interface TenantContext {
   tenant: Tenant;
   userId: string;
   role: TenantRole;
+  /**
+   * Non-null when a superadmin is looking at this workspace as SUPPORT
+   * (back-office slice 4): a live, unexpired session, honoured for a GET and
+   * for nothing else — see `resolveSupport`. The role is `staff`, the least a
+   * member can be, so owners-only pages and folders stay closed; the marker
+   * is for the banner and for the few renders that would otherwise write.
+   */
+  support: SupportView | null;
+}
+
+/**
+ * A server action or a non-GET route was called while a support session is
+ * live. Refused outright rather than answered under the superadmin's own
+ * workspace (a client's ids in the wrong tenant) or the client's (a write).
+ */
+export class SupportViewError extends Error {
+  constructor() {
+    super(
+      "You are viewing this workspace as support; nothing can be changed from here. End the support view to work in your own workspace.",
+    );
+    this.name = "SupportViewError";
+  }
 }
 
 function superAdminEmails(): string[] {
@@ -47,71 +78,162 @@ export async function requireSuperAdmin(): Promise<{ userId: string }> {
 /**
  * Resolve the caller's active tenant (Clerk active organization → tenants row)
  * and their role in it. Redirects to onboarding when no org is active yet.
+ *
+ * A live support session comes first (below): it is answered before the
+ * active organization is even looked at, because a support view needs no
+ * organization of the viewer's own.
  */
 export async function requireTenant(): Promise<TenantContext> {
   const { userId, orgId, orgRole } = await auth();
   if (!userId) redirect("/sign-in");
+
+  const found = await lookup(userId, orgId ?? null, orgRole);
+  const support = await resolveSupport(userId, found.session);
+  if (support.kind === "refuse") throw new SupportViewError();
+  if (support.kind === "view") return support.ctx;
+
   if (!orgId) redirect("/onboarding");
-
-  const resolved = await lookupTenantAndRole(userId, orgId, orgRole);
-
   // Org exists in Clerk but hasn't synced yet (webhook lag) — send through
   // onboarding, which creates the row idempotently.
-  if (!resolved) redirect("/onboarding");
+  if (!found.resolved) redirect("/onboarding");
 
-  return { ...resolved, userId };
+  return { ...found.resolved, userId, support: null };
 }
 
 /**
- * Tenant + role resolution shared by requireTenant and resolveTenantContext.
- * Clerk owns owner-vs-member: org:admin is always "owner" and can never be an
- * expert. Within members, the local memberships flag decides expert-vs-staff;
- * a missing membership row (webhook lag, fresh dev DB) degrades to staff —
- * never upward.
+ * Tenant + role resolution shared by requireTenant and resolveTenantContext,
+ * in ONE transaction with the support-session lookup so a request costs the
+ * round trips it did before slice 4. Clerk owns owner-vs-member: org:admin is
+ * always "owner" and can never be an expert. Within members, the local
+ * memberships flag decides expert-vs-staff; a missing membership row (webhook
+ * lag, fresh dev DB) degrades to staff — never upward.
  */
+async function lookup(
+  userId: string,
+  orgId: string | null,
+  orgRole: string | null | undefined,
+): Promise<{
+  session: SupportSession | null;
+  resolved: { tenant: Tenant; role: TenantRole } | null;
+}> {
+  return withSystem(async (tx) => {
+    const session = await liveSupportSessionInTx(tx, userId);
+    if (!orgId) return { session, resolved: null };
+    const resolved = await lookupTenantAndRole(tx, userId, orgId, orgRole);
+    return { session, resolved };
+  });
+}
+
 async function lookupTenantAndRole(
+  tx: Tx,
   userId: string,
   orgId: string,
   orgRole: string | null | undefined,
 ): Promise<{ tenant: Tenant; role: TenantRole } | null> {
-  return withSystem(async (tx) => {
-    const tenant = await tx.query.tenants.findFirst({
-      where: eq(schema.tenants.clerkOrgId, orgId),
-    });
-    if (!tenant) return null;
-    if (orgRole === "org:admin") return { tenant, role: "owner" };
-
-    const [membership] = await tx
-      .select({ role: schema.memberships.role })
-      .from(schema.memberships)
-      .innerJoin(
-        schema.profiles,
-        eq(schema.profiles.id, schema.memberships.profileId),
-      )
-      .where(
-        and(
-          eq(schema.memberships.tenantId, tenant.id),
-          eq(schema.profiles.clerkUserId, userId),
-        ),
-      )
-      .limit(1);
-    const role: TenantRole = membership?.role === "expert" ? "expert" : "staff";
-    return { tenant, role };
+  const tenant = await tx.query.tenants.findFirst({
+    where: eq(schema.tenants.clerkOrgId, orgId),
   });
+  if (!tenant) return null;
+  if (orgRole === "org:admin") return { tenant, role: "owner" };
+
+  const [membership] = await tx
+    .select({ role: schema.memberships.role })
+    .from(schema.memberships)
+    .innerJoin(
+      schema.profiles,
+      eq(schema.profiles.id, schema.memberships.profileId),
+    )
+    .where(
+      and(
+        eq(schema.memberships.tenantId, tenant.id),
+        eq(schema.profiles.clerkUserId, userId),
+      ),
+    )
+    .limit(1);
+  const role: TenantRole = membership?.role === "expert" ? "expert" : "staff";
+  return { tenant, role };
 }
+
+/**
+ * The support half of resolution (back-office slice 4). With no live session
+ * this is a no-op. With one: the decision is pure (`decideSupportView`) and
+ * turns on facts the MIDDLEWARE stamped — `x-yosher-method`, `x-yosher-path`,
+ * overwriting anything a client sent — plus the `next-action` header a server
+ * action carries. A GET is answered as the client's workspace, as `staff`,
+ * and audited with the path once per request; anything else is refused. A
+ * viewer who is no longer a superadmin, or a session whose tenant is gone,
+ * ends the session and falls through to the ordinary path.
+ */
+async function resolveSupport(
+  userId: string,
+  session: SupportSession | null,
+): Promise<{ kind: "none" } | { kind: "refuse" } | { kind: "view"; ctx: TenantContext }> {
+  if (!session) return { kind: "none" };
+  const h = await headers();
+  const decision = decideSupportView(session, {
+    method: h.get("x-yosher-method") ?? "",
+    isAction: h.has("next-action"),
+    now: new Date(),
+  });
+  if (decision.kind === "none") return { kind: "none" };
+  if (decision.kind === "refuse") return { kind: "refuse" };
+
+  if (!(await isSuperAdmin())) {
+    await endSupportSession(userId);
+    return { kind: "none" };
+  }
+  const tenant = await withSystem((tx) =>
+    tx.query.tenants.findFirst({ where: eq(schema.tenants.id, session.tenantId) }),
+  );
+  if (!tenant) {
+    await endSupportSession(userId);
+    return { kind: "none" };
+  }
+  await recordViewOnce(session.id, tenant.id, userId, h.get("x-yosher-path") ?? "");
+  return {
+    kind: "view",
+    ctx: {
+      tenant,
+      userId,
+      role: "staff",
+      support: {
+        sessionId: session.id,
+        tenantId: tenant.id,
+        tenantName: tenant.name,
+        reason: session.reason,
+        openedAt: session.openedAt,
+        expiresAt: session.expiresAt,
+      },
+    },
+  };
+}
+
+/**
+ * One audit row per request, not per component: a render calls
+ * `requireTenant()` from the layout, the page and whatever else asks, and
+ * `cache` collapses those into one write for the same session and path.
+ */
+const recordViewOnce = cache(
+  async (sessionId: string, tenantId: string, clerkUserId: string, path: string) =>
+    recordSupportView({ sessionId, tenantId, clerkUserId, path }),
+);
 
 /**
  * Non-redirecting variant of requireTenant for API route handlers, which
  * must answer 401/404 JSON instead of redirecting (session 5: the blob
  * upload token route and the document file route). Null = not signed in,
- * no active org, or org not yet synced.
+ * no active org, or org not yet synced — and, under a live support session,
+ * anything but a GET.
  */
 export async function resolveTenantContext(): Promise<TenantContext | null> {
   const { userId, orgId, orgRole } = await auth();
-  if (!userId || !orgId) return null;
-  const resolved = await lookupTenantAndRole(userId, orgId, orgRole);
-  if (!resolved) return null;
-  return { ...resolved, userId };
+  if (!userId) return null;
+  const found = await lookup(userId, orgId ?? null, orgRole);
+  const support = await resolveSupport(userId, found.session);
+  if (support.kind === "refuse") return null;
+  if (support.kind === "view") return support.ctx;
+  if (!found.resolved) return null;
+  return { ...found.resolved, userId, support: null };
 }
 
 /** Like requireTenant, but restricted to the business owner. */

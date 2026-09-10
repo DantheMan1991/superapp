@@ -23,7 +23,9 @@ import {
   setAuditStatus,
 } from "../actions";
 
-const STATUSES = ["open", "report_ready", "won", "lost"] as const;
+// `won` and `lost` left with back-office slice 2: an outcome belongs to the
+// deal in the operator's CRM, which the lead opened.
+const STATUSES = ["open", "report_ready"] as const;
 
 export function AuditWorkspace({
   auditId,

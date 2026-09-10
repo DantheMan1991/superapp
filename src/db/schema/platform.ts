@@ -534,18 +534,40 @@ export const auditStatus = pgEnum("audit_status", [
 ]);
 
 /**
- * Discovery/audit engagements with prospects (Tier 0 — the sales wedge).
- * Prospects are not tenants yet, so this is platform-level data:
- * RLS restricts it to the superadmin context only.
+ * Discovery engagements (Tier 0 — the sales wedge): the copilot conversation
+ * with the founder, and the health check + build spec it produces.
+ *
+ * A ROW OF THE OPERATOR TENANT since back-office slice 2 (ADR 0041): the
+ * business that runs the platform owns the record, and `party_id` names the
+ * party it is about. Until 2026-09-09 this was platform-level data with a
+ * superadmin-only policy and `tenant_id` meant the tenant the audit was
+ * ABOUT — a prospect row minted for a stranger — which `origin_tenant_id`
+ * remembers. Scoped like every tenant table now: superadmin_all + member_all
+ * (migration 0288).
  */
 export const audits = pgTable(
   "audits",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    /** The CRM record this engagement belongs to. Always set by the app. */
-    tenantId: uuid("tenant_id").references(() => tenants.id, {
-      onDelete: "cascade",
-    }),
+    /** The operator tenant. Never the business the record is about. */
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /**
+     * The party (in the operator tenant) this discovery is about. Null for a
+     * record nothing points at yet — one that moved home before its business
+     * had a party; the console attaches it. No FK: `parties` is keyed
+     * `(tenant_id, id)`, and a party merged away in the CRM leaves a record
+     * to re-attach, not a cascade.
+     */
+    partyId: uuid("party_id"),
+    /**
+     * Where a record came from when it moved home: the tenant it was about.
+     * Read by `ensureOperatorParty` to attach the record when that business
+     * gets its party, and by nothing for access. No FK on purpose — the row
+     * it names is one slice 3 deletes.
+     */
+    originTenantId: uuid("origin_tenant_id"),
     businessName: text("business_name").notNull(),
     industry: text("industry").notNull().default("general"),
     contactName: text("contact_name"),
@@ -565,7 +587,10 @@ export const audits = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (t) => [index("audits_status_idx").on(t.status)],
+  (t) => [
+    index("audits_status_idx").on(t.status),
+    index("audits_tenant_party_idx").on(t.tenantId, t.partyId),
+  ],
 );
 
 /* ------------------------------------------------------------------------

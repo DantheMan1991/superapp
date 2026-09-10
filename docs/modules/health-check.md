@@ -2,15 +2,40 @@
 
 > The lead funnel: an anonymous visitor has a real conversation with Claude
 > about how their business runs, gets a written assessment, and — if they
-> leave contact details — becomes a prospect tenant with a Discovery audit
-> already attached for the superadmin to pick up. The public front of the
-> same machinery `/admin/audits` uses internally.
+> leave contact details — lands in the OPERATOR tenant's CRM as a business, a
+> contact, a deal, a follow-up and a Discovery record (ADR 0041, ADR 0042).
+> The public front of the same machinery `/admin/audits` uses internally.
 > Status: live · Scope: `platform`
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this area. Every PR
 that changes it MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-09 — A lead lands as a lead (`claude/back-office-2-discovery-comes-home`, back-office slice 2)
+
+- **Promotion no longer mints a workspace.** `promoteSession` used to write a
+  prospect `tenants` row, a `subscriptions` row and an `audits` row under
+  `withSystem` — a stranger modelled as a workspace. It now lands in the
+  OPERATOR tenant (ADR 0041) as `staff` with no user, through the doors every
+  member action uses — the enquiry's shape (ADR 0021): the business party,
+  the person (matched by email when the operator already knows the inbox),
+  the contact point, the discovery record (`audits`, now the operator's table
+  with `party_id`), the leads slot with a proposition (ADR 0042 — the CRM
+  opens the deal, joins the contact, leaves the note), a follow-up due today,
+  an audit-log row. One transaction.
+- **The session is claimed first.** Only an `awaiting_contact` row takes the
+  contact and flips to `completed`, atomically, so a double submit finds the
+  first claim and gets the same assessment back; a landing that fails hands
+  the claim back so the visitor can retry; no operator named answers
+  `unavailable` (the visitor sees the same generic message).
+- **The operator is told** — its owners' addresses, Reply-To the visitor,
+  `kind: health_check`, idempotent per audit and recipient. Closes the Open
+  item below that said nobody was.
+- **The assessment becomes the record's intake notes** once written, so the
+  founder's Discovery copilot starts from what the visitor was told.
+- `tests/interview.test.ts` rewritten for the landing; the promotion test
+  obtains the operator rather than minting one.
 
 ### 2026-07-28 — Folded into the public site (`4ba0de7`, PR #28)
 - Moved under the `(marketing)` route group so it inherits the site header,
@@ -34,8 +59,8 @@ that changes it MUST add an entry here (rule in AGENTS.md).
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
 | `interview_sessions` | The anonymous conversation, its state and the generated assessment | Superadmin-only RLS (0022). `state` CHECK: `active` / `awaiting_contact` / `completed` / `expired`. Partial unique index on `audit_id` where not null = the double-submit anchor. Never stores a raw IP |
-| `audits` | The Discovery record created on promotion | Platform-level, superadmin-only RLS |
-| `tenants` | Prospect row, `clerk_org_id = null` until they actually sign up | Slug uniqueness resolved by `uniqueTenantSlug` |
+| `audits` | The Discovery record created on promotion | The OPERATOR tenant's row since back-office slice 2 (`tenant_id` = operator, `party_id` = the business party); `superadmin_all` + `member_all` |
+| `parties`, `party_contact_points`, `crm_*`, `work_items` (in the operator tenant) | What one landing writes: the business, the person, the email, the record, the deal, the affiliation, the note, the follow-up | Through the shared doors and the leads slot; nothing platform-level is written any more |
 | `public_access_attempts` | Rate-limit ledger shared with the contact form | Counted inside the insert transaction |
 
 ## Key files & seams
@@ -61,17 +86,19 @@ that changes it MUST add an entry here (rule in AGENTS.md).
   running unprotected.
 - **Raw IPs are never stored** — `ip_hash = sha256(SALT + ip)`. The salt is
   what stops the hash being a reversible lookup over the IPv4 space.
-- **`audit_id` is the idempotency anchor.** A double-submitted contact form
-  returns the existing promotion instead of creating a second prospect.
-- Sessions are promoted under `withSystem` because a prospect has no tenant
-  context yet — this is trusted sync code, one of the sanctioned uses.
+- **The claim is the idempotency anchor, and `audit_id` the proof.** A
+  double-submitted contact form finds the session already `completed` and
+  returns the existing assessment; `audit_id` is set once the landing has
+  happened, and a claim whose landing failed is handed back.
+- Only the session's own row is touched under `withSystem` — it is
+  platform-level, an anonymous visitor's. Everything the lead becomes is
+  written inside the operator tenant's context as `staff`, so the member
+  policies bound what a stranger's form may write.
 
 ## Open items
 
 - **No expiry sweep.** `expired` is a valid state but nothing walks the table
   to set it, and nothing deletes old transcripts.
-- **No notification on promotion** — a new prospect sits in `/admin/audits`
-  until a superadmin happens to look.
 - Assessment failure leaves `assessment` null with no retry path for the
   visitor.
 - No measurement of the funnel: starts, completions and promotions are not

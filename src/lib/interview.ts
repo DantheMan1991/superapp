@@ -1,11 +1,21 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { and, eq, gte, sql } from "drizzle-orm";
-import { withSystem, schema } from "@/db";
-import type { AuditMessage, InterviewSession } from "@/db/schema";
-import { logAudit } from "@/lib/audit";
+import { withSystem, withTenant, schema } from "@/db";
+import type { AuditMessage } from "@/db/schema";
+import { logAudit, logAuditInTx } from "@/lib/audit";
 import { getClaude, CLAUDE_MODEL, CLAUDE_THINKING_OFF } from "@/lib/claude";
-import { uniqueTenantSlug } from "@/lib/slug";
+import { sendEmail } from "@/lib/email/send";
+import { landLead } from "@/lib/leads/resolve";
+import { getOperatorTenant } from "@/lib/operator-tenant";
+import { createParty } from "@/lib/parties";
+import { findPartiesByContact } from "@/lib/parties/contacts";
+import { notifyPlan, tryAddContactPoint } from "@/lib/sites/enquiries";
+import { splitPersonName } from "@/lib/sites/enquiry-schema";
+import { appUrl } from "@/lib/stripe-customer";
+import { getTenantTimezone } from "@/lib/tenant-timezone";
+import { todayInTimezone } from "@/lib/timezone";
+import { createUnlinkedWork, createWorkForEntity } from "@/lib/work/entity-work";
 import {
   ASSESSMENT_INSTRUCTION,
   ASSESSMENT_MAX_TOKENS,
@@ -286,7 +296,71 @@ export async function callAssessmentModel(
 
 export type PromoteResult =
   | { ok: true; assessment: string | null }
-  | { ok: false; code: "expired" };
+  /** `unavailable`: nowhere to land — no operator tenant is named, or the
+   *  landing failed and the session was handed back for another try. */
+  | { ok: false; code: "expired" | "unavailable" };
+
+/** What one landing wrote, for the log and the email. */
+interface LandedLeadRows {
+  auditId: string;
+  businessPartyId: string;
+  personPartyId: string;
+  workItemId: string;
+  crm: boolean;
+}
+
+export interface LeadContact {
+  email: string;
+  contactName: string;
+  businessName: string;
+}
+
+/** A failed landing hands the session back so the visitor can try again. */
+async function releaseClaim(sessionId: string): Promise<void> {
+  await withSystem((tx) =>
+    tx
+      .update(schema.interviewSessions)
+      .set({ state: "awaiting_contact", updatedAt: new Date() })
+      .where(eq(schema.interviewSessions.id, sessionId)),
+  );
+}
+
+/**
+ * The operator hears about a lead the way a business hears about an enquiry
+ * (ADR 0021): its own owners' addresses, never the visitor's, with Reply-To
+ * set to the visitor. Best-effort — the lead is already safe.
+ */
+export async function notifyOperator(
+  operatorId: string,
+  landed: LandedLeadRows,
+  contact: LeadContact,
+  exchanges: number,
+): Promise<void> {
+  const plan = await notifyPlan(operatorId, "");
+  const subject = `Health check lead: ${contact.businessName}`;
+  const text = [
+    `${contact.contactName} (${contact.email}) finished the health check for ${contact.businessName} — ${exchanges} exchanges.`,
+    "",
+    `Discovery: ${appUrl(`/admin/audits/${landed.auditId}`)}`,
+    landed.crm
+      ? "The business and the contact are in the CRM, with a deal on the pipeline and a follow-up due today."
+      : "A follow-up is due today.",
+    "",
+    "Reply to this email to reach them.",
+  ].join("\n");
+  for (const to of plan.recipients) {
+    const sent = await sendEmail({
+      tenantId: operatorId,
+      kind: "health_check",
+      to: to.email,
+      subject,
+      text,
+      idempotencyKey: `health-check:${landed.auditId}:${to.key}`,
+      replyTo: contact.email,
+    });
+    if (!sent.ok) console.error(`health check: email not sent (${sent.reason})`);
+  }
+}
 
 /**
  * Promotion: session → prospect tenant + audit row in the founder's
@@ -297,113 +371,217 @@ export type PromoteResult =
  */
 export async function promoteSession(
   sessionId: string,
-  contact: { email: string; contactName: string; businessName: string },
+  contact: LeadContact,
   callAssessment: (t: AuditMessage[]) => Promise<string> = callAssessmentModel,
+  notify: typeof notifyOperator = notifyOperator,
 ): Promise<PromoteResult> {
-  type Promoted = {
-    already: boolean;
-    session: InterviewSession;
-    tenantId?: string;
-    auditId?: string;
-  };
-
-  let promoted: Promoted;
-  try {
-    promoted = await withSystem(async (tx): Promise<Promoted> => {
-      const session = await tx.query.interviewSessions.findFirst({
-        where: eq(schema.interviewSessions.id, sessionId),
-      });
-      if (!session) throw new InterviewError("SESSION_GONE");
-      if (session.state === "completed" && session.auditId) {
-        return { already: true, session };
-      }
-      if (session.state !== "awaiting_contact") {
-        throw new InterviewError("SESSION_GONE");
-      }
-
-      const slug = await uniqueTenantSlug(tx, contact.businessName);
-      const [tenant] = await tx
-        .insert(schema.tenants)
-        .values({
-          clerkOrgId: null,
-          name: contact.businessName,
-          slug,
-          industry: "general",
-          status: "prospect",
-          contactName: contact.contactName,
-          contactEmail: contact.email,
-        })
-        .returning({ id: schema.tenants.id });
-      await tx
-        .insert(schema.subscriptions)
-        .values({ tenantId: tenant.id })
-        .onConflictDoNothing();
-
-      const [audit] = await tx
-        .insert(schema.audits)
-        .values({
-          tenantId: tenant.id,
-          businessName: contact.businessName,
-          industry: "general",
-          contactName: contact.contactName,
-          status: "open",
-          source: "self_serve",
-          context: "Self-serve landing-page health check interview.",
-          messages: session.messages,
-        })
-        .returning({ id: schema.audits.id });
-
-      await tx
-        .update(schema.interviewSessions)
-        .set({
-          auditId: audit.id,
-          email: contact.email,
-          contactName: contact.contactName,
-          businessName: contact.businessName,
-          state: "completed",
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.interviewSessions.id, sessionId));
-
-      return { already: false, session, tenantId: tenant.id, auditId: audit.id };
+  // 1. Claim the session, atomically: only an `awaiting_contact` row takes
+  //    the contact and flips to `completed`, so a double submit finds the
+  //    first claim and gets the same answer back. A stale id gets the same
+  //    message an expired one does — no validity oracles.
+  const claim = await withSystem(async (tx) => {
+    const session = await tx.query.interviewSessions.findFirst({
+      where: eq(schema.interviewSessions.id, sessionId),
     });
-  } catch (err) {
-    if (err instanceof InterviewError) return { ok: false, code: "expired" };
-    throw err;
-  }
-
-  if (promoted.already) {
-    return { ok: true, assessment: promoted.session.assessment };
-  }
-
-  await logAudit({
-    action: "prospect.created",
-    tenantId: promoted.tenantId,
-    actorLabel: "landing-interview",
+    if (!session) return { kind: "gone" as const };
+    if (session.state === "completed" && session.auditId) {
+      return { kind: "already" as const, session };
+    }
+    if (session.state !== "awaiting_contact") return { kind: "gone" as const };
+    const [claimed] = await tx
+      .update(schema.interviewSessions)
+      .set({
+        email: contact.email,
+        contactName: contact.contactName,
+        businessName: contact.businessName,
+        state: "completed",
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(schema.interviewSessions.id, sessionId),
+          eq(schema.interviewSessions.state, "awaiting_contact"),
+        ),
+      )
+      .returning();
+    if (!claimed) return { kind: "gone" as const };
+    return { kind: "claimed" as const, session: claimed };
   });
+  if (claim.kind === "gone") return { ok: false, code: "expired" };
+  if (claim.kind === "already") {
+    return { ok: true, assessment: claim.session.assessment };
+  }
+  const session = claim.session;
+
+  // 2. Where a lead lands: the OPERATOR tenant (ADR 0041) — named by the
+  //    flag, not by anything the visitor chose. With none there is nowhere
+  //    to land, so the claim is handed back for a later try.
+  const operator = await getOperatorTenant();
+  if (!operator) {
+    console.error("health check: no operator tenant is named; a lead could not land");
+    await releaseClaim(sessionId);
+    return { ok: false, code: "unavailable" };
+  }
+
+  // 3. Land, as `staff` with no user, inside the operator's own context and
+  //    through the doors every member action uses — the enquiry's shape
+  //    (ADR 0021) — plus the slot the CRM fills (ADR 0042). One transaction:
+  //    the business, the person, the discovery record, the deal and the
+  //    follow-up exist together or not at all.
+  let landed: LandedLeadRows;
+  try {
+    landed = await withTenant(
+      operator.id,
+      async (tx): Promise<LandedLeadRows> => {
+        const timezone = await getTenantTimezone(tx, operator.id);
+        const receivedOn = todayInTimezone(timezone);
+
+        const business = await createParty(tx, operator.id, {
+          kind: "organization",
+          displayName: contact.businessName,
+        });
+        // The person: matched by email when the operator already knows the
+        // address, otherwise new — never a second party for the same inbox.
+        const matches = await findPartiesByContact(tx, operator.id, "email", contact.email);
+        const known = matches.map((m) => m.party).find((p) => p.kind === "person");
+        const person =
+          known ??
+          (await createParty(tx, operator.id, {
+            kind: "person",
+            displayName: contact.contactName,
+            ...splitPersonName(contact.contactName),
+          }));
+        await tryAddContactPoint(tx, operator.id, person.id, "email", contact.email);
+
+        const [audit] = await tx
+          .insert(schema.audits)
+          .values({
+            tenantId: operator.id,
+            partyId: business.id,
+            businessName: contact.businessName,
+            industry: "general",
+            contactName: contact.contactName,
+            status: "open",
+            source: "self_serve",
+            context: "Self-serve health check interview.",
+            messages: session.messages,
+          })
+          .returning({ id: schema.audits.id });
+
+        const landedIn = await landLead(
+          tx,
+          { tenantId: operator.id, userId: "" },
+          {
+            partyId: business.id,
+            contactPartyId: person.id,
+            source: "health-check",
+            proposition: {
+              title: `${contact.businessName}: the outsourced back office`,
+              note: {
+                subject: "Health check",
+                body: `${contact.contactName} completed the health check interview (${session.exchangeCount} exchanges). Transcript and assessment: Discovery, ${appUrl(`/admin/audits/${audit.id}`)}.`,
+              },
+            },
+          },
+        );
+        const crm = landedIn.includes("crm");
+
+        const workInput = {
+          title: `Health check lead: ${contact.businessName}`,
+          notes: `${contact.contactName} · ${contact.email}\nCompleted the health check (${session.exchangeCount} exchanges). Open Discovery to read it.`,
+          dueOn: receivedOn,
+        };
+        const workCtx = { tenantId: operator.id, userId: "" };
+        const workItemId = crm
+          ? await createWorkForEntity(
+              tx,
+              workCtx,
+              { extensionSlug: "crm", entityType: "contact", entityId: person.id },
+              workInput,
+            )
+          : await createUnlinkedWork(tx, workCtx, workInput);
+
+        await logAuditInTx(tx, {
+          action: "lead.landed",
+          tenantId: operator.id,
+          actorLabel: "landing-interview",
+          targetType: "audit",
+          targetId: audit.id,
+          meta: {
+            sessionId,
+            partyId: business.id,
+            contactPartyId: person.id,
+            matchedExisting: !!known,
+            crm,
+            workItemId,
+            exchanges: session.exchangeCount,
+          },
+        });
+
+        return {
+          auditId: audit.id,
+          businessPartyId: business.id,
+          personPartyId: person.id,
+          workItemId,
+          crm,
+        };
+      },
+      { role: "staff" },
+    );
+  } catch (err) {
+    console.error("health check: landing failed", err instanceof Error ? err.message : err);
+    await releaseClaim(sessionId);
+    return { ok: false, code: "unavailable" };
+  }
+
+  // 4. The anchor: the session remembers its audit, which is what makes a
+  //    double submit answer with the same lead instead of landing twice.
+  await withSystem((tx) =>
+    tx
+      .update(schema.interviewSessions)
+      .set({ auditId: landed.auditId, updatedAt: new Date() })
+      .where(eq(schema.interviewSessions.id, sessionId)),
+  );
+
   await logAudit({
     action: "interview.completed",
-    tenantId: promoted.tenantId,
+    tenantId: operator.id,
     actorLabel: "landing-interview",
     targetType: "audit",
-    targetId: promoted.auditId,
-    meta: {
-      sessionId,
-      exchanges: promoted.session.exchangeCount,
-    },
+    targetId: landed.auditId,
+    meta: { sessionId, exchanges: session.exchangeCount, partyId: landed.businessPartyId },
   });
 
-  // The lead is safe; the assessment is best-effort.
+  // 5. The operator hears about it.
+  try {
+    await notify(operator.id, landed, contact, session.exchangeCount);
+  } catch (err) {
+    console.error("health check: notification failed", err);
+  }
+
+  // 6. The lead is safe; the assessment is best-effort. What the visitor is
+  //    told is also what the founder's discovery starts from.
   let assessment: string | null = null;
   try {
-    assessment = await callAssessment(
-      promoted.session.messages as AuditMessage[],
-    );
+    const text = await callAssessment(session.messages as AuditMessage[]);
+    assessment = text;
     await withSystem((tx) =>
       tx
         .update(schema.interviewSessions)
-        .set({ assessment, updatedAt: new Date() })
+        .set({ assessment: text, updatedAt: new Date() })
         .where(eq(schema.interviewSessions.id, sessionId)),
+    );
+    await withTenant(
+      operator.id,
+      (tx) =>
+        tx
+          .update(schema.audits)
+          .set({
+            context: `Self-serve health check interview.\n\nThe assessment the visitor received:\n\n${text}`,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(schema.audits.tenantId, operator.id), eq(schema.audits.id, landed.auditId))),
+      { role: "staff" },
     );
   } catch (err) {
     console.error("assessment generation failed", err);

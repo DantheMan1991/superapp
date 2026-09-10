@@ -532,6 +532,16 @@ knows the pointer exists, and nothing here may ever write `tenants`. To this
 module the record is an ordinary record — `platform` is a source word beside
 `website` and `referral`, not a kind.
 
+**A stranger's arrival is a lead this module fills in (ADR 0042, slice 2).**
+`src/modules/crm/leads.ts` fills the `src/lib/leads/` slot: the record with
+its source, the person joined to the business (never primary — the partial
+unique index that keeps one primary would refuse a second inside the door's
+transaction), a deal in the default pipeline's opening stage when the arrival
+carries a proposition, a note on the timeline. It runs as `staff` with no user
+inside the door's transaction, never fails the arrival, and never lets a
+database error escape. The enquiry, the booking and the health check all
+arrive through it; `health-check` is a third source word.
+
 **The spine is shared, not CRM-owned, and the constraint that forced it is
 entitlement.** A tenant can buy Accounting without CRM, so accounting can never
 FK into a `crm_*` table — but two customer lists is the failure this module

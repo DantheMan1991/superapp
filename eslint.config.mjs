@@ -325,6 +325,10 @@ const eslintConfig = defineConfig([
       // The shared linkable-record contract. Same rule, same reason: a contract
       // that imported an implementation of itself would invert the graph.
       "src/lib/entity-links/types.ts",
+      // A stranger's arrival is a lead the CRM fills in (ADR 0042). Same
+      // rule: the door and the resolver know the shape, registry.ts knows CRM.
+      "src/lib/leads/types.ts",
+      "src/lib/leads/resolve.ts",
     ],
     rules: {
       "no-restricted-imports": [

@@ -7,6 +7,7 @@ import { z } from "zod";
 import { withSystem, withTenant, schema } from "@/db";
 import { requireSuperAdmin } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { operatorRefusal } from "@/lib/operator-guard";
 import { uniqueTenantSlug } from "@/lib/slug";
 import { upsertTenantFromOrg } from "@/lib/tenant-sync";
 import { provisionAccounting } from "@/modules/accounting/templates/apply";
@@ -93,6 +94,22 @@ export async function toggleModule(input: z.infer<typeof toggleModuleSchema>) {
   const parsed = toggleModuleSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   const { tenantId, moduleId, enabled } = parsed.data;
+
+  // The operator tenant's features stay on (ADR 0041): the platform itself
+  // will come to depend on them — its CRM is where every lead lands. Checked
+  // before the dependency walk, so a refused toggle leaves no trace.
+  if (!enabled) {
+    const tenant = await withSystem((tx) =>
+      tx.query.tenants.findFirst({
+        where: eq(schema.tenants.id, tenantId),
+        columns: { isOperator: true },
+      }),
+    );
+    const refusal = tenant
+      ? operatorRefusal(tenant, "moduleOff")
+      : "No such business.";
+    if (refusal) return { error: refusal };
+  }
 
   // Dependency check BEFORE anything else, including provisioning — a refused
   // toggle must leave no trace. Enforced only here, at the moment of enabling:
@@ -299,12 +316,23 @@ export async function setTenantStatus(
   const parsed = setStatusSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
 
-  await withSystem((tx) =>
-    tx
+  // The flag is read in the same transaction as the write, so the operator
+  // row is refused by what it is now, not by what a page rendered earlier.
+  const refused = await withSystem(async (tx) => {
+    const tenant = await tx.query.tenants.findFirst({
+      where: eq(schema.tenants.id, parsed.data.tenantId),
+      columns: { isOperator: true },
+    });
+    if (!tenant) return "No such business.";
+    const refusal = operatorRefusal(tenant, "status");
+    if (refusal) return refusal;
+    await tx
       .update(schema.tenants)
       .set({ status: parsed.data.status, updatedAt: new Date() })
-      .where(eq(schema.tenants.id, parsed.data.tenantId)),
-  );
+      .where(eq(schema.tenants.id, parsed.data.tenantId));
+    return null;
+  });
+  if (refused) return { error: refused };
 
   await logAudit({
     action: "tenant.status_changed",

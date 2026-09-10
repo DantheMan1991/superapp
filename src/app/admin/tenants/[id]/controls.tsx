@@ -21,17 +21,28 @@ import {
   setTenantStatus,
   toggleModule,
 } from "../../actions";
+import { operatorRefusal } from "@/lib/operator-guard";
 
 const STATUSES = ["prospect", "onboarding", "active", "paused", "churned"] as const;
 
 export function TenantStatusSelect({
   tenantId,
   status,
+  isOperator,
 }: {
   tenantId: string;
   status: string;
+  isOperator: boolean;
 }) {
   const [pending, startTransition] = useTransition();
+
+  // Where the control is the point, a refused control is not drawn: the
+  // sentence the action would answer with stands in its place, from the same
+  // predicate the action calls (src/lib/operator-guard.ts).
+  const refusal = operatorRefusal({ isOperator }, "status");
+  if (refusal) {
+    return <p className="max-w-56 text-xs text-muted-foreground">{refusal}</p>;
+  }
 
   return (
     <Select
@@ -67,6 +78,7 @@ export function ModuleToggle({
   moduleId,
   enabled,
   canToggle,
+  isOperator,
 }: {
   tenantId: string;
   moduleId: string;
@@ -80,13 +92,17 @@ export function ModuleToggle({
    * un-switchable. See the comment in page.tsx.
    */
   canToggle: boolean;
+  /** The operator tenant's features stay on: the off-switch is not offered. */
+  isOperator: boolean;
 }) {
   const [pending, startTransition] = useTransition();
+  const stayOn =
+    enabled && operatorRefusal({ isOperator }, "moduleOff") !== null;
 
   return (
     <Switch
       checked={enabled}
-      disabled={pending || !canToggle}
+      disabled={pending || !canToggle || stayOn}
       onCheckedChange={(next) =>
         startTransition(async () => {
           const res = await toggleModule({ tenantId, moduleId, enabled: next });

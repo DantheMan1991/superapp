@@ -2003,6 +2003,13 @@
       "when": 1789001619752,
       "tag": "0285_inventory_barcode",
       "breakpoints": true
+    },
+    {
+      "idx": 286,
+      "version": "7",
+      "when": 1789005995147,
+      "tag": "0286_operator_tenant",
+      "breakpoints": true
     }
   ]
 }

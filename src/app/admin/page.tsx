@@ -2,6 +2,7 @@ import Link from "next/link";
 import { desc, eq, sql as dsql } from "drizzle-orm";
 import { Plus } from "lucide-react";
 import { withSystem, schema } from "@/db";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/app/page-header";
 import { StatCard } from "@/components/app/stat-card";
@@ -44,14 +45,17 @@ export default async function AdminClientsPage() {
       .orderBy(desc(schema.tenants.createdAt)),
   );
 
-  const activeClients = rows.filter(
+  // The operator tenant — the platform's own workspace (ADR 0041) — is listed
+  // but is not a client: it counts in nothing and pays nobody.
+  const clients = rows.filter((r) => !r.tenant.isOperator);
+  const activeClients = clients.filter(
     (r) => r.tenant.status === "active",
   ).length;
-  const paying = rows.filter((r) => PAYING.includes(r.subStatus ?? ""));
+  const paying = clients.filter((r) => PAYING.includes(r.subStatus ?? ""));
   const mrrCents = paying.reduce((sum, r) => sum + (r.amountCents ?? 0), 0);
 
   const stats = [
-    { label: "Clients", value: String(rows.length) },
+    { label: "Clients", value: String(clients.length) },
     { label: "Active", value: String(activeClients) },
     { label: "Paying subscriptions", value: String(paying.length) },
     {
@@ -88,7 +92,7 @@ export default async function AdminClientsPage() {
 
       <div>
         <h2 className="font-heading font-medium tracking-heading">
-          {rows.length} client{rows.length === 1 ? "" : "s"}
+          {clients.length} client{clients.length === 1 ? "" : "s"}
         </h2>
         <p className="mb-3 text-sm text-muted-foreground">
           Click a row to manage modules, billing, and notes.
@@ -125,6 +129,11 @@ export default async function AdminClientsPage() {
                     >
                       {tenant.name}
                     </Link>
+                    {tenant.isOperator && (
+                      <Badge variant="outline" className="ml-2">
+                        Operator
+                      </Badge>
+                    )}
                   </TableCell>
                   <TableCell className="capitalize text-muted-foreground">
                     {tenant.industry}

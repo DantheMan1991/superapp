@@ -37,6 +37,7 @@ import {
 import { getLedgerIntegrity } from "@/modules/accounting/core";
 import { formatCents } from "@/modules/accounting/lib/money";
 import { loadRetainerView } from "@/lib/retainer";
+import { operatorRefusal } from "@/lib/operator-guard";
 import {
   formatMinutesAsHours,
   todayInRetainerTz,
@@ -196,9 +197,14 @@ export default async function TenantDetailPage({
               {tenant.createdAt.toLocaleDateString()}
             </span>
             <TenantStatusBadge status={tenant.status} />
+            {tenant.isOperator && <Badge variant="outline">Operator</Badge>}
           </div>
         </div>
-        <TenantStatusSelect tenantId={tenant.id} status={tenant.status} />
+        <TenantStatusSelect
+          tenantId={tenant.id}
+          status={tenant.status}
+          isOperator={tenant.isOperator}
+        />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -249,6 +255,12 @@ export default async function TenantDetailPage({
                 built. &ldquo;In build&rdquo; ones have a renderer but are not in
                 the catalog yet: switchable here so a slice can be tried on a
                 real tenant before anybody is sold it.
+                {tenant.isOperator && (
+                  <>
+                    {" "}
+                    {operatorRefusal(tenant, "moduleOff")}
+                  </>
+                )}
               </CardDescription>
             </CardHeader>
             <CardContent className="divide-y">
@@ -298,6 +310,7 @@ export default async function TenantDetailPage({
                       moduleId={mod.id}
                       enabled={enabledBySlug.get(mod.id) ?? false}
                       canToggle={implemented}
+                      isOperator={tenant.isOperator}
                     />
                   </div>
                 );
@@ -345,6 +358,18 @@ export default async function TenantDetailPage({
             </CardContent>
           </Card>
 
+          {/* The operator cannot hold a retainer with itself (ADR 0041); the
+              card says so and offers no timer, allotment or log. */}
+          {tenant.isOperator ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Retainer</CardTitle>
+                <CardDescription>
+                  {operatorRefusal(tenant, "retainer")}
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          ) : (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Retainer</CardTitle>
@@ -405,6 +430,7 @@ export default async function TenantDetailPage({
               )}
             </CardContent>
           </Card>
+          )}
 
           <Card>
             <CardHeader>
@@ -466,6 +492,12 @@ export default async function TenantDetailPage({
               <CardTitle className="text-base">Subscription</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
+              {tenant.isOperator ? (
+                <p className="text-muted-foreground">
+                  {operatorRefusal(tenant, "billing")}
+                </p>
+              ) : (
+              <>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Status</span>
                 <SubscriptionStatusBadge
@@ -488,6 +520,8 @@ export default async function TenantDetailPage({
                 Billing state syncs automatically from Stripe. The client
                 manages payment from their dashboard&apos;s Billing page.
               </p>
+              </>
+              )}
             </CardContent>
           </Card>
 

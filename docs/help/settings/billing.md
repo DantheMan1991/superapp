@@ -13,6 +13,7 @@ Open **Billing** under `Settings` in the sidebar. Owners only. This page is abou
 - **The line about extra hours.** `Need extra hands-on hours this month? Buy hour blocks on the Hours page.` Hour blocks are bought on Hours, not here.
 - **The foot of the page.** `Payments are processed by Stripe. Card details never touch our servers.`
 - **In the Yosher app on a phone** there is no `Billing` row in the sidebar. If you open the page anyway, you see the `Current subscription` card with its badge and plan, and the line `Billing isn't available in the app.` Nothing else. Use a web browser for the plans and the Stripe portal.
+- **If your business is the one that runs Yosher** — the operator workspace — the page is one card, `Not billed`, with the line `This is the operator tenant. It is not billed by itself.` and no plans and no portal. No client ever sees this card.
 
 ## How to subscribe
 

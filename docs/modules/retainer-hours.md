@@ -8,6 +8,19 @@
 
 ## Build log
 
+### 2026-09-09 — The operator tenant holds no retainer (`claude/back-office-plan`)
+
+- Yosher is now a tenant of its own platform (ADR 0041, back-office slice 0),
+  and a retainer with itself is nonsense: `/admin/retainers` leaves the
+  operator row out, the tenant page's Retainer card is a sentence instead of
+  the controls, and `setRetainerAllotment`, `startTimer` and `logManualTime`
+  refuse it through `operatorRefusal(tenant, "retainer")`
+  (`src/lib/operator-guard.ts`). On the operator's own `/dashboard/hours`
+  there is no meter and no hour block to buy. Every client's meter is
+  untouched. The meter stays at Layer 0 because it is two-sided — the
+  operator writes, the client reads — which is why "not a sellable module"
+  above is still true for now (ADR 0041, Notes).
+
 ### 2026-09-06 — No hour blocks inside the mobile app (`claude/mobile-app-0-app-aware-web`)
 
 - The two block cards are left out when the request comes from the Yosher

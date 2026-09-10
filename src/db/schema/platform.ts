@@ -18,6 +18,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const tenantStatus = pgEnum("tenant_status", [
   "prospect",
@@ -138,6 +139,21 @@ export const tenants = pgTable(
      * currency, which is a different and much larger change.
      */
     currencySymbol: text("currency_symbol"),
+    /**
+     * THE OPERATOR TENANT — the business that runs the platform, running on
+     * it (ADR 0041, docs/modules/back-office.md). At most one per database:
+     * the partial unique index below is the constraint. In data rather than an
+     * env var so dev and prod each name their own, the isolation suite can
+     * mint one, and the deploy sets nothing.
+     *
+     * Set by scripts/operator-tenant.ts under withSystem, audited, never by a
+     * console action — moving it is not a routine act. What it changes is
+     * deliberately small: the console refuses its own buttons on this row
+     * (src/lib/operator-guard.ts), and the health check will land its leads
+     * here (slice 2). To RLS it is an ordinary tenant, and
+     * tests/isolation/operator.test.ts is what keeps it that way.
+     */
+    isOperator: boolean("is_operator").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -148,6 +164,10 @@ export const tenants = pgTable(
   (t) => [
     uniqueIndex("tenants_clerk_org_id_idx").on(t.clerkOrgId),
     uniqueIndex("tenants_slug_idx").on(t.slug),
+    // One operator per database, proved by the index rather than by code.
+    uniqueIndex("tenants_operator_idx")
+      .on(t.isOperator)
+      .where(sql`${t.isOperator} = true`),
   ],
 );
 

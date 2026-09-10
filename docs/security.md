@@ -242,6 +242,16 @@ Extensions add tables and columns. They do not get to relax a core policy,
 bypass `effective_visibility`, or read another pack's rows. See
 [extension-model.md](extension-model.md).
 
+**S13 — The operator tenant is an ordinary tenant.**
+Yosher runs on its own platform (ADR
+[0041](decisions/0041-a-tenant-is-a-workspace-and-a-client-is-a-party-in-the-operator-tenant.md)).
+Its rows are tenant-scoped, its policies are everyone's policies, and
+`tests/isolation/operator.test.ts` certifies it as one half of an ordinary
+pair. Nothing in RLS, `withTenant` or the isolation suite may special-case
+it. The flag (`tenants.is_operator`) exists so the CONSOLE can refuse its own
+buttons and so a public door can find where a lead lands — and that is all it
+may ever be read for.
+
 ---
 
 ## 4. Checklists

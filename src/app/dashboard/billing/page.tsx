@@ -4,6 +4,7 @@ import { CheckCircle2 } from "lucide-react";
 import { withTenant, schema } from "@/db";
 import { requireTenantOwner } from "@/lib/auth";
 import { isNativeApp } from "@/lib/native-app";
+import { operatorRefusal } from "@/lib/operator-guard";
 import { reconcileSubscriptionFromStripe } from "@/lib/billing-sync";
 import { PLANS } from "@/lib/stripe";
 import {
@@ -28,6 +29,35 @@ export default async function BillingPage({
 }) {
   const ctx = await requireTenantOwner();
   const { status } = await searchParams;
+
+  // The operator tenant — the business that runs the platform, running on it
+  // (ADR 0041) — is not billed by itself: no plan, no checkout, no portal, and
+  // no Stripe read for a customer that does not exist.
+  if (ctx.tenant.isOperator) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Billing"
+          description={`Subscription for ${ctx.tenant.name}.`}
+        />
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Not billed</CardTitle>
+            <CardDescription>
+              {operatorRefusal(ctx.tenant, "billing")}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            <p>
+              This workspace is the platform&apos;s own. What clients pay is
+              collected by Stripe and shown on their Billing pages; there is
+              nothing to pay here.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   // Webhooks are the primary sync; this direct API read covers local dev
   // (no public URL for Stripe to call) and heals any missed event.

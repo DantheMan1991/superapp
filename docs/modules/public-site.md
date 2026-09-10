@@ -11,6 +11,63 @@
 Newest first. One entry per session/PR that touched this area. Every PR
 that changes it MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-10 — A vertical seeded into the operator tenant's own site (`claude/seed-vertical-site`)
+
+The founder asked whether the industry sites should be managed through the
+Marketing module instead of a data file — "I want to be able to customize
+them." Re-checked rather than re-answered, and **three objections in the
+session before this one did not hold up**: site links take a full `https://`
+address (`links.ts`), so the health-check funnel works from a tenant site; the
+section kinds cover nearly all of it; and a connected domain (slice 3) is more
+standalone than a path, not less. The tool also brings something the code page
+cannot have — a `form` section whose enquiry becomes a party, a CRM record and
+a follow-up (ADR 0021).
+
+`scripts/seed-vertical-site.ts` writes a vertical into the operator tenant's
+site so the founder edits it in the product rather than in TypeScript. Run for
+`homestead` against **production** on 2026-09-10.
+
+- **Create-only, and it refuses when a site exists.** The vertical file is the
+  source for the FIRST write and nothing after it; re-running over an edited
+  site would overwrite a person's work with a stale copy, and no merge could be
+  right.
+- **Written as a DRAFT, `sites.status` left `draft`** — nothing is publicly
+  reachable until somebody presses Publish.
+- **The kit is the TENANT's, not the vertical's.** `brand_kits.display_name`
+  is what the invoice PDF prints (ADR 0018), so it says `Yosher`; the sub-brand
+  lives in `sites.title`, which the site header prefers. Getting this backwards
+  would have put "Yosher Homestead" on every invoice Yosher sends a client.
+- **Three things do not survive the move**, and the script's header says so:
+  the icons (`CARD_ICON_NAMES` is industry-NEUTRAL by design — no cow, fence,
+  shears or tractor, so `SITE_ICONS` is a least-wrong map and a visible
+  downgrade), the numbered walk-through (no numbered-narrative section, so the
+  sequence moves into the card headings), and the CTA's paragraph (a `cta`
+  section is a headline and one button).
+- **The rows are written directly, not through
+  `@/modules/marketing/site-ops`.** That module is `server-only`, which a
+  script cannot import — the reason `scripts/operator-tenant.ts:21` already
+  records. `tsx --conditions react-server` satisfies `server-only` and then
+  breaks `lucide-react`, which the script reaches through the vertical's
+  icons: **data holding React components cannot cross a process boundary**,
+  which is the strongest argument yet for naming icons by string in
+  `src/lib/verticals/`.
+- **THE LIMIT THAT DECIDES THE SECOND VERTICAL: `sites_tenant_idx` is a unique
+  index on `tenant_id` — ONE SITE PER TENANT**, and the schema comment calls it
+  "one site per tenant in this slice". Homestead now occupies the operator
+  tenant's only slot. A second industry site needs that index lifted (a product
+  change every client would get) or another home; making each brand its own
+  tenant would put its enquiries in the wrong CRM.
+- **Verified by reading the rows back, NOT by driving the editor.** The local
+  Clerk instance is the DEVELOPMENT one and its session is a member of Hilltop
+  Farm and Test only — there is no Yosher App organization to switch to from
+  this machine, so `/sites/yosher-homestead/draft` answers "Page not found",
+  correctly. Confirmed in the database: slug `yosher-homestead`, title
+  `Yosher Homestead`, status `draft`, `published_at` null, kit
+  `Yosher / #13203e + #2ead8a`, one page `/` with a draft and no published
+  snapshot, nine sections
+  `hero → columns → columns → columns → text → columns → faq → form → cta`.
+  **Nobody has yet opened this site in the editor.**
+
 ### 2026-09-10 — Yosher Homestead, and the industries we serve (`claude/yosher-homestead-vertical`)
 
 The founder: "a really good marketing website for Yosher Homestead … a

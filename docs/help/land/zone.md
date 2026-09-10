@@ -11,7 +11,7 @@ Open a {{parcel|lower}} from the Land list, then click a {{zone|lower}}'s name i
 - **The top of the page.** The link above the title carries the {{parcel|lower}}'s name and takes you back to its page. The title is the {{zone|lower}}'s name. The line under it shows its area, what it is currently for, a {badge:not productive|outline} badge for ground that is not expected to earn, and {badge:retired|outline} if it has been retired. At the right: **one move button, and which one depends on what is here.** While something is on this {{zone|lower}} you get {button:Move to…|outline}, then {button:Move off|outline}, then {button:Record a stay|primary}. While nothing is on it you get {button:Move something here|outline} and {button:Record a stay|primary} — and the move button only appears when there is something on this {{parcel|lower}} to bring.
 - **`Rested`**, or **`Currently`** while something is on it. The large figure is `Occupied now`, `Never used`, or the days since the last stay ended, such as `18 days`. Under it: what is on it and since when, `Nothing has been recorded on it yet.`, or `Since [date]`. If the {{parcel|lower}} has a rest target, a line compares: `Target on this parcel is 21 days — met.` or `— 3 short.` It is a comparison only. Nothing is refused for being short.
 - **`Grazing days`.** The total days something has been on it, `Across 6 stays, all time.`
-- **`What it is for`.** The last five uses with their dates, or `Nothing declared yet.` A use is set from the {{zone|lower}}'s menu on the {{parcel|lower}}'s page.
+- **`What it is for`.** The most recent five uses with their dates, or `Nothing declared yet.` Where there are more, a line reads `5 of 9 — the rest are in the dialog above.` Owners get {button:Say what it is for|outline} on an unused {{zone|lower}} and {button:Change it|outline} once there is one; it is the same dialog as the {{zone|lower}}'s menu on the {{parcel|lower}}'s page.
 - **`Boundary`.** The same reading as on the {{parcel|lower}}'s page: the measured area against the recorded one. The boundary itself is traced on the {{parcel|lower}}'s site plan, and `the site plan` in this section is a link there. Owners can also paste a boundary with {button:Add a boundary|outline} or {button:Replace boundary|outline}.
 - **`Walk to it`.** Only once its shape is drawn. `Its corners, nearest first. Nothing is recorded about where you were.` and {button:Take me there|outline}. See below.
 - **`Stays`.** A list with a count. On a computer it is a table: `What`, with any notes under it; `On`; `Off`, which shows {badge:still on it|outline} for an open stay and {badge:not yet|outline} for one that has not started; `Days`, counted with both ends included, or a dash while open; `Area used`, or `all of it`; and {button:Remove|outline} on each row. On a phone each stay is a card carrying the same things — the name, the dates, the days, the area and the notes — with {button:Remove|outline} at the bottom of it.
@@ -52,6 +52,19 @@ Use this when they are leaving the {{parcel|lower}} altogether — sold, or gone
 
 The day it moves off counts as a day on this {{zone|lower}}. On Monday and off Monday is one grazing day.
 
+## How to say what this {{zone|lower}} is for
+
+Owners only, because a use is a dated fact about ground the books charge costs to. The same dialog is on the {{zone|lower}}'s menu on the {{parcel|lower}}'s page; this one saves going back there while you are standing on the ground.
+
+1. Click {button:Say what it is for|outline}, or {button:Change it|outline} if something is already declared. The dialog is `What is [name] for?` and reads `From a date. Whatever it was for before is closed the day before, so the history stays readable.`
+2. Pick `Use`: Pasture, Hay, Crop, Garden, Orchard, Woodlot, Yard, Lane, Building site, Water, Wetland, Idle, any use you have already invented, or `Something else…`, which opens a box to type a new one. Nothing is picked for you on ground that has never had a use, and {button:Record use|primary} stays greyed out until you choose.
+3. Set `From`, the date it starts. Today to begin with.
+4. Leave `Expected to earn` on for pasture, hay, crops, a garden, an orchard or a woodlot, and off for a yard, a lane, a building site, water, wetland or idle ground: `Turn this off for a yard, a lane or a house site. Ground that earns nothing still carries tax and upkeep, and counting it as productive flatters every per-acre figure.` Picking a use sets this for you; changing it afterwards is yours.
+5. Add `Notes` if you want them. A `History` block lists every earlier use with its dates.
+6. Click {button:Record use|primary}. You see `Use recorded`, and the line under the {{zone|lower}}'s name changes to say what it is for now.
+
+Starting a new use closes the previous one the day before the new start date. A use recorded on the same day it started replaces that one rather than closing it, because a period that never happened is not history.
+
 ## How to walk to this {{zone|lower}}
 
 1. Click {button:Take me there|outline} under `Walk to it`. The phone starts reading its position.
@@ -82,8 +95,8 @@ A stay cannot be edited. A wrong date is fixed by removing the stay and recordin
 
 ## Not on this page
 
-Setting what the {{zone|lower}} is for is done from its menu on the {{parcel|lower}}'s page. A move only reaches {{zone|plural|lower}} on the same {{parcel|lower}}; to send something to a different block of ground, move it off here and record a stay there.
+A move only reaches {{zone|plural|lower}} on the same {{parcel|lower}}; to send something to a different block of ground, move it off here and record a stay there.
 
 ## Who can do what
 
-Everyone can record a stay, move something on or off, remove a stay, and walk to the {{zone|lower}}. Owners can also add or replace the boundary. A retired {{zone|lower}} shows owners {button:Put the {{zone|lower}} back|outline} and nothing else.
+Everyone can record a stay, move something on or off, remove a stay, and walk to the {{zone|lower}}. Owners can also say what it is for, and add or replace the boundary. A retired {{zone|lower}} shows owners {button:Put the {{zone|lower}} back|outline} and nothing else.

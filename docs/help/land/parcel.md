@@ -61,6 +61,8 @@ The box cannot edit a shape. To move a corner, use {button:Move the corners|outl
 
 ## How to set what a {{zone|lower}} is for
 
+The same dialog is on the {{zone|lower}}'s own page, which is easier when you are standing on the ground. See [One {{zone|lower}}](zone.md).
+
 1. Open the menu on the row and choose `Set what it is for`. The dialog is `What is [name] for?` and reads `From a date. Whatever it was for before is closed the day before, so the history stays readable.`
 2. Pick `Use`: Pasture, Hay, Crop, Garden, Orchard, Woodlot, Yard, Lane, Building site, Water, Wetland, Idle, any use you have already invented, or `Something else…`, which opens a box to type a new one.
 3. Set `From`, the date it starts. Today to begin with.

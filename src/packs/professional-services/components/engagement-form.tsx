@@ -27,6 +27,12 @@ import { createEngagementAction, updateEngagementAction } from "../actions";
 import { SUGGESTED_ENGAGEMENT_KINDS, engagementKindLabel } from "../vocabulary";
 
 const NEW_CLIENT = "__new__";
+/**
+ * What a new engagement opens on. NOT `kindOptions[0]`, which is alphabetical
+ * and so offered "Hourly" first — found by driving. The schema defaults
+ * `ps_engagements.kind` to `retainer`, and the form should agree with it.
+ */
+const DEFAULT_KIND = "retainer";
 const CUSTOM_KIND = "__custom__";
 
 /** Hours in the field, minutes on the wire — the same trade the cost fields make. */
@@ -98,7 +104,11 @@ export function EngagementForm({
   const editing = engagement !== undefined;
 
   const [kindChoice, setKindChoice] = useState<string>(
-    engagement ? (kindOptions.includes(engagement.kind) ? engagement.kind : CUSTOM_KIND) : kindOptions[0] ?? "retainer",
+    engagement
+      ? kindOptions.includes(engagement.kind)
+        ? engagement.kind
+        : CUSTOM_KIND
+      : DEFAULT_KIND,
   );
   const [customKind, setCustomKind] = useState(
     engagement && !kindOptions.includes(engagement.kind) ? engagement.kind : "",

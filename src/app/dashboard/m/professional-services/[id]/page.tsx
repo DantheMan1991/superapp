@@ -182,14 +182,24 @@ export default async function EngagementPage({
           </div>
         </Panel>
         <Panel className="p-4">
+          {/* THE SAME RULE THE MONTH TABLE BELOW USES, and it has to be:
+              driving this found the card saying "Logged at the rate $180.00"
+              beside a table row reading $0.00 for the same month. Hours INSIDE
+              a retainer are already paid for by the fee, so pricing them at
+              the rate invites somebody to bill them twice. A retainer
+              engagement therefore always shows its OVERAGE — zero until it
+              goes over — and only an engagement with no hours included prices
+              everything logged. */}
           <div className="text-sm text-muted-foreground">
-            {thisMonth.isOver ? "Extra this month" : "Logged at the rate"}
+            {thisMonth.includedMinutes > 0 ? "Extra this month" : "Logged at the rate"}
           </div>
           <div className="mt-1 text-2xl font-medium tabular-nums">
             {thisMonth.overageCents === null
               ? "—"
               : formatMoney(
-                  thisMonth.isOver ? thisMonth.overageCents : (thisMonth.usedCents ?? 0),
+                  thisMonth.includedMinutes > 0
+                    ? thisMonth.overageCents
+                    : (thisMonth.usedCents ?? 0),
                   currencySymbol,
                 )}
           </div>

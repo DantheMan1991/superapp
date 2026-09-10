@@ -2,12 +2,18 @@
 
 import { revalidatePath } from "next/cache";
 import { clerkClient, currentUser } from "@clerk/nextjs/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { withSystem, withTenant, schema } from "@/db";
 import { requireSuperAdmin } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { operatorRefusal } from "@/lib/operator-guard";
+import {
+  ensureOperatorParty,
+  RelationshipError,
+  relationshipMessage,
+  type EnsureResult,
+} from "./relationship";
 import { uniqueTenantSlug } from "@/lib/slug";
 import { upsertTenantFromOrg } from "@/lib/tenant-sync";
 import { provisionAccounting } from "@/modules/accounting/templates/apply";
@@ -346,29 +352,103 @@ export async function setTenantStatus(
   return { ok: true };
 }
 
-const addNoteSchema = z.object({
-  tenantId: z.string().uuid(),
-  body: z.string().trim().min(1).max(5000),
-});
+const partySchema = z.object({ tenantId: z.string().uuid() });
 
-export async function addTenantNote(formData: FormData) {
+type PartyOutcome =
+  | { error: string }
+  | { ok: true; partyId: string; created: boolean; notesMoved: number };
+
+/**
+ * A client is a party (ADR 0041, back-office slice 1): make this workspace's
+ * party in the operator's CRM and point the row at it. Idempotent — a linked
+ * workspace answers with its party and writes nothing. Console notes stopped
+ * being written here in the same slice; the ones that exist ride across onto
+ * the party's timeline.
+ */
+export async function createOperatorPartyAction(
+  input: z.infer<typeof partySchema>,
+): Promise<PartyOutcome> {
   const { userId } = await requireSuperAdmin();
-  const parsed = addNoteSchema.safeParse({
-    tenantId: formData.get("tenantId"),
-    body: formData.get("body"),
-  });
-  if (!parsed.success) return { error: "Note can't be empty" };
+  const parsed = partySchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
 
-  await withSystem((tx) =>
-    tx.insert(schema.tenantNotes).values({
+  let result: EnsureResult;
+  try {
+    result = await ensureOperatorParty(parsed.data.tenantId, { userId });
+  } catch (err) {
+    if (err instanceof RelationshipError) {
+      return { error: relationshipMessage(err.code) };
+    }
+    throw err;
+  }
+  if (result.created) {
+    await logAudit({
+      action: "tenant.party_linked",
       tenantId: parsed.data.tenantId,
-      authorClerkUserId: userId,
-      body: parsed.data.body,
+      actorClerkUserId: userId,
+      actorLabel: "admin-console",
+      targetType: "party",
+      targetId: result.partyId,
+      meta: { notesMoved: result.notesMoved },
+    });
+  }
+
+  revalidatePath(`/admin/tenants/${parsed.data.tenantId}`);
+  revalidatePath("/admin");
+  return { ok: true, ...result };
+}
+
+type BackfillOutcome =
+  | { error: string }
+  | { ok: true; considered: number; created: number; notesMoved: number };
+
+/**
+ * The backfill: every WORKSPACE (a Clerk organization behind it) with no
+ * party yet. Prospect rows are left alone on purpose — slice 3 decides which
+ * of them are real and which are test residue, and a party for the residue
+ * would be junk in the operator's CRM.
+ */
+export async function createOperatorPartiesAction(): Promise<BackfillOutcome> {
+  const { userId } = await requireSuperAdmin();
+  const unlinked = await withSystem((tx) =>
+    tx.query.tenants.findMany({
+      where: and(
+        isNotNull(schema.tenants.clerkOrgId),
+        isNull(schema.tenants.operatorPartyId),
+        eq(schema.tenants.isOperator, false),
+      ),
+      columns: { id: true },
     }),
   );
 
-  revalidatePath(`/admin/tenants/${parsed.data.tenantId}`);
-  return { ok: true };
+  let created = 0;
+  let notesMoved = 0;
+  for (const t of unlinked) {
+    let result: EnsureResult;
+    try {
+      result = await ensureOperatorParty(t.id, { userId });
+    } catch (err) {
+      if (err instanceof RelationshipError) {
+        return { error: relationshipMessage(err.code) };
+      }
+      throw err;
+    }
+    if (!result.created) continue;
+    created += 1;
+    notesMoved += result.notesMoved;
+    await logAudit({
+      action: "tenant.party_linked",
+      tenantId: t.id,
+      actorClerkUserId: userId,
+      actorLabel: "admin-console",
+      targetType: "party",
+      targetId: result.partyId,
+      meta: { notesMoved: result.notesMoved, backfill: true },
+    });
+  }
+
+  revalidatePath("/admin");
+  return { ok: true, considered: unlinked.length, created, notesMoved };
 }
 
 const createClientSchema = z.object({

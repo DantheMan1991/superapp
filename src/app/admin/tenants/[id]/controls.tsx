@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,10 +11,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import {
-  addTenantNote,
   convertProspectToClient,
   installProfile,
   setTenantLabels,
@@ -145,40 +143,6 @@ export function ConvertProspectForm({
       />
       <Button type="submit" size="sm" disabled={pending} className="w-full">
         {pending ? "Converting…" : "Convert to client"}
-      </Button>
-    </form>
-  );
-}
-
-export function AddNoteForm({ tenantId }: { tenantId: string }) {
-  const [pending, startTransition] = useTransition();
-  const formRef = useRef<HTMLFormElement>(null);
-
-  return (
-    <form
-      ref={formRef}
-      action={(formData) =>
-        startTransition(async () => {
-          const res = await addTenantNote(formData);
-          if (res?.error) toast.error(res.error);
-          else {
-            toast.success("Note added");
-            formRef.current?.reset();
-          }
-        })
-      }
-      className="space-y-2"
-    >
-      <input type="hidden" name="tenantId" value={tenantId} />
-      <Textarea
-        name="body"
-        placeholder="Call recap, next steps, gotchas…"
-        required
-        maxLength={5000}
-        rows={3}
-      />
-      <Button type="submit" size="sm" disabled={pending}>
-        {pending ? "Saving…" : "Add note"}
       </Button>
     </form>
   );

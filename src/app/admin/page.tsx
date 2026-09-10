@@ -3,6 +3,7 @@ import { desc, eq, sql as dsql } from "drizzle-orm";
 import { Plus } from "lucide-react";
 import { withSystem, schema } from "@/db";
 import { Badge } from "@/components/ui/badge";
+import { CreatePartiesButton } from "./relationship-controls";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/app/page-header";
 import { StatCard } from "@/components/app/stat-card";
@@ -48,6 +49,12 @@ export default async function AdminClientsPage() {
   // The operator tenant — the platform's own workspace (ADR 0041) — is listed
   // but is not a client: it counts in nothing and pays nobody.
   const clients = rows.filter((r) => !r.tenant.isOperator);
+  // Workspaces the operator's CRM does not know yet (ADR 0041, slice 1).
+  // Prospect rows are not counted: they have no workspace, and slice 3 decides
+  // which of them are real.
+  const unlinked = clients.filter(
+    (r) => r.tenant.clerkOrgId && !r.tenant.operatorPartyId,
+  ).length;
   const activeClients = clients.filter(
     (r) => r.tenant.status === "active",
   ).length;
@@ -95,8 +102,17 @@ export default async function AdminClientsPage() {
           {clients.length} client{clients.length === 1 ? "" : "s"}
         </h2>
         <p className="mb-3 text-sm text-muted-foreground">
-          Click a row to manage modules, billing, and notes.
+          Click a row to manage modules, billing, and its party in the CRM.
         </p>
+        {unlinked > 0 && (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm">
+            <span className="text-muted-foreground">
+              {unlinked} workspace{unlinked === 1 ? " has" : "s have"} no party
+              in the operator&apos;s CRM yet.
+            </span>
+            <CreatePartiesButton count={unlinked} />
+          </div>
+        )}
         <DataTable>
           <Table>
             <TableHeader>

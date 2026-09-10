@@ -14,6 +14,7 @@
  * instead of growing a single 6,000-line one.
  */
 import { describe } from "vitest";
+import { eq } from "drizzle-orm";
 import { schema, type Tx } from "../../src/db";
 
 export const RUN = !!process.env.DATABASE_URL;
@@ -68,4 +69,38 @@ export async function seedParty(
     .values({ tenantId, kind: "organization", displayName })
     .returning();
   return row.id;
+}
+
+/**
+ * The operator tenant (ADR 0041) for a test that needs one: the NAMED one
+ * when the database has it — a dev branch where the founder has run
+ * scripts/operator-tenant.ts — and a minted one otherwise, which is what CI's
+ * from-zero database gets. A database holds at most one, by index, so a test
+ * that always minted its own would fail the moment a real one existed; that
+ * refusal is a fact the suite proves, not a fixture problem.
+ *
+ * A test may create rows INSIDE a real operator and must delete exactly
+ * those; it must never delete the operator itself unless it minted it, which
+ * is why `minted` comes back beside the id. Raw select and insert, like every
+ * fixture here: this suite certifies what the DATABASE enforces.
+ */
+export async function obtainOperator(
+  tx: Tx,
+  stamp: string,
+): Promise<{ id: string; minted: boolean }> {
+  const existing = await tx.query.tenants.findFirst({
+    where: eq(schema.tenants.isOperator, true),
+    columns: { id: true },
+  });
+  if (existing) return { id: existing.id, minted: false };
+  const [row] = await tx
+    .insert(schema.tenants)
+    .values({
+      clerkOrgId: `${stamp}-op`,
+      name: "Isolation Operator",
+      slug: `${stamp}-op`,
+      isOperator: true,
+    })
+    .returning({ id: schema.tenants.id });
+  return { id: row.id, minted: true };
 }

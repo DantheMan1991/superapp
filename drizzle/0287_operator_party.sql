@@ -1,0 +1,1 @@
+ALTER TABLE "tenants" ADD COLUMN "operator_party_id" uuid;

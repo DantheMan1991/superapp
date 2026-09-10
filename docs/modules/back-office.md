@@ -6,12 +6,70 @@
 > `/admin` shrinks to what only a superadmin can do — provision a workspace,
 > switch features on, watch, support. Plan and slice order below; the decision
 > under it is [ADR 0041](../decisions/0041-a-tenant-is-a-workspace-and-a-client-is-a-party-in-the-operator-tenant.md).
-> Status: partial — slice 0 (the operator tenant exists) built 2026-09-09; slices 1–7 planned below · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: partial — slices 0–1 built 2026-09-09 (the operator tenant exists; a client is a party); slices 2–7 planned below · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this area. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-09 — Slice 1: a client is a party (`claude/back-office-1-a-client-is-a-party`)
+
+- **`tenants.operator_party_id`** (migration 0287): the one pointer from a
+  workspace to its party in the operator's CRM. Soft — `parties` is keyed
+  `(tenant_id, id)` and the pointer crosses tenants — written once by the
+  console and by nothing in any module. `tests/isolation/operator.test.ts` now
+  proves a member cannot write it from inside or outside, beside the flag.
+- **`ensureOperatorParty` / `readOperatorParty`**
+  (`src/app/admin/relationship.ts`). Under the OPERATOR's context as an owner
+  — never `withSystem` — an organization party named for the business, its
+  contact email as a contact point, a CRM record with `source = 'platform'`
+  when CRM is on, and every console note as a `note` activity by its original
+  author through CRM's own `logActivity`; then, under `withSystem`, the
+  pointer, guarded so a second click cannot link a workspace to two parties.
+  Idempotent: a linked workspace answers with its party and writes nothing.
+  `readOperatorParty` reads the name back as `staff` and answers null for a
+  party that is gone — the first place the console reads a tenant's rows
+  through RLS rather than the god view.
+- **Console.** The tenant page's Notes card is a **Relationship** card: the
+  party's name and *Open in CRM*, or *Create its party in the CRM* with the
+  legacy notes listed beneath until it exists. The operator's own page has no
+  such card. The Clients list says how many workspaces have no party yet and
+  offers *Create parties for N workspaces* — the backfill. Console notes
+  stopped being written (`addTenantNote` and its form are gone); the rows
+  stay until slice 3's DROP.
+- **One click into the CRM.** The record route reads the ACTIVE organization,
+  so *Open in CRM* first makes the operator active (Clerk's `setActive`, the
+  sidebar switcher's own call) and then navigates; without that, a click from
+  inside a client's organization was a 404. This was an Open item; closed.
+- **Three departures from the plan as written.** The backfill is a **console
+  action, not a script**: every door it needs — the party subsystem, CRM's
+  ops, `logAudit` — is `server-only`, which a tsx script cannot load.
+  Prospect rows are **left out of the backfill** on purpose (a party for
+  `butt-fuck` would be junk in the operator's CRM; slice 3 decides which
+  prospects are real) — the per-workspace button still works on one. And
+  **`getOperatorTenant()` arrived here**, not in slice 2: the console needed
+  the operator's id and Clerk org id for the read and the hop.
+- **Tests must not assume an empty database.** Once the founder names the dev
+  branch's operator, a test that minted its own would hit the unique index.
+  `obtainOperator` in `tests/isolation/_shared.ts` takes the named one when it
+  exists and mints one otherwise, and each test deletes exactly what it
+  created — a party inside a real operator, never the operator.
+  `tests/operator-relationship.test.ts` (db-backed) covers create /
+  idempotence / refusal of the operator itself / read-back and null. On this
+  run the dev branch had no operator yet, so both files took the minted path
+  with CRM on.
+- **Not driven in a browser** — another session's `next dev` held the
+  directory again. Lint, `tsc`, pure and the three db-backed files against
+  the dev branch are green. What to try by hand after merge: *Create parties
+  for N workspaces* on `/admin` (or the per-workspace button on only the
+  ones you want — the test workspaces are workspaces too), then *Open in CRM*
+  from a tenant page; it should land on the record inside Yosher App.
+- **Carried from slice 0:** Clerk auto-suffixes the slug of an organization
+  created through its API (`yosher-app-1789009231912500266`; `test-1784…`
+  before it) and the console shows the slug nowhere, so the operator script's
+  argument is not the name. Slice 3's provisioning from a party should hand
+  Clerk an explicit, deduped `slugify(name)`.
 
 ### 2026-09-09 — Slice 0: the operator tenant exists (`claude/back-office-plan`)
 
@@ -157,8 +215,8 @@ unique index `WHERE is_operator` — at most one per database. A one-time
 script, `scripts/operator-tenant.ts` (the `create-app-role.ts` shape: run by
 hand, under `withSystem`, audited as `tenant.operator_set`), rather than a
 console button: moving the flag is not a routine act. The lookup,
-`getOperatorTenantId()`, arrives with its first caller (the health check,
-slice 2) rather than here.
+`getOperatorTenant()`, arrived with its first caller — slice 1's console
+read — rather than here.
 
 **The guard.** A pure predicate the console's actions call before acting on
 the operator row: the status select is not drawn and the action refuses
@@ -181,16 +239,16 @@ guard predicate. **Docs.** This file; `architecture.md` §4 gets the operator
 tenant beside the god view; `security.md` §3 gets the "ordinary tenant"
 invariant.
 
-#### Slice 1 — A client is a party
+#### Slice 1 — A client is a party — BUILT 2026-09-09
 
 **What.** `tenants.operator_party_id uuid` — nullable, no FK (`parties` is
 keyed `(tenant_id, id)`; the pointer crosses tenants by design, like
-`site_enquiries.party_id`). A backfill script that, for every non-operator
-tenant, creates an organization party in the operator tenant through the
-shared door (`createParty`, `addContactPoint` from `contact_email`) with a
-CRM record `source = 'platform'`, moves each `tenant_notes` row onto the
-party as a `note` activity, and writes the pointer. Run on dev, read the
-result, run on prod.
+`site_enquiries.party_id`). A backfill — a console action, not a script;
+the build log says why — that, for every workspace, creates an organization
+party in the operator tenant through the shared door (`createParty`,
+`addContactPoint` from `contact_email`) with a CRM record
+`source = 'platform'`, moves each `tenant_notes` row onto the party as a
+`note` activity, and writes the pointer. Run from the Clients page.
 
 **The console.** The tenant page's Notes card becomes a Relationship card:
 the party's display name (read via `withTenant(operatorTenantId, …, { role:
@@ -342,7 +400,7 @@ RLS and an isolation test, per `security.md` §4.
 | Table / column | Slice | Purpose | Notes |
 | --- | --- | --- | --- |
 | `tenants.is_operator` | 0 — built, migration 0286 | Names the operator tenant | Partial unique index `WHERE is_operator`; set by script under `withSystem`, never by a console action |
-| `tenants.operator_party_id` | 1 | The party in the operator tenant this workspace was provisioned for | Soft pointer, no FK; written once at conversion; null when the party is gone |
+| `tenants.operator_party_id` | 1 — built, migration 0287 | The party in the operator tenant this workspace was provisioned for | Soft pointer, no FK; written once at conversion; null when the party is gone |
 | `audits.tenant_id`, `audits.party_id` | 2 | Discovery becomes the operator's, attached to the party | Standard tenant policies replace `audits_superadmin_all`; `won`/`lost` retired |
 | `src/lib/leads/` | 2 | The slot a stranger's arrival passes through | No table. CRM fills it |
 | `tenant_notes` | 3 | Dropped | After slice 1's move has deployed |
@@ -353,6 +411,8 @@ RLS and an isolation test, per `security.md` §4.
 ## Key files & seams
 
 - `src/lib/operator-guard.ts` (slice 0) — the one predicate both sides of the console call; `scripts/operator-tenant.ts` names the operator.
+- `src/lib/operator-tenant.ts` (slice 1) — the operator, read once: id and Clerk org id.
+- `src/app/admin/relationship.ts` + `relationship-controls.tsx` (slice 1) — a client is a party: ensure, read, the three buttons.
 - `src/lib/leads/` (slice 2) — types, registry, resolve; `src/modules/crm/leads.ts` fills it.
 - `src/lib/interview.ts` — `promoteSession` becomes a landing, not a provisioning.
 - `src/lib/sites/enquiries.ts` — moves onto the slot with no proposition.
@@ -383,9 +443,6 @@ RLS and an isolation test, per `security.md` §4.
   proposal Yosher sends will want one.
 - **Retainer time as revenue or WIP**, and whether the client-facing meter
   becomes a projection of the pack's engagements — deferred (ADR 0041, Notes).
-- **The active organization.** A console link into the operator's CRM needs
-  the operator to be the active org; whether the link should switch it is a
-  nicety for after slice 1 has been used.
 - **Yosher's own public site** is the `(marketing)` route group in code, not a
   Marketing-module site. Running it through the module would be the loudest
   dogfood of all; not in this plan.

@@ -517,6 +517,21 @@ this dossier keeps warning about.
 
 ## Decisions & gotchas
 
+### The operator's records — every client is a party here (ADR 0041, back-office slice 1, 2026-09-09)
+
+Yosher runs on Yosher: the platform's own workspace is a tenant with CRM
+switched on, and **every client workspace is an organization party in it**,
+made by the console's `ensureOperatorParty` (`src/app/admin/relationship.ts`)
+under the operator's context as an owner. The record carries
+`crm_party_details.source = 'platform'` — the enquiry's shape (ADR 0021) — and
+the console notes a superadmin once wrote about the client ride across through
+this module's own `logActivity` door as `note` activities by their original
+author, dated when they were written. The console keeps the workspace and ONE
+pointer (`tenants.operator_party_id`) and links here; nothing in this module
+knows the pointer exists, and nothing here may ever write `tenants`. To this
+module the record is an ordinary record — `platform` is a source word beside
+`website` and `referral`, not a kind.
+
 **The spine is shared, not CRM-owned, and the constraint that forced it is
 entitlement.** A tenant can buy Accounting without CRM, so accounting can never
 FK into a `crm_*` table — but two customer lists is the failure this module

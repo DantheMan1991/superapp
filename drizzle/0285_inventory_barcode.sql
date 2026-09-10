@@ -1,0 +1,3 @@
+ALTER TABLE "inventory_items" ADD COLUMN "barcode" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "inventory_items_tenant_barcode_idx" ON "inventory_items" USING btree ("tenant_id","barcode") WHERE "inventory_items"."barcode" is not null;--> statement-breakpoint
+ALTER TABLE "inventory_items" ADD CONSTRAINT "inventory_items_barcode_present" CHECK ("inventory_items"."barcode" is null or length(btrim("inventory_items"."barcode")) > 0);

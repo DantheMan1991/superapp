@@ -110,6 +110,7 @@ export function ItemForm({
     const purchaseUnit = String(formData.get("purchaseUnit") ?? "").trim();
     const storage = String(formData.get("storageRequirement") ?? NO_STORAGE);
     const rawReorder = String(formData.get("reorderPoint") ?? "").trim();
+    const barcode = String(formData.get("barcode") ?? "").trim();
 
     startTransition(async () => {
       const result = await createItemAction({
@@ -121,6 +122,8 @@ export function ItemForm({
         purchaseUnitQty: rawQty ? Number(rawQty) : null,
         storageRequirement: storage === NO_STORAGE ? null : storage,
         reorderPoint: rawReorder ? Number(rawReorder) : null,
+        // Blank is the absence of a code, which the column spells `null`.
+        barcode: barcode || null,
         notes: String(formData.get("notes") ?? ""),
       });
       if ("error" in result) {
@@ -251,6 +254,24 @@ export function ItemForm({
               </p>
             </div>
 
+            <div className="grid gap-2">
+              <Label htmlFor="barcode">Barcode</Label>
+              <Input
+                id="barcode"
+                name="barcode"
+                maxLength={512}
+                autoComplete="off"
+                placeholder="Scan it, or type what is printed"
+              />
+              <p className="text-xs text-muted-foreground">
+                {/* A scanner is a keyboard: it types the code and presses
+                    Enter. So this box wants no camera and no special mode —
+                    click into it and scan. */}
+                Whatever is printed on it. Scan into this box, or type it. A
+                scan on the list screen opens whatever carries it.
+              </p>
+            </div>
+
             <EnterprisePicker
               id="enterprise"
               word={enterpriseWord}
@@ -335,6 +356,7 @@ export interface EditableItem {
   purchaseUnitQty: number | null;
   storageRequirement: string | null;
   reorderPoint: number | null;
+  barcode: string | null;
   notes: string;
   status: string;
 }
@@ -409,6 +431,7 @@ export function ItemControls({
     const rawQty = String(formData.get("purchaseUnitQty") ?? "").trim();
     const purchaseUnit = String(formData.get("purchaseUnit") ?? "").trim();
     const rawReorder = String(formData.get("reorderPoint") ?? "").trim();
+    const barcode = String(formData.get("barcode") ?? "").trim();
 
     startTransition(async () => {
       const result = await updateItemAction({
@@ -421,6 +444,9 @@ export function ItemControls({
         purchaseUnitQty: rawQty ? Number(rawQty) : null,
         storageRequirement: storage === NO_STORAGE ? null : storage,
         reorderPoint: rawReorder ? Number(rawReorder) : null,
+        // Emptying the box CLEARS the code — `undefined` would leave the old
+        // one, and there would be no way to take a barcode off a thing.
+        barcode: barcode || null,
         notes: String(formData.get("notes") ?? ""),
       });
       if ("error" in result) {
@@ -593,6 +619,25 @@ export function ItemControls({
                 <p className="text-xs text-muted-foreground">
                   You are told on What needs you when on hand falls to this,
                   in the unit you count it in. Blank for no reminder.
+                </p>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor={`edit-barcode-${item.id}`}>Barcode</Label>
+                <Input
+                  id={`edit-barcode-${item.id}`}
+                  name="barcode"
+                  maxLength={512}
+                  autoComplete="off"
+                  placeholder="Scan it, or type what is printed"
+                  defaultValue={item.barcode ?? ""}
+                />
+                <p className="text-xs text-muted-foreground">
+                {/* A scanner is a keyboard: it types the code and presses
+                    Enter. So this box wants no camera and no special mode —
+                    click into it and scan. */}
+                Whatever is printed on it. Scan into this box, or type it. A
+                scan on the list screen opens whatever carries it.
                 </p>
               </div>
 

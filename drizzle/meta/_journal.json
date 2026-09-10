@@ -1996,6 +1996,13 @@
       "when": 1788976579245,
       "tag": "0284_setup_interviews_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 285,
+      "version": "7",
+      "when": 1789001619752,
+      "tag": "0285_inventory_barcode",
+      "breakpoints": true
     }
   ]
 }

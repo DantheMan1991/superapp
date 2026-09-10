@@ -119,6 +119,8 @@ export class InventoryError extends Error {
        */
       | "RECEIPT_UNAVAILABLE"
       | "INVALID_KIND"
+      /** Two things cannot carry one printed code — see `assertBarcodeFree`. */
+      | "BARCODE_TAKEN"
       | "INVALID_UNIT"
       | "INVALID_SOURCE"
       | "ITEM_INVALID"
@@ -277,6 +279,8 @@ export interface ItemInput {
    * reminder. Read by the attention source and by nothing that refuses.
    */
   reorderPoint?: number | null;
+  /** What is printed on the thing. Null, or `""` from a cleared box, means none. */
+  barcode?: string | null;
   notes?: string;
 }
 
@@ -296,6 +300,8 @@ export async function createItem(
   if (!isKnownUnit(stockingUnit)) {
     throw new InventoryError("INVALID_UNIT", `unknown unit: ${input.stockingUnit}`);
   }
+  const barcode = input.barcode?.trim() || null;
+  if (barcode) await assertBarcodeFree(tx, ctx.tenantId, barcode);
 
   const rows = await tx
     .insert(schema.inventoryItems)
@@ -309,10 +315,70 @@ export async function createItem(
       purchaseUnitQty: input.purchaseUnitQty ?? null,
       storageRequirement: input.storageRequirement?.trim() || null,
       reorderPoint: input.reorderPoint ?? null,
+      barcode,
       notes: input.notes?.trim() ?? "",
     })
     .returning();
   return rows[0];
+}
+
+/**
+ * **NO TWO OF A TENANT'S THINGS CARRY ONE CODE**, checked here so the person
+ * gets a sentence naming the thing that already has it.
+ *
+ * The partial unique index is the real guarantee and this is the manners: a
+ * raw index violation reaches the screen as "Something went wrong saving
+ * that." about a code somebody is looking at on a bag. The index stays because
+ * a check-then-write is not atomic — two tabs can both pass this — and being
+ * refused by the database is the right outcome for that race.
+ *
+ * **RETIRED THINGS COUNT.** Retiring is reversible, so a live item taking a
+ * retired one's code would make putting the retired one back impossible. The
+ * sentence says which it is, because "Grower crumble already has that code"
+ * about something not in the list would otherwise be a puzzle.
+ */
+async function assertBarcodeFree(
+  tx: Tx,
+  tenantId: string,
+  barcode: string,
+  exceptItemId?: string,
+): Promise<void> {
+  const holder = await tx.query.inventoryItems.findFirst({
+    where: and(
+      eq(schema.inventoryItems.tenantId, tenantId),
+      eq(schema.inventoryItems.barcode, barcode),
+    ),
+    columns: { id: true, name: true, status: true },
+  });
+  if (!holder || holder.id === exceptItemId) return;
+  throw new InventoryError(
+    "BARCODE_TAKEN",
+    `${holder.name}${holder.status === "archived" ? " (retired)" : ""} already has that code`,
+  );
+}
+
+/**
+ * The one thing carrying this code, or null.
+ *
+ * **EXACT, never a partial match.** A scan is a whole code and a prefix of one
+ * belongs to something else entirely; `listItems`' search is where a partial
+ * answer belongs. Trimmed, because a scanner appends a newline and a person
+ * pastes with a space.
+ */
+export async function findItemByBarcode(
+  tx: Tx,
+  tenantId: string,
+  barcode: string,
+): Promise<InventoryItem | null> {
+  const code = barcode.trim();
+  if (!code) return null;
+  const row = await tx.query.inventoryItems.findFirst({
+    where: and(
+      eq(schema.inventoryItems.tenantId, tenantId),
+      eq(schema.inventoryItems.barcode, code),
+    ),
+  });
+  return row ?? null;
 }
 
 export async function updateItem(
@@ -375,6 +441,15 @@ export async function updateItem(
   if (input.reorderPoint !== undefined) {
     // Null clears it. The CHECK refuses a negative; the action refuses it first.
     patch.reorderPoint = input.reorderPoint;
+  }
+  if (input.barcode !== undefined) {
+    // A cleared box arrives as `""`, and blank is not a code — it is the
+    // absence of one, which the column spells `null`.
+    const barcode = input.barcode?.trim() || null;
+    if (barcode && barcode !== existing.barcode) {
+      await assertBarcodeFree(tx, ctx.tenantId, barcode, id);
+    }
+    patch.barcode = barcode;
   }
   if (input.notes !== undefined) patch.notes = input.notes.trim();
 

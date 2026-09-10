@@ -6,12 +6,59 @@
 > `/admin` shrinks to what only a superadmin can do — provision a workspace,
 > switch features on, watch, support. Plan and slice order below; the decision
 > under it is [ADR 0041](../decisions/0041-a-tenant-is-a-workspace-and-a-client-is-a-party-in-the-operator-tenant.md).
-> Status: partial — slices 0–3 built (the operator tenant exists; a client is a party; Discovery comes home and a lead lands as a lead; a workspace is provisioned from a party and prospects retire); slices 4–7 planned below · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: partial — slices 0–4 built (the operator tenant exists; a client is a party; Discovery comes home and a lead lands as a lead; a workspace is provisioned from a party and prospects retire; support access); slices 5–7 planned below · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this area. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-10 — Slice 4: look at it as they see it — support access (`claude/back-office-4-support-access`)
+
+- **`support_sessions`** (migrations 0290 + 0291): platform-level,
+  superadmin-only. A row is a superadmin's look at one client's workspace —
+  who, which, why, opened, expires (sixty minutes), ended, views. One live
+  per person by partial unique index; opening a new one ends the last.
+- **The wall is the request, not every action.** `requireTenant()` and
+  `resolveTenantContext()` share one lookup (one transaction, as before) that
+  also fetches the viewer's live session. With one, the decision is PURE
+  (`src/lib/support-view-decide.ts`): a GET or HEAD carrying no
+  `next-action` header is answered as the client's workspace; a server
+  action or any other method is REFUSED outright — `SupportViewError` from
+  `requireTenant`, null from `resolveTenantContext` — never answered under
+  the superadmin's own workspace (a client's ids in the wrong tenant) and
+  never under the client's (a write). The method and path come from headers
+  the MIDDLEWARE stamps (`x-yosher-method`, `x-yosher-path`), overwriting
+  anything a client sent; an unstamped method reads as not-a-GET.
+- **Role `staff`**, the least a member can be: owners-only folders stay
+  closed by RLS, owner pages (`requireTenantOwner`) redirect, the CRM and
+  Accounting render as they do for staff. A viewer who is no longer a
+  superadmin, or whose session's tenant is gone, has the session ended and
+  falls through to the ordinary path. Every render audits `support.viewed`
+  with the path — once per request, `React.cache` collapsing the layout's and
+  the page's calls — and counts on the session.
+- **Console and banner.** The tenant page's *Support* card takes a reason and
+  opens the view (`openSupportViewAction`, audited `support.opened`, refused
+  for the operator — the superadmin is already inside it); the dashboard
+  shows a bar on every page with the workspace, the reason, the minutes left
+  and *End support view* (`endSupportViewAction`, audited `support.ended`
+  with the view count, then back to the tenant page).
+- **What a render may still write.** The wall stops actions and non-GET
+  routes; a page that writes on load runs as staff under the client's
+  policies. Every such page was read: billing and hours are owner-only or
+  need a checkout parameter, the CRM board's first-visit pipeline needs an
+  owner, the Team page reconciles only for an owner. None writes under
+  support. A database-level READ ONLY for support renders would need the
+  context to reach `withTenant` through fifty-six hand-written role unions;
+  recorded under Open items, not done.
+- **Tests.** `tests/support-view.test.ts` (pure) — none / view / refuse, and
+  the unstamped method; `tests/support-sessions.test.ts` (db) — open ends
+  the last, views counted and audited with their paths, ending and expiry;
+  `tests/isolation/support.test.ts` — members see and write nothing, no
+  context sees nothing, the superadmin sees.
+- **Not driven in a browser** — opening a view needs the superadmin's Clerk
+  session in the pane. What to try by hand: *Support* on a client's page →
+  the dashboard with the bar → any Save (refused) → *End support view*.
 
 ### 2026-09-10 — Slice 3: a workspace is provisioned from a party; prospects retire (`claude/back-office-3-provision-from-a-party`)
 
@@ -455,7 +502,7 @@ tenant_notes`.
 pointer is written once. **Docs.** This file; `architecture.md` line about
 `admin/`; the `tenants` schema comment stops calling itself the CRM.
 
-#### Slice 4 — Look at it as they see it (support access)
+#### Slice 4 — Look at it as they see it (support access) — BUILT 2026-09-10
 
 **What.** A superadmin opens a client's dashboard read-only. A
 `support_sessions` table (`tenant_id`, `clerk_user_id`, `expires_at`,
@@ -527,7 +574,7 @@ RLS and an isolation test, per `security.md` §4.
 | `audits.tenant_id`, `audits.party_id`, `audits.origin_tenant_id` | 2 — built, migration 0288 | Discovery becomes the operator's, attached to the party; the origin is a breadcrumb for attaching later | `member_all` added beside `superadmin_all`; `won`/`lost` retired; the migration refuses a database with audits and no operator |
 | `src/lib/leads/` | 2 — built | The slot a stranger's arrival passes through (ADR 0042) | No table. CRM fills it |
 | `tenant_notes` | 3 — dropped, migration 0289 | Dropped | It held nothing on either database by then |
-| `support_sessions` | 4 | A superadmin's time-boxed read-only view of a tenant | Honoured for renders only |
+| `support_sessions` | 4 — built, migrations 0290/0291 | A superadmin's time-boxed read-only view of a tenant | Superadmin-only; honoured for a GET and nothing else |
 | `operator_postings` | 5 | Stripe object → operator invoice | `stripe_object_id UNIQUE` is the idempotency arbiter |
 | `memberships.last_seen_at` | 6 | Health signal | Stamped at most hourly |
 
@@ -542,7 +589,7 @@ RLS and an isolation test, per `security.md` §4.
 - `src/app/admin/audits/` — every action through `asOperator`; `audit-controls.tsx` attach and delete.
 - `src/app/admin/provision.ts` (slice 3) — resolve the party, attach the workspace; `provisionWorkspace` in actions.ts is the only place Clerk is asked; `scripts/retire-prospects.ts`.
 - `src/app/admin/actions.ts` — provisioning from a party; the guard.
-- `src/lib/auth.ts` — `resolveTenantContext()` learns support sessions (slice 4), renders only.
+- `src/lib/auth.ts` — `requireTenant`/`resolveTenantContext` honour a live support session for a GET only (slice 4); `src/lib/support-view.ts` the sessions, `support-view-decide.ts` the pure wall, `src/proxy.ts` the stamp.
 - `src/app/api/webhooks/stripe/route.ts`, `src/lib/retainer-billing.ts` — the money loop's sources.
 
 ## Decisions & gotchas
@@ -579,6 +626,14 @@ RLS and an isolation test, per `security.md` §4.
 - **Drive residue in Yosher App's CRM**: *Yosher Drive Test Plumbing*, the
   person *Drive Test*, its discovery record and follow-up — delete on the
   founder's word.
+- **A support render is not read-only at the database.** The wall is the
+  request layer; a page that writes on load would write as staff. None does
+  today (each was read). Making `withTenant` open a READ ONLY transaction
+  for a support view needs the marker to reach it — the role unions are
+  hand-written in fifty-six places — so it waits for a reason.
+- **Clients cannot see their own support-access history.** `support_sessions`
+  is superadmin-only. Showing a workspace who looked and why would be the
+  honest thing; nobody has asked yet.
 - **Retainer time as revenue or WIP**, and whether the client-facing meter
   becomes a projection of the pack's engagements — deferred (ADR 0041, Notes).
 - **Yosher's own public site** is the `(marketing)` route group in code, not a

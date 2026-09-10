@@ -28,7 +28,10 @@ that matter for code:
   role that did not come from `requireTenant()`/`resolveTenantContext()`.
 - **Authorization is server-side on every request**: `requireSuperAdmin()`,
   `requireTenant()`, `requireTenantOwner()` in `src/lib/auth.ts`. The
-  middleware only checks "signed in".
+  middleware only checks "signed in" — and stamps the method and path, which
+  is how `requireTenant()` honours a superadmin's live SUPPORT VIEW of a
+  client's workspace for a GET and refuses it for everything else
+  (`docs/modules/back-office.md`, slice 4; security.md S14).
 - **Zod-validate every boundary** (server actions, webhooks).
 - **Billing state is written only from trusted Stripe data**: the
   signature-verified webhook, or a server→Stripe API reconcile

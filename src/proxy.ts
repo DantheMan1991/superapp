@@ -36,6 +36,14 @@ import {
  * is cheap. No database here — a host that is not ours becomes a path, and
  * the page does the lookup.
  *
+ * One thing this file STAMPS on every request it passes: `x-yosher-method`
+ * and `x-yosher-path`, set from the request itself and overwriting anything
+ * a client sent under those names. `headers()` in a server component has no
+ * method, and the support view (back-office slice 4, src/lib/auth.ts) turns
+ * on exactly that: a live session is honoured for a GET and refused for a
+ * server action or any other method. The stamp is the only way the resolver
+ * can tell, and this is the only place that may set it.
+ *
  * Two environment switches ride on the same per-request read:
  *
  *   - `MAINTENANCE_MODE=1` closes the platform's own hosts with a 503 while
@@ -73,11 +81,16 @@ export default clerkMiddleware(
       );
       if (entry) return NextResponse.redirect(new URL(entry, req.url));
     }
+    const stamped = new Headers(req.headers);
+    stamped.set("x-yosher-method", req.method);
+    stamped.set("x-yosher-path", req.nextUrl.pathname);
     const target = siteRewrite(kind, req.nextUrl.pathname);
-    if (target === null) return;
+    if (target === null) {
+      return NextResponse.next({ request: { headers: stamped } });
+    }
     const url = req.nextUrl.clone();
     url.pathname = target;
-    return NextResponse.rewrite(url);
+    return NextResponse.rewrite(url, { request: { headers: stamped } });
   },
   // A callback rather than an object, so the key kind and the app URL are
   // read per request like everything else here.

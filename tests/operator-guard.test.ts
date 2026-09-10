@@ -9,7 +9,7 @@ describe("operatorRefusal", () => {
   const acts = Object.keys(OPERATOR_REFUSALS) as (keyof typeof OPERATOR_REFUSALS)[];
 
   it("names every act the console refuses", () => {
-    expect(acts.sort()).toEqual(["billing", "moduleOff", "retainer", "status"]);
+    expect(acts.sort()).toEqual(["billing", "moduleOff", "retainer", "status", "support"]);
   });
 
   it("allows every act on an ordinary tenant", () => {

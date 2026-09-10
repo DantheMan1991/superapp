@@ -11,6 +11,17 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-10 — A superadmin may look, and only look (`claude/back-office-4-support-access`)
+
+Back-office slice 4 ([back-office.md](back-office.md)). `requireTenant()` and
+`resolveTenantContext()` gained a first step: a live `support_sessions` row
+for the viewer makes a GET resolve as the CLIENT's workspace — role `staff`,
+`support` set on the context — and makes every server action and non-GET
+route refuse. The two functions now share one lookup in one transaction, so
+the session read costs no extra round trip. The method and path the decision
+turns on are stamped by `src/proxy.ts`, never read from the client. Nothing
+about owner-vs-member resolution changed.
+
 ### 2026-09-06 — Account deletion reaches the mirror; the auth pages know the app (`claude/mobile-app-0-app-aware-web`)
 
 Part of the mobile app's slice 0 (see [mobile-app.md](mobile-app.md), ADR 0032).

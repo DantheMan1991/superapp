@@ -461,6 +461,44 @@ export const subscriptions = pgTable(
   ],
 );
 
+/**
+ * A superadmin's time-boxed, read-only, audited look at a client's workspace
+ * as its staff see it (back-office slice 4). Platform-level and
+ * superadmin-only: the console opens and ends one, src/lib/auth.ts reads it
+ * on every tenant request and honours it for a GET and nothing else. One
+ * live session per person, by the partial unique index; opening a new one
+ * ends the last. Sixty minutes, then it is not live whether or not anybody
+ * ended it.
+ */
+export const supportSessions = pgTable(
+  "support_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    clerkUserId: text("clerk_user_id").notNull(),
+    /** Why — typed by the superadmin, shown on the banner, kept for the record. */
+    reason: text("reason").notNull(),
+    openedAt: timestamp("opened_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    lastViewedAt: timestamp("last_viewed_at", { withTimezone: true }),
+    viewCount: integer("view_count").notNull().default(0),
+  },
+  (t) => [
+    index("support_sessions_user_idx").on(t.clerkUserId, t.expiresAt),
+    index("support_sessions_tenant_idx").on(t.tenantId),
+    uniqueIndex("support_sessions_live_idx")
+      .on(t.clerkUserId)
+      .where(sql`${t.endedAt} is null`),
+  ],
+);
+
+export type SupportSession = typeof supportSessions.$inferSelect;
+
 /** Append-only log of sensitive actions. */
 export const auditLog = pgTable(
   "audit_log",

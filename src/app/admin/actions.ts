@@ -21,6 +21,7 @@ import {
   resolveProvisionTarget,
   type ProvisionTarget,
 } from "./provision";
+import { endSupportSession, openSupportSession } from "@/lib/support-view";
 import { upsertTenantFromOrg } from "@/lib/tenant-sync";
 import { provisionAccounting } from "@/modules/accounting/templates/apply";
 import { provisionDocuments } from "@/modules/documents/templates/apply";
@@ -569,6 +570,73 @@ export async function provisionWorkspace(formData: FormData) {
     tenantId: tenant.id,
     warning: warnings.length > 0 ? warnings.join(" ") : undefined,
   };
+}
+
+const supportOpenSchema = z.object({
+  tenantId: z.string().uuid(),
+  reason: z.string().trim().min(3, "Say why, in a few words").max(500),
+});
+
+/**
+ * Open a support view of a client's workspace (back-office slice 4): a
+ * time-boxed, read-only, audited look as its staff see it. Ends whatever
+ * view this superadmin had open. The dashboard then answers as the client's
+ * workspace for a GET and refuses everything else — src/lib/auth.ts.
+ */
+export async function openSupportViewAction(
+  input: z.infer<typeof supportOpenSchema>,
+): Promise<{ ok: true } | { error: string }> {
+  const { userId } = await requireSuperAdmin();
+  const parsed = supportOpenSchema.safeParse(input);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  }
+  const tenant = await withSystem((tx) =>
+    tx.query.tenants.findFirst({
+      where: eq(schema.tenants.id, parsed.data.tenantId),
+      columns: { id: true, isOperator: true },
+    }),
+  );
+  if (!tenant) return { error: "No such business." };
+  const refusal = operatorRefusal(tenant, "support");
+  if (refusal) return { error: refusal };
+
+  const session = await openSupportSession({
+    tenantId: tenant.id,
+    clerkUserId: userId,
+    reason: parsed.data.reason,
+  });
+  await logAudit({
+    action: "support.opened",
+    tenantId: tenant.id,
+    actorClerkUserId: userId,
+    actorLabel: "admin-console",
+    targetType: "support_session",
+    targetId: session.id,
+    meta: { reason: parsed.data.reason, expiresAt: session.expiresAt.toISOString() },
+  });
+  return { ok: true };
+}
+
+/** End this superadmin's support view, whichever workspace it was of. */
+export async function endSupportViewAction(): Promise<
+  { ok: true; tenantId: string | null } | { error: string }
+> {
+  const { userId } = await requireSuperAdmin();
+  const ended = await endSupportSession(userId);
+  if (ended) {
+    await logAudit({
+      action: "support.ended",
+      tenantId: ended.tenantId,
+      actorClerkUserId: userId,
+      actorLabel: "admin-console",
+      targetType: "support_session",
+      targetId: ended.id,
+      meta: { views: ended.viewCount },
+    });
+    revalidatePath(`/admin/tenants/${ended.tenantId}`);
+  }
+  return { ok: true, tenantId: ended?.tenantId ?? null };
 }
 
 const setLabelsSchema = z.object({

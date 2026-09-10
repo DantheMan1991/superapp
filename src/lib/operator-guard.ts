@@ -28,6 +28,9 @@ export const OPERATOR_REFUSALS = {
     "This is the operator tenant. It cannot hold a retainer with itself.",
   /** A plan, a checkout, an hour block: billed by itself. */
   billing: "This is the operator tenant. It is not billed by itself.",
+  /** A support view: the superadmin is already a member of it. */
+  support:
+    "This is the operator tenant. Open it from the organization switcher, not as support.",
 } as const;
 
 export type OperatorAct = keyof typeof OPERATOR_REFUSALS;

@@ -5,6 +5,7 @@ import { InventoryModule } from "./inventory/InventoryModule";
 import { LivestockModule } from "./livestock/LivestockModule";
 import { ProductionModule } from "./production/ProductionModule";
 import { RetailModule } from "./retail/RetailModule";
+import { ProfessionalServicesModule } from "./professional-services/ProfessionalServicesModule";
 
 /**
  * Layer 2a registry: slug → how the pack behaves.
@@ -16,7 +17,7 @@ import { RetailModule } from "./retail/RetailModule";
  * allowed to know both exist.
  *
  * `assets`, `land`, `inventory`, `livestock`, `production` and `retail` are
- * built; `crops` and `professional-services` are DECLARED AND UNBUILT. That is not a placeholder state: a
+ * built; `crops` alone is DECLARED AND UNBUILT. That is not a placeholder state: a
  * declared pack has a real dependency graph, installs with a profile, and
  * shows as an empty slot in the admin registry — exactly how `scheduling` and
  * `work` were carried before they shipped. Each
@@ -251,11 +252,9 @@ export const packRegistry: Record<string, PackDefinition> = {
 
   /**
    * What a services business sells: an ENGAGEMENT — a client's agreement
-   * (scope, retainer hours, rate, start) — the time against it, and the
-   * onboarding list starting one sets in motion. Declared with the `agency`
-   * profile (back-office slice 7a) so the profile's manifest is complete and
-   * its install order exercised before the pack's own slices land; the slice
-   * order is in docs/modules/agency.md.
+   * (scope, retainer hours, rate, start) — and the time against it. Ships
+   * both from slice 7b (docs/modules/professional-services.md); the
+   * onboarding list and Discovery are 7c and 7d.
    *
    * Requires nothing. A client is a PARTY, and the party door is Layer 0 —
    * the CRM being on makes the client easier to find, not the engagement
@@ -270,6 +269,21 @@ export const packRegistry: Record<string, PackDefinition> = {
     name: "Professional services",
     icon: "briefcase",
     requires: [],
+    labels: [
+      {
+        key: "engagement",
+        fallback: "Engagement",
+        describes:
+          "One agreement with one client — what you have taken on, for how much, from when. A law practice calls it a matter; a studio calls it an account or a project.",
+      },
+      {
+        key: "client",
+        fallback: "Client",
+        describes:
+          "The business you do the work for. An accountant and a consultancy both say client; a shop would say customer.",
+      },
+    ],
+    Component: ProfessionalServicesModule,
   },
 };
 

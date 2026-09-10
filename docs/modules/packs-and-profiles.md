@@ -9,6 +9,22 @@
 
 ## Build log
 
+### 2026-09-10 — A profile's `packConfig` reaches a pack nobody farmed for (`claude/back-office-7b-engagements-and-time`)
+
+`professional-services` ships ([professional-services.md](professional-services.md)),
+and it is the first pack whose market is not the founder's farm — which is
+the claim [ADR 0004](../decisions/0004-capability-packs-and-industry-profiles.md)
+makes and the fifth independent test of it. Nothing in Layer 0 or Layer 1
+changed to admit it: a slug in `src/packs/index.ts`, a row in
+`scripts/seed.ts`, an icon key, a schema file, and two declared labels.
+
+**Two words are declared for the first time by a pack a CORE tool also has
+opinions about.** `client` is what Accounting calls a customer and CRM calls
+a record, and this pack renames neither — it declares its own word for its
+own screens, which is exactly the boundary. The open item below about core
+modules declaring no vocabulary is unchanged, and is now more visible: an
+agency's invoice still says "Customer".
+
 ### 2026-09-10 — Seed application is built (`claude/back-office-7a-seeds-and-the-agency-profile`)
 
 The largest gap in the installer, open since Layer 2 shipped on 2026-08-14,

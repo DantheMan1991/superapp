@@ -6,12 +6,32 @@
 > `/admin` shrinks to what only a superadmin can do — provision a workspace,
 > switch features on, watch, support. Plan and slice order below; the decision
 > under it is [ADR 0041](../decisions/0041-a-tenant-is-a-workspace-and-a-client-is-a-party-in-the-operator-tenant.md).
-> Status: partial — slices 0–6 and 7a built (the operator tenant exists; a client is a party; Discovery comes home and a lead lands as a lead; a workspace is provisioned from a party and prospects retire; support access; the money loop; health signals; the agency profile and the seed applier); slices 7b–7d planned below · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: partial — slices 0–6, 7a and 7b built (the operator tenant exists; a client is a party; Discovery comes home and a lead lands as a lead; a workspace is provisioned from a party and prospects retire; support access; the money loop; health signals; the agency profile and the seed applier; engagements and time); slices 7c–7d planned below · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this area. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-10 — Slice 7b: engagements and time (`claude/back-office-7b-engagements-and-time`)
+
+- **The `professional-services` pack ships** — the thing every services
+  business would recognise, and the first pack written for a market that is
+  not the founder's farm. Engagements (client, scope, dates, fee, rate,
+  retainer hours, status), the time logged against them, and each engagement
+  as a COST OBJECT so what a client costs reaches the P&L. Migrations 0295
+  (tables, **hand-reordered** — a composite FK to a table born in the same
+  migration must follow its unique index) and 0296 (RLS), applied and
+  verify-rls green on dev and prod before the PR.
+- **Dogfood is the point.** Yosher's own clients now have somewhere to live
+  that is not this console: the operator tenant has the agency profile
+  installed (the founder pressed it after 7a), so `/dashboard/m/professional-services`
+  in Yosher App is where a client's retainer and its hours belong. The
+  platform's own retainer meter — the two-sided one at Layer 0 — is
+  untouched, and whether it becomes a projection of these engagements is
+  still the deferred question in ADR 0041's Notes.
+- Full dossier: [professional-services.md](professional-services.md). Three
+  guides. Not driven.
 
 ### 2026-09-10 — Slice 7a: seeds land, and the agency profile exists (`claude/back-office-7a-seeds-and-the-agency-profile`)
 
@@ -669,8 +689,9 @@ profile seed applier [packs-and-profiles.md](packs-and-profiles.md) recorded
 as unbuilt, so that came first.
 
 **In four PRs**, the order and each one's shape in [agency.md](agency.md):
-7a the seed applier and the profile (built); 7b engagements and time; 7c
-onboarding as a Work list; 7d Discovery leaves the console.
+7a the seed applier and the profile (built); 7b engagements and time (built —
+[professional-services.md](professional-services.md)); 7c onboarding as a
+Work list; 7d Discovery leaves the console.
 
 **Nothing in it is named Yosher.** Yosher is the pilot, as Hilltop Farm is the
 homestead profile's.
@@ -703,6 +724,7 @@ RLS and an isolation test, per `security.md` §4.
 - `src/app/admin/provision.ts` (slice 3) — resolve the party, attach the workspace; `provisionWorkspace` in actions.ts is the only place Clerk is asked; `scripts/retire-prospects.ts`.
 - `src/app/admin/health.ts` (slice 6) — the signals and the concerns; `src/lib/last-seen.ts` the hourly rule and the words.
 - `src/app/admin/profile-seed.ts` (slice 7a) — a profile's seed lands in the modules that are on; `src/industries/agency/` the profile and its chart.
+- `src/packs/professional-services/` (slice 7b) — engagements and time, in the CLIENT's product rather than the console.
 - `src/app/admin/actions.ts` — provisioning from a party; the guard.
 - `src/lib/auth.ts` — `requireTenant`/`resolveTenantContext` honour a live support session for a GET only (slice 4); `src/lib/support-view.ts` the sessions, `support-view-decide.ts` the pure wall, `src/proxy.ts` the stamp.
 - `src/app/api/webhooks/stripe/route.ts`, `src/lib/retainer-billing.ts` — the money loop's sources; `src/lib/platform-revenue.ts` the posting, the backfill, the retry; `platform-revenue-controls.tsx` the operator's two buttons.

@@ -246,9 +246,10 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
     description:
       "Engagements — what each client has agreed to, the hours against it, and what starting one sets in motion.",
     category: "pack",
-    // Declared with the `agency` profile (back-office slice 7a) and unbuilt:
-    // `coming_soon` until engagements land, the arrangement `crops` has.
-    status: "coming_soon",
+    // `available` from slice 7b (2026-09-10): engagements, the month's meter
+    // and the time log, with each engagement synced as a cost object. The
+    // onboarding list and Discovery follow in 7c and 7d.
+    status: "available",
     sortOrder: 270,
   },
 ];

@@ -31,6 +31,17 @@ export const agency: IndustryProfile = {
    */
   labels: {},
   /**
+   * What an engagement is shaped like here. The pack has no list of its own
+   * on purpose — one that knew what "retainer" meant to an agency rather
+   * than to a law firm would know what industry it was in — so the kinds a
+   * profile expects are its own, and a tenant types one nobody listed.
+   */
+  packConfig: {
+    "professional-services": {
+      kinds: ["retainer", "project", "hourly"],
+    },
+  },
+  /**
    * What the profile contributes on install (back-office slice 7a): the
    * accounts a services business keeps beyond the general chart, and the two
    * folders every engagement produces papers for. Applied when the module

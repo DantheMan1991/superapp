@@ -7,7 +7,7 @@
 > services business keeps beyond the general chart of accounts. Nothing in it
 > is named after that business; clients, engagements, retainers, discovery
 > and onboarding are any services firm's.
-> Status: partial — the profile and its seed are built (back-office slice 7a); the pack it lists is declared and unbuilt · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: partial — the profile, its seed and the pack's first slice are built (back-office 7a and 7b); onboarding lists and Discovery are not · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 **Pilot tenant: the operator tenant.** The plan in
 [back-office.md](back-office.md) says the pack is worth more once a fortnight
@@ -17,6 +17,21 @@ platform gap it exposed first (7a), the engagement model once it has been
 lived with (7b), and the screens that hang off it after that.
 
 ## Build log
+
+### 2026-09-10 — Slice 7b: the pack ships its first slice (`claude/back-office-7b-engagements-and-time`)
+
+`professional-services` is built: engagements, the month's meter and the time
+log — full dossier in [professional-services.md](professional-services.md),
+migrations 0295 and 0296. The profile's manifest did not change except to
+gain `packConfig["professional-services"].kinds`, which is the three shapes an
+agency bills in; the pack has no list of its own, for the reason
+`livestock.species` lives in a profile and not in the pack.
+
+**What this profile still contributes and the pack does not:** the chart
+(slice 7a) has `1220 Work in Progress` and `4030 Retainer Revenue` waiting,
+and nothing posts to them yet. That is the open item the pack's dossier
+carries, and it is deliberately unanswered until running the agency on this
+has said what a line should read.
 
 ### 2026-09-10 — Slice 7a: seeds land, and the profile exists (`claude/back-office-7a-seeds-and-the-agency-profile`)
 
@@ -101,12 +116,13 @@ their own is a posting-rule change for the day the accountant asks.
 Declared in `src/packs/index.ts`; each slice below is its own PR and gets the
 pack's own dossier when the first one lands.
 
-- **7b — Engagements and time.** An engagement is a client's agreement — the
-  party it is for, scope, retainer hours a month, rate, start and end, state
-  — and a COST OBJECT (`dimension_members`, type `engagement`), so what is
-  spent against it rolls into the books. Time against an engagement is a
-  member-level chore; the month's hours against the retainer use the same
-  pure meter math the platform retainer uses. Owner-level to make or end one.
+- ~~**7b — Engagements and time.**~~ **BUILT 2026-09-10** — see
+  [professional-services.md](professional-services.md). It landed as
+  designed: the engagement is a cost object synced in the same transaction,
+  the client is a party, time is a member-level chore, and the month's math
+  is composed from `src/lib/retainer-core.ts` rather than copied. One thing
+  the plan did not anticipate: retainer hours needed their own month-keyed
+  history table, for the reason the platform's `retainer_allotments` has one.
 - **7c — Onboarding as a Work list.** A profile's `packConfig` names the
   lists an engagement starts with; starting one raises the items through the
   Layer 0 work verbs, linked to the engagement (P3), never a task engine of
@@ -134,7 +150,7 @@ pack's own dossier when the first one lands.
 
 ## Open items
 
-- **The pack is unbuilt** — slices 7b–7d above.
+- **The pack is part-built** — 7b shipped; 7c and 7d above.
 - **Core modules declare no vocabulary**, so *Client* cannot yet replace
   *Customer* on an invoice; the profile's `labels` is empty until they do
   (the open item [packs-and-profiles.md](packs-and-profiles.md) already

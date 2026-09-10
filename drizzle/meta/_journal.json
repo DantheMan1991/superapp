@@ -2066,6 +2066,20 @@
       "when": 1789020414819,
       "tag": "0294_membership_last_seen",
       "breakpoints": true
+    },
+    {
+      "idx": 295,
+      "version": "7",
+      "when": 1789036632391,
+      "tag": "0295_professional_services",
+      "breakpoints": true
+    },
+    {
+      "idx": 296,
+      "version": "7",
+      "when": 1789036633391,
+      "tag": "0296_professional_services_rls",
+      "breakpoints": true
     }
   ]
 }

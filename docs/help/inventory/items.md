@@ -11,6 +11,7 @@ Open **Inventory** in the sidebar. The heading reads `What the business holds, w
 - **{button:Add item|primary}.** Opens the dialog that adds a new kind of thing you hold. Owners only.
 - **{button:Paste a list|outline|sparkles}.** Reads a pasted list, or a photo of one, and proposes a row per kind of thing for you to check before anything is added. Owners only. See how to paste a list, below.
 - **The five tabs.** `Items` is this page. `Counting`, `What it is worth` and `Deliveries & invoices` are the other screens. `When it is deducted` only appears for an owner. The strip scrolls sideways on a narrow screen.
+- **{button:Scan|outline}.** Only on a phone or a browser that can use the camera; it is simply not there otherwise. It opens the camera, and whatever carries the code you point it at opens. Nothing is recorded by scanning.
 - **`What it is worth`.** The cost standing in stock right now. Click the card to open the full valuation. Underneath it tells you whether every batch carries a cost, or how many are `Short by 2 batches nobody has costed`. A minus in front of the figure means more stock has left some batch than ever went into it; the valuation page shows which.
 - **`Not costed`.** How many batches nobody ever put a price on. `None` is the good answer. This card is also a link to the valuation.
 - **`Going off soon`.** How many batches are past their date or within six weeks of it. It turns red when any batch is already past its date, and takes the accent color when something is close. The line under it says which: `2 past their date, 3 more within six weeks`. Click the card to jump to the list below.
@@ -62,6 +63,17 @@ A place is an asset with `Things are kept here` turned on, under [Assets](../ass
 
 The search looks at names only. A bag of feed for the beef herd is not called beef, and the empty state says so. Kind, line of business, place and search combine, so `Meat` with the truck picked is the meat on the truck.
 
+## How to find something by scanning it
+
+**A barcode scanner is a keyboard.** Click into `Find by name`, scan, and it types the code and presses Enter for you. No mode, no setting, nothing to turn on.
+
+- If the code is exactly one thing's barcode, **that thing opens**. There is no list to click through, because there was nothing to choose between.
+- If it is not, you get the ordinary search results, so a half-scan or a code you never recorded is a narrowed list rather than a dead end.
+
+With no scanner, tap {button:Scan|outline} and point the camera at the code. The button is only there on a browser that can use the camera, which today means Chrome on Android and the Yosher app. You are asked for permission the first time. Nothing is recorded by scanning; it only finds.
+
+To give something a barcode, open it, tap {button:Edit|outline} and scan into the `Barcode` box. See [One {{item|lower}}](item.md).
+
 ## How to paste a list of what you hold
 
 1. Click {button:Paste a list|outline|sparkles}. `Paste a list of kinds of stock` opens and reads `Paste a list, columns from a spreadsheet, or add a photo of one. You'll see every row it found and can change anything before it saves.`
@@ -94,6 +106,9 @@ No quantities and no costs are read. What is on the shelf is recorded as a count
 | `Check the details and try again.` | Something in the dialog is not right. Most often `How many, each` was left at zero. |
 | `Use lowercase letters, numbers and underscores.` | Your own kind has a capital, a symbol, or starts with a digit. |
 | `Only an owner can change stock records.` | You are signed in as staff and pressed something an owner keeps. Recording stock and counting are not among them. |
+| `Grower crumble already has that code.` | Two things cannot carry one barcode. Find the other one and clear its code first. |
+| `Penicillin G (retired) already has that code.` | The same, and the thing holding it is retired. Show retired things to find it. |
+| `The camera could not be opened. Allow it in your browser, or type the code into the search box.` | Permission was refused, or there is no camera. |
 | `Something went wrong saving that.` | Something unexpected. Try again, and tell us if it keeps happening. |
 
 ## Not on this page
@@ -103,6 +118,9 @@ No quantities and no costs are read. What is on the shelf is recorded as a count
 - The figure on a card is the count in its unit. What it weighs is on the {{item|lower}}'s own page.
 - Nothing warns you at the moment you record something that it will take stock below zero.
 - Nothing can be brought in from a spreadsheet. Ask us if you have a long list.
+- Scanning finds; it never records. Scanning a bag does not receive it.
+- Only a whole barcode opens something. Part of one searches by name instead, which will usually find nothing.
+- Barcodes are not shown in the list or printed anywhere. They are on each thing's own page.
 
 ## Who can do what
 

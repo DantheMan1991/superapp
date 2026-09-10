@@ -105,6 +105,10 @@ function toResult(err: unknown): { error: string } {
         return { error: err.message };
       case "INVALID_KIND":
         return { error: "Use lowercase letters, numbers and underscores." };
+      // Names the thing that already has it, retired ones said so — see
+      // `assertBarcodeFree`.
+      case "BARCODE_TAKEN":
+        return { error: `${err.message}.` };
       case "INVALID_UNIT":
         return { error: err.message };
       case "INVALID_SOURCE":
@@ -194,6 +198,15 @@ const itemSchema = z.object({
   storageRequirement: z.string().max(32).nullable().optional(),
   /** In the stocking unit. Null clears it; a negative is refused here and by the CHECK. */
   reorderPoint: quantity.min(0).nullable().optional(),
+  /**
+   * What is printed on the thing. Long enough for a QR code's payload and
+   * capped so a pasted page of text is refused rather than stored.
+   *
+   * **NOT VALIDATED FOR SHAPE.** A UPC is digits, a QR code is not, and a
+   * business's own labels are whatever their printer prints — a format rule
+   * here would refuse the case the column exists for.
+   */
+  barcode: z.string().max(512).nullable().optional(),
   notes: z.string().max(5000).optional(),
 });
 

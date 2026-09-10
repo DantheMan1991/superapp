@@ -121,6 +121,20 @@ export const inventoryItems = pgTable(
       mode: "number",
     }),
     /**
+     * **WHAT IS PRINTED ON THE THING, so a scan finds it.** A UPC off a feed
+     * bag, a QR code from a co-op, or a number a business printed itself.
+     *
+     * **TEXT AND UNVALIDATED, on purpose.** A UPC is digits and a QR code is
+     * not; a farm's own label is whatever their printer prints. A format rule
+     * here would refuse the case this column exists for. The only rules are
+     * that it is not blank when present, and that no two of a tenant's things
+     * carry the same one — see the partial unique index below.
+     *
+     * Null is the ordinary case and always will be: most of what a business
+     * holds has nothing printed on it. Added 2026-09-09 (migration 0285).
+     */
+    barcode: text("barcode"),
+    /**
      * **WHICH LINE OF BUSINESS THIS BELONGS TO.** Null is ordinary and is the
      * default: plenty of what a business holds belongs to no one part of it.
      *
@@ -153,7 +167,33 @@ export const inventoryItems = pgTable(
       foreignColumns: [enterprises.tenantId, enterprises.id],
     }),
     index("inventory_items_tenant_enterprise_idx").on(t.tenantId, t.enterpriseId),
+    /**
+     * **ONE THING PER CODE, and the index is what makes a scan an ANSWER
+     * rather than a guess.** Two items sharing a barcode would make "find what
+     * I just scanned" ambiguous, and the screen would have to ask a question
+     * the scan was supposed to answer.
+     *
+     * **PARTIAL, because null is the ordinary case.** A plain unique index
+     * treats nulls as distinct in Postgres and would work — but saying `where
+     * barcode is not null` states the intent and keeps the index to the rows
+     * that have one, which is a handful of a long list.
+     *
+     * **ACROSS RETIRED THINGS TOO.** Retiring is reversible (`restoreItem`),
+     * so letting a live item take a retired one's code would make putting the
+     * retired one back impossible — a refusal at the wrong moment, about a
+     * decision made months earlier.
+     */
+    uniqueIndex("inventory_items_tenant_barcode_idx")
+      .on(t.tenantId, t.barcode)
+      .where(sql`${t.barcode} is not null`),
     check("inventory_items_name_present", sql`length(btrim(${t.name})) > 0`),
+    // Blank is not a barcode. Null says "nothing printed on it"; an empty
+    // string would be a second way to say the same thing, and the unique index
+    // would then let exactly one item hold it.
+    check(
+      "inventory_items_barcode_present",
+      sql`${t.barcode} is null or length(btrim(${t.barcode})) > 0`,
+    ),
     check(
       "inventory_items_kind_format",
       sql`${t.itemKind} ~ '^[a-z][a-z0-9_]{0,62}$'`,

@@ -33,6 +33,66 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-09-09 — Find it by scanning (`claude/find-it-by-scanning`)
+
+Slice 10, the last of the review. **Migration `0285_inventory_barcode`, applied
+to dev and production before this PR** per ADR 0014.
+
+**A BARCODE SCANNER IS A KEYBOARD, AND THAT IS THE WHOLE DESIGN.** It types the
+code into whatever has focus and presses Enter. So the hub's existing search box
+IS the scanner interface — no mode, no setting, no new control — and the feature
+is a column, an exact lookup, and a hub that opens the thing instead of listing
+one row under a search box.
+
+- **`inventory_items.barcode`**, text, nullable, unvalidated for shape. A UPC is
+  digits, a QR payload is not, and a business's own label is whatever its
+  printer prints; a format rule would refuse the case the column exists for.
+  Two constraints and no more: a CHECK that it is not blank when present, and a
+  **partial unique index** on `(tenant_id, barcode) where barcode is not null`.
+- **The index is what makes a scan an ANSWER rather than a guess.** Two things
+  sharing a code would make *find what I just scanned* a question. `assertBarcodeFree`
+  is the manners on top — it names the thing that already holds it, because a
+  raw index violation reaches the screen as "Something went wrong saving that."
+  about a code somebody is looking at on a bag. The index stays because a
+  check-then-write is not atomic, and being refused by the database is the right
+  outcome for that race.
+- **Retired things hold their codes.** Retiring is reversible, so letting a live
+  item take a retired one's code would make putting the retired one back
+  impossible — a refusal at the wrong moment about a decision made months
+  earlier. The sentence says `(retired)`, because otherwise it names something
+  that is not in the list the reader is looking at.
+- **An exact match on the hub REDIRECTS to the item.** A list of one under a
+  search box is a second click asking a question the scan already answered. Only
+  on an exact match, which the index makes at most one row; a partial code still
+  searches by name exactly as before.
+- **`ScanButton` is the second way in, and the less important one.** It renders
+  NOTHING unless `BarcodeDetector` and `getUserMedia` are both there — Chrome on
+  Android, which is what the mobile app wraps, and not Safari or Firefox. A
+  camera button that cannot work is worse than no button. Feature-detected
+  through `useSyncExternalStore` rather than state in an effect, the shape
+  `AfterHydration` already uses and the one `react-hooks/set-state-in-effect`
+  demands. **The track is stopped on every exit path** — closing, finding a
+  code, and unmounting — because a camera left running is a light on somebody's
+  phone.
+
+**NOT DRIVEN, and neither was slice 9.** The browser pane's Clerk session is
+still expired; every route redirects to sign-in and only the founder can
+complete it. So **nothing in this slice has been clicked**, and the camera path
+could not be verified even signed in: the pane has no camera, and
+`BarcodeDetector` is Chromium-on-Android. What stands in:
+
+- five ops tests — the exact trimmed lookup and its refusal to match a prefix,
+  the duplicate refusal naming its holder, the retired holder saying so, keeping
+  your own code while emptying the box clears it, and many things with no code;
+- an isolation test asserting the **database** refuses a blank and a duplicate
+  under `withSystem`, and that the index is per tenant — two businesses buying
+  the same feed carry the same UPC;
+- migration state: `PENDING: none` on both databases, `db:verify-rls` green on
+  both (172 tables).
+
+**The camera is the one part of this pack nothing has ever exercised.** It is
+named in Open items and it wants a phone.
+
 ### 2026-09-09 — The whole history (`claude/the-whole-history`)
 
 Slice 9 of the review. **No migration.**
@@ -2056,6 +2116,7 @@ with no reason is one whose kind already says why.
 | `inventory_tax_treatments` | **Where an accountant's decision is recorded**, per category — ADR 0013 §A.2 | `item_kind` NULL is the tenant default, and the unique index does NOT hold for it (Postgres nulls are distinct) — `setTaxRule` selects then updates, third time this pack has hit that. Composite FK to `accounts`. Carries `decided_by` and `decided_on`, because it is a record rather than a preference |
 
 | `inventory_cost_adjustments` | **A correction to what a batch COST.** Appended, never an edit — ADR 0012 §A.4 | Composite FKs to the item and the lot, **neither cascading**: erasing the record that somebody re-stated a cost would hide the money. `amount_cents` is SIGNED and CHECKed non-zero, which is the pair of things `inventory_movements` structurally cannot carry. `on_hand_cents + issued_cents = amount_cents` is CHECKed, so a stored split can never fail to account for the whole |
+| `inventory_items.barcode` | **WHAT IS PRINTED ON THE THING**, so a scan finds it (2026-09-09, migration 0285) | `text`, nullable — null is the ordinary case and always will be. CHECK: not blank when present. **Partial unique index** on `(tenant_id, barcode) where barcode is not null`, so one code names at most one thing, per tenant, retired ones included. Unvalidated for shape on purpose |
 | `inventory_weight_adjustments` | **A correction to what a batch WEIGHS.** Appended, never an edit — the cost correction's shape, for pounds (2026-09-08) | Composite FKs to the item and the lot, neither cascading, as with cost. `delta_lb` is SIGNED and CHECKed non-zero; `recorded_lb + delta_lb > 0` is CHECKed so a batch cannot be corrected to nothing; `recorded_lb` and `quantity_weighed` are stamped as what the batch read when it was written. Folded into the POUNDS by `core/weight.ts`, never into the quantity, and only where receipts were weighed. RLS: members read, owners insert, nobody updates or deletes |
 
 | `bill_line_stock_allocations` | **Which delivery a bill line is settling** | Composite FKs to `bill_lines` (**CASCADE** — when the LINE goes the settlement goes with it, because a deleted line no longer debits GRNI; it does NOT fire on an ordinary edit, which is what it used to do and what let GRNI be cleared twice) and to the receipt movement (**no cascade** — erasing the record that a bill settled it would hide the money). UNIQUE per (line, movement): a second match is a correction, not a second settlement |
@@ -2104,6 +2165,17 @@ commitment against a live animal to delivered without sitting on a shelf.
 
 ## Decisions & gotchas
 
+- **A BARCODE SCANNER IS A KEYBOARD.** It types and presses Enter, so the
+  search box is the scanner interface and the camera is the fallback rather
+  than the feature. Anything built later that "supports scanning" should start
+  by asking whether a focused text box already does it.
+- **A CODE NAMES AT MOST ONE THING, and the partial unique index is the
+  guarantee.** `assertBarcodeFree` exists for the sentence, not the safety: a
+  check-then-write is not atomic. Retired things keep their codes, because
+  retiring is reversible and a stolen code would make restoring impossible.
+- **THE CAMERA BUTTON RENDERS NOTHING WHERE IT CANNOT WORK.** `BarcodeDetector`
+  is Chromium-only. Feature-detect through `useSyncExternalStore`, never state
+  in an effect, and stop the media track on every exit path.
 - **A LOG SEARCHES THE NOTE; A LIST SEARCHES THE NAME.** `listItems` matches
   the name only, on purpose, so a search for *beef* does not return the feed
   whose note mentions the beef herd. `listEntries` matches the item, both batch
@@ -2375,9 +2447,16 @@ commitment against a live animal to delivered without sitting on a shelf.
 - **The filter does not reach COUNTING or MATCHING.** The valuation and the
   entries log gained kind and place on 2026-09-09; the counting screen and the
   bills list still cannot be narrowed at all.
-- **`/entries` has not been measured at 375px.** Built to the pack's card
-  pattern and covered by tests, but the pane's session expired before it could
-  be driven. Measure it first thing.
+- **`/entries`, the barcode boxes and the camera have not been driven at all.**
+  The pane's Clerk session expired before slice 9 and is still expired. Slices 9
+  and 10 are covered by tests and by the build; nothing in them has been
+  clicked, and no 375px measurement has been taken. First thing when the pane is
+  signed in again.
+- **THE CAMERA SCAN HAS NEVER RUN.** `ScanButton` needs `BarcodeDetector` and a
+  real camera — Chrome on Android or the mobile app. It cannot be exercised from
+  this machine at all, signed in or not, so it wants a phone and a printed code.
+  Everything around it (the column, the lookup, the refusals, the hub's redirect)
+  is tested.
 
 - ~~Nobody has driven slice 0 yet~~ — **closed 2026-08-19.** Driven on
   production; the fold, the split, the location split and the return to zero all

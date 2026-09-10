@@ -918,6 +918,74 @@ d("inventory tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
+  it("refuses a blank barcode, and two things carrying one code", async () => {
+    /**
+     * **THE INDEX IS THE GUARANTEE; `assertBarcodeFree` IS THE MANNERS.** The
+     * op's check is not atomic — two tabs can both pass it — so the database
+     * has to be the one that cannot be talked round. Asserted here, under
+     * `withSystem`, where the application code is not in the way.
+     */
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.inventoryItems).values({
+          tenantId: tenantA,
+          name: "Blank code",
+          stockingUnit: "lb",
+          barcode: "   ",
+        }),
+      ),
+      // Bare `toThrow`, as every assertion in this file is: drizzle wraps the
+      // failure in a "Failed query:" message and the constraint's name is not
+      // in it. What is being certified is that the DATABASE refuses, not how
+      // it phrases the refusal.
+    ).rejects.toThrow();
+
+    await withSystem((tx) =>
+      tx.insert(schema.inventoryItems).values({
+        tenantId: tenantA,
+        name: "Holds a code",
+        stockingUnit: "lb",
+        barcode: "SHARED-CODE",
+      }),
+    );
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.inventoryItems).values({
+          tenantId: tenantA,
+          name: "Wants the same code",
+          stockingUnit: "lb",
+          barcode: "SHARED-CODE",
+        }),
+      ),
+    ).rejects.toThrow();
+
+    /**
+     * **AND THE INDEX IS PER TENANT.** Two businesses buying the same feed
+     * carry the same UPC, and refusing the second would be one tenant's data
+     * deciding what another may record — the thing every index in this schema
+     * is keyed by `tenant_id` to prevent.
+     */
+    await withSystem((tx) =>
+      tx.insert(schema.inventoryItems).values({
+        tenantId: tenantB,
+        name: "Other tenant, same code",
+        stockingUnit: "lb",
+        barcode: "SHARED-CODE",
+      }),
+    );
+
+    // Many with no code at all, because the index is partial.
+    for (const name of ["No code one", "No code two"]) {
+      await withSystem((tx) =>
+        tx.insert(schema.inventoryItems).values({
+          tenantId: tenantA,
+          name,
+          stockingUnit: "lb",
+        }),
+      );
+    }
+  });
+
   it("refuses a correction of nothing", async () => {
     // Mirrors the movement ledger's `quantity <> 0`, on the column that carries
     // the meaning here. A correction of zero is not a correction.

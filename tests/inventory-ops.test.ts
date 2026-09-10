@@ -10,6 +10,7 @@ import {
   countEntries,
   createItem,
   createLot,
+  findItemByBarcode,
   getItem,
   listEntries,
   listItems,
@@ -574,6 +575,163 @@ d("inventory ops", () => {
         method: "carried",
         locationAssetId: null,
       });
+    });
+  });
+
+  describe("FINDING IT BY SCANNING", () => {
+    /**
+     * A scanner is a keyboard: it types the code and presses Enter. So the
+     * whole feature is a column, an exact lookup, and a hub that opens the
+     * thing instead of listing one row.
+     */
+    it("finds the one thing carrying a code, exactly and trimmed", async () => {
+      const item = await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: "Scannable feed",
+          stockingUnit: "lb",
+          itemKind: "feed",
+          barcode: `  0${STAMP}1  `,
+        }),
+      );
+      // Stored trimmed, so the code on the bag and the code in the column are
+      // the same string.
+      expect(item.barcode).toBe(`0${STAMP}1`);
+
+      const found = await asOwner((tx) =>
+        findItemByBarcode(tx, tenantId, `0${STAMP}1`),
+      );
+      expect(found?.id).toBe(item.id);
+      // A scanner appends a newline and a person pastes with a space.
+      expect(
+        (await asOwner((tx) => findItemByBarcode(tx, tenantId, ` 0${STAMP}1\n`)))?.id,
+      ).toBe(item.id);
+
+      /**
+       * **EXACT, NEVER A PREFIX.** A prefix of a barcode belongs to something
+       * else entirely, and answering with the wrong thing is worse than
+       * answering with nothing — `listItems`' search is where a partial answer
+       * belongs.
+       */
+      expect(await asOwner((tx) => findItemByBarcode(tx, tenantId, `0${STAMP}`))).toBeNull();
+      expect(await asOwner((tx) => findItemByBarcode(tx, tenantId, "   "))).toBeNull();
+    });
+
+    it("REFUSES A CODE ANOTHER THING ALREADY CARRIES, naming it", async () => {
+      // Two things sharing a code would make "find what I just scanned" a
+      // question rather than an answer.
+      await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: "First holder",
+          stockingUnit: "lb",
+          itemKind: "feed",
+          barcode: `dup-${STAMP}`,
+        }),
+      );
+      await expect(
+        asOwner((tx) =>
+          createItem(tx, ownerCtx(), {
+            name: "Second holder",
+            stockingUnit: "lb",
+            itemKind: "feed",
+            barcode: `dup-${STAMP}`,
+          }),
+        ),
+      ).rejects.toMatchObject({
+        code: "BARCODE_TAKEN",
+        message: "First holder already has that code",
+      });
+    });
+
+    it("SAYS SO WHEN THE THING HOLDING IT IS RETIRED", async () => {
+      /**
+       * Retiring is reversible, so a live item taking a retired one's code
+       * would make putting the retired one back impossible — a refusal at the
+       * wrong moment, about a decision made months earlier. The sentence names
+       * the retirement, because otherwise it is a puzzle: the thing is not in
+       * the list somebody is looking at.
+       */
+      const gone = await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: "Retired holder",
+          stockingUnit: "lb",
+          itemKind: "feed",
+          barcode: `old-${STAMP}`,
+        }),
+      );
+      await asOwner((tx) => archiveItem(tx, ownerCtx(), gone.id));
+      await expect(
+        asOwner((tx) =>
+          createItem(tx, ownerCtx(), {
+            name: "New holder",
+            stockingUnit: "lb",
+            itemKind: "feed",
+            barcode: `old-${STAMP}`,
+          }),
+        ),
+      ).rejects.toMatchObject({
+        code: "BARCODE_TAKEN",
+        message: "Retired holder (retired) already has that code",
+      });
+    });
+
+    it("lets a thing keep its own code, and lets the box be emptied", async () => {
+      const item = await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: "Recodeable feed",
+          stockingUnit: "lb",
+          itemKind: "feed",
+          barcode: `keep-${STAMP}`,
+        }),
+      );
+      // Saving the dialog without touching the box must not refuse itself.
+      const same = await asOwner((tx) =>
+        updateItem(tx, ownerCtx(), item.id, {
+          barcode: `keep-${STAMP}`,
+          notes: "unchanged code",
+        }),
+      );
+      expect(same.barcode).toBe(`keep-${STAMP}`);
+
+      // Emptying the box CLEARS it — otherwise a code could never be taken off
+      // a thing whose label was replaced.
+      const cleared = await asOwner((tx) =>
+        updateItem(tx, ownerCtx(), item.id, { barcode: "" }),
+      );
+      expect(cleared.barcode).toBeNull();
+      expect(
+        await asOwner((tx) => findItemByBarcode(tx, tenantId, `keep-${STAMP}`)),
+      ).toBeNull();
+
+      // And the freed code can be taken by something else.
+      const next = await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: "Took the code",
+          stockingUnit: "lb",
+          itemKind: "feed",
+          barcode: `keep-${STAMP}`,
+        }),
+      );
+      expect(next.barcode).toBe(`keep-${STAMP}`);
+    });
+
+    it("leaves a thing with no code alone, which is nearly everything", async () => {
+      const plain = await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: "Uncoded feed",
+          stockingUnit: "lb",
+          itemKind: "feed",
+        }),
+      );
+      expect(plain.barcode).toBeNull();
+      // Many things with no code coexist — the unique index is partial.
+      const second = await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: "Also uncoded",
+          stockingUnit: "lb",
+          itemKind: "feed",
+        }),
+      );
+      expect(second.barcode).toBeNull();
     });
   });
 

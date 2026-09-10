@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Boxes, SearchX } from "lucide-react";
 import { withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
@@ -22,6 +23,7 @@ import { labelFor } from "@/lib/packs/resolve";
 import {
   NO_PLACE,
   expiringLots,
+  findItemByBarcode,
   listItems,
   listKindsInUse,
   listLocations,
@@ -38,6 +40,7 @@ import { formatMoneySign } from "@/lib/money";
 import { PasteListButton } from "@/components/app/paste-list-button";
 import { ItemForm } from "./components/item-form";
 import { ItemFilters } from "./components/item-filters";
+import { ScanButton } from "./components/scan-button";
 import { InventoryNav } from "./components/inventory-nav";
 import { listEnterprises } from "@/lib/enterprises";
 import {
@@ -87,6 +90,30 @@ export async function InventoryModule({
   const placeParam = searchParams.place;
   const place = typeof placeParam === "string" && placeParam ? placeParam : undefined;
   const showArchived = searchParams.archived === "1";
+
+  /**
+   * **A SCAN IS AN ANSWER, SO IT OPENS THE THING RATHER THAN LISTING IT.**
+   *
+   * A barcode scanner is a keyboard: it types the code into whatever has
+   * focus and presses Enter. That lands here as an ordinary `?q=`, so the
+   * search box IS the scanner interface and needs no mode, no camera and no
+   * new control. When the term is EXACTLY one thing's barcode there is
+   * nothing to choose between, and a list of one under a search box is a
+   * second click asking a question the scan already answered.
+   *
+   * **ONLY ON AN EXACT MATCH**, which the partial unique index makes at most
+   * one row. A term that merely looks like digits still searches by name, so
+   * typing part of a code behaves exactly as it always did.
+   */
+  if (search) {
+    const scanned = await withTenant(
+      ctx.tenant.id,
+      (tx) => findItemByBarcode(tx, ctx.tenant.id, search),
+      { role: ctx.role },
+    );
+    if (scanned) redirect(`${BASE}/${scanned.id}`);
+  }
+
   const filtering =
     Boolean(kind) ||
     Boolean(search) ||
@@ -332,7 +359,16 @@ export async function InventoryModule({
         description="What the business holds, where it is, and which batch it came from."
         icon={<Boxes />}
         actions={
-          isOwner ? (
+          /**
+           * **SCANNING IS NOT AN OWNER'S ACT.** Finding what is in your hand
+           * is what the person in the freezer is doing, so the camera button
+           * sits outside the owner block that holds the two verbs. It renders
+           * nothing at all on a browser without `BarcodeDetector`, which is
+           * most of them — see `ScanButton`.
+           */
+          <div className="flex flex-wrap items-center gap-2">
+            <ScanButton />
+            {isOwner ? (
             <div className="flex flex-wrap items-center gap-2">
               <PasteListButton
                 slug="inventory.items"
@@ -347,7 +383,8 @@ export async function InventoryModule({
                 livestockEnabled={livestockEnabled}
               />
             </div>
-          ) : undefined
+            ) : null}
+          </div>
         }
       />
 

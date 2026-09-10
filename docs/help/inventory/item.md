@@ -29,6 +29,7 @@ On a phone, one card per batch: the code with its badges, where it came from and
 
 - **`From`** is `Bought`, `Raised here` or `Made here`.
 - **`Good until`** turns red once the date is past and there is still something on hand, and a line under the date says `past its date`, `goes off today`, `goes off in 5 days` or `good until 2026-11-01`. Blank covers both "nobody dated it" and "it does not go off".
+- **`Barcode`** is on the Edit box rather than the page: it is how a scan finds this, not something to read.
 - **`Carrying`** is what that batch cost and has not yet released. `No cost recorded` means nobody ever costed it, which is different from `$0.00`, meaning it was costed and has all been used. A minus in front of it, `−$8.00`, means a correction took more off the batch than was still standing in it. That is allowed and it is worth looking at.
 - **{badge:closed|outline}** and **{badge:split|outline}** mark a batch that has been closed elsewhere, or one cut off another.
 - **{button:Edit|ghost}**, **{button:Correct cost|ghost}**, **{button:Correct weight|ghost}**, **{button:Close|ghost}** and **{button:Split|ghost}** sit under each card, or at the end of each row, for owners. `Edit` is always there. `Correct weight` only appears on a batch that has a weight recorded. `Split` only while the batch is open and has something on hand. `Close` only once the batch is at zero or below, and it reads {button:Reopen|ghost} on a batch that is already closed.
@@ -168,6 +169,20 @@ The delivery entries are left exactly as they were recorded. The correction is a
 
 Once a batch has a correction, a `Weight corrections` list appears above `Recent entries`: when, which batch, why with your note and what the batch read at the time, the correction with its sign, and what it read once that correction landed.
 
+## How to give it a barcode
+
+So that scanning it on the {{item|lower}} list opens this page.
+
+1. Tap {button:Edit|outline}.
+2. Click into `Barcode` and **scan**. A scanner types the code for you. Or type what is printed.
+3. Tap {button:Save|primary}. You see `Saved`.
+
+Whatever is printed is fine: the number under a shop barcode, a QR code from a supplier, or a code you printed yourself. Nothing checks the shape of it.
+
+**No two things can carry one code.** If another one already has it you see `Grower crumble already has that code.`, naming it — and `(retired)` after the name when the thing holding it has been retired, so you know to show retired things to find it.
+
+To take a code off, empty the box and save.
+
 ## How to retire something
 
 1. Tap {button:Retire|ghost}. You are asked to confirm.
@@ -197,6 +212,7 @@ Once a batch has a correction, a `Weight corrections` list appears above `Recent
 | `nothing in this batch has been weighed yet — record a weight on a delivery first` | The batch has no weight to correct. Record a delivery with a weight instead. |
 | `this batch already reads 6 lb` | The figure you typed is what the batch already reads. Nothing was recorded. |
 | `Saved` | Your changes to the {{item|lower}} are in. |
+| `Grower crumble already has that code.` | Two things cannot carry one barcode. `(retired)` after the name means the thing holding it is retired. |
 | `Retired` / `Back in the list` | It is out of, or back in, the lists. |
 | `Showing 26–50 of 300 entries` | You are on the second page of entries. `Newer` goes back to the first. |
 | `No batches yet` | Nothing has been started. An owner starts the first. |
@@ -215,6 +231,7 @@ Once a batch has a correction, a `Weight corrections` list appears above `Recent
 ## Not on this page
 
 - Two batches cannot be merged from here.
+- A batch has no barcode of its own. The code is on the {{item|lower}}, so a scan finds the kind of thing and not the particular delivery.
 - Stock in a closed batch cannot be moved. You can see it, edit it and correct its cost, and nothing else.
 - The counted unit is locked the moment anything moves, even if the balance is back to zero.
 - Nothing traces a batch back through its splits, although the record is kept.

@@ -547,6 +547,7 @@ export default async function InventoryItemPage({
                   purchaseUnitQty: item.purchaseUnitQty,
                   storageRequirement: item.storageRequirement,
                   reorderPoint: item.reorderPoint,
+                  barcode: item.barcode,
                   notes: item.notes,
                   status: item.status,
                 }}

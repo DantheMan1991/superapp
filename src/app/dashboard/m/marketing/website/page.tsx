@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Camera, ExternalLink, Globe } from "lucide-react";
+import { Camera, ExternalLink, Globe, Plus } from "lucide-react";
 import { withTenant } from "@/db";
 import { templateFor } from "@/lib/site-templates/resolve";
 import { requireTenant } from "@/lib/auth";
@@ -129,11 +129,33 @@ export default async function WebsitePage({
     <div className="space-y-6">
       <PageHeader
         icon={<Globe />}
-        title="Website"
+        title={sites.length > 1 && drafts ? drafts.site.title || drafts.site.slug : "Website"}
         description={
           drafts
-            ? `${ctx.tenant.name}'s site, built from your brand kit and details.`
+            ? sites.length > 1
+              ? `One of ${ctx.tenant.name}'s ${sites.length} websites.`
+              : `${ctx.tenant.name}'s site, built from your brand kit and details.`
             : `A website for ${ctx.tenant.name}, written from your brand kit and the details you give it.`
+        }
+        actions={
+          /* ADD A WEBSITE LIVES HERE, not on the list. The list is drawn only
+             from two sites up, so a business with one had no way to build a
+             second — the control has to be reachable from a site, not only
+             from a list it cannot see. */
+          canWrite && drafts ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {sites.length > 1 && (
+                <Button asChild variant="ghost" size="sm">
+                  <Link href="/dashboard/m/marketing/website">All websites</Link>
+                </Button>
+              )}
+              <Button asChild variant="outline" size="sm">
+                <Link href="/dashboard/m/marketing/website?site=new">
+                  <Plus className="size-4" /> Add a website
+                </Link>
+              </Button>
+            </div>
+          ) : undefined
         }
       />
       <MarketingStrip />

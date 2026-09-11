@@ -47,10 +47,12 @@ export interface PageRowView {
  * a page's words wait for Publish (see page-actions.ts).
  */
 export function PagesPanel({
+  siteId,
   pages,
   slug,
   canWrite,
 }: {
+  siteId: string;
   pages: PageRowView[];
   slug: string;
   canWrite: boolean;
@@ -75,7 +77,7 @@ export function PagesPanel({
     const next = arrayMove(order, from, to);
     setOrder(next);
     startTransition(async () => {
-      const result = await reorderPagesAction({ order: next.map((p) => p.id) });
+      const result = await reorderPagesAction({ siteId, order: next.map((p) => p.id) });
       if ("error" in result) {
         toast.error(result.error);
         setOrder(pages);
@@ -89,7 +91,7 @@ export function PagesPanel({
   function add() {
     if (!pathCheck.ok) return;
     startTransition(async () => {
-      const result = await addPageAction({ title, path: pathCheck.path });
+      const result = await addPageAction({ siteId, title, path: pathCheck.path });
       if ("error" in result) {
         toast.error(result.error);
         return;

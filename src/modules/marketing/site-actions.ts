@@ -36,7 +36,7 @@ import { saveKitLook } from "./kit-ops";
 import {
   changeSiteSlug,
   createSite,
-  findSite,
+  findSiteById,
   publishSite,
   replaceDrafts,
   unpublishSite,
@@ -60,13 +60,21 @@ const BASE = "/dashboard/m/marketing/website";
  * the second, a connected domain on the third.
  */
 function revalidateSite(): void {
-  revalidatePath(BASE);
+  revalidatePath(BASE, "layout");
   revalidatePath("/sites/[slug]/[[...path]]", "page");
   revalidatePath("/hosted/[slug]/[[...path]]", "page");
   revalidatePath("/domain/[host]/[[...path]]", "page");
 }
 
-const detailsInput = z.object({
+/**
+ * WHICH SITE. Every action that touches a site names it, because a tenant
+ * may have several (ADR 0045) and a server action must never infer one from
+ * ambient state. The id is a CLAIM until `findSiteById` proves it is this
+ * tenant's; RLS is the second lock behind that.
+ */
+const siteRef = z.object({ siteId: z.string().uuid() });
+
+const detailsInput = siteRef.extend({
   title: z.string().trim().max(80).default(""),
   phone: z.string().trim().max(40).default(""),
   email: z.string().trim().max(120).default(""),
@@ -82,7 +90,10 @@ const detailsInput = z.object({
  * are four of the settings' fields; the frame (the header, the footer, the
  * bar) is the rest, and a save of the details leaves it as it was.
  */
-function settingsFrom(existing: SiteSettings, input: z.infer<typeof detailsInput>): SiteSettings {
+function settingsFrom(
+  existing: SiteSettings,
+  input: Omit<z.infer<typeof detailsInput>, "siteId">,
+): SiteSettings {
   const hoursLines = input.hoursText
     .split(/\r?\n/)
     .map((l) => l.trim())
@@ -106,11 +117,11 @@ function slugFrom(raw: string): string {
   return check.slug;
 }
 
-const buildInput = detailsInput.extend({ slug: z.string().max(80) });
+const buildInput = detailsInput.omit({ siteId: true }).extend({ slug: z.string().max(80) });
 
 export async function createSiteAction(
   input: unknown,
-): Promise<ActionResult<{ slug: string }>> {
+): Promise<ActionResult<{ slug: string; siteId: string }>> {
   try {
     const ctx = await gate();
     const parsed = buildInput.safeParse(input);
@@ -120,9 +131,6 @@ export async function createSiteAction(
     const start = await withTenant(
       ctx.tenantId,
       async (tx) => {
-        if (await findSite(tx, ctx.tenantId)) {
-          throw new MarketingError("SITE_EXISTS", "site exists");
-        }
         const brand = await resolveBrandFor(tx, ctx.tenantId, null);
         const tenant = await tx.query.tenants.findFirst({
           where: eq(schema.tenants.id, ctx.tenantId),
@@ -169,23 +177,26 @@ export async function createSiteAction(
     // The starter pictures, once the site exists: network first, rows second,
     // and the drafts take them in a second pass. A picture that fails is left out.
     await placeStarterPictures(ctx, siteId, template, brief, brand, { schedulingOn, blocks }, pages, source);
-    if (settings.address) await placeOnMap(ctx, settings.address);
+    if (settings.address) await placeOnMap(ctx, siteId, settings.address);
     revalidateSite();
-    return { ok: true, data: { slug } };
+    return { ok: true, data: { slug, siteId } };
   } catch (err) {
     return fail(err);
   }
 }
 
 /** The assistant writes every draft again from the current kit and details. */
-export async function rewriteSiteCopyAction(): Promise<ActionResult> {
+export async function rewriteSiteCopyAction(input: unknown): Promise<ActionResult> {
   try {
     const ctx = await gate();
+    const ref = siteRef.safeParse(input);
+    if (!ref.success) return { error: "Which website?" };
+    const { siteId } = ref.data;
     const schedulingOn = await isModuleEnabled(ctx.tenantId, "scheduling");
-    const { siteId, brief, brand, template, blocks } = await withTenant(
+    const { brief, brand, template, blocks } = await withTenant(
       ctx.tenantId,
       async (tx) => {
-        const site = await findSite(tx, ctx.tenantId);
+        const site = await findSiteById(tx, ctx.tenantId, siteId);
         if (!site) throw new MarketingError("SITE_MISSING", "no site");
         const brand = await resolveBrandFor(tx, ctx.tenantId, null);
         const tenant = await tx.query.tenants.findFirst({
@@ -194,7 +205,6 @@ export async function rewriteSiteCopyAction(): Promise<ActionResult> {
         });
         const settings = SiteSettingsSchema.parse(site.settings);
         return {
-          siteId: site.id,
           brand,
           template: templateFor(tenant?.industry),
           blocks: await siteBlockCatalog(tx, ctx.tenantId),
@@ -233,10 +243,11 @@ export async function saveSiteDetailsAction(input: unknown): Promise<ActionResul
     const ctx = await gate();
     const parsed = detailsInput.safeParse(input);
     if (!parsed.success) return { error: "Check the fields and try again." };
+    const { siteId } = parsed.data;
     const saved = await withTenant(
       ctx.tenantId,
       async (tx) => {
-        const site = await findSite(tx, ctx.tenantId);
+        const site = await findSiteById(tx, ctx.tenantId, siteId);
         if (!site) throw new MarketingError("SITE_MISSING", "no site");
         const existing = readSiteSettings(site.settings);
         const settings = settingsFrom(existing, parsed.data);
@@ -255,7 +266,7 @@ export async function saveSiteDetailsAction(input: unknown): Promise<ActionResul
       },
       { role: ctx.role },
     );
-    if (saved.address && !saved.placed) await placeOnMap(ctx, saved.address);
+    if (saved.address && !saved.placed) await placeOnMap(ctx, siteId, saved.address);
     revalidateSite();
     return { ok: true };
   } catch (err) {
@@ -293,13 +304,17 @@ async function placeStarterPictures(
   await withTenant(ctx.tenantId, (tx) => replaceDrafts(tx, ctx, siteId, withPictures, source), { role: ctx.role });
 }
 
-async function placeOnMap(ctx: Awaited<ReturnType<typeof gate>>, address: string): Promise<void> {
+async function placeOnMap(
+  ctx: Awaited<ReturnType<typeof gate>>,
+  siteId: string,
+  address: string,
+): Promise<void> {
   const pin = await geocodeAddress(address);
   if (!pin) return;
   await withTenant(
     ctx.tenantId,
     async (tx) => {
-      const site = await findSite(tx, ctx.tenantId);
+      const site = await findSiteById(tx, ctx.tenantId, siteId);
       if (!site) return;
       const current = readSiteSettings(site.settings);
       if (current.address.trim() !== address.trim()) return;
@@ -315,7 +330,7 @@ const linkInput = z.object({
 });
 
 /** The Header and footer form, every row as typed; `frameFromInput` applies the rules. */
-const headerFooterInput = z.object({
+const headerFooterInput = siteRef.extend({
   announcement: z.object({
     text: z.string().trim().max(120).default(""),
     href: z.string().trim().max(200).default(""),
@@ -354,12 +369,13 @@ export async function saveHeaderFooterAction(input: unknown): Promise<ActionResu
     const ctx = await gate();
     const parsed = headerFooterInput.safeParse(input);
     if (!parsed.success) return { error: "Check the fields and try again." };
+    const { siteId } = parsed.data;
     const checked = frameFromInput(parsed.data);
     if (!checked.ok) return { error: checked.message };
     await withTenant(
       ctx.tenantId,
       async (tx) => {
-        const site = await findSite(tx, ctx.tenantId);
+        const site = await findSiteById(tx, ctx.tenantId, siteId);
         if (!site) throw new MarketingError("SITE_MISSING", "no site");
         const settings = SiteSettingsSchema.safeParse({
           ...readSiteSettings(site.settings),
@@ -384,7 +400,7 @@ export async function saveHeaderFooterAction(input: unknown): Promise<ActionResu
   }
 }
 
-const slugInput = z.object({ slug: z.string().max(80) });
+const slugInput = siteRef.extend({ slug: z.string().max(80) });
 
 export async function changeSiteSlugAction(
   input: unknown,
@@ -393,11 +409,12 @@ export async function changeSiteSlugAction(
     const ctx = await gate();
     const parsed = slugInput.safeParse(input);
     if (!parsed.success) return { error: "Give the site an address." };
+    const { siteId } = parsed.data;
     const slug = slugFrom(parsed.data.slug);
     await withTenant(
       ctx.tenantId,
       async (tx) => {
-        const site = await findSite(tx, ctx.tenantId);
+        const site = await findSiteById(tx, ctx.tenantId, siteId);
         if (!site) throw new MarketingError("SITE_MISSING", "no site");
         if (site.slug === slug) return;
         await changeSiteSlug(tx, ctx, site, slug);
@@ -419,13 +436,16 @@ export async function changeSiteSlugAction(
   }
 }
 
-export async function publishSiteAction(): Promise<ActionResult> {
+export async function publishSiteAction(input: unknown): Promise<ActionResult> {
   try {
     const ctx = await gate();
+    const ref = siteRef.safeParse(input);
+    if (!ref.success) return { error: "Which website?" };
+    const { siteId } = ref.data;
     await withTenant(
       ctx.tenantId,
       async (tx) => {
-        const site = await findSite(tx, ctx.tenantId);
+        const site = await findSiteById(tx, ctx.tenantId, siteId);
         if (!site) throw new MarketingError("SITE_MISSING", "no site");
         await publishSite(tx, ctx, site.id);
         await logAuditInTx(tx, {
@@ -446,13 +466,16 @@ export async function publishSiteAction(): Promise<ActionResult> {
   }
 }
 
-export async function unpublishSiteAction(): Promise<ActionResult> {
+export async function unpublishSiteAction(input: unknown): Promise<ActionResult> {
   try {
     const ctx = await gate();
+    const ref = siteRef.safeParse(input);
+    if (!ref.success) return { error: "Which website?" };
+    const { siteId } = ref.data;
     await withTenant(
       ctx.tenantId,
       async (tx) => {
-        const site = await findSite(tx, ctx.tenantId);
+        const site = await findSiteById(tx, ctx.tenantId, siteId);
         if (!site) throw new MarketingError("SITE_MISSING", "no site");
         await unpublishSite(tx, ctx, site.id);
         await logAuditInTx(tx, {

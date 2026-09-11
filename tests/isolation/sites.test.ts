@@ -143,12 +143,16 @@ d("sites and site_pages (RLS)", () => {
     expect(drafts).toHaveLength(0);
   });
 
-  it("an address is unique across tenants, and a tenant holds one site", async () => {
+  /**
+   * The second assertion here USED to be that a tenant holds exactly one site.
+   * ADR 0045 lifted that on purpose; what survives is the half that is still
+   * true and still load-bearing — the address is a hostname label, so it is
+   * unique across every tenant and a tenant transaction cannot check it by
+   * reading. The index does, and this proves it still does.
+   */
+  it("an address is unique across tenants", async () => {
     await expect(
       withSystem((tx) => tx.insert(schema.sites).values({ tenantId: tenantB, slug: SLUG_A })),
-    ).rejects.toThrow();
-    await expect(
-      asOwner((tx) => tx.insert(schema.sites).values({ tenantId: tenantA, slug: `${STAMP}-second` })),
     ).rejects.toThrow();
   });
 
@@ -934,5 +938,85 @@ d("site_images (RLS)", () => {
       tx.select().from(schema.siteImages),
     );
     expect(seen).toHaveLength(0);
+  });
+
+  /**
+   * MANY SITES PER TENANT (ADR 0045). `sites_tenant_idx` used to be UNIQUE and
+   * this insert is what it forbade. The address stays unique across every
+   * tenant, so the second site needs its own — which is the whole point: a
+   * business runs two brands, each on its own address.
+   */
+  it("a tenant may have a second site, and its address is still platform-wide", async () => {
+    const second = await asOwner((tx) =>
+      tx.insert(schema.sites).values({ tenantId: tenantA, slug: `${STAMP}-second` }).returning(),
+    );
+    expect(second).toHaveLength(1);
+    const mine = await asOwner((tx) => tx.select().from(schema.sites));
+    expect(mine.length).toBeGreaterThanOrEqual(2);
+    // The other tenant's site is still invisible, with two of ours in the table.
+    expect(mine.every((s) => s.tenantId === tenantA)).toBe(true);
+    expect(mine.some((s) => s.id === siteB)).toBe(false);
+
+    // …and the second site's address is refused to anybody else.
+    await expect(
+      asOtherTenant((tx) =>
+        tx.insert(schema.sites).values({ tenantId: tenantB, slug: `${STAMP}-second` }),
+      ),
+    ).rejects.toThrow();
+    await asOwner((tx) => tx.delete(schema.sites).where(eq(schema.sites.id, second[0].id)));
+  });
+
+  /**
+   * A KIT HAS AT MOST ONE OWNER (ADR 0045). A website's own look is a
+   * `brand_kits` row with `site_id` set; the business-wide kit has NEITHER
+   * owner column, which is what keeps `resolveBrandFor` from picking a site's
+   * logo up and printing it on the invoices.
+   */
+  it("a site may have its own brand kit, and a kit may not own two things", async () => {
+    const [kit] = await asOwner((tx) =>
+      tx
+        .insert(schema.brandKits)
+        .values({ tenantId: tenantA, siteId: siteA, displayName: "Second Brand" })
+        .returning(),
+    );
+    expect(kit.siteId).toBe(siteA);
+    expect(kit.entityId).toBeNull();
+
+    // One per site.
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.brandKits).values({ tenantId: tenantA, siteId: siteA, displayName: "Again" }),
+      ),
+    ).rejects.toThrow();
+
+    // Another tenant's site cannot be named, even with a real id: the
+    // composite FK is on (tenant_id, site_id).
+    await expect(
+      asOtherTenant((tx) =>
+        tx.insert(schema.brandKits).values({ tenantId: tenantB, siteId: siteA, displayName: "Theirs" }),
+      ),
+    ).rejects.toThrow();
+
+    await asOwner((tx) => tx.delete(schema.brandKits).where(eq(schema.brandKits.id, kit.id)));
+  });
+
+  it("a site's kit dies with the site", async () => {
+    const [extra] = await withSystem((tx) =>
+      tx.insert(schema.tenants).values({ clerkOrgId: `${STAMP}-k`, name: "Kit K", slug: `${STAMP}-k` }).returning(),
+    );
+    const [site] = await withSystem((tx) =>
+      tx.insert(schema.sites).values({ tenantId: extra.id, slug: `${STAMP}-k` }).returning(),
+    );
+    const [kit] = await withSystem((tx) =>
+      tx.insert(schema.brandKits).values({ tenantId: extra.id, siteId: site.id }).returning(),
+    );
+    await withSystem((tx) => tx.delete(schema.sites).where(eq(schema.sites.id, site.id)));
+    const left = await withSystem((tx) =>
+      tx.query.brandKits.findFirst({ where: eq(schema.brandKits.id, kit.id) }),
+    );
+    // CASCADE, not SET NULL: a kit that silently became the business-wide one
+    // would put a dead brand's logo on live invoices.
+    expect(left).toBeUndefined();
+    await withSystem((tx) => tx.delete(schema.tenants).where(eq(schema.tenants.id, extra.id)));
   });
 });

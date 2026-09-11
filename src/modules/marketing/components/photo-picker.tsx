@@ -40,6 +40,7 @@ function sizeLabel(bytes: number): string {
 }
 
 export function PhotoField({
+  siteId,
   idPrefix,
   label,
   hint,
@@ -50,6 +51,7 @@ export function PhotoField({
   onLibraryChange,
   assistantOn,
 }: {
+  siteId: string;
   idPrefix: string;
   label: string;
   hint?: string;
@@ -117,6 +119,7 @@ export function PhotoField({
       )}
       {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
       <PhotoLibraryDialog
+        siteId={siteId}
         open={open}
         onOpenChange={setOpen}
         tenantId={tenantId}
@@ -141,6 +144,7 @@ export function PhotoField({
  * it to add or change one of several.
  */
 export function PhotoLibraryDialog({
+  siteId,
   open,
   onOpenChange,
   tenantId,
@@ -150,6 +154,7 @@ export function PhotoLibraryDialog({
   onPick,
   onRemoved,
 }: {
+  siteId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   tenantId: string;
@@ -177,7 +182,7 @@ export function PhotoLibraryDialog({
         access: "private",
         handleUploadUrl: "/api/marketing/sites/upload",
       });
-      const result = await registerSitePhotoAction({ pathname: blob.pathname });
+      const result = await registerSitePhotoAction({ siteId, pathname: blob.pathname });
       if ("error" in result) {
         toast.error(result.error);
         return;

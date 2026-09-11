@@ -19,9 +19,35 @@ import { recordVersion } from "./page-ops";
  * into the friendly answer. That is the right order: a pre-read would be a
  * race the index has to settle anyway.
  */
-export async function findSite(tx: Tx, tenantId: string): Promise<Site | null> {
-  const row = await tx.query.sites.findFirst({
+/**
+ * Every site the tenant has, oldest first — the order the Website screen
+ * lists them, so a site does not move when another is added or renamed.
+ *
+ * MANY SITES PER TENANT since ADR 0045. There used to be a `findSite(tx,
+ * tenantId)` here and a UNIQUE index making it answerable; both are gone,
+ * because "the tenant's site" is no longer a question with an answer. A
+ * caller that wants one names it.
+ */
+export async function listSites(tx: Tx, tenantId: string): Promise<Site[]> {
+  return tx.query.sites.findMany({
     where: eq(schema.sites.tenantId, tenantId),
+    orderBy: (s, { asc }) => [asc(s.createdAt), asc(s.id)],
+  });
+}
+
+/**
+ * One site, by id. The tenant predicate is belt to RLS's braces: a site id
+ * arriving from a form is a CLAIM, and this is where it stops being one.
+ * Null when the id is not this tenant's, which every caller turns into the
+ * same refusal a missing site gets.
+ */
+export async function findSiteById(
+  tx: Tx,
+  tenantId: string,
+  siteId: string,
+): Promise<Site | null> {
+  const row = await tx.query.sites.findFirst({
+    where: and(eq(schema.sites.tenantId, tenantId), eq(schema.sites.id, siteId)),
   });
   return row ?? null;
 }

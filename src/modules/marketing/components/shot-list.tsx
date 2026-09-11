@@ -48,6 +48,7 @@ const hasTouch = () => navigator.maxTouchPoints > 0;
 const noTouch = () => false;
 
 export function ShotList({
+  siteId,
   tenantId,
   canWrite,
   assistantOn,
@@ -55,6 +56,7 @@ export function ShotList({
   starters,
   pages,
 }: {
+  siteId: string;
   tenantId: string;
   canWrite: boolean;
   assistantOn: boolean;
@@ -99,6 +101,7 @@ export function ShotList({
                 .map((spot) => (
                   <SpotRow
                     key={spot.key}
+                    siteId={siteId}
                     pageId={page.id}
                     spot={spot}
                     tenantId={tenantId}
@@ -119,6 +122,7 @@ export function ShotList({
 }
 
 function SpotRow({
+  siteId,
   pageId,
   spot: fresh,
   tenantId,
@@ -129,6 +133,7 @@ function SpotRow({
   onLibraryChange,
   starters,
 }: {
+  siteId: string;
   pageId: string;
   spot: Spot;
   tenantId: string;
@@ -181,7 +186,7 @@ function SpotRow({
         access: "private",
         handleUploadUrl: "/api/marketing/sites/upload",
       });
-      const result = await registerSitePhotoAction({ pathname: blob.pathname });
+      const result = await registerSitePhotoAction({ siteId, pathname: blob.pathname });
       if ("error" in result) {
         toast.error(result.error);
         return;
@@ -288,6 +293,7 @@ function SpotRow({
       </div>
       {canWrite && (
         <PhotoLibraryDialog
+          siteId={siteId}
           open={libraryOpen}
           onOpenChange={setLibraryOpen}
           tenantId={tenantId}

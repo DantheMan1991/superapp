@@ -8,7 +8,7 @@ import { MarketingError } from "./core/errors";
 import { fail, gate, type ActionResult } from "./gate";
 import { deleteSiteImage, insertSiteImage } from "./image-ops";
 import { discardPhotoBlob, inspectUploadedPhoto } from "./photo-ingest";
-import { findSite } from "./site-ops";
+import { findSiteById } from "./site-ops";
 
 /**
  * The site's photo library: adding a photo after the browser uploaded it,
@@ -48,14 +48,21 @@ export async function toPhotoView(row: SiteImage): Promise<SitePhotoView> {
   };
 }
 
-const registerInput = z.object({ pathname: z.string().min(1).max(500) });
+const registerInput = z.object({
+  siteId: z.string().uuid(),
+  pathname: z.string().min(1).max(500),
+});
 
 export async function registerSitePhotoAction(input: unknown): Promise<ActionResult<SitePhotoView>> {
   try {
     const ctx = await gate();
     const parsed = registerInput.safeParse(input);
     if (!parsed.success) return { error: "Choose a photo and try again." };
-    const site = await withTenant(ctx.tenantId, (tx) => findSite(tx, ctx.tenantId), { role: ctx.role });
+    const site = await withTenant(
+      ctx.tenantId,
+      (tx) => findSiteById(tx, ctx.tenantId, parsed.data.siteId),
+      { role: ctx.role },
+    );
     if (!site) throw new MarketingError("SITE_MISSING", "no site");
 
     // Network, outside the transaction: reads the real bytes, keeps only

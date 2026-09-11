@@ -3,7 +3,7 @@ import { and, asc, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { schema, withSystem, withTenant, type Tx } from "@/db";
 import type { Site, SiteDomain, SiteImage, SitePage, SitePageVersion } from "@/db/schema";
 import type { ResolvedBrand } from "@/lib/brand/core";
-import { resolveBrandFor } from "@/lib/brand/read";
+import { resolveBrandForSite } from "@/lib/brand/read";
 import { findManagedCalendarId, itemsOnCalendar } from "@/lib/schedule/managed-calendars";
 import { getTenantTimezone } from "@/lib/tenant-timezone";
 import { loadSiteBlocks } from "@/lib/site-blocks/resolve";
@@ -229,7 +229,7 @@ async function loadPublishedFromHit(hit: SiteHit): Promise<PublicSite | null> {
       ),
       orderBy: asc(schema.sitePages.navOrder),
     });
-    const brand = await resolveBrandFor(tx, hit.tenantId, null);
+    const brand = await resolveBrandForSite(tx, hit.tenantId, hit.id);
     const customHost = await activeHost(tx, hit.tenantId, site.id);
     const images = await listSiteImages(tx, hit.tenantId, site.id);
     const timezone = await getTenantTimezone(tx, hit.tenantId);
@@ -291,9 +291,12 @@ export async function loadPageEditor(
 export async function loadSiteDrafts(
   tx: Tx,
   tenantId: string,
+  siteId: string,
 ): Promise<{ site: Site; pages: SitePage[]; domains: SiteDomain[]; images: SiteImage[]; view: PublicSite } | null> {
+  // NAMED, not found: a tenant may have several sites (ADR 0045). Null when
+  // the id is not this tenant's, which the screen shows as "no website".
   const site = await tx.query.sites.findFirst({
-    where: eq(schema.sites.tenantId, tenantId),
+    where: and(eq(schema.sites.tenantId, tenantId), eq(schema.sites.id, siteId)),
   });
   if (!site) return null;
   const pages = await tx.query.sitePages.findMany({
@@ -304,7 +307,7 @@ export async function loadSiteDrafts(
     where: and(eq(schema.siteDomains.tenantId, tenantId), eq(schema.siteDomains.siteId, site.id)),
     orderBy: asc(schema.siteDomains.createdAt),
   });
-  const brand = await resolveBrandFor(tx, tenantId, null);
+  const brand = await resolveBrandForSite(tx, tenantId, site.id);
   const customHost = domains.find((d) => d.status === "active")?.domain ?? null;
   const images = await listSiteImages(tx, tenantId, site.id);
   const timezone = await getTenantTimezone(tx, tenantId);

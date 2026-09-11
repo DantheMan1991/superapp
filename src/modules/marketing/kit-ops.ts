@@ -46,11 +46,18 @@ export interface KitLogo {
   spec: LogoSpec | Record<string, never>;
 }
 
+/**
+ * `entityId === null` is THE BUSINESS-WIDE KIT, and since ADR 0045 that means
+ * both owner columns null: a website's kit also carries a null `entity_id`, so
+ * the older one-column predicate would have found a site's row here and let
+ * a save to the business kit overwrite a site's logo.
+ */
 function kitWhere(tenantId: string, entityId: string | null) {
   return entityId === null
     ? and(
         eq(schema.brandKits.tenantId, tenantId),
         isNull(schema.brandKits.entityId),
+        isNull(schema.brandKits.siteId),
       )
     : and(
         eq(schema.brandKits.tenantId, tenantId),

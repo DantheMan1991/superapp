@@ -43,10 +43,15 @@ export async function resolveBrandFor(
       where: eq(schema.tenants.id, tenantId),
       columns: { name: true },
     }),
+    // BOTH nulls, not just `entity_id`. Since ADR 0045 a website's kit also
+    // has a null `entity_id`, so the older one-column predicate would have
+    // picked a site's look up as the business's — and put a site's logo on
+    // the invoices.
     tx.query.brandKits.findFirst({
       where: and(
         eq(schema.brandKits.tenantId, tenantId),
         isNull(schema.brandKits.entityId),
+        isNull(schema.brandKits.siteId),
       ),
     }),
     entityId
@@ -62,6 +67,49 @@ export async function resolveBrandFor(
     tenantName: tenant?.name ?? "",
     business: business ?? null,
     company: company ?? null,
+  });
+}
+
+/**
+ * What a WEBSITE looks like, resolved over the business-wide kit exactly as a
+ * company's is (ADR 0045) — so a site that sets only its own logo keeps the
+ * business's colours and fonts.
+ *
+ * This is the seam that lets one business run two brands. Everything a visitor
+ * sees on a site goes through it: the header, the logo route, the favicon, the
+ * share image, the drawn map. A site with no kit of its own gets the
+ * business-wide look, which is every client today and stays the common case.
+ */
+export async function resolveBrandForSite(
+  tx: Tx,
+  tenantId: string,
+  siteId: string,
+): Promise<ResolvedBrand> {
+  const [tenant, business, site] = await Promise.all([
+    tx.query.tenants.findFirst({
+      where: eq(schema.tenants.id, tenantId),
+      columns: { name: true },
+    }),
+    tx.query.brandKits.findFirst({
+      where: and(
+        eq(schema.brandKits.tenantId, tenantId),
+        isNull(schema.brandKits.entityId),
+        isNull(schema.brandKits.siteId),
+      ),
+    }),
+    tx.query.brandKits.findFirst({
+      where: and(
+        eq(schema.brandKits.tenantId, tenantId),
+        eq(schema.brandKits.siteId, siteId),
+      ),
+    }),
+  ]);
+  // `company` is the override slot in `resolveBrand`, and a site's kit is an
+  // override of exactly the same shape — one merge, not two.
+  return resolveBrand({
+    tenantName: tenant?.name ?? "",
+    business: business ?? null,
+    company: site ?? null,
   });
 }
 

@@ -16,7 +16,7 @@ import { fail, gate, type ActionResult } from "./gate";
 import type { MarketingCtx } from "./kit-ops";
 import { industryLabel } from "./logo-generate";
 import { siteBriefFor } from "./site-generate";
-import { findSite } from "./site-ops";
+import { findSiteById } from "./site-ops";
 
 /**
  * The assistant's three doors (slice 12). Each is gate → Zod → a read
@@ -49,13 +49,16 @@ async function pageBrief(ctx: MarketingCtx, pageId: string) {
   return withTenant(
     ctx.tenantId,
     async (tx) => {
-      const site = await findSite(tx, ctx.tenantId);
-      if (!site) throw new MarketingError("SITE_MISSING", "no site");
+      // The page names its own site, so nothing has to be told which one
+      // (ADR 0045): a tenant may have several, and reading "the" site here
+      // would have been a guess the moment it did.
       const page = await tx.query.sitePages.findFirst({
         where: and(eq(schema.sitePages.tenantId, ctx.tenantId), eq(schema.sitePages.id, pageId)),
-        columns: { id: true, title: true },
+        columns: { id: true, title: true, siteId: true },
       });
       if (!page) throw new MarketingError("PAGE_MISSING", "no page");
+      const site = await findSiteById(tx, ctx.tenantId, page.siteId);
+      if (!site) throw new MarketingError("SITE_MISSING", "no site");
       const siblings = await tx.query.sitePages.findMany({
         where: and(eq(schema.sitePages.tenantId, ctx.tenantId), eq(schema.sitePages.siteId, site.id)),
         columns: { id: true, title: true },

@@ -32,7 +32,7 @@ import {
   SITE_DOMAINS_MAX,
 } from "./domain-ops";
 import { fail, gate, type ActionResult } from "./gate";
-import { findSite } from "./site-ops";
+import { findSiteById } from "./site-ops";
 
 /**
  * Server actions for a connected domain. Owner-only through the module's
@@ -96,7 +96,10 @@ function factsFrom(
   };
 }
 
-const connectInput = z.object({ domain: z.string().max(260) });
+const connectInput = z.object({
+  siteId: z.string().uuid(),
+  domain: z.string().max(260),
+});
 
 export async function connectDomainAction(
   input: unknown,
@@ -114,7 +117,7 @@ export async function connectDomainAction(
     const siteId = await withTenant(
       ctx.tenantId,
       async (tx) => {
-        const site = await findSite(tx, ctx.tenantId);
+        const site = await findSiteById(tx, ctx.tenantId, parsed.data.siteId);
         if (!site) throw new MarketingError("SITE_MISSING", "no site");
         if ((await listSiteDomains(tx, ctx.tenantId, site.id)).length >= SITE_DOMAINS_MAX) {
           throw new MarketingError("DOMAIN_LIMIT", "limit");

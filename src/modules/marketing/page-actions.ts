@@ -22,7 +22,7 @@ import {
   restoreVersion,
   savePageDraft,
 } from "./page-ops";
-import { findSite } from "./site-ops";
+import { findSiteById } from "./site-ops";
 
 /**
  * Server actions for one page: the editor's save, adding and removing pages,
@@ -142,6 +142,7 @@ export async function savePageAction(input: unknown): Promise<ActionResult> {
 }
 
 const addInput = z.object({
+  siteId: z.string().uuid(),
   title: z.string().trim().min(1, "Give the page a title.").max(80),
   path: z.string().max(120),
 });
@@ -164,7 +165,7 @@ export async function addPageAction(
     const pageId = await withTenant(
       ctx.tenantId,
       async (tx) => {
-        const site = await findSite(tx, ctx.tenantId);
+        const site = await findSiteById(tx, ctx.tenantId, parsed.data.siteId);
         if (!site) throw new MarketingError("SITE_MISSING", "no site");
         const page = await addPage(tx, ctx, site.id, { title: parsed.data.title, path, content });
         await logAuditInTx(tx, {
@@ -215,7 +216,10 @@ export async function deletePageAction(input: unknown): Promise<ActionResult> {
   }
 }
 
-const orderInput = z.object({ order: z.array(z.string().uuid()).max(50) });
+const orderInput = z.object({
+  siteId: z.string().uuid(),
+  order: z.array(z.string().uuid()).max(50),
+});
 
 export async function reorderPagesAction(input: unknown): Promise<ActionResult> {
   try {
@@ -225,7 +229,7 @@ export async function reorderPagesAction(input: unknown): Promise<ActionResult> 
     await withTenant(
       ctx.tenantId,
       async (tx) => {
-        const site = await findSite(tx, ctx.tenantId);
+        const site = await findSiteById(tx, ctx.tenantId, parsed.data.siteId);
         if (!site) throw new MarketingError("SITE_MISSING", "no site");
         await reorderPages(tx, ctx, site.id, parsed.data.order);
       },

@@ -141,7 +141,8 @@ export function BuildSiteForm({
   defaultSlug: string;
   siteDomain: string | null;
 }) {
-  const { pending, run } = useRun();
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
   const [slug, setSlug] = useState(defaultSlug);
   const [details, setDetails] = useState(EMPTY_DETAILS);
   return (
@@ -160,7 +161,23 @@ export function BuildSiteForm({
       <DetailFields values={details} onChange={(p) => setDetails((d) => ({ ...d, ...p }))} withTitle={false} />
       <Button
         disabled={pending || !normalizeSiteSlug(slug).ok}
-        onClick={() => run(() => createSiteAction({ slug, ...details }), "Your website is drafted. Have a look before you publish it.")}
+        onClick={() =>
+          startTransition(async () => {
+            const result = await createSiteAction({ slug, ...details });
+            if ("error" in result) {
+              toast.error(result.error);
+              return;
+            }
+            toast.success("Your website is drafted. Have a look before you publish it.");
+            // Not `useRun`: this screen may have been reached at `?site=new`,
+            // where a refresh redraws the build form and the site just built
+            // is nowhere. It has an id now, so go to it.
+            if (result.data?.siteId) {
+              router.push(`/dashboard/m/marketing/website?site=${result.data.siteId}`);
+            }
+            router.refresh();
+          })
+        }
       >
         {pending ? "Writing…" : "Build it"}
       </Button>

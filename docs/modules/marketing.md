@@ -56,6 +56,45 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-10 — Adding a second website (`claude/add-a-second-website`)
+
+**A defect the previous two PRs shipped, found by the founder:** "I don't see
+anything different on the production. still just one website." He was right,
+and the reason was a catch-22 of my own making.
+
+- **"Add a website" lived only on `SiteList`, and `SiteList` is drawn only from
+  two sites up** (`chooseSite`) — so a business with ONE site had no control
+  anywhere that could make a second. Every tenant in production has exactly one
+  site, so nobody could reach the feature at all. It now lives in the Website
+  screen's `PageHeader`, where it is reachable from a site rather than only
+  from a list that site's existence prevents. `All websites` joins it once
+  there are several, and the header's title becomes the site's own name so a
+  person knows which of them they are editing.
+- **Building a site now GOES to it.** `useRun` only calls `router.refresh()`,
+  and the build form is reached at `?site=new` — where a refresh redraws the
+  build form and the site just built is nowhere, looking exactly like a press
+  that did nothing. `BuildSiteForm` now pushes to `?site=<id>` from the
+  `siteId` that `createSiteAction` already returned.
+- **THE LESSON, and it is not about this feature.** Both halves were verified
+  by `tsc`, a green build, 3080 tests and an isolation run, and both were
+  reachable only by a user doing the one thing the tests never do: *starting
+  from the state every real tenant is actually in.* A one-site tenant was the
+  universal case in production and the untested case in the suite.
+- **Driven end to end on the dev branch's Hilltop Farm**: one site → the header
+  offers `Add a website`; `?site=new` draws the build form; `Build it` writes
+  the site, the toast fires and the screen lands on
+  `?site=ff4d072c-…` titled `hilltop-farm-store`; the header then offers
+  `All websites`, and the list draws both with `Live` and `Draft`.
+- **`hilltop-farm-store` IS KEPT on the dev branch, deliberately.** It is the
+  only two-site tenant anywhere, and the list, the `All websites` link and the
+  per-site look panel cannot be driven by hand without one — the same reason
+  the Test tenant keeps two companies. Do not tidy it away.
+- **A browser-pane trap, not an app bug:** while a viewport is emulated tall
+  (`resize_window` 1280×4600, used to screenshot a long page), `left_click` by
+  `ref` reports the right coordinates and hit-tests correctly but never reaches
+  the handler. Three clicks looked like an app that ignored them. Reset to
+  `preset: "desktop"` before driving anything.
+
 ### 2026-09-10 — A look per website (`claude/a-look-per-website`)
 
 The write half of [ADR 0045](../decisions/0045-a-business-may-have-several-websites-and-a-kit-may-belong-to-one.md),

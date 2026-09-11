@@ -35,7 +35,7 @@ export default async function DraftSitePage({
   if (!hit || hit.tenantId !== ctx.tenant.id) notFound();
   const drafts = await withTenant(
     ctx.tenant.id,
-    (tx) => loadSiteDrafts(tx, ctx.tenant.id),
+    (tx) => loadSiteDrafts(tx, ctx.tenant.id, hit.id),
     { role: ctx.role },
   );
   if (!drafts) notFound();

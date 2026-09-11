@@ -11,9 +11,13 @@
  * import another module, and Accounting must not learn that Marketing exists to
  * print a logo.
  *
- * **ONE KIT FOR THE BUSINESS, AND OPTIONALLY ONE PER COMPANY.** `entity_id` is
- * null on the business-wide kit — the one every company inherits — and set on
- * a company's own look. ADR 0015 hung the connected account off the company
+ * **ONE KIT FOR THE BUSINESS, AND OPTIONALLY ONE PER COMPANY OR PER WEBSITE.**
+ * The business-wide kit — the one everything inherits — has NEITHER `entity_id`
+ * nor `site_id`; a company's own look sets the first, a website's own look sets
+ * the second (ADR 0045), and `brand_kits_one_owner` forbids both. A site's kit
+ * is what lets one business run two brands: the farm and its farm store, or a
+ * platform and the industry it sells to, each with its own logo, domain and
+ * social links. ADR 0015 hung the connected account off the company
  * because the money lands in the company's bank; a brand hangs off the company
  * for the same kind of reason (Oak Row LLC and Maple Street LLC may trade
  * under different names), but unlike a bank account most companies do NOT want
@@ -46,6 +50,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
 import { entities } from "./ledger";
+import { sites } from "./sites";
 
 export const brandKits = pgTable(
   "brand_kits",
@@ -63,6 +68,19 @@ export const brandKits = pgTable(
      * tenants by the composite FK below.
      */
     entityId: uuid("entity_id"),
+    /**
+     * Set = this WEBSITE's own look, resolved over the business-wide one field
+     * by field, exactly as a company's is (ADR 0045).
+     *
+     * A separate key from `entity_id` on purpose, and the `brand_kits_one_owner`
+     * CHECK keeps them apart. A brand a business sells under is NOT a company:
+     * "Yosher Homestead" has no books, issues no invoices and has no tax id, so
+     * making it an `entities` row to borrow this column would put a fabricated
+     * company in the entity picker, in the reports and on the invoice's company
+     * selector. A site is the thing that has a logo, a domain and social
+     * accounts, so a site is what the kit hangs off.
+     */
+    siteId: uuid("site_id"),
     /**
      * The name customers know the business by. Empty = fall back (a company
      * kit falls back to the business kit, which falls back to the tenant's
@@ -127,14 +145,18 @@ export const brandKits = pgTable(
   (t) => [
     uniqueIndex("brand_kits_tenant_id_id_idx").on(t.tenantId, t.id),
     index("brand_kits_tenant_idx").on(t.tenantId),
-    // One business-wide kit per tenant …
+    // One business-wide kit per tenant — the one with NEITHER owner set …
     uniqueIndex("brand_kits_tenant_business_idx")
       .on(t.tenantId)
-      .where(sql`${t.entityId} is null`),
-    // … and at most one per company.
+      .where(sql`${t.entityId} is null and ${t.siteId} is null`),
+    // … at most one per company …
     uniqueIndex("brand_kits_tenant_entity_idx")
       .on(t.tenantId, t.entityId)
       .where(sql`${t.entityId} is not null`),
+    // … and at most one per website (ADR 0045).
+    uniqueIndex("brand_kits_tenant_site_idx")
+      .on(t.tenantId, t.siteId)
+      .where(sql`${t.siteId} is not null`),
     /**
      * A company's own look dies with the company; the business-wide kit
      * (entity_id null) is untouched by the constraint, which MATCH SIMPLE
@@ -148,6 +170,27 @@ export const brandKits = pgTable(
       columns: [t.tenantId, t.entityId],
       foreignColumns: [entities.tenantId, entities.id],
     }).onDelete("cascade"),
+    /**
+     * A website's own look dies with the website, for the same reasons the
+     * company's does: CASCADE because the bare SET NULL can never run on a
+     * `(tenant_id, x)` key, and a kit that silently became the business-wide
+     * one would be worse than a missing one.
+     */
+    foreignKey({
+      name: "brand_kits_site_fk",
+      columns: [t.tenantId, t.siteId],
+      foreignColumns: [sites.tenantId, sites.id],
+    }).onDelete("cascade"),
+    /**
+     * A KIT HAS AT MOST ONE OWNER. Business-wide (neither set), a company's
+     * (`entity_id`), or a website's (`site_id`) — never a company's AND a
+     * website's, which would make `resolveBrandFor` a question about
+     * precedence rather than a merge.
+     */
+    check(
+      "brand_kits_one_owner",
+      sql`${t.entityId} is null or ${t.siteId} is null`,
+    ),
     check(
       "brand_kits_primary_color_shape",
       sql`${t.primaryColor} = '' or ${t.primaryColor} ~ '^#[0-9a-f]{6}$'`,

@@ -53,7 +53,13 @@ function Block({ title, lede, children }: { title: string; lede: string; childre
   );
 }
 
-export function HeaderFooterForm({ settings }: { settings: SiteSettings }) {
+export function HeaderFooterForm({
+  siteId,
+  settings,
+}: {
+  siteId: string;
+  settings: SiteSettings;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const id = useId();
@@ -71,7 +77,7 @@ export function HeaderFooterForm({ settings }: { settings: SiteSettings }) {
 
   const save = () =>
     startTransition(async () => {
-      const result: Result = await saveHeaderFooterAction(values);
+      const result: Result = await saveHeaderFooterAction({ ...values, siteId });
       if ("error" in result) {
         toast.error(result.error);
         return;

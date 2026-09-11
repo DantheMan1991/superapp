@@ -56,6 +56,67 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-10 — Many websites per business, and a kit that may belong to one (`claude/many-sites-per-tenant`)
+
+The founder: "lift the one-site-per-tenant limit … the logo for each industry
+will be slightly different, plus … we will need to be able to handle the social
+media for each industry." **Migration 0297, applied to dev AND prod before the
+merge** (ADR 0014) and proved in `pg_indexes`: `sites_tenant_idx` is now a
+PLAIN index on both.
+[ADR 0045](../decisions/0045-a-business-may-have-several-websites-and-a-kit-may-belong-to-one.md).
+
+- **The limit was thinner than it looked.** Every table hanging off a site —
+  `site_pages`, `site_domains`, `site_enquiries`, `site_page_views`,
+  `site_images` — already keyed on `site_id`, and `site_domains_site_idx` was
+  never unique. What assumed one site was CODE.
+- **`findSite(tx, tenantId)` is gone**, with its thirteen callers.
+  `listSites` and `findSiteById` replace it, and every action that touches a
+  site now names one through a `siteRef` Zod object. "The tenant's site" is no
+  longer a question with an answer.
+- **`chooseSite`** (`src/lib/sites/choose.ts`, pure and tested): one site opens
+  without being asked and wins over a stale `?site=` in a bookmark; `new` steps
+  aside so a second can be built; two or more with none asked for draws
+  `SiteList`. **A business with one website never learns the plural exists** —
+  ADR 0010's promise about companies, kept again. Two screens ask (the Website
+  screen and the shot list), which is why the rule is one pure function.
+- **A kit may belong to a website**: `brand_kits.site_id` beside `entity_id`,
+  `brand_kits_one_owner` forbidding both, a composite FK that CASCADEs, and
+  `resolveBrandForSite` merging the site's look over the business's exactly as
+  a company's already merged. The public renderer, the drafts screen and the
+  site read path all resolve the SITE's brand now.
+- **TWO LIVE BUGS THE COLUMN CREATED, both fixed here.** `entity_id is null`
+  had meant "business-wide"; a site's kit also has a null `entity_id`, so the
+  one-column predicate in `resolveBrandFor` (read) AND `kitWhere` (write) would
+  have found a site's row — putting a site's logo on the invoices, and letting
+  a save to the business kit overwrite a site's. Both predicates now require
+  BOTH nulls.
+- **`tsc` is blind to the boundary that mattered.** Server actions take
+  `input: unknown`, so seven client forms could have shipped without a
+  `siteId` and typechecked — the symptom would be a form that says "check the
+  fields" forever. They were found by grepping every caller of each changed
+  input schema, not by the compiler. Required React props WERE used
+  deliberately for the component tree, because there the compiler does find
+  every render site: it walked the cascade out to `section-forms`'s `photos`
+  context and the page editor.
+- **Nothing writes `site_id` yet.** The column, the constraints and the read
+  path are in and honoured; the editor still edits the business kit and the
+  per-company one, so every site wears the business look — as it did before,
+  so nothing regressed. The per-site kit editor is the next PR and is the
+  larger half: 45 `entityId` references across `kit-ops`/`actions` and five
+  components, which want a `KitOwner` discriminated union rather than
+  `entityId: string | null`.
+- **Tests**: `tests/sites-choose.test.ts` (every branch, including one-site
+  winning over a stale id and never reporting a site and a list at once) and
+  three cases in `tests/isolation/sites.test.ts` — a second site with its own
+  platform-wide address, a per-site kit that may not own two things or name
+  another tenant's site, and a kit dying with its site. **One existing
+  assertion was retired**: "a tenant holds one site" was the limit itself.
+  `test:isolation` 660 passing on the dev branch; `verify-rls` 176 tables on
+  both.
+- **Not built here:** the per-site kit editor, and an enquiry recording WHICH
+  site produced the lead (still `source = 'website'`, which stops being enough
+  the day a second site is published).
+
 ### 2026-09-05 — Slice 18: the shot list (`claude/marketing-shot-list`)
 
 The founder, looking at his own Shop page with three tinted tiles and no

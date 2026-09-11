@@ -92,8 +92,18 @@ export const sites = pgTable(
   },
   (t) => [
     uniqueIndex("sites_tenant_id_id_idx").on(t.tenantId, t.id),
-    // One site per tenant in this slice (see the header).
-    uniqueIndex("sites_tenant_idx").on(t.tenantId),
+    /**
+     * MANY SITES PER TENANT since 2026-09-10 (ADR 0045). This was a UNIQUE
+     * index and is now a plain one: a business with two brands — a farm and
+     * its farm store, a platform and the industry it sells to — wants a site
+     * each, with its own logo, its own domain and its own social links, and
+     * every table that hangs off a site already keys on `site_id`.
+     *
+     * The address stays platform-wide unique below, so nothing about how a
+     * site is FOUND changed. What changed is that finding "the" site of a
+     * tenant is no longer a question with an answer.
+     */
+    index("sites_tenant_idx").on(t.tenantId),
     // The address is platform-wide; two tenants cannot share a hostname.
     uniqueIndex("sites_slug_idx").on(t.slug),
     // An old address is looked up by containment, across every tenant, under `withSystem`.

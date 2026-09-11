@@ -51,6 +51,8 @@ import { SuggestDescription } from "./assistant-controls";
 
 type GalleryItem = Extract<Section, { type: "gallery" }>["items"][number];
 type PhotoProps = {
+  /** Which website these photos belong to — the library is per site. */
+  siteId: string;
   tenantId: string;
   library: SitePhotoView[];
   onLibraryChange: (next: SitePhotoView[]) => void;
@@ -134,6 +136,7 @@ function SectionFields({
             idPrefix={id("photo")}
             label="Photo beside the headline"
             hint="Optional. A landscape photo sits beside the words on a wide screen and under them on a phone."
+            siteId={photos.siteId}
             tenantId={photos.tenantId}
             value={section.image}
             onChange={(image) => onChange({ ...section, image })}
@@ -279,6 +282,7 @@ function SectionFields({
           <PhotoField
             idPrefix={id("photo")}
             label="Photo"
+            siteId={photos.siteId}
             tenantId={photos.tenantId}
             value={section.image}
             onChange={(image) => onChange({ ...section, image })}
@@ -337,7 +341,8 @@ function SectionFields({
                 idPrefix={id("photo")}
                 label="Photo beside the text"
                 hint="Optional. Sits beside the paragraphs on a wide screen and under them on a phone."
-                tenantId={photos.tenantId}
+                siteId={photos.siteId}
+            tenantId={photos.tenantId}
                 value={section.image}
                 onChange={(image) => onChange({ ...section, image })}
                 library={photos.library}
@@ -397,7 +402,8 @@ function SectionFields({
                   idPrefix={id(`item-${i}-photo`)}
                   label="Photo"
                   hint="Optional. With one, the item is a photo tile with its name on it; without, a tinted tile."
-                  tenantId={photos.tenantId}
+                  siteId={photos.siteId}
+            tenantId={photos.tenantId}
                   value={item.image}
                   onChange={(image) => onChange({ ...section, items: section.items.map((it, j) => (j === i ? { ...it, image } : it)) })}
                   library={photos.library}
@@ -1000,7 +1006,8 @@ function GalleryFields({
       <PhotoLibraryDialog
         open={picking !== null}
         onOpenChange={(next) => !next && setPicking(null)}
-        tenantId={photos.tenantId}
+        siteId={photos.siteId}
+            tenantId={photos.tenantId}
         library={photos.library}
         onLibraryChange={photos.onLibraryChange}
         selectedId={typeof picking === "number" ? (items[picking]?.image.id ?? null) : null}
@@ -1145,7 +1152,8 @@ function SortableCard({
         idPrefix={id("photo")}
         label="Photo"
         hint="Optional. Sits above the heading in place of the icon."
-        tenantId={photos.tenantId}
+        siteId={photos.siteId}
+            tenantId={photos.tenantId}
         value={card.image}
         onChange={(image) => onChange({ image })}
         library={photos.library}
@@ -1294,7 +1302,8 @@ function StyleFields({
           idPrefix={`${idPrefix}-background`}
           label="Background photo"
           hint="Darkened so the words stay readable. It is decoration, so it needs no description."
-          tenantId={photos.tenantId}
+          siteId={photos.siteId}
+            tenantId={photos.tenantId}
           value={style.photo}
           onChange={(photo) => set({ photo })}
           library={photos.library}

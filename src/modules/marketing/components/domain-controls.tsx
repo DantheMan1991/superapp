@@ -39,10 +39,12 @@ export interface DomainRowView {
  * "Check again" asks it once more.
  */
 export function ConnectDomainForm({
+  siteId,
   enabled,
   platformHosts,
   siteDomain,
 }: {
+  siteId: string;
   enabled: boolean;
   platformHosts: string[];
   siteDomain: string | null;
@@ -75,7 +77,7 @@ export function ConnectDomainForm({
           disabled={pending || !check.ok}
           onClick={() =>
             startTransition(async () => {
-              const result = await connectDomainAction({ domain: value });
+              const result = await connectDomainAction({ siteId, domain: value });
               if ("error" in result) {
                 toast.error(result.error);
                 return;

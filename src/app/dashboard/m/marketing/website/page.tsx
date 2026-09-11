@@ -11,7 +11,10 @@ import { listSiteEnquiries } from "@/lib/sites/enquiries";
 import { readEnquiryAnswers } from "@/lib/sites/enquiry-schema";
 import { undescribedPhotosOnPage } from "@/lib/sites/pages";
 import { isStarterPhoto, pageSpots, shotLine, shotNotesFor, shotSummary } from "@/lib/sites/shots";
+import { chooseSite } from "@/lib/sites/choose";
 import { loadSiteDrafts } from "@/lib/sites/read";
+import { listSites } from "@/modules/marketing/site-ops";
+import { SiteList } from "@/modules/marketing/components/site-list";
 import { listSiteViews } from "@/lib/sites/views";
 import { summarizeViews } from "@/lib/sites/views-core";
 import { normalizeSiteSlug, platformHostsFromEnv, siteDomainFromEnv } from "@/lib/sites/slug";
@@ -41,14 +44,35 @@ export const dynamic = "force-dynamic";
  * right. Editing what a page SAYS is slice 2's editor; here the words come
  * from the assistant and can be asked for again.
  */
-export default async function WebsitePage() {
+export default async function WebsitePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ site?: string }>;
+}) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "marketing");
   const today = todayInTimezone(ctx.tenant.timezone);
+  const asked = (await searchParams).site ?? "";
+
+  /**
+   * WHICH SITE THIS SCREEN IS ABOUT (ADR 0045).
+   *
+   * One site — every client today — opens straight into it and never learns
+   * that a business may have several, which is the same promise ADR 0010 keeps
+   * about companies. Several, and no site asked for, draws the list instead.
+   * An id that is not this tenant's simply is not in `sites`, so it falls
+   * through to the list rather than to an error: RLS already decided.
+   */
+  const sites = await withTenant(ctx.tenant.id, (tx) => listSites(tx, ctx.tenant.id), {
+    role: ctx.role,
+  });
+  const { site: chosen, showList } = chooseSite(sites, asked);
+  if (showList) return <SiteList sites={sites} canWrite={ctx.role === "owner"} />;
+
   const { drafts, enquiries, views } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
-      const drafts = await loadSiteDrafts(tx, ctx.tenant.id);
+      const drafts = chosen ? await loadSiteDrafts(tx, ctx.tenant.id, chosen.id) : null;
       const enquiries = drafts ? await listSiteEnquiries(tx, ctx.tenant.id, drafts.site.id) : [];
       const views = drafts ? await listSiteViews(tx, ctx.tenant.id, drafts.site.id, today) : [];
       return { drafts, enquiries, views };
@@ -140,7 +164,7 @@ export default async function WebsitePage() {
                     : "The words are the template's own; read them before you publish."}
                 </p>
               </div>
-              {canWrite && <SiteStatusButtons status={drafts.site.status} />}
+              {canWrite && <SiteStatusButtons siteId={drafts.site.id} status={drafts.site.status} />}
             </div>
             <dl className="grid gap-3 text-sm sm:grid-cols-2">
               {hostUrl(drafts.site.slug) && (
@@ -183,6 +207,7 @@ export default async function WebsitePage() {
               </p>
             </div>
             <PagesPanel
+              siteId={drafts.site.id}
               key={drafts.pages.map((p) => `${p.id}:${p.navOrder}`).join(",")}
               slug={drafts.site.slug}
               canWrite={canWrite}
@@ -211,7 +236,7 @@ export default async function WebsitePage() {
             <Panel className="flex flex-wrap items-center justify-between gap-4 p-5">
               <p className="text-sm">{shotLine(shots)}</p>
               <Button asChild variant="outline" size="sm">
-                <Link href="/dashboard/m/marketing/website/photos">
+                <Link href={`/dashboard/m/marketing/website/photos?site=${drafts.site.id}`}>
                   <Camera className="size-4" />
                   Open the shot list
                 </Link>
@@ -277,7 +302,7 @@ export default async function WebsitePage() {
             <h2 className="font-heading text-lg font-semibold tracking-heading">Details on the site</h2>
             <Panel className="p-6">
               {canWrite ? (
-                <SiteDetailsForm title={drafts.site.title} settings={drafts.view.settings} mapStatus={mapStatusLine(drafts.view.settings)} />
+                <SiteDetailsForm siteId={drafts.site.id} title={drafts.site.title} settings={drafts.view.settings} mapStatus={mapStatusLine(drafts.view.settings)} />
               ) : (
                 <dl className="grid gap-3 text-sm sm:grid-cols-2">
                   <div><dt className="text-xs text-muted-foreground">Phone</dt><dd>{drafts.view.settings.phone || "None"}</dd></div>
@@ -301,7 +326,7 @@ export default async function WebsitePage() {
             </div>
             <Panel className="p-6">
               {canWrite ? (
-                <HeaderFooterForm settings={drafts.view.settings} />
+                <HeaderFooterForm siteId={drafts.site.id} settings={drafts.view.settings} />
               ) : (
                 <HeaderFooterSummary settings={drafts.view.settings} />
               )}
@@ -336,6 +361,7 @@ export default async function WebsitePage() {
               {canWrite ? (
                 <div className="p-5">
                   <ConnectDomainForm
+                    siteId={drafts.site.id}
                     enabled={isVercelConfigured()}
                     platformHosts={platformHostsFromEnv(process.env)}
                     siteDomain={siteDomain}
@@ -353,7 +379,7 @@ export default async function WebsitePage() {
             <section className="space-y-3">
               <h2 className="font-heading text-lg font-semibold tracking-heading">Address</h2>
               <Panel className="p-6">
-                <SiteSlugForm slug={drafts.site.slug} siteDomain={siteDomain} />
+                <SiteSlugForm siteId={drafts.site.id} slug={drafts.site.slug} siteDomain={siteDomain} />
               </Panel>
             </section>
           )}

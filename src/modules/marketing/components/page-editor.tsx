@@ -140,6 +140,7 @@ const KIND_LABEL: Record<VersionView["kind"], string> = {
 };
 
 export function PageEditor({
+  siteId,
   pageId,
   slug,
   isHome,
@@ -152,6 +153,8 @@ export function PageEditor({
   assistantOn,
   blocks,
 }: {
+  /** The site this page belongs to — a business may have several (ADR 0045). */
+  siteId: string;
   pageId: string;
   slug: string;
   isHome: boolean;
@@ -366,7 +369,7 @@ export function PageEditor({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link
-          href="/dashboard/m/marketing/website"
+          href={`/dashboard/m/marketing/website?site=${siteId}`}
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
         >
           <ChevronLeft className="size-4" /> Back to the website
@@ -437,7 +440,7 @@ export function PageEditor({
             {emptySpots > 0 && (
               <p className="text-xs text-muted-foreground">
                 {emptySpots === 1 ? "One place for a photo on this page is empty." : `${emptySpots} places for a photo on this page are empty.`}{" "}
-                <Link href="/dashboard/m/marketing/website/photos" className="underline underline-offset-2 hover:text-foreground">
+                <Link href={`/dashboard/m/marketing/website/photos?site=${siteId}`} className="underline underline-offset-2 hover:text-foreground">
                   The shot list
                 </Link>{" "}
                 says what to take there.
@@ -510,7 +513,7 @@ export function PageEditor({
                 idPrefix={selectedRow.key}
                 section={selectedRow.section}
                 onChange={(next) => update(selectedRow.key, next)}
-                photos={{ tenantId, library, onLibraryChange: setLibrary, assistantOn }}
+                photos={{ siteId, tenantId, library, onLibraryChange: setLibrary, assistantOn }}
                 schedulingOn={schedulingOn}
                 mapStatus={mapStatus}
                 blocks={blocks}

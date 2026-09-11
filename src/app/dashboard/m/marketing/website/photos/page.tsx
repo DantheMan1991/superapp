@@ -5,7 +5,9 @@ import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { templateFor } from "@/lib/site-templates/resolve";
+import { chooseSite } from "@/lib/sites/choose";
 import { loadSiteDrafts } from "@/lib/sites/read";
+import { listSites } from "@/modules/marketing/site-ops";
 import { isStarterPhoto, pageSpots, shotNotesFor } from "@/lib/sites/shots";
 import { PageHeader } from "@/components/app/page-header";
 import { assistantOn } from "@/modules/marketing/assistant";
@@ -19,10 +21,25 @@ export const dynamic = "force-dynamic";
  * in the template's own terms. Staff read it; owners fill it, from a
  * phone as readily as a desk. No site yet means nothing to list.
  */
-export default async function ShotListRoute() {
+export default async function ShotListRoute({
+  searchParams,
+}: {
+  searchParams: Promise<{ site?: string }>;
+}) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "marketing");
-  const drafts = await withTenant(ctx.tenant.id, (tx) => loadSiteDrafts(tx, ctx.tenant.id), { role: ctx.role });
+  const asked = (await searchParams).site ?? "";
+  // The same rule the Website screen uses (`chooseSite`): one site needs no
+  // asking, several are told apart by `?site=`. Nothing chosen sends the
+  // reader back to the screen that CAN draw the list.
+  const drafts = await withTenant(
+    ctx.tenant.id,
+    async (tx) => {
+      const chosen = chooseSite(await listSites(tx, ctx.tenant.id), asked).site;
+      return chosen ? loadSiteDrafts(tx, ctx.tenant.id, chosen.id) : null;
+    },
+    { role: ctx.role },
+  );
   if (!drafts) redirect("/dashboard/m/marketing/website");
   // The platform's drawn stand-ins are known by the name their file carries.
   const starters = new Set(drafts.images.filter((i) => isStarterPhoto(i.pathname)).map((i) => i.id));
@@ -39,7 +56,7 @@ export default async function ShotListRoute() {
   return (
     <div className="space-y-4">
       <Link
-        href="/dashboard/m/marketing/website"
+        href={`/dashboard/m/marketing/website?site=${drafts.site.id}`}
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ChevronLeft className="size-4" /> Back to the website
@@ -50,6 +67,7 @@ export default async function ShotListRoute() {
         description="Every place on your pages where a photo belongs, what to take there, and a way to put it in from your phone."
       />
       <ShotList
+        siteId={drafts.site.id}
         tenantId={ctx.tenant.id}
         canWrite={ctx.role === "owner"}
         assistantOn={assistantOn()}

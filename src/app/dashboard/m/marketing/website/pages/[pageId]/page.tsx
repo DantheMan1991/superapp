@@ -59,6 +59,7 @@ export default async function PageEditorRoute({
       />
       <PageEditor
         key={data.page.updatedAt.getTime()}
+        siteId={data.site.id}
         pageId={data.page.id}
         slug={data.site.slug}
         isHome={data.page.path === "/"}

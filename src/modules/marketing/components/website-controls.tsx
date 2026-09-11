@@ -169,7 +169,7 @@ export function BuildSiteForm({
 }
 
 /** Publish, take down, and ask for the words again. */
-export function SiteStatusButtons({ status }: { status: string }) {
+export function SiteStatusButtons({ siteId, status }: { siteId: string; status: string }) {
   const { pending, run } = useRun();
   const published = status === "published";
   return (
@@ -181,7 +181,7 @@ export function SiteStatusButtons({ status }: { status: string }) {
           disabled={pending}
           onClick={() => {
             if (!window.confirm("Take the website off the internet? Your pages are kept and you can publish again any time.")) return;
-            run(unpublishSiteAction, "Your website is offline.");
+            run(() => unpublishSiteAction({ siteId }), "Your website is offline.");
           }}
         >
           {pending ? "One moment…" : "Unpublish"}
@@ -190,7 +190,7 @@ export function SiteStatusButtons({ status }: { status: string }) {
         <Button
           size="sm"
           disabled={pending}
-          onClick={() => run(publishSiteAction, "Your website is live.")}
+          onClick={() => run(() => publishSiteAction({ siteId }), "Your website is live.")}
         >
           {pending ? "Publishing…" : "Publish"}
         </Button>
@@ -199,7 +199,7 @@ export function SiteStatusButtons({ status }: { status: string }) {
         <Button
           size="sm"
           disabled={pending}
-          onClick={() => run(publishSiteAction, "Your website is updated.")}
+          onClick={() => run(() => publishSiteAction({ siteId }), "Your website is updated.")}
         >
           {pending ? "Publishing…" : "Publish changes"}
         </Button>
@@ -210,7 +210,7 @@ export function SiteStatusButtons({ status }: { status: string }) {
         disabled={pending}
         onClick={() => {
           if (!window.confirm("Write every page again from your brand kit and details? The current drafts are replaced. What is published stays until you publish again.")) return;
-          run(rewriteSiteCopyAction, "The words are rewritten. Have a look before you publish.");
+          run(() => rewriteSiteCopyAction({ siteId }), "The words are rewritten. Have a look before you publish.");
         }}
       >
         {pending ? "Writing…" : "Rewrite the words"}
@@ -219,7 +219,15 @@ export function SiteStatusButtons({ status }: { status: string }) {
   );
 }
 
-export function SiteSlugForm({ slug, siteDomain }: { slug: string; siteDomain: string | null }) {
+export function SiteSlugForm({
+  siteId,
+  slug,
+  siteDomain,
+}: {
+  siteId: string;
+  slug: string;
+  siteDomain: string | null;
+}) {
   const { pending, run } = useRun();
   const [value, setValue] = useState(slug);
   const check = normalizeSiteSlug(value);
@@ -239,7 +247,7 @@ export function SiteSlugForm({ slug, siteDomain }: { slug: string; siteDomain: s
           variant="outline"
           size="sm"
           disabled={pending || !check.ok || unchanged}
-          onClick={() => run(() => changeSiteSlugAction({ slug: value }), "Address changed.")}
+          onClick={() => run(() => changeSiteSlugAction({ siteId, slug: value }), "Address changed.")}
         >
           {pending ? "Saving…" : "Change address"}
         </Button>
@@ -253,10 +261,12 @@ export function SiteSlugForm({ slug, siteDomain }: { slug: string; siteDomain: s
 }
 
 export function SiteDetailsForm({
+  siteId,
   title,
   settings,
   mapStatus,
 }: {
+  siteId: string;
   title: string;
   settings: SiteSettings;
   /** Where the map stands (`mapStatusLine`), shown under the address. */
@@ -279,7 +289,7 @@ export function SiteDetailsForm({
       <div className="flex items-center gap-3">
         <Button
           disabled={pending || !dirty}
-          onClick={() => run(() => saveSiteDetailsAction(values), "Details saved. They show on the site straight away.")}
+          onClick={() => run(() => saveSiteDetailsAction({ ...values, siteId }), "Details saved. They show on the site straight away.")}
         >
           {pending ? "Saving…" : "Save"}
         </Button>

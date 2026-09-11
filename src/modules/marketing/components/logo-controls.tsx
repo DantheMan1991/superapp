@@ -11,6 +11,7 @@ import {
 } from "@/lib/brand/core";
 import { removeBrandLogoAction, setBrandLogoAction } from "../actions";
 import { LogoGenerator } from "./logo-generator";
+import { ownerFields, type KitOwner } from "@/lib/brand/owner";
 
 interface LogoView {
   src: string;
@@ -29,13 +30,13 @@ interface LogoView {
  */
 export function LogoControls({
   tenantId,
-  entityId,
+  owner,
   logo,
   nameForLogo,
   canWrite,
 }: {
   tenantId: string;
-  entityId: string | null;
+  owner: KitOwner;
   logo: LogoView | null;
   /** What "Draw one for me" puts on the logo: the kit's display name, else the business's. */
   nameForLogo: string;
@@ -66,7 +67,7 @@ export function LogoControls({
         file,
         { access: "private", handleUploadUrl: "/api/marketing/brand/upload" },
       );
-      const result = await setBrandLogoAction({ entityId, pathname: blob.pathname });
+      const result = await setBrandLogoAction({ ...ownerFields(owner), pathname: blob.pathname });
       if ("error" in result) {
         toast.error(result.error);
         return;
@@ -84,7 +85,7 @@ export function LogoControls({
   function onRemove() {
     if (!window.confirm("Remove the logo? Documents go back to the name on its own.")) return;
     startTransition(async () => {
-      const result = await removeBrandLogoAction({ entityId });
+      const result = await removeBrandLogoAction({ ...ownerFields(owner) });
       if ("error" in result) {
         toast.error(result.error);
         return;
@@ -125,7 +126,7 @@ export function LogoControls({
       {canWrite && (
         <div className="flex flex-wrap items-center gap-2">
           <LogoGenerator
-            entityId={entityId}
+            owner={owner}
             defaultName={nameForLogo}
             hasLogo={logo !== null}
           />

@@ -32,7 +32,7 @@ import { fail, gate, type ActionResult } from "./gate";
 import { industryLabel } from "./logo-generate";
 import { siteBriefFor, writeSite } from "./site-generate";
 import { ensureStarterPictures } from "./starter-pictures";
-import { saveKitLook } from "./kit-ops";
+import { BUSINESS_KIT, saveKitLook } from "./kit-ops";
 import {
   changeSiteSlug,
   createSite,
@@ -137,11 +137,18 @@ export async function createSiteAction(
           columns: { industry: true },
         });
         // The template is the industry's (slice 15): its frame is the site's
-        // starting frame, and its look goes on the kit only where nobody chose.
+        // starting frame, and its look goes on the BUSINESS kit only where
+        // nobody chose one.
+        //
+        // Still the business kit now that a site may have its own (ADR 0045),
+        // and the guard is what makes that safe: by the time a second site is
+        // built the business has a look, so the condition is false and a new
+        // brand can never redefine the one every other site inherits. A site
+        // that wants its own says so afterwards, on its own kit.
         const template = templateFor(tenant?.industry);
         const settings = settingsFrom({ ...EMPTY_SETTINGS, ...template.frame }, parsed.data);
         if (template.look && !brand.look && !brand.fontPairing && !brand.buttonShape) {
-          await saveKitLook(tx, ctx, null, {
+          await saveKitLook(tx, ctx, BUSINESS_KIT, {
             look: template.look.look ?? "",
             fontPairing: template.look.fontPairing ?? "",
             buttonShape: template.look.buttonShape ?? "",

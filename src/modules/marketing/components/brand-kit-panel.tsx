@@ -5,6 +5,7 @@ import { BrandKitForm } from "./brand-kit-form";
 import { BrandPreview } from "./brand-preview";
 import { LogoControls } from "./logo-controls";
 import type { LookInherits } from "./look-fields";
+import type { KitOwner } from "@/lib/brand/owner";
 
 /**
  * One kit, drawn as: how it reads → the logo → the fields. Server component;
@@ -16,7 +17,7 @@ import type { LookInherits } from "./look-fields";
  */
 export function BrandKitPanel({
   tenantId,
-  entityId,
+  owner,
   kit,
   resolved,
   inherits,
@@ -24,10 +25,10 @@ export function BrandKitPanel({
   canWrite,
 }: {
   tenantId: string;
-  entityId: string | null;
+  owner: KitOwner;
   kit: BrandKit | null;
   resolved: ResolvedBrand;
-  /** What a company kit's blank look falls back to (the business kit's answers); null on the business kit. */
+  /** What an owned kit's blank look falls back to (the business kit's answers); null on the business kit itself. */
   inherits: LookInherits | null;
   /** What the name field falls back to when left blank. */
   fallbackName: string;
@@ -43,10 +44,11 @@ export function BrandKitPanel({
         version: kit.updatedAt.getTime(),
       }
     : null;
-  // A company panel with no logo of its own still SHOWS the shared one in its
-  // preview, and says so, so the owner can see why the invoice carries it.
+  // A company's or a website's panel with no logo of its own still SHOWS the
+  // shared one in its preview, and says so, so the owner can see why the
+  // invoice — or the site header — carries it.
   const inheritedLogo =
-    !ownLogo && resolved.logo && entityId !== null
+    !ownLogo && resolved.logo && owner.kind !== "business"
       ? "Using your brand's logo."
       : null;
 
@@ -55,20 +57,14 @@ export function BrandKitPanel({
       <div className="p-5">
         <BrandPreview
           resolved={resolved}
-          logoSrc={
-            ownLogo
-              ? logoSrc(ownLogo.kitId, ownLogo.version)
-              : resolved.logo && entityId !== null
-                ? null
-                : null
-          }
+          logoSrc={ownLogo ? logoSrc(ownLogo.kitId, ownLogo.version) : null}
           inheritedLogoNote={inheritedLogo}
         />
       </div>
       <div className="p-5">
         <LogoControls
           tenantId={tenantId}
-          entityId={entityId}
+          owner={owner}
           logo={ownLogo ? { ...ownLogo, src: logoSrc(ownLogo.kitId, ownLogo.version) } : null}
           nameForLogo={kit?.displayName || fallbackName}
           canWrite={canWrite}
@@ -76,7 +72,7 @@ export function BrandKitPanel({
       </div>
       <div className="p-5">
         <BrandKitForm
-          entityId={entityId}
+          owner={owner}
           initial={{
             displayName: kit?.displayName ?? "",
             tagline: kit?.tagline ?? "",

@@ -21,6 +21,7 @@ import {
   type LogoCandidate,
 } from "@/lib/brand/logo-spec";
 import { adoptLogoAction, draftLogosAction } from "../actions";
+import { ownerFields, type KitOwner } from "@/lib/brand/owner";
 
 /**
  * "Draw one for me": the kit sets the business's name as a wordmark or a
@@ -32,11 +33,11 @@ import { adoptLogoAction, draftLogosAction } from "../actions";
  * picture; the server re-draws it.
  */
 export function LogoGenerator({
-  entityId,
+  owner,
   defaultName,
   hasLogo,
 }: {
-  entityId: string | null;
+  owner: KitOwner;
   /** The kit's display name, else the business's name — what goes on the logo. */
   defaultName: string;
   hasLogo: boolean;
@@ -61,7 +62,7 @@ export function LogoGenerator({
 
   function draft() {
     startDraft(async () => {
-      const result = await draftLogosAction({ entityId, name, initials });
+      const result = await draftLogosAction({ ...ownerFields(owner), name, initials });
       if ("error" in result) {
         toast.error(result.error);
         return;
@@ -76,7 +77,7 @@ export function LogoGenerator({
     const chosen = candidates?.find((c) => c.key === picked);
     if (!chosen) return;
     startAdopt(async () => {
-      const result = await adoptLogoAction({ entityId, spec: chosen.spec });
+      const result = await adoptLogoAction({ ...ownerFields(owner), spec: chosen.spec });
       if ("error" in result) {
         toast.error(result.error);
         return;

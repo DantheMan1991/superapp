@@ -2,6 +2,13 @@ import "dotenv/config";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../../src/db";
+import { BUSINESS_KIT } from "../../src/lib/brand/owner";
+import {
+  deleteKit,
+  ensureKit,
+  findKit,
+  saveKitFields,
+} from "../../src/modules/marketing/kit-ops";
 import { d } from "./_shared";
 
 /**
@@ -252,5 +259,75 @@ d("brand_kits (RLS)", () => {
       return tx.select().from(schema.brandKits);
     });
     expect(rows).toHaveLength(0);
+  });
+
+  /**
+   * THE OPS, WITH A SITE AS THE OWNER (ADR 0045).
+   *
+   * The RLS cases above are about who may see a row. These are about whether
+   * the ops pick the RIGHT row, which is the failure the `site_id` column
+   * introduced and which nothing throws on: a site's kit carries a null
+   * `entity_id` just as the business's does, so a predicate naming one column
+   * finds whichever row came back first.
+   *
+   * `server-only` is stubbed in `vitest.config.ts`, which is what lets a test
+   * drive the module's own ops rather than re-implementing them.
+   */
+  it("a site's kit is created, found, saved and deleted without touching the business's", async () => {
+    const ctx = { tenantId: tenantA, userId: OWNER, role: "owner" as const };
+    const [site] = await asOwner((tx) =>
+      tx.insert(schema.sites).values({ tenantId: tenantA, slug: `${STAMP}-look` }).returning(),
+    );
+    const owner = { kind: "site" as const, siteId: site.id };
+
+    // Nothing yet: a site wears the business look until somebody says otherwise.
+    expect(await asOwner((tx) => findKit(tx, tenantA, owner))).toBeNull();
+
+    const made = await asOwner((tx) => ensureKit(tx, ctx, owner));
+    expect(made.siteId).toBe(site.id);
+    expect(made.entityId).toBeNull();
+
+    await asOwner((tx) =>
+      saveKitFields(tx, ctx, owner, {
+        displayName: "Second Brand",
+        tagline: "Its own",
+        primaryColor: "#123456",
+        accentColor: "",
+        look: "",
+        fontPairing: "",
+        buttonShape: "",
+      }),
+    );
+
+    // THE ASSERTION THAT MATTERS: the business kit is untouched. Before the
+    // predicate required both nulls, this save landed on whichever row came
+    // back first — and the business kit is the one on the invoices.
+    const business = await asOwner((tx) => findKit(tx, tenantA, BUSINESS_KIT));
+    expect(business?.id).toBe(businessKitA);
+    expect(business?.displayName).not.toBe("Second Brand");
+    expect(await asOwner((tx) => findKit(tx, tenantA, owner)))
+      .toMatchObject({ displayName: "Second Brand", siteId: site.id });
+
+    // …and a company's kit is still its own.
+    expect((await asOwner((tx) => findKit(tx, tenantA, { kind: "company", entityId: entityA2 })))?.id)
+      .toBe(companyKitA2);
+
+    await asOwner((tx) => deleteKit(tx, ctx, owner));
+    expect(await asOwner((tx) => findKit(tx, tenantA, owner))).toBeNull();
+    expect((await asOwner((tx) => findKit(tx, tenantA, BUSINESS_KIT)))?.id).toBe(businessKitA);
+    await asOwner((tx) => tx.delete(schema.sites).where(eq(schema.sites.id, site.id)));
+  });
+
+  it("a site id from somewhere else is refused before anything is written", async () => {
+    const ctx = { tenantId: tenantA, userId: OWNER, role: "owner" as const };
+    const [theirs] = await withSystem((tx) =>
+      tx.insert(schema.sites).values({ tenantId: tenantB, slug: `${STAMP}-theirs` }).returning(),
+    );
+    // 404-shaped: another tenant's site must look exactly like one that is not
+    // there, and `assertSite` runs before the insert so nothing is half-made.
+    await expect(
+      asOwner((tx) => ensureKit(tx, ctx, { kind: "site", siteId: theirs.id })),
+    ).rejects.toThrow();
+    await withSystem((tx) => tx.delete(schema.sites).where(eq(schema.sites.id, theirs.id)));
   });
 });

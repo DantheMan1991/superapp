@@ -228,7 +228,11 @@ export async function receiveSiteBooking(
           await landLead(
             tx,
             { tenantId: hit.tenantId, userId: "" },
-            { partyId: party.id, source: "website" },
+            {
+              partyId: party.id,
+              source: "website",
+              sourceDetail: site.title || site.slug,
+            },
           )
         ).includes("crm");
 

@@ -184,6 +184,7 @@ export default async function RecordPage({
             // rendered — the write path merges rather than replaces, so an
             // unrelated save cannot drop them.
             initialCustom={(details.custom ?? {}) as Record<string, unknown>}
+            sourceDetail={details.sourceDetail}
             initial={{
               kind: party.kind,
               displayName: party.displayName,

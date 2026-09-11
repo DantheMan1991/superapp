@@ -77,19 +77,29 @@ d("the leads slot", () => {
     expect(details).toHaveLength(0);
   });
 
-  it("a plain message adopts the record with its source, and nothing more", async () => {
+  it("a plain message adopts the record with its source AND which door it came through", async () => {
     const landed = await withTenant(on, (tx) =>
-      landLead(tx, ctxFor(on), { partyId: orgOn, source: "website" }),
+      landLead(tx, ctxFor(on), {
+        partyId: orgOn,
+        source: "website",
+        // Which of the business's websites (ADR 0045). "website" alone stops
+        // being an answer the day a second one is published.
+        sourceDetail: "Yosher Homestead",
+      }),
     );
     expect(landed).toEqual(["crm"]);
 
     const [details] = await withTenant(on, (tx) =>
       tx
-        .select({ source: schema.crmPartyDetails.source })
+        .select({
+          source: schema.crmPartyDetails.source,
+          sourceDetail: schema.crmPartyDetails.sourceDetail,
+        })
         .from(schema.crmPartyDetails)
         .where(eq(schema.crmPartyDetails.partyId, orgOn)),
     );
     expect(details?.source).toBe("website");
+    expect(details?.sourceDetail).toBe("Yosher Homestead");
 
     const deals = await withTenant(on, (tx) =>
       tx.select().from(schema.crmDeals).where(eq(schema.crmDeals.partyId, orgOn)),
@@ -155,14 +165,20 @@ d("the leads slot", () => {
     );
     expect(notes).toEqual([{ subject: "Health check", dealId: deals[0].id }]);
 
-    // The record kept the source it already had.
+    // The record kept the source it already had — and the door with it. A
+    // returning customer's record still says where it FIRST came from, which
+    // is the fact worth keeping.
     const [details] = await withTenant(on, (tx) =>
       tx
-        .select({ source: schema.crmPartyDetails.source })
+        .select({
+          source: schema.crmPartyDetails.source,
+          sourceDetail: schema.crmPartyDetails.sourceDetail,
+        })
         .from(schema.crmPartyDetails)
         .where(eq(schema.crmPartyDetails.partyId, orgOn)),
     );
     expect(details?.source).toBe("website");
+    expect(details?.sourceDetail).toBe("Yosher Homestead");
   });
 
   it("a second arrival does not duplicate the affiliation, and never poisons the transaction", async () => {

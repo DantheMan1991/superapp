@@ -78,6 +78,23 @@ export const crmPartyDetails = pgTable(
     lifecycleStage: text("lifecycle_stage").notNull().default(""),
     /** Same shape, same reason: "referral", "website", whatever a pack names. */
     source: text("source").notNull().default(""),
+    /**
+     * WHICH DOOR, when `source` alone cannot say. A business may run several
+     * websites (ADR 0045), and "website" stops being an answer the day the
+     * second one is published — this holds the one that produced the lead, by
+     * the name its owner calls it.
+     *
+     * A SEPARATE COLUMN rather than a longer `source`, because `source` is
+     * the word a person types and filters on ("referral", "website") and
+     * ADR 0042 settled that it is a word and not a kind. Folding the site
+     * into it would turn one value into one per site and quietly break every
+     * grouping of it.
+     *
+     * Written by a door, never by the form: it is a record of where the lead
+     * actually arrived, so an owner editing `source` afterwards does not
+     * rewrite history. Empty for every lead that needs no disambiguating.
+     */
+    sourceDetail: text("source_detail").notNull().default(""),
     notes: text("notes").notNull().default(""),
     /**
      * Extension bag (primitive P2) for the per-tenant custom fields slice 2

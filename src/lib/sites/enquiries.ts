@@ -217,7 +217,13 @@ export async function receiveSiteEnquiry(
           await landLead(
             tx,
             { tenantId: hit.tenantId, userId: "" },
-            { partyId: party.id, source: "website" },
+            {
+              partyId: party.id,
+              source: "website",
+              // The SITE, never the tenant: two sites of one business
+              // must not read the same in the CRM.
+              sourceDetail: site.title || site.slug,
+            },
           )
         ).includes("crm");
 

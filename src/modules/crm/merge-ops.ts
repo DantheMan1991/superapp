@@ -307,6 +307,7 @@ async function loadSide(tx: Tx, tenantId: string, partyId: string): Promise<Side
       ? {
           lifecycleStage: details.lifecycleStage,
           source: details.source,
+          sourceDetail: details.sourceDetail,
           notes: details.notes,
           ownerClerkUserId: details.ownerClerkUserId,
           visibility: details.visibility,
@@ -607,6 +608,7 @@ export async function applyMerge(
       .set({
         lifecycleStage: plan.details.patch.lifecycleStage,
         source: plan.details.patch.source,
+        sourceDetail: plan.details.patch.sourceDetail,
         notes: plan.details.patch.notes,
         ownerClerkUserId: plan.details.patch.ownerClerkUserId,
         visibility: plan.details.patch.visibility,

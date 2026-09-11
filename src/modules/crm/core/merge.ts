@@ -182,6 +182,7 @@ export interface DetailsPlan {
   patch: {
     lifecycleStage: string;
     source: string;
+    sourceDetail: string;
     notes: string;
     ownerClerkUserId: string | null;
     visibility: "members" | "restricted";
@@ -289,6 +290,7 @@ export interface AffiliationSnapshot {
 export interface DetailsSnapshot {
   lifecycleStage: string;
   source: string;
+  sourceDetail: string;
   notes: string;
   ownerClerkUserId: string | null;
   visibility: "members" | "restricted";
@@ -427,6 +429,18 @@ export function planDetails(
     patch: {
       lifecycleStage: survivor.lifecycleStage || loser.lifecycleStage,
       source: survivor.source || loser.source,
+      /**
+       * THE DETAIL GOES WITH THE SOURCE IT ARRIVED WITH, rather than filling
+       * blanks on its own like every other field here. A survivor whose
+       * source is "referral" must not inherit the loser's "arrived through
+       * Yosher Homestead": the pair would then describe a journey neither
+       * record made.
+       */
+      sourceDetail: survivor.source
+        ? survivor.sourceDetail
+        : loser.source
+          ? loser.sourceDetail
+          : survivor.sourceDetail || loser.sourceDetail,
       notes: joinNotes(survivor.notes, loser.notes),
       ownerClerkUserId: survivor.ownerClerkUserId ?? loser.ownerClerkUserId,
       // THE MORE RESTRICTIVE VISIBILITY WINS, which is the one field the
@@ -484,6 +498,7 @@ function isBlankCustom(value: CustomValue): boolean {
 const EMPTY_DETAILS: DetailsPlan["patch"] = {
   lifecycleStage: "",
   source: "",
+  sourceDetail: "",
   notes: "",
   ownerClerkUserId: null,
   visibility: "members",

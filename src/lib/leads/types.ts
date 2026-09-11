@@ -22,6 +22,15 @@ export interface LandedLead {
   /** An open word beside `website` and `referral`: a source, never a kind. */
   source: string;
   /**
+   * WHICH DOOR, when the word alone cannot say — the name of the website a
+   * message came through, once a business has more than one (ADR 0045).
+   *
+   * Beside `source` rather than inside it, deliberately: `source` is what an
+   * owner types and filters on, and one value per website would quietly break
+   * every grouping of it. Absent for a door that needs no disambiguating.
+   */
+  sourceDetail?: string;
+  /**
    * Present when the stranger asked about buying something — a title for the
    * deal a pipeline would open, and a note for its timeline. Absent for a
    * plain message, which lands as a record and nothing more.

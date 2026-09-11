@@ -56,6 +56,17 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-10 — The enquiry says which site it came from (`claude/which-site-sent-the-lead`)
+
+Both public doors this module owns — the enquiry form
+(`src/lib/sites/enquiries.ts`) and the booking form (`src/lib/sites/bookings.ts`)
+— now pass `sourceDetail: site.title || site.slug` through the lead slot
+(ADR 0042), so a CRM record says WHICH of a business's websites produced it.
+**Never the tenant's name as a fallback**: two sites of one business reading
+identically in the CRM is the one thing the field exists to prevent. Migration
+0298 and the rule the merge needed are written up in
+[crm.md](crm.md); nothing about how a site is rendered or published changed.
+
 ### 2026-09-10 — Adding a second website (`claude/add-a-second-website`)
 
 **A defect the previous two PRs shipped, found by the founder:** "I don't see

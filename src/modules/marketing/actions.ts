@@ -16,7 +16,7 @@ import {
   type LogoCandidate,
 } from "@/lib/brand/logo-spec";
 import { BRAND_LOOKS, BUTTON_SHAPES, FONT_PAIRINGS } from "@/lib/brand/looks";
-import { resolveBrandFor } from "@/lib/brand/read";
+import { resolveBrandFor, resolveBrandForSite } from "@/lib/brand/read";
 import { MarketingError } from "./core/errors";
 import { fail, gate, type ActionResult } from "./gate";
 import {
@@ -27,8 +27,10 @@ import {
 } from "./logo-generate";
 import {
   clearKitLogo,
-  deleteCompanyKit,
+  deleteKit,
   ensureKit,
+  BUSINESS_KIT,
+  type KitOwner,
   saveKitFields,
   setKitLogo,
 } from "./kit-ops";
@@ -61,9 +63,29 @@ function revalidate(): void {
 }
 
 const entityIdSchema = z.string().uuid().nullable();
+const siteIdSchema = z.string().uuid().nullable().default(null);
+
+/**
+ * WHOSE LOOK A REQUEST IS ABOUT (ADR 0045). The wire shape is unchanged for
+ * every caller that sends only `entityId` — the business's kit is still both
+ * absent — and a website's kit is `siteId`.
+ *
+ * Both set is refused HERE rather than left to the `brand_kits_one_owner`
+ * CHECK, so the answer is a sentence instead of a constraint error. Neither
+ * set is the business, which is the common case and needs no field at all.
+ */
+function kitOwnerFrom(input: { entityId: string | null; siteId?: string | null }): KitOwner {
+  if (input.entityId && input.siteId) {
+    throw new MarketingError("INVALID_INPUT", "a look belongs to one thing");
+  }
+  if (input.entityId) return { kind: "company", entityId: input.entityId };
+  if (input.siteId) return { kind: "site", siteId: input.siteId };
+  return BUSINESS_KIT;
+}
 
 const fieldsSchema = z.object({
   entityId: entityIdSchema,
+  siteId: siteIdSchema,
   displayName: z.string().trim().max(BRAND_DISPLAY_NAME_MAX),
   tagline: z.string().trim().max(BRAND_TAGLINE_MAX),
   primaryColor: z.string().trim().max(16),
@@ -98,7 +120,7 @@ export async function saveBrandKitAction(
     await withTenant(
       ctx.tenantId,
       async (tx) => {
-        const kit = await saveKitFields(tx, ctx, parsed.data.entityId, {
+        const kit = await saveKitFields(tx, ctx, kitOwnerFrom(parsed.data), {
           displayName: parsed.data.displayName,
           tagline: parsed.data.tagline,
           primaryColor,
@@ -113,7 +135,7 @@ export async function saveBrandKitAction(
           actorClerkUserId: ctx.userId,
           targetType: "brand_kit",
           targetId: kit.id,
-          meta: { entityId: parsed.data.entityId },
+          meta: { entityId: parsed.data.entityId, siteId: parsed.data.siteId },
         });
       },
       { role: ctx.role },
@@ -127,6 +149,7 @@ export async function saveBrandKitAction(
 
 const logoSchema = z.object({
   entityId: entityIdSchema,
+  siteId: siteIdSchema,
   pathname: z.string().min(1).max(500),
 });
 
@@ -145,14 +168,14 @@ export async function setBrandLogoAction(
     const { kit, previous } = await withTenant(
       ctx.tenantId,
       async (tx) => {
-        const result = await setKitLogo(tx, ctx, parsed.data.entityId, logo);
+        const result = await setKitLogo(tx, ctx, kitOwnerFrom(parsed.data), logo);
         await logAuditInTx(tx, {
           action: "marketing.brand_kit.logo_set",
           tenantId: ctx.tenantId,
           actorClerkUserId: ctx.userId,
           targetType: "brand_kit",
           targetId: result.kit.id,
-          meta: { entityId: parsed.data.entityId, mimeType: logo.mimeType },
+          meta: { entityId: parsed.data.entityId, siteId: parsed.data.siteId, mimeType: logo.mimeType },
         });
         return result;
       },
@@ -177,7 +200,7 @@ export async function setBrandLogoAction(
   }
 }
 
-const entityOnlySchema = z.object({ entityId: entityIdSchema });
+const entityOnlySchema = z.object({ entityId: entityIdSchema, siteId: siteIdSchema });
 
 export async function removeBrandLogoAction(
   input: unknown,
@@ -189,14 +212,14 @@ export async function removeBrandLogoAction(
     const { kit, previous } = await withTenant(
       ctx.tenantId,
       async (tx) => {
-        const result = await clearKitLogo(tx, ctx, parsed.data.entityId);
+        const result = await clearKitLogo(tx, ctx, kitOwnerFrom(parsed.data));
         await logAuditInTx(tx, {
           action: "marketing.brand_kit.logo_removed",
           tenantId: ctx.tenantId,
           actorClerkUserId: ctx.userId,
           targetType: "brand_kit",
           targetId: result.kit.id,
-          meta: { entityId: parsed.data.entityId },
+          meta: { entityId: parsed.data.entityId, siteId: parsed.data.siteId },
         });
         return result;
       },
@@ -213,6 +236,7 @@ export async function removeBrandLogoAction(
 
 const draftSchema = z.object({
   entityId: entityIdSchema,
+  siteId: siteIdSchema,
   name: z.string().trim().min(1).max(LOGO_LINE_MAX * 2),
   initials: z.string().trim().max(3),
 });
@@ -232,7 +256,9 @@ export async function draftLogosAction(
     const { brand, industry } = await withTenant(
       ctx.tenantId,
       async (tx) => ({
-        brand: await resolveBrandFor(tx, ctx.tenantId, parsed.data.entityId),
+        brand: parsed.data.siteId
+          ? await resolveBrandForSite(tx, ctx.tenantId, parsed.data.siteId)
+          : await resolveBrandFor(tx, ctx.tenantId, parsed.data.entityId),
         industry: (
           await tx.query.tenants.findFirst({
             where: eq(schema.tenants.id, ctx.tenantId),
@@ -259,6 +285,7 @@ export async function draftLogosAction(
 
 const adoptSchema = z.object({
   entityId: entityIdSchema,
+  siteId: siteIdSchema,
   spec: z.unknown(),
 });
 
@@ -278,7 +305,7 @@ export async function adoptLogoAction(input: unknown): Promise<ActionResult> {
     const { kit, previous } = await withTenant(
       ctx.tenantId,
       async (tx) => {
-        const result = await setKitLogo(tx, ctx, parsed.data.entityId, logo);
+        const result = await setKitLogo(tx, ctx, kitOwnerFrom(parsed.data), logo);
         await logAuditInTx(tx, {
           action: "marketing.brand_kit.logo_drawn",
           tenantId: ctx.tenantId,
@@ -303,7 +330,16 @@ export async function adoptLogoAction(input: unknown): Promise<ActionResult> {
   }
 }
 
-const companySchema = z.object({ entityId: z.string().uuid() });
+/**
+ * Giving one thing its own look, or taking it away again. Exactly one of the
+ * two is named — the business's look is not a row anybody may create or
+ * delete, which the `KitOwner` type enforces at `deleteKit`.
+ */
+const ownedSchema = z
+  .object({ entityId: entityIdSchema.default(null), siteId: siteIdSchema })
+  .refine((v) => Boolean(v.entityId) !== Boolean(v.siteId), {
+    message: "Name a company or a website, not both.",
+  });
 
 /** A company gets a look of its own — an empty kit to fill in. */
 export async function startCompanyLookAction(
@@ -311,19 +347,19 @@ export async function startCompanyLookAction(
 ): Promise<ActionResult> {
   try {
     const ctx = await gate();
-    const parsed = companySchema.safeParse(input);
+    const parsed = ownedSchema.safeParse(input);
     if (!parsed.success) return { error: "Pick a company and try again." };
     await withTenant(
       ctx.tenantId,
       async (tx) => {
-        const kit = await ensureKit(tx, ctx, parsed.data.entityId);
+        const kit = await ensureKit(tx, ctx, kitOwnerFrom(parsed.data));
         await logAuditInTx(tx, {
           action: "marketing.brand_kit.company_look_started",
           tenantId: ctx.tenantId,
           actorClerkUserId: ctx.userId,
           targetType: "brand_kit",
           targetId: kit.id,
-          meta: { entityId: parsed.data.entityId },
+          meta: { entityId: parsed.data.entityId, siteId: parsed.data.siteId },
         });
       },
       { role: ctx.role },
@@ -341,18 +377,20 @@ export async function removeCompanyLookAction(
 ): Promise<ActionResult> {
   try {
     const ctx = await gate();
-    const parsed = companySchema.safeParse(input);
+    const parsed = ownedSchema.safeParse(input);
     if (!parsed.success) return { error: "Pick a company and try again." };
     const { previous } = await withTenant(
       ctx.tenantId,
       async (tx) => {
-        const result = await deleteCompanyKit(tx, ctx, parsed.data.entityId);
+        const owner = kitOwnerFrom(parsed.data);
+        if (owner.kind === "business") throw new MarketingError("INVALID_INPUT", "no owner named");
+        const result = await deleteKit(tx, ctx, owner);
         await logAuditInTx(tx, {
           action: "marketing.brand_kit.company_look_removed",
           tenantId: ctx.tenantId,
           actorClerkUserId: ctx.userId,
           targetType: "entity",
-          targetId: parsed.data.entityId,
+          targetId: parsed.data.entityId ?? parsed.data.siteId ?? "",
         });
         return result;
       },

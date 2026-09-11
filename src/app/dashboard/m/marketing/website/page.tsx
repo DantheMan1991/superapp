@@ -11,9 +11,17 @@ import { listSiteEnquiries } from "@/lib/sites/enquiries";
 import { readEnquiryAnswers } from "@/lib/sites/enquiry-schema";
 import { undescribedPhotosOnPage } from "@/lib/sites/pages";
 import { isStarterPhoto, pageSpots, shotLine, shotNotesFor, shotSummary } from "@/lib/sites/shots";
+import { resolveBrand } from "@/lib/brand/core";
+import { BUSINESS_KIT } from "@/lib/brand/owner";
 import { chooseSite } from "@/lib/sites/choose";
 import { loadSiteDrafts } from "@/lib/sites/read";
+import { findKit } from "@/modules/marketing/kit-ops";
 import { listSites } from "@/modules/marketing/site-ops";
+import { BrandKitPanel } from "@/modules/marketing/components/brand-kit-panel";
+import {
+  RemoveOwnLookButton,
+  StartOwnLookButton,
+} from "@/modules/marketing/components/own-look-controls";
 import { SiteList } from "@/modules/marketing/components/site-list";
 import { listSiteViews } from "@/lib/sites/views";
 import { summarizeViews } from "@/lib/sites/views-core";
@@ -69,13 +77,20 @@ export default async function WebsitePage({
   const { site: chosen, showList } = chooseSite(sites, asked);
   if (showList) return <SiteList sites={sites} canWrite={ctx.role === "owner"} />;
 
-  const { drafts, enquiries, views } = await withTenant(
+  const { drafts, enquiries, views, siteKit, businessKit } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
       const drafts = chosen ? await loadSiteDrafts(tx, ctx.tenant.id, chosen.id) : null;
+      // This site's OWN look, and the business look it falls back to
+      // (ADR 0045). A null kit means the site wears the business's, which is
+      // every site until somebody says otherwise.
+      const siteKit = chosen
+        ? await findKit(tx, ctx.tenant.id, { kind: "site", siteId: chosen.id })
+        : null;
+      const businessKit = await findKit(tx, ctx.tenant.id, BUSINESS_KIT);
       const enquiries = drafts ? await listSiteEnquiries(tx, ctx.tenant.id, drafts.site.id) : [];
       const views = drafts ? await listSiteViews(tx, ctx.tenant.id, drafts.site.id, today) : [];
-      return { drafts, enquiries, views };
+      return { drafts, enquiries, views, siteKit, businessKit };
     },
     { role: ctx.role },
   );
@@ -86,6 +101,18 @@ export default async function WebsitePage({
     ? await Promise.all([isModuleEnabled(ctx.tenant.id, "crm"), isModuleEnabled(ctx.tenant.id, "work")])
     : [false, false];
   const canWrite = ctx.role === "owner";
+  // What a site kit's blank look falls back to: the business kit's answers,
+  // resolved exactly as the Marketing screen resolves a company's.
+  const businessLook = resolveBrand({
+    tenantName: ctx.tenant.name,
+    business: businessKit,
+    company: null,
+  });
+  const businessInherits = {
+    look: businessLook.look,
+    fontPairing: businessLook.fontPairing,
+    buttonShape: businessLook.buttonShape,
+  };
   // Where a photo belongs on each page, read from the drafts as they are now (slice 18).
   const starters = new Set(drafts?.images.filter((i) => isStarterPhoto(i.pathname)).map((i) => i.id) ?? []);
   const notes = shotNotesFor(templateFor(ctx.tenant.industry));
@@ -383,6 +410,56 @@ export default async function WebsitePage({
               </Panel>
             </section>
           )}
+
+          {/* THIS SITE'S LOOK (ADR 0045). A site with no kit of its own wears
+              the business's, which is the common case and says so rather than
+              drawing an empty form. The panel is the same one the Marketing
+              screen draws for the business and for a company — one editor,
+              three owners. */}
+          <section className="space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="font-heading text-lg font-semibold tracking-heading">
+                This website&apos;s look
+              </h2>
+              {canWrite && siteKit && (
+                <RemoveOwnLookButton
+                  owner={{ kind: "site", siteId: drafts.site.id }}
+                  name={drafts.site.title || drafts.site.slug}
+                />
+              )}
+            </div>
+            {siteKit ? (
+              <BrandKitPanel
+                tenantId={ctx.tenant.id}
+                owner={{ kind: "site", siteId: drafts.site.id }}
+                kit={siteKit}
+                resolved={resolveBrand({
+                  tenantName: ctx.tenant.name,
+                  business: businessKit,
+                  company: siteKit,
+                })}
+                inherits={businessInherits}
+                fallbackName={drafts.site.title || ctx.tenant.name}
+                canWrite={canWrite}
+              />
+            ) : (
+              <Panel className="flex flex-wrap items-center justify-between gap-3 p-5">
+                <div>
+                  <div className="font-medium">Uses your brand.</div>
+                  <div className="text-sm text-muted-foreground">
+                    Its name, colors, fonts and logo are your business&apos;s. Give
+                    it its own to run this site as a separate brand.
+                  </div>
+                </div>
+                {canWrite && (
+                  <StartOwnLookButton
+                    owner={{ kind: "site", siteId: drafts.site.id }}
+                    name={drafts.site.title || drafts.site.slug}
+                  />
+                )}
+              </Panel>
+            )}
+          </section>
         </>
       )}
     </div>

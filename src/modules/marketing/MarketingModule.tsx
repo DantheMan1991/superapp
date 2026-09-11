@@ -9,10 +9,11 @@ import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
 import { BrandKitPanel } from "./components/brand-kit-panel";
 import {
-  RemoveCompanyLookButton,
-  StartCompanyLookButton,
-} from "./components/company-look-controls";
+  RemoveOwnLookButton,
+  StartOwnLookButton,
+} from "./components/own-look-controls";
 import { MarketingStrip } from "./components/marketing-strip";
+import { BUSINESS_KIT, isBusinessKit } from "@/lib/brand/owner";
 
 /**
  * The module's front page: the brand kit, with the strip to the website.
@@ -44,7 +45,11 @@ export async function MarketingModule({ ctx }: { ctx: TenantContext }) {
     { role: ctx.role },
   );
 
-  const business = kits.find((k) => k.entityId === null) ?? null;
+  // `isBusinessKit`, not `entityId === null`: a WEBSITE's kit also carries a
+  // null `entity_id` (ADR 0045), and this `find` would have shown a site's
+  // brand as the business's. Site kits are edited on the Website screen and
+  // are deliberately not listed here.
+  const business = kits.find(isBusinessKit) ?? null;
   const companyKits = new Map<string, BrandKit>(
     kits.filter((k) => k.entityId !== null).map((k) => [k.entityId as string, k]),
   );
@@ -72,7 +77,7 @@ export async function MarketingModule({ ctx }: { ctx: TenantContext }) {
         </h2>
         <BrandKitPanel
           tenantId={ctx.tenant.id}
-          entityId={null}
+          owner={BUSINESS_KIT}
           kit={business}
           resolved={resolveBrand({
             tenantName: ctx.tenant.name,
@@ -112,8 +117,8 @@ export async function MarketingModule({ ctx }: { ctx: TenantContext }) {
                     </div>
                   </div>
                   {canWrite && (
-                    <StartCompanyLookButton
-                      entityId={company.id}
+                    <StartOwnLookButton
+                      owner={{ kind: "company", entityId: company.id }}
                       name={company.name}
                     />
                   )}
@@ -125,15 +130,15 @@ export async function MarketingModule({ ctx }: { ctx: TenantContext }) {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <h3 className="font-medium">{company.name}</h3>
                   {canWrite && (
-                    <RemoveCompanyLookButton
-                      entityId={company.id}
+                    <RemoveOwnLookButton
+                      owner={{ kind: "company", entityId: company.id }}
                       name={company.name}
                     />
                   )}
                 </div>
                 <BrandKitPanel
                   tenantId={ctx.tenant.id}
-                  entityId={company.id}
+                  owner={{ kind: "company", entityId: company.id }}
                   kit={kit}
                   resolved={resolveBrand({
                     tenantName: ctx.tenant.name,

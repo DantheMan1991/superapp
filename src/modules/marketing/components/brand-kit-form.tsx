@@ -13,6 +13,7 @@ import {
 import { BUTTON_SHAPE_SPECS, FONT_PAIRING_SPECS, isBrandLook, isButtonShape, isFontPairing, LOOK_SPECS } from "@/lib/brand/looks";
 import { saveBrandKitAction } from "../actions";
 import { LookFields, type LookInherits } from "./look-fields";
+import { ownerFields, type KitOwner } from "@/lib/brand/owner";
 
 interface Fields {
   displayName: string;
@@ -31,13 +32,13 @@ interface Fields {
  * "no brand colour yet" is a real state the invoice renders differently.
  */
 export function BrandKitForm({
-  entityId,
+  owner,
   initial,
   inherits,
   fallbackName,
   canWrite,
 }: {
-  entityId: string | null;
+  owner: KitOwner;
   initial: Fields;
   /** What a company kit's blank look falls back to; null on the business kit. */
   inherits: LookInherits | null;
@@ -55,7 +56,7 @@ export function BrandKitForm({
 
   function onSave() {
     startTransition(async () => {
-      const result = await saveBrandKitAction({ entityId, ...fields });
+      const result = await saveBrandKitAction({ ...ownerFields(owner), ...fields });
       if ("error" in result) {
         toast.error(result.error);
         return;
@@ -91,7 +92,8 @@ export function BrandKitForm({
     );
   }
 
-  const idFor = (name: string) => `brand-${entityId ?? "business"}-${name}`;
+  const idFor = (name: string) =>
+    `brand-${owner.kind === "company" ? owner.entityId : owner.kind === "site" ? owner.siteId : "business"}-${name}`;
 
   return (
     <div className="space-y-4">

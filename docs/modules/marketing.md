@@ -56,6 +56,62 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-10 — A look per website (`claude/a-look-per-website`)
+
+The write half of [ADR 0045](../decisions/0045-a-business-may-have-several-websites-and-a-kit-may-belong-to-one.md),
+which the session before this one left as a column nothing filled in. **No
+migration** — `brand_kits.site_id` and its constraints went out with 0297.
+
+- **`KitOwner` replaces `entityId: string | null`** through `kit-ops` and the
+  kit actions: `{ kind: "business" }`, `{ kind: "company"; entityId }`,
+  `{ kind: "site"; siteId }`. Two states became three, and a second nullable
+  parameter would have made every function decide what both-set means — a
+  question `brand_kits_one_owner` already refuses to represent.
+- **The type lives in `src/lib/brand/owner.ts`, not in `kit-ops`**, because the
+  screens need it and `kit-ops` is `server-only`. That file also holds
+  `ownerFields` (the wire/column shape), `ownerFrom` and `isBusinessKit`.
+- **A THIRD instance of the same bug, found and fixed here.** ADR 0045 had
+  already closed `resolveBrandFor` (which would have printed a site's logo on
+  the invoices) and `kitWhere` (which would have let a save to the business kit
+  overwrite a site's). The Marketing screen had it too:
+  `kits.find((k) => k.entityId === null)` over `loadBrandKits`, which returns
+  every row — so **a website's kit could have been drawn as the business's
+  brand**, and `find` takes the first match. `isBusinessKit` is now the one
+  predicate, and it exists as a named function precisely because the inline
+  version has been wrong three times.
+- **One editor, three owners.** `BrandKitPanel`, `BrandKitForm`,
+  `LogoControls` and `LogoGenerator` all take an owner now, so the Website
+  screen draws the SAME panel the Marketing screen draws for the business and
+  for a company. `company-look-controls.tsx` became `own-look-controls.tsx`
+  (`StartOwnLookButton` / `RemoveOwnLookButton`): the two pairs differed only
+  in a noun and in what the warning said was at stake — invoices for a company,
+  pages for a site — and keeping two is how the wording drifts.
+- **The Website screen gained "This website's look"**, below Address and
+  OUTSIDE the owner-only block so staff can see which brand a site wears. A
+  site with no kit says *"Uses your brand"* and offers one button rather than
+  drawing an empty form.
+- **A new site's suggested look still goes on the BUSINESS kit**, and the
+  existing guard is what makes that safe now that it could go elsewhere: it
+  applies only when the business has chosen no look at all, so by the time a
+  second site is built the condition is false and a new brand can never
+  redefine the one every other site inherits.
+- **Driven on Hilltop Farm**: the Website screen renders the panel at the
+  bottom reading *"Uses your brand. … Give it its own look"*. **Not clicked** —
+  the dev server reads the PRODUCTION database, and pressing it would have
+  written a real `brand_kits` row for a tenant nobody asked me to touch. The
+  write path is covered by the test below instead.
+- **Tests**: `tests/brand-owner.test.ts` (the wire round-trip, and
+  `isBusinessKit` against a list holding all three kinds with the SITE's row
+  first, because that is the row the old predicate returned) and two cases in
+  `tests/isolation/brand.test.ts` driving the real ops — a site kit created,
+  found, saved and deleted **with the business kit asserted untouched**, and
+  another tenant's site id refused before anything is written. `server-only` is
+  stubbed in `vitest.config.ts`, which is what lets a test call the module's own
+  ops.
+- **Not built here:** an enquiry recording WHICH site produced the lead; a kit
+  shared by two sites (two kits with the same values today); and the per-site
+  look reaching the invoice PDF, which stays the business's and should.
+
 ### 2026-09-10 — Many websites per business, and a kit that may belong to one (`claude/many-sites-per-tenant`)
 
 The founder: "lift the one-site-per-tenant limit … the logo for each industry

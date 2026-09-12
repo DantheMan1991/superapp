@@ -205,3 +205,36 @@ export function roleMayManageWorkers(role: TimeRole): boolean {
 export function roleMayApprove(role: TimeRole): boolean {
   return role === "owner";
 }
+
+/**
+ * The name of the unique index a write violated, or null.
+ *
+ * ── THIS EXISTS BECAUSE THE OBVIOUS VERSION SILENTLY DID NOTHING ─────────────
+ *
+ * Three places in this module translated a constraint into a sentence with
+ * `String(err).includes("<index name>")`, and **not one of them ever fired.**
+ * Drizzle wraps the driver's error, so `String(err)` is `Failed query: insert
+ * into "time_punches" …` — the SQL, never the constraint. The real error is
+ * one level down. Measured, not guessed:
+ *
+ *     err.cause.code       === "23505"
+ *     err.cause.constraint === "time_punches_one_open_idx"
+ *
+ * So a second clock-in showed a raw SQL dump where "a clock is already
+ * running" was written and waiting. `marketing/domain-ops.ts` had the right
+ * shape all along (`err.code ?? err.cause?.code`); this names the constraint
+ * as well, because these tables carry more than one unique index and only the
+ * named one means what the sentence beside it says.
+ *
+ * Returns the NAME rather than a boolean so the caller matches on the index it
+ * means, and a violation of any other one keeps travelling as the failure it
+ * is.
+ */
+export function violatedUniqueIndex(err: unknown): string | null {
+  const own = err as { code?: string; constraint?: string } | null;
+  const cause = (err as { cause?: { code?: string; constraint?: string } } | null)
+    ?.cause;
+  const code = own?.code ?? cause?.code;
+  if (code !== "23505") return null;
+  return own?.constraint ?? cause?.constraint ?? null;
+}

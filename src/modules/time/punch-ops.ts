@@ -3,7 +3,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { dateInTimezone } from "@/lib/timezone";
 import { MAX_ENTRY_MINUTES } from "./core/duration";
-import { TimeError } from "./core/errors";
+import { TimeError, violatedUniqueIndex } from "./core/errors";
 import { minutesBetween, roundMinutes } from "./core/rounding";
 import { assertPeriodOpen } from "./sheet-ops";
 
@@ -99,7 +99,7 @@ export async function clockIn(
       .returning({ id: schema.timePunches.id });
     return row.id;
   } catch (err) {
-    if (String(err).includes("time_punches_one_open_idx")) {
+    if (violatedUniqueIndex(err) === "time_punches_one_open_idx") {
       throw new TimeError("ALREADY_CLOCKED_IN", "a clock is already running");
     }
     throw err;

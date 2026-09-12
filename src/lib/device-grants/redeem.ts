@@ -128,10 +128,35 @@ export async function redeemGrant(
         tenantId: found.tenantId,
         userId: found.clerkUserId,
         role: roleForGrant(found.membershipRole),
-        today: todayInTimezone(found.timezone),
+        // Provisional: the body has not been parsed yet, so the sentence's own
+        // time is not known. The route replaces both with `atEffectiveTime`
+        // once `clampSpokenAt` has answered.
+        now,
+        timezone: found.timezone,
+        today: todayInTimezone(found.timezone, now),
       },
     };
   });
+}
+
+/**
+ * The context again, dated to when the sentence actually happened.
+ *
+ * `redeemGrant` runs before the body is parsed, so it can only date the
+ * context to the request. A queued sentence is older than its request — often
+ * by hours — and `time.clock_in` writing the wrong one is wages, so the route
+ * re-dates the context after `clampSpokenAt` and before anything records.
+ *
+ * `today` is re-derived rather than kept: a sentence spoken at eleven last
+ * night and delivered at six this morning belongs to LAST NIGHT, and the date
+ * has to move with the instant or the two disagree.
+ */
+export function atEffectiveTime(ctx: TellCtx, effectiveAt: Date): TellCtx {
+  return {
+    ...ctx,
+    now: effectiveAt,
+    today: todayInTimezone(ctx.timezone, effectiveAt),
+  };
 }
 
 /**

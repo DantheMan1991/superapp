@@ -120,6 +120,48 @@ the farm's asset list until they say so.
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-12 — The box leaves livestock, and learns what time it is (`claude/tell-clock-in`)
+
+Voice slice 1. No migration. The slot itself, rather than a new filler of it —
+the `time` source is written up in [time.md](time.md).
+
+**The box moved to What needs you**, which is what slice 6 said a second filler
+would mean: *"when a second pack fills the slot the box belongs somewhere both
+can be reached from — What needs you — and moving it is a page change, not a
+change to any source."* It was precisely that. `tell-box.tsx` did not change,
+no source changed, and the two page edits were an import each. A prediction in
+an ADR that turns out to cost what it said it would is worth recording as such.
+
+It sits directly under the title and above the list, because this page REPORTS
+and the box RECORDS — and half of what somebody records here is what makes a
+row below go away.
+
+**`TellCtx` gained `now: Date` and `timezone: string`.** It carried only
+`today`, a date string, which is everything a loss or a move needs and nothing
+a punch does. The two gates supply them differently, and the difference is the
+point:
+
+- `tell-sources/actions.ts` — typed on a screen, so `now` is `new Date()`.
+- `device-grants/redeem.ts` — a phone (ADR 0048), where a sentence spoken with
+  no signal is queued and arrives hours later. `redeemGrant` runs before the
+  body is parsed and can only date the context to the REQUEST, so the route
+  calls `atEffectiveTime()` after `clampSpokenAt` has answered, and every use
+  of `ctx` below that line is dated to when the sentence happened.
+
+`today` is re-derived from the two rather than kept, so a sentence spoken at
+eleven at night and delivered at six the next morning logs against the night
+before. The contract now says out loud that an action writing a timestamp must
+read `ctx.now` and never a clock.
+
+**The ordering of `tellSources` is now load-bearing in a small way.** Every
+action a tenant has goes into ONE tool description (`tellToolFor`), so the
+array is the order the model reads the catalogue in. `time` is first because
+"clock me in" is the sentence said most often, by the most people.
+
+The registry's own note about what comes next is unchanged: `inventory` (stock
+used or counted), `land` (a paddock rested or topped), `production` (a run's
+yield) — a file and a line each.
+
 ### 2026-09-09 — Slice 7: the setup interview (`claude/the-setup-interview`)
 
 The last slice, and the one whose case had to be argued before it was built:

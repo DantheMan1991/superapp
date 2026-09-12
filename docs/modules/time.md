@@ -218,6 +218,69 @@ farm-shaped remainder.
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-12 — "Clock me in" (`claude/tell-clock-in`)
+
+Voice slice 1. Slice 7 scoped the `tell-sources` filler and shipped without it, recording it as one of the two extension points left as "still promises" — this delivers that one, and `paste-targets` is still outstanding. The module's first appearance in `tell-sources`
+([ADR 0039](../decisions/0039-a-pack-declares-what-it-can-be-told-in-one-sentence.md)).
+No migration.
+
+`src/modules/time/tell/source.ts` declares two actions, `time.clock_in` and
+`time.clock_out`, each recording through `punch-ops`' own verbs. Being the
+SECOND filler of the slot is what moved the box: ADR 0039 said *"when a second
+pack fills the slot the box belongs somewhere both can be reached from — What
+needs you — and moving it is a page change, not a change to any source."* It
+was exactly that — two page edits, no source touched.
+
+**There is no field for whose clock it is, and that is the security property.**
+The worker is resolved from `ctx.userId` through `getWorkerForUser`, so a
+sentence can only ever move the speaker's own clock. Clocking somebody else in
+is writing a wage record on their behalf, which is what the keypad's PIN exists
+for; a sentence carries no credential of theirs. Somebody the business keeps no
+hours for contributes NO actions, so the model is never told they exist.
+
+**`TellCtx` gained `now` and `timezone`, and this module is why.** It carried
+only `today`, a date string — fine for a loss or a move, useless for a punch.
+From the box the sentence's time and the request's time are the same instant;
+from a phone ([ADR 0048](../decisions/0048-a-phone-holds-a-grant-that-may-only-tell.md))
+they are not, because a sentence spoken in a barn with no signal is queued and
+arrives hours later. Stamping a queued clock-in at processing time is not a
+rounding error, it is wages. `atEffectiveTime()` re-dates the context after the
+endpoint's clamp, and re-derives `today` with it — a sentence spoken at eleven
+last night and delivered at six this morning belongs to last night.
+`tests/time-tell-source.test.ts` asserts the punch lands on the exact instant
+the context carried, not "roughly now".
+
+**No backdating and no dimension.** "I started at seven" is an amendment, and
+the module has a screen for it that shows what changed and who changed it — a
+spoken hour is the one input nobody can check afterwards. Slice 4's dimensions
+belong on the entry that clock-out creates, and choosing through a tenant's
+whole dimension tree by voice needs readback work nobody has done; the clock
+runs either way and tagging it later costs nothing.
+
+#### A refusal that had never once been shown
+
+Writing the first test for a second clock-in turned up a live bug. `clockIn`
+translated the open-clock index into `a clock is already running` with
+`String(err).includes("time_punches_one_open_idx")` — and **that branch has
+never run.** Drizzle wraps the driver's error, so `String(err)` is `Failed
+query: insert into "time_punches" …`, the SQL and never the constraint.
+Measured against Postgres rather than guessed:
+
+    err.cause.code       === "23505"
+    err.cause.constraint === "time_punches_one_open_idx"
+
+So a second clock-in showed a raw query dump, on the ordinary panel and on the
+shared keypad, where a written sentence was waiting. Nothing went red, because
+the fallback `throw err` is a perfectly good code path — the same shape as the
+repo's "returns a real-but-wrong value" class.
+
+**All three sites in this module had it**, not just the one the test hit:
+`punch-ops` (one open clock), `sheet-ops` (already submitted) and `worker-ops`
+(sign-in already linked). All three now call `violatedUniqueIndex()` in
+`core/errors.ts`, which reads the cause chain and returns the index NAME so a
+caller matches on the one it means. `tests/constraint-errors.test.ts` pins the
+measured error shape and scans `src/` so the idiom cannot come back.
+
 ### 2026-09-12 — Slice 8: overtime before it happens (`claude/time-8-overtime-before-it-happens`)
 
 Four obligations through `attention-sources`, every one of them self-clearing.

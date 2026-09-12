@@ -13,6 +13,7 @@ export const DB_BACKED_TESTS = [
   "tests/time-attention.test.ts",
   "tests/time-labor-posting.test.ts",
   "tests/time-pin-ops.test.ts",
+  "tests/time-tell-source.test.ts",
   "tests/banking-personal-db.test.ts",
   "tests/banking-payees-db.test.ts",
   "tests/banking-rules-db.test.ts",

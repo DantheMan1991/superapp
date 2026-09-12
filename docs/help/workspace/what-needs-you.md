@@ -12,7 +12,71 @@ Open **What needs you** under `Workspace` in the sidebar. Every row is one thing
 - **Each row.** Its title on the left with a detail line under it, and a badge on the right: {badge:Overdue|destructive} when its date has passed, {badge:Today|primary} when it is due today, {badge:Soon|secondary} when it is due on a later date, or {badge:Open|secondary} when it needs you but has no date. Rows are ordered overdue first, then today, then soon, and within each by date. Click a row to open the record itself. A few rows carry a button at their right edge that does the thing without opening the record; the row disappears once it is done.
 - **Your list.** The list at the top: things assigned to you, and things that are yours because of your role.
 - **`Not assigned to anyone`.** Owners only. A second list under a rule, captioned `Nobody has picked these up. You see them because you own the business, not because they are yours.`
+- **`Tell it what happened`.** A box directly under the title, above the list. Type one sentence — `Clock me in`, `Three chicks dead in pen two` — and it works out what to record. See how to tell it, below. Everyone sees it; each tool decides for itself what you are allowed to record.
 - **`Email me this each morning`.** A switch at the right of the title. On for everyone to begin with. It is yours alone: an owner cannot turn a staff member's email off, and nobody can turn on yours.
+
+## How to tell it what happened
+
+Instead of finding the right screen and the right dialog, say it. The box sits
+directly under the title, above the list, because the fastest thing you can do
+here is record what just happened — and half the time that is what makes a row
+below go away.
+
+1. Type one sentence into `Tell it what happened`, such as `Clock me in`, or
+   `Three chicks dead in pen two, and moved the cows to the creek field`. One
+   sentence can hold more than one thing.
+2. Click {button:Read it|primary|sparkles}. It reads `Reading…` while it works.
+3. You get a card for each thing it found, with the fields already filled in.
+   Read every one. Change anything that is wrong, and click {icon:x} on a card
+   you do not want.
+4. Anything it could not place is left empty with an amber line under it:
+   `It heard "the back pen" — pick or type the right one.` Pick from the list.
+   **It never guesses the nearest one.**
+5. A card that is not ready says so: `Which animals is missing.` The button
+   stays gray until every card is complete.
+6. Click {button:Record 2 things|primary}. You see what was recorded, such as
+   `Clocked in at 7:42 AM` or `3 head — died — from Pen 2`.
+
+## What it can record
+
+Only the tools your business has switched on contribute cards, and some only
+appear when they have something to work with.
+
+| Card | What it records | It needs |
+| --- | --- | --- |
+| `Clocked in` | Starts your clock, exactly as the {button:Clock in|primary} button on Time does | Nothing. Add what you are starting on if you want |
+| `Clocked out` | Stops your clock and turns it into hours | A clock that is already running |
+| `Animals lost` | Head that died, were culled or were sold live | Which animals, how many, and what happened |
+| `Looked at them` | That you walked the pen, with a note if you saw something | Which animals |
+| `Moved somewhere` | Animals moved onto a paddock | Which animals, and where to. Only when you keep Land |
+| `Fed them` | Feed or other stock given to animals, taken out of stock | Which animals, what, and how much **in the unit that item is counted in**, shown beside its name. Only when you keep Inventory |
+
+## The clock is always your own
+
+`Clocked in` and `Clocked out` only ever move **your** clock. There is no box
+for whose it is, on purpose: clocking somebody else in is writing down hours
+they will be paid for, and a typed sentence is not proof it was them. Use the
+shared device's keypad for that, where each person enters their own PIN.
+
+If your business does not keep hours for you, the two clock cards never appear
+at all.
+
+## What it will not do
+
+- **Treatments**, on purpose: a treatment sets the withdrawal clock that
+  decides whether meat may be sold, and that is worth four deliberate answers
+  on its own screen.
+- **Weights**, for a duller reason — you have the scale in front of you anyway.
+- **A time you say out loud.** `I started at seven` cannot be recorded. The
+  clock starts when you say it, and correcting a start time is done on the
+  Time screen where the change is visible.
+
+`When` fills itself in with today, because you are usually saying it where it
+happened on the day it happened. Everything else is left blank unless the
+sentence says it. It never invents a number, a pen or a date.
+
+Either all the cards are recorded or none of them are — two things said in one
+sentence happened together.
 
 ## How to read where a row comes from
 

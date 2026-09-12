@@ -51,12 +51,34 @@ import type { Tx } from "@/db";
  *     to map "pen two" onto one. Nothing else leaves (S9). Labels are names.
  */
 
-/** Who is telling it, and what day it is for them. */
+/** Who is telling it, and WHEN — see the note on `now`. */
 export interface TellCtx {
   tenantId: string;
   userId: string;
   role: "owner" | "staff" | "expert";
-  /** The tenant's today, so "this morning" and "yesterday" mean the right day. */
+  /**
+   * WHEN THE SENTENCE HAPPENED, not when it was processed.
+   *
+   * From the box on a screen these are the same instant and this is simply
+   * `new Date()`. From a phone (ADR 0048) they are not: a sentence spoken in
+   * a barn with no signal is queued and sent when the phone reconnects, which
+   * may be hours later, and the endpoint clamps the phone's claim to the
+   * server's clock before setting this.
+   *
+   * **AN ACTION THAT WRITES A TIMESTAMP MUST USE THIS AND NEVER `new Date()`.**
+   * `time.clock_in` is the one that made it necessary: stamping a queued
+   * clock-in at processing time is not a rounding error, it is wages.
+   */
+  now: Date;
+  /** The tenant's zone. Needed by anything that turns `now` into a day. */
+  timezone: string;
+  /**
+   * The tenant's today, so "this morning" and "yesterday" mean the right day.
+   * DERIVED from `now` and `timezone` — `todayInTimezone(timezone, now)` — and
+   * carried because almost every action wants the date and not the instant.
+   * A sentence queued last night and sent this morning logs against LAST
+   * NIGHT, which is the whole point of deriving it rather than reading a clock.
+   */
   today: string;
 }
 

@@ -484,6 +484,189 @@ d("time tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
+  /* ── submit, approve, lock (slice 3) ──────────────────────────────────── */
+
+  it("a period and a sheet belong to one tenant and are invisible to the other", async () => {
+    await withSystem(async (tx) => {
+      await tx.insert(schema.timePeriods).values({
+        tenantId: tenantA,
+        startsOn: "2026-09-06",
+        endsOn: "2026-09-12",
+        lockedAt: new Date(),
+        lockedByClerkUserId: OWNER,
+      });
+      await tx.insert(schema.timeSheets).values({
+        tenantId: tenantA,
+        workerId: workerA,
+        periodStartsOn: "2026-09-06",
+        periodEndsOn: "2026-09-12",
+        submittedByClerkUserId: MATE,
+      });
+    });
+
+    const mine = await asStaff(async (tx) => ({
+      periods: await tx.select().from(schema.timePeriods),
+      sheets: await tx.select().from(schema.timeSheets),
+    }));
+    expect(mine.periods).toHaveLength(1);
+    expect(mine.sheets).toHaveLength(1);
+
+    const theirs = await asOtherTenant(async (tx) => ({
+      periods: await tx.select().from(schema.timePeriods),
+      sheets: await tx.select().from(schema.timeSheets),
+    }));
+    expect(theirs.periods).toEqual([]);
+    expect(theirs.sheets).toEqual([]);
+  });
+
+  it("a sheet cannot be written against another tenant's worker", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.timeSheets).values({
+          tenantId: tenantA,
+          workerId: workerB,
+          periodStartsOn: "2026-10-04",
+          periodEndsOn: "2026-10-10",
+          submittedByClerkUserId: OWNER,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("one sheet per person per period", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.timeSheets).values({
+          tenantId: tenantA,
+          workerId: workerA,
+          periodStartsOn: "2026-09-06",
+          periodEndsOn: "2026-09-12",
+          submittedByClerkUserId: MATE,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a lock and its locker cannot disagree", async () => {
+    // Two columns that can disagree are two columns that will, so the CHECK
+    // insists they arrive and leave together.
+    for (const bad of [
+      { lockedAt: new Date(), lockedByClerkUserId: null },
+      { lockedAt: null, lockedByClerkUserId: OWNER },
+    ]) {
+      await expect(
+        withSystem((tx) =>
+          tx
+            .update(schema.timePeriods)
+            .set(bad)
+            .where(eq(schema.timePeriods.tenantId, tenantA)),
+        ),
+      ).rejects.toThrow();
+    }
+  });
+
+  it("the snapshot arrives with the approval and never without it", async () => {
+    // Totals without an approval would be a guess stored as a fact; an
+    // approval without totals would be an agreement to nothing.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.timeSheets)
+          .set({ workedMinutes: 2400 })
+          .where(eq(schema.timeSheets.tenantId, tenantA)),
+      ),
+    ).rejects.toThrow();
+
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.timeSheets)
+          .set({ approvedAt: new Date(), approvedByClerkUserId: OWNER })
+          .where(eq(schema.timeSheets.tenantId, tenantA)),
+      ),
+    ).rejects.toThrow();
+
+    // Together they are accepted.
+    await withSystem(async (tx) => {
+      await tx
+        .update(schema.timeSheets)
+        .set({
+          approvedAt: new Date(),
+          approvedByClerkUserId: OWNER,
+          workedMinutes: 2400,
+          regularMinutes: 2400,
+          overtimeMinutes: 0,
+          doubleTimeMinutes: 0,
+          paidLeaveMinutes: 0,
+          rulesetSlug: "federal",
+        })
+        .where(eq(schema.timeSheets.tenantId, tenantA));
+      const row = await tx.query.timeSheets.findFirst({
+        where: eq(schema.timeSheets.tenantId, tenantA),
+      });
+      expect(row!.workedMinutes).toBe(2400);
+    });
+  });
+
+  it("an amendment cannot reach across tenants, and cannot amend itself", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.timeEntries).values({
+          tenantId: tenantB,
+          workerId: workerB,
+          minutes: 60,
+          workDate: "2026-09-20",
+          enteredByClerkUserId: OTHER,
+          amendsEntryId: entryA,
+        }),
+      ),
+    ).rejects.toThrow();
+
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.timeEntries)
+          .set({ amendsEntryId: entryA })
+          .where(eq(schema.timeEntries.id, entryA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("the entry an amendment corrects cannot be deleted out from under it", async () => {
+    // NO ACTION, not cascade: a correction of nothing is worse than a row that
+    // will not go away.
+    /*
+     * THREE TRANSACTIONS, not one. A statement that violates a constraint
+     * aborts the whole transaction in Postgres — every later command comes
+     * back "current transaction is aborted" — so a test that expects a
+     * rejection cannot then clean up alongside it.
+     */
+    const amendmentId = await withSystem(async (tx) => {
+      const [row] = await tx
+        .insert(schema.timeEntries)
+        .values({
+          tenantId: tenantA,
+          workerId: workerA,
+          minutes: 30,
+          workDate: "2026-09-20",
+          enteredByClerkUserId: OWNER,
+          amendsEntryId: entryA,
+        })
+        .returning({ id: schema.timeEntries.id });
+      return row.id;
+    });
+
+    await expect(
+      withSystem((tx) =>
+        tx.delete(schema.timeEntries).where(eq(schema.timeEntries.id, entryA)),
+      ),
+    ).rejects.toThrow();
+
+    await withSystem((tx) =>
+      tx.delete(schema.timeEntries).where(eq(schema.timeEntries.id, amendmentId)),
+    );
+  });
+
   /* ── the week and the period (slice 2) ────────────────────────────────── */
 
   it("refuses a pay frequency and a ruleset nobody ships", async () => {

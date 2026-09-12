@@ -22,7 +22,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { deleteTimeEntryAction, updateTimeEntryAction } from "../actions";
+import {
+  amendEntryAction,
+  deleteTimeEntryAction,
+  updateTimeEntryAction,
+} from "../actions";
 import { decimalHours, formatDuration, parseDuration } from "../core/duration";
 import { PAY_TYPES, payTypeLabel } from "../core/pay-types";
 
@@ -178,6 +182,114 @@ export function EntryRow({ entry, today }: { entry: EntryView; today: string }) 
             </Button>
             <Button type="submit" disabled={pending}>
               {pending ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Put right an entry inside a LOCKED period.
+ *
+ * It does not edit anything. It adds a new entry in the open period carrying
+ * the difference and pointing back at the original, so the record still says
+ * what the pay run actually saw. That is the whole reason locking is safe to
+ * offer: a mistake found after payroll has an answer that is not "unlock it and
+ * hope nobody notices".
+ */
+export function AmendEntryButton({
+  entry,
+  correctionDate,
+}: {
+  entry: EntryView;
+  /**
+   * Where the correction lands: the first day in a period nobody has locked,
+   * which is today only when today's own period is still open.
+   */
+  correctionDate: string;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [duration, setDuration] = useState("");
+
+  const minutes = parseDuration(duration);
+
+  function submit(formData: FormData) {
+    if (minutes <= 0) {
+      toast.error("How long? Try 1:30, 1.5 or 90m.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await amendEntryAction({
+        originalEntryId: entry.id,
+        minutes,
+        workDate: correctionDate,
+        payType: entry.payType as (typeof PAY_TYPES)[number],
+        note: String(formData.get("note") ?? ""),
+      });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Correction added to the open period");
+      setOpen(false);
+      router.refresh();
+    });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm">
+          Correct
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <form action={submit}>
+          <DialogHeader>
+            <DialogTitle>Add a correction</DialogTitle>
+            <DialogDescription>
+              {entry.workerName} was logged {formatDuration(entry.minutes)} on{" "}
+              {entry.workDate}, in a period that is now locked. That entry stays
+              exactly as it is. This adds the difference to today instead.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor={`a-${entry.id}`}>How much to add</Label>
+              <Input
+                id={`a-${entry.id}`}
+                name="duration"
+                required
+                autoFocus
+                value={duration}
+                onChange={(e) => setDuration(e.target.value)}
+                placeholder="1:30, 1.5 or 90m"
+              />
+              <p className="text-xs text-subtle-foreground">
+                {duration.trim() === ""
+                  ? "The hours that were missed, not the corrected total."
+                  : minutes > 0
+                    ? `That is ${formatDuration(minutes)}, dated ${correctionDate}.`
+                    : "Not a length we can read."}
+              </p>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor={`an-${entry.id}`}>Why</Label>
+              <Input
+                id={`an-${entry.id}`}
+                name="note"
+                maxLength={1000}
+                defaultValue={`Correction to ${entry.workDate}`}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="submit" disabled={pending}>
+              {pending ? "Adding…" : "Add correction"}
             </Button>
           </DialogFooter>
         </form>

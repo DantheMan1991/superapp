@@ -31,10 +31,15 @@ import {
   RunningClockRow,
   type RunningClock,
 } from "./components/clock";
-import { EntryRow, type EntryView } from "./components/entry-row";
+import {
+  AmendEntryButton,
+  EntryRow,
+  type EntryView,
+} from "./components/entry-row";
 import { LogTimeForm } from "./components/log-time";
 import { listEntries, listOpenPunches, listWorkers } from "./read";
 import { getTimePrefs } from "./settings-ops";
+import { firstOpenDay, listLockedPeriods } from "./sheet-ops";
 
 /**
  * The module's home: one week of hours, by day.
@@ -83,6 +88,8 @@ export async function TimeModule({
     workers,
     members,
     openPunches,
+    lockedPeriods,
+    correctionDate,
   } =
     await withTenant(
       ctx.tenant.id,
@@ -104,6 +111,21 @@ export async function TimeModule({
           // going is today's problem and must not hide when somebody pages
           // back to look at a fortnight ago.
           openPunches: await listOpenPunches(tx, ctx.tenant.id),
+          // Which days in this week are past a pay run. Read up front so the
+          // rows can draw the right control rather than offering Edit and then
+          // refusing the press.
+          lockedPeriods: await listLockedPeriods(tx, ctx.tenant.id, {
+            from: weekStart,
+            to: addDays(weekStart, 6),
+          }),
+          // Where a correction to a locked entry lands. Not "today": a business
+          // that locks the period it is standing in would have nowhere to put
+          // one. See `firstOpenDay`.
+          correctionDate: await firstOpenDay(tx, ctx.tenant.id, today, {
+            frequency: prefs.payFrequency,
+            weekStartsOn: prefs.weekStartsOn,
+            anchor: prefs.periodAnchor,
+          }),
         };
       },
       { role: ctx.role, userId: ctx.userId },
@@ -192,6 +214,8 @@ export async function TimeModule({
   }));
 
   const isThisWeek = weekStart === startOfWeek(today, weekStartsOn);
+  const dayIsLocked = (date: string) =>
+    lockedPeriods.some((p) => p.startsOn <= date && date <= p.endsOn);
 
   return (
     <div className="space-y-4">
@@ -389,8 +413,13 @@ export async function TimeModule({
               return (
                 <Panel key={day}>
                   <div className="flex items-center justify-between gap-4 border-b border-divider px-4 py-2.5">
-                    <h2 className="text-sm font-medium tracking-heading">
+                    <h2 className="flex items-center gap-2 text-sm font-medium tracking-heading">
                       {dayLabel(day)}
+                      {dayIsLocked(day) && (
+                        <span className="rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-normal text-warning-foreground">
+                          Locked
+                        </span>
+                      )}
                     </h2>
                     <span className="text-sm tabular-nums text-muted-foreground">
                       {formatDuration(dayMinutes)}
@@ -443,7 +472,15 @@ export async function TimeModule({
                           <span className="min-w-0 flex-1 truncate text-muted-foreground">
                             {row.note}
                           </span>
-                          {canWrite && <EntryRow entry={view} today={today} />}
+                          {canWrite &&
+                            (dayIsLocked(row.workDate) ? (
+                              <AmendEntryButton
+                                entry={view}
+                                correctionDate={correctionDate}
+                              />
+                            ) : (
+                              <EntryRow entry={view} today={today} />
+                            ))}
                         </li>
                       );
                     })}

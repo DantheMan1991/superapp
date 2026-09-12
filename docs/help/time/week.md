@@ -20,9 +20,10 @@ There are two ways to record time here. Click {button:Start a clock|outline} whe
 - **The week bar.** The dates of the week you are reading, like `Sep 6 – Sep 12`. `This week` sits beside it when you are on the current one. {button:← Previous|ghost} and {button:Next →|ghost} move a week at a time, and there is no limit in either direction. When you have moved away, a {button:This week|outline} button appears on the right to bring you back.
 - **Worked this week.** A list of each person and how their week breaks down, biggest first: `40h regular`, then `10h overtime` and `1h double time` when there are any. The rules being used are named on the right. It appears when two or more people worked, or whenever anybody has earned overtime. Paid leave and holiday are left out of these numbers, because they are not hours worked and never count toward overtime.
 - **`4h before overtime`.** Sits on somebody's line once they are within eight hours of the weekly threshold. This is the point of showing a week rather than a fortnight: it is a decision you can still make on a Wednesday, not a number you read after payroll.
-- **A day.** One block per day that has hours on it, newest first. The heading is the day, like `Fri, Sep 11`, with that day's total on the right. Days with nothing on them are left out, so a week with one busy Tuesday is one block and not seven.
+- **A day.** One block per day that has hours on it, newest first. The heading is the day, like `Fri, Sep 11`, with that day's total on the right. Days with nothing on them are left out, so a week with one busy Tuesday is one block and not seven. A day inside a pay period you have locked carries a {badge:Locked|warning} chip.
 - **A row.** One line per entry: who worked, how long, and what they did. When the hours were not worked, a badge says which kind, like {badge:Paid leave}. Worked hours carry no badge, since that is the ordinary case. `clock` at the end means the entry came from a clock rather than being typed; hover it to see what it was rounded to.
 - **{button:Edit|ghost}.** At the end of each row. Opens the same box again, filled in, with a {button:Delete|destructive} button in it.
+- **{button:Correct|ghost}.** Takes the place of {button:Edit|ghost} on any day inside a locked period. It does not change the entry — it adds a correction in the open period instead. See [the pay period](pay-period.md).
 
 ## How to log an hour
 
@@ -113,6 +114,8 @@ The week you are reading is in the address bar, so you can send somebody a link 
 | `One entry cannot be longer than a day.` | You asked for more than 24 hours in one entry. Split it across the days it covers. |
 | `That person has left.` | Somebody marked this person as having left. Bring them back on [People](people.md) first. |
 | `This entry changed while you were editing it.` | Somebody else saved this entry while your box was open. Reload the page and make your change again. |
+| `That pay period is locked.` | The day you picked is inside a period you have locked. Use {button:Correct|ghost} on the entry instead. |
+| `Correction added to the open period` | Your correction was saved, dated in the first period that is still open. |
 | `no overtime` | That person's week was checked against your rules and stayed under every threshold. |
 | `Accountant access is read-only.` | You are signed in as an accountant. You can read every hour and change nothing. |
 
@@ -124,7 +127,9 @@ Which day your week starts on is yours to set, on [People](people.md).
 
 ## Not on this page
 
-You cannot say which part of the business an hour was spent on, or mark a week as finished. Neither is built. Ask us where it is up to.
+You cannot say which part of the business an hour was spent on. That is not built. Ask us where it is up to.
+
+Hours are approved and locked a **pay period** at a time rather than a week at a time, over on [the pay period](pay-period.md).
 
 Clocks live only on this screen for now, so somebody clocking themselves in has to open it. Starting a clock from a phone in one tap is coming.
 

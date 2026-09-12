@@ -25,7 +25,7 @@ import {
   PeriodLockButton,
   SubmitSheetButton,
 } from "@/modules/time/components/sheet-controls";
-import { listEntries } from "@/modules/time/read";
+import { listEntries, listEntryDimensions } from "@/modules/time/read";
 import { getTimePrefs } from "@/modules/time/settings-ops";
 import { getPeriodLock, listSheets } from "@/modules/time/sheet-ops";
 
@@ -135,7 +135,7 @@ export default async function PayPeriodPage({
   const today = todayInTimezone(ctx.tenant.timezone);
   const anchorDate = asked && isDateString(asked) ? asked : today;
 
-  const { prefs, rows, sheets, lock } = await withTenant(
+  const { prefs, rows, entryDimensions, sheets, lock } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
       const prefs = await getTimePrefs(tx, ctx.tenant.id);
@@ -152,9 +152,15 @@ export default async function PayPeriodPage({
        */
       const from = weeks[0]?.start ?? period.start;
       const to = weeks[weeks.length - 1]?.end ?? period.end;
+      const rows = await listEntries(tx, ctx.tenant.id, { from, to });
       return {
         prefs,
-        rows: await listEntries(tx, ctx.tenant.id, { from, to }),
+        rows,
+        entryDimensions: await listEntryDimensions(
+          tx,
+          ctx.tenant.id,
+          rows.map((r) => r.id),
+        ),
         sheets: await listSheets(tx, ctx.tenant.id, period),
         lock: await getPeriodLock(tx, ctx.tenant.id, period.start),
       };
@@ -237,6 +243,49 @@ export default async function PayPeriodPage({
       }
     }
   }
+
+  /*
+   * WHERE THE HOURS WENT. Worked minutes grouped by what each entry was booked
+   * to, biggest first — the reason `time_entry_dimensions` exists and the first
+   * place a business sees labour landing against a paddock or a line of
+   * business. Slice 6 turns the same grouping into a cost in the P&L; this is
+   * the hours behind it.
+   *
+   * Only WORKED minutes: paid leave is not labour on anything.
+   */
+  const minutesByMember = new Map<string, { name: string; minutes: number }>();
+  let untaggedMinutes = 0;
+  {
+    const tagsFor = new Map<string, { memberId: string; name: string }[]>();
+    for (const d of entryDimensions) {
+      const list = tagsFor.get(d.entryId) ?? [];
+      list.push({ memberId: d.memberId, name: d.name });
+      tagsFor.set(d.entryId, list);
+    }
+    for (const row of rows) {
+      if (!countsAsWorked(row.payType)) continue;
+      const tags = tagsFor.get(row.id) ?? [];
+      if (tags.length === 0) {
+        untaggedMinutes += row.minutes;
+        continue;
+      }
+      /*
+       * AN ENTRY WITH TWO TAGS OF DIFFERENT KINDS COUNTS UNDER BOTH, and that
+       * is right rather than double counting: an hour on the north paddock FOR
+       * the beef enterprise genuinely belongs to each when you ask about that
+       * kind. The totals are per kind, never summed across kinds, which is the
+       * same rule the P&L's "Split by" already follows.
+       */
+      for (const tag of tags) {
+        const seen = minutesByMember.get(tag.memberId);
+        if (seen) seen.minutes += row.minutes;
+        else minutesByMember.set(tag.memberId, { name: tag.name, minutes: row.minutes });
+      }
+    }
+  }
+  const whereHoursWent = [...minutesByMember.values()].sort(
+    (a, b) => b.minutes - a.minutes,
+  );
 
   const anyRows = perWeek.some((p) => p.workers.length > 0);
   const totals = perWeek.flatMap((p) => p.workers).reduce(
@@ -332,6 +381,41 @@ export default async function PayPeriodPage({
         added up for the period — {ruleset.summary} A week that starts in one
         period and ends in another is paid in the period it ends in.
       </p>
+
+      {whereHoursWent.length > 0 && (
+        <Panel className="p-4">
+          <h2 className="mb-3 text-sm font-medium tracking-heading">
+            Where the hours went
+          </h2>
+          <ul className="grid gap-1.5 sm:grid-cols-2">
+            {whereHoursWent.map((w) => (
+              <li
+                key={w.name}
+                className="flex items-baseline justify-between gap-4 text-sm"
+              >
+                <span className="truncate">{w.name}</span>
+                <span className="tabular-nums text-muted-foreground">
+                  {formatDuration(w.minutes)}
+                </span>
+              </li>
+            ))}
+            {untaggedMinutes > 0 && (
+              <li className="flex items-baseline justify-between gap-4 text-sm">
+                <span className="truncate text-subtle-foreground">
+                  Not booked to anything
+                </span>
+                <span className="tabular-nums text-subtle-foreground">
+                  {formatDuration(untaggedMinutes)}
+                </span>
+              </li>
+            )}
+          </ul>
+          <p className="mt-3 text-xs text-subtle-foreground">
+            Counted per kind. An hour booked to both a field and a line of
+            business appears under each, so these do not add up to the total.
+          </p>
+        </Panel>
+      )}
 
       {!anyRows ? (
         <EmptyState

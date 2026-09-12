@@ -13,6 +13,7 @@ The important thing on this screen is that a period is shown **as its weeks**, n
 - **The heading.** `Pay period`, and under it the whole period added up: regular hours, then overtime, then double time, then anything paid but not worked. Parts with nothing in them are left out, so a quiet period reads as one figure.
 - **{button:Time|outline}.** Takes you back to the week.
 - **The period bar.** The dates of the period you are reading, like `Aug 30 – Sep 12, 2026`. `This period` sits beside it when you are on the current one. {button:← Previous|ghost} and {button:Next →|ghost} move a whole period at a time, and a {button:This period|outline} button appears once you have moved away.
+- **Where the hours went.** A panel listing everything the period's hours were booked to, biggest first, with `Not booked to anything` at the end when some were not. It only appears once at least one hour has been booked to something.
 - **The explanation.** A line under the bar saying how overtime was worked out, in the words of the rules you picked on [People](people.md), and what happens to a week that starts in one period and ends in another.
 - **A week.** One block per week the period pays, oldest first, headed `Week of Sep 6 – Sep 12` with a count of the people in it.
 - **A person.** One line per person per week: their name, then `40h regular`, then `10h overtime` and `1h double time` when there are any, then any hours paid but not worked. When a week produced no overtime at all, the line says `no overtime` so you can see it was checked rather than missed.
@@ -51,6 +52,14 @@ That is on purpose. Once you have paid somebody for Tuesday, the record has to k
 If the period you are standing in is itself locked, the correction goes to the first day of the next one — the box tells you which date it is using before you save.
 
 You can {button:Unlock period|outline} at any time, and it does not ask. Unlocking just puts things back the way they were.
+
+## Reading "Where the hours went"
+
+Each line is one thing your hours were booked to, and how long went to it. Only hours actually **worked** are counted — paid leave is not labour on anything.
+
+**These figures do not add up to the total, and that is on purpose.** An hour can be booked to more than one kind of thing at once — a field *and* a line of business, say — and it counts under each, because both answers are true. Ask "how much went to the north field" and "how much went to beef" separately; do not add them together.
+
+`Not booked to anything` is not a fault. It is just the hours nobody said what they were for, and it is the figure to watch if you want a complete picture.
 
 ## Who approves what
 

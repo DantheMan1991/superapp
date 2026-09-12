@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { MAX_ENTRY_MINUTES } from "./core/duration";
 import { TimeError } from "./core/errors";
@@ -291,6 +291,143 @@ export async function amendEntry(
       note: input.note.trim(),
       enteredByClerkUserId: input.enteredByClerkUserId,
       amendsEntryId: original.id,
+    })
+    .returning({ id: schema.timeEntries.id });
+  return row.id;
+}
+
+/**
+ * Tag an entry with what it was for: one dimension member per dimension type.
+ *
+ * REPLACES THE WHOLE SET rather than merging, because the caller always holds
+ * the complete answer — `DimensionTags` round-trips every id it was given,
+ * including ones for types the surface could not show. A merge would make
+ * "remove this tag" unexpressible.
+ *
+ * VALIDATED THE WAY THE LEDGER VALIDATES IT: the member must exist, belong to
+ * this tenant and be active, and no two members may share a type. An inactive
+ * member is refused rather than quietly kept, because `postEntry` will refuse
+ * it too when slice 6 posts the labor cost — better to disagree now than at the
+ * pay run.
+ */
+export async function setEntryDimensions(
+  tx: Tx,
+  tenantId: string,
+  entryId: string,
+  memberIds: readonly string[],
+): Promise<void> {
+  await tx
+    .delete(schema.timeEntryDimensions)
+    .where(
+      and(
+        eq(schema.timeEntryDimensions.tenantId, tenantId),
+        eq(schema.timeEntryDimensions.entryId, entryId),
+      ),
+    );
+  if (memberIds.length === 0) return;
+
+  const unique = [...new Set(memberIds)];
+  const members = await tx
+    .select({
+      id: schema.dimensionMembers.id,
+      dimensionType: schema.dimensionMembers.dimensionType,
+      isActive: schema.dimensionMembers.isActive,
+    })
+    .from(schema.dimensionMembers)
+    .where(
+      and(
+        eq(schema.dimensionMembers.tenantId, tenantId),
+        inArray(schema.dimensionMembers.id, unique),
+      ),
+    );
+
+  const byId = new Map(members.map((m) => [m.id, m]));
+  const seenTypes = new Set<string>();
+  const rows = unique.map((id) => {
+    const member = byId.get(id);
+    if (!member || !member.isActive) {
+      throw new TimeError("DIMENSION_INVALID", `dimension member ${id} invalid`);
+    }
+    if (seenTypes.has(member.dimensionType)) {
+      throw new TimeError(
+        "DIMENSION_INVALID",
+        `two members of dimension type ${member.dimensionType}`,
+      );
+    }
+    seenTypes.add(member.dimensionType);
+    return {
+      tenantId,
+      entryId,
+      dimensionType: member.dimensionType,
+      memberId: id,
+    };
+  });
+
+  await tx.insert(schema.timeEntryDimensions).values(rows);
+}
+
+/**
+ * Divide one entry in two, so each half can say what it was for.
+ *
+ * THE ANSWER TO "five hours on the north field and three on the barn". The
+ * original keeps the remainder and the new entry takes `minutes`, so the day's
+ * total never moves — which is the property that makes this safe to offer on a
+ * screen where somebody is looking at a figure they already believe.
+ *
+ * The new half inherits everything except the tags, which are the whole reason
+ * for splitting; its own are set by the caller straight afterwards. A punch is
+ * deliberately NOT inherited: `time_entries_punch_idx` allows one entry per
+ * punch, and the raw record belongs to the half that kept the original id.
+ */
+export async function splitEntry(
+  tx: Tx,
+  tenantId: string,
+  input: { entryId: string; minutes: number; today: string },
+): Promise<string> {
+  const original = await tx.query.timeEntries.findFirst({
+    where: and(
+      eq(schema.timeEntries.tenantId, tenantId),
+      eq(schema.timeEntries.id, input.entryId),
+    ),
+  });
+  if (!original) throw new TimeError("ENTRY_NOT_FOUND", "no such entry");
+  await assertPeriodOpen(tx, tenantId, original.workDate);
+
+  if (!Number.isInteger(input.minutes) || input.minutes <= 0) {
+    throw new TimeError("DURATION_UNREADABLE", "minutes must be positive");
+  }
+  if (input.minutes >= original.minutes) {
+    throw new TimeError(
+      "SPLIT_TOO_LARGE",
+      "a split has to leave something behind",
+    );
+  }
+
+  await tx
+    .update(schema.timeEntries)
+    .set({
+      minutes: original.minutes - input.minutes,
+      version: sql`${schema.timeEntries.version} + 1`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(schema.timeEntries.tenantId, tenantId),
+        eq(schema.timeEntries.id, input.entryId),
+      ),
+    );
+
+  const [row] = await tx
+    .insert(schema.timeEntries)
+    .values({
+      tenantId,
+      workerId: original.workerId,
+      minutes: input.minutes,
+      workDate: original.workDate,
+      payType: original.payType,
+      note: original.note,
+      source: original.source,
+      enteredByClerkUserId: original.enteredByClerkUserId,
     })
     .returning({ id: schema.timeEntries.id });
   return row.id;

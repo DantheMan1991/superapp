@@ -5,7 +5,7 @@
 > knows the difference between overtime and a pay period, and an hour that
 > reaches the P&L tagged with the thing it was spent on. Core owns the
 > mechanism; an industry layer supplies the vocabulary and the odd pay rule.
-> Status: partial — slices 0–3 built (people, hours, the clock, the workweek and overtime, and submit/approve/lock). The case for staying `coming_soon` is now weaker: a locked period is trustworthy. The remaining gap is money — no rates, no export · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: partial — slices 0–4 built (people, hours, the clock, the workweek and overtime, and submit/approve/lock). The case for staying `coming_soon` is now weaker: a locked period is trustworthy. The remaining gap is money — no rates, no export · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## The plan (agreed with the founder 2026-09-11)
 
@@ -217,6 +217,55 @@ farm-shaped remainder.
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-12 — Slice 4: what the hour was for (`claude/time-4-what-it-was-for`)
+
+One link table, `time_entry_dimensions`. Migrations `0311`/`0312`.
+
+- **NO NEW TAXONOMY, AND THE `time-targets` SLOT IS NOT BUILT.** The plan named
+  a declared extension point here. It turned out to be a second answer to a
+  question the platform had already answered: `dimension_members` IS the
+  mechanism, and five packs already fill it — `land` syncs parcels and zones,
+  `assets` its assets, `inventory` and `livestock` their lots, `enterprises`
+  lines of business. Tagging an hour with a member makes it bookable to a
+  paddock, a herd or a tractor with **no new seam**, and a parallel slot would
+  have had no filler while asking every pack to populate two registries. The
+  slot comes back if something worth booking to is ever NOT a dimension member
+  — a professional-services engagement is the likely first, in absorption slice
+  A1.
+- **The shape is `line_dimensions`'**, denormalized `dimension_type` included.
+  That column is what lets both rules be the database's: one member per type per
+  entry (unique index), and the member really is of the type claimed (the
+  three-column FK). The isolation suite proves the second by trying to call an
+  enterprise a parcel.
+- **Splitting a day is splitting an entry**, which falls out of
+  one-member-per-type and is the honest model: the hours really were divided,
+  and one row carrying two tags could never say how much went where. `splitEntry`
+  leaves the remainder on the original so **the day's total never moves** — the
+  property that makes it safe to offer beside a figure somebody already
+  believes.
+- **`src/lib/dimensions.ts` is new, and the reason is the module isolation
+  rule.** Accounting has its own `listDimensionMembers`; a second core module
+  reaching for it would be one module importing another. The shared read goes in
+  Layer 0, exactly as `src/lib/parties/`, `src/lib/enterprises/` and
+  `src/lib/work/` already do.
+- **`time` was added to `MODULE_SLUGS` in `eslint.config.mjs`, four slices
+  late.** The comment beside `work` records the same miss happening three slices
+  late, and now says so twice. Time was clean when it was noticed — it imported
+  nothing — but only by luck, and slice 4 was about to want accounting's reader.
+- **"Where the hours went"** on the pay period screen is the visible payoff:
+  worked minutes grouped by what they were booked to, with an explicit `Not
+  booked to anything` line. An hour booked to two KINDS counts under each, and
+  the panel says so rather than pretending the figures sum — the same rule the
+  P&L's "Split by" follows.
+- Verified: 33 isolation tests, the pure suites, lint, `tsc` and the build
+  green. `0311`/`0312` applied to dev AND prod, **confirmed with
+  `inspect-migration-state.ts` rather than the migrate command's own output**,
+  per the rule slice 3 earned. Both databases at 186 tables.
+- **Driven on HILLTOP FARM**, which is the point: five pickers — Asset,
+  Enterprise, Lot, Parcel, Zone — appeared in the log dialog with no code in
+  this module naming any of them. Logged 3h 30m against `Beef`, split an hour
+  off it, and the pay period read `Beef 2h 30m · Not booked to anything 1h`.
 
 ### 2026-09-12 — Slice 3: submit, approve, lock (`claude/time-3-submit-approve-lock`)
 
@@ -534,7 +583,7 @@ FORCE RLS, a `--custom` policy migration and isolation coverage
 | `time_punches` | **Built** | Raw clock evidence | `timestamptz` in/out, who pressed each button, note, version. Composite FK to `time_workers`. Partial unique on `(tenant_id, worker_id) WHERE ended_at IS NULL` — one open punch, enforced by Postgres. CHECK `ended_at > started_at`. The device, the coordinates and the client-generated id for idempotent offline sync arrive in slice 7 with the screen that sends them |
 | `time_periods` | **Built** | The LOCK on a pay period | `starts_on`/`ends_on` stored (they must survive a change of pay frequency), `locked_at` + `locked_by`, CHECKed to arrive and leave together. A row exists once the period has been locked at least once; `locked_at is null` is open. No status column — there are two states and a timestamp says which, plus when |
 | `time_sheets` | **Built** | One worker's period, submitted then approved | A row exists once submitted; `approved_at is null` means waiting. The five totals plus `ruleset_slug` are the SNAPSHOT and are null until approval, CHECKed to arrive with it. Unique on `(tenant, worker, period_starts_on)`. Period dates stored, not referenced |
-| `time_entry_dimensions` | 4 | What the hour was for | The `dimension_members` link, so the P&L splits labor with no report code. Composite FK on `(tenant_id, …)` like every other referencing table |
+| `time_entry_dimensions` | **Built** | What the hour was for | `entry_id` + denormalized `dimension_type` + `member_id`. Unique on `(tenant, entry, dimension_type)` so one member per kind; three-column FK to `dimension_members (tenant_id, dimension_type, id)` so the stated kind is the member's real one. Cascades from the entry; NO ACTION on the member, which is retired rather than deleted |
 | `time_rates` | 5 | Effective-dated pay | Cost rate, bill rate, burden percent, effective from. A change is a new row. Expected to carry an owners-only policy |
 | `time_breaks` | 5 | Meal and rest periods | Child of a punch. Paid flag, kind. Needed for premium rules, queryable rather than jsonb |
 
@@ -559,6 +608,8 @@ Built in slice 0:
   `settings-ops.ts`, `sheet-ops.ts` — one writer per table, each taking the
   caller's `tx`. `sheet-ops.ts` also holds `assertPeriodOpen`, the guard every
   write path calls, and `firstOpenDay`, which decides where a correction lands
+- `src/lib/dimensions.ts` — the SHARED dimension read, in Layer 0 because a
+  second core module may not import accounting's
 - `src/modules/time/attention/source.ts` — timesheets waiting to be approved,
   registered third in `src/lib/attention-sources/registry.ts`
 - `src/modules/time/components/sheet-controls.tsx` — submit, approve, lock
@@ -604,6 +655,15 @@ Written before the build so they are not rediscovered.
 - **Never fabricate a clock-out.** An open punch past a threshold raises an
   attention item and is closed by a person. An auto-close that silently invents
   hours is a payroll error with a paper trail pointing at us.
+- **Do not invent a taxonomy that `dimension_members` already is.** Five packs
+  sync into it and the P&L builds its report options from whatever types are
+  present, so a module that tags a row with a member gets every pack's things
+  for free and stays industry-blind. Slice 4 dropped a planned parallel slot for
+  this reason.
+- **Counting per kind is not double counting.** An hour booked to a field AND a
+  line of business belongs to each when you ask about that kind; the totals are
+  per kind and must never be summed across kinds. Any screen showing them says
+  so.
 - **Two guards that are each right can be wrong together.** Slice 3's drive
   found both of this module's real bugs, and neither was a unit-test miss: a
   sheet control pinned to the first week of a period hid itself from anybody who
@@ -669,6 +729,8 @@ Written before the build so they are not rediscovered.
   restated — but it will no longer line up with any period the screen computes,
   so it simply stops being visible. A warning on the frequency picker is the
   cheap fix; refusing the change outright is probably too strict.
+- The `time-targets` extension slot is designed and unbuilt, deliberately. It
+  arrives with the first thing worth booking to that is not a dimension member.
 - **A period is locked for everybody or nobody.** Locking one person's hours
   while another's stay open is not expressible, and nobody has asked for it. The Browser pane's `preview_start`
   launches from the session's working directory rather than an out-of-repo

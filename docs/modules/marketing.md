@@ -181,22 +181,22 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 
 The second slice of the social run: writing a post, cutting a photo to it,
 putting it on the calendar, and being reminded when it is due. **Migrations
-0311 and 0312** (`social_posts` + its policies), applied to dev AND prod before
-the merge; `verify-rls` reads 185 tables on both.
+0313 and 0314** (`social_posts` + its policies), applied to dev AND prod before
+the merge; `verify-rls` reads 187 on dev and 186 on prod (the one-table gap is
+another session's unmerged `time_rates`, whose stamps sit above these).
 
-**Generated as `0309`/`0310` and renumbered TWICE-OVER**, and the second time
-needed the harder half of the repair. Time slice 3 (#514) took those slots and
-merged first, and its own pair had been RE-STAMPED above mine — so keeping my
-original `when` would have left the journal non-monotonic (311 below 310) and a
-database built from zero would have SKIPPED `social_posts` entirely. Both stamps
-were therefore raised above the mark (1789212040000 / 1789212060000) and, because
-the migrations were already applied to dev and prod, each database's
-`drizzle.__drizzle_migrations.created_at` was moved to match in the same breath —
-otherwise the next `db:migrate` re-runs `CREATE TABLE` and aborts the whole
-transaction. That is the rule #515 added to conventions.md, and
-`scripts/restamp-migration.ts` (added here) is the tool for its second half:
-ledger only, one row matched on an exact stamp, and nothing written without
-`--write`. **The same tool then cleared a PENDING that was not mine**: #509's
+**Generated as `0309`/`0310` and renumbered THREE TIMES** — Time slices 3, 4
+and their follow-ups each took the next pair of slots and merged first, on a day
+when four sessions were writing migrations against one database. Each repair
+was the same and is now mechanical: take the winner's journal and snapshots
+whole, regenerate, **restore the hand edit**, stamp above the newest mark, and
+move this branch's two ledger rows on BOTH databases to match. The last of those
+matters most, because a winner that has itself been re-stamped leaves
+the journal non-monotonic if you keep your original `when` — 313 below 312 — and
+**a database built from zero would then SKIP `social_posts` entirely**. That is
+the rule #515 added to conventions.md, and `scripts/restamp-migration.ts` (added
+here) is the tool for its second half: ledger only, one row matched on an exact
+stamp, and nothing written without `--write`. **The same tool then cleared a PENDING that was not mine**: #509's
 `0302`/`0303` had been renumbered into the slot above `0301`, giving them a
 `when` BELOW the stamps they were applied under, and the ledger was never
 corrected — so `inspect-migration-state` read `PENDING (2)` on dev AND
@@ -851,7 +851,7 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
 | `site_images` | The site's photo library: one row per derivative the platform made | FORCE RLS; `member_read`, owner INSERT/DELETE, **no UPDATE** (a replaced photo is a new row). Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. **Unique on `pathname`** (one blob, one row); at most `SITE_IMAGES_MAX` (60) per site. CHECKs: `mime_type in (image/jpeg, image/png)`, width/height/bytes > 0. The blob lives under `sites/<tenant>/photos/`; sections reference the row by id with their own alt text (ADR 0023) |
 | `social_channels` | An account a brand posts to (S0, `0306`/`0307`) | FORCE RLS; `member_read`, owner INSERT/**UPDATE**/DELETE, no public policy. **`site_id` NULLABLE** — one of the business's websites, or the business itself ([ADR 0047](../decisions/0047-a-social-channel-belongs-to-a-website-and-a-footer-link-is-not-one.md)); the composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE is MATCH SIMPLE, so a null site is checked by nothing and a named one still cascades. **Unique `(tenant_id, network, handle)`**: one account is one row across the workspace, whichever brand claims it, which is ADR 0047's rule made mechanical. `handle` is `normalizeHandle`d (no `@`, no spaces, lowercase — safe on every network here, and what lets the index be a plain one). CHECKs: `network` in the eight `SOCIAL_NETWORKS`, `status in (active, paused)`, handle 1–80, label ≤ 80, url ≤ 500, `audience`/`voice` ≤ 400, and `social_channels_other_has_label` — `other` is the one network with no name of its own. At most `SOCIAL_CHANNELS_MAX` (12) per owner, counted per site and again for the business's. UPDATE is allowed here and refused on `site_images` for the reason each table exists: a channel is the account and is edited, a photo is a record of an event and is replaced |
 
-| `social_posts` | One post, to one account, once (S1, `0311`/`0312`) | FORCE RLS; `member_read`, owner INSERT/UPDATE/DELETE, no public policy. `channel_id` NOT NULL — composite FK `(tenant_id, channel_id) → social_channels` ON DELETE **CASCADE**: words written for an account that is gone are not words for anything. `image_id` nullable — composite FK `(tenant_id, image_id) → site_images` ON DELETE **SET NULL `("image_id")`, the column-list form, HAND-EDITED into the migration**: drizzle-kit emits the bare form, which would try to null `tenant_id` too and could never run. There is no `site_id`: the brand comes from the channel, which cannot move brands (ADR 0047), so one denormalised column would be one more thing to keep true. CHECKs: `status in (draft, scheduled, posted)` — **no `idea`**, a dateless draft is one; `origin in (hand, assistant, pack)`; `shape` one of the four `POST_SHAPES`; body ≤ 5000, link ≤ 500; `focus_x`/`focus_y` between 0 and 1; and two that matter — `social_posts_scheduled_has_time` and `social_posts_posted_has_time`, because a scheduled post with no time is invisible to the sweep and sits there looking handled. `social_posts_due_idx` is PARTIAL (`status = 'scheduled' and reminded_at is null`) — exactly the rows the ten-minute cron reads. `reminded_at`/`work_item_id` are the sweep's own bookkeeping, written under `withSystem`; `work_item_id` is a SOFT pointer, like `site_enquiries`' |
+| `social_posts` | One post, to one account, once (S1, `0313`/`0314`) | FORCE RLS; `member_read`, owner INSERT/UPDATE/DELETE, no public policy. `channel_id` NOT NULL — composite FK `(tenant_id, channel_id) → social_channels` ON DELETE **CASCADE**: words written for an account that is gone are not words for anything. `image_id` nullable — composite FK `(tenant_id, image_id) → site_images` ON DELETE **SET NULL `("image_id")`, the column-list form, HAND-EDITED into the migration**: drizzle-kit emits the bare form, which would try to null `tenant_id` too and could never run. There is no `site_id`: the brand comes from the channel, which cannot move brands (ADR 0047), so one denormalised column would be one more thing to keep true. CHECKs: `status in (draft, scheduled, posted)` — **no `idea`**, a dateless draft is one; `origin in (hand, assistant, pack)`; `shape` one of the four `POST_SHAPES`; body ≤ 5000, link ≤ 500; `focus_x`/`focus_y` between 0 and 1; and two that matter — `social_posts_scheduled_has_time` and `social_posts_posted_has_time`, because a scheduled post with no time is invisible to the sweep and sits there looking handled. `social_posts_due_idx` is PARTIAL (`status = 'scheduled' and reminded_at is null`) — exactly the rows the ten-minute cron reads. `reminded_at`/`work_item_id` are the sweep's own bookkeeping, written under `withSystem`; `work_item_id` is a SOFT pointer, like `site_enquiries`' |
 
 **The crop is a focus point, not a box.** `shape` + `focus_x`/`focus_y` (0–1 of
 the source) go into `cropBox()`, which returns the biggest rectangle of that

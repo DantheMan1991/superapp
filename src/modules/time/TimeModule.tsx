@@ -6,6 +6,8 @@ import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
 import { Button } from "@/components/ui/button";
 import type { TenantContext } from "@/lib/auth";
+import { dimensionTypesFrom } from "@/lib/dimension-options";
+import { listTenantDimensionMembers } from "@/lib/dimensions";
 import { listAssignableMembers, memberLabel } from "@/lib/team";
 import {
   addDays,
@@ -34,10 +36,16 @@ import {
 import {
   AmendEntryButton,
   EntryRow,
+  SplitEntryButton,
   type EntryView,
 } from "./components/entry-row";
 import { LogTimeForm } from "./components/log-time";
-import { listEntries, listOpenPunches, listWorkers } from "./read";
+import {
+  listEntries,
+  listEntryDimensions,
+  listOpenPunches,
+  listWorkers,
+} from "./read";
 import { getTimePrefs } from "./settings-ops";
 import { firstOpenDay, listLockedPeriods } from "./sheet-ops";
 
@@ -89,6 +97,7 @@ export async function TimeModule({
     members,
     openPunches,
     lockedPeriods,
+    dimensionMembers,
     correctionDate,
   } =
     await withTenant(
@@ -121,6 +130,7 @@ export async function TimeModule({
           // Where a correction to a locked entry lands. Not "today": a business
           // that locks the period it is standing in would have nowhere to put
           // one. See `firstOpenDay`.
+          dimensionMembers: await listTenantDimensionMembers(tx, ctx.tenant.id),
           correctionDate: await firstOpenDay(tx, ctx.tenant.id, today, {
             frequency: prefs.payFrequency,
             weekStartsOn: prefs.weekStartsOn,
@@ -130,6 +140,34 @@ export async function TimeModule({
       },
       { role: ctx.role, userId: ctx.userId },
     );
+
+  /*
+   * A SECOND READ rather than a join on `listEntries`: an entry with three tags
+   * would come back three times and every total would have to de-duplicate
+   * first, which is the shape that makes a figure wrong in a way nobody
+   * notices.
+   */
+  const entryDimensions = await withTenant(
+    ctx.tenant.id,
+    (tx) => listEntryDimensions(tx, ctx.tenant.id, rows.map((r) => r.id)),
+    { role: ctx.role, userId: ctx.userId },
+  );
+  const tagsByEntry = new Map<string, { memberId: string; name: string }[]>();
+  for (const d of entryDimensions) {
+    const list = tagsByEntry.get(d.entryId) ?? [];
+    list.push({ memberId: d.memberId, name: d.name });
+    tagsByEntry.set(d.entryId, list);
+  }
+
+  /*
+   * ACTIVE MEMBERS, PLUS WHATEVER THE ROWS ON SCREEN ALREADY CARRY. Offering
+   * only active ones would make a tag on a retired paddock invisible AND
+   * unremovable — the trap `dimension-options.ts` documents and takes
+   * `keepIds` for.
+   */
+  const dimensionTypes = dimensionTypesFrom(dimensionMembers, {
+    keepIds: entryDimensions.map((d) => d.memberId),
+  });
 
   const labelByUser = new Map(
     members.map((member) => [member.clerkUserId, memberLabel(member)]),
@@ -251,6 +289,7 @@ export async function TimeModule({
                 workers={activeWorkers}
                 defaultWorkerId={mine?.id ?? null}
                 today={today}
+                dimensionTypes={dimensionTypes}
               />
             )}
           </div>
@@ -435,6 +474,9 @@ export async function TimeModule({
                         payType: row.payType,
                         note: row.note,
                         workerName: row.workerName,
+                        memberIds: (tagsByEntry.get(row.id) ?? []).map(
+                          (t) => t.memberId,
+                        ),
                         enteredBy:
                           row.enteredByClerkUserId === ctx.userId
                             ? null
@@ -472,6 +514,17 @@ export async function TimeModule({
                           <span className="min-w-0 flex-1 truncate text-muted-foreground">
                             {row.note}
                           </span>
+                          {/* What it was for, where a reader checking a cost
+                              would look for it: beside the hours, not behind a
+                              dialog. */}
+                          {(tagsByEntry.get(row.id) ?? []).map((tag) => (
+                            <span
+                              key={tag.memberId}
+                              className="shrink-0 rounded-full bg-module-accent/10 px-2 py-0.5 text-[11px] text-module-accent"
+                            >
+                              {tag.name}
+                            </span>
+                          ))}
                           {canWrite &&
                             (dayIsLocked(row.workDate) ? (
                               <AmendEntryButton
@@ -479,7 +532,19 @@ export async function TimeModule({
                                 correctionDate={correctionDate}
                               />
                             ) : (
-                              <EntryRow entry={view} today={today} />
+                              <>
+                                {row.minutes > 1 && (
+                                  <SplitEntryButton
+                                    entry={view}
+                                    dimensionTypes={dimensionTypes}
+                                  />
+                                )}
+                                <EntryRow
+                                  entry={view}
+                                  today={today}
+                                  dimensionTypes={dimensionTypes}
+                                />
+                              </>
                             ))}
                         </li>
                       );

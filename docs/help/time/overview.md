@@ -24,7 +24,7 @@ Time records what was worked. [Work](../work/overview.md) records what still has
 
 ## Not on this page
 
-Plenty, and all of it is coming. You cannot say which part of the business an hour was spent on, and Time does not know what anyone is paid — so it deals in hours, never money. There is no export for your payroll provider yet. Both are planned. Ask us where it is up to.
+Plenty, and all of it is coming. Time does not know what anyone is paid, so it deals in hours and never money — which also means the hours you book to a field or a line of business do not yet show up as a cost against it. There is no export for your payroll provider either. Both are planned. Ask us where it is up to.
 
 Time also does not run your payroll and is not going to. When it can work out gross pay, it will hand that to whoever does your payroll rather than calculating tax.
 

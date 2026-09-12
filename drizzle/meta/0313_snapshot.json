@@ -1,6 +1,6 @@
 {
-  "id": "9e8a56fc-87c5-4367-b5ea-ccc4abe51abf",
-  "prevId": "16d74ed8-9ac4-4951-b67b-d702aa4d173f",
+  "id": "0a6f783e-26fe-46ff-9c92-ca26dcc44346",
+  "prevId": "bf331910-ffd5-417b-b0d7-9c8a76c459db",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -24296,6 +24296,280 @@
         "social_channels_other_has_label": {
           "name": "social_channels_other_has_label",
           "value": "\"social_channels\".\"network\" <> 'other' or length(btrim(\"social_channels\".\"label\")) > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.social_posts": {
+      "name": "social_posts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel_id": {
+          "name": "channel_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'draft'"
+        },
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'hand'"
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "link": {
+          "name": "link",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "image_id": {
+          "name": "image_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "shape": {
+          "name": "shape",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'square'"
+        },
+        "focus_x": {
+          "name": "focus_x",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0.5
+        },
+        "focus_y": {
+          "name": "focus_y",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0.5
+        },
+        "scheduled_at": {
+          "name": "scheduled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "posted_at": {
+          "name": "posted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reminded_at": {
+          "name": "reminded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "work_item_id": {
+          "name": "work_item_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by_clerk_user_id": {
+          "name": "created_by_clerk_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "social_posts_tenant_id_id_idx": {
+          "name": "social_posts_tenant_id_id_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "social_posts_channel_idx": {
+          "name": "social_posts_channel_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "channel_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "scheduled_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "social_posts_due_idx": {
+          "name": "social_posts_due_idx",
+          "columns": [
+            {
+              "expression": "scheduled_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "status = 'scheduled' and reminded_at is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "social_posts_tenant_id_tenants_id_fk": {
+          "name": "social_posts_tenant_id_tenants_id_fk",
+          "tableFrom": "social_posts",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "social_posts_channel_fk": {
+          "name": "social_posts_channel_fk",
+          "tableFrom": "social_posts",
+          "tableTo": "social_channels",
+          "columnsFrom": [
+            "tenant_id",
+            "channel_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "social_posts_image_fk": {
+          "name": "social_posts_image_fk",
+          "tableFrom": "social_posts",
+          "tableTo": "site_images",
+          "columnsFrom": [
+            "tenant_id",
+            "image_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "social_posts_status_values": {
+          "name": "social_posts_status_values",
+          "value": "\"social_posts\".\"status\" in ('draft', 'scheduled', 'posted')"
+        },
+        "social_posts_origin_values": {
+          "name": "social_posts_origin_values",
+          "value": "\"social_posts\".\"origin\" in ('hand', 'assistant', 'pack')"
+        },
+        "social_posts_shape_values": {
+          "name": "social_posts_shape_values",
+          "value": "\"social_posts\".\"shape\" in ('square', 'portrait', 'story', 'wide')"
+        },
+        "social_posts_body_length": {
+          "name": "social_posts_body_length",
+          "value": "length(\"social_posts\".\"body\") <= 5000"
+        },
+        "social_posts_link_length": {
+          "name": "social_posts_link_length",
+          "value": "length(\"social_posts\".\"link\") <= 500"
+        },
+        "social_posts_focus_range": {
+          "name": "social_posts_focus_range",
+          "value": "\"social_posts\".\"focus_x\" between 0 and 1 and \"social_posts\".\"focus_y\" between 0 and 1"
+        },
+        "social_posts_scheduled_has_time": {
+          "name": "social_posts_scheduled_has_time",
+          "value": "\"social_posts\".\"status\" <> 'scheduled' or \"social_posts\".\"scheduled_at\" is not null"
+        },
+        "social_posts_posted_has_time": {
+          "name": "social_posts_posted_has_time",
+          "value": "\"social_posts\".\"status\" <> 'posted' or \"social_posts\".\"posted_at\" is not null"
         }
       },
       "isRLSEnabled": false

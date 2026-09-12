@@ -1,6 +1,7 @@
 import "server-only";
 import { and, eq } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
+import { hasOpenLaborAccrual } from "@/lib/labor-posting";
 import { TimeError } from "./core/errors";
 import { isPayFrequency, type PayFrequency } from "./core/periods";
 import { isRoundingChoice } from "./core/rounding";
@@ -28,6 +29,8 @@ export interface TimePrefs {
   payFrequency: PayFrequency;
   periodAnchor: string | null;
   overtimeRuleset: string;
+  /** Whether locking a pay period writes its labor to the general ledger. */
+  postsLabor: boolean;
 }
 
 /**
@@ -51,7 +54,44 @@ export async function getTimePrefs(tx: Tx, tenantId: string): Promise<TimePrefs>
     payFrequency: (row?.payFrequency as PayFrequency) ?? "weekly",
     periodAnchor: row?.periodAnchor ?? null,
     overtimeRuleset: row?.overtimeRuleset ?? DEFAULT_RULESET_SLUG,
+    postsLabor: row?.postsLabor ?? false,
   };
+}
+
+/**
+ * Turn the labor accrual on, or off.
+ *
+ * **OFF IS REFUSED WHILE AN ACCRUAL IS STILL STANDING**, which is inventory's
+ * `assertPostingChangeSafe` rule and it is there for the same reason: the
+ * accrued wages are sitting in `2300` waiting to be relieved by a payroll run,
+ * and a switch that simply stopped future periods posting would leave them
+ * there forever with nothing left in the product that knows how to clear them.
+ * Unlocking the periods first reverses each accrual properly, and then the
+ * switch is free to move.
+ *
+ * STANDING, not "ever posted". A business that tried this, changed its mind and
+ * unlocked everything has nothing in `2300` and must be allowed to turn it off;
+ * refusing on history rather than on state would be a one-way door.
+ */
+export async function setPostsLabor(
+  tx: Tx,
+  tenantId: string,
+  postsLabor: boolean,
+): Promise<void> {
+  if (!postsLabor && (await hasOpenLaborAccrual(tx, tenantId))) {
+    throw new TimeError(
+      "POSTING_IN_USE",
+      "wages are still in the books; unlock those periods first",
+    );
+  }
+  await tx
+    .insert(schema.timeSettings)
+    .values({ tenantId, postsLabor })
+    .onConflictDoUpdate({
+      target: schema.timeSettings.tenantId,
+      set: { postsLabor, updatedAt: new Date() },
+      where: and(eq(schema.timeSettings.tenantId, tenantId)),
+    });
 }
 
 export async function setWeekStartsOn(

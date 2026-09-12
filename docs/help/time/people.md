@@ -18,6 +18,7 @@ Open **Time** {icon:clock} in the sidebar, then click {button:People|outline}. A
 - **People are paid.** `Weekly`, `Every two weeks`, `Twice a month` or `Monthly`. This is when people are **paid**, which is not how overtime is measured — overtime is always worked out for each week on its own. Choosing `Every two weeks` asks you for a starting date, because nothing in the calendar says which of two weeks begins a period.
 - **Pay rates.** A panel headed `Pay rates`, marked `only owners can see this`. One line per rate ever set: who, the hourly figure, the day it started, and the charge-out rate and on-costs when you have given them. Staff and accountants do not see this panel at all — it is not hidden from them by the screen, it is invisible to them in the database.
 - **Overtime rules.** `Federal (over 40 in a week)`, `California (daily and weekly)` or `None — no overtime rules`. Whatever you pick, the full rule is spelled out underneath so you can check it. This is a legal choice you make with whoever does your payroll; we do the arithmetic and we do not know where your people work.
+- **Wages in your books.** A tick box at the bottom, owners only: `Send wages to the books when a period is locked`. Off unless you turn it on.
 
 ## How to add somebody
 
@@ -72,6 +73,20 @@ To remove a rate you typed wrongly, click {button:Remove|ghost} on its line. It 
 
 Changing this never changes anybody's overtime. It changes how the [pay period](pay-period.md) screen groups the weeks up.
 
+## How to send wages to your books
+
+Tick `Send wages to the books when a period is locked`. From then on, locking a pay period writes one entry in your accounts:
+
+- **Salaries & Wages** (account 6450) is charged with what the approved hours came to, **split by what the hours were for** — so a Profit & Loss by enterprise shows each one carrying its own labour.
+- **Payroll Taxes** (6500) is charged with your on-costs, split the same way, if you have set an on-costs percentage.
+- **Payroll Liabilities** (2300) is credited with the total, because at that moment you owe the money and have not paid it.
+
+When your payroll provider's run actually goes out, enter it as a bill or a bank transaction against **2300**, and the two cancel. That is the whole point of the accrual: the cost lands in the fortnight that earned it rather than the day the bank moves.
+
+Leave it off if your accountant keys payroll in from a report. Nothing is written and nothing changes.
+
+**You cannot turn it off while wages are still sitting in your books.** Unlock those pay periods first — that takes each accrual back out properly — and the box will then clear. You see `Wages from this business are already in the books. Unlock those pay periods first, which takes them back out properly.`
+
 ## How to choose your overtime rules
 
 1. Scroll to `Overtime rules`.
@@ -115,10 +130,16 @@ If you are not sure, leave it on `To the minute`. It is the only setting that ne
 | `An hourly rate like 22.50.` | The pay box was empty or was not a number. |
 | `Burden is a whole percent between 0 and 200.` | On-costs must be a whole number in that range. |
 | `Nobody has a rate yet.` | No rates have been set. Hours are still recorded and added up without them. |
+| `Wages will go to your books` / `Wages will stay here` | The tick box saved. |
+| `Wages from this business are already in the books…` | You tried to stop posting while an accrual is still standing. Unlock those periods first. |
+| `Your chart of accounts does not have the payroll accounts this needs…` | 6450, 6500 or 2300 is missing, renamed away or duplicated. Re-provision your chart from Accounting. |
+| `There is no default company to post wages to.` | Set a default company in Accounting first. |
 
 ## Not on this page
 
-You cannot record what anybody is paid, what they do, or whether they are salaried. None of that is built yet, and pay rates in particular will not be visible to everybody when they arrive. Ask us where it is up to.
+You cannot record what anybody **does** — a job title, a trade, a department. Ask us if you need it.
+
+Wages go to one set of books: the company you have marked as your default in Accounting. If a second company employs its own people, Time does not yet know that.
 
 There is no separate rounding for different people, and no way to round a punch up automatically at the end of a shift.
 
@@ -130,4 +151,4 @@ The overtime rules are for the whole business. You cannot yet mark one person as
 
 **Only owners can see or set pay rates at all.** That is enforced in the database, not just on the screen: a member of staff opening this page does not get a hidden panel, they get no panel, and the same is true of anybody reading the data another way. A support session from us counts as staff, so we see the hours and never the wages.
 
-Owners can also add people, link and unlink sign-ins, mark somebody as having left, and set all four settings on this page. Staff and accountants can read the list and the settings. Staff can still log hours and start and stop clocks for anybody on it, over on [The week](week.md).
+Owners can also add people, link and unlink sign-ins, mark somebody as having left, set all four settings on this page, and decide whether wages go to your books. Staff and accountants can read the list and the settings — but not the rates, and not the wages tick box, which is an owner's decision about money. Staff can still log hours and start and stop clocks for anybody on the list, over on [The week](week.md).

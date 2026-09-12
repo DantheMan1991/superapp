@@ -26,6 +26,7 @@ import {
   addWorkerAction,
   setOvertimeRulesetAction,
   setPayFrequencyAction,
+  setPostsLaborAction,
   setRoundingAction,
   setWeekStartsOnAction,
   setWorkerActiveAction,
@@ -529,6 +530,58 @@ export function OvertimeRulesetPicker({ slug }: { slug: string }) {
       <p className="text-xs text-muted-foreground">
         Which rules apply to you is your decision, with whoever does your
         payroll. We do the arithmetic; we do not know where your people work.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Whether locking a pay period puts its wages in the books.
+ *
+ * A SWITCH RATHER THAN A SILENT DEFAULT, because both answers are ordinary. A
+ * farm that does its own books wants the accrual; one whose accountant keys
+ * payroll in from a report wants nothing written at all, and would rightly
+ * treat journal entries it never asked for as a bug.
+ *
+ * Turning it off again is refused once anything has posted — the server says so
+ * and this only relays the message, because the screen has no way to know what
+ * is in the ledger and should not pretend to.
+ */
+export function PostsLaborSwitch({ on }: { on: boolean }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          className="size-4 accent-[var(--accent-time)]"
+          checked={on}
+          disabled={pending}
+          onChange={(event) => {
+            const next = event.target.checked;
+            startTransition(async () => {
+              const result = await setPostsLaborAction({ postsLabor: next });
+              if ("error" in result) {
+                toast.error(result.error);
+                router.refresh();
+                return;
+              }
+              toast.success(
+                next ? "Wages will go to your books" : "Wages will stay here",
+              );
+              router.refresh();
+            });
+          }}
+        />
+        Send wages to the books when a period is locked
+      </label>
+      <p className="text-xs text-subtle-foreground">
+        Locking a pay period writes a payroll accrual: what the approved hours
+        came to, charged to Salaries &amp; Wages and split by what the hours were
+        for, owed under Payroll Liabilities until you pay it. Unlocking the
+        period reverses it.
       </p>
     </div>
   );

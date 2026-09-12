@@ -392,6 +392,21 @@ export const timeSettings = pgTable(
      * if a deploy ever goes backwards.
      */
     overtimeRuleset: text("overtime_ruleset").notNull().default("federal"),
+    /**
+     * Whether locking a pay period posts its labor to the general ledger.
+     *
+     * **OFF BY DEFAULT, which is the only safe default.** Turning it on writes
+     * a journal entry every time a period is locked, and a business that keeps
+     * hours for scheduling and does its books somewhere else must never
+     * discover that by finding entries it did not ask for. Off also means
+     * nothing changes for every tenant that had Time before this shipped.
+     *
+     * Turning it BACK off once something has posted is refused, the way
+     * inventory's `assertPostingChangeSafe` refuses the same move: the accrued
+     * debits would strand in `2300` with nothing left to relieve them. Unlock
+     * the periods first, which reverses each accrual properly.
+     */
+    postsLabor: boolean("posts_labor").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

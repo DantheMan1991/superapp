@@ -5,6 +5,7 @@ import { z } from "zod";
 import { withTenant } from "@/db";
 import { logAuditInTx } from "@/lib/audit";
 import { requireTenant, type TenantContext } from "@/lib/auth";
+import { LaborPostingError, type LedgerCtx } from "@/lib/labor-posting";
 import { requireModuleEnabled } from "@/lib/modules";
 import { todayInTimezone, zonedTimeToInstant } from "@/lib/timezone";
 import {
@@ -27,6 +28,8 @@ import {
   splitEntry,
   updateEntry,
 } from "./entry-ops";
+import { payPeriodCsv } from "./export-ops";
+import { postPeriodLabor, reversePeriodLabor } from "./posting-ops";
 import { deleteRate, setRate } from "./rate-ops";
 import { getEntry } from "./read";
 import {
@@ -42,6 +45,7 @@ import {
   getTimePrefs,
   setOvertimeRuleset,
   setPayFrequency,
+  setPostsLabor,
   setRoundingMinutes,
   setWeekStartsOn,
 } from "./settings-ops";
@@ -87,8 +91,40 @@ async function ownerGate(): Promise<TenantContext> {
   return ctx;
 }
 
+/**
+ * The ledger context an accrual posts under.
+ *
+ * Built from `requireTenant()`'s result and nothing else, so the entry is
+ * written with exactly the privileges of the person who pressed Lock —
+ * `postEntry` runs `requireOwnerRole` against this, and `payroll_accrual` is
+ * deliberately not a machine source.
+ */
+function ledgerCtx(ctx: TenantContext): LedgerCtx {
+  return { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role };
+}
+
 function fail(error: unknown): { error: string } {
   if (error instanceof TimeError) return { error: friendlyMessage(error) };
+  /*
+   * The posting door has its own error type, because Layer 0 does not know what
+   * a timesheet is. Translating here rather than letting it escape is the same
+   * move `PartyError` gets at this boundary: the client should never see a word
+   * from a subsystem it did not ask about.
+   */
+  if (error instanceof LaborPostingError) {
+    return {
+      error: friendlyMessage(
+        new TimeError(
+          error.code === "NO_ENTITY"
+            ? "POSTING_NO_ENTITY"
+            : error.code === "ALREADY_POSTED"
+              ? "POSTING_IN_USE"
+              : "POSTING_ACCOUNTS",
+          error.message,
+        ),
+      ),
+    };
+  }
   console.error("time action failed", error);
   return { error: "Something went wrong." };
 }
@@ -743,20 +779,53 @@ export async function returnSheetAction(
 
 const lockSchema = z.object({ on: dateSchema, locked: z.boolean() });
 
+/**
+ * Lock a pay period, and — if this business has asked for it — put its labor in
+ * the books at the same moment.
+ *
+ * **ONE TRANSACTION, both halves.** A lock that succeeded while its accrual
+ * failed would leave a period that says it has been through a pay run and books
+ * that have never heard of it, and nothing in the product would ever notice.
+ * They land together or neither lands.
+ *
+ * Unlocking reverses, for the same reason and in the same transaction.
+ */
 export async function setPeriodLockAction(
   input: z.input<typeof lockSchema>,
-): Promise<ActionResult> {
+): Promise<ActionResult<{ posted: boolean; unapprovedWorkers: number }>> {
   try {
     const ctx = await approverGate();
     const parsed = lockSchema.parse(input);
-    const { period } = await periodFor(ctx, parsed.on);
-    await withTenant(
+    const { period, prefs } = await periodFor(ctx, parsed.on);
+    const data = await withTenant(
       ctx.tenant.id,
       async (tx) => {
+        let posted = false;
+        let unapprovedWorkers = 0;
         if (parsed.locked) {
-          await lockPeriod(tx, ctx.tenant.id, period, ctx.userId);
+          const periodId = await lockPeriod(
+            tx,
+            ctx.tenant.id,
+            period,
+            ctx.userId,
+          );
+          if (prefs.postsLabor) {
+            const result = await postPeriodLabor(tx, ledgerCtx(ctx), {
+              period,
+              periodId,
+            });
+            posted = result.entryId !== null;
+            unapprovedWorkers = result.accrual.unapprovedWorkers;
+          }
         } else {
-          await unlockPeriod(tx, ctx.tenant.id, period.start);
+          const periodId = await unlockPeriod(tx, ctx.tenant.id, period.start);
+          if (prefs.postsLabor) {
+            const result = await reversePeriodLabor(tx, ledgerCtx(ctx), {
+              period,
+              periodId,
+            });
+            posted = result.entryId !== null;
+          }
         }
         await logAuditInTx(tx, {
           action: parsed.locked ? "time.period.locked" : "time.period.unlocked",
@@ -764,13 +833,75 @@ export async function setPeriodLockAction(
           actorClerkUserId: ctx.userId,
           targetType: "time_period",
           targetId: period.start,
-          meta: { startsOn: period.start, endsOn: period.end },
+          meta: {
+            startsOn: period.start,
+            endsOn: period.end,
+            // Whether the books moved is exactly the kind of thing somebody
+            // reads an audit log to find out.
+            posted,
+          },
         });
+        return { posted, unapprovedWorkers };
       },
       { role: ctx.role, userId: ctx.userId },
     );
     revalidate();
+    return { ok: true, data };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const postsLaborSchema = z.object({ postsLabor: z.boolean() });
+
+export async function setPostsLaborAction(
+  input: z.input<typeof postsLaborSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await ownerGate();
+    const { postsLabor } = postsLaborSchema.parse(input);
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => setPostsLabor(tx, ctx.tenant.id, postsLabor),
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
     return { ok: true };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const exportSchema = z.object({ on: dateSchema });
+
+/**
+ * One pay period as a CSV a payroll provider can read.
+ *
+ * **HOURS AND GROSS, AND DELIBERATELY NOT A PROVIDER'S OWN FORMAT.** Gusto, ADP
+ * and QuickBooks Payroll each want a different file, and a core tool that is
+ * industry-blind has no business knowing which one this tenant uses — that is
+ * exactly the shape of thing a layer adds. What every one of them accepts is a
+ * row per person with hours by kind, so that is what this writes.
+ *
+ * Owner-only, because the gross is on it. A staff export would come back with
+ * empty money columns, which is a worse answer than a refusal.
+ */
+export async function exportPayPeriodCsvAction(
+  input: z.input<typeof exportSchema>,
+): Promise<ActionResult<{ filename: string; csv: string }>> {
+  try {
+    const ctx = await approverGate();
+    const { on } = exportSchema.parse(input);
+    const { period, prefs } = await periodFor(ctx, on);
+    const data = await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        return await payPeriodCsv(tx, ctx.tenant.id, period, prefs);
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return { ok: true, data };
   } catch (error) {
     return fail(error);
   }

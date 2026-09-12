@@ -5,7 +5,7 @@
 > knows the difference between overtime and a pay period, and an hour that
 > reaches the P&L tagged with the thing it was spent on. Core owns the
 > mechanism; an industry layer supplies the vocabulary and the odd pay rule.
-> Status: partial — slices 0–5 built (people, hours, the clock, the workweek and overtime, submit/approve/lock, what the hour was for, and what it costs). It now answers the question it was built for: hours in, gross pay out, frozen at approval. The remaining gap is the books — nothing is posted and there is no payroll export · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: partial — slices 0–6 built. Hours in, gross pay out, frozen at approval, **posted to the ledger split by dimension**, and a file for the payroll provider. The loop the tool was built for is closed; what remains is the phone, the warning before overtime happens, and the farm layer · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## The plan (agreed with the founder 2026-09-11)
 
@@ -217,6 +217,90 @@ farm-shaped remainder.
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-12 — Slice 6: it reaches the books (`claude/time-6-it-reaches-the-books`)
+
+The labor accrual, split by dimension and reversible, and a CSV for whoever
+runs the payroll. Migration `0315`.
+
+- **A MODULE MAY NOT IMPORT ANOTHER MODULE, AND THAT DECIDED THE SHAPE.**
+  `eslint.config.mjs`'s `MODULE_SLUGS` binds `src/modules/<slug>/` and
+  deliberately leaves `src/packs/` and Layer 0 alone — which is why inventory
+  calls `postEntry` from its own directory and Time cannot. So the write goes
+  through `src/lib/labor-posting.ts`, the same answer slice 4 reached for the
+  dimension READ with `src/lib/dimensions.ts`. The rule catches `import type`
+  too, so the door re-exports `LedgerCtx`.
+- **The door is NARROW on purpose.** It takes a period's labor and posts the one
+  entry that means; it does not take accounts or lines. A general "post anything
+  from Layer 0" helper would be a second way into the ledger with none of
+  `postEntry`'s guards in front of it, which is exactly what ADR 0011 refused
+  when it rejected `postMachineEntry`.
+- **IT POSTS ON LOCK, NOT ON APPROVE**, against the plan. Three reasons, and the
+  second is the one that settles it. One entry per period is the shape a
+  bookkeeper wants — posting per sheet gives a twelve-person farm twelve entries
+  a fortnight. **`returnSheet` refuses an approved sheet**, so approval has no
+  undo and an accrual posted there could never be reversed; `unlockPeriod`
+  already exists and is exactly the undo an accrual needs. And "locked" is the
+  moment the business says these are the hours we are paying, which is when a
+  liability is real.
+- **ONLY APPROVED SHEETS.** Hours nobody has agreed to are not a liability.
+  Unapproved sheets in a locked period are COUNTED and reported in the toast
+  — "2 timesheets were never approved" — rather than quietly included or
+  quietly dropped.
+- **The approved snapshot is what posts**, not a figure worked out again at lock
+  time. `time_sheets.gross_cents` froze at approval (slice 5) precisely so a
+  rate added in between cannot restate it, and an accrual that disagreed with
+  the timesheet it came from would be the worst kind of wrong — nobody would
+  find it.
+- **Minutes are the basis for the split, and the premium is spread.** The
+  forty-first hour is only expensive because forty came before it; asking which
+  job "caused" the overtime has no answer, and whichever was booked last is an
+  artefact of data entry. So `core/allocate.ts` apportions the whole week's pay
+  over the period's hours. **`allocateCents` is largest-remainder**, because
+  three equal shares of $10.00 are $9.99 and an entry that does not sum to zero
+  does not post at all.
+- **The grouping key is the whole SET of dimension members, not one member.** An
+  hour tagged with an enterprise AND a parcel is one journal line carrying both
+  — `line_dimensions` allows one member per TYPE per line. Grouping by a single
+  member would either double-count the hour or drop one of its tags.
+- **Wages and on-costs are separate expense lines against one liability.** A P&L
+  that folded the employer's tax into wages would tell an owner their people
+  cost less than they do, and splitting it costs one line. `6450` and `6500`
+  debit, `2300` credits, and `2300` is relieved when the provider's run arrives
+  as a bill — the shape `2060` already has.
+- **THE ACCOUNTS ALREADY EXISTED.** `2300 Payroll Liabilities`, `6450 Salaries &
+  Wages` and `6500 Payroll Taxes` all ship in the general chart, so no tenant
+  needs a re-provision and no template changed. `6450` and `6500` share subtype
+  `payroll_expense`, so subtype cannot tell them apart — `pickOne` returns null
+  on the pair and the CODE decides, which is the same reason inventory's
+  resolver puts code before subtype.
+- **THE BUG WORTH REMEMBERING: a reversal is not a `payroll_accrual` row.**
+  `reverseEntry` writes `source = 'reversal'` and NO `source_id`, so a query
+  filtering on source and period finds the accruals and never the reversals —
+  `openLaborAccrual` said "still accrued" forever and the period could not be
+  re-locked. The only link back is `reverses_entry_id`. Both the code and
+  `tests/time-labor-posting.test.ts` now say so out loud.
+- **Posting is OFF by default** (`time_settings.posts_labor`), because a
+  business that keeps hours for scheduling and does its books elsewhere would
+  rightly call journal entries it never asked for a bug. Turning it back off is
+  refused **while an accrual is STANDING**, not once anything has ever posted:
+  refusing on history would make it a one-way door for anybody who tried it and
+  changed their mind.
+- **CONTRACTOR HOURS TO A BILL ARE NOT BUILT**, and are recorded as 6b rather
+  than pushed silently. A contractor is not an employee: their hours are a
+  payable to a vendor, not a wage, and expressing that needs a kind on
+  `time_workers`, a vendor link, and the bill machinery through a wider Layer 0
+  door than this one. It is a slice, not a corner of this one.
+- Verified: 20 new pure tests in `time-posting`, 11 db-backed in
+  `time-labor-posting`, 39 isolation, lint, `tsc` and the build green. `0315`
+  applied to dev AND prod, both at 187 tables with RLS clean.
+- **Driven on Hilltop Farm, end to end.** Turned the switch on, locked
+  Sep 6–12 and got `$99.12` — `6450` $60.00 Beef + $24.00 Unattributed, `6500`
+  $10.80 + $4.32, `2300` credit $99.12, debits and credits equal. **The P&L
+  split by enterprise then showed Beef carrying $60.00 of wages and $10.80 of
+  on-costs**, which is the whole reason slices 4–6 exist. Unlocked it: a
+  `reversal` entry posted for the same $99.12 and both accounts vanished from
+  the P&L. Re-locked: a second accrual posted on a fresh idempotency key.
 
 ### 2026-09-12 — Slice 5: what it costs (`claude/time-5-what-it-costs`)
 
@@ -647,9 +731,9 @@ FORCE RLS, a `--custom` policy migration and isolation coverage
 | --- | --- | --- | --- |
 | `time_workers` | **Built** | A person the business keeps hours for | Detail row on `parties` (kind `person`), the `crm_party_details` pattern. Unique on `(tenant_id, party_id)`; **partial** unique on `(tenant_id, clerk_user_id)` where not null. The PIN hash (slice 7), `entity_id` (slice 6), pay basis and exempt flag (slices 2 and 5) arrive with their readers |
 | `time_entries` | **Built** | The payable fact | Minutes, never decimal hours. Business day (`date`, string mode), `pay_type`, note, `entered_by_clerk_user_id`, `punch_id`, `source`, `amends_entry_id` (composite self-FK, NO ACTION), version. Composite FKs to `time_workers` (cascade) and `time_punches` (**SET NULL, column-list form**). Partial unique on `(tenant_id, punch_id)` — one entry per punch. CHECKs: minutes > 0, minutes ≤ 1440, `pay_type` and `source` each in their closed set. The target arrives in slice 4 |
-| `time_settings` | **Built** | One row per tenant, created lazily | `week_starts_on` (0–6), `rounding_minutes` (0, 5, 6, 10, 15, 30), `pay_frequency`, `period_anchor` and `overtime_ruleset`, all CHECKed, plus a CHECK that an anchor can exist only on a biweekly payroll. The ruleset is a SLUG naming a data file, never a set of thresholds. A missing row means the defaults, decided in the read rather than by a backfill |
+| `time_settings` | **Built** | One row per tenant, created lazily | `week_starts_on` (0–6), `rounding_minutes` (0, 5, 6, 10, 15, 30), `pay_frequency`, `period_anchor` and `overtime_ruleset`, all CHECKed, plus a CHECK that an anchor can exist only on a biweekly payroll. The ruleset is a SLUG naming a data file, never a set of thresholds. `posts_labor` (slice 6) decides whether locking a period writes a journal entry — FALSE by default, and refused going back to false while an accrual is standing. A missing row means the defaults, decided in the read rather than by a backfill |
 | `time_punches` | **Built** | Raw clock evidence | `timestamptz` in/out, who pressed each button, note, version. Composite FK to `time_workers`. Partial unique on `(tenant_id, worker_id) WHERE ended_at IS NULL` — one open punch, enforced by Postgres. CHECK `ended_at > started_at`. The device, the coordinates and the client-generated id for idempotent offline sync arrive in slice 7 with the screen that sends them |
-| `time_periods` | **Built** | The LOCK on a pay period | `starts_on`/`ends_on` stored (they must survive a change of pay frequency), `locked_at` + `locked_by`, CHECKed to arrive and leave together. A row exists once the period has been locked at least once; `locked_at is null` is open. No status column — there are two states and a timestamp says which, plus when |
+| `time_periods` | **Built** | The LOCK on a pay period, and what a labor accrual points at (`journal_entries.source_id`) | `starts_on`/`ends_on` stored (they must survive a change of pay frequency), `locked_at` + `locked_by`, CHECKed to arrive and leave together. A row exists once the period has been locked at least once; `locked_at is null` is open. No status column — there are two states and a timestamp says which, plus when |
 | `time_sheets` | **Built** | One worker's period, submitted then approved | A row exists once submitted; `approved_at is null` means waiting. The five totals plus `ruleset_slug` are the SNAPSHOT and are null until approval, CHECKed to arrive with it. Unique on `(tenant, worker, period_starts_on)`. Period dates stored, not referenced |
 | `time_entry_dimensions` | **Built** | What the hour was for | `entry_id` + denormalized `dimension_type` + `member_id`. Unique on `(tenant, entry, dimension_type)` so one member per kind; three-column FK to `dimension_members (tenant_id, dimension_type, id)` so the stated kind is the member's real one. Cascades from the entry; NO ACTION on the member, which is retired rather than deleted |
 | `time_rates` | **Built** | Effective-dated pay | `pay_rate_cents` (the wage, and the only input to gross), `bill_rate_cents` (nullable), `burden_percent` (0–200, a COST and never pay), `effective_on`. Unique on `(tenant, worker, effective_on)`. **The only owners-only table in the module**: its policy carries `app_current_tenant_role() = 'owner'` |
@@ -670,7 +754,8 @@ Built in slice 0:
   threshold), `overtime.ts` (**the evaluator**), `rulesets.ts` (federal,
   California, none, as data), `periods.ts` (pay-period arithmetic and the
   straddle rule), `pay.ts` (**the regular rate, the premiums and gross**),
-  `errors.ts` (`TimeError`, `roleMayWrite`,
+  `allocate.ts` (largest-remainder apportionment — what splits a week's pay
+  across the things it was spent on without losing a cent), `errors.ts` (`TimeError`, `roleMayWrite`,
   `roleMayManageWorkers`), `week.ts` (the weekday names and the strip's labels
   — the ARITHMETIC is `@/lib/timezone`'s)
 - `src/modules/time/read.ts`, `worker-ops.ts`, `entry-ops.ts`, `punch-ops.ts`,
@@ -679,14 +764,26 @@ Built in slice 0:
   write path calls, and `firstOpenDay`, which decides where a correction lands
 - `src/lib/dimensions.ts` — the SHARED dimension read, in Layer 0 because a
   second core module may not import accounting's
+- **`src/lib/labor-posting.ts`** — the matching WRITE, and the only place this
+  module reaches the ledger. Resolves the three payroll accounts and the default
+  entity, posts, reverses, and answers "is an accrual still standing"
+- `src/modules/time/posting-ops.ts` — a locked period turned into posting lines:
+  approved sheets only, the approved gross, split by dimension set
+- `src/modules/time/export-ops.ts` — the payroll CSV. The one place in Time
+  where minutes become decimal hours
 - `src/modules/time/attention/source.ts` — timesheets waiting to be approved,
   registered third in `src/lib/attention-sources/registry.ts`
 - `src/modules/time/components/sheet-controls.tsx` — submit, approve, lock
 - `src/modules/time/components/rate-controls.tsx` — set a rate, remove a rate,
   and the one place dollars in a box become cents in the database
+- `src/modules/time/components/export-controls.tsx` — the payroll download
 - `src/modules/time/actions.ts` — gate → Zod → `withTenant` → revalidate. Two
   gates: `gate()` for writing time, `ownerGate()` for changing who the workers
   are
+- `tests/time-labor-posting.test.ts` (11, DB-backed — the accrual, the balance,
+  the reversal and the CSV; listed in `tests/db-backed-files.ts`),
+- `tests/time-posting.test.ts` (20 — the apportionment, and that nothing is
+  lost),
 - `tests/time-overtime.test.ts` (34 — the evaluator and the periods),
   `tests/time-pay.test.ts` (22 — the regular rate, the weighted average and the
   ways of getting overtime pay wrong), `tests/time-core.test.ts` (49),
@@ -784,6 +881,19 @@ Written before the build so they are not rediscovered.
   the Documents module's owners-only folders use. Read it with
   `withTenant(..., { role: ctx.role })` and never with a role that did not come
   from `requireTenant()`.
+- **A REVERSAL IS NOT A `payroll_accrual` ROW.** `reverseEntry` writes
+  `source = 'reversal'` with no `source_id` at all, so any "has this period been
+  reversed" question answered by filtering on source and period is answered
+  WRONG, silently, forever. The only link back is `reverses_entry_id`. This cost
+  a debugging round in slice 6 and has a test of its own.
+- **Time may not import accounting.** `MODULE_SLUGS` binds this directory, and
+  it binds `import type` as well. The ledger write goes through
+  `src/lib/labor-posting.ts` and the dimension read through
+  `src/lib/dimensions.ts`; if a third thing is needed, it goes to Layer 0 too —
+  never by widening the eslint rule.
+- **Only approved hours are a liability.** Nothing else in this module may post,
+  and an unapproved sheet in a locked period is REPORTED rather than included or
+  dropped.
 - **`hours × 1.5 × rate` is the wrong formula and it looks right.** It agrees
   with the correct one for everybody on a single rate, which is exactly why it
   survives everywhere. Overtime is 0.5 × the REGULAR RATE — a weighted average
@@ -814,6 +924,20 @@ Written before the build so they are not rediscovered.
 - **Rates are whole cents per hour**, so $15.375 is not expressible. Right for a
   wage, wrong for a blended or piece rate — revisit when slice 9's piece rate
   arrives.
+- **Contractor hours still become wages — slice 6b.** A subcontractor paid by
+  the hour is a payable to a vendor, not a payroll accrual. It needs a kind on
+  `time_workers`, a vendor link on it, and a wider Layer 0 door (bills, not just
+  entries). Named and unbuilt, deliberately.
+- **Wages post to the DEFAULT entity only.** One company employs everybody, as
+  far as Time is concerned. A tenant whose second company has its own payroll
+  needs a per-worker entity, which is a real change and nobody has asked.
+- **Nothing relieves `2300` from inside Time.** The payroll provider's run is
+  entered as a bill or a bank transaction the ordinary way, which works but is
+  unguided — there is no "match this run to these accruals" screen the way
+  `2060` has one in production/inventory. The next thing to want.
+- **Burden uses the rate in force on the period's LAST DAY.** A business that
+  changed its on-cost percentage mid-period gets the later one. Defensible — it
+  is the current policy, and burden is an estimate — but it is a choice.
 - **No salary, bonus, shift differential or on-call pay.** Non-discretionary
   bonuses and differentials belong IN the regular rate, which is why
   `payForWeek` takes earnings rather than one rate: they can be added without

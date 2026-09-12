@@ -18,6 +18,7 @@ import { loadSiteDrafts } from "@/lib/sites/read";
 import { findKit } from "@/modules/marketing/kit-ops";
 import { listSites } from "@/modules/marketing/site-ops";
 import { BrandKitPanel } from "@/modules/marketing/components/brand-kit-panel";
+import { DeleteSiteButton } from "@/modules/marketing/components/delete-site-controls";
 import {
   RemoveOwnLookButton,
   StartOwnLookButton,
@@ -482,6 +483,33 @@ export default async function WebsitePage({
               </Panel>
             )}
           </section>
+
+          {/* Removing it. Last on the screen and owner-only, because it is the
+              one control here that cannot be undone. The counts come from what
+              the screen already loaded, so the confirm can say what goes
+              without a second read. */}
+          {canWrite && (
+            <section className="space-y-2">
+              <h2 className="font-heading text-lg font-semibold tracking-heading">
+                Delete this website
+              </h2>
+              <Panel className="flex flex-wrap items-center justify-between gap-3 p-5">
+                <div className="text-sm text-muted-foreground">
+                  Its pages, photos and messages go with it, and it cannot be
+                  undone. Your customers and follow-ups are kept.
+                </div>
+                <DeleteSiteButton
+                  siteId={drafts.site.id}
+                  name={drafts.site.title || drafts.site.slug}
+                  counts={{
+                    pages: drafts.pages.length,
+                    photos: drafts.images.length,
+                    enquiries: enquiries.length,
+                  }}
+                />
+              </Panel>
+            </section>
+          )}
         </>
       )}
     </div>

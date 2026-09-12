@@ -56,6 +56,49 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-11 — A website can be removed (`claude/a-website-can-be-removed`)
+
+Lifting the one-site limit made "add a website" reachable and left no way to
+undo it — the founder's first mistaken site would have been permanent. No
+migration: every child table already cascades on `sites`.
+
+- **Two refusals, and they are the design.** `deleteSite` refuses a PUBLISHED
+  site ("unpublish it first") and one with a CONNECTED DOMAIN ("remove the
+  domain first"). Both make the destructive act the second thing that happens,
+  never the first. The domain refusal is also correctness: the domain has to
+  come off Vercel as well as out of the table, and `removeDomainAction` is the
+  tested path that does both — cascading the row here would leave the project
+  holding a domain pointing at a site that is gone, which is the half of a
+  broken delete nobody can see from inside the app.
+- **THE BLOBS ARE THE ONE THING THE DATABASE CANNOT CLEAN UP.** `site_images`
+  and the site's own logo are rows pointing at files; a cascade deletes the
+  rows and leaves the files. `deleteSite` returns the pathnames and the action
+  discards them AFTER the commit — before it, a rollback would have destroyed
+  files for a site that still exists. A discard that fails is swallowed: the
+  row is already gone, so throwing would report a failure that did not happen.
+- **The confirm counts what goes** — pages, photos, messages — because "are you
+  sure?" asks a question the reader cannot answer without going to look it up.
+  It also says what STAYS, which is the half people get wrong: every enquiry
+  already became a customer in CRM and a follow-up in Work, and the follow-up's
+  notes carry the message itself (`enquiryNotes`). What goes is the enquiry ROW.
+- **Neither refusal is drawn as a disabled button.** The reason a delete is
+  unavailable is a sentence worth reading, and a disabled control with a
+  tooltip is how that sentence goes unread.
+- **`SITE_EXISTS` removed.** Nothing has thrown it since a business could have
+  several sites, and its message — "This business already has a website" —
+  had become a lie.
+- **Tests**: four cases in `tests/isolation/sites.test.ts` — the published
+  refusal followed by a successful delete once unpublished, the domain refusal
+  followed by the same, the full cascade with the blob pathnames handed back
+  (checked under `withSystem`, so RLS is not the reason a row looks gone), and
+  another tenant's site refused and still present afterwards. 45 passing.
+- **NOT DRIVEN IN THE UI.** The local dev server's Clerk session had expired
+  and only the founder can sign it back in; production runs the pre-merge code
+  and has one site nobody wants deleted. The ops are proven against a real
+  database; the button and its confirm are not. Given that the two defects
+  before this one were both UI reachability, that gap is worth closing before
+  anyone relies on it.
+
 ### 2026-09-11 — The site wears its own look everywhere (`claude/the-site-wears-its-own-look`)
 
 **Found by driving it on production**, in the Yosher App workspace, which no

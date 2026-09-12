@@ -32,10 +32,12 @@ import { fail, gate, type ActionResult } from "./gate";
 import { industryLabel } from "./logo-generate";
 import { siteBriefFor, writeSite } from "./site-generate";
 import { ensureStarterPictures } from "./starter-pictures";
+import { discardPhotoBlob } from "./photo-ingest";
 import { BUSINESS_KIT, saveKitLook } from "./kit-ops";
 import {
   changeSiteSlug,
   createSite,
+  deleteSite,
   findSiteById,
   publishSite,
   replaceDrafts,
@@ -498,6 +500,58 @@ export async function unpublishSiteAction(input: unknown): Promise<ActionResult>
       },
       { role: ctx.role },
     );
+    revalidateSite();
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * Remove a website altogether.
+ *
+ * The refusals — published, or a domain still pointing here — live in
+ * `deleteSite` beside the delete they guard, so nothing can reach the
+ * destructive statement without passing them.
+ *
+ * THE BLOBS GO AFTER THE COMMIT, never inside the transaction. A file
+ * discarded before a rollback is a file destroyed for a site that still
+ * exists; a file discarded after a commit is, at worst, one that outlives its
+ * row for a moment. The same ordering `deleteSitePhotoAction` uses, and the
+ * house rule that a transaction never waits on the network. A discard that
+ * fails leaves an orphan file and is NOT allowed to fail the delete: the row
+ * is already gone and the site is already removed from the screen, so
+ * throwing here would report a failure that did not happen.
+ */
+export async function deleteSiteAction(input: unknown): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const ref = siteRef.safeParse(input);
+    if (!ref.success) return { error: "Which website?" };
+    const { siteId } = ref.data;
+    const removal = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const site = await findSiteById(tx, ctx.tenantId, siteId);
+        if (!site) throw new MarketingError("SITE_MISSING", "no site");
+        const result = await deleteSite(tx, ctx, site.id);
+        await logAuditInTx(tx, {
+          action: "marketing.site.deleted",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "site",
+          targetId: site.id,
+          // What went, so the row is worth reading a year later. Identifiers
+          // and counts only — never the words that were on the pages.
+          meta: { slug: site.slug, title: site.title, ...result.counts },
+        });
+        return result;
+      },
+      { role: ctx.role },
+    );
+    for (const pathname of removal.blobs) {
+      await discardPhotoBlob(pathname).catch(() => {});
+    }
     revalidateSite();
     return { ok: true };
   } catch (err) {

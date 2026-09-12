@@ -16,8 +16,9 @@ export type MarketingErrorCode =
   | "SPEC_INVALID"
   | "SLUG_TAKEN"
   | "SLUG_INVALID"
-  | "SITE_EXISTS"
   | "SITE_MISSING"
+  | "SITE_PUBLISHED"
+  | "SITE_HAS_DOMAIN"
   | "SITE_EMPTY"
   | "PAGE_MISSING"
   | "PAGE_PATH_TAKEN"
@@ -77,10 +78,12 @@ export function friendlyMessage(err: unknown): string {
         return "That address is already taken. Choose another.";
       case "SLUG_INVALID":
         return "Use letters, numbers and hyphens for the address.";
-      case "SITE_EXISTS":
-        return "This business already has a website.";
       case "SITE_MISSING":
         return "There is no website yet. Build one first.";
+      case "SITE_PUBLISHED":
+        return "This website is on the internet. Unpublish it first, then it can be deleted.";
+      case "SITE_HAS_DOMAIN":
+        return "A domain still points at this website. Remove the domain first, so it stops resolving here.";
       case "SITE_EMPTY":
         return "There are no pages to publish yet.";
       case "PAGE_MISSING":

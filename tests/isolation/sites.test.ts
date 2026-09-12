@@ -2,6 +2,7 @@ import "dotenv/config";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../../src/db";
+import { deleteSite, findSiteById } from "../../src/modules/marketing/site-ops";
 import { d } from "./_shared";
 
 /**
@@ -931,6 +932,127 @@ d("site_images (RLS)", () => {
     );
     expect(left).toBeUndefined();
     await withSystem((tx) => tx.delete(schema.tenants).where(eq(schema.tenants.id, extra.id)));
+  });
+
+
+  /**
+   * REMOVING A WEBSITE (ADR 0045). The refusals matter more than the delete:
+   * a published site and a connected domain are each a reason the destructive
+   * statement must not be the first thing that happens.
+   */
+  it("refuses a published site, and deletes it once it is off the internet", async () => {
+    const ctx = { tenantId: tenantA, userId: OWNER, role: "owner" as const };
+    const [site] = await asOwner((tx) =>
+      tx
+        .insert(schema.sites)
+        .values({ tenantId: tenantA, slug: `${STAMP}-del`, status: "published" })
+        .returning(),
+    );
+    await asOwner((tx) =>
+      tx.insert(schema.sitePages).values({
+        tenantId: tenantA,
+        siteId: site.id,
+        path: "/",
+        title: "Home",
+      }),
+    );
+
+    await expect(asOwner((tx) => deleteSite(tx, ctx, site.id))).rejects.toThrow();
+    // Still there: a refused delete deletes nothing.
+    expect(await asOwner((tx) => findSiteById(tx, tenantA, site.id))).not.toBeNull();
+
+    await asOwner((tx) =>
+      tx.update(schema.sites).set({ status: "draft" }).where(eq(schema.sites.id, site.id)),
+    );
+    const removal = await asOwner((tx) => deleteSite(tx, ctx, site.id));
+    expect(removal.counts.pages).toBe(1);
+    expect(await asOwner((tx) => findSiteById(tx, tenantA, site.id))).toBeNull();
+  });
+
+  it("refuses while a domain still points at it", async () => {
+    const ctx = { tenantId: tenantA, userId: OWNER, role: "owner" as const };
+    const [site] = await asOwner((tx) =>
+      tx.insert(schema.sites).values({ tenantId: tenantA, slug: `${STAMP}-dom` }).returning(),
+    );
+    const [domain] = await asOwner((tx) =>
+      tx
+        .insert(schema.siteDomains)
+        .values({ tenantId: tenantA, siteId: site.id, domain: `${STAMP}.example.com` })
+        .returning(),
+    );
+    // The domain has to come off Vercel too, and `removeDomainAction` is the
+    // path that does both. Cascading it here would leave the project holding
+    // a domain pointing at a site that is gone.
+    await expect(asOwner((tx) => deleteSite(tx, ctx, site.id))).rejects.toThrow();
+
+    await asOwner((tx) => tx.delete(schema.siteDomains).where(eq(schema.siteDomains.id, domain.id)));
+    await asOwner((tx) => deleteSite(tx, ctx, site.id));
+    expect(await asOwner((tx) => findSiteById(tx, tenantA, site.id))).toBeNull();
+  });
+
+  it("takes its pages, photos, messages and its own look, and hands back the blobs", async () => {
+    const ctx = { tenantId: tenantA, userId: OWNER, role: "owner" as const };
+    const [site] = await asOwner((tx) =>
+      tx.insert(schema.sites).values({ tenantId: tenantA, slug: `${STAMP}-all` }).returning(),
+    );
+    await asOwner((tx) =>
+      tx.insert(schema.sitePages).values({ tenantId: tenantA, siteId: site.id, path: "/", title: "Home" }),
+    );
+    // NOT `photo`: that is the row-builder helper this line calls, and
+    // shadowing it makes the initializer reference itself.
+    const [image] = await asOwner((tx) =>
+      tx.insert(schema.siteImages).values(photo(tenantA, site.id, "gone")).returning(),
+    );
+    const [kit] = await asOwner((tx) =>
+      tx
+        .insert(schema.brandKits)
+        .values({
+          tenantId: tenantA,
+          siteId: site.id,
+          logoPathname: `brand/${STAMP}/logos/gone.png`,
+          logoMimeType: "image/png",
+          logoWidth: 10,
+          logoHeight: 10,
+          logoBytes: 100,
+        })
+        .returning(),
+    );
+
+    const removal = await asOwner((tx) => deleteSite(tx, ctx, site.id));
+
+    // THE BLOBS ARE THE ONE THING THE DATABASE CANNOT CLEAN UP: the rows
+    // cascade and the files do not, so they come back for the caller to
+    // discard after commit.
+    expect(removal.blobs).toContain(image.pathname);
+    expect(removal.blobs).toContain(`brand/${STAMP}/logos/gone.png`);
+    expect(removal.counts).toEqual({ pages: 1, enquiries: 0, photos: 1 });
+
+    // Everything that hung off it cascaded, checked under `withSystem` so
+    // RLS is not the reason a row looks gone.
+    expect(
+      await withSystem((tx) =>
+        tx.select().from(schema.sitePages).where(eq(schema.sitePages.siteId, site.id)),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await withSystem((tx) =>
+        tx.select().from(schema.siteImages).where(eq(schema.siteImages.id, image.id)),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await withSystem((tx) =>
+        tx.select().from(schema.brandKits).where(eq(schema.brandKits.id, kit.id)),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("another tenant's site cannot be deleted, and is still there afterwards", async () => {
+    const ctx = { tenantId: tenantA, userId: OWNER, role: "owner" as const };
+    await expect(asOwner((tx) => deleteSite(tx, ctx, siteB))).rejects.toThrow();
+    const theirs = await withSystem((tx) =>
+      tx.query.sites.findFirst({ where: eq(schema.sites.id, siteB) }),
+    );
+    expect(theirs).toBeTruthy();
   });
 
   it("default-deny: no context sees no photos", async () => {

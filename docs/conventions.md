@@ -360,3 +360,46 @@ computes `canDelete` per row and sends a boolean.
 - [ ] Guide updated for any screen that changed, or written from `_TEMPLATE.md` for a new one ([docs/help/](help/))
 - [ ] Security checklist for the surface you touched ([security.md §4](security.md))
 - [ ] No industry vocabulary added to Layer 1
+
+---
+
+## 11. Working in parallel
+
+Several sessions run against this repo at once.
+
+- **One worktree per session; never the primary checkout.** A session working
+  in `Documents/Superapp` switches the branch out from under whatever else is
+  running there — the failure is not a merge conflict but a clobbering.
+  `.claude/worktrees/<name>` is the right home: it sits inside the repo, so
+  `node_modules` resolves from the parent checkout and no `npm ci` is needed;
+  its path is short enough for Turbopack on Windows, which a session
+  scratchpad path is not; and it is already in `.git/info/exclude`.
+- **Rebase onto `main` before pushing, never merge.** Branches here are short
+  and single-purpose, so a conflict is cheaper resolved once in your own
+  worktree than in the PR.
+- **`git worktree remove` it when the PR merges.** A stale worktree holds a
+  gigabyte of `node_modules` and hides the live ones in `git worktree list`.
+
+### The files that would otherwise conflict on every PR
+
+`tests/db-backed-files.ts` and `docs/decisions/README.md` are marked
+`merge=union` in `.gitattributes`: git keeps both sides' lines instead of
+raising a conflict. That is safe only because a line in those two lists does
+not depend on its neighbours, and `tests/db-backed-files.test.ts` recomputes
+its list from file contents regardless. **Nothing else belongs on that list** —
+a union merge of two module build-log entries interleaves them into nonsense.
+Resolve a build log by rebasing and re-adding your entry at the top.
+
+### A number is not a merge problem
+
+Union merge does not fix a collision that merges cleanly and is still wrong:
+two sessions that both take migration `0311`, or both take ADR `0048`, get two
+of them.
+
+- **One session holds a migration at a time.**
+  [ADR 0014](decisions/0014-migrations-are-applied-before-the-merge.md) already
+  forces this — the migration is applied to the dev branch *and* production
+  before the merge, which is serial by construction. A second session that
+  needs one waits, or ships without.
+- **Take the next ADR number as you write the file**, and re-check
+  `docs/decisions/` immediately before pushing.

@@ -58,6 +58,7 @@ import {
   Save,
   Search,
   MessageSquarePlus,
+  Mic,
   Send,
   Share2,
   Smartphone,
@@ -155,6 +156,8 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   send: Send,
   // The advisor's New thread (livestock, slice 11).
   "message-square-plus": MessageSquarePlus,
+  // "Say it" on the tell box (voice slice 2, ADR 0049).
+  mic: Mic,
   share: Share2,
   smartphone: Smartphone,
   sparkles: Sparkles,

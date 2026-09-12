@@ -8,7 +8,9 @@
 import {
   bigint,
   boolean,
+  check,
   date,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -371,6 +373,174 @@ export const pushDevices = pgTable(
   ],
 );
 export type PushDevice = typeof pushDevices.$inferSelect;
+
+/**
+ * THE GRANT A PHONE HOLDS — the credential a Siri intent or an Android
+ * assistant action presents when it writes with no session behind it: *"Hey
+ * Siri, tell Yosher three chicks died in pen two."* One row per (phone,
+ * business). Read [ADR 0048](../../../docs/decisions/0048-a-phone-holds-a-grant-that-may-only-tell.md)
+ * before changing anything here; four things shape this table.
+ *
+ *  1. **IT IS BOUND TO ONE BUSINESS.** A spoken sentence has no organisation
+ *     picker, so the credential carries the answer. Somebody in two
+ *     businesses holds two grants on one phone, and the app mints for the
+ *     one they are standing in. `schedule_feed_tokens` is scoped this way for
+ *     the same reason.
+ *
+ *  2. **IT WRITES.** The feed token next door only reads, and stores a bare
+ *     SHA-256 on the reasoning that a stolen digest is worth nothing without
+ *     the URL. This one can move stock and punch a clock, so it is stored
+ *     under `hashToken()` — HMAC keyed by `SHARE_SECRET` — and a
+ *     database-only compromise (a backup, a branch copy, a logged query)
+ *     yields nothing usable. A deliberate step up from the precedent, not a
+ *     copy of it.
+ *
+ *  3. **NOBODY WILL EVER REVOKE A PHONE.** The founder's words, and the
+ *     design follows from them rather than pretending otherwise.
+ *     `expires_at` is `GRANT_DAYS` out and slid forward on every use, so a
+ *     phone that goes quiet dies on its own. That covers the phone dropped
+ *     in the slurry pit and NOT the person who left — sliding expiry rewards
+ *     use, and somebody who quit and keeps talking to it never expires. So
+ *     `redeem.ts` INNER JOINs `memberships`, and taking somebody out of the
+ *     workspace kills their phone on its next sentence. Revoking is never a
+ *     separate act anybody has to remember.
+ *
+ *  4. **`scope` IS AN ENUM OF ONE, ON PURPOSE.** A phone may TELL and
+ *     nothing else: no money, no owner-only anything, no reads beyond the
+ *     readback of what it just wrote. A second value is a decision somebody
+ *     takes deliberately in an ADR, not a boolean that drifts.
+ *
+ * RLS (`drizzle/0320`): superadmin all; otherwise YOUR OWN ROWS IN YOUR OWN
+ * TENANT — `app_current_tenant()` AND `app_current_user()`, the posture
+ * `push_devices` (0262) takes, because a grant is a credential and no tier of
+ * membership reaches somebody else's. The redeem path opens `withSystem` for
+ * exactly one query and then reopens as that person, the shape
+ * `feed-serve.ts` established.
+ */
+export const deviceGrantScope = pgEnum("device_grant_scope", ["tell"]);
+
+export const deviceGrants = pgTable(
+  "device_grants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Whose phone. Clerk's id, as everywhere identity is mirrored. */
+    clerkUserId: text("clerk_user_id").notNull(),
+    /**
+     * `hashToken()` of the token, hex. UNIQUE GLOBALLY rather than per
+     * tenant: the endpoint has no tenant context until this row resolves, so
+     * the hash is the entire lookup key and a collision across tenants would
+     * be a cross-tenant WRITE. `schedule_feed_tokens` reasons the same way
+     * about a cross-tenant read; this is the same argument one degree more
+     * serious.
+     */
+    tokenHash: text("token_hash").notNull(),
+    scope: deviceGrantScope("scope").notNull().default("tell"),
+    platform: pushPlatform("platform").notNull(),
+    /** "Dan's iPhone" — so the list somebody revokes from is readable. */
+    label: text("label").notNull().default(""),
+    appVersion: text("app_version").notNull().default(""),
+    /** Slid forward on every use. See point 3 above. */
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    /** "by hand", "replaced" — for the list, never a reason a stranger wrote. */
+    revokedReason: text("revoked_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("device_grants_hash_idx").on(t.tokenHash),
+    uniqueIndex("device_grants_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("device_grants_owner_idx").on(t.tenantId, t.clerkUserId),
+    check("device_grants_label_length", sql`length(${t.label}) <= 60`),
+  ],
+);
+export type DeviceGrant = typeof deviceGrants.$inferSelect;
+
+export const deviceUseOutcome = pgEnum("device_use_outcome", [
+  "proposed",
+  "recorded",
+  "refused",
+]);
+
+/**
+ * EVERY SENTENCE A PHONE SENT, AND WHAT CAME OF IT. This is a table rather
+ * than two columns on the grant because it earns its place twice:
+ *
+ *  1. **IDEMPOTENCY.** A barn has no signal, so the phone queues sentences
+ *     and sends them when it reconnects — and a retry that is not recognised
+ *     punches the clock twice. `(grant_id, idempotency_key)` is unique, and a
+ *     replay is answered from the first attempt instead of acting again.
+ *
+ *  2. **THE RATE LIMIT.** Every sentence is a model call, so a stolen phone
+ *     is a bill as well as a write. Counting rows in a window is durable
+ *     across serverless instances in a way the box's in-process cooldown
+ *     (`tell-sources/model.ts`) is not, and it has to be: the phone in a
+ *     pocket has no disabled button to stop it.
+ *
+ * **NOTHING HERE HOLDS WHAT THE PERSON SAID.** The sentence can name a
+ * customer, a price or an animal, and this row long outlives the proposal —
+ * so what is kept is the action slugs it turned into and nothing else, the
+ * rule `audit_log` follows (security.md S9). The sentence itself lives on the
+ * in-memory proposal for `PROPOSAL_TTL_MS` and is then gone.
+ *
+ * `claimed_at` IS THE PHONE'S OWN CLOCK AND IS NOT BELIEVED. A device clock
+ * is user-settable, and for a clock-in the difference is wages, so
+ * `redeem.ts` clamps it to the server's within `SPOKEN_AT_TOLERANCE_MS` and
+ * stores both. A phone whose owner set the date back is visible here rather
+ * than silently trusted.
+ */
+export const deviceGrantUses = pgTable(
+  "device_grant_uses",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    grantId: uuid("grant_id").notNull(),
+    /**
+     * DENORMALIZED FROM THE GRANT, so this table's policy can be own-rows in
+     * the same shape as `device_grants`' rather than an EXISTS subquery into
+     * a table that has RLS of its own — the kind of policy that is correct
+     * the day it is written and surprising the day somebody changes the
+     * other table. Safe to copy because a grant's owner never changes: a
+     * phone that changes hands is a new grant, not an edited one.
+     */
+    clerkUserId: text("clerk_user_id").notNull(),
+    /** The phone's own id for this sentence. Opaque to us. */
+    idempotencyKey: text("idempotency_key").notNull(),
+    outcome: deviceUseOutcome("outcome").notNull(),
+    /** Slugs only — "livestock.move". Never a value, never a name. */
+    actionSlugs: jsonb("action_slugs").notNull().default([]),
+    /** What the phone said the time was. Not believed; see the comment. */
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    /** What the server used after clamping. This is the one that counts. */
+    effectiveAt: timestamp("effective_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // THE idempotency guarantee. Two retries of one sentence serialize here
+    // rather than both recording, the way the digest log stops a double send.
+    uniqueIndex("device_grant_uses_key_idx").on(t.grantId, t.idempotencyKey),
+    index("device_grant_uses_window_idx").on(t.grantId, t.createdAt),
+    foreignKey({
+      name: "device_grant_uses_grant_fk",
+      columns: [t.tenantId, t.grantId],
+      foreignColumns: [deviceGrants.tenantId, deviceGrants.id],
+    }).onDelete("cascade"),
+    check(
+      "device_grant_uses_key_length",
+      sql`length(${t.idempotencyKey}) between 8 and 200`,
+    ),
+  ],
+);
+export type DeviceGrantUse = typeof deviceGrantUses.$inferSelect;
 
 export const notificationDigestLog = pgTable(
   "notification_digest_log",

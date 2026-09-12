@@ -54,7 +54,7 @@ d("telling it what happened", () => {
     withTenant(tenantId, fn, { role: "owner", userId: OWNER });
 
   const propose = (sentence: string, entries: Array<{ action: string; fields: Record<string, unknown> }>) => {
-    resetTellCooldown(tenantId);
+    resetTellCooldown(tenantId, OWNER);
     return proposeTold(ctx(), sentence, model(entries));
   };
   const failing = async (work: () => Promise<unknown>): Promise<string> => {

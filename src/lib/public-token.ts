@@ -24,7 +24,7 @@ const TOKEN_BYTES = 32; // 256 bits, base64url -> 43 chars
 const SCRYPT_KEYLEN = 32;
 const SALT_BYTES = 16;
 
-type Purpose = "token" | "ip" | "session";
+type Purpose = "token" | "ip" | "session" | "proposal";
 
 function rootSecret(): string {
   const secret = process.env.SHARE_SECRET;
@@ -157,5 +157,62 @@ export function verifySession(
     return parsed.shareId === shareId && parsed.exp > now;
   } catch {
     return false;
+  }
+}
+
+/* ---- short-lived signed payloads -------------------------------------- */
+
+/**
+ * A blob the server produced, handed to a client, and handed back unchanged.
+ *
+ * FIRST USE: the device tell endpoint's proposal. A phone says a sentence, the
+ * server answers with cards and a readback, and the phone sends the cards back
+ * when the person says yes. Signing them means NOTHING HAS TO BE STORED
+ * BETWEEN THE TWO CALLS — no proposals table, no sweep to clean it, and no
+ * dependence on the confirm landing on the same serverless instance as the
+ * propose, which an in-process map would silently get wrong.
+ *
+ * The payload carries its own `exp`, so the lifetime travels with the blob
+ * rather than living in a column somebody could forget to check.
+ *
+ * A DIFFERENT KEY FROM `signSession`, via the purpose label, so a session
+ * cookie can never be presented as a proposal or the other way round.
+ */
+export function signProposal<T extends { exp: number }>(payload: T): string {
+  const body = Buffer.from(JSON.stringify(payload), "utf8").toString(
+    "base64url",
+  );
+  const mac = createHmac("sha256", key("proposal"))
+    .update(body)
+    .digest("base64url");
+  return `${body}.${mac}`;
+}
+
+/**
+ * The inverse. Returns null for anything that is not a payload this server
+ * signed and that has not yet expired — a forgery, a truncation, an edited
+ * card, a replay from an hour ago. The caller gets one answer for all of
+ * them, because telling them apart would say which part they got right.
+ */
+export function readProposal<T extends { exp: number }>(
+  signed: string | undefined,
+  now = Date.now(),
+): T | null {
+  if (!signed) return null;
+  const [body, mac] = signed.split(".");
+  if (!body || !mac) return null;
+  const expected = createHmac("sha256", key("proposal"))
+    .update(body)
+    .digest("base64url");
+  const a = Buffer.from(mac);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(body, "base64url").toString("utf8"),
+    ) as T;
+    return parsed.exp > now ? parsed : null;
+  } catch {
+    return null;
   }
 }

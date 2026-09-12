@@ -131,7 +131,9 @@ export async function proposeTold(
   });
   if (loaded.length === 0) throw new TellError("NOTHING_ENABLED", "no sources");
 
-  if (!claimCooldown(ctx.tenantId)) throw new TellError("COOLDOWN", "within the window");
+  if (!claimCooldown(ctx.tenantId, ctx.userId)) {
+    throw new TellError("COOLDOWN", "within the window");
+  }
 
   const actions = loaded.map((l) => l.action);
   const raw = await model({ sentence: said, actions, today: ctx.today });

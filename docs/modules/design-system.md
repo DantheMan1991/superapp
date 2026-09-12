@@ -21,6 +21,44 @@ tokens and gets its own pass later.
 
 ## Build log
 
+### 2026-09-12 — Time wears the design system (`claude/time-wears-the-design-system`)
+
+A module built over three slices without anybody checking it against this file.
+The founder spotted it on sight — *"it doesn't look very polished"* — and the
+audit was worse than the impression: every rule in "Rules that are easy to get
+wrong" had been broken exactly once.
+
+| Rule | What Time did |
+| --- | --- |
+| A panel is `bg-card shadow-elevation-1`, never a border | 11 × `rounded-lg border` |
+| `--divider` inside a container, `--border` for its edge | 4 × bare `divide-y` |
+| Three text tiers, and they are ORDERED | 37 × `text-muted-foreground`, 0 × `text-subtle-foreground` |
+| Every `/dashboard/m/<slug>` needs `--accent-<slug>` in three blocks | `--accent-time` did not exist |
+| `--warning` is a FILL; draw with its dark twin | double time and the long-punch alarm drawn in `--destructive` |
+
+- **`--accent-time: oklch(0.52 0.14 335)`**, added to all three blocks. Hue 335
+  is the widest gap left on a wheel that now carries fifteen modules — its
+  nearest neighbours are marketing (320) and livestock (350), 15° either side.
+  Lightness and chroma are copied from livestock's measured values and only the
+  hue moved, which keeps it inside an envelope that was already checked rather
+  than asserting a fresh measurement.
+- **Nine `Panel`s** replace the hand-rolled boxes. The week strip and the pay
+  period strip stopped being boxes at all: a pair of navigation links is a
+  control row, which is what `Pager` already models.
+- **Twelve `text-subtle-foreground`** where there had been nothing but the
+  second tier — counts, timestamps, the `clock` marker, the ruleset summary.
+  With everything at one weight nothing receded, which is most of why the
+  screens read flat.
+- **The long-punch alarm is a status chip** (`bg-warning/10
+  text-warning-foreground`), not red text. `--destructive` means *this went
+  wrong*; a clock left running is a thing to notice. Double time is a figure to
+  read and takes the same dark twin.
+- **Nothing about the behaviour changed**, which is the point: this is the
+  sweep that should have happened in slice 0, and the reason to record it is
+  that three slices went by without it. **A new module is not done until it has
+  been read against this file** — the primitives table and the token rules are
+  both here, and neither was consulted.
+
 ### 2026-09-07 — Every long picker is a Combobox (`claude/type-ahead-pickers`)
 
 The five pickers the 2026-09-06 entry named as "next" made the swap: the

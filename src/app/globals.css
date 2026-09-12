@@ -205,6 +205,7 @@
   --accent-email: oklch(0.52 0.14 245);
   --accent-scheduling: oklch(0.52 0.1 200);
   --accent-work: oklch(0.53 0.16 35);
+  --accent-time: oklch(0.52 0.14 335);
   /*
    * Marketing took 320 from `hello` on 2026-09-04: the stub module certifies
    * the shell and is never switched on for a client, so it is the one hue in
@@ -306,6 +307,7 @@
   --accent-email: oklch(0.7 0.13 245);
   --accent-scheduling: oklch(0.72 0.1 200);
   --accent-work: oklch(0.72 0.15 35);
+  --accent-time: oklch(0.74 0.14 335);
   --accent-marketing: oklch(0.72 0.13 320);
   --accent-hello: oklch(0.8 0.12 95);
   /* The packs, lifted the same way. Same hues as `:root`, higher L. */
@@ -345,6 +347,7 @@
   --accent-email: oklch(0.7 0.13 245);
   --accent-scheduling: oklch(0.72 0.1 200);
   --accent-work: oklch(0.72 0.15 35);
+  --accent-time: oklch(0.74 0.14 335);
   --accent-hello: oklch(0.72 0.13 320);
   /* The packs. This block is the one that gets forgotten — the rail is dark in
      BOTH themes, so a pack missing here inherits its `:root` value and goes

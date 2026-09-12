@@ -3,6 +3,7 @@ import { Clock } from "lucide-react";
 import { withTenant } from "@/db";
 import { EmptyState } from "@/components/app/empty-state";
 import { PageHeader } from "@/components/app/page-header";
+import { Panel } from "@/components/app/panel";
 import { Button } from "@/components/ui/button";
 import type { TenantContext } from "@/lib/auth";
 import { listAssignableMembers, memberLabel } from "@/lib/team";
@@ -245,21 +246,21 @@ export async function TimeModule({
       {/* ABOVE THE WEEK, not inside it: a running clock belongs to no week yet,
           and it is the thing somebody opening this page most needs to see. */}
       {clocks.length > 0 && (
-        <div className="rounded-lg border">
-          <div className="flex items-center justify-between gap-4 border-b px-3 py-2">
-            <h2 className="text-sm font-medium">
+        <Panel>
+          <div className="flex items-center justify-between gap-4 border-b border-divider px-4 py-2.5">
+            <h2 className="text-sm font-medium tracking-heading">
               On the clock now
-              <span className="ml-2 text-xs font-normal text-muted-foreground">
+              <span className="ml-2 text-xs font-normal text-subtle-foreground">
                 {clocks.length === 1 ? "1 person" : `${clocks.length} people`}
               </span>
             </h2>
             {roundingMinutes > 0 && (
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-subtle-foreground">
                 Rounded to {roundingMinutes} minutes when stopped
               </span>
             )}
           </div>
-          <ul className="divide-y">
+          <ul className="divide-y divide-divider">
             {clocks.map((clock) => (
               <RunningClockRow
                 key={clock.id}
@@ -269,20 +270,20 @@ export async function TimeModule({
               />
             ))}
           </ul>
-        </div>
+        </Panel>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Button asChild variant="ghost" size="sm">
             <Link href={`/dashboard/m/time?week=${addDays(weekStart, -7)}`}>
               ← Previous
             </Link>
           </Button>
-          <span className="text-sm font-medium">
+          <span className="text-sm font-medium tracking-heading">
             {weekLabel(weekStart)}
             {isThisWeek && (
-              <span className="ml-2 text-xs text-muted-foreground">
+              <span className="ml-2 text-xs font-normal text-subtle-foreground">
                 This week
               </span>
             )}
@@ -330,14 +331,16 @@ export async function TimeModule({
       ) : (
         <div className="space-y-4">
           {(perWorker.length > 1 || perWorker.some((w) => hasPremium(w.buckets))) && (
-            <div className="rounded-lg border p-3">
-              <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="text-sm font-medium">Worked this week</h2>
-                <span className="text-xs text-muted-foreground">
+            <Panel className="p-4">
+              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="text-sm font-medium tracking-heading">
+                  Worked this week
+                </h2>
+                <span className="max-w-md text-xs text-subtle-foreground">
                   {ruleset.summary}
                 </span>
               </div>
-              <ul className="grid gap-1">
+              <ul className="grid gap-1.5">
                 {perWorker.map((w) => (
                   <li
                     key={w.name}
@@ -352,22 +355,26 @@ export async function TimeModule({
                         {formatDuration(w.buckets.overtimeMinutes)} overtime
                       </span>
                     )}
+                    {/* The warning pair's DARK twin, not `--destructive`.
+                        Double time is a figure to read, not something that went
+                        wrong — and `--warning` itself is a fill at 2.18:1 and
+                        must never be drawn with. */}
                     {w.buckets.doubleTimeMinutes > 0 && (
-                      <span className="tabular-nums text-destructive">
+                      <span className="tabular-nums text-warning-foreground">
                         {formatDuration(w.buckets.doubleTimeMinutes)} double time
                       </span>
                     )}
                     {/* Said before it happens, not after payroll. The whole
                         point of showing a workweek rather than a fortnight. */}
                     {w.left !== null && w.left <= 8 * 60 && (
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-xs text-subtle-foreground">
                         {formatDuration(w.left)} before overtime
                       </span>
                     )}
                   </li>
                 ))}
               </ul>
-            </div>
+            </Panel>
           )}
 
           {/* Newest day first, and only days with something on them: seven
@@ -380,14 +387,16 @@ export async function TimeModule({
               const dayRows = byDay.get(day) ?? [];
               const dayMinutes = dayRows.reduce((s, r) => s + r.minutes, 0);
               return (
-                <div key={day} className="rounded-lg border">
-                  <div className="flex items-center justify-between gap-4 border-b px-3 py-2">
-                    <h2 className="text-sm font-medium">{dayLabel(day)}</h2>
+                <Panel key={day}>
+                  <div className="flex items-center justify-between gap-4 border-b border-divider px-4 py-2.5">
+                    <h2 className="text-sm font-medium tracking-heading">
+                      {dayLabel(day)}
+                    </h2>
                     <span className="text-sm tabular-nums text-muted-foreground">
                       {formatDuration(dayMinutes)}
                     </span>
                   </div>
-                  <ul className="divide-y">
+                  <ul className="divide-y divide-divider">
                     {dayRows.map((row) => {
                       const view: EntryView = {
                         id: row.id,
@@ -406,7 +415,7 @@ export async function TimeModule({
                       return (
                         <li
                           key={row.id}
-                          className="flex items-center gap-3 px-3 py-2 text-sm"
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm"
                         >
                           <span className="w-40 shrink-0 truncate font-medium">
                             {row.workerName}
@@ -421,7 +430,7 @@ export async function TimeModule({
                           )}
                           {row.source === "timer" && (
                             <span
-                              className="shrink-0 text-[11px] text-muted-foreground"
+                              className="shrink-0 text-[11px] text-subtle-foreground"
                               title={
                                 roundingMinutes > 0
                                   ? `From a clock, rounded to ${roundingMinutes} minutes`
@@ -439,7 +448,7 @@ export async function TimeModule({
                       );
                     })}
                   </ul>
-                </div>
+                </Panel>
               );
             })}
         </div>

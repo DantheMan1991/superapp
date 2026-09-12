@@ -4,6 +4,7 @@ import { Users } from "lucide-react";
 import { schema, withTenant } from "@/db";
 import { EmptyState } from "@/components/app/empty-state";
 import { PageHeader } from "@/components/app/page-header";
+import { Panel } from "@/components/app/panel";
 import { Button } from "@/components/ui/button";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -105,7 +106,7 @@ export default async function TimePeoplePage() {
       />
 
       {!canManage && (
-        <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+        <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
           Only an owner can change who is on this list.
         </p>
       )}
@@ -123,12 +124,12 @@ export default async function TimePeoplePage() {
           }
         />
       ) : (
-        <div className="rounded-lg border">
-          <ul className="divide-y">
+        <Panel>
+          <ul className="divide-y divide-divider">
             {workers.map((worker) => (
               <li
                 key={worker.id}
-                className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm"
+                className="flex flex-wrap items-center gap-3 px-4 py-2.5 text-sm"
               >
                 <span
                   className={`min-w-0 flex-1 truncate font-medium ${
@@ -145,7 +146,7 @@ export default async function TimePeoplePage() {
                     members={memberOptions}
                   />
                 ) : (
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-xs text-subtle-foreground">
                     {worker.clerkUserId
                       ? (labelByUser.get(worker.clerkUserId) ?? "Signs in")
                       : "No sign-in"}
@@ -162,12 +163,14 @@ export default async function TimePeoplePage() {
               </li>
             ))}
           </ul>
-        </div>
+        </Panel>
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="rounded-lg border p-3">
-          <h2 className="mb-2 text-sm font-medium">Your week starts on</h2>
+        <Panel className="p-4">
+          <h2 className="mb-2 text-sm font-medium tracking-heading">
+            Your week starts on
+          </h2>
           {canManage ? (
             <WeekStartPicker weekStartsOn={prefs.weekStartsOn} />
           ) : (
@@ -187,9 +190,11 @@ export default async function TimePeoplePage() {
               .
             </p>
           )}
-        </div>
-        <div className="rounded-lg border p-3">
-          <h2 className="mb-2 text-sm font-medium">Round clocked time to</h2>
+        </Panel>
+        <Panel className="p-4">
+          <h2 className="mb-2 text-sm font-medium tracking-heading">
+            Round clocked time to
+          </h2>
           {canManage ? (
             <RoundingPicker roundingMinutes={prefs.roundingMinutes} />
           ) : (
@@ -197,9 +202,11 @@ export default async function TimePeoplePage() {
               {roundingLabel(prefs.roundingMinutes)}.
             </p>
           )}
-        </div>
-        <div className="rounded-lg border p-3">
-          <h2 className="mb-2 text-sm font-medium">People are paid</h2>
+        </Panel>
+        <Panel className="p-4">
+          <h2 className="mb-2 text-sm font-medium tracking-heading">
+            People are paid
+          </h2>
           {canManage ? (
             <PayFrequencyPicker
               frequency={prefs.payFrequency}
@@ -214,9 +221,11 @@ export default async function TimePeoplePage() {
               {payFrequencyLabel(prefs.payFrequency)}.
             </p>
           )}
-        </div>
-        <div className="rounded-lg border p-3">
-          <h2 className="mb-2 text-sm font-medium">Overtime rules</h2>
+        </Panel>
+        <Panel className="p-4">
+          <h2 className="mb-2 text-sm font-medium tracking-heading">
+            Overtime rules
+          </h2>
           {canManage ? (
             <OvertimeRulesetPicker slug={prefs.overtimeRuleset} />
           ) : (
@@ -224,7 +233,7 @@ export default async function TimePeoplePage() {
               {rulesetFor(prefs.overtimeRuleset).summary}
             </p>
           )}
-        </div>
+        </Panel>
       </div>
     </div>
   );

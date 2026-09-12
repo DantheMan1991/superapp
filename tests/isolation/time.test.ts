@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq, inArray, isNull, sql } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../../src/db";
 import { d } from "./_shared";
 
@@ -494,7 +494,10 @@ d("time tables (RLS)", () => {
           minutes: 60,
           workDate: "2026-09-11",
           enteredByClerkUserId: MATE,
-          source: "kiosk", // arrives in slice 7, with the door that writes it
+          // `kiosk` was the example here until slice 7 built the keypad that
+          // writes it. `import` is the next promise, and must stay unstorable
+          // until something imports.
+          source: "import",
         }),
       ),
     ).rejects.toThrow();
@@ -925,6 +928,140 @@ d("time tables (RLS)", () => {
       });
       expect(row!.periodAnchor).toBe("2026-09-06");
       expect(row!.overtimeRuleset).toBe("federal"); // the shipped default
+    });
+  });
+
+  // ── slice 7: the shared device ────────────────────────────────────────────
+
+  it("a PIN hash set in one tenant is invisible in the other", async () => {
+    await withSystem((tx) =>
+      tx
+        .update(schema.timeWorkers)
+        .set({ pinHash: "salt.hash" })
+        .where(eq(schema.timeWorkers.id, workerA)),
+    );
+    // The row itself is already proven unreachable from tenant B; this pins
+    // that the PIN travels with it rather than living anywhere shared.
+    const seen = await asOtherTenant((tx) =>
+      tx.query.timeWorkers.findMany({
+        columns: { id: true, pinHash: true },
+      }),
+    );
+    expect(seen.every((w) => w.pinHash === null)).toBe(true);
+    expect(seen.map((w) => w.id)).not.toContain(workerA);
+  });
+
+  it("two tenants may use the SAME client id without colliding", async () => {
+    // The uniqueness is per tenant, which is what the index says and what
+    // matters: two farms' tablets minting the same uuid is astronomically
+    // unlikely, but a global unique would make one of them fail silently for
+    // a reason nobody could ever find.
+    const ref = `${STAMP}-shared-ref`;
+    await withSystem(async (tx) => {
+      await tx.insert(schema.timePunches).values([
+        {
+          tenantId: tenantA,
+          workerId: workerA,
+          startedAt: new Date("2026-09-01T12:00:00Z"),
+          endedAt: new Date("2026-09-01T13:00:00Z"),
+          startedByClerkUserId: MATE,
+          clientRef: ref,
+        },
+        {
+          tenantId: tenantB,
+          workerId: workerB,
+          startedAt: new Date("2026-09-01T12:00:00Z"),
+          endedAt: new Date("2026-09-01T13:00:00Z"),
+          startedByClerkUserId: OTHER,
+          clientRef: ref,
+        },
+      ]);
+    });
+    const mine = await asOwner((tx) =>
+      tx.query.timePunches.findMany({
+        where: eq(schema.timePunches.clientRef, ref),
+      }),
+    );
+    expect(mine).toHaveLength(1);
+    expect(mine[0].tenantId).toBe(tenantA);
+  });
+
+  it("refuses a SECOND punch with the same client id in one tenant", async () => {
+    const ref = `${STAMP}-dup-ref`;
+    await withSystem((tx) =>
+      tx.insert(schema.timePunches).values({
+        tenantId: tenantA,
+        workerId: workerA,
+        startedAt: new Date("2026-09-02T12:00:00Z"),
+        endedAt: new Date("2026-09-02T13:00:00Z"),
+        startedByClerkUserId: MATE,
+        clientRef: ref,
+      }),
+    );
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.timePunches).values({
+          tenantId: tenantA,
+          workerId: workerA,
+          startedAt: new Date("2026-09-03T12:00:00Z"),
+          endedAt: new Date("2026-09-03T13:00:00Z"),
+          startedByClerkUserId: MATE,
+          clientRef: ref,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("still allows many punches with NO client id", async () => {
+    // The index is partial for exactly this: every punch from the ordinary
+    // panel carries null, and nulls must not collide with each other.
+    await withSystem((tx) =>
+      tx.insert(schema.timePunches).values([
+        {
+          tenantId: tenantA,
+          workerId: workerA,
+          startedAt: new Date("2026-09-04T12:00:00Z"),
+          endedAt: new Date("2026-09-04T13:00:00Z"),
+          startedByClerkUserId: MATE,
+        },
+        {
+          tenantId: tenantA,
+          workerId: workerA,
+          startedAt: new Date("2026-09-05T12:00:00Z"),
+          endedAt: new Date("2026-09-05T13:00:00Z"),
+          startedByClerkUserId: MATE,
+        },
+      ]),
+    );
+    const nulls = await asOwner((tx) =>
+      tx.query.timePunches.findMany({
+        where: isNull(schema.timePunches.clientRef),
+      }),
+    );
+    expect(nulls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("refuses an entry source no door writes", async () => {
+    // `kiosk` arrived with the keypad in slice 7; `import`, `tell` and `paste`
+    // are still promises and must not be storable.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.timeEntries)
+          .set({ source: "import" })
+          .where(eq(schema.timeEntries.id, entryA)),
+      ),
+    ).rejects.toThrow();
+
+    await withSystem(async (tx) => {
+      await tx
+        .update(schema.timeEntries)
+        .set({ source: "kiosk" })
+        .where(eq(schema.timeEntries.id, entryA));
+      const row = await tx.query.timeEntries.findFirst({
+        where: eq(schema.timeEntries.id, entryA),
+      });
+      expect(row!.source).toBe("kiosk");
     });
   });
 });

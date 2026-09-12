@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 
 /**
@@ -19,6 +19,10 @@ export interface WorkerRow {
   clerkUserId: string | null;
   isActive: boolean;
   version: number;
+  /** Whether a PIN is set. Never the PIN, and never its hash. */
+  hasPin: boolean;
+  pinFailedCount: number;
+  pinFailedAt: Date | null;
 }
 
 /**
@@ -40,6 +44,15 @@ export async function listWorkers(
       clerkUserId: schema.timeWorkers.clerkUserId,
       isActive: schema.timeWorkers.isActive,
       version: schema.timeWorkers.version,
+      /*
+       * WHETHER there is a PIN, never the PIN's hash. The column stays out of
+       * every select that reaches a screen, which is the rule the schema
+       * comment asks callers to keep; a boolean is all any screen needs to
+       * decide between "Give a PIN" and "Change it".
+       */
+      hasPin: sql<boolean>`${schema.timeWorkers.pinHash} is not null`,
+      pinFailedCount: schema.timeWorkers.pinFailedCount,
+      pinFailedAt: schema.timeWorkers.pinFailedAt,
     })
     .from(schema.timeWorkers)
     .innerJoin(

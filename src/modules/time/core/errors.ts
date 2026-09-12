@@ -32,6 +32,8 @@ export type TimeErrorCode =
   | "AMEND_NOT_LOCKED"
   | "DIMENSION_INVALID"
   | "SPLIT_TOO_LARGE"
+  | "PIN_INVALID"
+  | "PIN_TOO_SIMPLE"
   | "RATE_INVALID"
   | "RATE_NOT_FOUND"
   | "POSTING_IN_USE"
@@ -104,6 +106,10 @@ export function friendlyMessage(err: unknown): string {
       return "That pay period is locked. Add a correction in the open period instead.";
     case "PERIOD_NOT_LOCKED":
       return "That pay period is not locked.";
+    case "PIN_INVALID":
+      return "A PIN is 4 to 8 digits.";
+    case "PIN_TOO_SIMPLE":
+      return "That PIN is too easy to guess. Avoid 1234, 0000 and runs of digits.";
     case "POSTING_IN_USE":
       return "Wages from this business are already in the books. Unlock those pay periods first, which takes them back out properly.";
     case "POSTING_ACCOUNTS":

@@ -7,7 +7,11 @@ import { logAuditInTx } from "@/lib/audit";
 import { requireTenant, type TenantContext } from "@/lib/auth";
 import { LaborPostingError, type LedgerCtx } from "@/lib/labor-posting";
 import { requireModuleEnabled } from "@/lib/modules";
-import { todayInTimezone, zonedTimeToInstant } from "@/lib/timezone";
+import {
+  formatTimeInTimezone,
+  todayInTimezone,
+  zonedTimeToInstant,
+} from "@/lib/timezone";
 import {
   TimeError,
   friendlyMessage,
@@ -15,6 +19,7 @@ import {
   roleMayManageWorkers,
   roleMayWrite,
 } from "./core/errors";
+import { formatDuration } from "./core/duration";
 import { PAY_TYPES } from "./core/pay-types";
 import { PAY_FREQUENCIES, payPeriodFor } from "./core/periods";
 import { isRoundingChoice } from "./core/rounding";
@@ -29,6 +34,12 @@ import {
   updateEntry,
 } from "./entry-ops";
 import { payPeriodCsv } from "./export-ops";
+import {
+  clearWorkerPin,
+  punchWithPin,
+  resetPinLockout,
+  setWorkerPin,
+} from "./pin-ops";
 import { postPeriodLabor, reversePeriodLabor } from "./posting-ops";
 import { deleteRate, setRate } from "./rate-ops";
 import { getEntry } from "./read";
@@ -848,6 +859,189 @@ export async function setPeriodLockAction(
     revalidate();
     return { ok: true, data };
   } catch (error) {
+    return fail(error);
+  }
+}
+
+const pinSchema = z.object({
+  workerId: uuidSchema,
+  // Bounded and format-checked like anything else crossing the boundary. The
+  // real rules are `core/pin.ts`'s and the op applies them; this only keeps a
+  // megabyte of text from reaching scrypt.
+  pin: z.string().min(4).max(8),
+});
+
+export async function setWorkerPinAction(
+  input: z.input<typeof pinSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await ownerGate();
+    const parsed = pinSchema.parse(input);
+    await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        await setWorkerPin(tx, ctx.tenant.id, parsed);
+        await logAuditInTx(tx, {
+          action: "time.worker.pin_set",
+          tenantId: ctx.tenant.id,
+          actorClerkUserId: ctx.userId,
+          targetType: "time_worker",
+          targetId: parsed.workerId,
+          // Identifiers only. The PIN is not an identifier.
+          meta: {},
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return { ok: true };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const workerIdSchema = z.object({ workerId: uuidSchema });
+
+export async function clearWorkerPinAction(
+  input: z.input<typeof workerIdSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await ownerGate();
+    const { workerId } = workerIdSchema.parse(input);
+    await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        await clearWorkerPin(tx, ctx.tenant.id, workerId);
+        await logAuditInTx(tx, {
+          action: "time.worker.pin_cleared",
+          tenantId: ctx.tenant.id,
+          actorClerkUserId: ctx.userId,
+          targetType: "time_worker",
+          targetId: workerId,
+          meta: {},
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return { ok: true };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+export async function resetPinLockoutAction(
+  input: z.input<typeof workerIdSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await ownerGate();
+    const { workerId } = workerIdSchema.parse(input);
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => resetPinLockout(tx, ctx.tenant.id, workerId),
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return { ok: true };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const punchSchema = z.object({
+  workerId: uuidSchema,
+  pin: z.string().min(4).max(8),
+  // A uuid the device minted before the network. Bounded like any client input,
+  // however friendly — retail's `clientRef` takes the same treatment.
+  clientRef: z.string().min(8).max(64).nullable().default(null),
+  deviceLabel: z.string().max(60).default(""),
+});
+
+/**
+ * The shared keypad's one action: tap a name, type a PIN, and it does whichever
+ * of in or out is next.
+ *
+ * **GATED AS AN ORDINARY WRITE, NOT AS AN OWNER'S.** The tablet by the barn
+ * door should be signed in as a member of staff — it is standing in a barn, and
+ * whoever walks past has whatever the session has. `gate()` is the right check
+ * because clocking somebody in is already a staff act through the ordinary
+ * panel; the PIN decides WHICH of several people is standing here, and adds a
+ * check the ordinary panel does not have rather than removing one.
+ *
+ * A wrong PIN comes back as `{ ok: true, data: { kind: "wrong" } }`, not as an
+ * error, because the failure count has to COMMIT — see `pin-ops.ts`.
+ */
+export async function punchWithPinAction(
+  input: z.input<typeof punchSchema>,
+): Promise<
+  ActionResult<{ kind: string; message: string; workerName?: string }>
+> {
+  try {
+    const ctx = await gate();
+    const parsed = punchSchema.parse(input);
+    const now = new Date();
+    const data = await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        const prefs = await getTimePrefs(tx, ctx.tenant.id);
+        const result = await punchWithPin(tx, ctx.tenant.id, {
+          ...parsed,
+          actorClerkUserId: ctx.userId,
+          at: now,
+          roundingMinutes: prefs.roundingMinutes,
+          timezone: ctx.tenant.timezone,
+        });
+        if (result.kind === "wrong") {
+          return { kind: "wrong", message: "That PIN is not right." };
+        }
+        if (result.kind === "locked") {
+          return {
+            kind: "locked",
+            message: `Too many wrong tries. Try again in ${result.remaining}.`,
+          };
+        }
+        if (result.kind === "clocked_in") {
+          return {
+            kind: "clocked_in",
+            workerName: result.workerName,
+            message: `Clocked in at ${formatTimeInTimezone(result.at, ctx.tenant.timezone)}`,
+          };
+        }
+        const { paidMinutes, rawMinutes } = result.out;
+        return {
+          kind: "clocked_out",
+          workerName: result.workerName,
+          message:
+            paidMinutes <= 0
+              ? "Too short to record. Nothing was logged."
+              : rawMinutes === paidMinutes
+                ? `Clocked out. ${formatDuration(paidMinutes)} logged.`
+                : `Clocked out. You worked ${formatDuration(rawMinutes)}, logged ${formatDuration(paidMinutes)}.`,
+        };
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return { ok: true, data };
+  } catch (error) {
+    /*
+     * `assertPeriodOpen` refuses to close a clock into a period somebody has
+     * already been paid for, which is right — but its message tells the reader
+     * to "add a correction in the open period", and the reader here is standing
+     * at a keypad in a barn with no way to do that and no idea what it means.
+     * Same refusal, said to the person who is actually looking at it.
+     */
+    if (error instanceof TimeError && error.code === "PERIOD_LOCKED") {
+      return {
+        ok: true,
+        data: {
+          kind: "refused",
+          message:
+            "These dates are closed for pay, so this could not be recorded. " +
+            "Your clock is still running — tell whoever runs your payroll.",
+        },
+      };
+    }
     return fail(error);
   }
 }

@@ -36,6 +36,14 @@ export async function clockIn(
     actorClerkUserId: string;
     /** Passed in so one request has one idea of "now". */
     at: Date;
+    /**
+     * An id the DEVICE minted before it reached the network. Null from the
+     * ordinary panel, set by the shared keypad, and what makes a retry over a
+     * bad connection return the punch it already started.
+     */
+    clientRef?: string | null;
+    /** What the shared device calls itself. "" from anywhere else. */
+    deviceLabel?: string;
   },
 ): Promise<string> {
   const worker = await tx.query.timeWorkers.findFirst({
@@ -47,6 +55,27 @@ export async function clockIn(
   if (!worker) throw new TimeError("WORKER_NOT_FOUND", "no such worker");
   if (!worker.isActive) {
     throw new TimeError("WORKER_INACTIVE", "that person has left");
+  }
+
+  /*
+   * READ FIRST ON THE CLIENT ID, and only on the client id.
+   *
+   * A device with no signal retries, and the retry must find its own punch
+   * rather than be told somebody is already clocked in — which is true, and is
+   * exactly the wrong thing to say to the person who started it one second ago.
+   * Checking is cheaper and clearer than catching the unique violation, and it
+   * lets this return the SAME punch rather than a different error; retail's
+   * `recordSale` made the same call for the same reason.
+   */
+  if (input.clientRef) {
+    const already = await tx.query.timePunches.findFirst({
+      where: and(
+        eq(schema.timePunches.tenantId, tenantId),
+        eq(schema.timePunches.clientRef, input.clientRef),
+      ),
+      columns: { id: true },
+    });
+    if (already) return already.id;
   }
 
   /*
@@ -64,6 +93,8 @@ export async function clockIn(
         startedAt: input.at,
         startedByClerkUserId: input.actorClerkUserId,
         note: input.note.trim(),
+        clientRef: input.clientRef ?? null,
+        deviceLabel: input.deviceLabel ?? "",
       })
       .returning({ id: schema.timePunches.id });
     return row.id;
@@ -100,6 +131,14 @@ export async function clockOut(
     at: Date;
     roundingMinutes: number;
     timezone: string;
+    /**
+     * What kind of door stopped the clock. `timer` is the ordinary panel;
+     * `kiosk` is a shared device, where the person who pressed the button and
+     * the person who worked are different by design and worth telling apart
+     * later. CHECKed on the column, so an unknown value is refused rather than
+     * stored.
+     */
+    source?: "timer" | "kiosk";
   },
 ): Promise<ClockOutResult> {
   const punch = await loadPunch(tx, tenantId, input.punchId);
@@ -165,7 +204,7 @@ export async function clockOut(
       workDate,
       payType: "worked",
       note,
-      source: "timer",
+      source: input.source ?? "timer",
       punchId: punch.id,
       enteredByClerkUserId: input.actorClerkUserId,
     })

@@ -483,4 +483,48 @@ d("time tables (RLS)", () => {
       ),
     ).rejects.toThrow();
   });
+
+  /* ── the week and the period (slice 2) ────────────────────────────────── */
+
+  it("refuses a pay frequency and a ruleset nobody ships", async () => {
+    for (const patch of [
+      { payFrequency: "fortnightly" },
+      { overtimeRuleset: "massachusetts" },
+    ]) {
+      await expect(
+        withSystem((tx) =>
+          tx
+            .update(schema.timeSettings)
+            .set(patch)
+            .where(eq(schema.timeSettings.tenantId, tenantA)),
+        ),
+      ).rejects.toThrow();
+    }
+  });
+
+  it("a period anchor can only exist on a biweekly payroll", async () => {
+    // An anchor left behind after a switch to monthly means nothing, and would
+    // quietly decide period boundaries if the business ever switched back. The
+    // database refuses the combination rather than trusting the write path.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.timeSettings)
+          .set({ payFrequency: "monthly", periodAnchor: "2026-09-06" })
+          .where(eq(schema.timeSettings.tenantId, tenantA)),
+      ),
+    ).rejects.toThrow();
+
+    await withSystem(async (tx) => {
+      await tx
+        .update(schema.timeSettings)
+        .set({ payFrequency: "biweekly", periodAnchor: "2026-09-06" })
+        .where(eq(schema.timeSettings.tenantId, tenantA));
+      const row = await tx.query.timeSettings.findFirst({
+        where: eq(schema.timeSettings.tenantId, tenantA),
+      });
+      expect(row!.periodAnchor).toBe("2026-09-06");
+      expect(row!.overtimeRuleset).toBe("federal"); // the shipped default
+    });
+  });
 });

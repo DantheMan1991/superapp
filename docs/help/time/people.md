@@ -1,6 +1,6 @@
 # People
 
-> Everybody whose hours this business keeps, the day your week runs from, and what clocked time is rounded to. Owners work here; everybody else can read it.
+> Everybody whose hours this business keeps, and the four settings behind every figure in Time: the day your week runs from, what clocked time is rounded to, how often people are paid, and which overtime rules you follow. Owners work here; everybody else can read it.
 > **Route:** /dashboard/m/time/people
 > **Order:** 120
 
@@ -15,6 +15,8 @@ Open **Time** {icon:clock} in the sidebar, then click {button:People|outline}. A
 - **{button:Time|outline}.** Takes you back to the week.
 - **Your week starts on.** A picker at the bottom left, from `Sunday` to `Saturday`. This is not just how the page looks. It is the day your week runs from, so it decides which week an hour falls in, and when overtime arrives it will decide that too. Pick the day your business actually counts from.
 - **Round clocked time to.** A picker beside it: `To the minute`, `5 minutes`, `6 minutes (a tenth of an hour)`, `10 minutes`, `15 minutes (a quarter hour)` or `30 minutes`. It only affects time from a clock. Hours you type are kept exactly as you type them.
+- **People are paid.** `Weekly`, `Every two weeks`, `Twice a month` or `Monthly`. This is when people are **paid**, which is not how overtime is measured — overtime is always worked out for each week on its own. Choosing `Every two weeks` asks you for a starting date, because nothing in the calendar says which of two weeks begins a period.
+- **Overtime rules.** `Federal (over 40 in a week)`, `California (daily and weekly)` or `None — no overtime rules`. Whatever you pick, the full rule is spelled out underneath so you can check it. This is a legal choice you make with whoever does your payroll; we do the arithmetic and we do not know where your people work.
 
 ## How to add somebody
 
@@ -42,6 +44,29 @@ There is no way to delete somebody, and that is deliberate. Their hours are a re
 2. Pick a day. You see `Saved`.
 3. Go back to the week with {button:Time|outline}. The days are now grouped from the day you picked.
 
+## How to say how often people are paid
+
+1. Scroll to `People are paid`.
+2. Pick how often. For `Weekly`, `Twice a month` and `Monthly` you see `Saved` and nothing else is needed.
+3. For `Every two weeks`, a box asks `When does a pay period start?`. Put in the first day of any one of your two-week periods — every other period is counted from it. If the date you give is not the day your week starts on, we move it back to the start of that week, so a period is always two whole weeks.
+4. Click {button:Save|primary}. You see `Saved`.
+
+Changing this never changes anybody's overtime. It changes how the [pay period](pay-period.md) screen groups the weeks up.
+
+## How to choose your overtime rules
+
+1. Scroll to `Overtime rules`.
+2. Pick the one that applies to you. The line underneath changes to spell out exactly what it means.
+3. You see `Saved`, and every figure in Time is worked out that way from then on.
+
+| You pick | What happens |
+| --- | --- |
+| `Federal (over 40 in a week)` | Anything over 40 hours worked in one week is overtime. The federal minimum, and all that most states add to. |
+| `California (daily and weekly)` | Over 8 hours in a day or 40 in a week is overtime; over 12 in a day is double time; the seventh day worked in a week pays overtime for 8 hours and double time beyond. |
+| `None — no overtime rules` | Hours are recorded and totalled, and none of them are ever marked as overtime. For a business whose people are all salaried. |
+
+Two things this does **not** do. It never changes an hour that was already logged — the entries stay exactly as they are and only the way they are added up changes, so you can switch and switch back. And it does not tell you which rules apply to you. That is your decision, and your payroll provider's.
+
 ## How to set rounding
 
 1. Scroll to `Round clocked time to`.
@@ -65,6 +90,9 @@ If you are not sure, leave it on `To the minute`. It is the only setting that ne
 | `Somebody else is already linked to that sign-in.` | That account belongs to another person here. Free it up on their line first. |
 | `That person could not be found.` | Somebody removed the record while your page was open. Reload the page. |
 | `Pick one of the rounding options.` | The rounding amount was not one of the choices. Reload the page and pick again. |
+| `Pick how often people are paid.` | The pay frequency was not one of the choices. Reload the page and pick again. |
+| `Say which day a pay period starts on.` | You chose `Every two weeks` and left the starting date empty. |
+| `Pick which overtime rules you follow.` | The rules were not one of the choices. Reload the page and pick again. |
 
 ## Not on this page
 
@@ -72,6 +100,8 @@ You cannot record what anybody is paid, what they do, or whether they are salari
 
 There is no separate rounding for different people, and no way to round a punch up automatically at the end of a shift.
 
+The overtime rules are for the whole business. You cannot yet mark one person as salaried and exempt while the rest are hourly, and there is no ruleset for the 8-and-80 arrangement some healthcare employers use. Ask us if you need either.
+
 ## Who can do what
 
-Owners can add people, link and unlink sign-ins, mark somebody as having left, and set the week start and the rounding. Staff and accountants can read the list. Staff can still log hours and start and stop clocks for anybody on it, over on [The week](week.md).
+Owners can add people, link and unlink sign-ins, mark somebody as having left, and set all four settings on this page. Staff and accountants can read the list and the settings. Staff can still log hours and start and stop clocks for anybody on it, over on [The week](week.md).

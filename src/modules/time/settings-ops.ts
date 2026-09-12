@@ -2,7 +2,9 @@ import "server-only";
 import { and, eq } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { TimeError } from "./core/errors";
+import { isPayFrequency, type PayFrequency } from "./core/periods";
 import { isRoundingChoice } from "./core/rounding";
+import { DEFAULT_RULESET_SLUG, isRulesetSlug } from "./core/rulesets";
 
 /**
  * The tenant's one Time setting. Read on every page, written from Settings.
@@ -23,6 +25,9 @@ export const DEFAULT_ROUNDING_MINUTES = 0;
 export interface TimePrefs {
   weekStartsOn: number;
   roundingMinutes: number;
+  payFrequency: PayFrequency;
+  periodAnchor: string | null;
+  overtimeRuleset: string;
 }
 
 /**
@@ -43,6 +48,9 @@ export async function getTimePrefs(tx: Tx, tenantId: string): Promise<TimePrefs>
   return {
     weekStartsOn: row?.weekStartsOn ?? DEFAULT_WEEK_STARTS_ON,
     roundingMinutes: row?.roundingMinutes ?? DEFAULT_ROUNDING_MINUTES,
+    payFrequency: (row?.payFrequency as PayFrequency) ?? "weekly",
+    periodAnchor: row?.periodAnchor ?? null,
+    overtimeRuleset: row?.overtimeRuleset ?? DEFAULT_RULESET_SLUG,
   };
 }
 
@@ -83,6 +91,55 @@ export async function setRoundingMinutes(
     .onConflictDoUpdate({
       target: schema.timeSettings.tenantId,
       set: { roundingMinutes, updatedAt: new Date() },
+      where: and(eq(schema.timeSettings.tenantId, tenantId)),
+    });
+}
+
+/**
+ * How often people are paid, and — for biweekly only — which fortnight it is.
+ *
+ * THE ANCHOR IS CLEARED BY EVERY OTHER FREQUENCY, which the CHECK on the table
+ * also insists on. An anchor left behind after a switch to monthly would sit
+ * there meaning nothing until somebody switched back and found their periods
+ * landing on a boundary they had forgotten choosing.
+ */
+export async function setPayFrequency(
+  tx: Tx,
+  tenantId: string,
+  frequency: string,
+  anchor: string | null,
+): Promise<void> {
+  if (!isPayFrequency(frequency)) {
+    throw new TimeError("PAY_FREQUENCY_INVALID", "not a pay frequency");
+  }
+  if (frequency === "biweekly" && !anchor) {
+    throw new TimeError("PERIOD_ANCHOR_REQUIRED", "biweekly needs a starting date");
+  }
+  const periodAnchor = frequency === "biweekly" ? anchor : null;
+  await tx
+    .insert(schema.timeSettings)
+    .values({ tenantId, payFrequency: frequency, periodAnchor })
+    .onConflictDoUpdate({
+      target: schema.timeSettings.tenantId,
+      set: { payFrequency: frequency, periodAnchor, updatedAt: new Date() },
+      where: and(eq(schema.timeSettings.tenantId, tenantId)),
+    });
+}
+
+export async function setOvertimeRuleset(
+  tx: Tx,
+  tenantId: string,
+  slug: string,
+): Promise<void> {
+  if (!isRulesetSlug(slug)) {
+    throw new TimeError("RULESET_INVALID", "not an overtime ruleset");
+  }
+  await tx
+    .insert(schema.timeSettings)
+    .values({ tenantId, overtimeRuleset: slug })
+    .onConflictDoUpdate({
+      target: schema.timeSettings.tenantId,
+      set: { overtimeRuleset: slug, updatedAt: new Date() },
       where: and(eq(schema.timeSettings.tenantId, tenantId)),
     });
 }

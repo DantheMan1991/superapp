@@ -5,7 +5,7 @@
 > knows the difference between overtime and a pay period, and an hour that
 > reaches the P&L tagged with the thing it was spent on. Core owns the
 > mechanism; an industry layer supplies the vocabulary and the odd pay rule.
-> Status: partial — slices 0 and 1 built (people, hours, the week, and the clock); seeded `coming_soon` until slice 2 · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: partial — slices 0–2 built (people, hours, the clock, the workweek and overtime); still seeded `coming_soon` until approval makes a period trustworthy · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## The plan (agreed with the founder 2026-09-11)
 
@@ -218,6 +218,71 @@ farm-shaped remainder.
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-12 — Slice 2: the week and the period (`claude/time-2-the-week-and-the-period`)
+
+The overtime evaluator, the pay-period arithmetic, and the screen that shows
+the difference between them. Migration `0308` — three columns on
+`time_settings`, and nothing else.
+
+**Generated as `0306` and renumbered**, because `Social S0` (#511) took that
+slot from a parallel session and merged first. That is the SECOND slot collision
+in three slices; the repair is the one
+[conventions.md](../conventions.md) prescribes, original `when`
+(`1789187568900`) put back so the already-applied migration is skipped rather
+than re-run. Unlike 0304's renumber it needed no hand-editing of the SQL:
+#511's snapshots were produced after slice 1 merged, so the regenerated diff was
+byte-identical.
+
+- **The evaluator is one pure function over a ruleset**
+  (`core/overtime.ts`). One worker, one workweek, one `OvertimeRuleset`, in;
+  buckets of minutes out. It knows nothing about pay periods, because averaging
+  hours across a fortnight is the error the whole design exists to prevent.
+- **A ruleset is DATA, and California proves it** (`core/rulesets.ts`). It ships
+  in this slice rather than slice 5 for one reason: a second jurisdiction that
+  required no code is the only evidence the first one was designed right. It is
+  a daily threshold, a double-time threshold and a seventh-day rule — three
+  numbers — and the evaluator has no branch that names a state. Driven: the same
+  53-hour week reads `40h regular + 13h overtime` under federal and
+  `40h regular + 12h overtime + 1h double time` under California, with one
+  picker changed.
+- **NO PYRAMIDING**, which is the subtlest rule here. An hour already paid as
+  daily overtime must not face the weekly test again, so each day contributes
+  only its STRAIGHT minutes to the weekly sum. Without it a Californian working
+  five ten-hour days is paid fifty hours of overtime on a fifty-hour week.
+- **Pay periods are computed, not stored** (`core/periods.ts`), and `0306`'s
+  header says why: nothing about a period is worth storing until it can be
+  approved and locked, which is slice 3. Weekly, biweekly (anchored, and the
+  anchor is pulled back to a week start so a period is always two whole weeks),
+  semi-monthly and monthly.
+- **The straddle rule, stated once**: a workweek is paid in the period where it
+  ENDS. `workweeksPaidIn` is the only place that decides it. Splitting a week
+  across two periods would mean deciding which hours were the overtime ones,
+  which is a question with no true answer. A test walks a year of semi-monthly
+  periods and asserts the weeks tile exactly — none paid twice, none skipped.
+- **`/dashboard/m/time/pay` shows a period AS ITS WEEKS**, never as one number.
+  That is the whole point of the screen: 30 hours then 50 is ten hours of
+  overtime, and a business reading "80 hours this fortnight" cannot see it.
+  Driven on the dev branch with exactly that fixture.
+- **The week screen now shows the split**, plus `4h before overtime` once
+  somebody is within eight hours of the threshold — a decision an owner can
+  still make on a Wednesday rather than a number they read after payroll.
+- **`0306` has no RLS migration and that is correct**, not an omission:
+  `time_settings` is already ENABLE + FORCE with its policies, and a policy
+  names ROWS, not columns.
+- **Thresholds are NOT in the database.** `overtime_ruleset` is a slug naming a
+  data file; two places holding the definition of "over 40" is two places to get
+  it wrong, and a business does not want its rules frozen at signup. The column
+  is CHECKed, and `rulesetFor` still falls back to the federal floor rather than
+  failing a page if a deploy goes backwards.
+- **An anchor can only exist on a biweekly payroll**, by CHECK. One left behind
+  after a switch to monthly would mean nothing until somebody switched back and
+  found their periods on a boundary they had forgotten choosing.
+- Verified: 34 new pure tests in `time-overtime`, 49 in `time-core`, 14 in
+  `timezone`, 21 isolation tests, lint, `tsc` and the build green. `0308`
+  applied to dev AND prod before the merge (ADR 0014), `db:verify-rls` clean on
+  both. **Driven** on the dev branch: both settings pickers, the biweekly anchor
+  dialog, the pay-period screen and the ruleset switch.
+
 ### 2026-09-11 — Slice 1: the clock (`claude/time-1-the-clock`)
 
 `time_punches`, the two columns that say where an entry came from, and the
@@ -370,9 +435,9 @@ FORCE RLS, a `--custom` policy migration and isolation coverage
 | --- | --- | --- | --- |
 | `time_workers` | **Built** | A person the business keeps hours for | Detail row on `parties` (kind `person`), the `crm_party_details` pattern. Unique on `(tenant_id, party_id)`; **partial** unique on `(tenant_id, clerk_user_id)` where not null. The PIN hash (slice 7), `entity_id` (slice 6), pay basis and exempt flag (slices 2 and 5) arrive with their readers |
 | `time_entries` | **Built** | The payable fact | Minutes, never decimal hours. Business day (`date`, string mode), `pay_type`, note, `entered_by_clerk_user_id`, `punch_id`, `source`, version. Composite FKs to `time_workers` (cascade) and `time_punches` (**SET NULL, column-list form**). Partial unique on `(tenant_id, punch_id)` — one entry per punch. CHECKs: minutes > 0, minutes ≤ 1440, `pay_type` and `source` each in their closed set. The target arrives in slice 4 |
-| `time_settings` | **Built** | One row per tenant, created lazily | `week_starts_on` (0–6) and `rounding_minutes` (one of 0, 5, 6, 10, 15, 30), both CHECKed. Pay frequency, period anchor and the overtime ruleset land in slice 2 with the code that reads them. A missing row means the defaults, decided in the read rather than by a backfill — nobody has to be inserted before the page can render |
+| `time_settings` | **Built** | One row per tenant, created lazily | `week_starts_on` (0–6), `rounding_minutes` (0, 5, 6, 10, 15, 30), `pay_frequency`, `period_anchor` and `overtime_ruleset`, all CHECKed, plus a CHECK that an anchor can exist only on a biweekly payroll. The ruleset is a SLUG naming a data file, never a set of thresholds. A missing row means the defaults, decided in the read rather than by a backfill |
 | `time_punches` | **Built** | Raw clock evidence | `timestamptz` in/out, who pressed each button, note, version. Composite FK to `time_workers`. Partial unique on `(tenant_id, worker_id) WHERE ended_at IS NULL` — one open punch, enforced by Postgres. CHECK `ended_at > started_at`. The device, the coordinates and the client-generated id for idempotent offline sync arrive in slice 7 with the screen that sends them |
-| `time_periods` | 2 | Materialised pay periods | Status open / closed / paid, `locked_at`. Rows rather than computed, because approval state needs somewhere to live |
+| `time_periods` | 3 | Materialised pay periods | Status open / closed / paid, `locked_at`. Moved from slice 2 to slice 3 once it was clear a period is pure arithmetic over `time_settings` until it can be APPROVED — approval state is the first fact about a period worth storing, and a table without it would have had no column anybody read |
 | `time_sheets` | 3 | Worker × period | submitted / approved / locked, actors and timestamps, **totals snapshot** |
 | `time_entry_dimensions` | 4 | What the hour was for | The `dimension_members` link, so the P&L splits labor with no report code. Composite FK on `(tenant_id, …)` like every other referencing table |
 | `time_rates` | 5 | Effective-dated pay | Cost rate, bill rate, burden percent, effective from. A change is a new row. Expected to carry an owners-only policy |
@@ -385,11 +450,14 @@ Built in slice 0:
 - `src/db/schema/time.ts` — the three tables, re-exported by the barrel
 - `src/modules/time/TimeModule.tsx` — the week, at `/dashboard/m/time`
 - `src/app/dashboard/m/time/people/page.tsx` — who the business keeps hours for
+- `src/app/dashboard/m/time/pay/page.tsx` — one pay period, shown as its weeks
 - `src/modules/time/components/clock.tsx` — the running-clock panel
 - `src/modules/time/core/` — the pure half, so it bundles to the browser:
   `duration.ts` (parse, format, decimal), `pay-types.ts` (the closed set and
   `countsAsWorked`), `rounding.ts` (nearest-only rounding and the long-punch
-  threshold), `errors.ts` (`TimeError`, `roleMayWrite`,
+  threshold), `overtime.ts` (**the evaluator**), `rulesets.ts` (federal,
+  California, none, as data), `periods.ts` (pay-period arithmetic and the
+  straddle rule), `errors.ts` (`TimeError`, `roleMayWrite`,
   `roleMayManageWorkers`), `week.ts` (the weekday names and the strip's labels
   — the ARITHMETIC is `@/lib/timezone`'s)
 - `src/modules/time/read.ts`, `worker-ops.ts`, `entry-ops.ts`, `punch-ops.ts`,
@@ -397,14 +465,13 @@ Built in slice 0:
 - `src/modules/time/actions.ts` — gate → Zod → `withTenant` → revalidate. Two
   gates: `gate()` for writing time, `ownerGate()` for changing who the workers
   are
-- `tests/time-core.test.ts` (49), `tests/isolation/time.test.ts` (19), and the
+- `tests/time-overtime.test.ts` (34 — the evaluator and the periods),
+  `tests/time-core.test.ts` (49), `tests/isolation/time.test.ts` (21), and the
   calendar arithmetic this module leans on in `tests/timezone.test.ts`
 - `docs/help/time/` — `overview.md`, `week.md`, `people.md`
 
 Planned, with the slice that brings them:
 
-- `src/modules/time/core/rules/` — the pure evaluator and the ruleset data files
-  (`federal`, `california`, `8-80`, `none`) — slice 2
 - `src/lib/time/` — the verbs, so anything may log an hour without importing the
   module (§4b's arrangement) — slice 4, when a second caller exists
 - `src/lib/time-targets/` — the declared slot: types, registry, resolve — slice 4
@@ -437,6 +504,15 @@ Written before the build so they are not rediscovered.
 - **Never fabricate a clock-out.** An open punch past a threshold raises an
   attention item and is closed by a person. An auto-close that silently invents
   hours is a payroll error with a paper trail pointing at us.
+- **No pyramiding, and it is the easiest thing here to break.** An hour already
+  priced by a DAILY rule must not face the weekly test again. `evaluateWeek`
+  does that by summing each day's STRAIGHT minutes for the weekly comparison,
+  never its worked minutes. The test that catches a regression is "five
+  ten-hour days are 40 regular and 10 overtime".
+- **`evaluateWeek` wants all seven days, blank ones included.** A caller that
+  filtered out the empty days would silently switch the seventh-consecutive-day
+  rule off, because six worked days handed over as six entries look exactly like
+  a full week. There is a test named after that mistake.
 - **Leave never counts toward 40.** The single most common bug in this domain.
   Prevented by `pay_type` existing from **slice 0** — a slice earlier than
   planned, because it is a column the evaluator reads rather than one it writes,
@@ -467,8 +543,18 @@ Written before the build so they are not rediscovered.
 
 - The candidate ADRs: an overtime ruleset is data; a worker is a party and not a
   login; the workweek is the unit of overtime and the pay period the unit of
-  payment; Time stops at gross. Next free number is 0046.
-- **Nobody has driven any of it**, the clock included. The Browser pane's `preview_start`
+  payment; Time stops at gross. All four are now BUILT and unwritten, which is
+  the wrong way round — 0046 was taken by the preview-links work, so the next
+  free number moves.
+- **The 8/80 rule is not expressible** by `OvertimeRuleset` as it stands: it
+  needs a 14-day window rather than a workweek, so it changes the evaluator's
+  shape rather than adding a data file. Left until a healthcare client asks.
+- **Exempt is a whole-business setting today.** `none` turns overtime off for
+  everybody; a per-person exempt flag belongs on `time_workers` and arrives with
+  rates in slice 5.
+- Driven through slice 2 on the dev branch (Test tenant). Residue there: two
+  workers, one punch, a fortnight of seeded hours, and a biweekly payroll
+  anchored to 2026-08-30. The Browser pane's `preview_start`
   launches from the session's working directory rather than an out-of-repo
   worktree, so the session that built slice 0 could not drive its own code, and
   the main checkout was held by a parallel session's dev server. To look: switch

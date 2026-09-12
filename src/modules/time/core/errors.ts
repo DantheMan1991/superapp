@@ -21,6 +21,9 @@ export type TimeErrorCode =
   | "WORK_DATE_IN_FUTURE"
   | "WEEK_START_INVALID"
   | "ROUNDING_INVALID"
+  | "PAY_FREQUENCY_INVALID"
+  | "PERIOD_ANCHOR_REQUIRED"
+  | "RULESET_INVALID"
   | "PUNCH_NOT_FOUND"
   | "ALREADY_CLOCKED_IN"
   | "PUNCH_ALREADY_ENDED"
@@ -78,6 +81,12 @@ export function friendlyMessage(err: unknown): string {
       return "Pick the day your week starts on.";
     case "ROUNDING_INVALID":
       return "Pick one of the rounding options.";
+    case "PAY_FREQUENCY_INVALID":
+      return "Pick how often people are paid.";
+    case "PERIOD_ANCHOR_REQUIRED":
+      return "Say which day a pay period starts on.";
+    case "RULESET_INVALID":
+      return "Pick which overtime rules you follow.";
     case "PUNCH_NOT_FOUND":
       return "That clock could not be found.";
     case "ALREADY_CLOCKED_IN":

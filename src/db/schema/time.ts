@@ -342,6 +342,31 @@ export const timeSettings = pgTable(
      * integer and not a pair with a mode beside it.
      */
     roundingMinutes: integer("rounding_minutes").notNull().default(0),
+    /**
+     * How often people are PAID. Not how overtime is measured — that is the
+     * workweek, above, and the two are allowed to disagree. Biweekly is two
+     * workweeks and each is evaluated on its own; semi-monthly and monthly do
+     * not align to weeks at all.
+     */
+    payFrequency: text("pay_frequency").notNull().default("weekly"),
+    /**
+     * The first day of some pay period, for `biweekly` ONLY — the one
+     * frequency whose boundaries cannot be derived from the calendar or from
+     * the week start. Null for the other three, where it would be a value that
+     * means nothing and could drift.
+     */
+    periodAnchor: date("period_anchor", { mode: "string" }),
+    /**
+     * Which overtime rules this business is measured by. A SLUG naming a data
+     * file in `core/rulesets.ts`, never a set of thresholds stored here: two
+     * places holding the definition of "over 40" is two places to get it wrong,
+     * and a business does not want its rules frozen at the moment it signed up.
+     *
+     * CHECKed so the column cannot hold a ruleset no build has, though
+     * `rulesetFor` falls back to the federal floor rather than failing a page
+     * if a deploy ever goes backwards.
+     */
+    overtimeRuleset: text("overtime_ruleset").notNull().default("federal"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -358,6 +383,21 @@ export const timeSettings = pgTable(
     check(
       "time_settings_rounding_minutes",
       sql`${t.roundingMinutes} in (0, 5, 6, 10, 15, 30)`,
+    ),
+    check(
+      "time_settings_pay_frequency",
+      sql`${t.payFrequency} in ('weekly', 'biweekly', 'semimonthly', 'monthly')`,
+    ),
+    check(
+      "time_settings_overtime_ruleset",
+      sql`${t.overtimeRuleset} in ('federal', 'california', 'none')`,
+    ),
+    // An anchor is meaningless except for biweekly, and one left behind after a
+    // change of frequency would quietly decide period boundaries if the
+    // business ever switched back.
+    check(
+      "time_settings_anchor_only_biweekly",
+      sql`${t.periodAnchor} is null or ${t.payFrequency} = 'biweekly'`,
     ),
   ],
 );

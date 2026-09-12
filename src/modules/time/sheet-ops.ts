@@ -4,7 +4,9 @@ import { schema, type Tx } from "@/db";
 import { TimeError } from "./core/errors";
 import { countsAsPaid, countsAsWorked } from "./core/pay-types";
 import { evaluateWeek } from "./core/overtime";
+import { groupByRate, payForWeek } from "./core/pay";
 import { rulesetFor } from "./core/rulesets";
+import { listRates } from "./rate-ops";
 import {
   adjacentPayPeriod,
   payPeriodFor,
@@ -71,6 +73,12 @@ export interface SheetTotals {
   doubleTimeMinutes: number;
   paidLeaveMinutes: number;
   rulesetSlug: string;
+  /**
+   * What the period is worth, in cents. NULL when there are no rates — which
+   * covers both "this business keeps none" and "this reader may not see them",
+   * and nothing downstream should try to tell those apart.
+   */
+  grossCents: number | null;
 }
 
 /**
@@ -98,6 +106,7 @@ export async function totalsFor(
       doubleTimeMinutes: 0,
       paidLeaveMinutes: 0,
       rulesetSlug: ruleset.slug,
+      grossCents: null,
     };
   }
 
@@ -107,13 +116,24 @@ export async function totalsFor(
     workerId,
   });
 
-  const totals = {
+  /*
+   * Rates come back empty for a reader who may not see them (the policy carries
+   * `app_current_tenant_role() = 'owner'`), and that is the same answer as a
+   * business with none: no money figure. Only owners approve, so the snapshot
+   * taken at approval is always computed by somebody who could see them.
+   */
+  const rates = (await listRates(tx, tenantId))
+    .filter((r) => r.workerId === workerId)
+    .map((r) => ({ effectiveOn: r.effectiveOn, payRateCents: r.payRateCents }));
+
+  const totals: SheetTotals = {
     workedMinutes: 0,
     regularMinutes: 0,
     overtimeMinutes: 0,
     doubleTimeMinutes: 0,
     paidLeaveMinutes: 0,
     rulesetSlug: ruleset.slug,
+    grossCents: rates.length > 0 ? 0 : null,
   };
   for (const week of weeks) {
     const buckets = evaluateWeek(
@@ -129,15 +149,35 @@ export async function totalsFor(
     totals.regularMinutes += buckets.regularMinutes;
     totals.overtimeMinutes += buckets.overtimeMinutes;
     totals.doubleTimeMinutes += buckets.doubleTimeMinutes;
-    totals.paidLeaveMinutes += rows
-      .filter(
+    const leaveRows = rows.filter(
+      (r) =>
+        r.workDate >= week.start &&
+        r.workDate <= week.end &&
+        countsAsPaid(r.payType) &&
+        !countsAsWorked(r.payType),
+    );
+    totals.paidLeaveMinutes += leaveRows.reduce((s, r) => s + r.minutes, 0);
+
+    /*
+     * MONEY IS WORKED OUT PER WEEK, for the same reason overtime is: the
+     * regular rate is a weighted average over ONE workweek, and averaging a
+     * fortnight would price a raise that happened in the middle of it wrongly
+     * for both halves.
+     */
+    if (totals.grossCents !== null) {
+      const workedRows = rows.filter(
         (r) =>
           r.workDate >= week.start &&
           r.workDate <= week.end &&
-          countsAsPaid(r.payType) &&
-          !countsAsWorked(r.payType),
-      )
-      .reduce((s, r) => s + r.minutes, 0);
+          countsAsWorked(r.payType),
+      );
+      totals.grossCents += payForWeek({
+        worked: groupByRate(workedRows, rates),
+        overtimeMinutes: buckets.overtimeMinutes,
+        doubleTimeMinutes: buckets.doubleTimeMinutes,
+        leave: groupByRate(leaveRows, rates),
+      }).grossCents;
+    }
   }
   return totals;
 }

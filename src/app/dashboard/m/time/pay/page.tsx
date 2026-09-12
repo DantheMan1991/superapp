@@ -17,6 +17,7 @@ import {
   workweeksPaidIn,
 } from "@/modules/time/core/periods";
 import { evaluateWeek, hasPremium } from "@/modules/time/core/overtime";
+import { formatCents, groupByRate, payForWeek } from "@/modules/time/core/pay";
 import { rulesetFor } from "@/modules/time/core/rulesets";
 import { weekLabel } from "@/modules/time/core/week";
 import { roleMayApprove, roleMayWrite } from "@/modules/time/core/errors";
@@ -27,6 +28,7 @@ import {
 } from "@/modules/time/components/sheet-controls";
 import { listEntries, listEntryDimensions } from "@/modules/time/read";
 import { getTimePrefs } from "@/modules/time/settings-ops";
+import { listRates } from "@/modules/time/rate-ops";
 import { getPeriodLock, listSheets } from "@/modules/time/sheet-ops";
 
 export const dynamic = "force-dynamic";
@@ -135,7 +137,7 @@ export default async function PayPeriodPage({
   const today = todayInTimezone(ctx.tenant.timezone);
   const anchorDate = asked && isDateString(asked) ? asked : today;
 
-  const { prefs, rows, entryDimensions, sheets, lock } = await withTenant(
+  const { prefs, rows, entryDimensions, sheets, lock, rates } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
       const prefs = await getTimePrefs(tx, ctx.tenant.id);
@@ -163,6 +165,10 @@ export default async function PayPeriodPage({
         ),
         sheets: await listSheets(tx, ctx.tenant.id, period),
         lock: await getPeriodLock(tx, ctx.tenant.id, period.start),
+        // Empty unless the reader is an owner. The money column simply does not
+        // appear for anybody else, which is the policy showing through rather
+        // than a second check.
+        rates: await listRates(tx, ctx.tenant.id),
       };
     },
     { role: ctx.role, userId: ctx.userId },
@@ -210,6 +216,35 @@ export default async function PayPeriodPage({
       const paidNotWorked = mine
         .filter((r) => countsAsPaid(r.payType) && !countsAsWorked(r.payType))
         .reduce((s, r) => s + r.minutes, 0);
+
+      /*
+       * MONEY IS WORKED OUT PER WEEK, like the overtime it prices: the regular
+       * rate is a weighted average over ONE workweek, so a raise that landed
+       * mid-fortnight has to be priced in the week it happened.
+       */
+      const theirRates = rates
+        .filter((r) => r.workerId === workerId)
+        .map((r) => ({
+          effectiveOn: r.effectiveOn,
+          payRateCents: r.payRateCents,
+        }));
+      const money =
+        theirRates.length > 0
+          ? payForWeek({
+              worked: groupByRate(
+                mine.filter((r) => countsAsWorked(r.payType)),
+                theirRates,
+              ),
+              overtimeMinutes: buckets.overtimeMinutes,
+              doubleTimeMinutes: buckets.doubleTimeMinutes,
+              leave: groupByRate(
+                mine.filter(
+                  (r) => countsAsPaid(r.payType) && !countsAsWorked(r.payType),
+                ),
+                theirRates,
+              ),
+            })
+          : null;
       const leaveKinds = [
         ...new Set(
           mine
@@ -223,6 +258,7 @@ export default async function PayPeriodPage({
         buckets,
         paidNotWorked,
         leaveKinds,
+        money,
       };
     });
     return { week: w, workers: workers.filter((x) => x.buckets.workedMinutes > 0 || x.paidNotWorked > 0) };
@@ -473,6 +509,25 @@ export default async function PayPeriodPage({
                       {!hasPremium(w2.buckets) && w2.buckets.workedMinutes > 0 && (
                         <span className="text-xs text-subtle-foreground">
                           no overtime
+                        </span>
+                      )}
+                      {/* The figure only exists for a reader the rates policy
+                          lets see rates, so there is nothing to hide here. */}
+                      {w2.money && (
+                        <span
+                          className="tabular-nums font-medium"
+                          title={
+                            w2.money.overtimePremiumCents > 0
+                              ? `${formatCents(w2.money.straightTimeCents)} straight time plus ${formatCents(w2.money.overtimePremiumCents + w2.money.doubleTimePremiumCents)} overtime premium`
+                              : undefined
+                          }
+                        >
+                          {formatCents(w2.money.grossCents)}
+                        </span>
+                      )}
+                      {w2.money?.incomplete && (
+                        <span className="rounded-full bg-warning/10 px-2 py-0.5 text-[11px] text-warning-foreground">
+                          some hours have no rate
                         </span>
                       )}
                       {/*

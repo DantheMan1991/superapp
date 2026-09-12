@@ -16,6 +16,7 @@ The important thing on this screen is that a period is shown **as its weeks**, n
 - **Where the hours went.** A panel listing everything the period's hours were booked to, biggest first, with `Not booked to anything` at the end when some were not. It only appears once at least one hour has been booked to something.
 - **The explanation.** A line under the bar saying how overtime was worked out, in the words of the rules you picked on [People](people.md), and what happens to a week that starts in one period and ends in another.
 - **A week.** One block per week the period pays, oldest first, headed `Week of Sep 6 – Sep 12` with a count of the people in it.
+- **What it comes to.** A figure at the end of each person's line, like `$84.00`, once they have a pay rate. **Owners only** — it is not there for anybody else. `some hours have no rate` appears beside it when part of the week could not be priced.
 - **A person.** One line per person per week: their name, then `40h regular`, then `10h overtime` and `1h double time` when there are any, then any hours paid but not worked. When a week produced no overtime at all, the line says `no overtime` so you can see it was checked rather than missed.
 - **Where each person has got to.** On the first week each person appears in, the end of their line shows one of: {button:Send for approval|outline}, a {badge:Waiting for approval|warning} chip with {button:Approve|primary} and {button:Send back|ghost} beside it, or an {badge:Approved|success} chip. It appears once per person for the whole period, not once per week.
 - **{button:Lock period|primary}.** Top right, beside the dates. Stops every hour in these dates from being changed. Owners only, and it asks before it does it.
@@ -61,6 +62,22 @@ Each line is one thing your hours were booked to, and how long went to it. Only 
 
 `Not booked to anything` is not a fault. It is just the hours nobody said what they were for, and it is the figure to watch if you want a complete picture.
 
+## How the money is worked out
+
+Three things are worth knowing, because they are the parts people expect to be simpler than they are.
+
+**Every hour is paid once at its own rate, and overtime adds a half on top.** Forty-five hours at $20 is $900 of straight time plus $50 of overtime premium — $950. It is not 40 × $20 plus 5 × $30 done as a separate sum, though it comes to the same thing. Double time adds a whole extra instead of a half.
+
+**When somebody worked at two rates in a week, overtime is priced on the average of them.** Twenty hours at $20 and twenty at $30 is $1,000 over forty hours, so the rate their overtime is paid on is **$25** — not $20, and not $30. This is the law's rule, not ours, and it is why a raise in the middle of a week changes what the overtime that week is worth.
+
+**Paid leave is paid, and counts toward nothing else.** It does not push anybody into overtime and it does not change the average above. It is added at the end at its own rate.
+
+Your on-costs percentage is **not** in any of these figures. That is what an hour costs you, not what somebody takes home.
+
+## What approving freezes
+
+When you approve, the hours **and the money** are saved as they stand. Change a rate afterwards, even backdated, and an approved period keeps the figure you approved. That is the point: what you agreed to pay is a fact, and it should not move because a setting changed later.
+
 ## Who approves what
 
 Sending hours for approval is something anybody can do. **Approving is the owner's**, and so is locking. That split is the point of having two steps: somebody who could approve their own hours would be certifying nothing.
@@ -77,13 +94,14 @@ Sending hours for approval is something anybody can do. **Approving is the owner
 | `That timesheet has already been approved.` | The same, after an approval. Reload the page. |
 | `That pay period is locked.` | You tried to change an hour inside a locked period. Use {button:Correct|ghost} instead. |
 | `That entry can still be edited` | You tried to correct an entry whose period is open. Change it rather than correcting it. |
+| `some hours have no rate` | Part of that week was worked before any rate was set for that person, so the figure beside it is not the whole week. |
 
 ## Not on this page
 
-You cannot see what anybody is paid — this screen deals in hours, never money — and there is no export for your payroll provider yet. Both are coming. Ask us where it is up to.
+There is no export for your payroll provider yet, and nothing here is posted to your books. Both are coming. Ask us where it is up to.
 
 A period is either locked or it is not; you cannot lock one person's hours and leave another's open.
 
 ## Who can do what
 
-Everybody can read this page, accountants included. Staff can send hours for approval, including their own. **Only owners can approve, send back, or lock and unlock a period.** Accountants can change nothing. The settings behind it — how often people are paid, and which overtime rules apply — are owner-only and live on [People](people.md).
+Everybody can read this page, accountants included — but **the money only appears for owners**, because pay rates are owners-only in the database. Staff can send hours for approval, including their own. **Only owners can approve, send back, or lock and unlock a period.** Accountants can change nothing. The settings behind it — how often people are paid, and which overtime rules apply — are owner-only and live on [People](people.md).

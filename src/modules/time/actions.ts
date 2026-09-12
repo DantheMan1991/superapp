@@ -27,6 +27,7 @@ import {
   splitEntry,
   updateEntry,
 } from "./entry-ops";
+import { deleteRate, setRate } from "./rate-ops";
 import { getEntry } from "./read";
 import {
   approveSheet,
@@ -886,6 +887,87 @@ export async function splitEntryAction(
     );
     revalidate();
     return { ok: true, data: { id } };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+/*
+ * ── WHAT PEOPLE ARE PAID ─────────────────────────────────────────────────────
+ *
+ * OWNER-ONLY at both ends. `ownerGate()` refuses anybody else here, and
+ * `time_rates`' RLS policy refuses them again underneath — a guard in one place
+ * is a guard somebody can forget, and this is the one table in the module where
+ * forgetting means showing the whole team the wage bill.
+ *
+ * AUDITED, for the same reason approving is: a change to what somebody is paid
+ * should have an answer to "who decided that, and when".
+ */
+
+const rateSchema = z.object({
+  workerId: uuidSchema,
+  effectiveOn: dateSchema,
+  /** Cents per hour. The screen takes dollars and converts. */
+  payRateCents: z.number().int().min(0).max(100_000_00),
+  billRateCents: z.number().int().min(0).max(100_000_00).nullable(),
+  burdenPercent: z.number().int().min(0).max(200),
+});
+
+export async function setRateAction(
+  input: z.input<typeof rateSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await approverGate();
+    const parsed = rateSchema.parse(input);
+    await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        await setRate(tx, ctx.tenant.id, parsed);
+        await logAuditInTx(tx, {
+          action: "time.rate.set",
+          tenantId: ctx.tenant.id,
+          actorClerkUserId: ctx.userId,
+          targetType: "time_worker",
+          targetId: parsed.workerId,
+          // The AMOUNT is deliberately absent. The audit log records that a
+          // wage was set and by whom; what it was is in the table, behind the
+          // policy that decides who may read it.
+          meta: { effectiveOn: parsed.effectiveOn },
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return { ok: true };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const rateIdSchema = z.object({ rateId: uuidSchema });
+
+export async function deleteRateAction(
+  input: z.input<typeof rateIdSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await approverGate();
+    const { rateId } = rateIdSchema.parse(input);
+    await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        await deleteRate(tx, ctx.tenant.id, rateId);
+        await logAuditInTx(tx, {
+          action: "time.rate.removed",
+          tenantId: ctx.tenant.id,
+          actorClerkUserId: ctx.userId,
+          targetType: "time_rate",
+          targetId: rateId,
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return { ok: true };
   } catch (error) {
     return fail(error);
   }

@@ -44,6 +44,7 @@ export function RecordForm({
   canWrite = true,
   fieldDefs = [],
   initialCustom = {},
+  sourceDetail = "",
 }: {
   mode: "create" | "edit";
   partyId?: string;
@@ -51,6 +52,13 @@ export function RecordForm({
   detailsVersion?: number;
   initial: RecordFormValues;
   isOwner: boolean;
+  /**
+   * Which door this lead actually came through, when the source word
+   * cannot say — the website that produced it (ADR 0045). READ-ONLY and
+   * not a form value: a door wrote it, and an owner editing `source`
+   * afterwards should not rewrite where it arrived from.
+   */
+  sourceDetail?: string;
   /**
    * `roleMayWrite(role)`. False leaves every value legible and takes the writes
    * off: `readOnly` on the text controls, which browsers honour and which does
@@ -250,6 +258,11 @@ export function RecordForm({
           onChange={(e) => set("source", e.target.value)}
           placeholder="Referral, website, walk-in…"
         />
+        {sourceDetail && (
+          <p className="text-xs text-subtle-foreground">
+            Arrived through {sourceDetail}.
+          </p>
+        )}
       </div>
 
       <div className="space-y-2">

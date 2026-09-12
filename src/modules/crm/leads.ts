@@ -28,12 +28,15 @@ async function adoptWithSource(
   ctx: CrmCtx,
   partyId: string,
   source: string,
+  sourceDetail: string,
 ): Promise<void> {
   // The enquiry's shape (ADR 0021): a record CRM has already been asked about
-  // keeps the source it has; a first arrival names its own.
+  // keeps the source it has; a first arrival names its own. The detail rides
+  // with it under the same rule — a returning customer's record still says
+  // where it first came from, which is the fact worth keeping.
   await tx
     .insert(schema.crmPartyDetails)
-    .values({ tenantId: ctx.tenantId, partyId, source })
+    .values({ tenantId: ctx.tenantId, partyId, source, sourceDetail })
     .onConflictDoNothing();
 }
 
@@ -42,10 +45,10 @@ export const crmLeadLanding: LeadLanding = {
   async land(tx: Tx, lead: LeadContext, arrival: LandedLead): Promise<void> {
     const ctx: CrmCtx = { tenantId: lead.tenantId, userId: lead.userId, role: "staff" };
 
-    await adoptWithSource(tx, ctx, arrival.partyId, arrival.source);
+    await adoptWithSource(tx, ctx, arrival.partyId, arrival.source, arrival.sourceDetail ?? "");
 
     if (arrival.contactPartyId && arrival.contactPartyId !== arrival.partyId) {
-      await adoptWithSource(tx, ctx, arrival.contactPartyId, arrival.source);
+      await adoptWithSource(tx, ctx, arrival.contactPartyId, arrival.source, arrival.sourceDetail ?? "");
       const current = await tx.query.crmAffiliations.findFirst({
         where: and(
           eq(schema.crmAffiliations.tenantId, ctx.tenantId),

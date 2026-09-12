@@ -1,0 +1,1 @@
+ALTER TABLE "crm_party_details" ADD COLUMN "source_detail" text DEFAULT '' NOT NULL;

@@ -168,6 +168,7 @@ describe("details", () => {
   const details = (over: Partial<DetailsSnapshot> = {}): DetailsSnapshot => ({
     lifecycleStage: "",
     source: "",
+    sourceDetail: "",
     notes: "",
     ownerClerkUserId: null,
     visibility: "members",
@@ -182,6 +183,49 @@ describe("details", () => {
     );
     expect(plan.patch.lifecycleStage).toBe("customer");
     expect(plan.patch.source).toBe("referral");
+  });
+
+  /**
+   * The source and the detail behind it are a PAIR — "website" and the
+   * website it came through (ADR 0045) — and a merge that filled each blank
+   * on its own would describe a journey neither record made.
+   */
+  it("a source brings its own detail, and never the other record's", () => {
+    const plan = planDetails(
+      details({ source: "referral" }),
+      details({ source: "website", sourceDetail: "Yosher Homestead" }),
+    );
+    expect(plan.patch.source).toBe("referral");
+    // NOT "Yosher Homestead": the survivor did not arrive through it.
+    expect(plan.patch.sourceDetail).toBe("");
+  });
+
+  it("a blank source takes the loser's word AND its detail", () => {
+    const plan = planDetails(
+      details({ lifecycleStage: "customer" }),
+      details({ source: "website", sourceDetail: "Yosher Homestead" }),
+    );
+    expect(plan.patch.source).toBe("website");
+    expect(plan.patch.sourceDetail).toBe("Yosher Homestead");
+  });
+
+  it("the survivor's own detail survives a loser that has a source too", () => {
+    const plan = planDetails(
+      details({ source: "website", sourceDetail: "Yosher Homestead" }),
+      details({ source: "website", sourceDetail: "Yosher Trades" }),
+    );
+    expect(plan.patch.sourceDetail).toBe("Yosher Homestead");
+  });
+
+  it("a re-pointed details row keeps its detail whole", () => {
+    // No survivor row at all: the loser's moves across unchanged, which is
+    // the path a lead takes when CRM has never been asked about the survivor.
+    const plan = planDetails(
+      null,
+      details({ source: "website", sourceDetail: "Yosher Homestead" }),
+    );
+    expect(plan.repointLoserDetails).toBe(true);
+    expect(plan.patch.sourceDetail).toBe("Yosher Homestead");
   });
 
   it("KEEPS BOTH RECORDS' NOTES", () => {

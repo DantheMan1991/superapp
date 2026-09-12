@@ -14,6 +14,60 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-09-10 — Which website sent the lead (`claude/which-site-sent-the-lead`)
+
+`source = 'website'` stopped being an answer the day a business could publish
+a second site (ADR 0045). **Migration 0298** — one nullable-free text column,
+applied to dev AND prod before the merge and proved in
+`information_schema` on both.
+
+- **`crm_party_details.source_detail`, beside `source` and not inside it.**
+  `source` is the word an owner types and filters on, and ADR 0042 settled
+  that it is a word and not a kind; folding the site into it would turn one
+  value into one per site and quietly break every grouping of it. The detail
+  is the site's own name — `site.title || site.slug`, **never the tenant's
+  name**, because falling back to the business would make two sites read
+  identically, which is the one thing this exists to prevent.
+- **The door names it, the CRM writes it.** `LandedLead.sourceDetail` rides
+  the slot from ADR 0042, so the enquiry form and the booking form say which
+  site and nothing outside CRM names a CRM column. `adoptWithSource` writes it
+  under the same first-arrival rule as the source: a returning customer's
+  record still says where it FIRST came from.
+- **Written by a door, never by the form.** The record form's source stays
+  editable and the detail is drawn read-only beneath it — *"Arrived through
+  Yosher Homestead."* — so an owner re-labelling a source does not rewrite
+  where the lead actually arrived. The details UPDATE is a selective patch, so
+  it never touches the column either.
+- **THE MERGE NEEDED A RULE OF ITS OWN, and it is the subtle part.** Every
+  other field here is "the survivor's answer stands, the loser fills blanks" —
+  applied to this pair it would give a survivor whose source is `referral` the
+  loser's *"arrived through Yosher Homestead"*, describing a journey neither
+  record made. **The detail goes with the source it arrived with**:
+  `planDetails` takes the survivor's detail when the survivor has a source,
+  the loser's when the loser's word won, and falls back only when neither has
+  one.
+- **Driven end to end on the dev branch.** Submitted the real enquiry form on
+  Test's `oak-row-farm` site: the party, the enquiry and the CRM record all
+  landed, `source=website source_detail=oak-row-farm` (that site has no title,
+  so the slug fallback), and the record page reads *"Where they came from:
+  website / Arrived through oak-row-farm."* Older records keep an empty detail
+  — there is no backfill and there should not be, since nothing knows which
+  door they came through.
+  **A second finding on the way:** the same submission through Hilltop Farm
+  wrote the party and the enquiry and NO CRM record, because that tenant has
+  no `crm` row at all. Correct, and worth knowing before reading a lead's
+  provenance as missing when the module is simply off.
+- **`Provenance Two` is KEPT on the dev branch** — the only CRM record
+  anywhere with a `source_detail`, and the only way to see the record page's
+  line without submitting a form by hand.
+- **Tests**: four cases in `tests/crm-merge.test.ts` for the pair rule
+  (including a `referral` survivor that must NOT inherit a website's detail,
+  and a re-pointed row that keeps its detail whole) and two in
+  `tests/leads-db.test.ts` — a first arrival storing the door, and a second
+  arrival leaving it alone.
+- **Not built here:** provenance on the health check (`source = 'health-check'`
+  needs no disambiguating yet) and any filter or report over it.
+
 ### 2026-09-04 — CRM reads, and says so (`claude/crm-reads-and-says-so`)
 
 **Twelve screens rendered every control enabled for an `expert` and refused

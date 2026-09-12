@@ -113,6 +113,8 @@ export interface TellProposal {
     title: string;
     label: string;
     fields: TellAction["fields"];
+    /** ADR 0050 — the box records a complete card of this one without asking. */
+    unattended: boolean;
   }>;
 }
 
@@ -147,6 +149,7 @@ export async function proposeTold(
       title: l.action.title,
       label: l.source.label,
       fields: l.action.fields,
+      unattended: l.action.unattended === true,
     })),
   };
 }

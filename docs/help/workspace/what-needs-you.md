@@ -12,7 +12,7 @@ Open **What needs you** under `Workspace` in the sidebar. Every row is one thing
 - **Each row.** Its title on the left with a detail line under it, and a badge on the right: {badge:Overdue|destructive} when its date has passed, {badge:Today|primary} when it is due today, {badge:Soon|secondary} when it is due on a later date, or {badge:Open|secondary} when it needs you but has no date. Rows are ordered overdue first, then today, then soon, and within each by date. Click a row to open the record itself. A few rows carry a button at their right edge that does the thing without opening the record; the row disappears once it is done.
 - **Your list.** The list at the top: things assigned to you, and things that are yours because of your role.
 - **`Not assigned to anyone`.** Owners only. A second list under a rule, captioned `Nobody has picked these up. You see them because you own the business, not because they are yours.`
-- **`Tell it what happened`.** A box directly under the title, above the list. Type one sentence — `Clock me in`, `Three chicks dead in pen two` — and it works out what to record. See how to tell it, below. Everyone sees it; each tool decides for itself what you are allowed to record.
+- **`Tell it what happened`.** A box directly under the title, above the list. Type one sentence — or press {button:Say it|outline|mic} and speak it — `Clock me in`, `Three chicks dead in pen two` — and it works out what to record. See how to tell it, below. Everyone sees it; each tool decides for itself what you are allowed to record.
 - **`Email me this each morning`.** A switch at the right of the title. On for everyone to begin with. It is yours alone: an owner cannot turn a staff member's email off, and nobody can turn on yours.
 
 ## How to tell it what happened
@@ -35,7 +35,39 @@ below go away.
 5. A card that is not ready says so: `Which animals is missing.` The button
    stays gray until every card is complete.
 6. Click {button:Record 2 things|primary}. You see what was recorded, such as
-   `Clocked in at 7:42 AM` or `3 head — died — from Pen 2`.
+   `3 head — died — from Pen 2`.
+
+**Some things skip all of that.** Clocking in and out are recorded the moment
+Yosher understands them — no cards, no button. You say it and you see
+`Clocked in at 7:42 AM`. See below for which, and why only those.
+
+## How to say it instead of typing it
+
+Press {button:Say it|outline|mic} beside {button:Read it|primary|sparkles} and
+talk. **Stop talking and it stops listening** — you do not have to press
+anything. What you said is read straight away.
+
+So clocking in is one press: {button:Say it|outline|mic}, "clock me in", done.
+Anything that moves animals or stock still shows you a card to check first.
+
+- **It knows when you have finished** by listening for you to stop. It works
+  out how loud the room is first, so a running tractor does not fool it. If it
+  cannot tell, press {button:Listening…|primary} to finish.
+- It stops on its own after **30 seconds** whatever happens, and shows a
+  countdown for the last ten. A sentence is short; say one thing at a time.
+- Say it twice and the second goes on the end of the first, so you can add
+  something you forgot.
+- The first time, your phone or browser will ask permission for the microphone.
+  If you say no, the button stops working until you allow it in your browser's
+  settings — everything else on the page still works.
+- If you see `Talking to Yosher is not switched on for this platform yet`, the
+  business has not set speech up. Typing works exactly the same.
+
+**What happens to the recording.** In the Yosher app on your phone, your phone
+does the listening itself and the recording never leaves it. In a web browser,
+the recording is sent to the service that writes it down and is thrown away as
+soon as the words come back. **Either way nothing is kept** — not the audio,
+not the text, until you press the button to record it.
 
 ## What it can record
 
@@ -50,6 +82,25 @@ appear when they have something to work with.
 | `Looked at them` | That you walked the pen, with a note if you saw something | Which animals |
 | `Moved somewhere` | Animals moved onto a paddock | Which animals, and where to. Only when you keep Land |
 | `Fed them` | Feed or other stock given to animals, taken out of stock | Which animals, what, and how much **in the unit that item is counted in**, shown beside its name. Only when you keep Inventory |
+
+## What records itself, and what waits for you
+
+Two cards are written the moment Yosher understands them, with no card to read
+and no button to press:
+
+- `Clocked in`
+- `Clocked out`
+
+They are the only two, and they qualify because all three of these are true. A
+clock started by mistake is **on the Time screen the moment you look**, it is
+**removed in one press** with {button:Cancel|outline}, and it **moves nothing**
+— no animals, no stock, no money. It is a time against your own name.
+
+**Everything else waits for you.** Losses, moves, feeds and checks all show a
+card you read before anything happens, because a misheard sentence there costs
+you real animals or real stock, and putting that right means finding it first.
+
+If you would rather check the clock cards too, say so and it can be changed.
 
 ## The clock is always your own
 

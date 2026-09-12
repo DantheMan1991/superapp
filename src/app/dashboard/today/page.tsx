@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { Panel } from "@/components/app/panel";
 import { TellBox } from "@/components/app/tell-box";
+import { isServerSpeechConfigured } from "@/lib/speech/providers";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { todayInTimezone } from "@/lib/timezone";
@@ -91,7 +92,10 @@ export default async function TodayPage() {
           fastest thing somebody can do here is say what just happened, and
           half the time that is what makes an item below go away. Shown to
           everyone — each source's own verb decides who may record. */}
-      <TellBox placeholder="Clock me in, and three chicks dead in pen two" />
+      <TellBox
+        placeholder="Clock me in, and three chicks dead in pen two"
+        speechConfigured={isServerSpeechConfigured()}
+      />
 
 
       {/* A source that could not be asked is stated, never swallowed. An

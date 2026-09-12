@@ -137,6 +137,32 @@ export interface TellAction {
    */
   about: string;
   fields: TellField[];
+  /**
+   * **May a card of this action be recorded the instant it is proposed, with
+   * nobody tapping anything?** Defaults to NO, and the default is the rule
+   * (ADR 0039: the model never writes).
+   *
+   * ADR 0050 is the amendment and the reasoning. The short version: the
+   * confirm step exists because a misread sentence must not reach the herd,
+   * and it earns that cost for anything that MOVES something. It does not earn
+   * it for "clock me in" — four taps to start a clock is worse than the screen
+   * it replaces, which is a way of not being used at all.
+   *
+   * Say yes only when all three hold:
+   *
+   *  1. **A wrong one is visible.** Not "discoverable in an audit" — visible,
+   *     to this person, on a screen they already look at.
+   *  2. **A wrong one is undoable in one step**, by them, without a
+   *     correcting entry that itself needs explaining.
+   *  3. **It moves no quantity.** No head, no stock, no money. A clock is a
+   *     timestamp on your own name; a loss is three chicks that no longer
+   *     exist.
+   *
+   * Even then it only fires when the card came back COMPLETE — every required
+   * field filled, no unresolved word. A card with a blank in it is read back
+   * and waits, always.
+   */
+  unattended?: boolean;
   /** Do it, through the pack's own verb. Throw `TellRefusal` to refuse. */
   record(tx: Tx, ctx: TellCtx, values: TellValues): Promise<TellRecorded>;
 }

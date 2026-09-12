@@ -209,6 +209,40 @@ export function minutesUntilWeeklyOvertime(
   return left > 0 ? left : null;
 }
 
+/**
+ * How close is close enough to be worth telling somebody?
+ *
+ * **HALF A WORKING DAY.** On a forty-hour week that fires at thirty-six, which
+ * lands on Friday morning for somebody doing eight-hour days and on Thursday
+ * afternoon for somebody doing ten — a day's notice either way, which is what
+ * makes it a decision rather than a report. Warning earlier would put an item in
+ * front of an owner every Wednesday of every week and teach them to ignore it;
+ * warning later is a message that arrives after the money is spent.
+ */
+export const OVERTIME_WARNING_MINUTES = 4 * 60;
+
+/**
+ * Minutes left before overtime starts, but ONLY once it is close.
+ *
+ * The threshold is the whole point: `minutesUntilWeeklyOvertime` is true of
+ * every worker on a Monday morning, and a warning that is always on is not a
+ * warning. Null means "not worth saying" — either the ruleset has no weekly
+ * threshold, or the week is already over it, or there is plenty of room left.
+ *
+ * **A WEEK ALREADY IN OVERTIME RETURNS NULL, and that is deliberate.** This
+ * answers "can you still do something about it", and once the hours are worked
+ * nobody can; the pay period screen is where a week that went over is read.
+ * An obligation you cannot discharge is not an obligation.
+ */
+export function approachingOvertime(
+  buckets: WeekBuckets,
+  ruleset: OvertimeRuleset,
+): number | null {
+  const left = minutesUntilWeeklyOvertime(buckets, ruleset);
+  if (left === null || left > OVERTIME_WARNING_MINUTES) return null;
+  return left;
+}
+
 /** Did this week produce anything above straight time? */
 export function hasPremium(buckets: WeekBuckets): boolean {
   return buckets.overtimeMinutes > 0 || buckets.doubleTimeMinutes > 0;

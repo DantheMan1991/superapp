@@ -5,7 +5,7 @@
 > knows the difference between overtime and a pay period, and an hour that
 > reaches the P&L tagged with the thing it was spent on. Core owns the
 > mechanism; an industry layer supplies the vocabulary and the odd pay rule.
-> Status: partial — slices 0–7 built. Hours in, gross pay out, frozen at approval, posted to the ledger split by dimension, a file for the payroll provider, and **a shared keypad for people who never open the app**. What remains is the warning before overtime happens (8) and the farm layer (9) · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: partial — slices 0–8 built. Hours in, gross pay out, frozen at approval, posted to the ledger split by dimension, a file for the payroll provider, a shared keypad for people who never open the app, and **four obligations that find the person instead of waiting to be found**. Only the farm layer (9) and the two absorptions remain · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## The plan (agreed with the founder 2026-09-11)
 
@@ -217,6 +217,67 @@ farm-shaped remainder.
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-12 — Slice 8: overtime before it happens (`claude/time-8-overtime-before-it-happens`)
+
+Four obligations through `attention-sources`, every one of them self-clearing.
+**No migration** — the whole slice is queries over state that already exists.
+
+- **THE PERFORMANCE WORRY FROM SLICE 3 WAS ANSWERED, NOT INHERITED.** This
+  file's own comment said the overtime warning "needs the evaluator run per
+  worker per week, which is too much to do inside a digest that already asks six
+  sources for their answers". True of the shape it imagined — a query per worker
+  — and false of the one built: **one aggregate query returns the whole
+  business's worked minutes per worker per day**, and `evaluateWeek` is then
+  pure arithmetic over seven numbers each. Nothing runs a query inside a loop,
+  so the source is a fixed handful of round trips whatever the head count.
+- **`approachingOvertime` exists because a warning that is always on is not a
+  warning.** `minutesUntilWeeklyOvertime` is true of everybody on a Monday; the
+  new function adds the only thing that makes it useful, a threshold. **Half a
+  working day**, which on a forty-hour week fires at thirty-six — Friday morning
+  on eight-hour days, Thursday afternoon on ten.
+- **It goes quiet once the week is already over**, which is the decision worth
+  defending. This answers "can you still do something about it"; once the hours
+  are worked nobody can, and a week that went over is read on the pay period
+  screen. An obligation you cannot discharge is not an obligation.
+- **WHO GETS TOLD DIFFERS PER ITEM, and the rule is "whoever can do the thing".**
+  Approaching overtime goes to OWNERS ONLY even when the worker has a login —
+  sending somebody home early is the decision of whoever pays for the hour, and
+  telling both would report one fact twice. A forgotten clock and unsent hours go
+  to the WORKER when they have a sign-in and roll up to the owner as
+  `unassigned` when they do not, which is exactly the case the contract's
+  roll-up was written for: the barn worker's clock is invisible to everyone
+  otherwise.
+- **THE BUG DRIVING FOUND, AND IT WAS ALREADY IN PRODUCTION.** Slice 3's action
+  handler was an arrow defined in `source.ts` that called the module's exported
+  action. The arrow is what gets passed to the client button, an arrow in that
+  file is not a server action, and React refuses it with "Functions cannot be
+  passed directly to Client Components" — taking down the WHOLE `What needs you`
+  page, not the item. It had shipped in slice 3 and nothing caught it: `tsc` is
+  happy, the source's tests never render, and the page only fails when an item
+  carrying an action is actually drawn. `attention/actions.ts` now holds both
+  handlers as real `"use server"` exports, referenced by name, the shape
+  accounting has always used.
+- **The worked-pay-type list is DERIVED from `countsAsWorked`**, not written out
+  in SQL, so the query and the predicate cannot drift.
+- **A clock is only "left running" after sixteen hours** — `LONG_PUNCH_MINUTES`,
+  the clock panel's own threshold, reused rather than reinvented. Below it an
+  item would fire on every full day anybody works, which is how a warning gets
+  muted. It is `overdue` rather than `soon`: unlike a queue, this one has
+  already gone wrong.
+- **Unsent hours are asked for on the PREVIOUS period, never the current one.**
+  Asking somebody to submit a week they are still working is asking them to do
+  it twice. Somebody who has left is not asked at all — they are not going to
+  press submit, and their hours still reach an owner through the approval item.
+- Verified: 7 new pure tests on the threshold, 17 db-backed in
+  `time-attention.test.ts`, the rest of the suites, lint, `tsc` and the build
+  green.
+- **Driven on Hilltop Farm**, all four: a twenty-hour clock appeared under `Not
+  assigned to anyone` with its device name; `Marta Quinn is 3h 52m from
+  overtime` appeared as {badge:Today} with the arithmetic matching to the
+  minute; pressing {button:Send} cleared the unsent row and produced the waiting
+  row; pressing {button:Approve} cleared that. Every item self-cleared when its
+  cause was removed.
 
 ### 2026-09-12 — Slice 7: on a phone, in a barn (`claude/time-7-on-a-phone-in-a-barn`)
 
@@ -554,8 +615,12 @@ Built in slice 0:
   apart from `punch-ops.ts` so the ordinary panel can never acquire a PIN check
   and the keypad can never skip one: two doors, two functions, not one with a
   flag
-- `src/modules/time/attention/source.ts` — timesheets waiting to be approved,
-  registered third in `src/lib/attention-sources/registry.ts`
+- `src/modules/time/attention/source.ts` — FOUR obligations: a clock left
+  running, somebody approaching overtime, hours nobody sent, and hours waiting
+  to be approved. Registered in `src/lib/attention-sources/registry.ts`
+- `src/modules/time/attention/actions.ts` — the one-tap handlers, and it is
+  `"use server"` for a reason the file spells out: an arrow written in
+  `source.ts` is not a server action and takes the whole page down
 - `src/modules/time/components/sheet-controls.tsx` — submit, approve, lock
 - `src/modules/time/components/rate-controls.tsx` — set a rate, remove a rate,
   and the one place dollars in a box become cents in the database
@@ -567,6 +632,8 @@ Built in slice 0:
 - `src/modules/time/actions.ts` — gate → Zod → `withTenant` → revalidate. Two
   gates: `gate()` for writing time, `ownerGate()` for changing who the workers
   are
+- `tests/time-attention.test.ts` (17, DB-backed — **who gets told what**, which
+  is the part of an attention source that fails silently),
 - `tests/time-pin-ops.test.ts` (13, DB-backed — **the lockout, because counting
   a failure is a write that has to survive the failure**),
 - `tests/time-pin.test.ts` (11 — what a PIN is and when the lock opens),
@@ -674,6 +741,13 @@ Written before the build so they are not rediscovered.
   the Documents module's owners-only folders use. Read it with
   `withTenant(..., { role: ctx.role })` and never with a role that did not come
   from `requireTenant()`.
+- **AN ATTENTION ACTION HANDLER MUST BE A REAL SERVER ACTION**, exported from a
+  `"use server"` file and referenced BY NAME. Wrapping the module's action in an
+  arrow inside `source.ts` looks equivalent and is not: the arrow is what
+  reaches the client button, and React refuses it — taking down the whole `What
+  needs you` page rather than the item. It shipped in slice 3 and was found by
+  driving slice 8; nothing else can catch it, because the page only fails when
+  an item carrying an action is drawn.
 - **A CREDENTIAL FAILURE MUST NOT THROW.** Counting it is a WRITE, and
   `withTenant`'s transaction discards every write when the callback throws — so
   a thrown "wrong PIN" silently rolls back the counter that makes the lockout
@@ -701,6 +775,10 @@ Written before the build so they are not rediscovered.
 - **Burden must never reach gross.** `payForWeek` takes no burden argument at
   all; that is the guarantee, not a convention. Cost is `costWithBurden`'s
   question and it is asked somewhere else.
+- **A warning that is always on is not a warning.** `approachingOvertime` has a
+  threshold for that reason, and goes quiet once the week is over because by
+  then there is no decision left to take. Ask of any new item: can the person
+  reading it still do something?
 - **Ask what reading a secret would GAIN somebody before hiding it.**
   `pin_hash` is on a member-wide table and `time_rates` is owners-only, and both
   are right: a signed-in member can already clock anybody in, so the PIN hides
@@ -727,6 +805,15 @@ Written before the build so they are not rediscovered.
 - **Rates are whole cents per hour**, so $15.375 is not expressible. Right for a
   wage, wrong for a blended or piece rate — revisit when slice 9's piece rate
   arrives.
+- **The overtime warning is WEEKLY only.** California's daily rules mean
+  somebody can be paid a premium for hour nine of a single day without being
+  anywhere near forty for the week, and nothing warns about that. `evaluateWeek`
+  already computes it per day, so the arithmetic is there; what is missing is a
+  decision about how noisy a daily warning would be in a business that routinely
+  works tens.
+- **No per-person exempt flag still bites here**: a salaried manager who never
+  earns overtime is warned about it like anybody else. It is the same open item
+  slice 5 recorded, now with a second reader.
 - **The shared clock is not OFFLINE.** `client_ref` is in, so writing is
   idempotent and a retry is safe; what is missing is a service worker to cache
   the shell and a durable queue to flush on reconnect. `docs/modules/retail.md`

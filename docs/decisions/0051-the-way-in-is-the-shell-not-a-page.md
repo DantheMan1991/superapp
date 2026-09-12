@@ -90,6 +90,21 @@ reading the manual.
 - It floats over page content. Mitigated by the corner, by shrinking on large
   screens, and by `print:hidden` — but a page whose own bottom-right corner is
   load-bearing will need to know about it. None does today.
+- **THE TOASTS HAD THAT CORNER FIRST, and the collision was real.** Sonner
+  renders bottom-right at z-index 999999999; this button is bottom-right at 40.
+  The symptom was specific and bad: after recording anything, the success toast
+  covered the button for its whole life, so the microphone was dead for four
+  seconds at exactly the moment somebody would say the next thing.
+  `document.elementFromPoint` at the button's centre returned the toast. Found
+  by driving it, not by reading it — the first press worked and only the second
+  failed.
+
+  Fixed by offsetting the TOASTS (`src/app/layout.tsx`), not by moving the
+  button: the button's corner is load-bearing, because it is where a thumb is,
+  and a toast's is not. `calc(5.5rem + env(safe-area-inset-bottom))` clears a
+  3.5rem button and its 1rem margin. Measured afterwards: toast bottom edge 88px
+  from the viewport bottom, button top 72px, and `elementFromPoint` returns the
+  microphone.
 - `env(safe-area-inset-bottom)` keeps it clear of the iPhone home indicator.
   Without that it sits under the swipe bar and takes two tries to hit; it has
   NOT been verified on a real handset, only reasoned and emulated at 375px.

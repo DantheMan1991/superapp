@@ -10,6 +10,61 @@
 
 ## Build log
 
+### 2026-09-12 — "Add a job to fix the top gate" (`claude/tell-work`)
+
+Voice slice 4. `src/modules/work/tell/source.ts` fills `tell-sources`
+([ADR 0039](../decisions/0039-a-pack-declares-what-it-can-be-told-in-one-sentence.md)).
+No migration.
+
+**The first source that is not about a farm.** Livestock's four actions and
+Time's two clocks are both things a particular kind of business does; every
+business alive has a list of things that need doing. The founder's ask was that
+this *"should work with every tool"*, and this is the source that shows the
+slot is not a farm feature wearing a general coat.
+
+It writes through `src/lib/work/` — `createUnlinkedWork` and `setWorkComplete`
+— and imports nothing from `src/modules/work/`. That seam exists precisely
+because anything may raise a work item and a module may not import another
+module (§4b), so this is one more caller of it rather than a special case.
+
+**The two actions are not the same kind of safe, and that is the point.**
+
+- `work.add` **records itself** (ADR 0050). A job added by mistake is on a
+  list, removable in one press, and moves no quantity. All three tests pass.
+- `work.done` **does not**, and it is the first time the rule discriminates
+  inside a single source. A job ticked by mistake *leaves* the open list, so
+  the mistake becomes harder to see rather than easier — it fails the first
+  test outright — and the consequence is not untidiness but somebody believing
+  a gate is shut when it is open.
+
+`work.done` is only OFFERED when the list has something on it, the same
+reasoning livestock uses for offering only lots with animals in them: an action
+whose every choice is empty is one the model can pick and then fail to fill,
+costing a readback that could never have gone anywhere.
+
+**The due date is deliberately not `defaultToday`.** Livestock's dates fill in
+because a round is walked on the day it is walked; a job with no date is
+perfectly normal, and filling one in invents an urgency nobody asked for.
+
+Tests: `tests/work-tell-source.test.ts`, 9 of them, including that the offer
+appears and disappears with the list and that ticking one job leaves the others
+alone.
+
+Driven on dev **from the accounting overview**, which is the point — the
+launcher is on every page now:
+
+- `Add a job to fix the top gate by Friday` → no card, no button, and a
+  `work_items` row titled **Fix the top gate** due **2026-09-18**. The title is
+  the job rather than the sentence, and the 18th is the Friday after Saturday
+  the 12th.
+- `The top gate is fixed` → a `Job finished` card resolved to **Fix the top
+  gate**, sitting on `Record 1 thing` and **not** recorded. The rule
+  discriminating inside one source, seen rather than reasoned.
+
+**Nobody has ever clicked this module** (see the note at the top of this file),
+and a voice door that any business can use from any page is the likeliest thing
+yet to change that.
+
 ### 2026-09-03 — Work says so first (`claude/work-says-so-first`)
 
 **Both screens rendered every control enabled for an `expert` and refused every

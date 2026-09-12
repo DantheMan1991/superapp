@@ -120,6 +120,24 @@ the farm's asset list until they say so.
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-12 — A third filler, and the first that is not a farm (`claude/tell-work`)
+
+Voice slice 4. The slot itself; the source is written up in [work.md](work.md).
+No migration.
+
+`work` joins `time` and `livestock` in `tellSources`. It is the one that tests
+the founder's actual ask — *"it should work with every tool"* — because the
+first two are things a particular kind of business does and a list of jobs is
+something every business has.
+
+Nothing in `src/lib/tell-sources/` changed. A third filler cost a file and a
+line in the registry, which is what the extension point was for.
+
+**The order in `tellSources` is now doing a small job.** Every action a tenant
+has goes into ONE tool description (`tellToolFor`), so the array is the order
+the model reads the catalogue in: most-said first — the clock, then the jobs
+everybody has, then the herd.
+
 ### 2026-09-12 — Say it from anywhere (`claude/speech-seam`)
 
 Voice slice 2, third pass. [ADR 0051](../decisions/0051-the-way-in-is-the-shell-not-a-page.md).

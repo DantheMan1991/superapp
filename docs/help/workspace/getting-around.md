@@ -123,6 +123,8 @@ appear when they have something to work with.
 | --- | --- | --- |
 | `Clocked in` | Starts your clock, exactly as the {button:Clock in|primary} button on Time does | Nothing. Add what you are starting on if you want |
 | `Clocked out` | Stops your clock and turns it into hours | A clock that is already running |
+| `Job added` | Writes down something that needs doing, exactly as adding it in Work does | What the job is. Add a date if you said one |
+| `Job finished` | Ticks a job off the list | A job already on the list. Only offered when there is one |
 | `Animals lost` | Head that died, were culled or were sold live | Which animals, how many, and what happened |
 | `Looked at them` | That you walked the pen, with a note if you saw something | Which animals |
 | `Moved somewhere` | Animals moved onto a paddock | Which animals, and where to. Only when you keep Land |
@@ -130,16 +132,23 @@ appear when they have something to work with.
 
 ## What records itself, and what waits for you
 
-Two cards are written the moment Yosher understands them, with no card to read
-and no button to press:
+These are written the moment Yosher understands them, with no card to read and
+no button to press:
 
 - `Clocked in`
 - `Clocked out`
+- `Job added`
 
-They are the only two, and they qualify because all three of these are true. A
-clock started by mistake is **on the Time screen the moment you look**, it is
-**removed in one press** with {button:Cancel|outline}, and it **moves nothing**
-— no animals, no stock, no money. It is a time against your own name.
+They qualify because all three of these are true of each. A clock started by
+mistake is **on the Time screen the moment you look**, it is **removed in one
+press** with {button:Cancel|outline}, and it **moves nothing** — no animals, no
+stock, no money. A job added by mistake is the same: it is sitting on the list,
+you delete it, and nothing else changed.
+
+**`Job finished` is not in that list, and the reason is worth knowing.** A job
+ticked off by mistake *disappears* from the open list, so the mistake gets
+harder to spot rather than easier — and you would believe the gate was shut
+when it was open. So finishing a job is always read back to you first.
 
 **Everything else waits for you.** Losses, moves, feeds and checks all show a
 card you read before anything happens, because a misheard sentence there costs

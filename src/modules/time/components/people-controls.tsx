@@ -24,12 +24,16 @@ import {
 } from "@/components/ui/select";
 import {
   addWorkerAction,
+  setOvertimeRulesetAction,
+  setPayFrequencyAction,
   setRoundingAction,
   setWeekStartsOnAction,
   setWorkerActiveAction,
   setWorkerUserAction,
 } from "../actions";
+import { PAY_FREQUENCIES, payFrequencyLabel } from "../core/periods";
 import { ROUNDING_CHOICES, roundingLabel } from "../core/rounding";
+import { RULESETS, rulesetFor } from "../core/rulesets";
 import { WEEKDAYS } from "../core/week";
 
 export interface PersonOption {
@@ -363,6 +367,168 @@ export function RoundingPicker({
       <p className="text-xs text-muted-foreground">
         Only applies to time from a clock. Always to the nearest, so it costs as
         often as it pays. Typed hours are kept exactly as typed.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * How often people are paid — which is NOT how overtime is measured.
+ *
+ * The sentence under it says so, because the two settings sit next to each
+ * other and a reader who conflates them will believe a fortnight of 80 hours
+ * has no overtime in it. Biweekly asks for a starting date, because nothing in
+ * the calendar says which of two weeks begins a period.
+ */
+export function PayFrequencyPicker({
+  frequency,
+  anchor,
+  weekExample,
+}: {
+  frequency: string;
+  anchor: string | null;
+  /** A real upcoming week start, so the date box opens somewhere sensible. */
+  weekExample: string;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [open, setOpen] = useState(false);
+  const [choice, setChoice] = useState(frequency);
+
+  function save(value: string, anchorValue: string | null) {
+    startTransition(async () => {
+      const result = await setPayFrequencyAction({
+        frequency: value as (typeof PAY_FREQUENCIES)[number],
+        anchor: anchorValue,
+      });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Saved");
+      setOpen(false);
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <Select
+        disabled={pending}
+        value={frequency}
+        onValueChange={(value) => {
+          setChoice(value);
+          // Biweekly cannot be saved without knowing which fortnight it is, so
+          // it asks before saving rather than after failing.
+          if (value === "biweekly") {
+            setOpen(true);
+            return;
+          }
+          save(value, null);
+        }}
+      >
+        <SelectTrigger className="w-[200px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {PAY_FREQUENCIES.map((f) => (
+            <SelectItem key={f} value={f}>
+              {payFrequencyLabel(f)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-muted-foreground">
+        When people are paid. Overtime is still worked out for each week on its
+        own, so a fortnight is two weeks and not eighty hours.
+        {frequency === "biweekly" && anchor ? ` Periods start from ${anchor}.` : ""}
+      </p>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-md">
+          <form
+            action={(formData: FormData) =>
+              save(choice, String(formData.get("anchor") ?? "") || null)
+            }
+          >
+            <DialogHeader>
+              <DialogTitle>When does a pay period start?</DialogTitle>
+              <DialogDescription>
+                Pick the first day of any one of your two-week periods. Every
+                other period is counted from it.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-2 py-4">
+              <Label htmlFor="anchor">First day of a period</Label>
+              <Input
+                id="anchor"
+                name="anchor"
+                type="date"
+                required
+                defaultValue={anchor ?? weekExample}
+              />
+              <p className="text-xs text-muted-foreground">
+                If this is not the day your week starts on, we move it back to
+                the start of that week so a period is always two whole weeks.
+              </p>
+            </div>
+            <DialogFooter>
+              <Button type="submit" disabled={pending}>
+                {pending ? "Saving…" : "Save"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+/**
+ * Which overtime rules the business follows.
+ *
+ * THE COPY MATTERS MORE THAN THE CONTROL. This is a legal choice the business
+ * makes with whoever does its payroll, and the product must not appear to have
+ * made it for them — so the summary of whatever is picked is shown in full,
+ * and the line underneath says whose decision it is.
+ */
+export function OvertimeRulesetPicker({ slug }: { slug: string }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const current = rulesetFor(slug);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Select
+        disabled={pending}
+        value={slug}
+        onValueChange={(value) =>
+          startTransition(async () => {
+            const result = await setOvertimeRulesetAction({ slug: value });
+            if ("error" in result) {
+              toast.error(result.error);
+              return;
+            }
+            toast.success("Saved");
+            router.refresh();
+          })
+        }
+      >
+        <SelectTrigger className="w-[260px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {RULESETS.map((r) => (
+            <SelectItem key={r.slug} value={r.slug}>
+              {r.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-muted-foreground">{current.summary}</p>
+      <p className="text-xs text-muted-foreground">
+        Which rules apply to you is your decision, with whoever does your
+        payroll. We do the arithmetic; we do not know where your people work.
       </p>
     </div>
   );

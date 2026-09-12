@@ -9,11 +9,19 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { todayInTimezone, zonedTimeToInstant } from "@/lib/timezone";
 import { TimeError, friendlyMessage, roleMayManageWorkers, roleMayWrite } from "./core/errors";
 import { PAY_TYPES } from "./core/pay-types";
+import { PAY_FREQUENCIES } from "./core/periods";
 import { isRoundingChoice } from "./core/rounding";
+import { isRulesetSlug } from "./core/rulesets";
 import { DATE_FORMAT } from "./core/week";
 import { deleteEntry, logTime, updateEntry } from "./entry-ops";
 import { clockIn, clockOut, cancelPunch, adjustPunchStart } from "./punch-ops";
-import { getTimePrefs, setRoundingMinutes, setWeekStartsOn } from "./settings-ops";
+import {
+  getTimePrefs,
+  setOvertimeRuleset,
+  setPayFrequency,
+  setRoundingMinutes,
+  setWeekStartsOn,
+} from "./settings-ops";
 import { createWorker, setWorkerActive, setWorkerUser } from "./worker-ops";
 
 /**
@@ -65,6 +73,7 @@ function fail(error: unknown): { error: string } {
 function revalidate(): void {
   revalidatePath(BASE);
   revalidatePath(`${BASE}/people`);
+  revalidatePath(`${BASE}/pay`);
 }
 
 const uuidSchema = z.string().uuid();
@@ -478,6 +487,75 @@ export async function setRoundingAction(
           tenantId: ctx.tenant.id,
           actorClerkUserId: ctx.userId,
           meta: { roundingMinutes },
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return { ok: true };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const payFrequencySchema = z.object({
+  frequency: z.enum(PAY_FREQUENCIES),
+  /** Required for biweekly, ignored by the rest. */
+  anchor: z.string().regex(DATE_FORMAT, "expected yyyy-mm-dd").nullable(),
+});
+
+export async function setPayFrequencyAction(
+  input: z.input<typeof payFrequencySchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await ownerGate();
+    const parsed = payFrequencySchema.parse(input);
+    await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        await setPayFrequency(tx, ctx.tenant.id, parsed.frequency, parsed.anchor);
+        await logAuditInTx(tx, {
+          action: "time.settings.pay_frequency_changed",
+          tenantId: ctx.tenant.id,
+          actorClerkUserId: ctx.userId,
+          meta: { frequency: parsed.frequency },
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return { ok: true };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const rulesetSchema = z.object({
+  slug: z.string().refine(isRulesetSlug, "not an overtime ruleset"),
+});
+
+/**
+ * Which overtime rules the business is measured by.
+ *
+ * AUDITED, and of everything in this module this is the one that most deserves
+ * it: it changes what every future week is worth, and the answer to "who
+ * decided we were on the federal rules?" should not be nobody.
+ */
+export async function setOvertimeRulesetAction(
+  input: z.input<typeof rulesetSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await ownerGate();
+    const { slug } = rulesetSchema.parse(input);
+    await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        await setOvertimeRuleset(tx, ctx.tenant.id, slug);
+        await logAuditInTx(tx, {
+          action: "time.settings.overtime_ruleset_changed",
+          tenantId: ctx.tenant.id,
+          actorClerkUserId: ctx.userId,
+          meta: { ruleset: slug },
         });
       },
       { role: ctx.role, userId: ctx.userId },

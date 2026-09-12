@@ -11,13 +11,18 @@ import { listAssignableMembers, memberLabel } from "@/lib/team";
 import { roleMayManageWorkers } from "@/modules/time/core/errors";
 import {
   AddWorker,
+  OvertimeRulesetPicker,
+  PayFrequencyPicker,
   RoundingPicker,
   WeekStartPicker,
   WorkerActiveButton,
   WorkerSignInPicker,
 } from "@/modules/time/components/people-controls";
+import { startOfWeek, todayInTimezone } from "@/lib/timezone";
 import { listWorkers } from "@/modules/time/read";
+import { payFrequencyLabel } from "@/modules/time/core/periods";
 import { roundingLabel } from "@/modules/time/core/rounding";
+import { rulesetFor } from "@/modules/time/core/rulesets";
 import { getTimePrefs } from "@/modules/time/settings-ops";
 
 export const dynamic = "force-dynamic";
@@ -190,6 +195,33 @@ export default async function TimePeoplePage() {
           ) : (
             <p className="text-sm text-muted-foreground">
               {roundingLabel(prefs.roundingMinutes)}.
+            </p>
+          )}
+        </div>
+        <div className="rounded-lg border p-3">
+          <h2 className="mb-2 text-sm font-medium">People are paid</h2>
+          {canManage ? (
+            <PayFrequencyPicker
+              frequency={prefs.payFrequency}
+              anchor={prefs.periodAnchor}
+              weekExample={startOfWeek(
+                todayInTimezone(ctx.tenant.timezone),
+                prefs.weekStartsOn,
+              )}
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {payFrequencyLabel(prefs.payFrequency)}.
+            </p>
+          )}
+        </div>
+        <div className="rounded-lg border p-3">
+          <h2 className="mb-2 text-sm font-medium">Overtime rules</h2>
+          {canManage ? (
+            <OvertimeRulesetPicker slug={prefs.overtimeRuleset} />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {rulesetFor(prefs.overtimeRuleset).summary}
             </p>
           )}
         </div>

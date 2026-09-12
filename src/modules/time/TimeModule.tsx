@@ -18,6 +18,12 @@ import {
 import { roleMayWrite } from "./core/errors";
 import { formatDuration } from "./core/duration";
 import { countsAsPaid, countsAsWorked, payTypeLabel } from "./core/pay-types";
+import {
+  evaluateWeek,
+  hasPremium,
+  minutesUntilWeeklyOvertime,
+} from "./core/overtime";
+import { rulesetFor } from "./core/rulesets";
 import { dayLabel, weekDays, weekLabel } from "./core/week";
 import {
   ClockInButton,
@@ -67,7 +73,16 @@ export async function TimeModule({
    * parallel, but a second `withTenant` would be a second BEGIN and a second
    * round of context statements to Neon for a lookup that returns one integer.
    */
-  const { weekStartsOn, roundingMinutes, weekStart, rows, workers, members, openPunches } =
+  const {
+    weekStartsOn,
+    roundingMinutes,
+    overtimeRuleset: roundingPrefsRuleset,
+    weekStart,
+    rows,
+    workers,
+    members,
+    openPunches,
+  } =
     await withTenant(
       ctx.tenant.id,
       async (tx) => {
@@ -76,6 +91,7 @@ export async function TimeModule({
         return {
           weekStartsOn: prefs.weekStartsOn,
           roundingMinutes: prefs.roundingMinutes,
+          overtimeRuleset: prefs.overtimeRuleset,
           weekStart,
           rows: await listEntries(tx, ctx.tenant.id, {
             from: weekStart,
@@ -110,13 +126,41 @@ export async function TimeModule({
     .filter((r) => countsAsPaid(r.payType))
     .reduce((sum, r) => sum + r.minutes, 0);
 
+  /*
+   * THE WEEK ON THIS SCREEN IS THE WORKWEEK, which is what makes it the right
+   * place to show overtime: the evaluator's whole contract is one worker, one
+   * workweek, one ruleset. The pay period is a different question and has its
+   * own screen, because a fortnight is two of these and must never be averaged.
+   *
+   * Every day of the week is passed in, blank ones included — a ruleset with a
+   * seventh-consecutive-day rule can only be answered by a caller that knows a
+   * day was empty.
+   */
+  const ruleset = rulesetFor(roundingPrefsRuleset);
+  const days = weekDays(weekStart);
   const perWorker = [...workers]
-    .map((worker) => ({
-      name: worker.name,
-      minutes: rows
-        .filter((r) => r.workerId === worker.id && countsAsWorked(r.payType))
-        .reduce((sum, r) => sum + r.minutes, 0),
-    }))
+    .map((worker) => {
+      const buckets = evaluateWeek(
+        days.map((date) => ({
+          date,
+          workedMinutes: rows
+            .filter(
+              (r) =>
+                r.workerId === worker.id &&
+                r.workDate === date &&
+                countsAsWorked(r.payType),
+            )
+            .reduce((sum, r) => sum + r.minutes, 0),
+        })),
+        ruleset,
+      );
+      return {
+        name: worker.name,
+        minutes: buckets.workedMinutes,
+        buckets,
+        left: minutesUntilWeeklyOvertime(buckets, ruleset),
+      };
+    })
     .filter((w) => w.minutes > 0)
     .sort((a, b) => b.minutes - a.minutes);
 
@@ -164,6 +208,9 @@ export async function TimeModule({
         icon={<Clock />}
         actions={
           <div className="flex items-center gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link href="/dashboard/m/time/pay">Pay period</Link>
+            </Button>
             <Button asChild variant="outline" size="sm">
               <Link href="/dashboard/m/time/people">People</Link>
             </Button>
@@ -282,19 +329,41 @@ export async function TimeModule({
         />
       ) : (
         <div className="space-y-4">
-          {perWorker.length > 1 && (
+          {(perWorker.length > 1 || perWorker.some((w) => hasPremium(w.buckets))) && (
             <div className="rounded-lg border p-3">
-              <h2 className="mb-2 text-sm font-medium">Worked this week</h2>
-              <ul className="grid gap-1 sm:grid-cols-2">
+              <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="text-sm font-medium">Worked this week</h2>
+                <span className="text-xs text-muted-foreground">
+                  {ruleset.summary}
+                </span>
+              </div>
+              <ul className="grid gap-1">
                 {perWorker.map((w) => (
                   <li
                     key={w.name}
-                    className="flex items-center justify-between gap-4 text-sm"
+                    className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm"
                   >
-                    <span className="truncate">{w.name}</span>
-                    <span className="tabular-nums text-muted-foreground">
-                      {formatDuration(w.minutes)}
+                    <span className="w-40 shrink-0 truncate">{w.name}</span>
+                    <span className="tabular-nums">
+                      {formatDuration(w.buckets.regularMinutes)} regular
                     </span>
+                    {w.buckets.overtimeMinutes > 0 && (
+                      <span className="tabular-nums text-module-accent">
+                        {formatDuration(w.buckets.overtimeMinutes)} overtime
+                      </span>
+                    )}
+                    {w.buckets.doubleTimeMinutes > 0 && (
+                      <span className="tabular-nums text-destructive">
+                        {formatDuration(w.buckets.doubleTimeMinutes)} double time
+                      </span>
+                    )}
+                    {/* Said before it happens, not after payroll. The whole
+                        point of showing a workweek rather than a fortnight. */}
+                    {w.left !== null && w.left <= 8 * 60 && (
+                      <span className="text-xs text-muted-foreground">
+                        {formatDuration(w.left)} before overtime
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>

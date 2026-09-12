@@ -12,12 +12,14 @@ There are two ways to record time here. Click {button:Start a clock|outline} whe
 
 - **The heading.** `Time`, and under it how much was worked this week. When somebody was paid without working, a second figure follows it, like `4h paid but not worked`. Before anything is logged it reads `What everybody worked, week by week.`
 - **{button:People|outline}.** Takes you to [People](people.md), where you add somebody new or change the day your week starts on.
+- **{button:Pay period|outline}.** Takes you to [the pay period](pay-period.md), where the same hours are grouped the way you pay them.
 - **{button:Start a clock|outline}.** Starts a running clock for somebody. Grayed out when everybody on the list is already on the clock.
 - **{button:Log time|primary}.** Opens the box for writing down hours already worked. It is grayed out until at least one person is on the People list.
 - **On the clock now.** A block above the week, and only there when at least one clock is running. It shows every running clock, longest first, whichever week you are reading, because a clock left going is today's problem. The heading counts the people. When your business rounds clocked time, the right of the heading says what to, like `Rounded to 15 minutes when stopped`.
 - **A running clock.** One line per person: their name, `you` if it is yours, how long it has been running counting up, and the time it started. Past sixteen hours the figure turns red and the line says `Running over 16 hours. Correct when it started, or throw it away.` Nothing stops a clock on its own, because that would put hours on a timesheet that nobody worked.
 - **The week bar.** The dates of the week you are reading, like `Sep 6 – Sep 12`. `This week` sits beside it when you are on the current one. {button:← Previous|ghost} and {button:Next →|ghost} move a week at a time, and there is no limit in either direction. When you have moved away, a {button:This week|outline} button appears on the right to bring you back.
-- **Worked this week.** A short list of each person and what they worked, biggest first. It only appears when two or more people worked, because with one person it would repeat the figure in the heading. Paid leave and holiday are left out of these numbers.
+- **Worked this week.** A list of each person and how their week breaks down, biggest first: `40h regular`, then `10h overtime` and `1h double time` when there are any. The rules being used are named on the right. It appears when two or more people worked, or whenever anybody has earned overtime. Paid leave and holiday are left out of these numbers, because they are not hours worked and never count toward overtime.
+- **`4h before overtime`.** Sits on somebody's line once they are within eight hours of the weekly threshold. This is the point of showing a week rather than a fortnight: it is a decision you can still make on a Wednesday, not a number you read after payroll.
 - **A day.** One block per day that has hours on it, newest first. The heading is the day, like `Fri, Sep 11`, with that day's total on the right. Days with nothing on them are left out, so a week with one busy Tuesday is one block and not seven.
 - **A row.** One line per entry: who worked, how long, and what they did. When the hours were not worked, a badge says which kind, like {badge:Paid leave}. Worked hours carry no badge, since that is the ordinary case. `clock` at the end means the entry came from a clock rather than being typed; hover it to see what it was rounded to.
 - **{button:Edit|ghost}.** At the end of each row. Opens the same box again, filled in, with a {button:Delete|destructive} button in it.
@@ -111,11 +113,18 @@ The week you are reading is in the address bar, so you can send somebody a link 
 | `One entry cannot be longer than a day.` | You asked for more than 24 hours in one entry. Split it across the days it covers. |
 | `That person has left.` | Somebody marked this person as having left. Bring them back on [People](people.md) first. |
 | `This entry changed while you were editing it.` | Somebody else saved this entry while your box was open. Reload the page and make your change again. |
+| `no overtime` | That person's week was checked against your rules and stayed under every threshold. |
 | `Accountant access is read-only.` | You are signed in as an accountant. You can read every hour and change nothing. |
+
+## Why this screen is a week
+
+Overtime is worked out for a **week**, and only for a week. That is true however often you are paid: if you pay fortnightly, the fortnight is two of these weeks and each is tested on its own. Somebody who works 30 hours one week and 50 the next has earned ten hours of overtime, even though the fortnight adds up to 80. This screen is the unit that decides it; [the pay period](pay-period.md) is the unit you pay.
+
+Which day your week starts on is yours to set, on [People](people.md).
 
 ## Not on this page
 
-You cannot say which part of the business an hour was spent on, mark a week as finished, or see overtime. None of that is built. Ask us where it is up to.
+You cannot say which part of the business an hour was spent on, or mark a week as finished. Neither is built. Ask us where it is up to.
 
 Clocks live only on this screen for now, so somebody clocking themselves in has to open it. Starting a clock from a phone in one tap is coming.
 

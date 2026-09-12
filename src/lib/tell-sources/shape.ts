@@ -281,3 +281,37 @@ export const confirmedEntriesSchema = z
   )
   .min(1)
   .max(TELL_MAX_ENTRIES);
+
+/**
+ * MAY THIS BATCH BE RECORDED WITHOUT ANYBODY TAPPING ANYTHING? (ADR 0050.)
+ *
+ * Here rather than in the box because of what it decides: the one condition
+ * under which a model's output reaches a tenant's data with no person in
+ * between. A rule like that belongs where it can be tested, not inside a
+ * component where it is read once by whoever is changing the layout.
+ *
+ * Four things must all hold, and the last two are why this is not simply
+ * `action.unattended`:
+ *
+ *  1. There is at least one card. An empty batch is not "all clear".
+ *  2. Every card's action DECLARED itself unattended. One dissenter stops the
+ *     whole batch — two things said in one sentence happened together, and
+ *     half of them landing while the other half waits is the worst of both
+ *     (ADR 0039's all-or-none, unchanged).
+ *  3. No card carries a HINT. A hint is a word that matched nothing, and
+ *     "never nearest" means somebody has to look at it.
+ *  4. Every card passes `checkEntry`. A required field left empty is not
+ *     something to guess at unattended.
+ */
+export function readyToRecordUnasked(
+  cards: TellCard[],
+  actions: Array<Pick<TellAction, "fields"> & { slug: string; unattended: boolean }>,
+): boolean {
+  if (cards.length === 0) return false;
+  return cards.every((card) => {
+    const action = actions.find((a) => a.slug === card.actionSlug);
+    if (!action || !action.unattended) return false;
+    if (Object.keys(card.hints).length > 0) return false;
+    return checkEntry(card.values, action) === null;
+  });
+}

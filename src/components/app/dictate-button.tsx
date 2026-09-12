@@ -79,6 +79,108 @@ function probeCapabilities(serverConfigured: boolean): SpeechCapabilities {
   };
 }
 
+/**
+ * Stop when they stop talking.
+ *
+ * ── WHY THIS IS ADAPTIVE AND NOT A FIXED THRESHOLD ───────────────────────────
+ *
+ * A fixed "below 0.01 is silence" works at a desk and fails in the place this
+ * product is for. A tractor idling forty feet away sits well above any
+ * threshold quiet enough to be useful indoors, so the recorder would never
+ * stop itself and the feature would be exactly as many taps as before — for
+ * the people who need it most.
+ *
+ * So the first `CALIBRATE_MS` are spent measuring THIS room, and everything
+ * after is relative to that floor. Speech has to clear the floor by a wide
+ * margin, and silence is a return towards it — which is a stable question in a
+ * loud barn and a quiet office alike.
+ *
+ * The listener never stops anything on its own before somebody has actually
+ * spoken: `NOTHING_SAID_MS` of never clearing the bar is its own ending, so a
+ * button pressed by mistake gives up rather than recording the room for thirty
+ * seconds.
+ */
+const CALIBRATE_MS = 400;
+const SILENCE_MS = 1_200;
+const NOTHING_SAID_MS = 5_000;
+const TICK_MS = 100;
+
+function listenForSilence(stream: MediaStream, done: () => void): () => void {
+  const AudioCtx =
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext?: typeof AudioContext })
+      .webkitAudioContext;
+  // No Web Audio (an old WebView): the recorder still works, it just has to be
+  // stopped by hand. Degrading is right; refusing to record would not be.
+  if (!AudioCtx) return () => {};
+
+  const context = new AudioCtx();
+  const analyser = context.createAnalyser();
+  analyser.fftSize = 1024;
+  context.createMediaStreamSource(stream).connect(analyser);
+  const buffer = new Float32Array(analyser.fftSize);
+
+  const startedAt = Date.now();
+  let floorTotal = 0;
+  let floorTicks = 0;
+  let floor = 0;
+  let spokeAt: number | null = null;
+  let quietSince: number | null = null;
+  let stopped = false;
+
+  const timer = setInterval(() => {
+    analyser.getFloatTimeDomainData(buffer);
+    let sum = 0;
+    for (const sample of buffer) sum += sample * sample;
+    const rms = Math.sqrt(sum / buffer.length);
+    const age = Date.now() - startedAt;
+
+    if (age < CALIBRATE_MS) {
+      floorTotal += rms;
+      floorTicks += 1;
+      floor = floorTotal / Math.max(1, floorTicks);
+      return;
+    }
+
+    const speaking = rms > Math.max(floor * 3, 0.012);
+    const quiet = rms < Math.max(floor * 1.8, 0.008);
+
+    if (speaking) {
+      spokeAt = Date.now();
+      quietSince = null;
+      return;
+    }
+
+    if (spokeAt === null) {
+      // Nothing has been said at all yet.
+      if (age > NOTHING_SAID_MS) finish();
+      return;
+    }
+
+    if (quiet) {
+      quietSince ??= Date.now();
+      if (Date.now() - quietSince > SILENCE_MS) finish();
+    } else {
+      quietSince = null;
+    }
+  }, TICK_MS);
+
+  function finish() {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(timer);
+    void context.close();
+    done();
+  }
+
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(timer);
+    void context.close();
+  };
+}
+
 /** Whatever this browser will actually give `MediaRecorder`, or null. */
 function pickRecordingType(): string | null {
   if (typeof MediaRecorder === "undefined") return null;
@@ -129,12 +231,15 @@ export function DictateButton({
   const chunks = useRef<Blob[]>([]);
   const stopAt = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ticker = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hush = useRef<(() => void) | null>(null);
 
   function clearTimers() {
     if (stopAt.current) clearTimeout(stopAt.current);
     if (ticker.current) clearInterval(ticker.current);
+    hush.current?.();
     stopAt.current = null;
     ticker.current = null;
+    hush.current = null;
   }
 
   useEffect(() => clearTimers, []);
@@ -201,6 +306,11 @@ export function DictateButton({
     rec.start();
     setListening(true);
     setLeft(SPEECH_MAX_SECONDS);
+    // The reason there is usually no Stop to press. The button stays, because
+    // a room this cannot read is a room somebody still has to finish in.
+    hush.current = listenForSilence(stream, () => {
+      if (rec.state !== "inactive") rec.stop();
+    });
     stopAt.current = setTimeout(() => rec.state !== "inactive" && rec.stop(), SPEECH_MAX_SECONDS * 1000);
     ticker.current = setInterval(() => setLeft((n) => Math.max(0, n - 1)), 1000);
   }
@@ -257,16 +367,19 @@ export function DictateButton({
       onClick={toggle}
       disabled={disabled || working}
       aria-pressed={listening}
-      aria-label={listening ? "Stop listening" : "Say it instead of typing"}
+      aria-label={listening ? "Listening — press to finish now" : "Say it instead of typing"}
     >
       {working ? (
         <>
           <Loader2 className="mr-2 size-4 animate-spin" /> Writing it down…
         </>
       ) : listening ? (
+        // It normally stops itself, so the label says what is happening rather
+        // than demanding an action: pressing it is a way to finish early, not
+        // the way to finish.
         <>
           <Square className="mr-2 size-4 fill-current" />
-          {left <= 10 ? `Stop (${left}s)` : "Stop"}
+          {left <= 10 ? `Listening (${left}s)` : "Listening…"}
         </>
       ) : (
         <>

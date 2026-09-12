@@ -120,6 +120,80 @@ the farm's asset list until they say so.
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-12 — Four taps to start a clock (`claude/speech-seam`)
+
+Voice slice 2, second half. [ADR 0050](../decisions/0050-a-safe-verb-records-itself.md),
+which amends ADR 0039. No migration.
+
+The founder used the microphone the day it was built:
+
+> *"I don't like how many clicks it takes. I have to hit say it, then stop it,
+> then read it. Definitely not going to work."*
+
+He was counting, and the count was right — **Say it, speak, Stop, Read it,
+Record**. Five interactions to start a clock, for a feature whose entire
+justification is that finding the screen took too many. ADR 0039 opens by
+naming the cost it exists to remove; this had reintroduced it in a different
+shape. Three of the four taps carried no information.
+
+**The recorder stops itself when the talking stops.** Adaptive, not a fixed
+threshold — the first 400 ms measure the room and everything after is relative
+to that floor. A fixed "below 0.01 is silence" works at a desk and fails beside
+an idling tractor, so the recorder would never auto-stop for exactly the people
+who most need it to. The button stays, relabelled `Listening…`, because a room
+this cannot read is a room somebody still has to finish in.
+
+**Dictation reads itself.** Somebody who has just spoken has already committed
+to the sentence; asking them to press a second button to have it read is a tap
+that asks nothing.
+
+**A verb may declare that a COMPLETE card of it records itself** —
+`TellAction.unattended`, default false, and the default is the rule. Three
+tests, all of which must hold: a wrong one is visible on a screen this person
+already looks at, it is undoable in ONE step, and it moves no quantity.
+`time.clock_in` and `time.clock_out` pass; nothing in livestock does, and
+nothing is expected to.
+
+**`unattended` alone is never enough.** `readyToRecordUnasked` (in `shape.ts`,
+pure and tested) also requires a non-empty batch, no HINT on any card, and
+`checkEntry` clean on every one. One dissenting card stops the whole batch —
+ADR 0039's all-or-none is unchanged. The rule lives outside the component
+deliberately: it decides the one condition under which a model's output reaches
+a tenant's data with no person in between, and that does not belong somewhere
+it is read once by whoever is changing the layout.
+
+**`Nothing to record from that` now lists what it CAN be told.** The founder's
+first attempt hit that message because no `time_workers` row was linked to his
+sign-in, so the time source contributed zero actions and "clock me in" matched
+nothing. The message described the model's result and hid the cause — the
+person had no way to tell "you said it wrong" from "this is not set up for
+you". **That is the same class as the one in
+[one-of-everything](inventory.md): I tested the path where a worker exists and
+never walked the one where none does.**
+
+#### The count now
+
+- **Clock me in: one tap.** Press, speak, `Clocked in at 7:42 AM`.
+- **Three chicks dead in pen two: two taps.** Press, speak, read the card,
+  press Record. The confirm step is intact exactly where it earns its keep.
+
+#### Driven
+
+On dev as Hilltop Farm, typed rather than spoken (the pane blocks the
+microphone):
+
+- `Clock me in.` → no card, no button, and a `time_punches` row 0.5 minutes
+  old written by the signed-in owner. The box reset itself.
+- `Three chicks dead in pen two` → an `Animals lost` card that **did not**
+  record, sitting on `Record 1 thing`, with `It heard "pen two" — pick or type
+  the right one.` beside an empty field, because Hilltop has no Pen 2. Both
+  halves of ADR 0050 in one pass.
+
+**Still not driven: the microphone itself**, and therefore the silence
+detector. It needs a real microphone and a permission prompt, which the browser
+pane refuses. The thresholds are reasoned, not measured, and the first use in
+a real room should be treated as the first measurement.
+
 ### 2026-09-12 — Say it instead of typing it (`claude/speech-seam`)
 
 Voice slice 2, [ADR 0049](../decisions/0049-speech-is-a-fork-in-the-road-not-a-provider.md).

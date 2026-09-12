@@ -23,6 +23,7 @@ import {
 } from "@/lib/tell-sources/actions";
 import {
   checkEntry,
+  readyToRecordUnasked,
   TELL_MAX_CHARS,
   type TellCard,
 } from "@/lib/tell-sources/shape";
@@ -36,6 +37,7 @@ interface ActionView {
   title: string;
   label: string;
   fields: TellField[];
+  unattended: boolean;
 }
 
 /**
@@ -85,29 +87,37 @@ export function TellBox({
     setActions([]);
   }
 
-  function read() {
-    if (sentence.trim() === "") return;
+  function read(said = sentence) {
+    if (said.trim() === "") return;
     startReading(async () => {
-      const result = await proposeTellAction({ sentence });
+      const result = await proposeTellAction({ sentence: said });
       if ("error" in result) {
         toast.error(result.error);
         return;
       }
-      setActions(result.data.actions as ActionView[]);
+      const view = result.data.actions as ActionView[];
+      setActions(view);
       setCards(result.data.cards);
       if (result.data.cards.length === 0) {
         // An explicit message, not an empty panel: "nothing found" and "it
         // broke" must not look the same.
         toast.info("Nothing to record from that.");
+        return;
+      }
+      // ADR 0050 — straight through when every card is a complete one of an
+      // action that declared itself safe to record unasked. Four taps to start
+      // a clock is worse than the screen it replaces.
+      if (readyToRecordUnasked(result.data.cards, view)) {
+        save(result.data.cards);
       }
     });
   }
 
-  function save() {
-    if (!cards || !ready) return;
+  function save(what: TellCard[] | null = cards) {
+    if (!what || what.length === 0) return;
     startSaving(async () => {
       const result = await recordTellAction({
-        entries: cards.map((c) => ({ actionSlug: c.actionSlug, values: c.values })),
+        entries: what.map((c) => ({ actionSlug: c.actionSlug, values: c.values })),
       });
       if ("error" in result) {
         toast.error(result.error);
@@ -160,13 +170,17 @@ export function TellBox({
             <DictateButton
               serverConfigured={speechConfigured}
               disabled={reading}
-              onText={(said) =>
-                setSentence((now) =>
-                  now.trim() === "" ? said : `${now.trim()} ${said}`,
-                )
-              }
+              onText={(said) => {
+                // STRAIGHT INTO THE READING. Somebody who has just spoken a
+                // sentence has already committed to it; making them press a
+                // second button to have it read is a tap that asks nothing.
+                const combined =
+                  sentence.trim() === "" ? said : `${sentence.trim()} ${said}`;
+                setSentence(combined);
+                read(combined);
+              }}
             />
-            <Button onClick={read} disabled={reading || sentence.trim() === ""} size="sm">
+            <Button onClick={() => read()} disabled={reading || sentence.trim() === ""} size="sm">
               {reading ? (
                 <>
                   <Loader2 className="mr-2 size-4 animate-spin" /> Reading…
@@ -181,9 +195,28 @@ export function TellBox({
         ) : (
           <>
             {cards.length === 0 ? (
-              <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-                Nothing to record from that.
-              </p>
+              <div className="space-y-2 rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+                <p>Nothing to record from that.</p>
+                {/* WHAT IT CAN DO, not just what it could not. The first
+                    version said only the second, and somebody whose sentence
+                    matched nothing had no way to find out whether they had
+                    said it wrong or asked for something this workspace does
+                    not offer them — which is exactly what happened with
+                    "clock me in" on a person no worker record was linked to. */}
+                {actions.length > 0 ? (
+                  <p>
+                    Right now you can tell it about:{" "}
+                    <span className="text-foreground">
+                      {actions.map((a) => a.title.toLowerCase()).join(", ")}
+                    </span>
+                    .
+                  </p>
+                ) : (
+                  <p>
+                    Nothing in this workspace is set up to be told things yet.
+                  </p>
+                )}
+              </div>
             ) : (
               <ul className="space-y-3">
                 {cards.map((card, i) => {
@@ -244,7 +277,7 @@ export function TellBox({
                 Start over
               </Button>
               {cards.length > 0 && (
-                <Button onClick={save} disabled={saving || !ready} size="sm">
+                <Button onClick={() => save()} disabled={saving || !ready} size="sm">
                   {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
                   {saving
                     ? "Recording…"

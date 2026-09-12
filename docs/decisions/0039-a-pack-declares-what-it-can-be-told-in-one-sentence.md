@@ -1,7 +1,7 @@
 # 0039 — A pack declares what it can be told in one sentence, and its own verb records it
 
 - **Date:** 2026-09-09
-- **Status:** Accepted
+- **Status:** Accepted, amended by [0050](0050-a-safe-verb-records-itself.md) (a verb may declare that a complete card of it records itself; everything else here stands)
 - **Affects:** `src/lib/tell-sources/` (a declared extension point), the livestock pack as its first filler, the daily round page
 
 ## Context

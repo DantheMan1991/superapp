@@ -90,6 +90,11 @@ export const timeTellSource: TellSource = {
       {
         slug: "time.clock_in",
         title: "Clocked in",
+        // ADR 0050. A clock that started when you did not mean it to is on
+        // the Time panel the moment you look, and {button:Cancel} removes the
+        // punch outright. It moves no head, no stock and no money — it is a
+        // timestamp on your own name.
+        unattended: true,
         about:
           "The person speaking is starting work NOW. Examples: “clock me in”, “starting on the fencing”, “I'm on”. Only ever the speaker's own clock — if the sentence names somebody else, this is not the action. Do not choose this for a sentence that says when they started; there is no way to record a past time here.",
         fields: [
@@ -123,6 +128,9 @@ export const timeTellSource: TellSource = {
       {
         slug: "time.clock_out",
         title: "Clocked out",
+        // Same three tests as clock-in. A stop in the wrong minute is an
+        // amendment on a screen built to show what changed and who changed it.
+        unattended: true,
         about:
           "The person speaking is stopping work NOW. Examples: “clock me out”, “that's me done”, “finished for the day”. Only ever the speaker's own clock.",
         fields: [

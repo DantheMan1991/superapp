@@ -40,7 +40,22 @@ The last two do not line up with weeks at all, so a week will sometimes start in
 2. Read down each week and check the overtime against what you expect. If something looks wrong, click {button:Time|outline}, move to that week and fix the entries behind it.
 3. When somebody's hours are ready, click {button:Send for approval|outline} on their line. Anybody can do this, including the person themselves.
 4. As the owner, click {button:Approve|primary}. A box tells you exactly what you are agreeing to, like `40h regular · 10h overtime`. Those figures are **saved as they stand**, and are what a pay run quotes. If the hours are not right, click {button:Send back|ghost} instead and they go back to being unsubmitted.
-5. Once everybody is approved and you have run payroll, click {button:Lock period|primary}. It asks first, because of what it does next.
+5. Before you run payroll, click {button:Download for payroll|outline}. You get a spreadsheet file named for the dates — one row per person with their hours as decimals, what they are owed, and whether their sheet was approved.
+6. Once everybody is approved and you have run payroll, click {button:Lock period|primary}. It asks first, because of what it does next.
+
+## The payroll file
+
+{button:Download for payroll|outline} gives you a `.csv` — a plain spreadsheet every payroll system and every spreadsheet program opens. It is named `hours-2026-08-31-to-2026-09-13.csv`, so a folder of them sorts itself.
+
+One row per person who worked, and the columns are: worker, the period's two dates, regular hours, overtime hours, double time hours, paid leave hours, gross pay, and whether the sheet was approved.
+
+Three things are worth knowing before you hand it over:
+
+- **The hours are decimals**, not `7:30`. Seven and a half hours is `7.5`. Every payroll system reads that; almost none agree on how to read a colon.
+- **Somebody whose sheet was never approved is still on the file**, with `no` in the last column. They worked the hours, and a file that quietly left them off is how a person does not get paid. Check that column before you import.
+- **Approved rows carry the figures you approved**, not figures worked out afresh. Unapproved rows show what their hours currently come to.
+
+It is deliberately not any one provider's own format. Gusto, ADP and QuickBooks Payroll each want a different file; this is the shape they all accept, and your provider's import will ask you to match the columns once.
 
 ## What locking does
 
@@ -53,6 +68,18 @@ That is on purpose. Once you have paid somebody for Tuesday, the record has to k
 If the period you are standing in is itself locked, the correction goes to the first day of the next one — the box tells you which date it is using before you save.
 
 You can {button:Unlock period|outline} at any time, and it does not ask. Unlocking just puts things back the way they were.
+
+## Locking and your books
+
+If you have turned on `Send wages to the books` over on [People](people.md), locking does one more thing: it writes the approved wages into your accounts as a **payroll accrual**, dated the last day of the period.
+
+The box you confirm says so, and the button reads {button:Lock it and post the wages|primary} instead. Afterwards you see `Period locked and wages posted`, and if anybody's sheet was never approved it tells you how many were left out.
+
+The entry charges **Salaries & Wages** and **Payroll Taxes** — split by what the hours were for, so your Profit & Loss by enterprise carries its own labour — and credits **Payroll Liabilities** with the total you now owe. When your provider's payroll run goes out, enter it against Payroll Liabilities and the two cancel.
+
+**Unlocking reverses it.** Not by deleting the entry, which would leave your books unable to explain themselves, but by posting an opposite one. Both stay in the journal and they net to nothing. You see `Period unlocked and wages reversed`.
+
+Lock it again and it posts again, as a fresh entry. Nothing is ever counted twice.
 
 ## Reading "Where the hours went"
 
@@ -95,10 +122,15 @@ Sending hours for approval is something anybody can do. **Approving is the owner
 | `That pay period is locked.` | You tried to change an hour inside a locked period. Use {button:Correct|ghost} instead. |
 | `That entry can still be edited` | You tried to correct an entry whose period is open. Change it rather than correcting it. |
 | `some hours have no rate` | Part of that week was worked before any rate was set for that person, so the figure beside it is not the whole week. |
+| `Period locked and wages posted` | The lock went through and the accrual is in your books. |
+| `Period unlocked and wages reversed` | The lock came off and the accrual was reversed out. |
+| `2 timesheets were never approved, so they are not in this figure.` | Somebody's hours were not approved before you locked. Only approved hours become a liability. |
 
 ## Not on this page
 
-There is no export for your payroll provider yet, and nothing here is posted to your books. Both are coming. Ask us where it is up to.
+Contractors are paid the same way as employees here — their hours become wages, not a bill to a vendor. If you engage subcontractors by the hour, tell us; it is the next thing on the list.
+
+Nothing here files or withholds anything. Time works out what people have **earned**; what is deducted and paid over is your payroll provider's job, and always will be.
 
 A period is either locked or it is not; you cannot lock one person's hours and leave another's open.
 

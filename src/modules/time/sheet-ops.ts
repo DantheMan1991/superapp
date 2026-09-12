@@ -311,14 +311,20 @@ export async function returnSheet(
   }
 }
 
-/** Stop the hours in a period from moving. Creates the row if it is the first time. */
+/**
+ * Stop the hours in a period from moving. Creates the row if it is the first time.
+ *
+ * Returns the row's id, because that is what a journal entry points at when the
+ * period's labor is accrued (`journal_entries.source_id`). This function still
+ * writes one table and nothing else; posting is the caller's move.
+ */
 export async function lockPeriod(
   tx: Tx,
   tenantId: string,
   period: PayPeriod,
   actorClerkUserId: string,
-): Promise<void> {
-  await tx
+): Promise<string> {
+  const rows = await tx
     .insert(schema.timePeriods)
     .values({
       tenantId,
@@ -335,7 +341,9 @@ export async function lockPeriod(
         lockedByClerkUserId: actorClerkUserId,
         updatedAt: new Date(),
       },
-    });
+    })
+    .returning({ id: schema.timePeriods.id });
+  return rows[0].id;
 }
 
 /**
@@ -349,7 +357,7 @@ export async function unlockPeriod(
   tx: Tx,
   tenantId: string,
   periodStart: string,
-): Promise<void> {
+): Promise<string> {
   const result = await tx
     .update(schema.timePeriods)
     .set({
@@ -368,6 +376,7 @@ export async function unlockPeriod(
   if (result.length === 0) {
     throw new TimeError("PERIOD_NOT_LOCKED", "that period is not locked");
   }
+  return result[0].id;
 }
 
 /** Every sheet in one period, oldest submission first. */

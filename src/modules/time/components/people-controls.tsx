@@ -24,10 +24,12 @@ import {
 } from "@/components/ui/select";
 import {
   addWorkerAction,
+  setRoundingAction,
   setWeekStartsOnAction,
   setWorkerActiveAction,
   setWorkerUserAction,
 } from "../actions";
+import { ROUNDING_CHOICES, roundingLabel } from "../core/rounding";
 import { WEEKDAYS } from "../core/week";
 
 export interface PersonOption {
@@ -306,6 +308,61 @@ export function WeekStartPicker({ weekStartsOn }: { weekStartsOn: number }) {
       </Select>
       <p className="text-xs text-muted-foreground">
         Your week runs from here. Weekly totals are grouped by it.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * What a clocked span is rounded to.
+ *
+ * NO DIRECTION IS OFFERED, and the sentence under the picker says why in the
+ * reader's terms. Rounding is lawful while it is neutral — it has to cost as
+ * often as it pays — so every option here is to the NEAREST increment. A
+ * business that wants to always round down is asking for something this
+ * product will not do.
+ */
+export function RoundingPicker({
+  roundingMinutes,
+}: {
+  roundingMinutes: number;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <Select
+        disabled={pending}
+        value={String(roundingMinutes)}
+        onValueChange={(value) =>
+          startTransition(async () => {
+            const result = await setRoundingAction({
+              roundingMinutes: Number(value),
+            });
+            if ("error" in result) {
+              toast.error(result.error);
+              return;
+            }
+            toast.success("Saved");
+            router.refresh();
+          })
+        }
+      >
+        <SelectTrigger className="w-[220px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {ROUNDING_CHOICES.map((m) => (
+            <SelectItem key={m} value={String(m)}>
+              {roundingLabel(m)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-muted-foreground">
+        Only applies to time from a clock. Always to the nearest, so it costs as
+        often as it pays. Typed hours are kept exactly as typed.
       </p>
     </div>
   );

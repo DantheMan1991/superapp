@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, lte } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 
 /**
@@ -62,6 +62,7 @@ export interface EntryRow {
   workDate: string;
   payType: string;
   note: string;
+  source: string;
   enteredByClerkUserId: string;
   version: number;
 }
@@ -88,6 +89,7 @@ export async function listEntries(
       workDate: schema.timeEntries.workDate,
       payType: schema.timeEntries.payType,
       note: schema.timeEntries.note,
+      source: schema.timeEntries.source,
       enteredByClerkUserId: schema.timeEntries.enteredByClerkUserId,
       version: schema.timeEntries.version,
     })
@@ -168,4 +170,80 @@ export async function getWorkerForUser(
       ),
     })) ?? null
   );
+}
+
+export interface OpenPunchRow {
+  id: string;
+  workerId: string;
+  workerName: string;
+  startedAt: Date;
+  /**
+   * How long it has been running, as of this read.
+   *
+   * COMPUTED HERE rather than in the component, because "now" is a fact about
+   * when the query ran and a render is supposed to be a pure function of what
+   * it was given. The browser ticks up from this number; it never recomputes
+   * it, so nobody has to trust a laptop's clock.
+   */
+  elapsedMinutes: number;
+  note: string;
+  version: number;
+  startedByClerkUserId: string;
+}
+
+/**
+ * Every clock currently running, longest first.
+ *
+ * EVERYBODY'S, not just the reader's. A clock left running is a problem for
+ * whoever notices it, and the person it belongs to is by definition not
+ * looking at the screen. Longest first puts the one that needs attention at the
+ * top without the query knowing what "too long" means — that threshold is the
+ * screen's, and lives in `core/rounding.ts` beside the rest of the clock's
+ * arithmetic.
+ */
+export async function listOpenPunches(
+  tx: Tx,
+  tenantId: string,
+): Promise<OpenPunchRow[]> {
+  const rows = await tx
+    .select({
+      id: schema.timePunches.id,
+      workerId: schema.timePunches.workerId,
+      workerName: schema.parties.displayName,
+      startedAt: schema.timePunches.startedAt,
+      note: schema.timePunches.note,
+      version: schema.timePunches.version,
+      startedByClerkUserId: schema.timePunches.startedByClerkUserId,
+    })
+    .from(schema.timePunches)
+    .innerJoin(
+      schema.timeWorkers,
+      and(
+        eq(schema.timeWorkers.tenantId, schema.timePunches.tenantId),
+        eq(schema.timeWorkers.id, schema.timePunches.workerId),
+      ),
+    )
+    .innerJoin(
+      schema.parties,
+      and(
+        eq(schema.parties.tenantId, schema.timeWorkers.tenantId),
+        eq(schema.parties.id, schema.timeWorkers.partyId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.timePunches.tenantId, tenantId),
+        isNull(schema.timePunches.endedAt),
+      ),
+    )
+    .orderBy(asc(schema.timePunches.startedAt));
+
+  const now = Date.now();
+  return rows.map((row) => ({
+    ...row,
+    elapsedMinutes: Math.max(
+      0,
+      Math.round((now - row.startedAt.getTime()) / 60_000),
+    ),
+  }));
 }

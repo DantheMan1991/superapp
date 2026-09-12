@@ -2,9 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   COMMON_TIMEZONES,
   DEFAULT_TIMEZONE,
+  addDays,
   dateInTimezone,
+  datesBetween,
+  isDateString,
   isValidTimeZone,
   localHourInTimezone,
+  startOfWeek,
   todayInTimezone,
 } from "../src/lib/timezone";
 
@@ -111,5 +115,87 @@ describe("COMMON_TIMEZONES", () => {
 
   it("includes the default, so the picker can always show the current value", () => {
     expect(COMMON_TIMEZONES.some((t) => t.value === DEFAULT_TIMEZONE)).toBe(true);
+  });
+});
+
+/**
+ * Calendar arithmetic. Added when the Time module widened `startOfWeek` from
+ * `0 | 1` to any day of the week — an owner picks the day their week runs from
+ * (`time_settings.week_starts_on`), and before that only Sunday and Monday had
+ * a test.
+ */
+
+describe("isDateString", () => {
+  it("accepts real days", () => {
+    expect(isDateString("2026-09-11")).toBe(true);
+    expect(isDateString("2024-02-29")).toBe(true); // a leap year
+  });
+
+  it("refuses days that do not exist", () => {
+    // The format alone accepts these; a `Date` silently rolls them forward,
+    // which is why the round trip is the test.
+    expect(isDateString("2026-02-31")).toBe(false);
+    expect(isDateString("2025-02-29")).toBe(false);
+    expect(isDateString("2026-13-01")).toBe(false);
+    expect(isDateString("2026-9-11")).toBe(false);
+    expect(isDateString("11/09/2026")).toBe(false);
+    expect(isDateString("")).toBe(false);
+  });
+});
+
+describe("addDays", () => {
+  it("crosses months, years and a leap day", () => {
+    expect(addDays("2026-09-30", 1)).toBe("2026-10-01");
+    expect(addDays("2026-12-31", 1)).toBe("2027-01-01");
+    expect(addDays("2026-01-01", -1)).toBe("2025-12-31");
+    expect(addDays("2024-02-28", 1)).toBe("2024-02-29");
+  });
+
+  it("steps over both daylight-saving transitions", () => {
+    // US DST began 2026-03-08 and ended 2026-11-01, both Sundays. Adding
+    // 86,400,000 ms to a LOCAL instant skips or repeats an hour and lands on
+    // the wrong date; this runs in UTC, which has no transitions.
+    expect(addDays("2026-03-07", 1)).toBe("2026-03-08");
+    expect(addDays("2026-10-31", 2)).toBe("2026-11-02");
+  });
+});
+
+describe("startOfWeek", () => {
+  // 2026-09-11 is a Friday.
+  it("finds the start for a Sunday week and a Monday week", () => {
+    expect(startOfWeek("2026-09-11", 0)).toBe("2026-09-06");
+    expect(startOfWeek("2026-09-11", 1)).toBe("2026-09-07");
+  });
+
+  it("a day that IS the start returns itself", () => {
+    expect(startOfWeek("2026-09-06", 0)).toBe("2026-09-06");
+    expect(startOfWeek("2026-09-07", 1)).toBe("2026-09-07");
+  });
+
+  it("a Sunday in a Monday week belongs to the week before", () => {
+    // What the `+ 7) % 7` is for: without it this lands six days into the
+    // future, and every Sunday's hours are counted in the wrong week.
+    expect(startOfWeek("2026-09-13", 1)).toBe("2026-09-07");
+  });
+
+  it("works for all seven start days", () => {
+    // The reason the annotation was widened. Tuesday through Saturday had no
+    // coverage while Scheduling was the only caller.
+    for (let start = 0; start < 7; start++) {
+      for (const day of datesBetween("2026-09-06", "2026-09-12")) {
+        const s = startOfWeek(day, start);
+        expect(s <= day).toBe(true);
+        expect(datesBetween(s, day).length).toBeLessThanOrEqual(7);
+        expect(startOfWeek(s, start)).toBe(s); // idempotent
+      }
+    }
+  });
+
+  it("survives the days daylight saving moves", () => {
+    expect(startOfWeek("2026-03-08", 0)).toBe("2026-03-08");
+    expect(startOfWeek("2026-03-09", 0)).toBe("2026-03-08");
+    expect(startOfWeek("2026-03-14", 0)).toBe("2026-03-08");
+    expect(startOfWeek("2026-11-01", 0)).toBe("2026-11-01");
+    expect(startOfWeek("2026-11-07", 0)).toBe("2026-11-01");
   });
 });

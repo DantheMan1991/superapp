@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { TimeError } from "./core/errors";
+import { isRoundingChoice } from "./core/rounding";
 
 /**
  * The tenant's one Time setting. Read on every page, written from Settings.
@@ -16,20 +17,33 @@ import { TimeError } from "./core/errors";
 /** Sunday. Matches `time_settings.week_starts_on`'s column default. */
 export const DEFAULT_WEEK_STARTS_ON = 0;
 
+/** To the minute. Matches `time_settings.rounding_minutes`' column default. */
+export const DEFAULT_ROUNDING_MINUTES = 0;
+
+export interface TimePrefs {
+  weekStartsOn: number;
+  roundingMinutes: number;
+}
+
 /**
  * READ-ONLY, AND SAFE FOR A READER WITH NO WRITE RIGHTS. A missing row means
- * the default — the default lives in the read rather than in a backfill, the
- * shape `notification_preferences` uses, so nobody has to be inserted before
- * the page can render.
+ * the defaults — they live in the read rather than in a backfill, the shape
+ * `notification_preferences` uses, so nobody has to be inserted before the page
+ * can render.
+ *
+ * ONE READ FOR BOTH, because every screen that wants the week start also wants
+ * the rounding: the clock panel shows what a punch will be rounded to and the
+ * week groups by the start day. Two functions meant two round trips for one
+ * row.
  */
-export async function getWeekStartsOn(
-  tx: Tx,
-  tenantId: string,
-): Promise<number> {
+export async function getTimePrefs(tx: Tx, tenantId: string): Promise<TimePrefs> {
   const row = await tx.query.timeSettings.findFirst({
     where: eq(schema.timeSettings.tenantId, tenantId),
   });
-  return row?.weekStartsOn ?? DEFAULT_WEEK_STARTS_ON;
+  return {
+    weekStartsOn: row?.weekStartsOn ?? DEFAULT_WEEK_STARTS_ON,
+    roundingMinutes: row?.roundingMinutes ?? DEFAULT_ROUNDING_MINUTES,
+  };
 }
 
 export async function setWeekStartsOn(
@@ -51,6 +65,24 @@ export async function setWeekStartsOn(
     .onConflictDoUpdate({
       target: schema.timeSettings.tenantId,
       set: { weekStartsOn, updatedAt: new Date() },
+      where: and(eq(schema.timeSettings.tenantId, tenantId)),
+    });
+}
+
+export async function setRoundingMinutes(
+  tx: Tx,
+  tenantId: string,
+  roundingMinutes: number,
+): Promise<void> {
+  if (!isRoundingChoice(roundingMinutes)) {
+    throw new TimeError("ROUNDING_INVALID", "not a rounding option");
+  }
+  await tx
+    .insert(schema.timeSettings)
+    .values({ tenantId, roundingMinutes })
+    .onConflictDoUpdate({
+      target: schema.timeSettings.tenantId,
+      set: { roundingMinutes, updatedAt: new Date() },
       where: and(eq(schema.timeSettings.tenantId, tenantId)),
     });
 }

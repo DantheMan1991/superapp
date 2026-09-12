@@ -1,23 +1,24 @@
 /**
- * Calendar arithmetic on `yyyy-mm-dd` strings. NO IMPORTS AND NO DIRECTIVE —
- * the week strip renders in the browser.
+ * How a week READS in the Time module: the day names an owner picks from, and
+ * the labels on the week strip. NO IMPORTS BEYOND `@/lib/timezone`, which is
+ * deliberately client-safe, so this bundles to the browser.
  *
- * EVERY DATE HERE IS A CALENDAR FACT, NOT AN INSTANT, and all arithmetic runs
- * in UTC for one reason: UTC has no daylight saving, so "add a day" is always
- * exactly 86,400,000 ms. Do the same sum in a local zone and two mornings a
- * year it lands on the wrong date — the bug the reader experiences as a week
- * that starts on Saturday twice a year. `tenants.timezone` decides what TODAY
- * is (`todayInTimezone`); once you hold the string, the zone has done its job
- * and must not be consulted again.
+ * THE ARITHMETIC IS NOT HERE. `addDays`, `dayOfWeek`, `startOfWeek`,
+ * `datesBetween` and `isDateString` all live in `@/lib/timezone`, which has
+ * done UTC calendar maths since the scheduling module needed it. Slice 0 of
+ * this module wrote its own copies before noticing, and slice 1 deleted them:
+ * two implementations of "what day does this week start on" is exactly the
+ * drift that makes two screens disagree about which week an hour falls in.
  *
- * Slice 2 builds the WORKWEEK on top of this — the fixed recurring period
- * overtime is computed over, which is not the pay period. `startOfWeek` is
- * already that boundary; what slice 2 adds is what happens inside it.
+ * The rule they both follow is worth restating, because it is the one that
+ * bites: `tenants.timezone` decides what TODAY is, and after that a
+ * `yyyy-mm-dd` is a calendar fact whose arithmetic runs in UTC — the only zone
+ * where "add a day" is always 86,400,000 ms. Do the sum in a local zone and two
+ * mornings a year it lands on the wrong date.
  */
+import { addDays, datesBetween } from "@/lib/timezone";
 
-const DAY_MS = 86_400_000;
-
-/** Sunday first, matching `Date.prototype.getUTCDay()` and `week_starts_on`. */
+/** Sunday first, matching `getUTCDay()` and `time_settings.week_starts_on`. */
 export const WEEKDAYS = [
   "Sunday",
   "Monday",
@@ -28,64 +29,23 @@ export const WEEKDAYS = [
   "Saturday",
 ] as const;
 
+/** What a `yyyy-mm-dd` looks like. The shape half of a date check. */
 export const DATE_FORMAT = /^\d{4}-\d{2}-\d{2}$/;
-
-/**
- * Is this a real day, spelled the way the database stores one?
- *
- * The format check alone accepts `2026-02-31`, which Postgres refuses and a
- * `Date` silently rolls into March — so the round trip is the test.
- */
-export function isDateString(value: string): boolean {
-  if (!DATE_FORMAT.test(value)) return false;
-  const ms = Date.parse(`${value}T00:00:00Z`);
-  if (Number.isNaN(ms)) return false;
-  return toDateString(ms) === value;
-}
-
-function toDateString(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 10);
-}
-
-function toMs(date: string): number {
-  return Date.parse(`${date}T00:00:00Z`);
-}
-
-export function addDays(date: string, days: number): string {
-  return toDateString(toMs(date) + days * DAY_MS);
-}
-
-/** Whole days from `from` to `to`. Negative when `to` is earlier. */
-export function daysBetween(from: string, to: string): number {
-  return Math.round((toMs(to) - toMs(from)) / DAY_MS);
-}
-
-/**
- * The first day of the week `date` falls in, for a business whose week starts
- * on `weekStartsOn` (0 = Sunday … 6 = Saturday).
- *
- * The `+ 7) % 7` is not decoration: a Monday-start business looking at a Sunday
- * would otherwise get -1 and land six days into the future.
- */
-export function startOfWeek(date: string, weekStartsOn: number): string {
-  const day = new Date(toMs(date)).getUTCDay();
-  const back = (day - weekStartsOn + 7) % 7;
-  return addDays(date, -back);
-}
 
 /** The seven days of the week beginning `start`, in order. */
 export function weekDays(start: string): string[] {
-  return Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  return datesBetween(start, addDays(start, 6));
 }
 
 /**
- * "Mon 8 Sep" — enough to place a day without the year everybody already knows.
- * Formatted in UTC for the reason the whole file is: the string is a calendar
- * fact, and letting the reader's browser re-interpret it in its own zone is
- * what makes a date show as the day before.
+ * "Fri, Sep 11" — enough to place a day without the year everybody knows.
+ *
+ * Formatted in UTC: the string is a calendar fact, and letting the reader's
+ * browser re-interpret it in its own zone is what makes a date show as the day
+ * before.
  */
 export function dayLabel(date: string): string {
-  return new Date(toMs(date)).toLocaleDateString("en-US", {
+  return new Date(date + "T00:00:00Z").toLocaleDateString("en-US", {
     timeZone: "UTC",
     weekday: "short",
     day: "numeric",
@@ -93,15 +53,17 @@ export function dayLabel(date: string): string {
   });
 }
 
-/** "8 – 14 Sep" for a week strip heading. */
+/** "Sep 6 – Sep 12" for a week strip heading. */
 export function weekLabel(start: string): string {
-  const end = addDays(start, 6);
   const opts: Intl.DateTimeFormatOptions = {
     timeZone: "UTC",
     day: "numeric",
     month: "short",
   };
-  const from = new Date(toMs(start)).toLocaleDateString("en-US", opts);
-  const to = new Date(toMs(end)).toLocaleDateString("en-US", opts);
-  return `${from} – ${to}`;
+  const from = new Date(start + "T00:00:00Z").toLocaleDateString("en-US", opts);
+  const to = new Date(addDays(start, 6) + "T00:00:00Z").toLocaleDateString(
+    "en-US",
+    opts,
+  );
+  return from + " – " + to;
 }

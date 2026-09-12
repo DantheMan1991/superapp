@@ -105,6 +105,77 @@ export const timeWorkers = pgTable(
 );
 
 /**
+ * THE RAW CLOCK RECORD. Evidence, not the payable fact.
+ *
+ * The rule this table exists to keep: **store the raw forever and compute
+ * everything else.** A punch is what actually happened — two instants and who
+ * pressed the button — and the entry it produces is that run through the
+ * tenant's rounding policy. Keeping both is what lets a screen answer "you
+ * worked 7:53, we were paid for 8:00, here is the rule" instead of showing a
+ * number nobody can account for, and it is what makes the rounding policy
+ * changeable without rewriting history.
+ *
+ * ONE OPEN PUNCH PER WORKER, by a partial unique index rather than by care.
+ * Two running clocks on one person is not a state the product should be able to
+ * reach — it double-counts an afternoon — and between a look-before-you-leap
+ * SELECT and the INSERT another request can always win. The index cannot be
+ * raced.
+ *
+ * A manual entry has no punch, which is why nothing downstream may assume one
+ * exists. The device, the coordinates and the client-generated id that make an
+ * offline phone's punch idempotent arrive in slice 7, with the screen that
+ * sends them.
+ */
+export const timePunches = pgTable(
+  "time_punches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    workerId: uuid("worker_id").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    /** Null = the clock is still running. The only meaning it carries. */
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    /**
+     * WHO PRESSED THE BUTTON, which is not who worked. A supervisor clocking
+     * six people in is the ordinary case on a site, not an exception.
+     */
+    startedByClerkUserId: text("started_by_clerk_user_id").notNull(),
+    endedByClerkUserId: text("ended_by_clerk_user_id"),
+    /** Carried onto the entry at clock-out, so it is typed once. */
+    note: text("note").notNull().default(""),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("time_punches_tenant_id_id_idx").on(t.tenantId, t.id),
+    // THE INVARIANT. Partial, so the many closed punches a worker accumulates
+    // do not collide with each other.
+    uniqueIndex("time_punches_one_open_idx")
+      .on(t.tenantId, t.workerId)
+      .where(sql`${t.endedAt} is null`),
+    index("time_punches_tenant_started_idx").on(t.tenantId, t.startedAt),
+    foreignKey({
+      name: "time_punches_worker_fk",
+      columns: [t.tenantId, t.workerId],
+      foreignColumns: [timeWorkers.tenantId, timeWorkers.id],
+    }).onDelete("cascade"),
+    // A clock that stopped before it started is a typo in an adjustment, and it
+    // would produce negative minutes downstream.
+    check(
+      "time_punches_ends_after_start",
+      sql`${t.endedAt} is null or ${t.endedAt} > ${t.startedAt}`,
+    ),
+  ],
+);
+
+/**
  * Hours worked on a day. The fact everything downstream reads.
  *
  * Slice 1 adds `time_punches` — the raw clock record that PRODUCES entries —
@@ -157,6 +228,25 @@ export const timeEntries = pgTable(
     payType: text("pay_type").notNull().default("worked"),
     note: text("note").notNull().default(""),
     /**
+     * The punch this came from, when it came from one. Null for an entry
+     * somebody typed, which is most of them on most businesses.
+     *
+     * ONE DIRECTION ONLY. `time_punches` deliberately carries no `entry_id`
+     * back: two columns that can disagree are two columns that will, and "did
+     * this punch produce an entry?" is a lookup on the index below. The same
+     * argument `work_items` makes for `closed_at` over a boolean.
+     */
+    punchId: uuid("punch_id"),
+    /**
+     * How this entry came to exist. `timer` means a punch produced it, so a
+     * screen can say the minutes were rounded rather than typed.
+     *
+     * CHECKED, and widened by the slice that adds a writer — `kiosk`, `import`,
+     * `tell` and `paste` each arrive with the door that writes them. A value
+     * set listing doors nobody has built would be a promise in a constraint.
+     */
+    source: text("source").notNull().default("manual"),
+    /**
      * WHO TYPED IT, which is not who worked — a supervisor logging a crew's
      * afternoon is the ordinary case, not an exception. Kept apart from
      * `worker_id` for the reason `crm_party_details` keeps owner and visibility
@@ -180,6 +270,23 @@ export const timeEntries = pgTable(
       t.workerId,
       t.workDate,
     ),
+    // One entry per punch. Partial, because the many typed entries carry no
+    // punch at all and must not collide.
+    uniqueIndex("time_entries_punch_idx")
+      .on(t.tenantId, t.punchId)
+      .where(sql`${t.punchId} is not null`),
+    foreignKey({
+      name: "time_entries_punch_fk",
+      columns: [t.tenantId, t.punchId],
+      foreignColumns: [timePunches.tenantId, timePunches.id],
+      // SET NULL, not cascade: the entry is the payable fact and the punch is
+      // evidence for it, so losing the evidence must not lose the pay. The
+      // emitted SQL needs Postgres 15's COLUMN-LIST form, `SET NULL
+      // ("punch_id")` — a bare SET NULL on a composite FK would try to null
+      // `tenant_id` too and can never run. Hand-written in the migration;
+      // drizzle-kit diffs its own snapshot rather than the database, so it does
+      // not revert it.
+    }).onDelete("set null"),
     foreignKey({
       name: "time_entries_worker_fk",
       columns: [t.tenantId, t.workerId],
@@ -197,6 +304,7 @@ export const timeEntries = pgTable(
       "time_entries_pay_type",
       sql`${t.payType} in ('worked', 'paid_leave', 'holiday', 'unpaid')`,
     ),
+    check("time_entries_source", sql`${t.source} in ('manual', 'timer')`),
   ],
 );
 
@@ -222,6 +330,18 @@ export const timeSettings = pgTable(
       .references(() => tenants.id, { onDelete: "cascade" }),
     /** 0 = Sunday … 6 = Saturday, matching `Date.prototype.getDay()`. */
     weekStartsOn: integer("week_starts_on").notNull().default(0),
+    /**
+     * What a punch's minutes are rounded to on the way to an entry. 0 = to the
+     * minute, which is the default because it is the only setting that is
+     * right without anybody thinking about it.
+     *
+     * THERE IS NO DIRECTION, AND THAT IS THE POINT. Rounding is always to the
+     * NEAREST increment, so it costs the worker as often as it pays them. A
+     * policy that always rounds down is unlawful wage theft however small the
+     * increment, so the product does not offer it — which is why this is one
+     * integer and not a pair with a mode beside it.
+     */
+    roundingMinutes: integer("rounding_minutes").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -235,9 +355,14 @@ export const timeSettings = pgTable(
       "time_settings_week_starts_on",
       sql`${t.weekStartsOn} between 0 and 6`,
     ),
+    check(
+      "time_settings_rounding_minutes",
+      sql`${t.roundingMinutes} in (0, 5, 6, 10, 15, 30)`,
+    ),
   ],
 );
 
 export type TimeWorker = typeof timeWorkers.$inferSelect;
+export type TimePunch = typeof timePunches.$inferSelect;
 export type TimeEntry = typeof timeEntries.$inferSelect;
 export type TimeSettings = typeof timeSettings.$inferSelect;

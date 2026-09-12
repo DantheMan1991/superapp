@@ -53,6 +53,7 @@ d("time tables (RLS)", () => {
   let workerA = "";
   let workerB = "";
   let entryA = "";
+  let punchA = "";
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantA, fn, { role: "staff", userId: MATE });
@@ -104,7 +105,18 @@ d("time tables (RLS)", () => {
 
       await tx
         .insert(schema.timeSettings)
-        .values({ tenantId: tenantA, weekStartsOn: 1 });
+        .values({ tenantId: tenantA, weekStartsOn: 1, roundingMinutes: 15 });
+
+      const [punch] = await tx
+        .insert(schema.timePunches)
+        .values({
+          tenantId: tenantA,
+          workerId: workerA,
+          startedAt: new Date("2026-09-11T13:00:00Z"),
+          startedByClerkUserId: MATE,
+        })
+        .returning();
+      punchA = punch.id;
     });
   });
 
@@ -122,7 +134,9 @@ d("time tables (RLS)", () => {
       workers: await tx.select().from(schema.timeWorkers),
       entries: await tx.select().from(schema.timeEntries),
       settings: await tx.select().from(schema.timeSettings),
+      punches: await tx.select().from(schema.timePunches),
     }));
+    expect(seen.punches.map((p) => p.id)).toEqual([punchA]);
     expect(seen.workers.map((w) => w.id)).toEqual([workerA]);
     expect(seen.entries.map((e) => e.id)).toEqual([entryA]);
     expect(seen.settings.map((s) => s.weekStartsOn)).toEqual([1]);
@@ -133,10 +147,12 @@ d("time tables (RLS)", () => {
       workers: await tx.select().from(schema.timeWorkers),
       entries: await tx.select().from(schema.timeEntries),
       settings: await tx.select().from(schema.timeSettings),
+      punches: await tx.select().from(schema.timePunches),
     }));
     expect(seen.workers.map((w) => w.id)).toEqual([workerB]);
     expect(seen.entries).toEqual([]);
     expect(seen.settings).toEqual([]);
+    expect(seen.punches).toEqual([]);
   });
 
   it("naming another tenant's entry by id finds nothing", async () => {
@@ -269,10 +285,202 @@ d("time tables (RLS)", () => {
         workers: await tx.select().from(schema.timeWorkers),
         entries: await tx.select().from(schema.timeEntries),
         settings: await tx.select().from(schema.timeSettings),
+        punches: await tx.select().from(schema.timePunches),
       };
     });
     expect(seen.workers).toEqual([]);
     expect(seen.entries).toEqual([]);
     expect(seen.settings).toEqual([]);
+    expect(seen.punches).toEqual([]);
+  });
+
+  /* ── the clock (slice 1) ──────────────────────────────────────────────── */
+
+  it("one open punch per worker, enforced by the database", async () => {
+    // THE invariant of the clock. Two running clocks on one person
+    // double-count an afternoon, and no amount of care in the action layer can
+    // win a race that the index settles.
+    await expect(
+      asStaff((tx) =>
+        tx.insert(schema.timePunches).values({
+          tenantId: tenantA,
+          workerId: workerA,
+          startedAt: new Date("2026-09-11T15:00:00Z"),
+          startedByClerkUserId: MATE,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a worker may have any number of CLOSED punches", async () => {
+    // The index is partial. Without that, a second shift on the same day would
+    // be refused, which is the opposite of what the invariant is for.
+    await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.timePunches)
+        .values([
+          {
+            tenantId: tenantA,
+            workerId: workerA,
+            startedAt: new Date("2026-09-09T13:00:00Z"),
+            endedAt: new Date("2026-09-09T17:00:00Z"),
+            startedByClerkUserId: MATE,
+          },
+          {
+            tenantId: tenantA,
+            workerId: workerA,
+            startedAt: new Date("2026-09-10T13:00:00Z"),
+            endedAt: new Date("2026-09-10T17:00:00Z"),
+            startedByClerkUserId: MATE,
+          },
+        ])
+        .returning({ id: schema.timePunches.id });
+      expect(rows).toHaveLength(2);
+      await tx.delete(schema.timePunches).where(
+        inArray(
+          schema.timePunches.id,
+          rows.map((r) => r.id),
+        ),
+      );
+    });
+  });
+
+  it("a clock cannot stop before it started", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.timePunches).values({
+          tenantId: tenantA,
+          workerId: workerB,
+          startedAt: new Date("2026-09-11T17:00:00Z"),
+          endedAt: new Date("2026-09-11T13:00:00Z"),
+          startedByClerkUserId: OTHER,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a punch cannot belong to another tenant's worker, even under withSystem", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.timePunches).values({
+          tenantId: tenantA,
+          workerId: workerB,
+          startedAt: new Date("2026-09-11T13:00:00Z"),
+          startedByClerkUserId: OWNER,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("an entry cannot claim another tenant's punch", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.timeEntries).values({
+          tenantId: tenantB,
+          workerId: workerB,
+          minutes: 60,
+          workDate: "2026-09-11",
+          enteredByClerkUserId: OTHER,
+          source: "timer",
+          punchId: punchA,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("one entry per punch", async () => {
+    await withSystem(async (tx) => {
+      const [punch] = await tx
+        .insert(schema.timePunches)
+        .values({
+          tenantId: tenantA,
+          workerId: workerA,
+          startedAt: new Date("2026-09-08T13:00:00Z"),
+          endedAt: new Date("2026-09-08T17:00:00Z"),
+          startedByClerkUserId: MATE,
+        })
+        .returning({ id: schema.timePunches.id });
+
+      const entry = {
+        tenantId: tenantA,
+        workerId: workerA,
+        minutes: 240,
+        workDate: "2026-09-08",
+        enteredByClerkUserId: MATE,
+        source: "timer",
+        punchId: punch.id,
+      };
+      await tx.insert(schema.timeEntries).values(entry);
+      await expect(tx.insert(schema.timeEntries).values(entry)).rejects.toThrow();
+    });
+  });
+
+  it("deleting a punch keeps its entry and clears the link", async () => {
+    // The COLUMN-LIST form of ON DELETE SET NULL, which is the whole reason
+    // 0302 was hand-edited: a bare SET NULL on a composite key would try to
+    // null `tenant_id` and could never run. The entry is the payable fact and
+    // must survive losing its evidence.
+    await withSystem(async (tx) => {
+      const [punch] = await tx
+        .insert(schema.timePunches)
+        .values({
+          tenantId: tenantA,
+          workerId: workerA,
+          startedAt: new Date("2026-09-07T13:00:00Z"),
+          endedAt: new Date("2026-09-07T17:00:00Z"),
+          startedByClerkUserId: MATE,
+        })
+        .returning({ id: schema.timePunches.id });
+      const [entry] = await tx
+        .insert(schema.timeEntries)
+        .values({
+          tenantId: tenantA,
+          workerId: workerA,
+          minutes: 240,
+          workDate: "2026-09-07",
+          enteredByClerkUserId: MATE,
+          source: "timer",
+          punchId: punch.id,
+        })
+        .returning({ id: schema.timeEntries.id });
+
+      await tx
+        .delete(schema.timePunches)
+        .where(eq(schema.timePunches.id, punch.id));
+
+      const after = await tx.query.timeEntries.findFirst({
+        where: eq(schema.timeEntries.id, entry.id),
+      });
+      expect(after).toBeTruthy();
+      expect(after!.punchId).toBeNull();
+      expect(after!.minutes).toBe(240);
+      expect(after!.tenantId).toBe(tenantA);
+
+      await tx.delete(schema.timeEntries).where(eq(schema.timeEntries.id, entry.id));
+    });
+  });
+
+  it("refuses a source and a rounding nobody offers", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.timeEntries).values({
+          tenantId: tenantA,
+          workerId: workerA,
+          minutes: 60,
+          workDate: "2026-09-11",
+          enteredByClerkUserId: MATE,
+          source: "kiosk", // arrives in slice 7, with the door that writes it
+        }),
+      ),
+    ).rejects.toThrow();
+
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.timeSettings)
+          .set({ roundingMinutes: 7 })
+          .where(eq(schema.timeSettings.tenantId, tenantA)),
+      ),
+    ).rejects.toThrow();
   });
 });

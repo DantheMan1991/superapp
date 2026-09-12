@@ -6,22 +6,28 @@ import { PageHeader } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
 import type { TenantContext } from "@/lib/auth";
 import { listAssignableMembers, memberLabel } from "@/lib/team";
-import { todayInTimezone } from "@/lib/timezone";
+import {
+  addDays,
+  formatTimeInTimezone,
+  isDateString,
+  startOfWeek,
+  timeOfDayInTimezone,
+  dateInTimezone,
+  todayInTimezone,
+} from "@/lib/timezone";
 import { roleMayWrite } from "./core/errors";
 import { formatDuration } from "./core/duration";
 import { countsAsPaid, countsAsWorked, payTypeLabel } from "./core/pay-types";
+import { dayLabel, weekDays, weekLabel } from "./core/week";
 import {
-  addDays,
-  dayLabel,
-  isDateString,
-  startOfWeek,
-  weekDays,
-  weekLabel,
-} from "./core/week";
+  ClockInButton,
+  RunningClockRow,
+  type RunningClock,
+} from "./components/clock";
 import { EntryRow, type EntryView } from "./components/entry-row";
 import { LogTimeForm } from "./components/log-time";
-import { listEntries, listWorkers } from "./read";
-import { getWeekStartsOn } from "./settings-ops";
+import { listEntries, listOpenPunches, listWorkers } from "./read";
+import { getTimePrefs } from "./settings-ops";
 
 /**
  * The module's home: one week of hours, by day.
@@ -61,24 +67,30 @@ export async function TimeModule({
    * parallel, but a second `withTenant` would be a second BEGIN and a second
    * round of context statements to Neon for a lookup that returns one integer.
    */
-  const { weekStartsOn, weekStart, rows, workers, members } = await withTenant(
-    ctx.tenant.id,
-    async (tx) => {
-      const weekStartsOn = await getWeekStartsOn(tx, ctx.tenant.id);
-      const weekStart = startOfWeek(anchor, weekStartsOn);
-      return {
-        weekStartsOn,
-        weekStart,
-        rows: await listEntries(tx, ctx.tenant.id, {
-          from: weekStart,
-          to: addDays(weekStart, 6),
-        }),
-        workers: await listWorkers(tx, ctx.tenant.id),
-        members: await listAssignableMembers(tx, ctx.tenant.id),
-      };
-    },
-    { role: ctx.role, userId: ctx.userId },
-  );
+  const { weekStartsOn, roundingMinutes, weekStart, rows, workers, members, openPunches } =
+    await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        const prefs = await getTimePrefs(tx, ctx.tenant.id);
+        const weekStart = startOfWeek(anchor, prefs.weekStartsOn);
+        return {
+          weekStartsOn: prefs.weekStartsOn,
+          roundingMinutes: prefs.roundingMinutes,
+          weekStart,
+          rows: await listEntries(tx, ctx.tenant.id, {
+            from: weekStart,
+            to: addDays(weekStart, 6),
+          }),
+          workers: await listWorkers(tx, ctx.tenant.id),
+          members: await listAssignableMembers(tx, ctx.tenant.id),
+          // Every running clock, whatever week is being read: a clock left
+          // going is today's problem and must not hide when somebody pages
+          // back to look at a fortnight ago.
+          openPunches: await listOpenPunches(tx, ctx.tenant.id),
+        };
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
 
   const labelByUser = new Map(
     members.map((member) => [member.clerkUserId, memberLabel(member)]),
@@ -113,6 +125,27 @@ export async function TimeModule({
     .map((w) => ({ id: w.id, name: w.name }));
   const mine = workers.find((w) => w.clerkUserId === ctx.userId) ?? null;
 
+  /*
+   * THE TIMES ARE FORMATTED HERE, on the server, in the TENANT's zone. The row
+   * ticks a duration in the browser, which is zone-free; naming the hour a
+   * clock started is a calendar question and the browser's answer would be
+   * somebody else's.
+   */
+  const clocks: RunningClock[] = openPunches.map((punch) => ({
+    id: punch.id,
+    version: punch.version,
+    workerId: punch.workerId,
+    workerName: punch.workerName,
+    elapsedMinutes: punch.elapsedMinutes,
+    startedAtLabel:
+      dateInTimezone(punch.startedAt, ctx.tenant.timezone) === today
+        ? formatTimeInTimezone(punch.startedAt, ctx.tenant.timezone)
+        : `${dayLabel(dateInTimezone(punch.startedAt, ctx.tenant.timezone))}, ${formatTimeInTimezone(punch.startedAt, ctx.tenant.timezone)}`,
+    startedAtLocal: `${dateInTimezone(punch.startedAt, ctx.tenant.timezone)}T${timeOfDayInTimezone(punch.startedAt, ctx.tenant.timezone)}`,
+    note: punch.note,
+    mine: mine !== null && punch.workerId === mine.id,
+  }));
+
   const isThisWeek = weekStart === startOfWeek(today, weekStartsOn);
 
   return (
@@ -135,6 +168,13 @@ export async function TimeModule({
               <Link href="/dashboard/m/time/people">People</Link>
             </Button>
             {canWrite && (
+              <ClockInButton
+                workers={activeWorkers}
+                defaultWorkerId={mine?.id ?? null}
+                runningWorkerIds={clocks.map((c) => c.workerId)}
+              />
+            )}
+            {canWrite && (
               <LogTimeForm
                 workers={activeWorkers}
                 defaultWorkerId={mine?.id ?? null}
@@ -153,6 +193,36 @@ export async function TimeModule({
           Accountant access is read-only. You can see every hour logged and
           nothing here can be changed.
         </p>
+      )}
+
+      {/* ABOVE THE WEEK, not inside it: a running clock belongs to no week yet,
+          and it is the thing somebody opening this page most needs to see. */}
+      {clocks.length > 0 && (
+        <div className="rounded-lg border">
+          <div className="flex items-center justify-between gap-4 border-b px-3 py-2">
+            <h2 className="text-sm font-medium">
+              On the clock now
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                {clocks.length === 1 ? "1 person" : `${clocks.length} people`}
+              </span>
+            </h2>
+            {roundingMinutes > 0 && (
+              <span className="text-xs text-muted-foreground">
+                Rounded to {roundingMinutes} minutes when stopped
+              </span>
+            )}
+          </div>
+          <ul className="divide-y">
+            {clocks.map((clock) => (
+              <RunningClockRow
+                key={clock.id}
+                clock={clock}
+                roundingMinutes={roundingMinutes}
+                canWrite={canWrite}
+              />
+            ))}
+          </ul>
+        </div>
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3">
@@ -203,9 +273,11 @@ export async function TimeModule({
           icon={<Clock />}
           title="No hours this week"
           description={
-            isThisWeek
-              ? "Log what has been worked so far, or move back a week to see what was."
-              : "Nothing was logged in this week."
+            clocks.length > 0
+              ? "A clock is running. Hours appear here once it stops."
+              : isThisWeek
+                ? "Start a clock, log what has been worked so far, or move back a week to see what was."
+                : "Nothing was logged in this week."
           }
         />
       ) : (
@@ -276,6 +348,18 @@ export async function TimeModule({
                           {!countsAsWorked(row.payType) && (
                             <span className="shrink-0 rounded-full bg-module-accent/10 px-2 py-0.5 text-[11px] text-module-accent">
                               {payTypeLabel(row.payType)}
+                            </span>
+                          )}
+                          {row.source === "timer" && (
+                            <span
+                              className="shrink-0 text-[11px] text-muted-foreground"
+                              title={
+                                roundingMinutes > 0
+                                  ? `From a clock, rounded to ${roundingMinutes} minutes`
+                                  : "From a clock"
+                              }
+                            >
+                              clock
                             </span>
                           )}
                           <span className="min-w-0 flex-1 truncate text-muted-foreground">

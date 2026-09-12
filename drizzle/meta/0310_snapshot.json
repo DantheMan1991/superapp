@@ -1,6 +1,6 @@
 {
-  "id": "f8e0a3ca-dd05-4571-9503-5a3e250597f7",
-  "prevId": "d8b84659-eab9-4193-b59f-fc757ee10d9f",
+  "id": "16d74ed8-9ac4-4951-b67b-d702aa4d173f",
+  "prevId": "4e6d5bfd-3cea-4e44-9c80-3b61dde111f6",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -20325,6 +20325,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "amends_entry_id": {
+          "name": "amends_entry_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "source": {
           "name": "source",
           "type": "text",
@@ -20467,6 +20473,21 @@
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
+        "time_entries_amends_fk": {
+          "name": "time_entries_amends_fk",
+          "tableFrom": "time_entries",
+          "columnsFrom": [
+            "tenant_id",
+            "amends_entry_id"
+          ],
+          "tableTo": "time_entries",
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
         "time_entries_punch_fk": {
           "name": "time_entries_punch_fk",
           "tableFrom": "time_entries",
@@ -20517,6 +20538,168 @@
         "time_entries_source": {
           "name": "time_entries_source",
           "value": "\"time_entries\".\"source\" in ('manual', 'timer')"
+        },
+        "time_entries_amends_not_self": {
+          "name": "time_entries_amends_not_self",
+          "value": "\"time_entries\".\"amends_entry_id\" <> \"time_entries\".\"id\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.time_periods": {
+      "name": "time_periods",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "starts_on": {
+          "name": "starts_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ends_on": {
+          "name": "ends_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "locked_at": {
+          "name": "locked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "locked_by_clerk_user_id": {
+          "name": "locked_by_clerk_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "time_periods_tenant_id_id_idx": {
+          "name": "time_periods_tenant_id_id_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "time_periods_tenant_start_idx": {
+          "name": "time_periods_tenant_start_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "starts_on",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "time_periods_tenant_range_idx": {
+          "name": "time_periods_tenant_range_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "ends_on",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "time_periods_tenant_id_tenants_id_fk": {
+          "name": "time_periods_tenant_id_tenants_id_fk",
+          "tableFrom": "time_periods",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "tableTo": "tenants",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "time_periods_ends_after_start": {
+          "name": "time_periods_ends_after_start",
+          "value": "\"time_periods\".\"ends_on\" >= \"time_periods\".\"starts_on\""
+        },
+        "time_periods_locked_pair": {
+          "name": "time_periods_locked_pair",
+          "value": "(\"time_periods\".\"locked_at\" is null) = (\"time_periods\".\"locked_by_clerk_user_id\" is null)"
         }
       },
       "isRLSEnabled": false
@@ -20825,6 +21008,244 @@
         "time_settings_anchor_only_biweekly": {
           "name": "time_settings_anchor_only_biweekly",
           "value": "\"time_settings\".\"period_anchor\" is null or \"time_settings\".\"pay_frequency\" = 'biweekly'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.time_sheets": {
+      "name": "time_sheets",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "worker_id": {
+          "name": "worker_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "period_starts_on": {
+          "name": "period_starts_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "period_ends_on": {
+          "name": "period_ends_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "submitted_at": {
+          "name": "submitted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "submitted_by_clerk_user_id": {
+          "name": "submitted_by_clerk_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "approved_at": {
+          "name": "approved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "approved_by_clerk_user_id": {
+          "name": "approved_by_clerk_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "worked_minutes": {
+          "name": "worked_minutes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "regular_minutes": {
+          "name": "regular_minutes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "overtime_minutes": {
+          "name": "overtime_minutes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "double_time_minutes": {
+          "name": "double_time_minutes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "paid_leave_minutes": {
+          "name": "paid_leave_minutes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ruleset_slug": {
+          "name": "ruleset_slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "time_sheets_tenant_id_id_idx": {
+          "name": "time_sheets_tenant_id_id_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "time_sheets_tenant_worker_period_idx": {
+          "name": "time_sheets_tenant_worker_period_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "worker_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "period_starts_on",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "time_sheets_tenant_awaiting_idx": {
+          "name": "time_sheets_tenant_awaiting_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "approved_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "time_sheets_tenant_id_tenants_id_fk": {
+          "name": "time_sheets_tenant_id_tenants_id_fk",
+          "tableFrom": "time_sheets",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "tableTo": "tenants",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        },
+        "time_sheets_worker_fk": {
+          "name": "time_sheets_worker_fk",
+          "tableFrom": "time_sheets",
+          "columnsFrom": [
+            "tenant_id",
+            "worker_id"
+          ],
+          "tableTo": "time_workers",
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "time_sheets_ends_after_start": {
+          "name": "time_sheets_ends_after_start",
+          "value": "\"time_sheets\".\"period_ends_on\" >= \"time_sheets\".\"period_starts_on\""
+        },
+        "time_sheets_approved_pair": {
+          "name": "time_sheets_approved_pair",
+          "value": "(\"time_sheets\".\"approved_at\" is null) = (\"time_sheets\".\"approved_by_clerk_user_id\" is null)"
+        },
+        "time_sheets_snapshot_with_approval": {
+          "name": "time_sheets_snapshot_with_approval",
+          "value": "(\"time_sheets\".\"approved_at\" is null) = (\"time_sheets\".\"worked_minutes\" is null)"
         }
       },
       "isRLSEnabled": false
@@ -23729,280 +24150,6 @@
         "social_channels_other_has_label": {
           "name": "social_channels_other_has_label",
           "value": "\"social_channels\".\"network\" <> 'other' or length(btrim(\"social_channels\".\"label\")) > 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.social_posts": {
-      "name": "social_posts",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "channel_id": {
-          "name": "channel_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'draft'"
-        },
-        "origin": {
-          "name": "origin",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'hand'"
-        },
-        "body": {
-          "name": "body",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "link": {
-          "name": "link",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "image_id": {
-          "name": "image_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "shape": {
-          "name": "shape",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'square'"
-        },
-        "focus_x": {
-          "name": "focus_x",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0.5
-        },
-        "focus_y": {
-          "name": "focus_y",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0.5
-        },
-        "scheduled_at": {
-          "name": "scheduled_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "posted_at": {
-          "name": "posted_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "reminded_at": {
-          "name": "reminded_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "work_item_id": {
-          "name": "work_item_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by_clerk_user_id": {
-          "name": "created_by_clerk_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "social_posts_tenant_id_id_idx": {
-          "name": "social_posts_tenant_id_id_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        },
-        "social_posts_channel_idx": {
-          "name": "social_posts_channel_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "channel_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "scheduled_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        },
-        "social_posts_due_idx": {
-          "name": "social_posts_due_idx",
-          "columns": [
-            {
-              "expression": "scheduled_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "where": "status = 'scheduled' and reminded_at is null",
-          "concurrently": false
-        }
-      },
-      "foreignKeys": {
-        "social_posts_tenant_id_tenants_id_fk": {
-          "name": "social_posts_tenant_id_tenants_id_fk",
-          "tableFrom": "social_posts",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "tableTo": "tenants",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        },
-        "social_posts_channel_fk": {
-          "name": "social_posts_channel_fk",
-          "tableFrom": "social_posts",
-          "columnsFrom": [
-            "tenant_id",
-            "channel_id"
-          ],
-          "tableTo": "social_channels",
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        },
-        "social_posts_image_fk": {
-          "name": "social_posts_image_fk",
-          "tableFrom": "social_posts",
-          "columnsFrom": [
-            "tenant_id",
-            "image_id"
-          ],
-          "tableTo": "site_images",
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "social_posts_status_values": {
-          "name": "social_posts_status_values",
-          "value": "\"social_posts\".\"status\" in ('draft', 'scheduled', 'posted')"
-        },
-        "social_posts_origin_values": {
-          "name": "social_posts_origin_values",
-          "value": "\"social_posts\".\"origin\" in ('hand', 'assistant', 'pack')"
-        },
-        "social_posts_shape_values": {
-          "name": "social_posts_shape_values",
-          "value": "\"social_posts\".\"shape\" in ('square', 'portrait', 'story', 'wide')"
-        },
-        "social_posts_body_length": {
-          "name": "social_posts_body_length",
-          "value": "length(\"social_posts\".\"body\") <= 5000"
-        },
-        "social_posts_link_length": {
-          "name": "social_posts_link_length",
-          "value": "length(\"social_posts\".\"link\") <= 500"
-        },
-        "social_posts_focus_range": {
-          "name": "social_posts_focus_range",
-          "value": "\"social_posts\".\"focus_x\" between 0 and 1 and \"social_posts\".\"focus_y\" between 0 and 1"
-        },
-        "social_posts_scheduled_has_time": {
-          "name": "social_posts_scheduled_has_time",
-          "value": "\"social_posts\".\"status\" <> 'scheduled' or \"social_posts\".\"scheduled_at\" is not null"
-        },
-        "social_posts_posted_has_time": {
-          "name": "social_posts_posted_has_time",
-          "value": "\"social_posts\".\"status\" <> 'posted' or \"social_posts\".\"posted_at\" is not null"
         }
       },
       "isRLSEnabled": false

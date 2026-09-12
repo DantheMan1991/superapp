@@ -182,30 +182,28 @@ a feature PR; **import `@/lib/money` in new code.**
   matches on the exact `when`, which is the second reason not to invent a new
   one. First hit 2026-09-09, `0281` twice
   ([inventory.md](modules/inventory.md)).
-- **KEEPING THE ORIGINAL `when` IS ONLY SAFE WHILE IT IS STILL ABOVE THE
-  HIGH-WATER MARK.** The rule above assumes the loser's migration is already
-  applied to BOTH databases, so the original stamp lands under the mark and is
-  skipped as a no-op. It is not always true. Migrate-before-merge applies to
-  the dev branch first, so a migration can be **applied on dev and absent on
-  prod** — and if the winner's migration then goes out to both with a LATER
-  stamp, prod's single high-water row moves past the loser's original `when`.
-  Put that stamp back and prod skips the migration **silently, forever**: the
-  tables simply never appear, `db:migrate` says "Migrations complete", and
-  nothing is louder than that until somebody opens the screen. This is ADR
-  0014's failure exactly, reached by following the repair rather than by
-  skipping it.
-  **So check before you renumber.** `npx tsx scripts/inspect-migration-state.ts`
-  and `--dev` print each database's high-water row. Then:
-  - Original stamp still above both marks, or already applied to both → keep it,
-    as above.
-  - Original stamp now below prod's mark → **re-stamp above the mark, and undo
-    the migration on dev first** (drop what it created and delete its
-    `__drizzle_migrations` row), because with a new stamp dev will replay it.
-    Re-stamping without undoing re-runs `CREATE TABLE` on dev and aborts the
-    whole transaction.
-  Found 2026-09-12 while checking why the dev branch held two tables production
-  did not: an unmerged Time migration on dev, under a merged Social stamp
-  ([marketing.md](modules/marketing.md), slice S1).
+- **`db:migrate` CAN REPORT SUCCESS WITHOUT APPLYING YOUR MIGRATION.** Drizzle
+  decides what to run from a single high-water row — `Number(lastDbMigration
+  .created_at) < migration.folderMillis` — so a migration whose `when` is
+  BELOW the newest applied stamp is skipped in silence, and the command still
+  prints "Migrations complete." That is not only the renumber trap above: a
+  PARALLEL SESSION that migrates the same database while you are working raises
+  the mark past your unapplied stamp, and your migration is then stranded
+  forever. First hit 2026-09-12 on production, by Time slice 3 (`0309`/`0310`
+  generated at 11:07, another session's pair applied at 11:12 and 11:13); the
+  tables were simply absent and nothing said so.
+  **So: never trust "Migrations complete" — run `npx tsx
+  scripts/inspect-migration-state.ts [--dev]` afterwards and read the PENDING
+  line.** It is the only thing that compares the journal against what the
+  database actually has.
+  The repair when it happens: raise the stranded migration's `when` above the
+  newest applied stamp, and — for any database where it IS already applied —
+  update that database's `drizzle.__drizzle_migrations.created_at` to the new
+  stamp in the same breath, or the next run re-applies it. The DDL itself should
+  still go through `npm run db:migrate`; only the ledger is edited by hand.
+  Note this is the exact opposite instruction to the renumber rule above, and
+  the two are told apart by one question: **is this migration already applied to
+  the database in front of you?** Applied, keep the stamp. Stranded, raise it.
 - **A composite FK cannot take a bare `ON DELETE SET NULL`.** Postgres nulls
   every referencing column, `tenant_id` included, and `tenant_id` is NOT NULL on
   every tenant table — so the delete fails with a not-null violation instead of
@@ -384,3 +382,46 @@ computes `canDelete` per row and sends a boolean.
 - [ ] Guide updated for any screen that changed, or written from `_TEMPLATE.md` for a new one ([docs/help/](help/))
 - [ ] Security checklist for the surface you touched ([security.md §4](security.md))
 - [ ] No industry vocabulary added to Layer 1
+
+---
+
+## 11. Working in parallel
+
+Several sessions run against this repo at once.
+
+- **One worktree per session; never the primary checkout.** A session working
+  in `Documents/Superapp` switches the branch out from under whatever else is
+  running there — the failure is not a merge conflict but a clobbering.
+  `.claude/worktrees/<name>` is the right home: it sits inside the repo, so
+  `node_modules` resolves from the parent checkout and no `npm ci` is needed;
+  its path is short enough for Turbopack on Windows, which a session
+  scratchpad path is not; and it is already in `.git/info/exclude`.
+- **Rebase onto `main` before pushing, never merge.** Branches here are short
+  and single-purpose, so a conflict is cheaper resolved once in your own
+  worktree than in the PR.
+- **`git worktree remove` it when the PR merges.** A stale worktree holds a
+  gigabyte of `node_modules` and hides the live ones in `git worktree list`.
+
+### The files that would otherwise conflict on every PR
+
+`tests/db-backed-files.ts` and `docs/decisions/README.md` are marked
+`merge=union` in `.gitattributes`: git keeps both sides' lines instead of
+raising a conflict. That is safe only because a line in those two lists does
+not depend on its neighbours, and `tests/db-backed-files.test.ts` recomputes
+its list from file contents regardless. **Nothing else belongs on that list** —
+a union merge of two module build-log entries interleaves them into nonsense.
+Resolve a build log by rebasing and re-adding your entry at the top.
+
+### A number is not a merge problem
+
+Union merge does not fix a collision that merges cleanly and is still wrong:
+two sessions that both take migration `0311`, or both take ADR `0048`, get two
+of them.
+
+- **One session holds a migration at a time.**
+  [ADR 0014](decisions/0014-migrations-are-applied-before-the-merge.md) already
+  forces this — the migration is applied to the dev branch *and* production
+  before the merge, which is serial by construction. A second session that
+  needs one waits, or ships without.
+- **Take the next ADR number as you write the file**, and re-check
+  `docs/decisions/` immediately before pushing.

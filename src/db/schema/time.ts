@@ -238,6 +238,21 @@ export const timeEntries = pgTable(
      */
     punchId: uuid("punch_id"),
     /**
+     * The entry this one CORRECTS, when it is a correction.
+     *
+     * Set only by an amendment: once a pay period is locked its entries are
+     * immutable, so the way to put one right is to add a new entry in the open
+     * period that says what the difference was. Paid history is never rewritten
+     * — the original stays exactly as the pay run saw it, and this link is what
+     * lets a screen show the two together.
+     *
+     * Self-referential and composite, so an amendment can never point at
+     * another tenant's entry. `RESTRICT` rather than cascade or set-null: an
+     * entry somebody has amended is the evidence for the correction, and
+     * deleting it would leave a correction of nothing.
+     */
+    amendsEntryId: uuid("amends_entry_id"),
+    /**
      * How this entry came to exist. `timer` means a punch produced it, so a
      * screen can say the minutes were rounded rather than typed.
      *
@@ -276,6 +291,11 @@ export const timeEntries = pgTable(
       .on(t.tenantId, t.punchId)
       .where(sql`${t.punchId} is not null`),
     foreignKey({
+      name: "time_entries_amends_fk",
+      columns: [t.tenantId, t.amendsEntryId],
+      foreignColumns: [t.tenantId, t.id],
+    }),
+    foreignKey({
       name: "time_entries_punch_fk",
       columns: [t.tenantId, t.punchId],
       foreignColumns: [timePunches.tenantId, timePunches.id],
@@ -305,6 +325,10 @@ export const timeEntries = pgTable(
       sql`${t.payType} in ('worked', 'paid_leave', 'holiday', 'unpaid')`,
     ),
     check("time_entries_source", sql`${t.source} in ('manual', 'timer')`),
+    // An entry cannot amend itself; deeper cycles are the write path's problem,
+    // but the database can refuse the trivial one a bad copy produces. The same
+    // guard `schedule_items.parent_id` and `work_items.parent_id` carry.
+    check("time_entries_amends_not_self", sql`${t.amendsEntryId} <> ${t.id}`),
   ],
 );
 
@@ -402,7 +426,144 @@ export const timeSettings = pgTable(
   ],
 );
 
+/**
+ * A pay period that has been LOCKED, and nothing else.
+ *
+ * A period is arithmetic over `time_settings` (`core/periods.ts`) — slice 2
+ * deliberately did not materialise one, because until a period can be locked
+ * there is no fact about it worth storing. This table is that fact: payroll has
+ * been run for these dates, so the hours inside them must stop moving.
+ *
+ * A ROW IS CREATED WHEN A PERIOD IS FIRST LOCKED and then kept. Unlocking nulls
+ * `locked_at` rather than deleting, so the row remains the record that this
+ * period has been through a pay run at least once. WHO unlocked it and when is
+ * `audit_log`'s business, not a pair of columns here that nothing would read.
+ *
+ * THE DATES ARE STORED, not derived, because they must survive a change of pay
+ * frequency. An owner who switches from fortnightly to monthly has not
+ * un-locked last fortnight.
+ */
+export const timePeriods = pgTable(
+  "time_periods",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    startsOn: date("starts_on", { mode: "string" }).notNull(),
+    endsOn: date("ends_on", { mode: "string" }).notNull(),
+    /** Null = open. The only meaning it carries, and the only predicate read. */
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    lockedByClerkUserId: text("locked_by_clerk_user_id"),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("time_periods_tenant_id_id_idx").on(t.tenantId, t.id),
+    // One row per period. The start date identifies it; two periods cannot
+    // begin on the same day under any frequency.
+    uniqueIndex("time_periods_tenant_start_idx").on(t.tenantId, t.startsOn),
+    index("time_periods_tenant_range_idx").on(t.tenantId, t.endsOn),
+    check("time_periods_ends_after_start", sql`${t.endsOn} >= ${t.startsOn}`),
+    // Two columns that can disagree are two columns that will. Either it is
+    // locked and somebody locked it, or neither.
+    check(
+      "time_periods_locked_pair",
+      sql`(${t.lockedAt} is null) = (${t.lockedByClerkUserId} is null)`,
+    ),
+  ],
+);
+
+/**
+ * One worker's hours for one pay period, submitted and then approved.
+ *
+ * A ROW EXISTS ONCE IT HAS BEEN SUBMITTED. `approved_at is null` is "waiting
+ * for somebody", which is exactly the question the attention source asks, and
+ * it needs no status column to answer — the arrangement `work_items.closed_at`
+ * already lives by.
+ *
+ * THE TOTALS ARE A SNAPSHOT TAKEN AT APPROVAL, and they are null until then.
+ * Before approval the numbers are still moving, so storing them would be
+ * storing a guess; after it, they are what the approver actually agreed to and
+ * what a pay run quotes. `ruleset_slug` rides with them because the same hours
+ * under different rules are different money, and a business that changes its
+ * rules must not silently restate what it already approved.
+ *
+ * THE PERIOD'S DATES ARE STORED rather than referenced, for `time_periods`'
+ * reason: a sheet approved for a fortnight stays approved for that fortnight
+ * after the payroll switches to monthly.
+ */
+export const timeSheets = pgTable(
+  "time_sheets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    workerId: uuid("worker_id").notNull(),
+    periodStartsOn: date("period_starts_on", { mode: "string" }).notNull(),
+    periodEndsOn: date("period_ends_on", { mode: "string" }).notNull(),
+    submittedAt: timestamp("submitted_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    submittedByClerkUserId: text("submitted_by_clerk_user_id").notNull(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    approvedByClerkUserId: text("approved_by_clerk_user_id"),
+    /** The snapshot. Null until approved; see the header. */
+    workedMinutes: integer("worked_minutes"),
+    regularMinutes: integer("regular_minutes"),
+    overtimeMinutes: integer("overtime_minutes"),
+    doubleTimeMinutes: integer("double_time_minutes"),
+    paidLeaveMinutes: integer("paid_leave_minutes"),
+    /** Which rules produced those numbers. */
+    rulesetSlug: text("ruleset_slug"),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("time_sheets_tenant_id_id_idx").on(t.tenantId, t.id),
+    // One sheet per person per period.
+    uniqueIndex("time_sheets_tenant_worker_period_idx").on(
+      t.tenantId,
+      t.workerId,
+      t.periodStartsOn,
+    ),
+    // What the attention source reads: everything still waiting.
+    index("time_sheets_tenant_awaiting_idx").on(t.tenantId, t.approvedAt),
+    foreignKey({
+      name: "time_sheets_worker_fk",
+      columns: [t.tenantId, t.workerId],
+      foreignColumns: [timeWorkers.tenantId, timeWorkers.id],
+    }).onDelete("cascade"),
+    check(
+      "time_sheets_ends_after_start",
+      sql`${t.periodEndsOn} >= ${t.periodStartsOn}`,
+    ),
+    check(
+      "time_sheets_approved_pair",
+      sql`(${t.approvedAt} is null) = (${t.approvedByClerkUserId} is null)`,
+    ),
+    // The snapshot arrives with the approval and never without it.
+    check(
+      "time_sheets_snapshot_with_approval",
+      sql`(${t.approvedAt} is null) = (${t.workedMinutes} is null)`,
+    ),
+  ],
+);
+
 export type TimeWorker = typeof timeWorkers.$inferSelect;
+export type TimePeriod = typeof timePeriods.$inferSelect;
+export type TimeSheet = typeof timeSheets.$inferSelect;
 export type TimePunch = typeof timePunches.$inferSelect;
 export type TimeEntry = typeof timeEntries.$inferSelect;
 export type TimeSettings = typeof timeSettings.$inferSelect;

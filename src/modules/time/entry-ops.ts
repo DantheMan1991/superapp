@@ -4,6 +4,7 @@ import { schema, type Tx } from "@/db";
 import { MAX_ENTRY_MINUTES } from "./core/duration";
 import { TimeError } from "./core/errors";
 import { isDateString } from "@/lib/timezone";
+import { assertPeriodOpen } from "./sheet-ops";
 import { isPayType } from "./core/pay-types";
 
 /**
@@ -30,12 +31,26 @@ export interface LogTimeInput {
   today: string;
 }
 
-function assertEntryFields(input: {
-  minutes: number;
-  workDate: string;
-  payType: string;
-  today: string;
-}): void {
+function assertEntryFields(
+  input: {
+    minutes: number;
+    workDate: string;
+    payType: string;
+    today: string;
+  },
+  /**
+   * Let the day be in the future.
+   *
+   * ONLY THE AMENDMENT PATH PASSES THIS, and only because the server chooses
+   * that date rather than a person typing it: a correction lands on the first
+   * day of the first OPEN period, which is genuinely tomorrow or later whenever
+   * the business has locked the period it is standing in. The guard below
+   * exists to catch a mistyped year, and a date the server computed cannot have
+   * one. Found by driving slice 3, where every correction was refused as being
+   * in the future.
+   */
+  allowFuture = false,
+): void {
   if (!Number.isInteger(input.minutes) || input.minutes <= 0) {
     throw new TimeError("DURATION_UNREADABLE", "minutes must be a positive whole number");
   }
@@ -54,7 +69,7 @@ function assertEntryFields(input: {
    * Refused rather than warned: an hour that has not happened is not a record
    * of anything, and the only way it reaches a timesheet is a mistyped year.
    */
-  if (input.workDate > input.today) {
+  if (!allowFuture && input.workDate > input.today) {
     throw new TimeError("WORK_DATE_IN_FUTURE", "that day has not happened yet");
   }
   if (!isPayType(input.payType)) {
@@ -84,6 +99,9 @@ export async function logTime(
 ): Promise<string> {
   assertEntryFields(input);
   await loadActiveWorker(tx, tenantId, input.workerId);
+  // Not just edits: a NEW entry backdated into a locked period would change
+  // what a pay run already quoted just as surely as changing an old one.
+  await assertPeriodOpen(tx, tenantId, input.workDate);
 
   const [row] = await tx
     .insert(schema.timeEntries)
@@ -116,6 +134,25 @@ export async function updateEntry(
   input: UpdateEntryInput,
 ): Promise<void> {
   assertEntryFields(input);
+
+  /*
+   * BOTH DAYS ARE CHECKED. Moving an entry OUT of a locked period would take
+   * hours off a pay run that already counted them, and moving one IN would add
+   * hours to it — so the day it is leaving and the day it is arriving on both
+   * have to be open.
+   */
+  const current = await tx.query.timeEntries.findFirst({
+    where: and(
+      eq(schema.timeEntries.tenantId, tenantId),
+      eq(schema.timeEntries.id, input.entryId),
+    ),
+    columns: { workDate: true },
+  });
+  if (!current) throw new TimeError("ENTRY_NOT_FOUND", "no such entry");
+  await assertPeriodOpen(tx, tenantId, current.workDate);
+  if (current.workDate !== input.workDate) {
+    await assertPeriodOpen(tx, tenantId, input.workDate);
+  }
 
   const result = await tx
     .update(schema.timeEntries)
@@ -150,20 +187,27 @@ export async function updateEntry(
 }
 
 /**
- * A HARD DELETE, and it is the right shape only while this slice holds.
+ * A hard delete, and only while the period is open.
  *
- * Nothing downstream has read these rows yet: no timesheet has been approved,
- * no pay run has quoted them, nothing has posted. Slice 3 introduces the lock,
- * and from that point an approved entry is not deletable at all — a correction
- * becomes an amendment in the open period, because paid history is not
- * rewritten. The guard belongs with the lock that makes it meaningful; adding
- * it now would guard against a state that cannot exist.
+ * Slice 3 added the guard this comment used to promise: once the pay period is
+ * locked, the entry cannot be removed at all and a correction is an
+ * `amendEntry` in the open period instead. Paid history is not rewritten.
  */
 export async function deleteEntry(
   tx: Tx,
   tenantId: string,
   entryId: string,
 ): Promise<void> {
+  const current = await tx.query.timeEntries.findFirst({
+    where: and(
+      eq(schema.timeEntries.tenantId, tenantId),
+      eq(schema.timeEntries.id, entryId),
+    ),
+    columns: { workDate: true },
+  });
+  if (!current) throw new TimeError("ENTRY_NOT_FOUND", "no such entry");
+  await assertPeriodOpen(tx, tenantId, current.workDate);
+
   const result = await tx
     .delete(schema.timeEntries)
     .where(
@@ -176,4 +220,78 @@ export async function deleteEntry(
   if (result.length === 0) {
     throw new TimeError("ENTRY_NOT_FOUND", "no such entry");
   }
+}
+
+export interface AmendEntryInput {
+  /** The entry in the locked period that turned out to be wrong. */
+  originalEntryId: string;
+  /** What the difference is worth, in the OPEN period. */
+  minutes: number;
+  workDate: string;
+  payType: string;
+  note: string;
+  enteredByClerkUserId: string;
+  today: string;
+}
+
+/**
+ * Correct a locked entry by adding a new one that says what the difference was.
+ *
+ * THE ONLY WAY TO PUT RIGHT AN HOUR SOMEBODY HAS ALREADY BEEN PAID FOR. The
+ * original is left exactly as the pay run saw it and the new entry points back
+ * at it, so the record answers both "what were they paid?" and "what did we
+ * later decide was true?" — questions a rewrite would merge into one wrong
+ * answer.
+ *
+ * REFUSED WHEN THE ORIGINAL IS NOT ACTUALLY LOCKED. An entry that can still be
+ * edited should be edited: two ways to change one number is how the two stop
+ * agreeing, and an amendment of an open entry would double-count it.
+ */
+export async function amendEntry(
+  tx: Tx,
+  tenantId: string,
+  input: AmendEntryInput,
+): Promise<string> {
+  assertEntryFields(input, true);
+
+  const original = await tx.query.timeEntries.findFirst({
+    where: and(
+      eq(schema.timeEntries.tenantId, tenantId),
+      eq(schema.timeEntries.id, input.originalEntryId),
+    ),
+  });
+  if (!original) throw new TimeError("ENTRY_NOT_FOUND", "no such entry");
+
+  // The original must be locked, and the correction must not be.
+  let originalIsLocked = false;
+  try {
+    await assertPeriodOpen(tx, tenantId, original.workDate);
+  } catch (err) {
+    if (err instanceof TimeError && err.code === "PERIOD_LOCKED") {
+      originalIsLocked = true;
+    } else {
+      throw err;
+    }
+  }
+  if (!originalIsLocked) {
+    throw new TimeError("AMEND_NOT_LOCKED", "that entry can still be edited");
+  }
+  await assertPeriodOpen(tx, tenantId, input.workDate);
+
+  const [row] = await tx
+    .insert(schema.timeEntries)
+    .values({
+      tenantId,
+      // The correction belongs to the same person as the thing it corrects;
+      // taking the worker from the caller would let a slip reassign an hour.
+      workerId: original.workerId,
+      minutes: input.minutes,
+      workDate: input.workDate,
+      payType: input.payType,
+      note: input.note.trim(),
+      enteredByClerkUserId: input.enteredByClerkUserId,
+      amendsEntryId: original.id,
+    })
+    .returning({ id: schema.timeEntries.id });
+  return row.id;
 }

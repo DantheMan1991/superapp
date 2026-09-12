@@ -2,6 +2,7 @@ import "server-only";
 import { accountingAttentionSource } from "@/modules/accounting/attention/source";
 import { schedulingAttentionSource } from "@/modules/scheduling/attention/source";
 import { workAttentionSource } from "@/modules/work/attention/source";
+import { timeAttentionSource } from "@/modules/time/attention/source";
 import { livestockAttentionSource } from "@/packs/livestock/attention/source";
 import { inventoryAttentionSource } from "@/packs/inventory/attention/source";
 import { productionAttentionSource } from "@/packs/production/attention/source";
@@ -75,6 +76,12 @@ import type { AttentionSource } from "./types";
 export const attentionSources: readonly AttentionSource[] = [
   schedulingAttentionSource,
   workAttentionSource,
+  // TIME IS THIRD, from 2026-09-12. A submitted timesheet is somebody standing
+  // at the owner's desk waiting: it has a person on both ends and it clears the
+  // moment the decision is made, which is exactly what earns a place near the
+  // top. It sits under Work because work still has the stronger claim — an
+  // agreed date — while a sheet is a queue with none.
+  timeAttentionSource,
   productionAttentionSource,
   livestockAttentionSource,
   inventoryAttentionSource,

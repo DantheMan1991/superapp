@@ -1,0 +1,13 @@
+# Merge strategies for the files every PR appends to.
+#
+# `union` keeps BOTH sides' lines instead of raising a conflict. It is correct
+# only for a flat, append-only list whose lines do not depend on their
+# neighbours, and where a wrong result is caught by something. Do NOT add prose
+# here: a union merge of two build-log entries interleaves them into nonsense.
+#
+# It is also NOT a fix for a colliding NUMBER. Two sessions that both take
+# migration 0311, or both take ADR 0048, merge cleanly and are both wrong.
+# See conventions.md section 11.
+
+tests/db-backed-files.ts    merge=union
+docs/decisions/README.md    merge=union

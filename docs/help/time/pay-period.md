@@ -16,6 +16,8 @@ The important thing on this screen is that a period is shown **as its weeks**, n
 - **The explanation.** A line under the bar saying how overtime was worked out, in the words of the rules you picked on [People](people.md), and what happens to a week that starts in one period and ends in another.
 - **A week.** One block per week the period pays, oldest first, headed `Week of Sep 6 – Sep 12` with a count of the people in it.
 - **A person.** One line per person per week: their name, then `40h regular`, then `10h overtime` and `1h double time` when there are any, then any hours paid but not worked. When a week produced no overtime at all, the line says `no overtime` so you can see it was checked rather than missed.
+- **Where each person has got to.** On the first week each person appears in, the end of their line shows one of: {button:Send for approval|outline}, a {badge:Waiting for approval|warning} chip with {button:Approve|primary} and {button:Send back|ghost} beside it, or an {badge:Approved|success} chip. It appears once per person for the whole period, not once per week.
+- **{button:Lock period|primary}.** Top right, beside the dates. Stops every hour in these dates from being changed. Owners only, and it asks before it does it.
 
 ## How your pay periods are decided
 
@@ -30,14 +32,29 @@ You set this on [People](people.md), under `People are paid`:
 
 The last two do not line up with weeks at all, so a week will sometimes start in one period and finish in the next. **That week is paid in the period it ends in.** It is never split in half, because splitting it would mean deciding which of the hours were the overtime ones, and there is no true answer to that.
 
-## How to check a period before payroll
+## How to run a period, start to finish
 
-1. Open **Time** {icon:clock}, then {button:Pay period|outline}.
-2. Use {button:← Previous|ghost} if the period you are paying has already finished.
-3. Read down each week and check the overtime against what you expect.
-4. If something looks wrong, click {button:Time|outline} and move to that week to see the individual entries behind it.
+1. Open **Time** {icon:clock}, then {button:Pay period|outline}. Use {button:← Previous|ghost} if the period you are paying has already finished.
+2. Read down each week and check the overtime against what you expect. If something looks wrong, click {button:Time|outline}, move to that week and fix the entries behind it.
+3. When somebody's hours are ready, click {button:Send for approval|outline} on their line. Anybody can do this, including the person themselves.
+4. As the owner, click {button:Approve|primary}. A box tells you exactly what you are agreeing to, like `40h regular · 10h overtime`. Those figures are **saved as they stand**, and are what a pay run quotes. If the hours are not right, click {button:Send back|ghost} instead and they go back to being unsubmitted.
+5. Once everybody is approved and you have run payroll, click {button:Lock period|primary}. It asks first, because of what it does next.
 
-Nobody has to approve anything yet, and nothing is locked. Approving a period, so that it stops changing under you after payroll, is coming.
+## What locking does
+
+From the moment you lock, **nothing in those dates can be changed or deleted**. On the week screen every day inside the period gets a {badge:Locked|warning} chip, and the {button:Edit|ghost} button on each row becomes {button:Correct|ghost}.
+
+That is on purpose. Once you have paid somebody for Tuesday, the record has to keep saying what you paid them — otherwise next month you cannot tell what actually happened from what somebody tidied up afterwards.
+
+**So a mistake found later is not an edit, it is a correction.** Click {button:Correct|ghost} on the entry, say how much was missed, and it is added as a new entry in the first period that is still open. The original stays exactly as it was, and the two are linked. You see `Correction added to the open period`.
+
+If the period you are standing in is itself locked, the correction goes to the first day of the next one — the box tells you which date it is using before you save.
+
+You can {button:Unlock period|outline} at any time, and it does not ask. Unlocking just puts things back the way they were.
+
+## Who approves what
+
+Sending hours for approval is something anybody can do. **Approving is the owner's**, and so is locking. That split is the point of having two steps: somebody who could approve their own hours would be certifying nothing.
 
 ## Messages
 
@@ -46,11 +63,18 @@ Nobody has to approve anything yet, and nothing is locked. Approving a period, s
 | `Nothing in this period` | No hours were logged between these dates. |
 | `Nothing was logged in this week.` | One week inside the period is empty. The others may not be. |
 | `no overtime` | That person's week was checked and stayed under every threshold. |
+| `This period is locked.` | Nothing in these dates can be changed. Corrections go in the open period. |
+| `This period has already been sent for approval.` | Somebody submitted it while your page was open. Reload the page. |
+| `That timesheet has already been approved.` | The same, after an approval. Reload the page. |
+| `That pay period is locked.` | You tried to change an hour inside a locked period. Use {button:Correct|ghost} instead. |
+| `That entry can still be edited` | You tried to correct an entry whose period is open. Change it rather than correcting it. |
 
 ## Not on this page
 
-You cannot approve or lock a period, and you cannot see what anybody is paid — this screen deals in hours, not money. There is no export for your payroll provider yet. All three are coming. Ask us where it is up to.
+You cannot see what anybody is paid — this screen deals in hours, never money — and there is no export for your payroll provider yet. Both are coming. Ask us where it is up to.
+
+A period is either locked or it is not; you cannot lock one person's hours and leave another's open.
 
 ## Who can do what
 
-Everybody can read this page, accountants included. It has no controls to use. The settings behind it — how often people are paid, and which overtime rules apply — are owner-only and live on [People](people.md).
+Everybody can read this page, accountants included. Staff can send hours for approval, including their own. **Only owners can approve, send back, or lock and unlock a period.** Accountants can change nothing. The settings behind it — how often people are paid, and which overtime rules apply — are owner-only and live on [People](people.md).

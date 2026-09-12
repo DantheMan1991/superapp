@@ -166,6 +166,32 @@ export function cropBox(
   return { left, top, width, height };
 }
 
+/**
+ * HOW CLOSE IS "THE SAME PLACE"? — and this exists because exact equality is
+ * wrong here in a way that is invisible until somebody taps a photo.
+ *
+ * `focus_x`/`focus_y` are `real`, which is float4. The browser computes a tap
+ * as float64 (`0.11383928571428572`), Postgres keeps the nearest float32
+ * (`0.11383928`), and the value that comes back is a DIFFERENT NUMBER. Any
+ * `focus.x !== post.focusX` check is therefore true forever after the first
+ * save — which left the editor permanently "unsaved": Save never went quiet,
+ * `Save the picture` never appeared, and the screen said "Save first" about
+ * work it had already saved. Found by tapping a photo on the dev branch
+ * (2026-09-12); no test caught it, because none of them round-tripped a float
+ * through the database into a client-side comparison.
+ *
+ * 1e-4 of a 1,600px photo is a sixth of a pixel, so this can never hide a move
+ * a person made, and it is far wider than float4's error at these magnitudes.
+ */
+export const FOCUS_EPSILON = 1e-4;
+
+export function sameFocus(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+): boolean {
+  return Math.abs(a.x - b.x) < FOCUS_EPSILON && Math.abs(a.y - b.y) < FOCUS_EPSILON;
+}
+
 /** The same box as percentages, for the preview's overlay — no second rule to keep in step. */
 export function cropOverlay(
   source: { width: number; height: number },

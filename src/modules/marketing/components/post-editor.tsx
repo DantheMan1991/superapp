@@ -19,6 +19,7 @@ import {
   isPostShape,
   POST_SHAPES,
   POST_STATUS_LABELS,
+  sameFocus,
   SHAPE_HINTS,
   SHAPE_LABELS,
   type PostShape,
@@ -125,8 +126,9 @@ export function PostEditor({ post, library, photosHref, timezone, canWrite }: Po
     link !== post.link ||
     imageId !== post.imageId ||
     shape !== post.shape ||
-    focus.x !== post.focusX ||
-    focus.y !== post.focusY;
+    // NOT `!==`: the focus goes out as float64 and comes back as float4, so an
+    // exact comparison is true forever after the first save. See `sameFocus`.
+    !sameFocus(focus, { x: post.focusX, y: post.focusY });
 
   function run(work: () => Promise<{ ok: true } | { error: string }>, done: string) {
     startTransition(async () => {

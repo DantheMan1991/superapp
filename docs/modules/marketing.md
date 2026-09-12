@@ -247,11 +247,44 @@ gap is another session's unmerged Time work on dev — see Decisions & gotchas).
   the CHECKs refusing a scheduled post with no time and a status/shape/focus
   nobody registered, and the sweep seeing a due post but not one that is early,
   already reminded, or another tenant's. 27 in `tests/social-posts.test.ts`.
-- **Not driven.** The local Clerk session is signed out and another session's
-  dev server holds the port. The routes register in the build, both tables'
-  rules are proven against a real database, and the crop is covered by a
-  property test — but nobody has typed a post, tapped a photo or seen the cron
-  raise anything.
+- **DRIVEN END TO END on the dev branch, and it found a bug no test could
+  have.** Full walk on Test (one site) and Hilltop Farm (two sites): add an
+  account, write a post, choose a photo, change the shape, tap a focus, save,
+  schedule, run the sweep, read the reminder in What needs you, mark it posted.
+
+  **The editor was permanently "unsaved" after the first focus tap.**
+  `focus_x`/`focus_y` are `real` = float4. The browser sent
+  `0.11383928571428572`; Postgres kept `0.11383928`; the `focus.x !==
+  post.focusX` in the editor's `dirty` check was therefore true forever after.
+  Save never went quiet, **`Save the picture` never appeared at all**, and the
+  screen said "Save first, then the picture can be downloaded" about work it
+  had already saved. `sameFocus` with a 1e-4 epsilon is the fix — a sixth of a
+  pixel on a 1,600px photo, so it can never hide a real move. **No test caught
+  it because none of them round-tripped a float through the database into a
+  client-side comparison**; `tests/social-posts.test.ts` now carries the exact
+  pair observed.
+
+  What the drive PROVED, beyond the fix: the handle normaliser and the address
+  guess through the real form (`@OakRowFarm` → `https://www.facebook.com/
+  oakrowfarm`, and the prefix swapping with the network); the crop overlay
+  (one spread shadow, dimmed outside the box) and the box clamping at the
+  photo's edge; **the crop route returning 854×1067, a ratio of exactly
+  0.800 = 4:5, as `attachment; filename="post-portrait.jpg"`** — so
+  `cropBox` → `sharp.extract()` is right on real bytes; the sweep answering
+  `{"due":1,"raised":1,"failedTenants":0}` and then `{"due":0}` on the second
+  run, **idempotent**; `Post to Facebook (@oakrowfarm)` landing in What needs
+  you with the words and the link in its notes; the `Time to post` badge; and
+  the three-brand picker on Hilltop Farm — two websites and the business —
+  which is the founder's per-industry requirement working.
+- **Not driven: the clipboard's SUCCESS path.** `clipboard-write` is denied at
+  the browser level in the automation context, so pressing `Copy the words`
+  exercised only the refusal — which did render correctly rather than failing
+  silently. A real browser is needed to see the other half.
+- **Dev-branch residue, left on purpose**: the Test tenant now holds a Facebook
+  account (`@oakrowfarm`, already in that site's footer), an Instagram one
+  (`@oakrowfarmshop`, not in it), one POSTED post with a photo cut to Tall, and
+  the Work item the sweep raised. Worth knowing before the next fixture sweep,
+  and useful as the first real fixture for S2.
 - **Not built here:** the writer (S2), ranking the library against the words
   (S3), facts from the packs (S4), the month's plan (S5), any connection (S6),
   and any measurement (S7).

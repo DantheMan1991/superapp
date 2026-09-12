@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bodyLimitFor,
+  sameFocus,
   cropBox,
   cropOverlay,
   dayHeading,
@@ -222,6 +223,31 @@ describe("roundToStep", () => {
   it("leaves a time that is already on the step alone", () => {
     const on = new Date("2026-09-05T10:20:00Z");
     expect(roundToStep(on).getTime()).toBe(on.getTime());
+  });
+});
+
+describe("sameFocus", () => {
+  it("calls a float4 round-trip the same place, which exact equality cannot", () => {
+    // What actually happens: the browser computes the tap in float64, Postgres
+    // keeps the nearest float32, and the value that comes back differs. This is
+    // the real pair observed on the dev branch on 2026-09-12.
+    const typed = { x: 0.11383928571428572, y: 0.3447698744769874 };
+    const stored = { x: 0.11383928, y: 0.34476987 };
+    expect(typed.x === stored.x).toBe(false);
+    expect(sameFocus(typed, stored)).toBe(true);
+  });
+
+  it("still notices a move a person made", () => {
+    // A sixth of a pixel on a 1,600px photo is the floor; a tap is thousands
+    // of times bigger than that.
+    expect(sameFocus({ x: 0.5, y: 0.5 }, { x: 0.5, y: 0.52 })).toBe(false);
+    expect(sameFocus({ x: 0.5, y: 0.5 }, { x: 0.4, y: 0.5 })).toBe(false);
+  });
+
+  it("is the same answer whichever way round it is asked", () => {
+    const a = { x: 0.25, y: 0.75 };
+    const b = { x: 0.250005, y: 0.749995 };
+    expect(sameFocus(a, b)).toBe(sameFocus(b, a));
   });
 });
 

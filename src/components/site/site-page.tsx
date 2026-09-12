@@ -11,7 +11,7 @@ import { directionsUrl, MAP_ATTRIBUTION, MAP_HEIGHT, MAP_WIDTH, mapKey, pinIsFor
 import type { ImageRef, Section, SectionStyle, SitePageView, SiteSettings } from "@/lib/sites/schema";
 import { SECTION_ATTR } from "@/lib/sites/preview";
 import { jsonLdText, localBusinessJsonLd, siteBaseUrlFor, type BusinessFacts } from "@/lib/sites/seo";
-import { siteHref, type SiteMode } from "@/lib/sites/slug";
+import { isLiveMode, siteHref, type SiteMode } from "@/lib/sites/slug";
 import type { Slide } from "@/lib/sites/slides";
 import {
   backgroundClass,
@@ -61,7 +61,11 @@ const H2 = "text-3xl font-semibold tracking-tight sm:text-4xl";
 export function logoSrc(mode: SiteMode, slug: string): string {
   // On a site host the proxy maps `/logo` to the site's logo route; on the
   // platform host the route is addressed directly.
-  return mode === "host" ? "/logo" : `/sites/${slug}/logo`;
+  // The logo route resolves by slug for any site, published or not, so a
+  // preview needs no route of its own for it.
+  if (mode === "host") return "/logo";
+  if (mode === "preview") return `/p/${slug}/logo`;
+  return `/sites/${slug}/logo`;
 }
 
 /**
@@ -70,10 +74,14 @@ export function logoSrc(mode: SiteMode, slug: string): string {
  * is addressed directly; the draft preview reads the member route, so a
  * photo on an unpublished site is seen only by the people who put it there.
  */
-export function imageSrc(mode: SiteMode, slug: string, id: string): string {
+export function imageSrc(mode: SiteMode, key: string, id: string): string {
   if (mode === "host") return `/images/${id}`;
   if (mode === "draft") return `/api/marketing/sites/images/${id}`;
-  return `/sites/${slug}/images/${id}`;
+  // A preview is authorized by its token, not by a session or by the site
+  // being published — the two ways an image is otherwise reachable, and a
+  // client can use neither.
+  if (mode === "preview") return `/p/${key}/images/${id}`;
+  return `/sites/${key}/images/${id}`;
 }
 
 /** What the settings say about the business, for the structured data. */
@@ -94,10 +102,13 @@ function businessFacts(site: PublicSite, mode: SiteMode): BusinessFacts {
 }
 
 /** The map picture's address for this mode, keyed by the pin, the zoom and the colour (`src/lib/sites/map.ts`). */
-export function mapSrc(mode: SiteMode, slug: string, key: string): string {
-  if (mode === "host") return `/map/${key}`;
-  if (mode === "draft") return `/api/marketing/sites/map/${key}`;
-  return `/sites/${slug}/map/${key}`;
+export function mapSrc(mode: SiteMode, key: string, mapKey: string, siteId?: string): string {
+  if (mode === "host") return `/map/${mapKey}`;
+  // The member route serves any of the tenant's sites, so it has to be told
+  // which one (ADR 0045); the preview route already knows from its token.
+  if (mode === "draft") return `/api/marketing/sites/map/${mapKey}?site=${siteId ?? ""}`;
+  if (mode === "preview") return `/p/${key}/map/${mapKey}`;
+  return `/sites/${key}/map/${mapKey}`;
 }
 
 /**
@@ -112,17 +123,36 @@ export function resolveHref(mode: SiteMode, slug: string, href: string): string 
 }
 
 export function SitePage({
-  site,
+  site: given,
   page,
   mode,
   banner,
+  linkKey,
 }: {
   site: PublicSite;
   page: SitePageView;
   mode: SiteMode;
+  /**
+   * What in-site links address the site by. The slug for every mode but
+   * `preview`, which is addressed by its token — a preview whose nav pointed
+   * at the slug would send the client to the members-only draft route.
+   */
+  linkKey?: string;
   /** Above the header: the draft preview's notice. */
   banner?: ReactNode;
 }) {
+  /**
+   * HOW THIS SITE IS ADDRESSED IN THIS MODE. Everything below builds links
+   * and asset URLs from `site.slug`, in a dozen places across thirteen
+   * components — so rather than thread a second key through all of them and
+   * miss one silently, the slug IS the key: for a preview it is the token,
+   * and `/p/<token>/…` mirrors `/sites/<slug>/…` for pages, images, the map
+   * and the logo.
+   *
+   * The two things that need the real slug are both switched off in preview
+   * anyway: the visitor beacon (`isLiveMode`) and the forms (`disabled`).
+   */
+  const site = linkKey ? { ...given, slug: linkKey } : given;
   const primary = site.brand.primaryColor ?? "#1f2937";
   const accent = site.brand.accentColor ?? primary;
   // The look (slice 6d): the fonts as bundled families, the corners as variables the classes read.
@@ -140,16 +170,20 @@ export function SitePage({
     <div style={style} className={cn("site-root flex min-h-screen flex-col bg-white text-neutral-900", fonts.className)}>
       {banner}
       {/* The draft preview is the owner looking, not a visitor: no count, and a way to point at a section. */}
-      {mode === "draft" ? <DraftSelect /> : <ViewBeacon slug={site.slug} path={page.path} />}
+      {mode === "draft" && <DraftSelect />}
+      {/* Only a real visit counts. A preview is one client looking at
+          their own site, and counting it would make the owner's
+          visitor numbers a lie on day one. */}
+      {isLiveMode(mode) && <ViewBeacon slug={site.slug} path={page.path} />}
       {/* The home page tells search engines what the settings say about the business (slice 11). */}
-      {page.path === "/" && mode !== "draft" && (
+      {page.path === "/" && isLiveMode(mode) && (
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: jsonLdText(localBusinessJsonLd(businessFacts(site, mode))) }}
         />
       )}
       {/* Answered questions on the page, for search engines (slice 16). */}
-      {mode !== "draft" &&
+      {isLiveMode(mode) &&
         page.content.sections
           .filter((s) => s.type === "faq")
           .map((s) => (s.type === "faq" ? faqJsonLd(s.items) : null))
@@ -513,7 +547,9 @@ function SectionView({
               thanks={section.thanks}
               fields={section.fields}
               // The preview shows the form; only the live site takes messages.
-              disabled={mode === "draft"}
+              // A preview is a client looking at their own site; a message sent
+              // from it would be a real lead from a visit that never happened.
+              disabled={!isLiveMode(mode)}
               onDark={resolved.onDark || resolved.background === "brand"}
             />
           </div>
@@ -534,7 +570,9 @@ function SectionView({
               buttonLabel={section.buttonLabel}
               askPhone={section.askPhone}
               thanks={section.thanks}
-              disabled={mode === "draft"}
+              // A preview is a client looking at their own site; a message sent
+              // from it would be a real lead from a visit that never happened.
+              disabled={!isLiveMode(mode)}
               onDark={resolved.onDark || resolved.background === "brand"}
             />
           </div>

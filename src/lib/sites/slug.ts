@@ -25,6 +25,9 @@ export const RESERVED_SITE_SLUGS: ReadonlySet<string> = new Set([
   "sign-up",
   "onboarding",
   "s",
+  // `/p/<token>` is a preview link (ADR 0046); a site addressed `p` would
+  // sit under a path the platform already answers on.
+  "p",
   "sites",
   "hosted",
   "health-check",
@@ -202,24 +205,51 @@ export function classifyHost(
   return { kind: "custom", host: bare };
 }
 
-/** How a rendered page is being reached, which decides what its links look like. */
-export type SiteMode = "host" | "path" | "draft";
+/**
+ * How a rendered page is being reached, which decides what its links look
+ * like. `preview` is a link handed to somebody who cannot sign in (ADR 0046)
+ * and is addressed by its TOKEN, not by the site's slug — which is why the
+ * second argument below is a key rather than a slug.
+ */
+export type SiteMode = "host" | "path" | "draft" | "preview";
 
-/** The prefix every in-site link carries in the given mode. */
-export function siteBasePath(mode: SiteMode, slug: string): string {
+/**
+ * The prefix every in-site link carries in the given mode.
+ *
+ * `key` is the SITE'S SLUG for the three modes that address it that way, and
+ * the PREVIEW TOKEN for `preview`. Getting that wrong is how a preview ends up
+ * with a nav pointing at `/sites/<slug>/draft`, which is exactly the members-
+ * only route the client cannot reach — a preview whose every link 404s.
+ */
+/**
+ * Whether this is the site as the INTERNET sees it, rather than as somebody
+ * inside the business or holding a preview link does.
+ *
+ * A predicate because three things hang off it and each would be a silent
+ * mistake on its own: structured data (a draft telling Google about a business
+ * whose page is not up), the visitor counter (a preview shown to one client
+ * inflating what the owner reads as interest), and the canonical URL.
+ */
+export function isLiveMode(mode: SiteMode): boolean {
+  return mode === "host" || mode === "path";
+}
+
+export function siteBasePath(mode: SiteMode, key: string): string {
   switch (mode) {
     case "host":
       return "";
     case "path":
-      return `/sites/${slug}`;
+      return `/sites/${key}`;
     case "draft":
-      return `/sites/${slug}/draft`;
+      return `/sites/${key}/draft`;
+    case "preview":
+      return `/p/${key}`;
   }
 }
 
 /** A link to a page path (`/`, `/about`) from wherever the site is being read. */
-export function siteHref(mode: SiteMode, slug: string, path: string): string {
-  const base = siteBasePath(mode, slug);
+export function siteHref(mode: SiteMode, key: string, path: string): string {
+  const base = siteBasePath(mode, key);
   if (path === "/" || path === "") return base === "" ? "/" : base;
   return `${base}${path}`;
 }

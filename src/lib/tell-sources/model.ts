@@ -20,23 +20,50 @@ import type { TellAction } from "./types";
 const MAX_TOKENS = 4_000;
 
 /**
- * Per tenant, in this process. A person in a barn presses the button once and
+ * Per PERSON, in this process. A person in a barn presses the button once and
  * the box disables while it works; this only has to stop a double submit from
  * two tabs on one server. Stated in the dossier as the limit it is.
+ *
+ * ── WHY THE KEY IS THE PERSON AND NOT THE TENANT ─────────────────────────────
+ *
+ * It was the tenant until the device endpoint (ADR 0048) gave this path a
+ * second door. Behind a screen the difference never showed: one person, one
+ * button, and the button disables itself. A phone has no button and no tab,
+ * and five farmhands saying "clock me in" at seven in the morning are five
+ * independent callers — a tenant-wide window would answer the first and
+ * refuse the other four, silently, from their pockets.
+ *
+ * The stated purpose above was always per-person ("a double submit"), so this
+ * is the key it should have had. `paste-targets/model.ts` keeps the per-tenant
+ * key deliberately: a paste is a desk activity behind a dialog that disables
+ * itself, and nothing reaches it without a screen.
+ *
+ * NOT A RATE LIMIT, and never was — it is in-process, so it holds on one
+ * serverless instance and no further. The device endpoint's real limit counts
+ * rows in `device_grant_uses`.
  */
 const COOLDOWN_MS = 5_000;
 const lastCallAt = new Map<string, number>();
 
-export function claimCooldown(tenantId: string, now = Date.now()): boolean {
-  const last = lastCallAt.get(tenantId);
+function cooldownKey(tenantId: string, userId: string): string {
+  return `${tenantId}:${userId}`;
+}
+
+export function claimCooldown(
+  tenantId: string,
+  userId: string,
+  now = Date.now(),
+): boolean {
+  const key = cooldownKey(tenantId, userId);
+  const last = lastCallAt.get(key);
   if (last !== undefined && now - last < COOLDOWN_MS) return false;
-  lastCallAt.set(tenantId, now);
+  lastCallAt.set(key, now);
   return true;
 }
 
 /** For tests, which propose many times a second and never call out. */
-export function resetTellCooldown(tenantId: string): void {
-  lastCallAt.delete(tenantId);
+export function resetTellCooldown(tenantId: string, userId: string): void {
+  lastCallAt.delete(cooldownKey(tenantId, userId));
 }
 
 export interface TellCall {

@@ -11,6 +11,67 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-12 — A phone that may only tell (`claude/device-grants`)
+
+Voice slice 0, [ADR 0048](../decisions/0048-a-phone-holds-a-grant-that-may-only-tell.md).
+Migrations `0319` (tables) and `0320` (RLS), live on dev.
+
+The founder asked to talk to Yosher without opening the app. Two of his three
+examples already worked typed, because ADR 0039 built the intent layer and
+`proposeTold`/`recordTold` take a plain `TellCtx` and touch Clerk nowhere —
+**the only Clerk-shaped thing in the path is `gate()`.** So this slice is a
+SECOND GATE, not a second pipeline, and it is the identity half rather than
+the microphone half.
+
+- **`device_grants`** — a bearer token, hashed with `hashToken()` (HMAC, not
+  the bare SHA-256 the feed token uses, because this one WRITES), bound to one
+  person in one business. `scope` is an enum of one: `tell`.
+- **`device_grant_uses`** — append-only, unique on
+  `(grant_id, idempotency_key)`. Earns its place twice: it is the idempotency
+  guard for a phone retrying an offline queue, and the rate limit, which has to
+  be durable across serverless instances. **It holds action slugs and never
+  what was said** (S9).
+- **`POST /api/device/tell`** — the second route in the product reachable
+  without a session, and the FIRST that writes. Two calls: propose returns a
+  readback and a signed blob, confirm records it. Driveable with curl; no
+  native code exists yet, which is the point of the ordering.
+- **`redeemGrant()`** — `withSystem` for exactly one query, the shape
+  `feed-serve.ts` set, then the caller reopens as that person.
+
+Three decisions worth carrying:
+
+**A grant is never an owner.** Clerk owns owner-vs-member and this path has no
+session to ask. `roleForGrant()` returns `staff` or `expert`, never `owner`.
+`expert` is carried rather than flattened — expert is a different member, not a
+lesser staff, and promoting one here would hand the outside accountant writes
+its own screens refuse it.
+
+**It dies with the membership, not with the expiry.** The founder's answer to
+"would anybody revoke a departed worker's phone?" was no. Thirty-day sliding
+expiry covers the phone in the slurry pit and NOT the person who left — sliding
+expiry rewards use. So `redeemGrant()` INNER JOINs `profiles` and
+`memberships`, both of which `removeMembership()` hard-deletes, and taking
+somebody out of the workspace kills their phone on its next sentence.
+
+**A missing membership REFUSES here, where `lookupTenantAndRole()` degrades to
+`staff`.** That degrade is right for the web — webhook lag must not lock a new
+owner out of the workspace they just made — and copying it here would be a hole
+in exactly the row whose absence is supposed to kill the credential.
+
+Also changed: **the tell cooldown is keyed per person, not per tenant**
+(`tell-sources/model.ts`). Behind a screen the difference never showed; a phone
+has no button, and five farmhands saying "clock me in" at seven would have been
+one success and four silent refusals. `paste-targets` keeps the tenant key
+deliberately — a paste is a desk activity behind a dialog that disables itself.
+
+`/dashboard/settings/phone` is the first page under `/dashboard/settings` that
+is not owner-only, and it is linked from the **Business** nav group rather than
+the owner-gated **Settings** one.
+
+Tests: `tests/isolation/device-grants.test.ts` (11 clauses) and
+`tests/device-grants-redeem.test.ts` (10), including the one named for the case
+this feature turns on.
+
 ### 2026-09-10 — A member's own request leaves a mark (`claude/back-office-6-health-signals`)
 
 Back-office slice 6. `memberships.last_seen_at` is stamped by
@@ -157,6 +218,8 @@ and the stored role had never had to be right, because nothing read it.
 | `memberships` | Who belongs to which tenant, with what role | `tenant_id` + `profile_id` unique. Superadmin all; member SELECT tenant-scoped; member UPDATE narrowed to non-owner rows and staff/expert values only (`0085`). **No member INSERT or DELETE policy** — joining and leaving happen in Clerk |
 | `memberships.role` | `owner` \| `staff` \| `expert` | Two axes in one column: Clerk owns owner-vs-member, the Team page owns expert-vs-staff within members. Any writer must preserve an existing `expert` |
 | `memberships.clerk_role_synced_at` | When Clerk last confirmed this row | Nullable — NULL means never confirmed, which is the honest state for rows predating `0084`. Not a security boundary on its own; it is the input to one |
+| `device_grants` | The credential a phone presents when it writes with no session (ADR 0048) | One row per (phone, business). `token_hash` is `hashToken()` — HMAC, not bare SHA-256, because this one WRITES — and globally unique, since the endpoint has no tenant context until it resolves. `push_devices`' posture: your own rows in your own tenant, both clauses. **No DELETE policy** — revoked, never removed |
+| `device_grant_uses` | Every sentence a phone sent, and what came of it | Unique `(grant_id, idempotency_key)`: the idempotency guard AND the rate-limit window. Append-only — no UPDATE, no DELETE, like `audit_log`. `clerk_user_id` is denormalized from the grant so the policy is own-rows rather than a subquery into another RLS'd table. **Holds action slugs, never what was said** (S9) |
 
 ## Key files & seams
 
@@ -182,6 +245,14 @@ and the stored role had never had to be right, because nothing read it.
 - `src/lib/maintenance.ts` and `src/lib/authorized-parties.ts` — the two
   environment switches `src/proxy.ts` reads per request: the cutover's 503,
   and Clerk's origin allowlist for a production instance.
+- `src/lib/device-grants/` — the SECOND GATE (ADR 0048). `ops.ts` mints,
+  lists and revokes and may never call `withSystem`; `redeem.ts` is the only
+  file that may, for exactly one query, and turns a token into the same
+  `TellCtx` a session produces. Split for the reason `feed-ops`/`feed-serve`
+  are: one `withSystem` call, easy to find, hard to copy by accident.
+- `src/app/api/device/tell/route.ts` — the only route that WRITES tenant data
+  without a session. `/api/schedule/feed/[token]` is the only one that reads
+  without one; both say so at the top of their own file.
 - `docs/runbooks/clerk-production-cutover.md` — the procedure, in order.
 
 ## Decisions & gotchas
@@ -277,6 +348,20 @@ the day the development instance is retired, not for the cutover.
 
 ## Open items
 
+- **An owner cannot see the phones pointed at their own business.** `device_grants`
+  is own-rows in both directions, so `/dashboard/settings/phone` shows you yours
+  and nobody else's. Genuinely wanted and deliberately not in slice 0: it needs a
+  screen to put it on, and a policy is easier to loosen later than to tighten. The
+  lever an owner has meanwhile is bigger — removing the person, which `redeem.ts`
+  honours through its INNER JOIN.
+- **The idempotency check is check-then-act.** Two genuinely simultaneous duplicate
+  requests from one phone could both record; the realistic retry — an offline outbox
+  reconnecting seconds or hours later — is fully covered, and a phone retries
+  sequentially. Closing it properly needs the use row and the pack's write in ONE
+  transaction, which `recordTold` does not currently expose.
+- **Nothing native presents a grant yet.** The endpoint is curl-only until the Siri
+  App Intent exists, and what a phone can say is livestock's four actions, because
+  `tell-sources` still has one filler. `time` (clock in/out) is the next slice.
 - **Drift is invisible between reconciles.** Nothing alerts when a webhook is
   missed; the correction is only recorded (`membership.role_corrected`) when a
   reconcile happens to run. A periodic sweep across all tenants would close

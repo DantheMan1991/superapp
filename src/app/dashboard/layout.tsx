@@ -110,6 +110,12 @@ export default async function DashboardLayout({
       label: "Business",
       items: [
         { href: "/dashboard/hours", label: "Hours", icon: "clock" },
+        // Everyone, not owners only, and this is why it is HERE and not in the
+        // Settings group below: that group changes how the BUSINESS behaves
+        // and is owner-gated, while this is one person's own phone. A
+        // farmhand who cannot set their own phone up cannot use the feature
+        // at all. ADR 0048.
+        { href: "/dashboard/settings/phone", label: "Your phone", icon: "smartphone" },
         { href: "/dashboard/team", label: "Team", icon: "users" },
       ],
     },

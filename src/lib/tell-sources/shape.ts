@@ -228,7 +228,16 @@ export function resolveEntries(
  * the box to hold the button back and by the server before anything is
  * recorded, so the two never disagree about what "ready" means.
  */
-export function checkEntry(values: TellValues, action: TellAction): string | null {
+/**
+ * Takes the FIELDS rather than the whole action, so the device endpoint's
+ * readback can check a card against the light `{ slug, title, label, fields }`
+ * shape `proposeTold` hands back instead of needing a `record` it will never
+ * call. A `TellAction` still satisfies it.
+ */
+export function checkEntry(
+  values: TellValues,
+  action: Pick<TellAction, "fields">,
+): string | null {
   for (const f of action.fields) {
     const v = values[f.key];
     if (v === null || v === undefined || v === "") {

@@ -255,24 +255,27 @@ export function RunningClockRow({
   }
 
   return (
-    <li className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm">
+    <li className="flex flex-wrap items-center gap-3 px-4 py-2.5 text-sm">
       <span className="min-w-0 flex-1 truncate font-medium">
         {clock.workerName}
         {clock.mine && (
-          <span className="ml-2 text-xs text-muted-foreground">you</span>
+          <span className="ml-2 text-xs text-subtle-foreground">you</span>
         )}
       </span>
       <span
-        className={`tabular-nums ${tooLong ? "font-medium text-destructive" : ""}`}
+        className={`tabular-nums ${tooLong ? "font-medium text-warning-foreground" : ""}`}
       >
         {formatDuration(elapsed)}
       </span>
-      <span className="text-xs text-muted-foreground">
+      <span className="text-xs text-subtle-foreground">
         since {clock.startedAtLabel}
       </span>
+      {/* A pale tint with dark text, never a saturated fill and never
+          `--warning` drawn on — it measures 2.18:1 on the page. The dark twin
+          is the legible half of the pair. */}
       {tooLong && (
-        <span className="text-xs text-destructive">
-          Running over 16 hours. Correct when it started, or throw it away.
+        <span className="rounded-full bg-warning/10 px-2 py-0.5 text-[11px] text-warning-foreground">
+          Running over 16 hours — correct the start or throw it away
         </span>
       )}
       {canWrite && (

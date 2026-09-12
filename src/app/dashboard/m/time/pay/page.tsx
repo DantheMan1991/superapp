@@ -3,6 +3,7 @@ import { CalendarDays } from "lucide-react";
 import { withTenant } from "@/db";
 import { EmptyState } from "@/components/app/empty-state";
 import { PageHeader } from "@/components/app/page-header";
+import { Panel } from "@/components/app/panel";
 import { Button } from "@/components/ui/button";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -169,7 +170,7 @@ export default async function PayPeriodPage({
         }
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Button asChild variant="ghost" size="sm">
             <Link
@@ -178,10 +179,12 @@ export default async function PayPeriodPage({
               ← Previous
             </Link>
           </Button>
-          <span className="text-sm font-medium">
+          <span className="text-sm font-medium tracking-heading">
             {periodLabel(period)}
             {isThisPeriod && (
-              <span className="ml-2 text-xs text-muted-foreground">This period</span>
+              <span className="ml-2 text-xs font-normal text-subtle-foreground">
+                This period
+              </span>
             )}
           </span>
           <Button asChild variant="ghost" size="sm">
@@ -201,7 +204,7 @@ export default async function PayPeriodPage({
 
       {/* Said plainly, because a reader has to be able to check it against what
           their payroll company does. */}
-      <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+      <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
         Overtime is worked out for each <strong>week</strong> on its own, then
         added up for the period — {ruleset.summary} A week that starts in one
         period and ends in another is paid in the period it ends in.
@@ -217,27 +220,27 @@ export default async function PayPeriodPage({
       ) : (
         <div className="space-y-4">
           {perWeek.map(({ week: w, workers }) => (
-            <div key={w.start} className="rounded-lg border">
-              <div className="flex items-center justify-between gap-4 border-b px-3 py-2">
-                <h2 className="text-sm font-medium">
+            <Panel key={w.start}>
+              <div className="flex items-center justify-between gap-4 border-b border-divider px-4 py-2.5">
+                <h2 className="text-sm font-medium tracking-heading">
                   Week of {weekLabel(w.start)}
                 </h2>
-                <span className="text-xs text-muted-foreground">
+                <span className="text-xs text-subtle-foreground">
                   {workers.length === 0
                     ? "nothing logged"
                     : `${workers.length} ${workers.length === 1 ? "person" : "people"}`}
                 </span>
               </div>
               {workers.length === 0 ? (
-                <p className="px-3 py-2 text-sm text-muted-foreground">
+                <p className="px-4 py-2.5 text-sm text-muted-foreground">
                   Nothing was logged in this week.
                 </p>
               ) : (
-                <ul className="divide-y">
+                <ul className="divide-y divide-divider">
                   {workers.map((w2) => (
                     <li
                       key={w2.workerId}
-                      className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-sm"
+                      className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-sm"
                     >
                       <span className="w-40 shrink-0 truncate font-medium">
                         {w2.name}
@@ -251,7 +254,7 @@ export default async function PayPeriodPage({
                         </span>
                       )}
                       {w2.buckets.doubleTimeMinutes > 0 && (
-                        <span className="tabular-nums text-destructive">
+                        <span className="tabular-nums text-warning-foreground">
                           {formatDuration(w2.buckets.doubleTimeMinutes)} double time
                         </span>
                       )}
@@ -261,7 +264,7 @@ export default async function PayPeriodPage({
                         </span>
                       )}
                       {!hasPremium(w2.buckets) && w2.buckets.workedMinutes > 0 && (
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-xs text-subtle-foreground">
                           no overtime
                         </span>
                       )}
@@ -269,7 +272,7 @@ export default async function PayPeriodPage({
                   ))}
                 </ul>
               )}
-            </div>
+            </Panel>
           ))}
         </div>
       )}

@@ -218,6 +218,24 @@ farm-shaped remainder.
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-12 — Time wears the design system (`claude/time-wears-the-design-system`)
+
+No behaviour change. Slices 0–2 were built without reading
+[design-system.md](design-system.md), and it showed: eleven hand-rolled
+`rounded-lg border` boxes where a `Panel` belongs, bare `divide-y` instead of
+`--divider`, thirty-seven uses of the second text tier and none of the third,
+`--destructive` used for a figure, and no `--accent-time` token at all — so the
+module borrowed the brand default and had no colour of its own.
+
+Nine `Panel`s, twelve `text-subtle-foreground`, a status chip for the
+long-punch alarm, and `--accent-time` registered in all three blocks of
+`globals.css`. The design-system dossier carries the full audit and the reason
+the hue is 335.
+
+**The lesson is the process one**: a module is not finished when it works. The
+primitives table and the token rules are in one file and neither was consulted
+for three slices.
+
 ### 2026-09-12 — Slice 2: the week and the period (`claude/time-2-the-week-and-the-period`)
 
 The overtime evaluator, the pay-period arithmetic, and the screen that shows

@@ -204,6 +204,21 @@ a feature PR; **import `@/lib/money` in new code.**
   Note this is the exact opposite instruction to the renumber rule above, and
   the two are told apart by one question: **is this migration already applied to
   the database in front of you?** Applied, keep the stamp. Stranded, raise it.
+  `npx tsx scripts/restamp-migration.ts <old> <new> [--dev] [--write]` is the
+  ledger half: one row matched on an exact stamp, refusing unless exactly one
+  row moves and the target is free, and writing nothing without `--write`.
+  **A ledger row can need moving DOWN as well as up.** A migration renumbered
+  into a gap gets a `when` BELOW what it was applied under — 0302/0303
+  (`site_previews`, renumbered by #509 into the slot above `0301`) sat that way
+  on both databases for a day. Nothing re-ran, because the mark was hours
+  above them, so `db:migrate` was happy and only `inspect-migration-state`
+  knew: it read `PENDING (2)` on dev AND production, permanently. **That is the
+  worse failure of the two** — the drift detector everyone was just told to
+  trust cries wolf until somebody stops reading it. Correct the ledger in the
+  same breath as the renumber, whichever direction the stamp moves, and check
+  that PENDING says `none` afterwards. Hash the file with `git show HEAD:…`
+  rather than reading it from disk when you need to identify a row: on Windows
+  the working copy is CRLF and the digest will not match what Drizzle stored.
 - **A composite FK cannot take a bare `ON DELETE SET NULL`.** Postgres nulls
   every referencing column, `tenant_id` included, and `tenant_id` is NOT NULL on
   every tenant table — so the delete fails with a not-null violation instead of

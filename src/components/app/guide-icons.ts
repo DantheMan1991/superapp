@@ -7,6 +7,7 @@ import {
   Banknote,
   Bookmark,
   Building2,
+  CalendarClock,
   CalendarDays,
   Camera,
   Check,
@@ -15,6 +16,7 @@ import {
   ChevronRight,
   CircleQuestionMark,
   Copy,
+  Crosshair,
   Download,
   ExternalLink,
   Eye,
@@ -96,6 +98,8 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   banknote: Banknote,
   bookmark: Bookmark,
   building: Building2,
+  // Putting a social post on the calendar (marketing, slice S1).
+  "calendar-clock": CalendarClock,
   "calendar-days": CalendarDays,
   camera: Camera,
   check: Check,
@@ -104,6 +108,8 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   "chevron-right": ChevronRight,
   "circle-question-mark": CircleQuestionMark,
   copy: Copy,
+  // Re-centring a post's crop (marketing, slice S1).
+  crosshair: Crosshair,
   download: Download,
   "external-link": ExternalLink,
   eye: Eye,

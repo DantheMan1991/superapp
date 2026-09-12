@@ -1,95 +1,48 @@
-# Your social accounts
+# Your social posts
 
-> Write down the accounts you post from, who reads each one, and how you sound there. If you run more than one brand, each website keeps its own accounts.
+> Write what you are going to post, put a photo on it, and say when it goes out. Yosher reminds you when it is time, and you post it.
 > **Route:** /dashboard/m/marketing/social
 > **Order:** 230
 
-Open **Marketing** in the sidebar and click `Social`. Add each account you post from with {button:Add an account|primary|plus}: pick the network, type the account name, and Yosher fills in the address. Two boxes underneath ask who reads that account and how you sound there; they are for later, when Yosher writes posts for you, and you can leave them blank today. Nothing on this page posts anything or signs you in anywhere.
+Open **Marketing** in the sidebar and click `Social`. Click {button:Write a post|primary|plus} to start one; it opens straight into the words. Posts you have scheduled are listed by day, so the next thing to go out is at the top. **Yosher does not post for you.** When a post is due it puts `Post to Facebook (@yourname)` in `What needs you`; you open it, copy the words, save the picture, post it, and click {button:I posted it|outline|check}.
 
 ## What you see
 
 - **The row under the title.** Three tabs: `Brand`, `Website`, and `Social`, this page.
-- **The heading.** `Social`, with the line `The accounts you post from, who reads each one, and how you sound there.` If you have more than one brand the line names the one you are looking at, such as `The accounts Hilltop Farm posts from, who reads each one, and how it sounds there.`
-- **`Brand`, with a pill per brand**, only when you have more than one. Each pill is one of your websites, or your business itself for accounts that are not any one brand's. Click a pill to see that brand's accounts; the one you are on is colored.
-- **The list of accounts.** One row each:
-  - *The network and the account.* `Facebook` in bold, then `@oakrowfarm`. An account on `Another site` shows the name you gave it instead, such as `Our Substack`.
-  - *{badge:Paused|secondary}*, when you have paused that account.
-  - *{badge:In the footer}*, when the same account is one of the marks at the bottom of that brand's website.
-  - *Who reads it and how you sound*, on one line, when you have filled either in.
-  - *The address*, small, with {icon:external-link}. Click it to open the account in a new tab.
-  - *{button:Show in footer|ghost}*, for owners, on an account that belongs to a website and is not in its footer yet. It adds the mark to the bottom of every page of that website straight away.
-  - *{icon:pause}*, for owners. It stops Yosher offering that account, and the row gets {badge:Paused|secondary}. On a paused row the button is {icon:play} and puts it back.
-  - *{icon:pencil}*, for owners. It opens the same fields as adding, filled in.
-  - *{icon:trash}*, for owners. It asks first, then removes the account.
-- **`No accounts yet`**, before you add the first one, with `Add the accounts this website's brand posts from. Yosher keeps who reads each one and how it sounds there, so what it writes later fits the place it is going.` and {button:Add an account|primary|plus}. On your business's own accounts the second sentence reads `If you run more than one brand, add each brand's accounts on its own website instead.`
-- **The line at the bottom.** `Showing an account in the footer and posting to it are two different things: removing it here leaves the mark on your website until you take it out there. Yosher cannot post to any of these yet — that comes later, one network at a time.`
+- **The heading.** `Social`, with the line `What you are posting, and when.` If you run more than one brand the line names the one you are looking at.
+- **{button:Accounts|outline}**, at the right of the heading. It opens [Your social accounts](social-accounts.md), where you write down where your accounts are.
+- **`Brand`, with a pill per brand**, only when you have more than one. Click a pill to see that brand's posts.
+- **The account list and {button:Write a post|primary|plus}.** When the brand has one account the button says which it is for. With more than one, choose the account first; a post belongs to one account and cannot be moved to another afterwards. Paused accounts are not offered.
+- **A heading per day**: `No date yet` for posts you have not scheduled, then `Today`, `Tomorrow`, `Yesterday`, or the day written out such as `Saturday, September 12`. Posts with no date come first, because those are the ones waiting on you.
+- **A row per post**, which opens it:
+  - *The first words of the post*, or `Facebook post, nothing written yet`.
+  - *The account*, such as `Facebook · @oakrowfarm`, then the time it is set for, then `Photo` when one is on it.
+  - *{badge:Draft}*, *{badge:Scheduled}*, *{badge:Time to post|primary}* once Yosher has reminded you, or *{badge:Posted|secondary}*.
+- **`Nothing written yet`**, before your first post, with `Write a post, put a photo on it, and put it on the calendar. Yosher reminds you when it is time to post it.` With no accounts yet it reads `Add an account first, then posts you write here can be aimed at it.` and offers {button:Add an account|outline}.
+- **The line at the bottom.** `Yosher reminds you when a scheduled post is due, in What needs you. It cannot post for you yet — copy the words, save the picture, post it, then mark it posted.`
 
-### The fields, when you add or edit an account
+## How to write and schedule a post
 
-- **`Network`.** A list: `Facebook`, `Instagram`, `YouTube`, `TikTok`, `LinkedIn`, `X`, `Pinterest` and `Another site`. Changing it clears the address, since the old one belonged to the old network.
-- **`Account name`.** Your name on that network, without the @. Under it, `Without the @. Yosher fills in the address below.` On `Another site` this is labeled `Name on that site`.
-- **`What to call it`.** Only on `Another site`, and required there: what the list should call it, such as `Our Substack`.
-- **`Address`.** Filled in from the account name as you type, such as `https://www.facebook.com/oakrowfarm`. Type over it when the guess is wrong; LinkedIn in particular is `/company/` for a business and `/in/` for a person. On `Another site` nothing is guessed and you paste the address yourself.
-- **`Who reads this one`.** A couple of lines about the people who see this account. Up to 400 characters.
-- **`How you sound here`.** A couple of lines about the voice: plain or playful, short or long, what you never say. Up to 400 characters. Under both, `Both are for later: when Yosher writes a post for this account, these two are what it reads first. Leave them blank for now if you would rather.`
-- **The note on `Another site`.** `Yosher can plan and write for this one, and you post it yourself. It is the one kind of account Yosher will never be able to post to on its own.`
-- **{button:Add|primary}** or **{button:Save|primary}**, grayed out until you have typed an account name, and **{button:Cancel|ghost}**.
+1. Open **Marketing**, click `Social`, and click {button:Write a post|primary|plus}. Choose the account first if you have more than one.
+2. Type what it says in `What it says`. The counter underneath shows how many characters that network takes; on X it is 280, and it turns red when you are over.
+3. Click {button:Save|primary}.
+4. Under `The picture`, click a photo to use it. Choose `Square`, `Tall`, `Full screen` or `Wide`, then tap the part of the photo that matters. Click {button:Save|primary} again.
+5. Under `When`, pick the date and time and click {button:Schedule it|primary|calendar-clock}. You see `On the calendar. Yosher will remind you.`
 
-## How to add an account
+Times round to the nearest ten minutes, because that is how often Yosher checks.
 
-1. Open **Marketing**, click `Social`, and click {button:Add an account|primary|plus}.
-2. Pick the `Network`.
-3. Type the `Account name` without the @, such as `oakrowfarm`. Watch `Address` fill in, and correct it if the guess is wrong.
-4. Fill in `Who reads this one` and `How you sound here`, or leave them for now.
-5. Click {button:Add|primary}. You see `Account added.` and the row appears in the list.
+## How to post it when the time comes
 
-## How to show an account at the bottom of your website
-
-1. Find the account in the list and click {button:Show in footer|ghost}.
-2. You see `Added to the website's footer.` and the row gets {badge:In the footer}.
-3. The mark is live on every page of that website at once. To take it off later, open `Website`, find `The header and the footer`, and remove it there.
-
-A website's footer holds up to eight marks. Accounts under your business rather than under a website have no footer to go in, so the button is not on those rows.
-
-## How to stop using an account
-
-Click {icon:pause} on its row to pause it: you see `Paused.`, the row gets {badge:Paused|secondary}, and Yosher stops offering it. Everything you typed stays, and {icon:play} puts it back.
-
-Click {icon:trash} to remove it for good. Yosher asks `Remove @oakrowfarm?` and explains what happens: on an account that is in your footer, `Yosher stops offering this account. The mark stays in your website's footer until you remove it there — telling visitors where you are and posting there are two different things.`, and otherwise `Yosher stops offering this account. Nothing on your website changes.` Click {button:Remove|destructive} and you see `Removed.`
-
-## How brands work
-
-If you have one website, that website is your brand and this page shows its accounts with no pills and no picking. If you run two, each one keeps its own accounts, its own readers and its own voice, and a third pill named after your business holds any account they share. Yosher lists your brands first when there is more than one; click the brand you want.
-
-An account belongs to one brand. If you try to add the same account under a second brand, Yosher refuses it and tells you to remove it from the first one. An account you share between brands belongs under your business instead.
-
-## Messages
-
-| Message | What it means |
-| --- | --- |
-| `Account added.` | The account is saved and in the list. |
-| `Saved.` | Your edits to that account are saved. |
-| `Paused.` / `Back on.` | The account is set aside, or picked up again. |
-| `Removed.` | The account is gone. Anything in your website's footer is untouched. |
-| `Added to the website's footer.` | The mark is live at the bottom of every page of that website. |
-| `Type the account's name, such as oakrowfarm.` | The `Account name` box is empty. |
-| `Give this one a name, so the list can say what it is.` | `Another site` needs `What to call it` filled in. |
-| `Paste the address of the account, starting with https://.` | `Another site` has no address, and Yosher cannot guess one. |
-| `The address should be a full one starting with https://.` | What is in `Address` is not a web address. |
-| `That account is already here. An account belongs to one brand, so remove it from the other one first.` | The same network and account name are already saved under one of your brands. |
-| `That's 12 accounts, which is as many as one brand can hold. Remove one first.` | The limit per brand. |
-| `That account is no longer there.` | It was removed since you opened the page, perhaps by someone else. Reload. |
-| `This account belongs to the business rather than to one of its websites, so there is no footer to put it in.` | Only a brand with a website has a footer. |
-| `The footer already shows eight marks, which is as many as it holds. Remove one on the Website screen first.` | The footer is full. |
-| `There is no website yet. Build one first.` | The brand you were adding to has no website any more. |
-| `Only an owner can change how the business looks.` | Adding and changing accounts is an owner's job. |
-| `Accountant access is read-only.` | Accountants see this page and change nothing. |
-| `Check the fields and try again.` | Something in the form is longer than Yosher accepts. Shorten it. |
+1. Yosher puts `Post to Facebook (@yourname)` in `What needs you` on the day, with the words in it. The post's row here shows {badge:Time to post|primary}.
+2. Open the post. Click {button:Copy the words|outline|copy} — you see `Copied. Paste it where you post.`
+3. If there is a picture, click {button:Save the picture|outline|download}. It downloads already cut to the shape you chose.
+4. Go to the network, paste the words, add the picture, post it.
+5. Come back and click {button:I posted it|outline|check}. You see `Marked posted.` and the row reads {badge:Posted|secondary}.
 
 ## Not on this page
 
-The marks at the bottom of your website, which you can also add and remove by hand: `The header and the footer` on [Your website](website.md). Your logo, colors and name: [Your brand kit](overview.md). Writing a post, planning what to post, and posting it for you are not built yet.
+Where your accounts are, who reads each one and how you sound there: [Your social accounts](social-accounts.md). Adding photos to the library: `Photos` on [Your website](website.md), and [Photos to take](shot-list.md). Yosher writing a post for you, suggesting what to post about, and posting it to the network itself are not built yet.
 
 ## Who can do what
 
-Owners add, edit, pause and remove accounts, and put one in a website's footer. Staff see every account and the notes on each, and change nothing. Accountants see the same read-only page.
+Owners write, schedule, post and delete. Staff see every post and change nothing. Accountants see the same read-only page.

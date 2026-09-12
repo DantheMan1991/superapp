@@ -45,7 +45,11 @@ export type MarketingErrorCode =
   | "CHANNEL_LIMIT"
   | "CHANNEL_DUPLICATE"
   | "CHANNEL_NOT_ON_A_SITE"
-  | "FOOTER_FULL";
+  | "FOOTER_FULL"
+  | "POST_MISSING"
+  | "POST_EMPTY"
+  | "POST_TOO_LONG"
+  | "POST_TIME_INVALID";
 
 export class MarketingError extends Error {
   constructor(
@@ -144,6 +148,14 @@ export function friendlyMessage(err: unknown): string {
         return "This account belongs to the business rather than to one of its websites, so there is no footer to put it in.";
       case "FOOTER_FULL":
         return "The footer already shows eight marks, which is as many as it holds. Remove one on the Website screen first.";
+      case "POST_MISSING":
+        return "That post is no longer there.";
+      case "POST_EMPTY":
+        return "Write something first, then it can go on the calendar.";
+      case "POST_TOO_LONG":
+        return err.message;
+      case "POST_TIME_INVALID":
+        return "Pick a date and a time for it to go out.";
     }
   }
   return "Something went wrong. Please try again.";

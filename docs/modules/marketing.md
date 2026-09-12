@@ -210,6 +210,12 @@ second is a design mistake rather than a slip. No migration.
   looked like it had failed. It now carries `?add=1` and the form opens on
   arrival. It also carries `?brand=`, which it did not: from a brand's posts on
   a multi-brand tenant it had dropped you on the brand LIST.
+- **A THIRD one, found by driving the fix itself**: pasting a second address —
+  which is the first thing anybody does after pasting a wrong one — left the
+  PREVIOUS address's name behind and would have saved it. The form now tracks
+  whether the owner NAMED the account: a name they typed survives a re-paste, a
+  name Yosher read out of an address follows the address, and an account being
+  edited starts as named so changing its address never silently renames it.
 - **Both were invisible to every test and to the drive.** The drive typed a
   handle into the form and read back the address it had just generated, which
   is the definition of a test that agrees with itself; and it never pressed the

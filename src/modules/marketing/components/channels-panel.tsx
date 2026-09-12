@@ -316,8 +316,18 @@ function ChannelForm({
   onCancel: () => void;
 }) {
   const [draft, setDraft] = useState<Draft>(initial);
+  /**
+   * Has the owner NAMED this account themselves?
+   *
+   * A name they typed is theirs and survives a re-paste; one Yosher read out of
+   * an address follows the address. Without this, correcting a wrong address —
+   * the first thing anybody does — left the previous address's name behind and
+   * saved it. An account being EDITED starts as named, so changing its address
+   * never silently renames it.
+   */
+  const [named, setNamed] = useState(initial.handle.trim() !== "");
   const isOther = draft.network === "other";
-  // What the name will be if the owner types none: read out of the address.
+  // What the name will be if the owner has not named it: read out of the address.
   const derived = handleFromUrl(draft.profileUrl);
 
   /**
@@ -333,7 +343,7 @@ function ChannelForm({
         ...d,
         profileUrl: value,
         network: found ?? d.network,
-        handle: d.handle.trim() === "" ? handleFromUrl(value) : d.handle,
+        handle: named ? d.handle : handleFromUrl(value),
       };
     });
   }
@@ -382,13 +392,17 @@ function ChannelForm({
           </Label>
           <Input
             id="channel-handle"
-            value={draft.handle}
+            value={named ? draft.handle : derived}
             maxLength={80}
-            placeholder={derived || "oakrowfarm"}
-            onChange={(e) => setDraft((d) => ({ ...d, handle: e.target.value }))}
+            placeholder="oakrowfarm"
+            onChange={(e) => {
+              // Clearing it hands the name back to the address.
+              setNamed(e.target.value.trim() !== "");
+              setDraft((d) => ({ ...d, handle: e.target.value }));
+            }}
           />
           <p className="text-xs text-muted-foreground">
-            {draft.handle.trim() === "" && derived !== ""
+            {!named && derived !== ""
               ? `Yosher will call this one ${derived}. Type a different name if you would rather.`
               : "What Yosher calls this account in its own lists. It never changes the address."}
           </p>

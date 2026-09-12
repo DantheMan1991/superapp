@@ -18,9 +18,9 @@ Open **Marketing** in the sidebar and click `Social`. Add each account you post 
   - *Who reads it and how you sound*, on one line, when you have filled either in.
   - *The address*, small, with {icon:external-link}. Click it to open the account in a new tab.
   - *{button:Show in footer|ghost}*, for owners, on an account that belongs to a website and is not in its footer yet. It adds the mark to the bottom of every page of that website straight away.
-  - *{button:|ghost|pause}*, for owners. It stops Yosher offering that account, and the row gets {badge:Paused|secondary}. On a paused row the button is {button:|ghost|play} and puts it back.
-  - *{button:|ghost|pencil}*, for owners. It opens the same fields as adding, filled in.
-  - *{button:|ghost|trash}*, for owners. It asks first, then removes the account.
+  - *{icon:pause}*, for owners. It stops Yosher offering that account, and the row gets {badge:Paused|secondary}. On a paused row the button is {icon:play} and puts it back.
+  - *{icon:pencil}*, for owners. It opens the same fields as adding, filled in.
+  - *{icon:trash}*, for owners. It asks first, then removes the account.
 - **`No accounts yet`**, before you add the first one, with `Add the accounts this website's brand posts from. Yosher keeps who reads each one and how it sounds there, so what it writes later fits the place it is going.` and {button:Add an account|primary|plus}. On your business's own accounts the second sentence reads `If you run more than one brand, add each brand's accounts on its own website instead.`
 - **The line at the bottom.** `Showing an account in the footer and posting to it are two different things: removing it here leaves the mark on your website until you take it out there. Yosher cannot post to any of these yet — that comes later, one network at a time.`
 
@@ -53,9 +53,9 @@ A website's footer holds up to eight marks. Accounts under your business rather 
 
 ## How to stop using an account
 
-Click {button:|ghost|pause} on its row to pause it: you see `Paused.`, the row gets {badge:Paused|secondary}, and Yosher stops offering it. Everything you typed stays, and {button:|ghost|play} puts it back.
+Click {icon:pause} on its row to pause it: you see `Paused.`, the row gets {badge:Paused|secondary}, and Yosher stops offering it. Everything you typed stays, and {icon:play} puts it back.
 
-Click {button:|ghost|trash} to remove it for good. Yosher asks `Remove @oakrowfarm?` and explains what happens: on an account that is in your footer, `Yosher stops offering this account. The mark stays in your website's footer until you remove it there — telling visitors where you are and posting there are two different things.`, and otherwise `Yosher stops offering this account. Nothing on your website changes.` Click {button:Remove|destructive} and you see `Removed.`
+Click {icon:trash} to remove it for good. Yosher asks `Remove @oakrowfarm?` and explains what happens: on an account that is in your footer, `Yosher stops offering this account. The mark stays in your website's footer until you remove it there — telling visitors where you are and posting there are two different things.`, and otherwise `Yosher stops offering this account. Nothing on your website changes.` Click {button:Remove|destructive} and you see `Removed.`
 
 ## How brands work
 

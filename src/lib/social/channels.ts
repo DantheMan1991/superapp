@@ -31,7 +31,17 @@ export const CHANNEL_STATUS_LABELS: Record<ChannelStatus, string> = {
 
 export const HANDLE_MAX = 80;
 export const CHANNEL_LABEL_MAX = 80;
-export const CHANNEL_URL_MAX = 500;
+/**
+ * 200, NOT the column's 500.
+ *
+ * `SocialLinkSchema.url` caps a footer mark at 200, and a channel can be
+ * copied into the footer in one tap. A longer address would store fine and
+ * then fail that copy with "Check the fields and try again.", which is the
+ * worst kind of refusal: correct, late, and about a field the owner is not
+ * looking at. The column keeps 500 as headroom; nothing is ever written past
+ * this.
+ */
+export const CHANNEL_URL_MAX = 200;
 export const AUDIENCE_MAX = 400;
 export const VOICE_MAX = 400;
 

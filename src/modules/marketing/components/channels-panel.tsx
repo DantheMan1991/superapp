@@ -21,6 +21,7 @@ import { useConfirm } from "@/components/app/use-confirm";
 import {
   AUDIENCE_MAX,
   CHANNEL_STATUS_LABELS,
+  CHANNEL_URL_MAX,
   canEverConnect,
   channelDisplay,
   normalizeHandle,
@@ -377,7 +378,7 @@ function ChannelForm({
         <Input
           id="channel-url"
           value={shown}
-          maxLength={500}
+          maxLength={CHANNEL_URL_MAX}
           placeholder="https://www.facebook.com/oakrowfarm"
           className="font-mono text-sm"
           onChange={(e) => setDraft((d) => ({ ...d, profileUrl: e.target.value }))}

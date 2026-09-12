@@ -7,7 +7,7 @@ import { foregroundOn, type HexColor } from "@/lib/brand/core";
 import { initialsFor, normalizeSpec } from "@/lib/brand/logo-spec";
 import { renderLogoSvg } from "@/lib/brand/logo-svg";
 import { rasterizeSvgToPng } from "@/lib/brand/raster";
-import { loadLogoBytes, resolveBrandFor } from "@/lib/brand/read";
+import { loadLogoBytes, resolveBrandForSite } from "@/lib/brand/read";
 import type { SiteHit } from "./read";
 import { hash32, iconSizeFrom, type IconSize } from "./seo";
 
@@ -69,7 +69,10 @@ export async function siteIconResponse(
       columns: { title: true, status: true },
     });
     if (!site || site.status !== "published") return null;
-    const brand = await resolveBrandFor(tx, hit.tenantId, null);
+    // The site's own mark and colour (ADR 0045), for the same reason the
+    // logo route uses them: a tab showing the parent business's icon is the
+    // sub-brand leaking.
+    const brand = await resolveBrandForSite(tx, hit.tenantId, hit.id);
     return { brand, title: site.title || brand.displayName };
   });
   if (!found) return notFound();

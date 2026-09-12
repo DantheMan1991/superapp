@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import sharp from "sharp";
 import { and, eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
-import { resolveBrandFor } from "@/lib/brand/read";
+import { resolveBrandForSite } from "@/lib/brand/read";
 import { PUBLIC_IMAGE_CACHE } from "./images";
 import {
   MAP_HEIGHT,
@@ -133,7 +133,9 @@ async function pinAndColour(
   if (!site || (publishedOnly && site.status !== "published")) return null;
   const settings = readSiteSettings(site.settings);
   if (!pinIsFor(settings.map, settings.address)) return null;
-  const brand = await resolveBrandFor(tx, tenantId, null);
+  // The site's primary colour (ADR 0045): the pin is drawn in the brand
+  // whose page it appears on.
+  const brand = await resolveBrandForSite(tx, tenantId, siteId);
   return { pin: settings.map, colour: brand.primaryColor ?? "#1f2937" };
 }
 

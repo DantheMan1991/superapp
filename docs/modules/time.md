@@ -5,7 +5,7 @@
 > knows the difference between overtime and a pay period, and an hour that
 > reaches the P&L tagged with the thing it was spent on. Core owns the
 > mechanism; an industry layer supplies the vocabulary and the odd pay rule.
-> Status: planned — nothing built; slice order below · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: partial — slice 0 built (who the business keeps hours for, the hours, the week); seeded `coming_soon` until slice 2 · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## The plan (agreed with the founder 2026-09-11)
 
@@ -218,6 +218,57 @@ farm-shaped remainder.
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-11 — Slice 0: somebody worked some hours (`claude/time-0-somebody-worked-some-hours`)
+
+The module exists. Three tables, two screens, three guides. Registered in
+`src/modules/index.ts` and seeded **`coming_soon`** — hours that cannot become
+overtime, a cost or a paycheck are a notebook with extra steps, so slice 2 is
+the earliest this is sold.
+
+- **`time_workers` hangs off the party spine** (migration `0300`), the
+  `crm_party_details` shape. `clerk_user_id` is TEXT and nullable rather than a
+  `profiles` FK — it matches every other actor column here, so "is this worker
+  me?" is a string comparison rather than a join on every screen that asks. A
+  **partial** unique index on `(tenant_id, clerk_user_id)` where not null gives
+  one worker per sign-in while any number of people with no sign-in coexist,
+  which is the ordinary case and the reason the column is nullable rather than
+  the empty-string sentinel used elsewhere.
+- **`pay_type` shipped in slice 0, not slice 2.** The plan had it arriving with
+  the evaluator; it is a column the evaluator READS, so having it a slice early
+  costs one picker and saves a backfill over live hours. It is the one CLOSED
+  taxonomy in the module, and the schema comment carries the argument: a value
+  the evaluator has never seen cannot be classified safely in either direction.
+- **`time_settings` holds `week_starts_on` and nothing else.** The rest of what
+  this file lists for that table — pay frequency, rounding, the ruleset — lands
+  with the code that reads it. The week start is read today, by the screen that
+  groups by it.
+- **Week arithmetic runs in UTC**, which corrects what this file first said.
+  `tenants.timezone` decides what TODAY is; once you hold the `yyyy-mm-dd`
+  string it is a calendar fact, and UTC is the only zone where "add a day" is
+  always 86,400,000 ms. `tests/time-core.test.ts` pins both 2026 daylight-saving
+  crossings.
+- **A duration box that reads what people type** — `1:30`, `1h30`, `1h 30m`,
+  `1.5`, `90m`, `90` — and echoes back what it understood before anything
+  saves. It guesses on a bare number (under 16 is hours, 16 and over is
+  minutes), and a guess about money has to be visible while it can still be
+  corrected.
+- **A CHECK caps one entry at 1440 minutes.** Not a policy about overwork — two
+  entries on one day may legitimately exceed a shift — but a typo guard: `800`
+  meant as eight hours is otherwise thirteen days, and it reaches a pay run
+  before anybody notices.
+- **`0300` is hand-reordered.** drizzle-kit emitted `time_entries_worker_fk`
+  before the unique index it references. Migrations `0276` and `0295` paid for
+  this lesson first; the `when` in `_journal.json` is untouched because only
+  statement order changed.
+- **`ps_time_entries`' row type was renamed `PsTimeEntry`.** It was exported as
+  `TimeEntry` and collided through the schema barrel with the name
+  `time_entries` derives. A pack does not hold the unqualified word for a thing
+  core also has; `RetainerTimeEntry` is the precedent.
+- Verified: 49 pure tests, 11 isolation tests, lint, `tsc` and the build green.
+  `0300`/`0301` applied to dev AND prod before the merge (ADR 0014),
+  `db:verify-rls` clean on both at 179 tables. Dev branch re-seeded.
+- **Not driven.** Nobody has opened either screen — see Open items.
+
 ### 2026-09-11 — The plan (`claude/time-tracking-plan`)
 
 Design session with the founder. Nothing built; this file is the agreed shape
@@ -229,35 +280,51 @@ reasoning. Grounded in a read of `retainer.ts`, `professional-services.ts`,
 
 ## Data model
 
-Proposed, not built. Every table takes `tenant_id`, FORCE RLS, a `--custom`
-policy migration and isolation coverage (`docs/security.md` §4).
+**Built** rows are live (`0300`, `0301`, dev and prod). The rest are the plan's
+shape and arrive with the slice that reads them. Every table takes `tenant_id`,
+FORCE RLS, a `--custom` policy migration and isolation coverage
+(`docs/security.md` §4).
 
-| Table | Purpose | Notes (RLS, invariants, FKs) |
-| --- | --- | --- |
-| `time_workers` | A person who can log time | Detail row on `parties` (kind `person`), the `crm_party_details` pattern. Nullable `profile_id`, nullable PIN hash, `entity_id`, pay basis, exempt flag |
-| `time_punches` | Raw clock evidence | `timestamptz` in/out, device, coordinates, client id **unique per tenant** for idempotent offline sync. Partial unique index on `(tenant_id, worker_id) WHERE ended_at IS NULL` — one open punch, enforced by Postgres |
-| `time_entries` | The payable fact | Minutes, business day (`date`, string mode), pay type, target, optional `punch_id`, source, `entered_by`, version. CHECK minutes > 0 |
-| `time_entry_dimensions` | What the hour was for | The `dimension_members` link, so the P&L splits labor with no report code. Composite FK on `(tenant_id, …)` like every other referencing table |
-| `time_breaks` | Meal and rest periods | Child of a punch. Paid flag, kind. Needed for premium rules, queryable rather than jsonb |
-| `time_settings` | One row per tenant | Workweek start day and hour, pay frequency, period anchor, rounding policy, overtime ruleset slug, auto-deduct policy |
-| `time_periods` | Materialised pay periods | Status open / closed / paid, `locked_at`. Rows rather than computed, because approval state needs somewhere to live |
-| `time_rates` | Effective-dated pay | Cost rate, bill rate, burden percent, effective from. A change is a new row |
-| `time_sheets` | Worker × period | submitted / approved / locked, actors and timestamps, **totals snapshot** |
+| Table | Slice | Purpose | Notes (RLS, invariants, FKs) |
+| --- | --- | --- | --- |
+| `time_workers` | **Built** | A person the business keeps hours for | Detail row on `parties` (kind `person`), the `crm_party_details` pattern. Unique on `(tenant_id, party_id)`; **partial** unique on `(tenant_id, clerk_user_id)` where not null. The PIN hash (slice 7), `entity_id` (slice 6), pay basis and exempt flag (slices 2 and 5) arrive with their readers |
+| `time_entries` | **Built** | The payable fact | Minutes, never decimal hours. Business day (`date`, string mode), `pay_type`, note, `entered_by_clerk_user_id`, version. Composite FK to `time_workers`. CHECKs: minutes > 0, minutes ≤ 1440, and `pay_type` in the closed set. `punch_id` and `source` arrive in slice 1, the target in slice 4 |
+| `time_settings` | **Built** | One row per tenant, created lazily | `week_starts_on` (0–6, CHECK). Pay frequency, period anchor, rounding policy and the overtime ruleset land in slice 2 with the code that reads them. A missing row means the default, decided in the read rather than by a backfill — nobody has to be inserted before the page can render |
+| `time_punches` | 1 | Raw clock evidence | `timestamptz` in/out, device, coordinates, client id **unique per tenant** for idempotent offline sync. Partial unique index on `(tenant_id, worker_id) WHERE ended_at IS NULL` — one open punch, enforced by Postgres |
+| `time_periods` | 2 | Materialised pay periods | Status open / closed / paid, `locked_at`. Rows rather than computed, because approval state needs somewhere to live |
+| `time_sheets` | 3 | Worker × period | submitted / approved / locked, actors and timestamps, **totals snapshot** |
+| `time_entry_dimensions` | 4 | What the hour was for | The `dimension_members` link, so the P&L splits labor with no report code. Composite FK on `(tenant_id, …)` like every other referencing table |
+| `time_rates` | 5 | Effective-dated pay | Cost rate, bill rate, burden percent, effective from. A change is a new row. Expected to carry an owners-only policy |
+| `time_breaks` | 5 | Meal and rest periods | Child of a punch. Paid flag, kind. Needed for premium rules, queryable rather than jsonb |
 
 ## Key files & seams
 
-Planned.
+Built in slice 0:
 
-- `src/modules/time/` — renderer, actions, core
+- `src/db/schema/time.ts` — the three tables, re-exported by the barrel
+- `src/modules/time/TimeModule.tsx` — the week, at `/dashboard/m/time`
+- `src/app/dashboard/m/time/people/page.tsx` — who the business keeps hours for
+- `src/modules/time/core/` — the pure half, import-free so it bundles to the
+  browser: `duration.ts` (parse, format, decimal), `pay-types.ts` (the closed
+  set and `countsAsWorked`), `week.ts` (UTC calendar arithmetic), `errors.ts`
+  (`TimeError`, `roleMayWrite`, `roleMayManageWorkers`)
+- `src/modules/time/read.ts`, `worker-ops.ts`, `entry-ops.ts`,
+  `settings-ops.ts` — one writer per table, each taking the caller's `tx`
+- `src/modules/time/actions.ts` — gate → Zod → `withTenant` → revalidate. Two
+  gates: `gate()` for writing time, `ownerGate()` for changing who the workers
+  are
+- `tests/time-core.test.ts` (49), `tests/isolation/time.test.ts` (11)
+- `docs/help/time/` — `overview.md`, `week.md`, `people.md`
+
+Planned, with the slice that brings them:
+
 - `src/modules/time/core/rules/` — the pure evaluator and the ruleset data files
-  (`federal`, `california`, `8-80`, `none`)
+  (`federal`, `california`, `8-80`, `none`) — slice 2
 - `src/lib/time/` — the verbs, so anything may log an hour without importing the
-  module (§4b's arrangement)
-- `src/lib/time-targets/` — the declared slot: types, registry, resolve
+  module (§4b's arrangement) — slice 4, when a second caller exists
+- `src/lib/time-targets/` — the declared slot: types, registry, resolve — slice 4
 - `src/modules/time/attention/source.ts`, `setup/source.ts`, `paste/target.ts`,
-  `tell/source.ts` — the four fillers
-- `docs/help/time/overview.md` — the guide, from `docs/help/_TEMPLATE.md`, with
-  `**Route:** /dashboard/m/time/**`, from slice 0
+  `tell/source.ts` — the four fillers, slices 8, 0–8, 7 and 7
 
 ## Decisions & gotchas
 
@@ -267,14 +334,22 @@ Written before the build so they are not rediscovered.
   derive the business day in `tenants.timezone`, never subtract two dates. A
   span crossing midnight belongs to the day it **started**, configurable, and
   the choice is recorded rather than assumed.
-- **DST breaks the 168-hour assumption twice a year.** A workweek anchored at
-  Sunday 00:00 local is 167 or 169 hours on two weekends. Compute week
-  boundaries in the tenant zone; do not add `7 * 24 * 60 * 60 * 1000`.
+- **DST breaks the 168-hour assumption twice a year**, and slice 0 corrected
+  what this file said to do about it. A workweek anchored at Sunday 00:00 local
+  is 167 or 169 hours on two weekends. The fix is NOT to compute week boundaries
+  in the tenant's zone, which is what was first written here:
+  `tenants.timezone` decides what TODAY is, and once you hold the `yyyy-mm-dd`
+  string it is a calendar fact, so every sum on it runs in UTC — the only zone
+  where "add a day" is always 86,400,000 ms. `core/week.ts` does exactly that,
+  and `tests/time-core.test.ts` pins both 2026 crossings.
 - **Never fabricate a clock-out.** An open punch past a threshold raises an
   attention item and is closed by a person. An auto-close that silently invents
   hours is a payroll error with a paper trail pointing at us.
-- **Leave never counts toward 40.** The single most common bug in this domain;
-  it is prevented by the pay type existing in slice 2, not by care.
+- **Leave never counts toward 40.** The single most common bug in this domain.
+  Prevented by `pay_type` existing from **slice 0** — a slice earlier than
+  planned, because it is a column the evaluator reads rather than one it writes,
+  so shipping it early costs a picker and saves a backfill over live hours.
+  `countsAsWorked` is the one predicate that answers it, and both sides call it.
 - **The rounded number is never the only number.** Raw punch retained forever,
   the policy applied on the way to the entry, and both visible on screen.
 - **Approval snapshots; lock forbids restatement.** After a period is locked, an
@@ -294,9 +369,13 @@ Written before the build so they are not rediscovered.
 - The candidate ADRs: an overtime ruleset is data; a worker is a party and not a
   login; the workweek is the unit of overtime and the pay period the unit of
   payment; Time stops at gross. Next free number is 0046.
-- Whether `time` or `timekeeping` is the slug. `time` matches the one-word house
-  style (Mail, Work, Documents, Scheduling); `timekeeping` is unambiguous in
-  code. Recorded here so it is decided once.
+- **Nobody has driven either screen.** The Browser pane's `preview_start`
+  launches from the session's working directory rather than an out-of-repo
+  worktree, so the session that built slice 0 could not drive its own code, and
+  the main checkout was held by a parallel session's dev server. To look: switch
+  Time on for a tenant from `/admin`, add somebody on People, log an hour.
+- The `time` vs `timekeeping` slug question is **settled**: `time`, matching the
+  one-word house style (Mail, Work, Documents, Scheduling).
 - Accrual and carryover for paid leave is deferred past slice 9. Pay types make
   leave *expressible* from slice 2; a balance that earns itself is its own
   feature.

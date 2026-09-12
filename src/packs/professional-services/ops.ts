@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
-import type { Engagement, EngagementAllotment, TimeEntry } from "@/db/schema";
+import type { Engagement, EngagementAllotment, PsTimeEntry } from "@/db/schema";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import { isValidIsoDate } from "@/lib/money";
 import { loadParty, PartyError } from "@/lib/parties";
@@ -214,7 +214,7 @@ export interface EngagementDetail {
   clientName: string;
   allotments: EngagementAllotment[];
   /** Newest first. */
-  entries: TimeEntry[];
+  entries: PsTimeEntry[];
   thisMonth: EngagementMonth;
   /** Newest first, through this month. */
   months: EngagementMonth[];
@@ -547,7 +547,7 @@ export async function logTime(
   tx: Tx,
   ctx: EngagementCtx,
   input: { engagementId: string; minutes: number; workDate: string; note?: string },
-): Promise<TimeEntry> {
+): Promise<PsTimeEntry> {
   requireWrite(ctx, "member");
   assertMinutes(input.minutes);
   if (!isValidIsoDate(input.workDate)) {
@@ -572,7 +572,7 @@ export async function getTimeEntry(
   tx: Tx,
   tenantId: string,
   id: string,
-): Promise<TimeEntry | null> {
+): Promise<PsTimeEntry | null> {
   const row = await tx.query.psTimeEntries.findFirst({
     where: and(eq(schema.psTimeEntries.tenantId, tenantId), eq(schema.psTimeEntries.id, id)),
   });
@@ -589,7 +589,7 @@ export async function updateTimeEntry(
     workDate: string;
     note: string;
   },
-): Promise<TimeEntry> {
+): Promise<PsTimeEntry> {
   requireWrite(ctx, "member");
   assertMinutes(args.minutes);
   if (!isValidIsoDate(args.workDate)) {
@@ -623,7 +623,7 @@ export async function deleteTimeEntry(
   tx: Tx,
   ctx: EngagementCtx,
   args: { entryId: string },
-): Promise<TimeEntry> {
+): Promise<PsTimeEntry> {
   requireWrite(ctx, "member");
   const before = await getTimeEntry(tx, ctx.tenantId, args.entryId);
   if (!before) throw new EngagementError("NOT_FOUND", "entry not found");

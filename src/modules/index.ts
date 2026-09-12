@@ -6,6 +6,7 @@ import { EmailModule } from "./email/EmailModule";
 import { HelloModule } from "./hello/HelloModule";
 import { MarketingModule } from "./marketing/MarketingModule";
 import { SchedulingModule } from "./scheduling/SchedulingModule";
+import { TimeModule } from "./time/TimeModule";
 import { WorkModule } from "./work/WorkModule";
 
 /**
@@ -78,6 +79,18 @@ export const moduleRegistry: Record<string, ModuleDefinition> = {
     // reads better in the standard column.
     fullWidthPaths: ["website/pages"],
     Component: MarketingModule,
+  },
+  // Registered from slice 0 while the seed row stays `coming_soon` — the
+  // arrangement scheduling, work and marketing each used: a superadmin can
+  // switch it on for one tenant to try it, and nobody is sold it until the week
+  // can do arithmetic. Hours that cannot become overtime, a cost or a paycheck
+  // are a notebook with extra steps, so slice 2 is the earliest this is
+  // `available`.
+  time: {
+    slug: "time",
+    name: "Time",
+    icon: "clock",
+    Component: TimeModule,
   },
 };
 

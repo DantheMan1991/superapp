@@ -212,4 +212,10 @@ export const psTimeEntries = pgTable(
 
 export type Engagement = typeof psEngagements.$inferSelect;
 export type EngagementAllotment = typeof psEngagementAllotments.$inferSelect;
-export type TimeEntry = typeof psTimeEntries.$inferSelect;
+/**
+ * Named for its table, as `RetainerTimeEntry` is. It was `TimeEntry` until the
+ * core Time module arrived, whose `time_entries` derives that name and whose
+ * barrel export collided with this one — a pack does not get to hold the
+ * unqualified word for a thing core also has.
+ */
+export type PsTimeEntry = typeof psTimeEntries.$inferSelect;

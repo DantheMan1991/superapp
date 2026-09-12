@@ -523,6 +523,16 @@ export const timeSheets = pgTable(
     paidLeaveMinutes: integer("paid_leave_minutes"),
     /** Which rules produced those numbers. */
     rulesetSlug: text("ruleset_slug"),
+    /**
+     * What the approver agreed this period was worth, in cents.
+     *
+     * FROZEN WITH THE HOURS, and for a sharper reason than they are: rates are
+     * effective-dated, so a rate added later with a backdated `effective_on`
+     * would otherwise silently restate a period somebody has already been paid
+     * for. Null when the business keeps no rates at all, which is why it is not
+     * in the snapshot CHECK below.
+     */
+    grossCents: integer("gross_cents"),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -630,7 +640,89 @@ export const timeEntryDimensions = pgTable(
   ],
 );
 
+/**
+ * WHAT SOMEBODY IS PAID, effective-dated. The only table in this module that is
+ * not readable by everybody.
+ *
+ * ── A CHANGE IS A NEW ROW ────────────────────────────────────────────────────
+ *
+ * The rate in force on a day is the newest row whose `effective_on` is on or
+ * before it. Overwriting a rate would restate every week that has already been
+ * worked — a raise in March would quietly make January's payroll wrong — which
+ * is the same reason `retainer_allotments` and retail's `(channel, item)`
+ * pricing are histories rather than values.
+ *
+ * ── THREE NUMBERS THAT ARE NOT THE SAME NUMBER ───────────────────────────────
+ *
+ *  - `pay_rate_cents` is the WAGE, and the only one gross pay is computed from.
+ *  - `bill_rate_cents` is what a customer is charged. Different, and conflating
+ *    the two is how work looks profitable that is not. Null until a business
+ *    bills for time.
+ *  - `burden_percent` is the employer's on-cost — payroll taxes, insurance — on
+ *    top of the wage. It belongs to what an hour COSTS, never to what somebody
+ *    is PAID, so it stays out of gross entirely.
+ *
+ * ── OWNERS ONLY, AND IT IS AN RLS RULE ───────────────────────────────────────
+ *
+ * `0313` carries `app_current_tenant_role() = 'owner'` in the policy, the shape
+ * the Documents module's owners-only folders use. Every read therefore has to
+ * pass `{ role: ctx.role }` to `withTenant`, because it defaults to `staff` —
+ * the least privileged value, which is exactly right here and means a caller
+ * that forgets simply sees nothing rather than everything.
+ */
+export const timeRates = pgTable(
+  "time_rates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    workerId: uuid("worker_id").notNull(),
+    /** The first day this rate applies. The row before it stops that day. */
+    effectiveOn: date("effective_on", { mode: "string" }).notNull(),
+    /** Cents per hour. The wage, and the only input to gross pay. */
+    payRateCents: integer("pay_rate_cents").notNull(),
+    /** Cents per hour charged to a customer. Null until somebody bills time. */
+    billRateCents: integer("bill_rate_cents"),
+    /** Whole percent added to the wage to get the cost of an hour. */
+    burdenPercent: integer("burden_percent").notNull().default(0),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("time_rates_tenant_id_id_idx").on(t.tenantId, t.id),
+    // One rate per person per day it starts. A second row for the same day is
+    // an edit of the first, not a second rate.
+    uniqueIndex("time_rates_worker_effective_idx").on(
+      t.tenantId,
+      t.workerId,
+      t.effectiveOn,
+    ),
+    foreignKey({
+      name: "time_rates_worker_fk",
+      columns: [t.tenantId, t.workerId],
+      foreignColumns: [timeWorkers.tenantId, timeWorkers.id],
+    }).onDelete("cascade"),
+    // A negative wage is not a discount, it is a typo.
+    check("time_rates_pay_nonnegative", sql`${t.payRateCents} >= 0`),
+    check(
+      "time_rates_bill_nonnegative",
+      sql`${t.billRateCents} is null or ${t.billRateCents} >= 0`,
+    ),
+    check(
+      "time_rates_burden_range",
+      sql`${t.burdenPercent} >= 0 and ${t.burdenPercent} <= 200`,
+    ),
+  ],
+);
+
 export type TimeWorker = typeof timeWorkers.$inferSelect;
+export type TimeRate = typeof timeRates.$inferSelect;
 export type TimeEntryDimension = typeof timeEntryDimensions.$inferSelect;
 export type TimePeriod = typeof timePeriods.$inferSelect;
 export type TimeSheet = typeof timeSheets.$inferSelect;

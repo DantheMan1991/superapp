@@ -2192,6 +2192,20 @@
       "when": 1789214946840,
       "tag": "0312_time_targets_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 313,
+      "version": "7",
+      "when": 1789217772993,
+      "tag": "0313_time_rates",
+      "breakpoints": true
+    },
+    {
+      "idx": 314,
+      "version": "7",
+      "when": 1789217782694,
+      "tag": "0314_time_rates_rls",
+      "breakpoints": true
     }
   ]
 }

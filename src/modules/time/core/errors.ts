@@ -32,6 +32,8 @@ export type TimeErrorCode =
   | "AMEND_NOT_LOCKED"
   | "DIMENSION_INVALID"
   | "SPLIT_TOO_LARGE"
+  | "RATE_INVALID"
+  | "RATE_NOT_FOUND"
   | "PUNCH_NOT_FOUND"
   | "ALREADY_CLOCKED_IN"
   | "PUNCH_ALREADY_ENDED"
@@ -111,6 +113,10 @@ export function friendlyMessage(err: unknown): string {
       return "Pick one thing per kind, and nothing that has been retired.";
     case "SPLIT_TOO_LARGE":
       return "A split has to leave some time on the original entry.";
+    case "RATE_INVALID":
+      return "Check the pay rate — it cannot be negative, and burden is 0 to 200 percent.";
+    case "RATE_NOT_FOUND":
+      return "That rate could not be found.";
     case "PUNCH_NOT_FOUND":
       return "That clock could not be found.";
     case "ALREADY_CLOCKED_IN":

@@ -509,6 +509,90 @@ d("time tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
+  /* ── what it costs (slice 5) ──────────────────────────────────────────── */
+
+  it("A STAFF MEMBER CANNOT SEE WHAT ANYBODY IS PAID", async () => {
+    // The one table in this module that is not member-wide. Everything else is
+    // deliberately shared; the wage bill is not.
+    await withSystem((tx) =>
+      tx.insert(schema.timeRates).values({
+        tenantId: tenantA,
+        workerId: workerA,
+        effectiveOn: "2026-09-01",
+        payRateCents: 2250,
+      }),
+    );
+
+    const asOwnerSees = await asOwner((tx) => tx.select().from(schema.timeRates));
+    expect(asOwnerSees).toHaveLength(1);
+    expect(asOwnerSees[0].payRateCents).toBe(2250);
+
+    const asStaffSees = await asStaff((tx) => tx.select().from(schema.timeRates));
+    expect(asStaffSees).toEqual([]);
+  });
+
+  it("a staff member cannot WRITE a rate either", async () => {
+    // WITH CHECK carries the same term as USING, so this is refused rather
+    // than silently writing a row its author could not then read.
+    await expect(
+      asStaff((tx) =>
+        tx.insert(schema.timeRates).values({
+          tenantId: tenantA,
+          workerId: workerA,
+          effectiveOn: "2026-10-01",
+          payRateCents: 9999,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("the default role is staff, so forgetting to pass it shows nothing", async () => {
+    // `withTenant` defaults to the least privileged value. A caller that omits
+    // `{ role }` gets an empty table, never everybody's wages — the reason the
+    // default is what it is.
+    const forgotten = await withTenant(tenantA, (tx) =>
+      tx.select().from(schema.timeRates),
+    );
+    expect(forgotten).toEqual([]);
+  });
+
+  it("another tenant's owner sees nothing, role notwithstanding", async () => {
+    const theirs = await asOtherTenant((tx) => tx.select().from(schema.timeRates));
+    expect(theirs).toEqual([]);
+  });
+
+  it("one rate per person per start day", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.timeRates).values({
+          tenantId: tenantA,
+          workerId: workerA,
+          effectiveOn: "2026-09-01",
+          payRateCents: 2500,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a negative wage and an impossible burden", async () => {
+    for (const bad of [
+      { payRateCents: -1, burdenPercent: 0 },
+      { payRateCents: 2000, burdenPercent: 201 },
+      { payRateCents: 2000, burdenPercent: -1 },
+    ]) {
+      await expect(
+        withSystem((tx) =>
+          tx.insert(schema.timeRates).values({
+            tenantId: tenantA,
+            workerId: workerA,
+            effectiveOn: "2027-01-01",
+            ...bad,
+          }),
+        ),
+      ).rejects.toThrow();
+    }
+  });
+
   /* ── what the hour was for (slice 4) ──────────────────────────────────── */
 
   it("a tag is visible to its own tenant and to nobody else", async () => {

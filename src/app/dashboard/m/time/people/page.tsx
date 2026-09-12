@@ -20,6 +20,12 @@ import {
   WorkerSignInPicker,
 } from "@/modules/time/components/people-controls";
 import { startOfWeek, todayInTimezone } from "@/lib/timezone";
+import { formatCents } from "@/modules/time/core/pay";
+import {
+  DeleteRateButton,
+  SetRateButton,
+} from "@/modules/time/components/rate-controls";
+import { listRates } from "@/modules/time/rate-ops";
 import { listWorkers } from "@/modules/time/read";
 import { payFrequencyLabel } from "@/modules/time/core/periods";
 import { roundingLabel } from "@/modules/time/core/rounding";
@@ -42,7 +48,7 @@ export default async function TimePeoplePage() {
   await requireModuleEnabled(ctx.tenant.id, "time");
   const canManage = roleMayManageWorkers(ctx.role);
 
-  const { workers, members, prefs, candidates } = await withTenant(
+  const { workers, members, prefs, candidates, rates } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
       const workers = await listWorkers(tx, ctx.tenant.id);
@@ -76,6 +82,14 @@ export default async function TimePeoplePage() {
         candidates,
         members: await listAssignableMembers(tx, ctx.tenant.id),
         prefs: await getTimePrefs(tx, ctx.tenant.id),
+        /*
+         * Comes back EMPTY for anybody who is not an owner — the policy on
+         * `time_rates` carries `app_current_tenant_role() = 'owner'`, and this
+         * `withTenant` passes the reader's real role. The panel below is not
+         * rendered at all in that case, so nothing has to decide whether an
+         * empty list means "none" or "not for you".
+         */
+        rates: await listRates(tx, ctx.tenant.id),
       };
     },
     { role: ctx.role, userId: ctx.userId },
@@ -163,6 +177,77 @@ export default async function TimePeoplePage() {
               </li>
             ))}
           </ul>
+        </Panel>
+      )}
+
+      {/* OWNERS ONLY, and the RLS policy says so too. The screen asks the same
+          predicate the action's gate asks, so a control is never drawn for
+          somebody whose press would be refused. */}
+      {canManage && workers.length > 0 && (
+        <Panel className="p-4">
+          <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-medium tracking-heading">
+              Pay rates
+              <span className="ml-2 text-xs font-normal text-subtle-foreground">
+                only owners can see this
+              </span>
+            </h2>
+            <SetRateButton
+              workers={workers
+                .filter((w) => w.isActive)
+                .map((w) => ({ id: w.id, name: w.name }))}
+              today={todayInTimezone(ctx.tenant.timezone)}
+            />
+          </div>
+          {rates.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Nobody has a rate yet. Hours are still recorded and added up
+              without one — a rate is what turns them into a figure.
+            </p>
+          ) : (
+            <ul className="divide-y divide-divider">
+              {rates.map((rate) => {
+                const name =
+                  workers.find((w) => w.id === rate.workerId)?.name ?? "Somebody";
+                return (
+                  <li
+                    key={rate.id}
+                    className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2 text-sm first:pt-0"
+                  >
+                    <span className="w-40 shrink-0 truncate font-medium">
+                      {name}
+                    </span>
+                    <span className="tabular-nums">
+                      {formatCents(rate.payRateCents)}/hr
+                    </span>
+                    <span className="text-xs text-subtle-foreground">
+                      from {rate.effectiveOn}
+                    </span>
+                    {rate.billRateCents !== null && (
+                      <span className="text-xs text-muted-foreground">
+                        charged out at {formatCents(rate.billRateCents)}
+                      </span>
+                    )}
+                    {rate.burdenPercent > 0 && (
+                      <span className="text-xs text-muted-foreground">
+                        +{rate.burdenPercent}% on-costs
+                      </span>
+                    )}
+                    <span className="ml-auto">
+                      <DeleteRateButton
+                        rateId={rate.id}
+                        summary={`${name}, ${formatCents(rate.payRateCents)} an hour from ${rate.effectiveOn}`}
+                      />
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <p className="mt-3 text-xs text-subtle-foreground">
+            A change is a new row with a new start date. Nothing worked before
+            that date is re-priced.
+          </p>
         </Panel>
       )}
 

@@ -14,6 +14,7 @@ import {
   AddWorker,
   OvertimeRulesetPicker,
   PayFrequencyPicker,
+  PostsLaborSwitch,
   RoundingPicker,
   WeekStartPicker,
   WorkerActiveButton,
@@ -320,6 +321,18 @@ export default async function TimePeoplePage() {
           )}
         </Panel>
       </div>
+
+      {/* Owners only, like the rates above and for the same reason: it decides
+          what happens to money. Everybody else does not need to know the
+          question exists. */}
+      {canManage && (
+        <Panel className="p-4">
+          <h2 className="mb-2 text-sm font-medium tracking-heading">
+            Wages in your books
+          </h2>
+          <PostsLaborSwitch on={prefs.postsLabor} />
+        </Panel>
+      )}
     </div>
   );
 }

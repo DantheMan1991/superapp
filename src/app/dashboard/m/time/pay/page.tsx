@@ -21,6 +21,7 @@ import { formatCents, groupByRate, payForWeek } from "@/modules/time/core/pay";
 import { rulesetFor } from "@/modules/time/core/rulesets";
 import { weekLabel } from "@/modules/time/core/week";
 import { roleMayApprove, roleMayWrite } from "@/modules/time/core/errors";
+import { ExportPayPeriodButton } from "@/modules/time/components/export-controls";
 import {
   ApproveSheetButtons,
   PeriodLockButton,
@@ -391,10 +392,14 @@ export default async function PayPeriodPage({
             </Button>
           )}
           {canApprove && anyRows && (
+            <ExportPayPeriodButton on={period.start} />
+          )}
+          {canApprove && anyRows && (
             <PeriodLockButton
               on={period.start}
               locked={isLocked}
               label={periodLabel(period)}
+              postsLabor={prefs.postsLabor}
             />
           )}
         </div>

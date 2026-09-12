@@ -156,11 +156,14 @@ export function PeriodLockButton({
   on,
   locked,
   label,
+  postsLabor,
 }: {
   on: string;
   locked: boolean;
   /** "Aug 30 – Sep 12, 2026". */
   label: string;
+  /** Whether locking this period also writes a journal entry. */
+  postsLabor: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -173,7 +176,28 @@ export function PeriodLockButton({
         toast.error(result.error);
         return;
       }
-      toast.success(next ? "Period locked" : "Period unlocked");
+      /*
+       * SAY WHETHER THE BOOKS MOVED. "Period locked" on a business that posts
+       * wages is ambiguous in the one direction that matters — an owner who
+       * assumes it posted and finds nothing in the ledger a month later has no
+       * way back to this moment.
+       */
+      const posted = result.data?.posted ?? false;
+      const left = result.data?.unapprovedWorkers ?? 0;
+      if (next) {
+        toast.success(
+          posted ? "Period locked and wages posted" : "Period locked",
+          left > 0
+            ? {
+                description: `${left} ${left === 1 ? "timesheet was" : "timesheets were"} never approved, so ${left === 1 ? "it is" : "they are"} not in this figure.`,
+              }
+            : undefined,
+        );
+      } else {
+        toast.success(
+          posted ? "Period unlocked and wages reversed" : "Period unlocked",
+        );
+      }
       router.refresh();
     });
   }
@@ -196,8 +220,15 @@ export function PeriodLockButton({
               "Nobody will be able to change or delete an hour in these dates. " +
               "A mistake found later is put right by adding a correction in the " +
               "open period, which leaves the original as your pay run saw it. " +
-              "You can unlock it again.",
-            confirmLabel: "Lock the period",
+              "You can unlock it again." +
+              (postsLabor
+                ? " This will also put the approved wages in your books, as a " +
+                  "payroll accrual dated the last day of the period. Unlocking " +
+                  "reverses it."
+                : ""),
+            confirmLabel: postsLabor
+              ? "Lock it and post the wages"
+              : "Lock the period",
           });
           if (ok) set(true);
         }}

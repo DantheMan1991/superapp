@@ -145,6 +145,31 @@ export const journalEntrySource = pgEnum("journal_entry_source", [
    * that does not need it is how the boundary stops meaning anything.
    */
   "production_processing_accrual",
+  /**
+   * **ONE PAY PERIOD'S LABOR, ACCRUED WHEN THE PERIOD WAS LOCKED** — Time
+   * slice 6. `source_id` names a `time_periods` row.
+   *
+   * `Dr 6450 Salaries & Wages` and `Dr 6500 Payroll Taxes`, split by dimension
+   * so a P&L by enterprise carries its own labor; `Cr 2300 Payroll
+   * Liabilities` for the lot. Nothing has been paid at that point, which is the
+   * whole point: the expense belongs to the fortnight that earned it, not to
+   * the day the bank moves. `2300` is relieved when the payroll provider's run
+   * arrives as a bill or a bank transaction, exactly as `2060` is relieved by
+   * the plant's invoice.
+   *
+   * Added in `drizzle/0315`, which also adds `time_settings.posts_labor` — the
+   * warning `depreciation` and `intercompany` carry does NOT bite here. An enum
+   * value cannot be USED in the transaction that adds it, and Drizzle runs
+   * every pending migration in one; nothing in 0315 uses the value, which is
+   * only ever written at runtime by a later request.
+   *
+   * **NOT IN `MACHINE_SOURCES`**, and the argument is
+   * `production_processing_accrual`'s word for word. Wages are an estimate
+   * until a payroll run confirms them, and putting an estimated liability on
+   * the balance sheet is an owner's decision. `lockPeriod` is owner-only
+   * already, so `requireOwnerRole` is exactly the check it should meet.
+   */
+  "payroll_accrual",
 ]);
 
 export const entryEditPolicy = pgEnum("entry_edit_policy", [

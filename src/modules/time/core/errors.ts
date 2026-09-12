@@ -34,6 +34,9 @@ export type TimeErrorCode =
   | "SPLIT_TOO_LARGE"
   | "RATE_INVALID"
   | "RATE_NOT_FOUND"
+  | "POSTING_IN_USE"
+  | "POSTING_ACCOUNTS"
+  | "POSTING_NO_ENTITY"
   | "PUNCH_NOT_FOUND"
   | "ALREADY_CLOCKED_IN"
   | "PUNCH_ALREADY_ENDED"
@@ -101,6 +104,12 @@ export function friendlyMessage(err: unknown): string {
       return "That pay period is locked. Add a correction in the open period instead.";
     case "PERIOD_NOT_LOCKED":
       return "That pay period is not locked.";
+    case "POSTING_IN_USE":
+      return "Wages from this business are already in the books. Unlock those pay periods first, which takes them back out properly.";
+    case "POSTING_ACCOUNTS":
+      return "Your chart of accounts does not have the payroll accounts this needs — Salaries & Wages (6450), Payroll Taxes (6500) and Payroll Liabilities (2300). Re-provision it from Accounting.";
+    case "POSTING_NO_ENTITY":
+      return "There is no default company to post wages to. Set one in Accounting first.";
     case "SHEET_NOT_FOUND":
       return "That timesheet could not be found.";
     case "SHEET_EXISTS":

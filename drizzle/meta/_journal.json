@@ -2206,6 +2206,13 @@
       "when": 1789217782694,
       "tag": "0314_time_rates_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 315,
+      "version": "7",
+      "when": 1789219462443,
+      "tag": "0315_time_labor_posting",
+      "breakpoints": true
     }
   ]
 }

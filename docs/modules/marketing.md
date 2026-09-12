@@ -196,7 +196,16 @@ otherwise the next `db:migrate` re-runs `CREATE TABLE` and aborts the whole
 transaction. That is the rule #515 added to conventions.md, and
 `scripts/restamp-migration.ts` (added here) is the tool for its second half:
 ledger only, one row matched on an exact stamp, and nothing written without
-`--write`. **`db:generate` also silently reverted the hand-edited
+`--write`. **The same tool then cleared a PENDING that was not mine**: #509's
+`0302`/`0303` had been renumbered into the slot above `0301`, giving them a
+`when` BELOW the stamps they were applied under, and the ledger was never
+corrected — so `inspect-migration-state` read `PENDING (2)` on dev AND
+production every time anyone ran it. Nothing re-ran (the mark was hours above),
+which is exactly why it went unnoticed. Both rows were identified by hashing the
+GIT BLOB rather than the working copy — on Windows the checkout is CRLF and the
+digest does not match what Drizzle stored — and moved DOWN to the journal's
+values. Both databases now read `PENDING: none`.
+**`db:generate` also silently reverted the hand-edited
 `ON DELETE SET NULL ("image_id")` to the bare form** — exactly what that
 migration's own header warns about — and it was put back by hand.
 

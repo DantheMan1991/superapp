@@ -5,7 +5,7 @@
 > knows the difference between overtime and a pay period, and an hour that
 > reaches the P&L tagged with the thing it was spent on. Core owns the
 > mechanism; an industry layer supplies the vocabulary and the odd pay rule.
-> Status: partial — slice 0 built (who the business keeps hours for, the hours, the week); seeded `coming_soon` until slice 2 · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: partial — slices 0 and 1 built (people, hours, the week, and the clock); seeded `coming_soon` until slice 2 · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## The plan (agreed with the founder 2026-09-11)
 
@@ -218,6 +218,87 @@ farm-shaped remainder.
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-11 — Slice 1: the clock (`claude/time-1-the-clock`)
+
+`time_punches`, the two columns that say where an entry came from, and the
+rounding policy. Migrations `0304`/`0305`.
+
+**Generated as `0302`/`0303` and renumbered**, because `claude/preview-links`
+(#509) took those slots from a parallel session and merged first. The repair is
+the one [conventions.md](../conventions.md) prescribes, including the part that
+is easy to get wrong: **the original `when` goes back into the journal entry**
+(`1789184104883` and `1789184144785`), because drizzle applies a migration only
+when `lastApplied.created_at < when` and a fresh stamp would have re-run it
+against tables that exist. `scripts/inspect-migration-state.ts` confirms both
+databases against the renumbered journal.
+
+**It also turned up a live defect on `main`, which the regenerated snapshot
+repairs.** #509's snapshots were produced before that branch took slice 0's
+merge, so `0302_snapshot.json` and `0303_snapshot.json` have no `time_workers`,
+`time_entries` or `time_settings` in them — the newest snapshot on main had
+silently lost three tables, and regenerating against it proposed `CREATE TABLE`
+for all three. `0304_time_clock.sql` therefore carries slice 1's real delta
+rather than what drizzle-kit emitted, while `0304_snapshot.json` is the fresh
+complete one, so whoever generates next diffs against the truth.
+
+- **A punch is evidence; an entry is the payable fact**, and slice 1 is where
+  that stops being a sentence in a plan. `time_punches` keeps the two real
+  instants forever; `clockOut` measures them, applies the policy, and writes the
+  entry. Nothing overwrites the raw, so a screen can say "7h 53m worked, 8h
+  logged after rounding" and the policy can be changed later without rewriting
+  what happened.
+- **One open punch per worker, by a partial unique index.** Two running clocks
+  on one person double-count an afternoon, and between a look-before-you-leap
+  SELECT and the INSERT another request can always win. `clockIn` catches the
+  constraint by name and turns it into a sentence.
+- **Rounding is always to the NEAREST increment, and there is no direction to
+  pick.** Rounding a timesheet is lawful while it is neutral, so a policy that
+  always rounds down is not offered — which is why `rounding_minutes` is one
+  integer and not a pair with a mode beside it. `tests/time-core.test.ts` proves
+  the neutrality directly: over the sixty minute-offsets in an hour, quarter-hour
+  rounding gains exactly as much as it loses.
+- **Rounding to zero writes no entry**, and that is the policy working rather
+  than an edge case to paper over: five minutes on a quarter-hour setting is
+  worth nothing by the same rule that pays a full quarter for eight. The punch
+  survives as the record that somebody was there, and the toast says so.
+- **A punch's business day is the day it STARTED**, in the tenant's zone — a
+  shift from 22:00 Tuesday to 02:00 Wednesday is Tuesday's work. Not
+  configurable: the alternative convention (split at midnight) only matters once
+  overtime is computed per DAY rather than per week, and a setting nothing reads
+  differently is wrong half the time without anybody finding out. It becomes a
+  choice in slice 5, when a rule cares.
+- **Nothing closes a clock automatically.** Past sixteen hours the row turns red
+  and asks, and a person decides. Inventing a clock-out puts hours nobody worked
+  on a timesheet with a paper trail pointing at us.
+- **`0302` is hand-edited for `time_entries_punch_fk`.** drizzle-kit emits a
+  bare `ON DELETE set null`, which on a composite key means "null every column
+  in the key" — including `tenant_id`, which is NOT NULL, so the constraint
+  could never fire. Postgres 15's column-list form `SET NULL ("punch_id")` nulls
+  only what should be nulled, and drizzle-kit does not revert it because it
+  diffs its own snapshot. The isolation suite now proves the behaviour rather
+  than the spelling: delete a punch, the entry survives with a null link.
+- **A duplication from slice 0 was deleted.** `core/week.ts` had its own
+  `addDays`, `startOfWeek`, `daysBetween` and `isDateString`;
+  `src/lib/timezone.ts` has done UTC calendar arithmetic since Scheduling needed
+  it, and is deliberately not `server-only` so a client component may use it.
+  Two implementations of "what day does this week start on" is exactly the drift
+  that makes two screens disagree about which week an hour falls in. `startOfWeek`
+  there was annotated `0 | 1` while Scheduling was its only caller and is now
+  `number` (the arithmetic always handled all seven); `isDateString` moved there
+  too. `core/week.ts` keeps only what is Time's own: the weekday names and the
+  two labels. The coverage moved with the code, into `tests/timezone.test.ts`.
+- **The running total ticks from the SERVER's figure.** `listOpenPunches`
+  returns `elapsedMinutes` as of the read and the browser counts up from mount;
+  it never subtracts the punch's start from its own clock, because a laptop that
+  has not synced would show a number nobody else can reproduce. Found by lint
+  (`react-hooks/set-state-in-effect`, then `react-hooks/purity`), and the first
+  draft would also have painted `0m` for a clock that had been running three
+  hours.
+- Verified: 49 pure tests in `time-core`, 14 in `timezone`, 19 isolation tests,
+  lint, `tsc` and the build green. `0302`/`0303` applied to dev AND prod before
+  the merge (ADR 0014), `db:verify-rls` clean on both.
+- **Not driven.** Still nobody — see Open items.
+
 ### 2026-09-11 — Slice 0: somebody worked some hours (`claude/time-0-somebody-worked-some-hours`)
 
 The module exists. Three tables, two screens, three guides. Registered in
@@ -288,9 +369,9 @@ FORCE RLS, a `--custom` policy migration and isolation coverage
 | Table | Slice | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- | --- |
 | `time_workers` | **Built** | A person the business keeps hours for | Detail row on `parties` (kind `person`), the `crm_party_details` pattern. Unique on `(tenant_id, party_id)`; **partial** unique on `(tenant_id, clerk_user_id)` where not null. The PIN hash (slice 7), `entity_id` (slice 6), pay basis and exempt flag (slices 2 and 5) arrive with their readers |
-| `time_entries` | **Built** | The payable fact | Minutes, never decimal hours. Business day (`date`, string mode), `pay_type`, note, `entered_by_clerk_user_id`, version. Composite FK to `time_workers`. CHECKs: minutes > 0, minutes ≤ 1440, and `pay_type` in the closed set. `punch_id` and `source` arrive in slice 1, the target in slice 4 |
-| `time_settings` | **Built** | One row per tenant, created lazily | `week_starts_on` (0–6, CHECK). Pay frequency, period anchor, rounding policy and the overtime ruleset land in slice 2 with the code that reads them. A missing row means the default, decided in the read rather than by a backfill — nobody has to be inserted before the page can render |
-| `time_punches` | 1 | Raw clock evidence | `timestamptz` in/out, device, coordinates, client id **unique per tenant** for idempotent offline sync. Partial unique index on `(tenant_id, worker_id) WHERE ended_at IS NULL` — one open punch, enforced by Postgres |
+| `time_entries` | **Built** | The payable fact | Minutes, never decimal hours. Business day (`date`, string mode), `pay_type`, note, `entered_by_clerk_user_id`, `punch_id`, `source`, version. Composite FKs to `time_workers` (cascade) and `time_punches` (**SET NULL, column-list form**). Partial unique on `(tenant_id, punch_id)` — one entry per punch. CHECKs: minutes > 0, minutes ≤ 1440, `pay_type` and `source` each in their closed set. The target arrives in slice 4 |
+| `time_settings` | **Built** | One row per tenant, created lazily | `week_starts_on` (0–6) and `rounding_minutes` (one of 0, 5, 6, 10, 15, 30), both CHECKed. Pay frequency, period anchor and the overtime ruleset land in slice 2 with the code that reads them. A missing row means the defaults, decided in the read rather than by a backfill — nobody has to be inserted before the page can render |
+| `time_punches` | **Built** | Raw clock evidence | `timestamptz` in/out, who pressed each button, note, version. Composite FK to `time_workers`. Partial unique on `(tenant_id, worker_id) WHERE ended_at IS NULL` — one open punch, enforced by Postgres. CHECK `ended_at > started_at`. The device, the coordinates and the client-generated id for idempotent offline sync arrive in slice 7 with the screen that sends them |
 | `time_periods` | 2 | Materialised pay periods | Status open / closed / paid, `locked_at`. Rows rather than computed, because approval state needs somewhere to live |
 | `time_sheets` | 3 | Worker × period | submitted / approved / locked, actors and timestamps, **totals snapshot** |
 | `time_entry_dimensions` | 4 | What the hour was for | The `dimension_members` link, so the P&L splits labor with no report code. Composite FK on `(tenant_id, …)` like every other referencing table |
@@ -304,16 +385,20 @@ Built in slice 0:
 - `src/db/schema/time.ts` — the three tables, re-exported by the barrel
 - `src/modules/time/TimeModule.tsx` — the week, at `/dashboard/m/time`
 - `src/app/dashboard/m/time/people/page.tsx` — who the business keeps hours for
-- `src/modules/time/core/` — the pure half, import-free so it bundles to the
-  browser: `duration.ts` (parse, format, decimal), `pay-types.ts` (the closed
-  set and `countsAsWorked`), `week.ts` (UTC calendar arithmetic), `errors.ts`
-  (`TimeError`, `roleMayWrite`, `roleMayManageWorkers`)
-- `src/modules/time/read.ts`, `worker-ops.ts`, `entry-ops.ts`,
+- `src/modules/time/components/clock.tsx` — the running-clock panel
+- `src/modules/time/core/` — the pure half, so it bundles to the browser:
+  `duration.ts` (parse, format, decimal), `pay-types.ts` (the closed set and
+  `countsAsWorked`), `rounding.ts` (nearest-only rounding and the long-punch
+  threshold), `errors.ts` (`TimeError`, `roleMayWrite`,
+  `roleMayManageWorkers`), `week.ts` (the weekday names and the strip's labels
+  — the ARITHMETIC is `@/lib/timezone`'s)
+- `src/modules/time/read.ts`, `worker-ops.ts`, `entry-ops.ts`, `punch-ops.ts`,
   `settings-ops.ts` — one writer per table, each taking the caller's `tx`
 - `src/modules/time/actions.ts` — gate → Zod → `withTenant` → revalidate. Two
   gates: `gate()` for writing time, `ownerGate()` for changing who the workers
   are
-- `tests/time-core.test.ts` (49), `tests/isolation/time.test.ts` (11)
+- `tests/time-core.test.ts` (49), `tests/isolation/time.test.ts` (19), and the
+  calendar arithmetic this module leans on in `tests/timezone.test.ts`
 - `docs/help/time/` — `overview.md`, `week.md`, `people.md`
 
 Planned, with the slice that brings them:
@@ -332,8 +417,15 @@ Written before the build so they are not rediscovered.
 
 - **A punch is an instant; a day is a calendar fact.** Store `timestamptz`,
   derive the business day in `tenants.timezone`, never subtract two dates. A
-  span crossing midnight belongs to the day it **started**, configurable, and
-  the choice is recorded rather than assumed.
+  span crossing midnight belongs to the day it **started** — slice 1 built that
+  and deliberately did NOT make it configurable, because the alternative (split
+  at midnight) only matters once overtime is per-day, and a setting nothing
+  reads differently is wrong half the time silently.
+- **Never compute an elapsed time from the browser's clock.** A duration is
+  measurable locally; the difference between a local clock and a stored instant
+  is not, because the two clocks disagree. The running total counts up from the
+  figure the server sent. Both lint rules that fired on the first draft were
+  pointing at real defects, not style.
 - **DST breaks the 168-hour assumption twice a year**, and slice 0 corrected
   what this file said to do about it. A workweek anchored at Sunday 00:00 local
   is 167 or 169 hours on two weekends. The fix is NOT to compute week boundaries
@@ -351,7 +443,14 @@ Written before the build so they are not rediscovered.
   so shipping it early costs a picker and saves a backfill over live hours.
   `countsAsWorked` is the one predicate that answers it, and both sides call it.
 - **The rounded number is never the only number.** Raw punch retained forever,
-  the policy applied on the way to the entry, and both visible on screen.
+  the policy applied on the way to the entry, and both visible on screen. Two
+  consequences that look like bugs and are not: rounding can take a short punch
+  to zero and write no entry at all, and rounding is never offered in a
+  direction — always-down is unlawful at any increment, so the product has no
+  setting for it.
+- **The arithmetic already existed.** `src/lib/timezone.ts` is the calendar
+  module and is deliberately not `server-only`. Before adding a date helper to
+  this module, look there; slice 0 wrote four that were already in it.
 - **Approval snapshots; lock forbids restatement.** After a period is locked, an
   edit becomes an adjustment in the open period referencing the original. Paid
   history is not rewritten.
@@ -369,7 +468,7 @@ Written before the build so they are not rediscovered.
 - The candidate ADRs: an overtime ruleset is data; a worker is a party and not a
   login; the workweek is the unit of overtime and the pay period the unit of
   payment; Time stops at gross. Next free number is 0046.
-- **Nobody has driven either screen.** The Browser pane's `preview_start`
+- **Nobody has driven any of it**, the clock included. The Browser pane's `preview_start`
   launches from the session's working directory rather than an out-of-repo
   worktree, so the session that built slice 0 could not drive its own code, and
   the main checkout was held by a parallel session's dev server. To look: switch

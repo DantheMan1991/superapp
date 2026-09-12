@@ -184,9 +184,21 @@ feature: *"most businesses will only have one set of social media, but the
 yosher app business will for example have a facebook for each industry."* This
 PR is the plan for the whole run (above, **Social — the plan**),
 [ADR 0047](../decisions/0047-a-social-channel-belongs-to-a-website-and-a-footer-link-is-not-one.md),
-and its first slice. **Migrations 0302 and 0303** (`social_channels` + its
+and its first slice. **Migrations 0306 and 0307** (`social_channels` + its
 policies), applied to dev AND prod before the merge; `verify-rls` reads 182
 tables on both.
+
+**They were generated as `0302`/`0303` and renumbered after the fact**, because
+`claude/show-it-to-someone` took those slots from a parallel session and merged
+first (it had itself been renumbered off 0300/0301, which the Time module took).
+The renumber keeps the ORIGINAL `when` stamps — 1789184591433 and 1789184613616,
+the `created_at` values both databases already recorded — because drizzle
+applies a migration only when `lastApplied.created_at < when` STRICTLY, so a
+fresh stamp would re-run `CREATE TABLE` against a table that exists. Both stamps
+are still greater than `0305_time_clock_rls`'s, so the journal stays
+monotonic and a database built from zero applies them in order. The regenerated
+SQL is byte-identical to what was applied. **Third collision on this slot in two
+days; the repair is the one `inventory.md` wrote down.**
 
 - **The expensive half was decided a day earlier and nobody noticed.** ADR
   0045's rejected-alternatives table contains the sentence *"A site is the
@@ -253,6 +265,64 @@ tables on both.
 - **Not built here:** writing a post, the calendar, the photo half, facts from
   the packs, any connection, and any measurement — S1 through S7 above, in that
   order.
+
+### 2026-09-11 — Showing a site to somebody who cannot sign in (`claude/show-it-to-someone`)
+
+The founder asked what else the website tool needed; this was my first answer
+and it turned out to be three times the job. **Migrations 0302 and 0303**
+(`site_previews` + its policies), applied to dev AND prod before the merge —
+generated as 0300/0301 and renumbered when the Time module took those slots.
+[ADR 0046](../decisions/0046-a-preview-link-shows-an-unpublished-site-and-the-token-stands-in-for-the-slug.md).
+
+- **The gap:** the point of this module is handing a business its site, and
+  the only way to show one was to PUBLISH it — `/sites/<slug>/draft` demands a
+  member of that tenant. An agency had no way to say "here it is, what do you
+  think?", only "it is live, tell me what is wrong."
+- **`/p/<token>/` mirrors `/sites/<slug>/` completely** — the page and its
+  paths, images, the map, the logo. `SiteMode` gains `preview` and the
+  renderer substitutes the token for `site.slug` ONCE at the top, rather than
+  threading a second key through the thirteen components that take `mode`. A
+  missed call site there would be a link silently pointing at the members-only
+  route, and the compiler cannot see it because the argument is a `string`
+  either way.
+- **TWO THINGS THAT WOULD HAVE SHIPPED BROKEN, both found by building it.** A
+  preview would have had NO PHOTOGRAPHS: an unpublished site's images need
+  either a member session or a published site, and a client has neither. And
+  every in-site link would have 404'd, because `draft` mode builds them as
+  `/sites/<slug>/draft…`. Neither is visible on a one-page site with no
+  pictures, which is exactly what Yosher Homestead was when I first looked.
+- **Thinner than a document share on purpose**: no passcode, no use cap. What
+  is behind it is copy the owner intends to publish. `expires_at` stays NOT
+  NULL — the one rule kept whole.
+- **No DELETE policy at all.** Revoking is an UPDATE. A link handed to
+  somebody outside the business is not the owner's to erase, and it dies only
+  with its site.
+- **A preview is not a visit.** `isLiveMode` now gates the visitor beacon, the
+  structured data and the canonical URL; the enquiry and booking forms show
+  but are disabled. A client reviewing their own site must not create a real
+  lead or inflate the owner's numbers.
+- **Found and fixed on the way:** `memberMapResponse` still resolved the
+  tenant's site with `findFirst` by tenant alone — left behind by ADR 0045,
+  and with two sites it drew one site's pin in the OTHER'S BRAND COLOUR. It
+  takes a site id now and the member map route reads one from the query.
+- **Tests**: five cases in `tests/isolation/sites.test.ts` — an owner makes
+  one and staff read it, staff cannot make one, NOBODY can delete one, another
+  tenant's site is unrepresentable even under `withSystem`, one token hash
+  platform-wide, and previews dying with their site. 50 passing.
+- **DRIVEN END TO END on the dev branch**, and it caught the bug the whole
+  design was built to avoid. The preview page still passed `mode="draft"` — I
+  had added the mode and never switched the page to it — so the first
+  signed-out fetch came back with every nav link pointing at
+  `/sites/oak-row-farm/draft`. Types could not see it: the argument is a
+  `string` either way. Fixed, then re-checked with `curl` and NO COOKIES: the
+  page, `/about` and `/contact` all 200, the logo 200 `image/png` 17KB, a
+  photo 200 `image/jpeg` 13KB, every address `/p/<token>/…`. A junk token
+  renders "no longer available" with the same words. The owner's list read
+  `Opened 9 times`. After `Stop it`: the page says "no longer available", the
+  logo and the photo both 404, and **the view count stayed at 9** — a refused
+  look is not a look.
+- **Not built here:** comments on a preview (a different table, and it would
+  want the passcode this leaves out), and an email that sends the link.
 
 ### 2026-09-11 — A screenshot has to be of a screen that exists (`claude/a-screenshot-of-a-screen-that-exists`)
 
@@ -643,7 +713,7 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
 | `site_enquiries` | A message sent through the site's form: the record of what was sent | FORCE RLS; `member_read`, **member INSERT** (`owner`/`staff` — the public path writes as `staff`, ADR 0021), owner DELETE, **no UPDATE policy**. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. `party_id` / `work_item_id` are **soft pointers** (no FK): the screen resolves them and says when one is gone. CHECKs: name 1–120, message 1–4000, `notify_via in (none, site_email, owners)`. `ip_hash` is the salted hash the caps use, never the IP. Capped at `ENQUIRY_SITE_DAILY_CAP` (100) per site per UTC day. Since 4b (`0254`): `answers` jsonb, `EnquiryAnswer[]` label snapshots of the business's own questions. Since 8 (`0259`): `booking_starts_at` / `booking_ends_at` (both or neither, CHECK `site_enquiries_booking_whole`), `booking_title`, and `schedule_item_id`, a soft pointer to the item on the Bookings calendar — a booking is an enquiry with a time (ADR 0025), capped at `BOOKING_SITE_DAILY_CAP` (100) bookings per site per day |
 | `site_page_views` | How many people looked at a page: one row per `(site, day, path)`, counters only | FORCE RLS; `member_read`, **member INSERT and UPDATE** (`owner`/`staff` — the beacon upserts as `staff`, ADR 0022), **no DELETE policy**. Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. Unique `(site_id, day, path)`; `day` is a `date` in the tenant's timezone. CHECK: counts ≥ 0. Nothing about a person is stored; `visitors` is browsers reporting their first view of the day on that page |
 | `site_images` | The site's photo library: one row per derivative the platform made | FORCE RLS; `member_read`, owner INSERT/DELETE, **no UPDATE** (a replaced photo is a new row). Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. **Unique on `pathname`** (one blob, one row); at most `SITE_IMAGES_MAX` (60) per site. CHECKs: `mime_type in (image/jpeg, image/png)`, width/height/bytes > 0. The blob lives under `sites/<tenant>/photos/`; sections reference the row by id with their own alt text (ADR 0023) |
-| `social_channels` | An account a brand posts to (S0, `0302`/`0303`) | FORCE RLS; `member_read`, owner INSERT/**UPDATE**/DELETE, no public policy. **`site_id` NULLABLE** — one of the business's websites, or the business itself ([ADR 0047](../decisions/0047-a-social-channel-belongs-to-a-website-and-a-footer-link-is-not-one.md)); the composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE is MATCH SIMPLE, so a null site is checked by nothing and a named one still cascades. **Unique `(tenant_id, network, handle)`**: one account is one row across the workspace, whichever brand claims it, which is ADR 0047's rule made mechanical. `handle` is `normalizeHandle`d (no `@`, no spaces, lowercase — safe on every network here, and what lets the index be a plain one). CHECKs: `network` in the eight `SOCIAL_NETWORKS`, `status in (active, paused)`, handle 1–80, label ≤ 80, url ≤ 500, `audience`/`voice` ≤ 400, and `social_channels_other_has_label` — `other` is the one network with no name of its own. At most `SOCIAL_CHANNELS_MAX` (12) per owner, counted per site and again for the business's. UPDATE is allowed here and refused on `site_images` for the reason each table exists: a channel is the account and is edited, a photo is a record of an event and is replaced |
+| `social_channels` | An account a brand posts to (S0, `0306`/`0307`) | FORCE RLS; `member_read`, owner INSERT/**UPDATE**/DELETE, no public policy. **`site_id` NULLABLE** — one of the business's websites, or the business itself ([ADR 0047](../decisions/0047-a-social-channel-belongs-to-a-website-and-a-footer-link-is-not-one.md)); the composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE is MATCH SIMPLE, so a null site is checked by nothing and a named one still cascades. **Unique `(tenant_id, network, handle)`**: one account is one row across the workspace, whichever brand claims it, which is ADR 0047's rule made mechanical. `handle` is `normalizeHandle`d (no `@`, no spaces, lowercase — safe on every network here, and what lets the index be a plain one). CHECKs: `network` in the eight `SOCIAL_NETWORKS`, `status in (active, paused)`, handle 1–80, label ≤ 80, url ≤ 500, `audience`/`voice` ≤ 400, and `social_channels_other_has_label` — `other` is the one network with no name of its own. At most `SOCIAL_CHANNELS_MAX` (12) per owner, counted per site and again for the business's. UPDATE is allowed here and refused on `site_images` for the reason each table exists: a channel is the account and is edited, a photo is a record of an event and is replaced |
 
 **`social_channels` is not `sites.settings.social`.** The footer marks are up to
 eight links an owner chose to DISPLAY; a channel is an account the business

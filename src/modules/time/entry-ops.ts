@@ -3,8 +3,8 @@ import { and, eq, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { MAX_ENTRY_MINUTES } from "./core/duration";
 import { TimeError } from "./core/errors";
+import { isDateString } from "@/lib/timezone";
 import { isPayType } from "./core/pay-types";
-import { isDateString } from "./core/week";
 
 /**
  * The hours themselves. ONE WRITER per table; every function takes the caller's

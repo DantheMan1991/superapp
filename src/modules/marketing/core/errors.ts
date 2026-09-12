@@ -19,6 +19,7 @@ export type MarketingErrorCode =
   | "SITE_MISSING"
   | "SITE_PUBLISHED"
   | "SITE_HAS_DOMAIN"
+  | "PREVIEW_GONE"
   | "SITE_EMPTY"
   | "PAGE_MISSING"
   | "PAGE_PATH_TAKEN"
@@ -89,6 +90,8 @@ export function friendlyMessage(err: unknown): string {
         return "This website is on the internet. Unpublish it first, then it can be deleted.";
       case "SITE_HAS_DOMAIN":
         return "A domain still points at this website. Remove the domain first, so it stops resolving here.";
+      case "PREVIEW_GONE":
+        return "That preview link has expired or been revoked. Make a new one.";
       case "SITE_EMPTY":
         return "There are no pages to publish yet.";
       case "PAGE_MISSING":

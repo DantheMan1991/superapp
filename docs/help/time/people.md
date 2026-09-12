@@ -1,6 +1,6 @@
 # People
 
-> Everybody whose hours this business keeps, and the day your week runs from. Owners work here; everybody else can read it.
+> Everybody whose hours this business keeps, the day your week runs from, and what clocked time is rounded to. Owners work here; everybody else can read it.
 > **Route:** /dashboard/m/time/people
 > **Order:** 120
 
@@ -13,7 +13,8 @@ Open **Time** {icon:clock} in the sidebar, then click {button:People|outline}. A
 - **{button:Has left|ghost}.** Marks somebody as having left. They stop being offered when you log time and their past hours stay exactly where they are. The button then reads {button:Bring back|ghost}.
 - **{button:Add someone|primary}.** Opens the box for adding a person. Owners only.
 - **{button:Time|outline}.** Takes you back to the week.
-- **Your week starts on.** A picker at the bottom, from `Sunday` to `Saturday`. This is not just how the page looks. It is the day your week runs from, so it decides which week an hour falls in, and when overtime arrives it will decide that too. Pick the day your business actually counts from.
+- **Your week starts on.** A picker at the bottom left, from `Sunday` to `Saturday`. This is not just how the page looks. It is the day your week runs from, so it decides which week an hour falls in, and when overtime arrives it will decide that too. Pick the day your business actually counts from.
+- **Round clocked time to.** A picker beside it: `To the minute`, `5 minutes`, `6 minutes (a tenth of an hour)`, `10 minutes`, `15 minutes (a quarter hour)` or `30 minutes`. It only affects time from a clock. Hours you type are kept exactly as you type them.
 
 ## How to add somebody
 
@@ -41,6 +42,18 @@ There is no way to delete somebody, and that is deliberate. Their hours are a re
 2. Pick a day. You see `Saved`.
 3. Go back to the week with {button:Time|outline}. The days are now grouped from the day you picked.
 
+## How to set rounding
+
+1. Scroll to `Round clocked time to`.
+2. Pick an amount. You see `Saved`.
+3. From now on, when a clock stops, its minutes are rounded to that amount.
+
+Rounding is always to the **nearest** amount, never always up and never always down. On a quarter hour, eight minutes becomes fifteen and seven becomes nothing, so over a month it costs as often as it pays. That balance is what makes rounding a timesheet fair, and it is why there is no option to always round down.
+
+Two things it does not touch. Hours you type in by hand are kept exactly as typed, and every clock keeps a record of the real times it ran, so changing this setting never rewrites what already happened.
+
+If you are not sure, leave it on `To the minute`. It is the only setting that needs no explaining to anybody.
+
 ## Messages
 
 | Message | What it means |
@@ -51,11 +64,14 @@ There is no way to delete somebody, and that is deliberate. Their hours are a re
 | `That person can already have time logged for them.` | The person you picked under `Who` is already on this list. |
 | `Somebody else is already linked to that sign-in.` | That account belongs to another person here. Free it up on their line first. |
 | `That person could not be found.` | Somebody removed the record while your page was open. Reload the page. |
+| `Pick one of the rounding options.` | The rounding amount was not one of the choices. Reload the page and pick again. |
 
 ## Not on this page
 
 You cannot record what anybody is paid, what they do, or whether they are salaried. None of that is built yet, and pay rates in particular will not be visible to everybody when they arrive. Ask us where it is up to.
 
+There is no separate rounding for different people, and no way to round a punch up automatically at the end of a shift.
+
 ## Who can do what
 
-Owners can add people, link and unlink sign-ins, mark somebody as having left, and set the week start. Staff and accountants can read the list. Staff can still log hours for anybody on it, over on [The week](week.md).
+Owners can add people, link and unlink sign-ins, mark somebody as having left, and set the week start and the rounding. Staff and accountants can read the list. Staff can still log hours and start and stop clocks for anybody on it, over on [The week](week.md).

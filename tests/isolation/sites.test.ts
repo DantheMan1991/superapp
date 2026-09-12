@@ -1055,6 +1055,99 @@ d("site_images (RLS)", () => {
     expect(theirs).toBeTruthy();
   });
 
+
+  /**
+   * PREVIEW LINKS (ADR 0046) — `site_previews` RLS and the rules the table
+   * itself keeps. The resolver's refusals are pure enough to test elsewhere;
+   * what needs a database is that a link cannot be made for, or read from,
+   * another tenant's site, and that it is never deleted.
+   */
+  const preview = (tenantId: string, siteId: string, suffix: string, over: Record<string, unknown> = {}) => ({
+    tenantId,
+    siteId,
+    tokenHash: `${STAMP}-${suffix}`,
+    tokenCiphertext: `cipher-${suffix}`,
+    expiresAt: new Date(Date.now() + 86_400_000),
+    createdByClerkUserId: OWNER,
+    ...over,
+  });
+
+  it("an owner makes one, staff read it, and nobody deletes it", async () => {
+    const [row] = await asOwner((tx) =>
+      tx.insert(schema.sitePreviews).values(preview(tenantA, siteA, "made")).returning(),
+    );
+    expect(row.viewCount).toBe(0);
+    expect(row.revokedAt).toBeNull();
+
+    expect(await asStaff((tx) => tx.select().from(schema.sitePreviews))).toHaveLength(1);
+
+    // Staff may not make one …
+    await expect(
+      asStaff((tx) => tx.insert(schema.sitePreviews).values(preview(tenantA, siteA, "staff"))),
+    ).rejects.toThrow();
+
+    // … and NOBODY deletes one, owner included. A link handed to somebody
+    // outside the business is not the owner's to erase; revoking is an
+    // UPDATE, and the row dies only with its site.
+    const deleted = await asOwner((tx) =>
+      tx.delete(schema.sitePreviews).where(eq(schema.sitePreviews.id, row.id)).returning(),
+    );
+    expect(deleted).toHaveLength(0);
+
+    await asOwner((tx) =>
+      tx
+        .update(schema.sitePreviews)
+        .set({ revokedAt: new Date(), revokedByClerkUserId: OWNER })
+        .where(eq(schema.sitePreviews.id, row.id)),
+    );
+    const after = await asOwner((tx) =>
+      tx.query.sitePreviews.findFirst({ where: eq(schema.sitePreviews.id, row.id) }),
+    );
+    expect(after?.revokedAt).not.toBeNull();
+  });
+
+  it("another tenant's site cannot be named, even under withSystem", async () => {
+    // The composite FK carries the tenant, so a link pointing at somebody
+    // else's site is unrepresentable rather than merely refused.
+    await expect(
+      withSystem((tx) => tx.insert(schema.sitePreviews).values(preview(tenantB, siteA, "cross"))),
+    ).rejects.toThrow();
+  });
+
+  it("one token hash, platform-wide", async () => {
+    // The public route looks a token up across every tenant under
+    // `withSystem`; two rows sharing a hash would make that lookup ambiguous.
+    await asOwner((tx) => tx.insert(schema.sitePreviews).values(preview(tenantA, siteA, "dupe")));
+    await expect(
+      asOtherTenant((tx) => tx.insert(schema.sitePreviews).values(preview(tenantB, siteB, "dupe"))),
+    ).rejects.toThrow();
+  });
+
+  it("previews die with their site", async () => {
+    const [extra] = await withSystem((tx) =>
+      tx.insert(schema.tenants).values({ clerkOrgId: `${STAMP}-pv`, name: "Prev", slug: `${STAMP}-pv` }).returning(),
+    );
+    const [site] = await withSystem((tx) =>
+      tx.insert(schema.sites).values({ tenantId: extra.id, slug: `${STAMP}-pv` }).returning(),
+    );
+    const [link] = await withSystem((tx) =>
+      tx.insert(schema.sitePreviews).values(preview(extra.id, site.id, "dies")).returning(),
+    );
+    await withSystem((tx) => tx.delete(schema.sites).where(eq(schema.sites.id, site.id)));
+    const left = await withSystem((tx) =>
+      tx.query.sitePreviews.findFirst({ where: eq(schema.sitePreviews.id, link.id) }),
+    );
+    expect(left).toBeUndefined();
+    await withSystem((tx) => tx.delete(schema.tenants).where(eq(schema.tenants.id, extra.id)));
+  });
+
+  it("default-deny: no context sees no preview links", async () => {
+    const seen = await withTenant("00000000-0000-0000-0000-000000000000", (tx) =>
+      tx.select().from(schema.sitePreviews),
+    );
+    expect(seen).toHaveLength(0);
+  });
+
   it("default-deny: no context sees no photos", async () => {
     const seen = await withTenant("00000000-0000-0000-0000-000000000000", (tx) =>
       tx.select().from(schema.siteImages),

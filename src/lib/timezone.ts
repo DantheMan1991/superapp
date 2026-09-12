@@ -235,9 +235,32 @@ export function dayOfWeek(date: string): number {
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
-/** The `yyyy-mm-dd` the week containing `date` starts on. */
-export function startOfWeek(date: string, weekStartsOn: 0 | 1 = 0): string {
+/**
+ * The `yyyy-mm-dd` the week containing `date` starts on.
+ *
+ * `weekStartsOn` is 0 = Sunday … 6 = Saturday. It was typed `0 | 1` while
+ * Scheduling was the only caller; Time lets an owner pick any day of the week
+ * (`time_settings.week_starts_on`), and the arithmetic here has always handled
+ * all seven. Widening the annotation changes no behaviour for the existing
+ * callers, which pass 0 or 1.
+ */
+export function startOfWeek(date: string, weekStartsOn: number = 0): string {
   return addDays(date, -(((dayOfWeek(date) - weekStartsOn) + 7) % 7));
+}
+
+/**
+ * Is this a real day, spelled the way the database stores one?
+ *
+ * The format alone accepts `2026-02-31`, which Postgres refuses and a `Date`
+ * silently rolls into March — so the round trip is the test. Here rather than
+ * in a module because "is this a calendar date" is the same question
+ * everywhere, and this file is the one bridge between dates and instants.
+ */
+export function isDateString(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const ms = Date.parse(value + "T00:00:00Z");
+  if (Number.isNaN(ms)) return false;
+  return isoDate(new Date(ms)) === value;
 }
 
 /** Inclusive run of calendar dates. The columns of a week, the cells of a month. */

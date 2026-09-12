@@ -1,20 +1,25 @@
 # The week
 
-> Everybody's hours for one week, day by day, and the box you log them in. This is the screen you use every day.
+> Everybody's hours for one week, day by day, who is on the clock right now, and the two ways to record time. This is the screen you use every day.
 > **Route:** /dashboard/m/time
 > **Order:** 110
 
-Open **Time** {icon:clock} in the sidebar. You land on the week that today falls in. To add hours, click {button:Log time|primary}. To read another week, use {button:← Previous|ghost} and {button:Next →|ghost}.
+Open **Time** {icon:clock} in the sidebar. You land on the week that today falls in.
+
+There are two ways to record time here. Click {button:Start a clock|outline} when work is beginning and stop it when it ends, or click {button:Log time|primary} to write down hours that are already worked. Use whichever suits the job. To read another week, use {button:← Previous|ghost} and {button:Next →|ghost}.
 
 ## What you see
 
 - **The heading.** `Time`, and under it how much was worked this week. When somebody was paid without working, a second figure follows it, like `4h paid but not worked`. Before anything is logged it reads `What everybody worked, week by week.`
 - **{button:People|outline}.** Takes you to [People](people.md), where you add somebody new or change the day your week starts on.
-- **{button:Log time|primary}.** Opens the box for adding hours. It is grayed out until at least one person is on the People list.
+- **{button:Start a clock|outline}.** Starts a running clock for somebody. Grayed out when everybody on the list is already on the clock.
+- **{button:Log time|primary}.** Opens the box for writing down hours already worked. It is grayed out until at least one person is on the People list.
+- **On the clock now.** A block above the week, and only there when at least one clock is running. It shows every running clock, longest first, whichever week you are reading, because a clock left going is today's problem. The heading counts the people. When your business rounds clocked time, the right of the heading says what to, like `Rounded to 15 minutes when stopped`.
+- **A running clock.** One line per person: their name, `you` if it is yours, how long it has been running counting up, and the time it started. Past sixteen hours the figure turns red and the line says `Running over 16 hours. Correct when it started, or throw it away.` Nothing stops a clock on its own, because that would put hours on a timesheet that nobody worked.
 - **The week bar.** The dates of the week you are reading, like `Sep 6 – Sep 12`. `This week` sits beside it when you are on the current one. {button:← Previous|ghost} and {button:Next →|ghost} move a week at a time, and there is no limit in either direction. When you have moved away, a {button:This week|outline} button appears on the right to bring you back.
 - **Worked this week.** A short list of each person and what they worked, biggest first. It only appears when two or more people worked, because with one person it would repeat the figure in the heading. Paid leave and holiday are left out of these numbers.
 - **A day.** One block per day that has hours on it, newest first. The heading is the day, like `Fri, Sep 11`, with that day's total on the right. Days with nothing on them are left out, so a week with one busy Tuesday is one block and not seven.
-- **A row.** One line per entry: who worked, how long, and what they did. When the hours were not worked, a badge says which kind, like {badge:Paid leave}. Worked hours carry no badge, since that is the ordinary case.
+- **A row.** One line per entry: who worked, how long, and what they did. When the hours were not worked, a badge says which kind, like {badge:Paid leave}. Worked hours carry no badge, since that is the ordinary case. `clock` at the end means the entry came from a clock rather than being typed; hover it to see what it was rounded to.
 - **{button:Edit|ghost}.** At the end of each row. Opens the same box again, filled in, with a {button:Delete|destructive} button in it.
 
 ## How to log an hour
@@ -37,6 +42,41 @@ Open **Time** {icon:clock} in the sidebar. You land on the week that today falls
 6. Type what they did under `What they did`. Up to 1000 characters, and you can leave it empty.
 7. Click {button:Log time|primary}. You see `7h 30m logged` and the entry appears in the week.
 
+## How to use the clock
+
+1. Click {button:Start a clock|outline}.
+2. Pick the person under `Who`. Anybody already on the clock is left out of the list, so you cannot start two clocks on one person.
+3. Type what they are doing under `What they are doing`. You can leave it empty and add it later.
+4. Click {button:Start|primary}. You see `Clock started` and the person appears under `On the clock now`.
+5. When the work ends, click {button:Stop|primary} on their line. You see how much was logged.
+
+Nothing is recorded until the clock stops. A running clock is not hours yet, which is why it does not appear in the week below.
+
+What you see when you stop depends on your rounding setting, over on [People](people.md):
+
+| Your setting | You worked | You see |
+| --- | --- | --- |
+| `To the minute` | 7 hours 53 minutes | `7h 53m logged` |
+| `15 minutes` | 7 hours 53 minutes | `7h 53m worked, 8h logged after rounding.` |
+| `15 minutes` | 5 minutes | `Clock stopped after 5m. Rounding to 15 minutes left nothing to log.` |
+
+That last row is the setting working, not a fault. Rounding to the nearest quarter hour pays a full quarter for eight minutes and nothing for five, which is what makes it fair over a month. If you do not want that, set rounding to `To the minute`.
+
+## How to fix a clock somebody forgot to start
+
+1. Find the person under `On the clock now` and click {button:Fix start|ghost}.
+2. Set `Started at` to when the work really began. It is your business's local time, not your computer's.
+3. Click {button:Save|primary}. You see `Start time corrected` and the running total jumps to match.
+
+You can only do this while the clock is running. Once it has stopped it is an ordinary entry in the week below, and you change it with {button:Edit|ghost}.
+
+## How to throw a clock away
+
+1. Click {button:Throw away|ghost} on the line.
+2. You see `Clock thrown away. Nothing was logged.`
+
+Use this when a clock was started on the wrong person or by accident. It leaves no record and no hours. There is no way to throw away a clock that has already stopped, because that one produced hours somebody may have been paid for.
+
 ## How to correct an entry
 
 1. Find the row and click {button:Edit|ghost}.
@@ -58,6 +98,12 @@ The week you are reading is in the address bar, so you can send somebody a link 
 | Message | What it means |
 | --- | --- |
 | `Nobody can have time logged yet` | Nobody is on the People list. Click {button:Add someone|primary} to go and add the first person. |
+| `A clock is running. Hours appear here once it stops.` | Nothing is logged in this week yet, but somebody is on the clock. |
+| `They are already clocked in.` | That person has a clock running. Stop it before starting another. |
+| `That clock has already stopped.` | Somebody stopped it while your page was open. Reload the page. |
+| `A clock cannot start later than now.` | You set `Started at` to a time in the future. |
+| `That clock has run for more than a day.` | A clock was left running over 24 hours. Correct when it started, then stop it. |
+| `Clock thrown away. Nothing was logged.` | The running clock is gone and no hours were recorded. |
 | `No hours this week` | Nothing was logged in the week you are reading. Log some, or move to another week. |
 | `How long? Try 1:30, 1.5 or 90m.` | We could not read what you typed under `How long`. |
 | `Not a length we can read.` | The same thing, under the box, while you are still typing. |
@@ -69,7 +115,9 @@ The week you are reading is in the address bar, so you can send somebody a link 
 
 ## Not on this page
 
-You cannot clock in and out yet, say which part of the business an hour was spent on, mark a week as finished, or see overtime. None of that is built. Ask us where it is up to.
+You cannot say which part of the business an hour was spent on, mark a week as finished, or see overtime. None of that is built. Ask us where it is up to.
+
+Clocks live only on this screen for now, so somebody clocking themselves in has to open it. Starting a clock from a phone in one tap is coming.
 
 ## Who can do what
 

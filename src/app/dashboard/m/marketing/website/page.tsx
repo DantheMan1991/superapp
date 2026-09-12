@@ -19,6 +19,8 @@ import { findKit } from "@/modules/marketing/kit-ops";
 import { listSites } from "@/modules/marketing/site-ops";
 import { BrandKitPanel } from "@/modules/marketing/components/brand-kit-panel";
 import { DeleteSiteButton } from "@/modules/marketing/components/delete-site-controls";
+import { PreviewLinks } from "@/modules/marketing/components/preview-links";
+import { listPreviewLinksIn } from "@/modules/marketing/preview-ops";
 import {
   RemoveOwnLookButton,
   StartOwnLookButton,
@@ -78,7 +80,7 @@ export default async function WebsitePage({
   const { site: chosen, showList } = chooseSite(sites, asked);
   if (showList) return <SiteList sites={sites} canWrite={ctx.role === "owner"} />;
 
-  const { drafts, enquiries, views, siteKit, businessKit } = await withTenant(
+  const { drafts, enquiries, views, siteKit, businessKit, previews } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
       const drafts = chosen ? await loadSiteDrafts(tx, ctx.tenant.id, chosen.id) : null;
@@ -89,9 +91,13 @@ export default async function WebsitePage({
         ? await findKit(tx, ctx.tenant.id, { kind: "site", siteId: chosen.id })
         : null;
       const businessKit = await findKit(tx, ctx.tenant.id, BUSINESS_KIT);
+      // The links that show this site to somebody who cannot sign in.
+      const previews = chosen
+        ? await listPreviewLinksIn(tx, ctx.tenant.id, chosen.id)
+        : [];
       const enquiries = drafts ? await listSiteEnquiries(tx, ctx.tenant.id, drafts.site.id) : [];
       const views = drafts ? await listSiteViews(tx, ctx.tenant.id, drafts.site.id, today) : [];
-      return { drafts, enquiries, views, siteKit, businessKit };
+      return { drafts, enquiries, views, siteKit, businessKit, previews };
     },
     { role: ctx.role },
   );
@@ -482,6 +488,28 @@ export default async function WebsitePage({
                 )}
               </Panel>
             )}
+          </section>
+
+          {/* SHOWING IT TO SOMEBODY BEFORE IT IS PUBLISHED (ADR 0046). Above
+              Delete and below the look, because it is the last thing done
+              before a site goes live rather than after. Everyone sees the
+              list; only an owner makes or stops a link. */}
+          <section className="space-y-2">
+            <h2 className="font-heading text-lg font-semibold tracking-heading">
+              Show it to someone
+            </h2>
+            <Panel className="space-y-4 p-5">
+              <p className="text-sm text-muted-foreground">
+                A link that opens this site for anybody who has it, without a
+                Yosher account and before it is on the internet. Send it to the
+                business, get their answer, then publish.
+              </p>
+              <PreviewLinks
+                siteId={drafts.site.id}
+                links={previews}
+                canWrite={canWrite}
+              />
+            </Panel>
           </section>
 
           {/* Removing it. Last on the screen and owner-only, because it is the

@@ -1,6 +1,6 @@
 # Time
 
-> Keep a record of who worked, how long, and on which day. Two screens: the week, where hours are logged and read, and People, where you say whose hours you keep.
+> Keep a record of who worked, how long, and on which day, by running a clock or by writing hours down. Two screens: the week, where time is recorded and read, and People, where you say whose hours you keep.
 > **Route:** /dashboard/m/time/**
 > **Order:** 100
 
@@ -10,8 +10,8 @@ Time records what was worked. [Work](../work/overview.md) records what still has
 
 ## What you see
 
-- **Time.** The week. Everybody's hours, newest day first, with a running total for the week and for each day. This is where you log an hour. See [The week](week.md).
-- **People.** Everybody whose hours this business keeps, and the day your week starts on. Owners add and remove people here. See [People](people.md).
+- **Time.** The week. Everybody's hours, newest day first, with a running total for the week and for each day, and every clock that is running right now. This is where you start a clock or log an hour. See [The week](week.md).
+- **People.** Everybody whose hours this business keeps, the day your week starts on, and what clocked time is rounded to. Owners work here. See [People](people.md).
 
 ## How to start from nothing
 
@@ -19,14 +19,14 @@ Time records what was worked. [Work](../work/overview.md) records what still has
 2. Click {button:Add someone|primary}. That takes you to **People**.
 3. Add each person whose hours you want to keep. They do not need to be able to sign in.
 4. Set `Your week starts on` to the day your week runs from. Most businesses in the US use Sunday or Monday.
-5. Go back with {button:Time|outline} and click {button:Log time|primary}.
+5. Go back with {button:Time|outline}. Click {button:Start a clock|outline} when work is beginning, or {button:Log time|primary} to write down hours already worked.
 
 ## Not on this page
 
-Plenty, and all of it is coming. Right now Time keeps a record and adds it up. It does not yet have a clock you punch in and out of, it does not work out overtime, nobody approves a week, you cannot say which part of the business an hour was spent on, and it does not know what anyone is paid. Every one of those is planned. Ask us where it is up to.
+Plenty, and all of it is coming. Right now Time keeps a record and adds it up. It does not work out overtime, nobody approves a week, you cannot say which part of the business an hour was spent on, and it does not know what anyone is paid. Every one of those is planned. Ask us where it is up to.
 
 Time also does not run your payroll and is not going to. When it can work out gross pay, it will hand that to whoever does your payroll rather than calculating tax.
 
 ## Who can do what
 
-Owners can do everything, including adding people and setting the week start. Staff can see everything and log, change and delete hours. Accountants can read every hour and change nothing.
+Owners can do everything, including adding people and setting the week start and the rounding. Staff can see everything, start and stop clocks, and log, change and delete hours. Accountants can read every hour and change nothing.

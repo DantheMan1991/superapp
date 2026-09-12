@@ -3,35 +3,33 @@ import { Building2, Globe, Share2 } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
-import { readSiteSettings } from "@/lib/sites/schema";
 import { BUSINESS_BRAND_KEY, chooseBrand, listBrands } from "@/lib/social/brands";
-import { channelTitle } from "@/lib/social/channels";
+import { todayInTimezone } from "@/lib/timezone";
 import { listChannels } from "@/modules/marketing/social-ops";
+import { listPostsFor } from "@/modules/marketing/post-ops";
+import { toPostView } from "@/modules/marketing/post-actions";
 import { listSites } from "@/modules/marketing/site-ops";
-import { toChannelView } from "@/modules/marketing/social-actions";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
-import { ChannelsPanel } from "@/modules/marketing/components/channels-panel";
 import { MarketingStrip } from "@/modules/marketing/components/marketing-strip";
-import type { SocialNetwork } from "@/lib/sites/links";
+import { PostsPanel } from "@/modules/marketing/components/posts-panel";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Social: the accounts a brand posts to (slice S0, ADR 0047).
+ * Social: what this brand is posting, and when (slice S1).
  *
- * **Everything here is scoped to a BRAND**, which is one of the business's
- * websites or the business itself. One website and nothing shared means one
- * brand, and this screen then reads like the single-account tool every client
- * but the operator tenant needs.
+ * THE DAILY SCREEN, which is why it took `/social` from the accounts in S1 —
+ * where the accounts ARE is written down once; what to post is the work. The
+ * accounts moved one segment deeper.
  *
- * Nothing on this screen talks to a network. It is where an owner writes down
- * where their accounts are, who reads each one and how the brand sounds
- * there — the two things only a person knows, and the first thing the writer
- * will read when S2 arrives.
+ * Nothing here posts. A scheduled post becomes a Work item at its time
+ * (`post-reminders.ts`), and the owner copies the words, saves the picture and
+ * posts it themselves.
  */
-export default async function SocialPage({
+export default async function SocialPostsPage({
   searchParams,
 }: {
   searchParams: Promise<{ brand?: string }>;
@@ -44,18 +42,12 @@ export default async function SocialPage({
     ctx.tenant.id,
     async (tx) => ({
       sites: await listSites(tx, ctx.tenant.id),
-      // Every channel in the workspace, once: the counts on the picker need
-      // them all, and a workspace holds at most a few dozen.
       channels: await listChannels(tx, ctx.tenant.id),
     }),
     { role: ctx.role },
   );
 
-  const brands = listBrands(
-    sites,
-    ctx.tenant.name,
-    channels.some((c) => c.siteId === null),
-  );
+  const brands = listBrands(sites, ctx.tenant.name, channels.some((c) => c.siteId === null));
   const { brand, showList } = chooseBrand(brands, asked);
   const canWrite = ctx.role === "owner";
 
@@ -66,60 +58,47 @@ export default async function SocialPage({
         <PageHeader
           icon={<Share2 />}
           title="Social"
-          description="Each brand has its own accounts, its own readers and its own voice."
+          description="Each brand posts on its own accounts, in its own voice."
         />
         <Panel>
           <ul className="divide-y divide-divider">
-            {brands.map((b) => {
-              const mine = channels.filter((c) => c.siteId === b.siteId);
-              return (
-                <li key={b.key}>
-                  {/* The row is the link (design-system.md, 2026-09-06). */}
-                  <Link
-                    href={`/dashboard/m/marketing/social?brand=${b.key}`}
-                    className="flex items-center justify-between gap-4 px-4 py-3.5 transition-colors outline-none hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50"
-                  >
-                    <span className="flex min-w-0 items-center gap-3">
-                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-module-accent/10 text-module-accent">
-                        {b.siteId ? <Globe className="size-4" /> : <Building2 className="size-4" />}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate font-medium">{b.name}</span>
-                        <span className="block truncate text-xs text-subtle-foreground">
-                          {mine.length === 0
-                            ? "No accounts yet"
-                            : mine
-                                .map((c) =>
-                                  channelTitle({
-                                    network: c.network as SocialNetwork,
-                                    handle: c.handle,
-                                    label: c.label,
-                                  }),
-                                )
-                                .join(", ")}
-                        </span>
-                      </span>
+            {brands.map((b) => (
+              <li key={b.key}>
+                {/* The row is the link (design-system.md, 2026-09-06). */}
+                <Link
+                  href={`/dashboard/m/marketing/social?brand=${b.key}`}
+                  className="flex items-center justify-between gap-4 px-4 py-3.5 transition-colors outline-none hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50"
+                >
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-module-accent/10 text-module-accent">
+                      {b.siteId ? <Globe className="size-4" /> : <Building2 className="size-4" />}
                     </span>
-                    <Badge variant="secondary">{mine.length}</Badge>
-                  </Link>
-                </li>
-              );
-            })}
+                    <span className="block truncate font-medium">{b.name}</span>
+                  </span>
+                  <Badge variant="secondary">
+                    {channels.filter((c) => c.siteId === b.siteId).length}
+                  </Badge>
+                </Link>
+              </li>
+            ))}
           </ul>
         </Panel>
       </div>
     );
   }
 
-  const mine = channels.filter((c) => c.siteId === brand.siteId);
-  const views = await Promise.all(mine.map(toChannelView));
-  // What that website's footer shows today, so a row can say when the mark is
-  // already there and the button can stand down. A business-level brand has no
-  // footer at all, which is why this is empty for it rather than guessed at.
-  const site = brand.siteId ? sites.find((s) => s.id === brand.siteId) : undefined;
-  const footerUrls = site
-    ? readSiteSettings(site.settings).social.map((l) => ({ network: l.network, url: l.url }))
-    : [];
+  const posts = await withTenant(
+    ctx.tenant.id,
+    (tx) => listPostsFor(tx, ctx.tenant.id, brand.siteId),
+    { role: ctx.role },
+  );
+  const views = await Promise.all(posts.map(toPostView));
+  // Only ACTIVE accounts are offered for a new post: a paused one is set aside
+  // on purpose, and offering it here would be the pause meaning nothing.
+  const mine = channels.filter((c) => c.siteId === brand.siteId && c.status === "active");
+  const accountsHref = `/dashboard/m/marketing/social/accounts${
+    brands.length > 1 ? `?brand=${brand.key}` : ""
+  }`;
 
   return (
     <div className="space-y-6">
@@ -129,8 +108,13 @@ export default async function SocialPage({
         title="Social"
         description={
           brands.length > 1
-            ? `The accounts ${brand.name} posts from, who reads each one, and how it sounds there.`
-            : "The accounts you post from, who reads each one, and how you sound there."
+            ? `What ${brand.name} is posting, and when.`
+            : "What you are posting, and when."
+        }
+        actions={
+          <Button asChild variant="outline">
+            <Link href={accountsHref}>Accounts</Link>
+          </Button>
         }
       />
       {brands.length > 1 && (
@@ -151,17 +135,23 @@ export default async function SocialPage({
           ))}
         </div>
       )}
-      <ChannelsPanel
-        channels={views}
-        siteId={brand.siteId}
-        footerUrls={footerUrls}
+      <PostsPanel
+        posts={views}
+        channels={mine.map((c) => ({
+          id: c.id,
+          network: c.network,
+          handle: c.handle,
+          label: c.label,
+        }))}
+        today={todayInTimezone(ctx.tenant.timezone)}
+        timezone={ctx.tenant.timezone}
         canWrite={canWrite}
       />
       <p className="max-w-prose text-sm text-muted-foreground">
         {brand.key === BUSINESS_BRAND_KEY
-          ? "These belong to the business rather than to one website, so they are not offered for a footer."
-          : "Showing an account in the footer and posting to it are two different things: removing it here leaves the mark on your website until you take it out there."}{" "}
-        Yosher cannot post to any of these yet — that comes later, one network at a time.
+          ? "These posts go out on the business's own accounts rather than any one website's."
+          : "Yosher reminds you when a scheduled post is due, in What needs you."}{" "}
+        It cannot post for you yet — copy the words, save the picture, post it, then mark it posted.
       </p>
     </div>
   );

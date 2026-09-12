@@ -26,7 +26,8 @@
  * table), which is why there is no token column here: a connection is S6's
  * table, written when there is an app to connect to. The Square lesson —
  * OAuth code written before the developer app existed, still unproven in
- * production — is the one being avoided.
+ * production — is the one being avoided. That is still true of `social_posts`
+ * below (S1): a post is finished here and posted by a person.
  */
 import { sql } from "drizzle-orm";
 import {
@@ -34,13 +35,14 @@ import {
   foreignKey,
   index,
   pgTable,
+  real,
   text,
   timestamp,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
-import { sites } from "./sites";
+import { siteImages, sites } from "./sites";
 
 export const socialChannels = pgTable(
   "social_channels",
@@ -131,3 +133,115 @@ export const socialChannels = pgTable(
 );
 
 export type SocialChannel = typeof socialChannels.$inferSelect;
+
+export const socialPosts = pgTable(
+  "social_posts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /**
+     * ONE POST IS ONE CHANNEL, and NOT NULL says so at the database. Sending
+     * the same idea to several accounts writes several rows; see
+     * `src/lib/social/posts.ts` for why that is the design rather than a
+     * limitation. A post dies with the account it was for — words written for
+     * an Instagram that is gone are not words for anything.
+     */
+    channelId: uuid("channel_id").notNull(),
+    /** `draft`, `scheduled` or `posted`. There is no `idea`; a dateless draft is one. */
+    status: text("status").notNull().default("draft"),
+    /** Where it came from: typed by hand, written by the assistant (S2), or a pack's fact (S4). */
+    origin: text("origin").notNull().default("hand"),
+    /** The words. The form holds the owner to the NETWORK's limit, which is tighter. */
+    body: text("body").notNull().default(""),
+    /** A page on the site this is about, for the S7 link code to wrap later. */
+    link: text("link").notNull().default(""),
+    /**
+     * The photo, from the site's own library. A soft dependency in spirit but
+     * a real composite FK: ON DELETE SET NULL, so removing a photo from the
+     * library leaves the post and its words standing with no picture, rather
+     * than taking a scheduled post down with it.
+     */
+    imageId: uuid("image_id"),
+    /** One of `POST_SHAPES` — what the picture is cut to. */
+    shape: text("shape").notNull().default("square"),
+    /**
+     * WHERE THE PICTURE MATTERS, in 0–1 of the source. Not a crop box: the box
+     * is derived by `cropBox()` from the shape and this point, so a stored
+     * value can never describe a rectangle outside the photo or of the wrong
+     * ratio. Kept in fractions so it survives the photo being served at
+     * another size.
+     */
+    focusX: real("focus_x").notNull().default(0.5),
+    focusY: real("focus_y").notNull().default(0.5),
+    /** When it should go out. Required by a CHECK once the status is `scheduled`. */
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+    /** When somebody said they had posted it. Required by a CHECK once `posted`. */
+    postedAt: timestamp("posted_at", { withTimezone: true }),
+    /**
+     * THE SWEEP'S OWN BOOKKEEPING, and the reason it is idempotent. The
+     * ten-minute cron raises one Work item per post and stamps this; a second
+     * pass over the same row does nothing. Written under `withSystem` by
+     * trusted background code, never by a screen.
+     */
+    remindedAt: timestamp("reminded_at", { withTimezone: true }),
+    /** The Work item the sweep raised. A SOFT pointer, like `site_enquiries.work_item_id`. */
+    workItemId: uuid("work_item_id"),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("social_posts_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("social_posts_channel_idx").on(t.tenantId, t.channelId, t.scheduledAt),
+    /**
+     * EXACTLY THE ROWS THE SWEEP WANTS. Partial, because a cron running every
+     * ten minutes across every tenant should read an index the size of the
+     * work outstanding rather than of the table — and because the day a
+     * workspace holds ten thousand posted rows is the day this matters.
+     */
+    index("social_posts_due_idx")
+      .on(t.scheduledAt)
+      .where(sql`status = 'scheduled' and reminded_at is null`),
+    foreignKey({
+      name: "social_posts_channel_fk",
+      columns: [t.tenantId, t.channelId],
+      foreignColumns: [socialChannels.tenantId, socialChannels.id],
+    }).onDelete("cascade"),
+    /**
+     * SET NULL rather than CASCADE, and it must name the columns: a bare
+     * SET NULL can never run on a composite `(tenant_id, x)` key, because it
+     * would have to null the tenant too. PG 15's column-list form nulls only
+     * the photo, and drizzle-kit keeps it because it diffs snapshots rather
+     * than the database.
+     */
+    foreignKey({
+      name: "social_posts_image_fk",
+      columns: [t.tenantId, t.imageId],
+      foreignColumns: [siteImages.tenantId, siteImages.id],
+    }).onDelete("set null"),
+    check("social_posts_status_values", sql`${t.status} in ('draft', 'scheduled', 'posted')`),
+    check("social_posts_origin_values", sql`${t.origin} in ('hand', 'assistant', 'pack')`),
+    check("social_posts_shape_values", sql`${t.shape} in ('square', 'portrait', 'story', 'wide')`),
+    check("social_posts_body_length", sql`length(${t.body}) <= 5000`),
+    check("social_posts_link_length", sql`length(${t.link}) <= 500`),
+    check("social_posts_focus_range", sql`${t.focusX} between 0 and 1 and ${t.focusY} between 0 and 1`),
+    /**
+     * A STATUS THAT NEEDS A TIME MUST HAVE ONE. Without these two a scheduled
+     * post with no `scheduled_at` is invisible to the sweep and sits there
+     * forever looking scheduled — the worst kind of bug, because the screen
+     * says it is handled.
+     */
+    check(
+      "social_posts_scheduled_has_time",
+      sql`${t.status} <> 'scheduled' or ${t.scheduledAt} is not null`,
+    ),
+    check(
+      "social_posts_posted_has_time",
+      sql`${t.status} <> 'posted' or ${t.postedAt} is not null`,
+    ),
+  ],
+);
+
+export type SocialPost = typeof socialPosts.$inferSelect;

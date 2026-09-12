@@ -55,7 +55,7 @@
 | **17** | **The visual pass, from the best farm sites: the hero's eyebrow and second button and its scale by height, photo tiles for what is offered, icon circles, larger headings, a sticky header and a brand-colour footer, all in the renderer.** | **built 2026-09-05** |
 | **18** | **The shot list: every place a photo belongs, read from the pages and never stored, with what to take there in the template's own words, filled from a phone through the camera.** [ADR 0031](../decisions/0031-where-a-photo-belongs-is-read-from-the-page.md) | **built 2026-09-05** |
 | — | The shop block: `retail` slice 6 (online orders + pickup windows) fills the slot 9b made, plus a client island the site owns and a provider names; blocked on commitments (retail 3) and web checkout (payments) | not this module's |
-| — | **Social**, a run of its own: channels, a post that is finished, the writer, the photo half, facts from the packs, the plan, connections, and whether it worked. Its table is in [Social — the plan](#social--the-plan) below | S0 built 2026-09-11 |
+| — | **Social**, a run of its own: channels, a post that is finished, the writer, the photo half, facts from the packs, the plan, connections, and whether it worked. Its table is in [Social — the plan](#social--the-plan) below | S0–S1 built |
 
 ## Social — the plan
 
@@ -104,7 +104,7 @@ is that connection code written before the app exists proves nothing.
 | # | Slice | Needs an approval? |
 | --- | --- | --- |
 | **S0** | **Channels: `social_channels` per website or for the business, with the handle, the link, who reads it and how this brand sounds there; the screen; the one-tap footer mark.** [ADR 0047](../decisions/0047-a-social-channel-belongs-to-a-website-and-a-footer-link-is-not-one.md) | **built 2026-09-11** |
-| S1 | A post, finished: `social_posts`, one row per channel, a body and a photo from the library with a crop, `idea → draft → scheduled → posted`; the calendar; copy-to-clipboard and download the cropped image; the `*/10` cron raises "time to post" as a Work item | no |
+| **S1** | **A post, finished: `social_posts`, one row per account, the words held to that network's length, a photo from the library cut to a shape around a focus point, `draft → scheduled → posted`; the list by day; copy the words and download the cut picture; the `*/10` cron raises "time to post" as a Work item.** `idea` was dropped — a dateless draft is one | **built 2026-09-12** |
 | S2 | The writer: a post from a sentence, in this channel's voice, from this brand's own words. Hashtags are a fixed enumeration per brand, never invented per call | no |
 | S3 | The photo half: rank the library against the post's words with the vision call slice 12 already makes; a crop per network shape with `sharp`; and when nothing fits, a shot note — the shot list's machinery pointed at a post instead of a page | no |
 | S4 | Facts from the packs: `src/lib/post-sources/`, the ninth declared extension point. Retail and livestock first | no |
@@ -176,6 +176,85 @@ read.
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-12 — Social S1: a post, finished (`claude/a-post-that-is-finished`)
+
+The second slice of the social run: writing a post, cutting a photo to it,
+putting it on the calendar, and being reminded when it is due. **Migrations
+0309 and 0310** (`social_posts` + its policies), applied to dev AND prod before
+the merge; `verify-rls` reads 185 tables on dev and 183 on prod (the two-table
+gap is another session's unmerged Time work on dev — see Decisions & gotchas).
+
+- **`/social` IS NOW THE POSTS**, and the accounts moved to `/social/accounts`.
+  The daily job takes the shorter address; writing down where the accounts are
+  is a thing you do once. Done now, before anybody has bookmarked either.
+- **`idea` was dropped from the status list the plan promised.** A draft with
+  no time on it IS the idea, and a status nothing can produce is dead weight in
+  every switch that reads it — the shape that made five call sites return a
+  real-but-wrong value once already. What marks a proposed post out when S4
+  arrives is `origin` (`hand`, `assistant`, `pack`), which a reader can act on.
+- **A FOCUS POINT, NOT A CROP BOX**, and it is the design decision of the
+  slice. A free box needs a handle at each corner — four gestures on a phone —
+  and it needs the server to refuse a box outside the picture, of the wrong
+  ratio, or of zero width. A focus point is one tap: `cropBox()` takes the
+  shape and the point and returns the biggest rectangle of that ratio that
+  fits, slid to sit around the tap and clamped inside the edges. **It cannot
+  express a nonsense crop, so there is nothing to refuse.** The property test
+  runs every shape against every focus over four sources including a 3×97
+  sliver, and asserts the box never leaves the picture — because what consumes
+  it is `sharp.extract()`, which throws on a box that does.
+- **The crop is never stored.** ADR 0023 says one derivative per photo and a
+  replaced photo is a new row; a crop per post would be a second blob whose
+  life nothing owns. It is rendered on demand at
+  `/api/marketing/social/posts/[id]/image`, `?download=1` for the attachment,
+  and flattened onto white — every network re-encodes to JPEG and a transparent
+  corner goes black on most of them, so the alpha is dealt with here where it
+  can be seen rather than by Instagram where it cannot.
+- **THE MIGRATION HAD TO BE HAND-EDITED, and the test for it is the reason this
+  slice has an isolation file worth reading.** drizzle-kit emitted a bare
+  `ON DELETE set null` for `(tenant_id, image_id) → site_images`, which means
+  "null BOTH columns" — and `tenant_id` is NOT NULL, so deleting a photo would
+  have failed with a not-null violation instead of clearing the post's picture.
+  PG 15's column-list form `ON DELETE SET NULL ("image_id")` is the fix
+  (conventions.md has had the rule since the accounting composite FKs), and
+  `REMOVING A PHOTO CLEARS THE POST'S PICTURE AND LEAVES THE POST` proves it
+  against a real database rather than against the comment.
+- **The sweep splits its writes across two scopes, deliberately.** The work
+  item is raised `withTenant` as `staff` with no user, exactly as the website's
+  enquiry form raises one (ADR 0021) — Work's own policies decide. Stamping
+  `reminded_at` runs under `withSystem`, because `social_posts` is owner-only
+  to write and the sweep is not a person. The alternative was a member UPDATE
+  policy so the cron could write as `staff`, and **RLS is row-level, not
+  column-level**, so that would have let any member rewrite the business's
+  public voice. A shortcut in a cron beat a hole in a policy.
+- **`reminded_at` is cleared by `schedulePost` and `unschedulePost`**, which is
+  the whole reason it is a timestamp on the post rather than a boolean somebody
+  has to remember to reset: a post moved to next week is reminded next week.
+  One reminder per post, ever, otherwise.
+- **The time an owner types is read in the TENANT's zone, not the browser's.**
+  `datetime-local` gives a naive string and `Date.parse` reads it in whatever
+  zone the laptop is in; an owner away from home would have scheduled for the
+  wrong hour, silently. `fromLocalInput` measures the business's offset at that
+  instant and corrects.
+- **Owner-only to write, and it matters more here than for a logo.** In this
+  build a person still has to go and post it, but S6 sends a scheduled post on
+  its own — so whoever may write a row may eventually publish one. Recorded in
+  `0310`'s header rather than left as a copied default.
+- **Tests**: nine more cases in `tests/isolation/social.test.ts` (18 in the
+  file) — staff read and cannot write, owner CRUD, another tenant refused every
+  verb, a post naming another tenant's account OR photo unrepresentable even
+  under `withSystem`, the photo cascade above, a post dying with its account,
+  the CHECKs refusing a scheduled post with no time and a status/shape/focus
+  nobody registered, and the sweep seeing a due post but not one that is early,
+  already reminded, or another tenant's. 27 in `tests/social-posts.test.ts`.
+- **Not driven.** The local Clerk session is signed out and another session's
+  dev server holds the port. The routes register in the build, both tables'
+  rules are proven against a real database, and the crop is covered by a
+  property test — but nobody has typed a post, tapped a photo or seen the cron
+  raise anything.
+- **Not built here:** the writer (S2), ranking the library against the words
+  (S3), facts from the packs (S4), the month's plan (S5), any connection (S6),
+  and any measurement (S7).
 
 ### 2026-09-11 — Social S0: the accounts a brand posts to (`claude/a-facebook-per-brand`)
 
@@ -715,6 +794,16 @@ turned into one answer by `resolveLook` ([ADR 0024](../decisions/0024-a-look-is-
 | `site_images` | The site's photo library: one row per derivative the platform made | FORCE RLS; `member_read`, owner INSERT/DELETE, **no UPDATE** (a replaced photo is a new row). Composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE. **Unique on `pathname`** (one blob, one row); at most `SITE_IMAGES_MAX` (60) per site. CHECKs: `mime_type in (image/jpeg, image/png)`, width/height/bytes > 0. The blob lives under `sites/<tenant>/photos/`; sections reference the row by id with their own alt text (ADR 0023) |
 | `social_channels` | An account a brand posts to (S0, `0306`/`0307`) | FORCE RLS; `member_read`, owner INSERT/**UPDATE**/DELETE, no public policy. **`site_id` NULLABLE** — one of the business's websites, or the business itself ([ADR 0047](../decisions/0047-a-social-channel-belongs-to-a-website-and-a-footer-link-is-not-one.md)); the composite FK `(tenant_id, site_id) → sites` ON DELETE CASCADE is MATCH SIMPLE, so a null site is checked by nothing and a named one still cascades. **Unique `(tenant_id, network, handle)`**: one account is one row across the workspace, whichever brand claims it, which is ADR 0047's rule made mechanical. `handle` is `normalizeHandle`d (no `@`, no spaces, lowercase — safe on every network here, and what lets the index be a plain one). CHECKs: `network` in the eight `SOCIAL_NETWORKS`, `status in (active, paused)`, handle 1–80, label ≤ 80, url ≤ 500, `audience`/`voice` ≤ 400, and `social_channels_other_has_label` — `other` is the one network with no name of its own. At most `SOCIAL_CHANNELS_MAX` (12) per owner, counted per site and again for the business's. UPDATE is allowed here and refused on `site_images` for the reason each table exists: a channel is the account and is edited, a photo is a record of an event and is replaced |
 
+| `social_posts` | One post, to one account, once (S1, `0309`/`0310`) | FORCE RLS; `member_read`, owner INSERT/UPDATE/DELETE, no public policy. `channel_id` NOT NULL — composite FK `(tenant_id, channel_id) → social_channels` ON DELETE **CASCADE**: words written for an account that is gone are not words for anything. `image_id` nullable — composite FK `(tenant_id, image_id) → site_images` ON DELETE **SET NULL `("image_id")`, the column-list form, HAND-EDITED into the migration**: drizzle-kit emits the bare form, which would try to null `tenant_id` too and could never run. There is no `site_id`: the brand comes from the channel, which cannot move brands (ADR 0047), so one denormalised column would be one more thing to keep true. CHECKs: `status in (draft, scheduled, posted)` — **no `idea`**, a dateless draft is one; `origin in (hand, assistant, pack)`; `shape` one of the four `POST_SHAPES`; body ≤ 5000, link ≤ 500; `focus_x`/`focus_y` between 0 and 1; and two that matter — `social_posts_scheduled_has_time` and `social_posts_posted_has_time`, because a scheduled post with no time is invisible to the sweep and sits there looking handled. `social_posts_due_idx` is PARTIAL (`status = 'scheduled' and reminded_at is null`) — exactly the rows the ten-minute cron reads. `reminded_at`/`work_item_id` are the sweep's own bookkeeping, written under `withSystem`; `work_item_id` is a SOFT pointer, like `site_enquiries`' |
+
+**The crop is a focus point, not a box.** `shape` + `focus_x`/`focus_y` (0–1 of
+the source) go into `cropBox()`, which returns the biggest rectangle of that
+ratio that fits, slid around the point and clamped inside the edges. A stored
+value therefore cannot describe a crop outside the photo or of the wrong ratio,
+so nothing has to refuse one — and the cut picture is rendered on demand at
+`/api/marketing/social/posts/[id]/image` rather than stored, which keeps ADR
+0023's one-derivative rule whole.
+
 **`social_channels` is not `sites.settings.social`.** The footer marks are up to
 eight links an owner chose to DISPLAY; a channel is an account the business
 POSTS TO. `showChannelInFooterAction` is the one place the two touch and it
@@ -756,6 +845,18 @@ mismatch is visible where it can be fixed.
   `src/app/dashboard/m/marketing/social/page.tsx`;
   `docs/help/marketing/social.md`; `tests/isolation/social.test.ts` and
   `tests/social-channels.test.ts`
+- Social (S1): `src/lib/social/posts.ts` (shapes, `cropBox`, `cropOverlay`,
+  the per-network body limits, `groupByDay`, `roundToStep` — pure);
+  `src/modules/marketing/post-ops.ts`, `post-actions.ts`, `post-image.ts`
+  (the `sharp` crop), `post-reminders.ts` (the sweep);
+  `components/posts-panel.tsx`, `components/post-editor.tsx`;
+  `src/app/dashboard/m/marketing/social/page.tsx` (the posts),
+  `social/accounts/page.tsx` (moved in S1), `social/posts/[postId]/page.tsx`;
+  `src/app/api/marketing/social/posts/[id]/image/route.ts`;
+  `src/app/api/cron/social-due/route.ts` + the `*/10` entry in `vercel.json`;
+  `docs/help/marketing/social.md`, `social-post.md`, `social-accounts.md`;
+  `tests/social-posts.test.ts` and the second block of
+  `tests/isolation/social.test.ts`
 - Forms: `src/lib/sites/enquiry-schema.ts` (the form's Zod, the follow-up's
   and the email's words, `splitPersonName` — pure), `enquiries.ts`
   (`receiveSiteEnquiry`, the one public write path; `listSiteEnquiries`),
@@ -889,6 +990,30 @@ mismatch is visible where it can be fixed.
 - `src/lib/sites/shots.ts` — the shot list (18, ADR 0031): `pageSpots`, `spotKey`/`parseSpotKey`, `placePhoto`, `shotSummary`/`shotLine`, `emptySpotCount`, `isStarterPhoto`, `GENERIC_SHOTS`, `shotNotesFor` (pure); `SiteTemplate.shots` and `TemplatePicture.shot` in `src/lib/site-templates/types.ts`; `placePhotoAction` in `page-actions.ts`; `components/shot-list.tsx` and `src/app/dashboard/m/marketing/website/photos/page.tsx`; the `Photos` card on the Website page; `docs/help/marketing/shot-list.md`; `tests/site-shots.test.ts`
 
 ## Decisions & gotchas
+
+- **THE DEV BRANCH HELD TWO TABLES PRODUCTION DID NOT, and the reason is a gap
+  in the renumber rule.** Noticed on 2026-09-12: `verify-rls` read 185 on dev
+  and 183 on prod. Not this module's doing — `time_periods` and `time_sheets`
+  are a parallel session's UNMERGED Time migration, applied to dev the way
+  migrate-before-merge asks. The hazard is what happens next. Drizzle keeps a
+  single high-water row, and this slice's `0310` is now the newest stamp on
+  BOTH databases; that Time migration's own stamp is older. If it is renumbered
+  past `0310` while KEEPING its original `when` — which is what
+  conventions.md said to do — prod will skip it **silently, forever**, and the
+  tables will simply never appear. conventions.md now carries the refinement:
+  keep the original stamp only while it is still above every database's
+  high-water mark, otherwise re-stamp above the mark AND undo the migration on
+  dev first. Checked with `scripts/inspect-migration-state.ts`.
+- **The crop is rendered, never stored, and the composite FK to the photo had
+  to be hand-edited.** See the `social_posts` row in the data model and the S1
+  build-log entry; the isolation test
+  `REMOVING A PHOTO CLEARS THE POST'S PICTURE AND LEAVES THE POST` is what
+  stops the bare `ON DELETE set null` coming back on the next `db:generate`.
+- **The sweep writes under two different scopes on purpose.** The work item is
+  raised as `staff` inside the tenant (ADR 0021's shape); `reminded_at` is
+  stamped under `withSystem`, because RLS is row-level and a member UPDATE
+  policy on `social_posts` would have let any member rewrite the business's
+  public voice. `src/modules/marketing/post-reminders.ts` has the argument.
 
 - **A booking is an enquiry with a time** (ADR 0025), not a table of its
   own: the same party, follow-up, email and panel, plus four columns and a

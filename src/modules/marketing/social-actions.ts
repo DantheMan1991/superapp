@@ -43,10 +43,13 @@ import {
  * wrong link in a footer, which the owner sees, and never a failed publish,
  * because nothing publishes yet.
  */
-const BASE = "/dashboard/m/marketing/social";
+const BASE = "/dashboard/m/marketing/social/accounts";
 
 function revalidateSocial(): void {
   revalidatePath(BASE);
+  // A channel's name is on every post row, and pausing one changes what the
+  // posts screen offers to write against.
+  revalidatePath("/dashboard/m/marketing/social");
   // The footer mark, if the owner took the offer, is on every public page.
   revalidatePath("/dashboard/m/marketing/website");
   revalidatePath("/sites/[slug]/[[...path]]", "page");

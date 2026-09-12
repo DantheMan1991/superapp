@@ -1,7 +1,8 @@
 import "dotenv/config";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { eq, isNull } from "drizzle-orm";
+import { eq, inArray, isNull } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../../src/db";
+import { duePostIds } from "../../src/modules/marketing/post-reminders";
 import { d } from "./_shared";
 
 /**
@@ -314,5 +315,379 @@ d("social_channels (RLS)", () => {
       }),
     );
     expect(survivor?.id).toBe(businessChannelA);
+  });
+});
+
+/**
+ * `social_posts` RLS and its constraints — a post is one account's, once
+ * (slice S1).
+ *
+ * Members read; OWNERS write. The sweep that raises "time to post" is proven
+ * here too, because what it must NOT see (another tenant's rows, a post not
+ * yet due, one already reminded) is exactly the kind of thing a `withSystem`
+ * query gets wrong silently.
+ *
+ * **THE ONE TEST THIS FILE EXISTS FOR** is the photo cascade. The composite FK
+ * `(tenant_id, image_id)` is ON DELETE SET NULL with a COLUMN LIST, hand-edited
+ * into the migration, because the bare form would try to null `tenant_id` too
+ * and could never run — so removing a photo would fail rather than clear the
+ * picture. That is invisible until somebody deletes a photo a scheduled post
+ * was using, which is why it is asserted rather than trusted.
+ */
+d("social_posts (RLS)", () => {
+  const STAMP = `iso-posts-${process.pid}`;
+  const OWNER = `${STAMP}-owner`;
+  const MATE = `${STAMP}-mate`;
+  const OTHER = `${STAMP}-other`;
+
+  let tenantA: string;
+  let tenantB: string;
+  let siteA: string;
+  let siteB: string;
+  let channelA: string;
+  let channelB: string;
+  let imageA: string;
+  let imageB: string;
+  let draftA: string;
+  let postB: string;
+
+  const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantA, fn, { role: "staff", userId: MATE });
+  const asOwner = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantA, fn, { role: "owner", userId: OWNER });
+  const asOtherTenant = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantB, fn, { role: "owner", userId: OTHER });
+
+  beforeAll(async () => {
+    await withSystem(async (tx) => {
+      const tenants = await tx
+        .insert(schema.tenants)
+        .values([
+          { clerkOrgId: `${STAMP}-a`, name: "Posts A", slug: `${STAMP}-a` },
+          { clerkOrgId: `${STAMP}-b`, name: "Posts B", slug: `${STAMP}-b` },
+        ])
+        .returning();
+      tenantA = tenants[0].id;
+      tenantB = tenants[1].id;
+      const sites = await tx
+        .insert(schema.sites)
+        .values([
+          { tenantId: tenantA, slug: `${STAMP}-sa`, title: "Hilltop Farm" },
+          { tenantId: tenantB, slug: `${STAMP}-sb`, title: "B Farm" },
+        ])
+        .returning();
+      siteA = sites[0].id;
+      siteB = sites[1].id;
+      const channels = await tx
+        .insert(schema.socialChannels)
+        .values([
+          { tenantId: tenantA, siteId: siteA, network: "facebook", handle: "hilltopposts" },
+          { tenantId: tenantB, siteId: siteB, network: "facebook", handle: "bfarmposts" },
+        ])
+        .returning();
+      channelA = channels[0].id;
+      channelB = channels[1].id;
+      const images = await tx
+        .insert(schema.siteImages)
+        .values([
+          {
+            tenantId: tenantA,
+            siteId: siteA,
+            pathname: `sites/${tenantA}/photos/${STAMP}-a.jpg`,
+            mimeType: "image/jpeg",
+            width: 1600,
+            height: 1067,
+            bytes: 200_000,
+          },
+          {
+            tenantId: tenantB,
+            siteId: siteB,
+            pathname: `sites/${tenantB}/photos/${STAMP}-b.jpg`,
+            mimeType: "image/jpeg",
+            width: 1600,
+            height: 1067,
+            bytes: 200_000,
+          },
+        ])
+        .returning();
+      imageA = images[0].id;
+      imageB = images[1].id;
+      const posts = await tx
+        .insert(schema.socialPosts)
+        .values([
+          { tenantId: tenantA, channelId: channelA, body: "Market day this Saturday" },
+          { tenantId: tenantB, channelId: channelB, body: "Not yours" },
+        ])
+        .returning();
+      draftA = posts[0].id;
+      postB = posts[1].id;
+    });
+  });
+
+  afterAll(async () => {
+    await withSystem(async (tx) => {
+      // Posts, channels, photos and sites all cascade from the tenant.
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantA));
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantB));
+    });
+  });
+
+  it("staff read their own tenant's posts and nothing of the other's", async () => {
+    const seen = await asStaff((tx) => tx.select().from(schema.socialPosts));
+    expect(seen.map((p) => p.id)).toEqual([draftA]);
+    expect(seen.some((p) => p.id === postB)).toBe(false);
+  });
+
+  it("staff cannot insert, update or delete a post — the policy is owner-only", async () => {
+    await expect(
+      asStaff((tx) =>
+        tx.insert(schema.socialPosts).values({ tenantId: tenantA, channelId: channelA }),
+      ),
+    ).rejects.toThrow();
+    const updated = await asStaff((tx) =>
+      tx
+        .update(schema.socialPosts)
+        .set({ body: "Forged" })
+        .where(eq(schema.socialPosts.id, draftA))
+        .returning(),
+    );
+    expect(updated).toHaveLength(0);
+    const deleted = await asStaff((tx) =>
+      tx.delete(schema.socialPosts).where(eq(schema.socialPosts.id, draftA)).returning(),
+    );
+    expect(deleted).toHaveLength(0);
+    const still = await withSystem((tx) =>
+      tx.query.socialPosts.findFirst({ where: eq(schema.socialPosts.id, draftA) }),
+    );
+    expect(still?.body).toBe("Market day this Saturday");
+  });
+
+  it("an owner writes, schedules and removes their own tenant's posts", async () => {
+    const [created] = await asOwner((tx) =>
+      tx
+        .insert(schema.socialPosts)
+        .values({ tenantId: tenantA, channelId: channelA, body: "Calves in the north paddock" })
+        .returning(),
+    );
+    expect(created.status).toBe("draft");
+    expect(created.focusX).toBeCloseTo(0.5);
+    const [scheduled] = await asOwner((tx) =>
+      tx
+        .update(schema.socialPosts)
+        .set({ status: "scheduled", scheduledAt: new Date("2026-09-20T14:00:00Z") })
+        .where(eq(schema.socialPosts.id, created.id))
+        .returning(),
+    );
+    expect(scheduled.status).toBe("scheduled");
+    const removed = await asOwner((tx) =>
+      tx.delete(schema.socialPosts).where(eq(schema.socialPosts.id, created.id)).returning(),
+    );
+    expect(removed).toHaveLength(1);
+  });
+
+  it("another tenant's owner cannot read, update or delete tenant A's posts", async () => {
+    const seen = await asOtherTenant((tx) => tx.select().from(schema.socialPosts));
+    expect(seen.map((p) => p.id)).toEqual([postB]);
+    const updated = await asOtherTenant((tx) =>
+      tx
+        .update(schema.socialPosts)
+        .set({ body: "Taken over" })
+        .where(eq(schema.socialPosts.id, draftA))
+        .returning(),
+    );
+    expect(updated).toHaveLength(0);
+    const deleted = await asOtherTenant((tx) =>
+      tx.delete(schema.socialPosts).where(eq(schema.socialPosts.id, draftA)).returning(),
+    );
+    expect(deleted).toHaveLength(0);
+  });
+
+  it("a post naming another tenant's account or photo is unrepresentable, even under withSystem", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.socialPosts).values({ tenantId: tenantA, channelId: channelB }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx
+          .insert(schema.socialPosts)
+          .values({ tenantId: tenantA, channelId: channelA, imageId: imageB }),
+      ),
+    ).rejects.toThrow();
+    // And the positive half, so the refusals above are known to be about the
+    // TENANT rather than about the columns being wired up wrong.
+    const [ok] = await asOwner((tx) =>
+      tx
+        .insert(schema.socialPosts)
+        .values({ tenantId: tenantA, channelId: channelA, imageId: imageA })
+        .returning(),
+    );
+    expect(ok.imageId).toBe(imageA);
+    await asOwner((tx) =>
+      tx.delete(schema.socialPosts).where(eq(schema.socialPosts.id, ok.id)),
+    );
+  });
+
+  it("REMOVING A PHOTO CLEARS THE POST'S PICTURE AND LEAVES THE POST", async () => {
+    // The hand-edited `ON DELETE SET NULL ("image_id")`. With drizzle-kit's
+    // bare form this delete raises a not-null violation on `tenant_id` and a
+    // scheduled post can take a photo hostage.
+    const [image] = await withSystem((tx) =>
+      tx
+        .insert(schema.siteImages)
+        .values({
+          tenantId: tenantA,
+          siteId: siteA,
+          pathname: `sites/${tenantA}/photos/${STAMP}-doomed.jpg`,
+          mimeType: "image/jpeg",
+          width: 1600,
+          height: 1067,
+          bytes: 100_000,
+        })
+        .returning(),
+    );
+    const [post] = await asOwner((tx) =>
+      tx
+        .insert(schema.socialPosts)
+        .values({
+          tenantId: tenantA,
+          channelId: channelA,
+          body: "With a picture",
+          imageId: image.id,
+          status: "scheduled",
+          scheduledAt: new Date("2026-10-01T15:00:00Z"),
+        })
+        .returning(),
+    );
+    expect(post.imageId).toBe(image.id);
+    await withSystem((tx) =>
+      tx.delete(schema.siteImages).where(eq(schema.siteImages.id, image.id)),
+    );
+    const after = await withSystem((tx) =>
+      tx.query.socialPosts.findFirst({ where: eq(schema.socialPosts.id, post.id) }),
+    );
+    expect(after).toBeDefined();
+    expect(after?.imageId).toBeNull();
+    expect(after?.body).toBe("With a picture");
+    expect(after?.status).toBe("scheduled");
+    await withSystem((tx) =>
+      tx.delete(schema.socialPosts).where(eq(schema.socialPosts.id, post.id)),
+    );
+  });
+
+  it("a post dies with the account it was written for", async () => {
+    const [channel] = await withSystem((tx) =>
+      tx
+        .insert(schema.socialChannels)
+        .values({ tenantId: tenantA, siteId: siteA, network: "x", handle: "hilltoptemp" })
+        .returning(),
+    );
+    const [post] = await withSystem((tx) =>
+      tx
+        .insert(schema.socialPosts)
+        .values({ tenantId: tenantA, channelId: channel.id, body: "Temporary" })
+        .returning(),
+    );
+    await withSystem((tx) =>
+      tx.delete(schema.socialChannels).where(eq(schema.socialChannels.id, channel.id)),
+    );
+    const gone = await withSystem((tx) =>
+      tx.query.socialPosts.findFirst({ where: eq(schema.socialPosts.id, post.id) }),
+    );
+    expect(gone).toBeUndefined();
+  });
+
+  it("the checks refuse a status with no time, and a word or a focus nobody registered", async () => {
+    // A scheduled post with no time is invisible to the sweep and sits there
+    // looking handled — the worst shape a bug can take here.
+    await expect(
+      asOwner((tx) =>
+        tx
+          .insert(schema.socialPosts)
+          .values({ tenantId: tenantA, channelId: channelA, status: "scheduled" }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) =>
+        tx
+          .insert(schema.socialPosts)
+          .values({ tenantId: tenantA, channelId: channelA, status: "posted" }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) =>
+        tx
+          .insert(schema.socialPosts)
+          .values({ tenantId: tenantA, channelId: channelA, status: "idea" }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) =>
+        tx
+          .insert(schema.socialPosts)
+          .values({ tenantId: tenantA, channelId: channelA, shape: "panorama" }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) =>
+        tx
+          .insert(schema.socialPosts)
+          .values({ tenantId: tenantA, channelId: channelA, focusX: 1.5 }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) =>
+        tx
+          .insert(schema.socialPosts)
+          .values({ tenantId: tenantA, channelId: channelA, body: "x".repeat(5001) }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("the sweep sees a post whose time has come, and nothing else", async () => {
+    const now = new Date("2026-11-01T12:00:00Z");
+    const [due, notYet, already] = await withSystem((tx) =>
+      tx
+        .insert(schema.socialPosts)
+        .values([
+          {
+            tenantId: tenantA,
+            channelId: channelA,
+            body: "Due",
+            status: "scheduled",
+            scheduledAt: new Date("2026-11-01T11:50:00Z"),
+          },
+          {
+            tenantId: tenantA,
+            channelId: channelA,
+            body: "Later",
+            status: "scheduled",
+            scheduledAt: new Date("2026-11-01T12:10:00Z"),
+          },
+          {
+            tenantId: tenantA,
+            channelId: channelA,
+            body: "Already reminded",
+            status: "scheduled",
+            scheduledAt: new Date("2026-11-01T11:00:00Z"),
+            remindedAt: new Date("2026-11-01T11:00:00Z"),
+          },
+        ])
+        .returning(),
+    );
+    const seen = await duePostIds(now, tenantA);
+    expect(seen).toContain(due.id);
+    expect(seen).not.toContain(notYet.id);
+    expect(seen).not.toContain(already.id);
+    // A draft with a time on it is not on the calendar and is not due.
+    expect(seen).not.toContain(draftA);
+    // And nothing of tenant B's ever reaches tenant A's list.
+    expect(await duePostIds(now, tenantB)).not.toContain(due.id);
+    await withSystem((tx) =>
+      tx
+        .delete(schema.socialPosts)
+        .where(inArray(schema.socialPosts.id, [due.id, notYet.id, already.id])),
+    );
   });
 });

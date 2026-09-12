@@ -182,6 +182,30 @@ a feature PR; **import `@/lib/money` in new code.**
   matches on the exact `when`, which is the second reason not to invent a new
   one. First hit 2026-09-09, `0281` twice
   ([inventory.md](modules/inventory.md)).
+- **KEEPING THE ORIGINAL `when` IS ONLY SAFE WHILE IT IS STILL ABOVE THE
+  HIGH-WATER MARK.** The rule above assumes the loser's migration is already
+  applied to BOTH databases, so the original stamp lands under the mark and is
+  skipped as a no-op. It is not always true. Migrate-before-merge applies to
+  the dev branch first, so a migration can be **applied on dev and absent on
+  prod** — and if the winner's migration then goes out to both with a LATER
+  stamp, prod's single high-water row moves past the loser's original `when`.
+  Put that stamp back and prod skips the migration **silently, forever**: the
+  tables simply never appear, `db:migrate` says "Migrations complete", and
+  nothing is louder than that until somebody opens the screen. This is ADR
+  0014's failure exactly, reached by following the repair rather than by
+  skipping it.
+  **So check before you renumber.** `npx tsx scripts/inspect-migration-state.ts`
+  and `--dev` print each database's high-water row. Then:
+  - Original stamp still above both marks, or already applied to both → keep it,
+    as above.
+  - Original stamp now below prod's mark → **re-stamp above the mark, and undo
+    the migration on dev first** (drop what it created and delete its
+    `__drizzle_migrations` row), because with a new stamp dev will replay it.
+    Re-stamping without undoing re-runs `CREATE TABLE` on dev and aborts the
+    whole transaction.
+  Found 2026-09-12 while checking why the dev branch held two tables production
+  did not: an unmerged Time migration on dev, under a merged Social stamp
+  ([marketing.md](modules/marketing.md), slice S1).
 - **A composite FK cannot take a bare `ON DELETE SET NULL`.** Postgres nulls
   every referencing column, `tenant_id` included, and `tenant_id` is NOT NULL on
   every tenant table — so the delete fails with a not-null violation instead of

@@ -1,6 +1,6 @@
 # Getting around Yosher
 
-> The first screen you see, the sidebar, the search box, your account and business menus, the phone layout, printing, and how to get help on any page.
+> The first screen you see, the sidebar, the search box, the microphone button that records what happened from any page, your account and business menus, the phone layout, printing, and how to get help on any page.
 > **Route:** /dashboard
 > **Order:** 0
 
@@ -24,6 +24,7 @@ Yosher opens on the **Overview** page. The sidebar on the left takes you to ever
 - **The business switcher.** At the bottom of the sidebar, showing the business you are in. See how to switch, below.
 - **Your avatar.** Beside the switcher. It opens your own account: profile, email addresses, password, security, and `Sign out`. Your account is the same across every business you belong to, so a change here follows you everywhere. Under `Security` the last item is `Delete account`. It asks you to confirm, then removes your sign-in and your place in every business you belong to. The businesses themselves, and the records that name you, stay.
 - **The search box.** `Jump to…`, under your business name. See how to jump to a page, below.
+- **The microphone button.** A round blue button in the bottom right corner, on every page. Press it, say what happened, and Yosher records it — you never have to find a screen first. See how to tell it what happened, below.
 
 The switcher and the avatar can appear a moment after the rest of the page on a slow connection. That is normal.
 
@@ -56,6 +57,122 @@ The rows you can see, and when each one is there:
 Under the rows, `Not sure where to start? Walk through it with us and get a plan for your business.` opens a short conversation that writes you an ordered plan; see [Getting set up with us](setup.md). Owners only, like the card.
 
 A row clears however the thing arrives. Typing a new customer's name on an invoice clears `Add the people you work with` just as adding a record in CRM does. A tool that is switched off has no rows.
+
+## How to tell it what happened, from any page
+
+Instead of finding the right screen and the right dialog, say it.
+
+**The round blue microphone button in the bottom right corner is on every
+page.** Press it and start talking. It is there while you are looking at an
+invoice, walking the daily round, or anywhere else — you never have to go
+somewhere first in order to record something.
+
+1. Type one sentence into `Tell it what happened`, such as `Clock me in`, or
+   `Three chicks dead in pen two, and moved the cows to the creek field`. One
+   sentence can hold more than one thing.
+2. Click {button:Read it|primary|sparkles}. It reads `Reading…` while it works.
+3. You get a card for each thing it found, with the fields already filled in.
+   Read every one. Change anything that is wrong, and click {icon:x} on a card
+   you do not want.
+4. Anything it could not place is left empty with an amber line under it:
+   `It heard "the back pen" — pick or type the right one.` Pick from the list.
+   **It never guesses the nearest one.**
+5. A card that is not ready says so: `Which animals is missing.` The button
+   stays gray until every card is complete.
+6. Click {button:Record 2 things|primary}. You see what was recorded, such as
+   `3 head — died — from Pen 2`.
+
+**Some things skip all of that.** Clocking in and out are recorded the moment
+Yosher understands them — no cards, no button. You say it and you see
+`Clocked in at 7:42 AM`. See below for which, and why only those.
+
+## How to say it instead of typing it
+
+Press {button:Say it|outline|mic} beside {button:Read it|primary|sparkles} and
+talk. **Stop talking and it stops listening** — you do not have to press
+anything. What you said is read straight away.
+
+So clocking in is one press: {button:Say it|outline|mic}, "clock me in", done.
+Anything that moves animals or stock still shows you a card to check first.
+
+- **It knows when you have finished** by listening for you to stop. It works
+  out how loud the room is first, so a running tractor does not fool it. If it
+  cannot tell, press {button:Listening…|primary} to finish.
+- It stops on its own after **30 seconds** whatever happens, and shows a
+  countdown for the last ten. A sentence is short; say one thing at a time.
+- Say it twice and the second goes on the end of the first, so you can add
+  something you forgot.
+- The first time, your phone or browser will ask permission for the microphone.
+  If you say no, the button stops working until you allow it in your browser's
+  settings — everything else on the page still works.
+- If you see `Talking to Yosher is not switched on for this platform yet`, the
+  business has not set speech up. Typing works exactly the same.
+
+**What happens to the recording.** In the Yosher app on your phone, your phone
+does the listening itself and the recording never leaves it. In a web browser,
+the recording is sent to the service that writes it down and is thrown away as
+soon as the words come back. **Either way nothing is kept** — not the audio,
+not the text, until you press the button to record it.
+
+## What it can record
+
+Only the tools your business has switched on contribute cards, and some only
+appear when they have something to work with.
+
+| Card | What it records | It needs |
+| --- | --- | --- |
+| `Clocked in` | Starts your clock, exactly as the {button:Clock in|primary} button on Time does | Nothing. Add what you are starting on if you want |
+| `Clocked out` | Stops your clock and turns it into hours | A clock that is already running |
+| `Animals lost` | Head that died, were culled or were sold live | Which animals, how many, and what happened |
+| `Looked at them` | That you walked the pen, with a note if you saw something | Which animals |
+| `Moved somewhere` | Animals moved onto a paddock | Which animals, and where to. Only when you keep Land |
+| `Fed them` | Feed or other stock given to animals, taken out of stock | Which animals, what, and how much **in the unit that item is counted in**, shown beside its name. Only when you keep Inventory |
+
+## What records itself, and what waits for you
+
+Two cards are written the moment Yosher understands them, with no card to read
+and no button to press:
+
+- `Clocked in`
+- `Clocked out`
+
+They are the only two, and they qualify because all three of these are true. A
+clock started by mistake is **on the Time screen the moment you look**, it is
+**removed in one press** with {button:Cancel|outline}, and it **moves nothing**
+— no animals, no stock, no money. It is a time against your own name.
+
+**Everything else waits for you.** Losses, moves, feeds and checks all show a
+card you read before anything happens, because a misheard sentence there costs
+you real animals or real stock, and putting that right means finding it first.
+
+If you would rather check the clock cards too, say so and it can be changed.
+
+## The clock is always your own
+
+`Clocked in` and `Clocked out` only ever move **your** clock. There is no box
+for whose it is, on purpose: clocking somebody else in is writing down hours
+they will be paid for, and a typed sentence is not proof it was them. Use the
+shared device's keypad for that, where each person enters their own PIN.
+
+If your business does not keep hours for you, the two clock cards never appear
+at all.
+
+## What it will not do
+
+- **Treatments**, on purpose: a treatment sets the withdrawal clock that
+  decides whether meat may be sold, and that is worth four deliberate answers
+  on its own screen.
+- **Weights**, for a duller reason — you have the scale in front of you anyway.
+- **A time you say out loud.** `I started at seven` cannot be recorded. The
+  clock starts when you say it, and correcting a start time is done on the
+  Time screen where the change is visible.
+
+`When` fills itself in with today, because you are usually saying it where it
+happened on the day it happened. Everything else is left blank unless the
+sentence says it. It never invents a number, a pen or a date.
+
+Either all the cards are recorded or none of them are — two things said in one
+sentence happened together.
 
 ## How to open a page
 

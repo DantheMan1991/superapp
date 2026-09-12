@@ -127,6 +127,7 @@ export const DB_BACKED_TESTS = [
   "tests/setup-sources-db.test.ts",
   "tests/device-grants-redeem.test.ts",
   "tests/tell-sources-db.test.ts",
+  "tests/work-tell-source.test.ts",
   "tests/work-attention.test.ts",
   "tests/work-ops.test.ts",
   "tests/work.test.ts",

@@ -68,7 +68,26 @@ export default function RootLayout({
       >
         <body className="min-h-full flex flex-col font-sans">
           {children}
-          <Toaster position="bottom-right" />
+          {/*
+            OFFSET SO IT CLEARS THE MICROPHONE (ADR 0051). Sonner puts toasts
+            bottom-right at z-index 999999999; the floating tell button is
+            bottom-right at 40. They landed on top of each other, and the
+            symptom was specific and bad: after recording anything, the
+            success toast covered the button for its whole life — so the mic
+            was dead for four seconds at exactly the moment somebody would say
+            the next thing. `elementFromPoint` at the button's centre returned
+            the toast.
+
+            Offsetting the toasts rather than moving the button, because the
+            button's corner is load-bearing (it is where a thumb is) and a
+            toast's is not. 5.5rem clears a 3.5rem button and its 1rem margin;
+            the safe-area inset keeps both off an iPhone's home indicator.
+          */}
+          <Toaster
+            position="bottom-right"
+            offset="calc(5.5rem + env(safe-area-inset-bottom))"
+            mobileOffset="calc(5.5rem + env(safe-area-inset-bottom))"
+          />
         </body>
       </html>
     </ClerkProvider>

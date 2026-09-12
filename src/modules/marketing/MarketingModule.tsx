@@ -16,7 +16,8 @@ import { MarketingStrip } from "./components/marketing-strip";
 import { BUSINESS_KIT, isBusinessKit } from "@/lib/brand/owner";
 
 /**
- * The module's front page: the brand kit, with the strip to the website.
+ * The module's front page: the brand kit, with the strip to the website and
+ * to the accounts each brand posts from.
  *
  * The data is Layer 0 (`brand_kits`, read through `src/lib/brand/`); this is
  * the one place it is EDITED. The website lives at `./website`; the kit
@@ -67,7 +68,7 @@ export async function MarketingModule({ ctx }: { ctx: TenantContext }) {
       <PageHeader
         icon={<Megaphone />}
         title="Marketing"
-        description={`How ${ctx.tenant.name} looks to its customers: the brand kit on every invoice, and the website.`}
+        description={`How ${ctx.tenant.name} looks to its customers: the brand kit on every invoice, the website, and the accounts it posts from.`}
       />
       <MarketingStrip />
 

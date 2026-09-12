@@ -1,5 +1,5 @@
 "use client";
-import { Globe, Palette } from "lucide-react";
+import { Globe, Palette, Share2 } from "lucide-react";
 import { CategoryStrip } from "@/components/app/category-strip";
 
 /**
@@ -15,6 +15,7 @@ export function MarketingStrip() {
       items={[
         { href: BASE, label: "Brand", icon: Palette, exact: true },
         { href: `${BASE}/website`, label: "Website", icon: Globe },
+        { href: `${BASE}/social`, label: "Social", icon: Share2 },
       ]}
     />
   );

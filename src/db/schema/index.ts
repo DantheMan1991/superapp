@@ -27,6 +27,9 @@ export * from "./interview";
 export * from "./crm";
 export * from "./scheduling";
 export * from "./work";
+// What actually happened, beside Work's what needs doing: workers who may hold
+// no login, the hours logged against them, and the week they are grouped into.
+export * from "./time";
 // The TENANT charging THEIR customer. The other direction — the platform
 // charging the tenant — is `subscriptions` in platform.ts, and the two must
 // never get tangled. See ADR 0015.

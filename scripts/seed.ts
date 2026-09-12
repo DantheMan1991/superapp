@@ -138,6 +138,29 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
     status: "available",
     sortOrder: 70,
   },
+  {
+    id: "time",
+    name: "Time",
+    // Passes the neutrality test in docs/extension-model.md §3: a bookkeeping
+    // firm, a dental practice and a plumbing contractor all recognise somebody
+    // working for a length of time on a day.
+    //
+    // "Timesheets" would have been narrower than the tool and "Hours" is taken
+    // — `/dashboard/hours` is the retainer balance a client reads, and two
+    // screens answering to one word is how a nav item stops meaning anything.
+    //
+    // Description tracks what actually ships. The clock, the workweek and
+    // overtime, approval, what the hour was for, what it cost and the payroll
+    // export follow, and get added here as they do.
+    description:
+      "Who worked, how long, and on which day — the hours behind what you pay and what you charge.",
+    category: "core",
+    // `coming_soon` until slice 2: hours that cannot become overtime, a cost or
+    // a paycheck are a notebook with extra steps, and the empty-slot discipline
+    // says a module is not sold before it earns its place.
+    status: "coming_soon",
+    sortOrder: 80,
+  },
 
   // ---------------------------------------------------------------------
   // Layer 2a — capability packs. Same table, `category = 'pack'`

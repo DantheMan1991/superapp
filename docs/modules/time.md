@@ -221,8 +221,17 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 ### 2026-09-12 — Slice 2: the week and the period (`claude/time-2-the-week-and-the-period`)
 
 The overtime evaluator, the pay-period arithmetic, and the screen that shows
-the difference between them. Migration `0306` — three columns on
+the difference between them. Migration `0308` — three columns on
 `time_settings`, and nothing else.
+
+**Generated as `0306` and renumbered**, because `Social S0` (#511) took that
+slot from a parallel session and merged first. That is the SECOND slot collision
+in three slices; the repair is the one
+[conventions.md](../conventions.md) prescribes, original `when`
+(`1789187568900`) put back so the already-applied migration is skipped rather
+than re-run. Unlike 0304's renumber it needed no hand-editing of the SQL:
+#511's snapshots were produced after slice 1 merged, so the regenerated diff was
+byte-identical.
 
 - **The evaluator is one pure function over a ruleset**
   (`core/overtime.ts`). One worker, one workweek, one `OvertimeRuleset`, in;
@@ -269,7 +278,7 @@ the difference between them. Migration `0306` — three columns on
   after a switch to monthly would mean nothing until somebody switched back and
   found their periods on a boundary they had forgotten choosing.
 - Verified: 34 new pure tests in `time-overtime`, 49 in `time-core`, 14 in
-  `timezone`, 21 isolation tests, lint, `tsc` and the build green. `0306`
+  `timezone`, 21 isolation tests, lint, `tsc` and the build green. `0308`
   applied to dev AND prod before the merge (ADR 0014), `db:verify-rls` clean on
   both. **Driven** on the dev branch: both settings pickers, the biweekly anchor
   dialog, the pay-period screen and the ruleset switch.

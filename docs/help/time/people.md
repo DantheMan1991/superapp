@@ -1,6 +1,6 @@
 # People
 
-> Everybody whose hours this business keeps, and the four settings behind every figure in Time: the day your week runs from, what clocked time is rounded to, how often people are paid, and which overtime rules you follow. Owners work here; everybody else can read it.
+> Everybody whose hours this business keeps, what they are paid, and the four settings behind every figure in Time. Owners work here; everybody else can read the list and the settings but never the pay.
 > **Route:** /dashboard/m/time/people
 > **Order:** 120
 
@@ -16,6 +16,7 @@ Open **Time** {icon:clock} in the sidebar, then click {button:People|outline}. A
 - **Your week starts on.** A picker at the bottom left, from `Sunday` to `Saturday`. This is not just how the page looks. It is the day your week runs from, so it decides which week an hour falls in, and when overtime arrives it will decide that too. Pick the day your business actually counts from.
 - **Round clocked time to.** A picker beside it: `To the minute`, `5 minutes`, `6 minutes (a tenth of an hour)`, `10 minutes`, `15 minutes (a quarter hour)` or `30 minutes`. It only affects time from a clock. Hours you type are kept exactly as you type them.
 - **People are paid.** `Weekly`, `Every two weeks`, `Twice a month` or `Monthly`. This is when people are **paid**, which is not how overtime is measured — overtime is always worked out for each week on its own. Choosing `Every two weeks` asks you for a starting date, because nothing in the calendar says which of two weeks begins a period.
+- **Pay rates.** A panel headed `Pay rates`, marked `only owners can see this`. One line per rate ever set: who, the hourly figure, the day it started, and the charge-out rate and on-costs when you have given them. Staff and accountants do not see this panel at all — it is not hidden from them by the screen, it is invisible to them in the database.
 - **Overtime rules.** `Federal (over 40 in a week)`, `California (daily and weekly)` or `None — no overtime rules`. Whatever you pick, the full rule is spelled out underneath so you can check it. This is a legal choice you make with whoever does your payroll; we do the arithmetic and we do not know where your people work.
 
 ## How to add somebody
@@ -43,6 +44,24 @@ There is no way to delete somebody, and that is deliberate. Their hours are a re
 1. Scroll to `Your week starts on`.
 2. Pick a day. You see `Saved`.
 3. Go back to the week with {button:Time|outline}. The days are now grouped from the day you picked.
+
+## How to set what somebody is paid
+
+1. Scroll to `Pay rates` and click {button:Set a rate|outline}.
+2. Pick the person under `Who`.
+3. Put the hourly figure in `Hourly pay`, in dollars — `24.00`, or `22.50`.
+4. Set `From` to the first day this rate applies. This is the important field: see below.
+5. `Charged out at` is what a customer pays for the hour, if you bill for time. Leave it empty if you do not.
+6. `On-costs` is a percent added on top for your payroll taxes and insurance. It is what the hour **costs you**, and it is never added to what the person is paid.
+7. Click {button:Save|primary}. You see `Rate saved`.
+
+## Why the date matters
+
+**A change of pay is a new rate with a new start date, not an edit of the old one.** Set someone to $26 from the 1st of next month and everything worked before then is still worked out at their old rate. That is what stops a raise in March quietly making January's payroll wrong.
+
+It also means a rate you backdate *will* re-price the weeks after that date — every week except those in a pay period you have already approved, which keep the figure you approved.
+
+To remove a rate you typed wrongly, click {button:Remove|ghost} on its line. It asks first, because every unapproved week after that date goes back to whatever rate came before it.
 
 ## How to say how often people are paid
 
@@ -93,6 +112,9 @@ If you are not sure, leave it on `To the minute`. It is the only setting that ne
 | `Pick how often people are paid.` | The pay frequency was not one of the choices. Reload the page and pick again. |
 | `Say which day a pay period starts on.` | You chose `Every two weeks` and left the starting date empty. |
 | `Pick which overtime rules you follow.` | The rules were not one of the choices. Reload the page and pick again. |
+| `An hourly rate like 22.50.` | The pay box was empty or was not a number. |
+| `Burden is a whole percent between 0 and 200.` | On-costs must be a whole number in that range. |
+| `Nobody has a rate yet.` | No rates have been set. Hours are still recorded and added up without them. |
 
 ## Not on this page
 
@@ -100,8 +122,12 @@ You cannot record what anybody is paid, what they do, or whether they are salari
 
 There is no separate rounding for different people, and no way to round a punch up automatically at the end of a shift.
 
+Pay is hourly only. There is no salary, no piece rate, no bonus and no shift differential, and rates are whole cents — `15.38`, not `15.375`.
+
 The overtime rules are for the whole business. You cannot yet mark one person as salaried and exempt while the rest are hourly, and there is no ruleset for the 8-and-80 arrangement some healthcare employers use. Ask us if you need either.
 
 ## Who can do what
 
-Owners can add people, link and unlink sign-ins, mark somebody as having left, and set all four settings on this page. Staff and accountants can read the list and the settings. Staff can still log hours and start and stop clocks for anybody on it, over on [The week](week.md).
+**Only owners can see or set pay rates at all.** That is enforced in the database, not just on the screen: a member of staff opening this page does not get a hidden panel, they get no panel, and the same is true of anybody reading the data another way. A support session from us counts as staff, so we see the hours and never the wages.
+
+Owners can also add people, link and unlink sign-ins, mark somebody as having left, and set all four settings on this page. Staff and accountants can read the list and the settings. Staff can still log hours and start and stop clocks for anybody on it, over on [The week](week.md).

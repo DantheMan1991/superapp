@@ -5,7 +5,7 @@
 > knows the difference between overtime and a pay period, and an hour that
 > reaches the P&L tagged with the thing it was spent on. Core owns the
 > mechanism; an industry layer supplies the vocabulary and the odd pay rule.
-> Status: partial — slices 0–4 built (people, hours, the clock, the workweek and overtime, and submit/approve/lock). The case for staying `coming_soon` is now weaker: a locked period is trustworthy. The remaining gap is money — no rates, no export · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: partial — slices 0–5 built (people, hours, the clock, the workweek and overtime, submit/approve/lock, what the hour was for, and what it costs). It now answers the question it was built for: hours in, gross pay out, frozen at approval. The remaining gap is the books — nothing is posted and there is no payroll export · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## The plan (agreed with the founder 2026-09-11)
 
@@ -217,6 +217,74 @@ farm-shaped remainder.
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-12 — Slice 5: what it costs (`claude/time-5-what-it-costs`)
+
+`time_rates`, the gross-pay arithmetic in `core/pay.ts`, and the first
+owners-only table in this module. Migrations `0313`/`0314`.
+
+- **THE REGULAR RATE IS NOT THE BASE RATE**, and `core/pay.ts` exists to get
+  that right. Overtime is paid on straight-time pay ÷ hours worked — a WEIGHTED
+  AVERAGE when somebody worked at two rates that week. Twenty hours at $20 and
+  twenty at $30 is $1,000 over forty hours, so the overtime rate is **$25**,
+  neither $20 nor $30. And the premium is HALF that on top of straight time
+  already paid, not 1.5× the rate: every worked hour is paid once, overtime
+  hours get an extra 0.5, double time an extra 1.0. `hours × 1.5 × rate` is
+  wrong QUIETLY — it gives the right answer for everybody on a single rate,
+  which is why it survives in so many systems. There is a test asserting the two
+  agree in exactly that case, and diverge in the other.
+- **Gross is the sum of four rounded parts**, not a rounded sum, so straight
+  time + overtime premium + double-time premium + leave always equals the figure
+  on the screen. A reader who adds the components up must not find a cent
+  missing.
+- **Paid leave never touches the regular rate.** It is not hours worked, so it
+  neither raises nor dilutes the average; it is paid at its own rate and added
+  at the end. Same family of error as counting it toward the 40 — and `pay.ts`
+  gets it right for the same reason `overtime.ts` does: `countsAsWorked` is one
+  predicate, asked in both places.
+- **Burden is a COST, never pay.** `payForWeek` has no burden argument at all,
+  which is the guarantee rather than a convention: an employer's tax cannot
+  reach an employee's gross by mistake. `costWithBurden` is a separate function
+  for the separate question, and it is slice 6's input.
+- **A change of pay is a new row.** Effective-dated, like `retainer_allotments`
+  and retail's pricing: overwriting would restate every week already worked.
+  `rateOnDate` returns nothing before the history begins rather than projecting
+  today's wage backwards over work done before it was agreed, and `payForWeek`
+  reports that as `incomplete` instead of quietly paying zero.
+- **`time_rates` IS OWNERS-ONLY IN RLS**, the first table here that is not
+  member-wide. `app_current_tenant_role() = 'owner'` in the policy, the shape
+  the Documents module's owners-only folders use. Two consequences: `withTenant`
+  defaults to `staff`, so a caller that forgets `{ role }` sees an empty table
+  rather than the wage bill — failing closed — and a superadmin in a live
+  support view resolves as `staff`, so support sees the hours and never the
+  wages, which falls out of back-office slice 4 rather than needing a rule here.
+- **An empty rate read means EITHER "there are none" OR "not for you"**, and
+  nothing downstream tries to tell them apart: both are "no figure to show", so
+  the money column is simply absent for a reader who may not see it. Six
+  isolation tests prove the policy, including that a staff context can neither
+  read a rate nor write one.
+- **The approval snapshot now freezes the money too.** Rates are effective-dated,
+  so a rate added later with a backdated start would otherwise silently restate
+  a period somebody has already been paid for. `gross_cents` is deliberately NOT
+  inside the `time_sheets_snapshot_with_approval` CHECK: null is legitimate for
+  a business that keeps no rates, and tying it to `approved_at` would refuse
+  that business an approval. The drive shows both cases — Marta's sheet froze at
+  `8400`, Sam's (approved in slice 3, before rates existed) is `null`.
+- **Meal-break premiums are NOT built**, and `time_breaks` with them — deferred
+  with no slice number rather than pushed to the next one. A missed meal break
+  is an hour's pay under California's rules, and detecting one needs break
+  records, which nothing captures. With no break data, "no meal break taken" is
+  indistinguishable from "this business does not record breaks", so the rule
+  would fire on every long shift ever logged and be wrong for everyone. It
+  arrives with break capture or not at all.
+- Verified: 22 new pure tests in `time-pay`, 39 isolation tests, the rest of the
+  suites, lint, `tsc` and the build green. `0313`/`0314` applied to dev AND
+  prod, both confirmed with `inspect-migration-state.ts` reporting no pending
+  migration; 187 tables each side, RLS clean.
+- **Driven on Hilltop Farm**: set Marta Quinn to $24.00/hr from 2026-09-01 with
+  18% on-costs, and her 3h 30m read **$84.00** — not $99.12, because the
+  on-costs are a cost and not pay. Approved it and confirmed `gross_cents = 8400`
+  froze on the sheet.
 
 ### 2026-09-12 — Slice 4: what the hour was for (`claude/time-4-what-it-was-for`)
 
@@ -584,14 +652,14 @@ FORCE RLS, a `--custom` policy migration and isolation coverage
 | `time_periods` | **Built** | The LOCK on a pay period | `starts_on`/`ends_on` stored (they must survive a change of pay frequency), `locked_at` + `locked_by`, CHECKed to arrive and leave together. A row exists once the period has been locked at least once; `locked_at is null` is open. No status column — there are two states and a timestamp says which, plus when |
 | `time_sheets` | **Built** | One worker's period, submitted then approved | A row exists once submitted; `approved_at is null` means waiting. The five totals plus `ruleset_slug` are the SNAPSHOT and are null until approval, CHECKed to arrive with it. Unique on `(tenant, worker, period_starts_on)`. Period dates stored, not referenced |
 | `time_entry_dimensions` | **Built** | What the hour was for | `entry_id` + denormalized `dimension_type` + `member_id`. Unique on `(tenant, entry, dimension_type)` so one member per kind; three-column FK to `dimension_members (tenant_id, dimension_type, id)` so the stated kind is the member's real one. Cascades from the entry; NO ACTION on the member, which is retired rather than deleted |
-| `time_rates` | 5 | Effective-dated pay | Cost rate, bill rate, burden percent, effective from. A change is a new row. Expected to carry an owners-only policy |
-| `time_breaks` | 5 | Meal and rest periods | Child of a punch. Paid flag, kind. Needed for premium rules, queryable rather than jsonb |
+| `time_rates` | **Built** | Effective-dated pay | `pay_rate_cents` (the wage, and the only input to gross), `bill_rate_cents` (nullable), `burden_percent` (0–200, a COST and never pay), `effective_on`. Unique on `(tenant, worker, effective_on)`. **The only owners-only table in the module**: its policy carries `app_current_tenant_role() = 'owner'` |
+| `time_breaks` | — | Meal and rest periods | Child of a punch. Paid flag, kind. **Deferred with no slice number**: a meal premium needs break records, and with none captured "no break taken" is indistinguishable from "we do not record breaks", so the rule would fire on every long shift. Arrives with break capture |
 
 ## Key files & seams
 
 Built in slice 0:
 
-- `src/db/schema/time.ts` — the three tables, re-exported by the barrel
+- `src/db/schema/time.ts` — the module's tables, re-exported by the barrel
 - `src/modules/time/TimeModule.tsx` — the week, at `/dashboard/m/time`
 - `src/app/dashboard/m/time/people/page.tsx` — who the business keeps hours for
 - `src/app/dashboard/m/time/pay/page.tsx` — one pay period, shown as its weeks
@@ -601,11 +669,12 @@ Built in slice 0:
   `countsAsWorked`), `rounding.ts` (nearest-only rounding and the long-punch
   threshold), `overtime.ts` (**the evaluator**), `rulesets.ts` (federal,
   California, none, as data), `periods.ts` (pay-period arithmetic and the
-  straddle rule), `errors.ts` (`TimeError`, `roleMayWrite`,
+  straddle rule), `pay.ts` (**the regular rate, the premiums and gross**),
+  `errors.ts` (`TimeError`, `roleMayWrite`,
   `roleMayManageWorkers`), `week.ts` (the weekday names and the strip's labels
   — the ARITHMETIC is `@/lib/timezone`'s)
 - `src/modules/time/read.ts`, `worker-ops.ts`, `entry-ops.ts`, `punch-ops.ts`,
-  `settings-ops.ts`, `sheet-ops.ts` — one writer per table, each taking the
+  `settings-ops.ts`, `sheet-ops.ts`, `rate-ops.ts` — one writer per table, each taking the
   caller's `tx`. `sheet-ops.ts` also holds `assertPeriodOpen`, the guard every
   write path calls, and `firstOpenDay`, which decides where a correction lands
 - `src/lib/dimensions.ts` — the SHARED dimension read, in Layer 0 because a
@@ -613,21 +682,28 @@ Built in slice 0:
 - `src/modules/time/attention/source.ts` — timesheets waiting to be approved,
   registered third in `src/lib/attention-sources/registry.ts`
 - `src/modules/time/components/sheet-controls.tsx` — submit, approve, lock
+- `src/modules/time/components/rate-controls.tsx` — set a rate, remove a rate,
+  and the one place dollars in a box become cents in the database
 - `src/modules/time/actions.ts` — gate → Zod → `withTenant` → revalidate. Two
   gates: `gate()` for writing time, `ownerGate()` for changing who the workers
   are
 - `tests/time-overtime.test.ts` (34 — the evaluator and the periods),
-  `tests/time-core.test.ts` (49), `tests/isolation/time.test.ts` (21), and the
+  `tests/time-pay.test.ts` (22 — the regular rate, the weighted average and the
+  ways of getting overtime pay wrong), `tests/time-core.test.ts` (49),
+  `tests/isolation/time.test.ts` (39, six of them on the rates policy), and the
   calendar arithmetic this module leans on in `tests/timezone.test.ts`
-- `docs/help/time/` — `overview.md`, `week.md`, `people.md`
+- `docs/help/time/` — `overview.md`, `week.md`, `pay-period.md`, `people.md`
 
 Planned, with the slice that brings them:
 
 - `src/lib/time/` — the verbs, so anything may log an hour without importing the
-  module (§4b's arrangement) — slice 4, when a second caller exists
-- `src/lib/time-targets/` — the declared slot: types, registry, resolve — slice 4
-- `src/modules/time/attention/source.ts`, `setup/source.ts`, `paste/target.ts`,
-  `tell/source.ts` — the four fillers, slices 8, 0–8, 7 and 7
+  module (§4b's arrangement) — **unscheduled**: slice 4 passed without a second
+  caller appearing, and one caller does not need a seam
+- `src/lib/time-targets/` — the declared slot: types, registry, resolve —
+  **unscheduled**, and slice 4 says why: `dimension_members` answered the
+  question the slot was invented for
+- `src/modules/time/setup/source.ts`, `paste/target.ts`, `tell/source.ts` —
+  the remaining fillers, slices 0–8, 7 and 7
 
 ## Decisions & gotchas
 
@@ -703,10 +779,22 @@ Written before the build so they are not rediscovered.
   hours has to work end to end — approvals included, where the approver and the
   worker are the same person. (The lesson from
   `one-of-everything-is-the-untested-case`.)
-- **A rate is not a secret, but it is close.** What someone is paid should not be
-  visible to every member. Expect a visibility rule on `time_rates` in the shape
-  the Documents module's owners-only folders use — `withTenant(..., { role })`
-  with the role that came from `requireTenant()`.
+- **A rate is not a secret, but it is close**, and since slice 5 the database
+  says so: `time_rates` carries `app_current_tenant_role() = 'owner'`, the shape
+  the Documents module's owners-only folders use. Read it with
+  `withTenant(..., { role: ctx.role })` and never with a role that did not come
+  from `requireTenant()`.
+- **`hours × 1.5 × rate` is the wrong formula and it looks right.** It agrees
+  with the correct one for everybody on a single rate, which is exactly why it
+  survives everywhere. Overtime is 0.5 × the REGULAR RATE — a weighted average
+  over the workweek — on top of straight time already paid.
+  `tests/time-pay.test.ts` pins both the agreement and the divergence.
+- **Burden must never reach gross.** `payForWeek` takes no burden argument at
+  all; that is the guarantee, not a convention. Cost is `costWithBurden`'s
+  question and it is asked somewhere else.
+- **`withTenant` defaults to `staff`, and on `time_rates` that is load-bearing.**
+  A read that forgets `{ role: ctx.role }` returns nothing, which is the right
+  failure. Never "fix" such a read by widening the default.
 
 ## Open items
 
@@ -719,8 +807,17 @@ Written before the build so they are not rediscovered.
   needs a 14-day window rather than a workweek, so it changes the evaluator's
   shape rather than adding a data file. Left until a healthcare client asks.
 - **Exempt is a whole-business setting today.** `none` turns overtime off for
-  everybody; a per-person exempt flag belongs on `time_workers` and arrives with
-  rates in slice 5.
+  everybody; a per-person exempt flag belongs on `time_workers`. Slice 5 was
+  supposed to bring it and did not: exemption is a test about duties and salary
+  basis, not a rate, and guessing it from a wage would be worse than leaving the
+  business to say so. Unscheduled, and waiting for somebody who needs it.
+- **Rates are whole cents per hour**, so $15.375 is not expressible. Right for a
+  wage, wrong for a blended or piece rate — revisit when slice 9's piece rate
+  arrives.
+- **No salary, bonus, shift differential or on-call pay.** Non-discretionary
+  bonuses and differentials belong IN the regular rate, which is why
+  `payForWeek` takes earnings rather than one rate: they can be added without
+  reshaping it.
 - Driven through slice 3 on the dev branch (Test tenant). Residue there: two
   workers, one punch, a fortnight of seeded hours on a biweekly payroll anchored
   to 2026-08-30, one approved sheet, one locked period and one correction.
@@ -731,6 +828,10 @@ Written before the build so they are not rediscovered.
   cheap fix; refusing the change outright is probably too strict.
 - The `time-targets` extension slot is designed and unbuilt, deliberately. It
   arrives with the first thing worth booking to that is not a dimension member.
+- **Nothing warns before a backdated rate re-prices an open period.** Saving one
+  silently changes every unapproved week after its date. Approved periods are
+  safe — that is what `gross_cents` on the sheet is for — but the screen should
+  say how many weeks moved, and it does not.
 - **A period is locked for everybody or nobody.** Locking one person's hours
   while another's stay open is not expressible, and nobody has asked for it. The Browser pane's `preview_start`
   launches from the session's working directory rather than an out-of-repo

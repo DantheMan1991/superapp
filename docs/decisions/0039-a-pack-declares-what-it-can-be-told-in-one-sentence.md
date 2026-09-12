@@ -1,7 +1,7 @@
 # 0039 — A pack declares what it can be told in one sentence, and its own verb records it
 
 - **Date:** 2026-09-09
-- **Status:** Accepted, amended by [0050](0050-a-safe-verb-records-itself.md) (a verb may declare that a complete card of it records itself; everything else here stands)
+- **Status:** Accepted, amended by [0050](0050-a-safe-verb-records-itself.md) (a verb may declare that a complete card of it records itself) and [0051](0051-the-way-in-is-the-shell-not-a-page.md) (the box lives in the shell, not on a page — superseding the placement consequence below); everything else here stands
 - **Affects:** `src/lib/tell-sources/` (a declared extension point), the livestock pack as its first filler, the daily round page
 
 ## Context
@@ -94,10 +94,13 @@ in the other hand, and the scale screen is already open.
 ## Consequences
 
 - No migration. Every action writes through a verb that already existed.
-- The box lives on the livestock daily round, because livestock is the only
+- ~~The box lives on the livestock daily round, because livestock is the only
   filler. When a second pack fills the slot the box belongs somewhere both
   can be reached from — What needs you — and moving it is a page change, not
-  a change to any source.
+  a change to any source.~~ **Both halves happened exactly as written, and
+  then ADR 0051 superseded the whole line**: the question it answers is "where
+  can it be reached from", which turns out not to be "where should the way in
+  live". The control is in the shell now, on every page.
 - A pack that composes another must wrap that one's refusals too: livestock's
   feed issues stock, so `InventoryError` and `LandError` arrive as legitimate
   refusals and are surfaced in their own words. The first version wrapped only

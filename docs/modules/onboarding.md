@@ -120,6 +120,46 @@ the farm's asset list until they say so.
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-12 — Say it from anywhere (`claude/speech-seam`)
+
+Voice slice 2, third pass. [ADR 0051](../decisions/0051-the-way-in-is-the-shell-not-a-page.md).
+No migration.
+
+The founder, on finding the box on What needs you: *"Why is this in the what
+needs me page? Shouldn't this be prominent in the side bar and probably every
+page?"*
+
+**ADR 0039's placement line answered the wrong question.** It said where the
+box could be REACHED FROM, and predicted the move to What needs you correctly
+to the letter. But 0039 opens by naming the cost it exists to remove — knowing
+which screen, while holding a bucket — and a control you must navigate to in
+order to avoid navigating is that cost one level up. Second time in a day that
+something built to save steps had quietly put them back; ADR 0050 was the
+first.
+
+`TellLauncher` is now in the dashboard layout: a floating microphone button,
+bottom right, every page. **Not the nav rail, which was the founder's own
+suggestion** — on a phone the rail is a drawer behind a hamburger, so a row in
+it would be three taps to reach a feature ADR 0050 had just got to one, on the
+device the whole thing is for. Bottom right because that is where a thumb is.
+
+**The press that opens it is the press that starts it.** The sheet opens
+already listening (`autoListen`), because somebody who pressed a microphone has
+said what they want. It closes itself once anything is recorded.
+
+One control, not two: the inline box is gone from `/dashboard/today`, and the
+guide content moved with it from `what-needs-you.md` to `getting-around.md`,
+which is the guide for the shell. Hidden on `/dashboard/guides/**`, the one
+place somebody is reading rather than doing.
+
+Driven at 375×812 on the dev branch: the button is present on the livestock
+daily round (a page it had never been on), the sheet rises from the bottom,
+tries to listen, and — the pane blocking the microphone — says `Yosher needs
+the microphone. Allow it, or type instead.` with the textarea ready. Absent on
+the guides shelf, as intended. **Not verified on a real handset**, so
+`env(safe-area-inset-bottom)` keeping it clear of the iPhone home indicator is
+reasoned and emulated rather than seen.
+
 ### 2026-09-12 — Four taps to start a clock (`claude/speech-seam`)
 
 Voice slice 2, second half. [ADR 0050](../decisions/0050-a-safe-verb-records-itself.md),

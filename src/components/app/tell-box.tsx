@@ -57,8 +57,21 @@ interface ActionView {
 export function TellBox({
   placeholder,
   speechConfigured = false,
+  autoListen = false,
+  onRecorded,
+  labelHidden = false,
 }: {
   placeholder?: string;
+  /** Start listening as soon as this mounts — the launcher's press was the tap. */
+  autoListen?: boolean;
+  /** Told after anything is recorded, so a sheet can close itself. */
+  onRecorded?: () => void;
+  /**
+   * Keep the label for a screen reader and take it off the screen. For the
+   * launcher's sheet, which already says this in its own heading — the words
+   * twice, six lines apart, read as two different boxes.
+   */
+  labelHidden?: boolean;
   /**
    * A speech vendor is set up on the server. Answered by the PAGE, because it
    * is a fact about the deployment and a client component cannot read an
@@ -129,6 +142,7 @@ export function TellBox({
       );
       reset();
       router.refresh();
+      onRecorded?.();
     });
   }
 
@@ -148,7 +162,10 @@ export function TellBox({
     <Panel className="p-4">
       <div className="space-y-3">
         <div className="space-y-1.5">
-          <Label htmlFor="tell-sentence" className="text-sm font-medium">
+          <Label
+            htmlFor="tell-sentence"
+            className={cn("text-sm font-medium", labelHidden && "sr-only")}
+          >
             Tell it what happened
           </Label>
           <Textarea
@@ -169,6 +186,7 @@ export function TellBox({
                 way to write to the herd (ADR 0039). */}
             <DictateButton
               serverConfigured={speechConfigured}
+              startOnMount={autoListen}
               disabled={reading}
               onText={(said) => {
                 // STRAIGHT INTO THE READING. Somebody who has just spoken a

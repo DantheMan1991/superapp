@@ -204,10 +204,19 @@ export function DictateButton({
   onText,
   disabled,
   serverConfigured,
+  startOnMount = false,
 }: {
   onText: (text: string) => void;
   disabled?: boolean;
   serverConfigured: boolean;
+  /**
+   * Begin listening the moment this mounts, without waiting for a press.
+   *
+   * For the floating launcher: the press already happened — it is what opened
+   * the sheet — and asking for a second one to start listening would put back
+   * the tap ADR 0050 removed.
+   */
+  startOnMount?: boolean;
 }) {
   // WHAT THIS BROWSER CAN DO IS NOT A PIECE OF STATE, it is a fact this
   // machine already knows — so it is read through `useSyncExternalStore` with
@@ -232,6 +241,20 @@ export function DictateButton({
   const stopAt = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ticker = useRef<ReturnType<typeof setInterval> | null>(null);
   const hush = useRef<(() => void) | null>(null);
+
+  // Fires ONCE, guarded by a ref rather than by the effect's dependencies: a
+  // re-render for any other reason must not start a second recording over the
+  // top of the first.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!startOnMount || autoStarted.current) return;
+    if (route === null || route === "none") return;
+    autoStarted.current = true;
+    toggle();
+    // `route` is the only input that can turn this from "cannot" to "can",
+    // and the ref stops it running twice.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route, startOnMount]);
 
   function clearTimers() {
     if (stopAt.current) clearTimeout(stopAt.current);

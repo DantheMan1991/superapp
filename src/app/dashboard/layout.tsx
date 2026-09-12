@@ -20,6 +20,8 @@ import {
 } from "@/lib/enterprises/vocabulary";
 import { AfterHydration } from "@/components/app/after-hydration";
 import { PushRegistration } from "@/components/app/push-registration";
+import { TellLauncher } from "@/components/app/tell-launcher";
+import { isServerSpeechConfigured } from "@/lib/speech/providers";
 import { SupportBanner } from "./support-banner";
 
 export const dynamic = "force-dynamic";
@@ -189,6 +191,12 @@ export default async function DashboardLayout({
     <>
     {/* Inside the app, the first page of a launch plays the launch animation over itself. */}
     {showLaunch && <LaunchOverlay />}
+    {/* SAY IT FROM ANYWHERE (ADR 0051). In the layout rather than on a page,
+        because the cost this removes is knowing which screen to go to — and a
+        control you have to navigate to in order to avoid navigating is not
+        removing it. Whether a speech vendor is configured is a fact about the
+        deployment, so the server answers it here once. */}
+    <TellLauncher speechConfigured={isServerSpeechConfigured()} />
     <AppShell
       contextLabel={ctx.tenant.name}
       navGroups={navGroups}

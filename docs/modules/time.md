@@ -5,7 +5,7 @@
 > knows the difference between overtime and a pay period, and an hour that
 > reaches the P&L tagged with the thing it was spent on. Core owns the
 > mechanism; an industry layer supplies the vocabulary and the odd pay rule.
-> Status: partial — slices 0–2 built (people, hours, the clock, the workweek and overtime); still seeded `coming_soon` until approval makes a period trustworthy · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: partial — slices 0–3 built (people, hours, the clock, the workweek and overtime, and submit/approve/lock). The case for staying `coming_soon` is now weaker: a locked period is trustworthy. The remaining gap is money — no rates, no export · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## The plan (agreed with the founder 2026-09-11)
 
@@ -217,6 +217,83 @@ farm-shaped remainder.
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-12 — Slice 3: submit, approve, lock (`claude/time-3-submit-approve-lock`)
+
+`time_periods` (the lock), `time_sheets` (worker × period), the amendment, and
+Time's first attention source. Migrations `0309`/`0310`.
+
+- **A row in `time_periods` IS the lock.** Slice 2 argued a period was not worth
+  storing until it could be locked; this is that. Created on the first lock and
+  then kept, with `locked_at` nulled on unlock — the row stays as the record
+  that these dates have been through a pay run. Who unlocked it is `audit_log`'s
+  business, not a pair of columns nothing would read.
+- **A row in `time_sheets` IS the submission**, and `approved_at is null` is
+  "waiting for somebody" — exactly the question the attention source asks, with
+  no status column needed. The arrangement `work_items.closed_at` already lives
+  by.
+- **The totals are a snapshot taken at approval**, computed by `totalsFor` — the
+  same function the pay period screen renders from. A snapshot that disagreed
+  with the figure the approver was looking at would be the worst kind of bug:
+  silent, and only visible in a pay run. `ruleset_slug` rides with it, because
+  the same hours under different rules are different money.
+- **Submitting is `staff`, approving and locking are `owner`**
+  (`roleMayApprove`). That split is the entire point of having two steps:
+  somebody who can approve their own hours has an approval that certifies
+  nothing.
+- **A locked period is immutable, and `assertPeriodOpen` is the guard** — named
+  after accounting's, which does the same job for the books. Every write path
+  calls it: `logTime` (a backdated entry changes a pay run as surely as an edit),
+  `updateEntry` (**both** days, so an entry can be moved neither into nor out of
+  a locked period), `deleteEntry`, and `clockOut`.
+- **Not an RLS rule, and `0310`'s header says why**: the rule depends on a date
+  range in another table, which a row policy cannot express.
+- **A correction is an amendment, never a rewrite.** `amends_entry_id` is a
+  composite self-FK with `ON DELETE NO ACTION`, so the entry a correction
+  corrects cannot be deleted out from under it. The original stays as the pay
+  run saw it.
+- **Time is the third attention source**, after Scheduling and Work. A submitted
+  sheet is somebody waiting at the owner's desk: it clears the moment the
+  decision is made, with nothing to mark read. `urgency: soon` and a null
+  `dueOn`, because a queue is not a deadline and dressing one up as overdue
+  would cry wolf beside an invoice that genuinely is. It carries a one-tap
+  Approve, which is the module's own server action rather than a second copy of
+  it.
+
+**TWO BUGS THE DRIVE FOUND, both of which the tests would not have.**
+
+1. **A person who only worked in the SECOND week of a fortnight could never
+   submit.** The sheet control was pinned to `weeks[0]`, so a new starter had no
+   button at all. It now renders on the first week that person appears in.
+2. **Every correction was refused as being in the future.** `assertEntryFields`
+   rejects a `work_date` after today — a typo guard — but a correction lands in
+   the first OPEN period, which is genuinely tomorrow or later whenever the
+   business locks the period it is standing in. `firstOpenDay` computes the
+   date server-side and the amendment path passes `allowFuture`. The guard
+   protects against a mistyped year, and a date the server chose cannot have
+   one.
+
+Both were interactions between guards that are each individually right, which is
+the class of defect a unit test is worst at and ten minutes in the product is
+best at.
+
+- **AND THE MIGRATION WAS SILENTLY STRANDED ON PRODUCTION**, which is the most
+  important thing in this entry. `npm run db:migrate` printed *Migrations
+  complete* and applied nothing: drizzle decides what to run from one
+  high-water row, and a parallel session had applied its own pair at 11:12 and
+  11:13 while `0309`/`0310` were stamped 11:07. The two tables were simply
+  absent from prod and the command said it was fine. Caught by running
+  `scripts/inspect-migration-state.ts` rather than believing the output.
+  Repaired by raising both stamps above the mark and moving dev's two ledger
+  rows to match, so the DDL still went to prod through the supported command.
+  **The standing rule is now in [conventions.md](../conventions.md): never
+  trust "Migrations complete", run the reconciler.**
+- Verified: 28 isolation tests, the pure suites, lint, `tsc` and the build
+  green. `0309`/`0310` applied to dev AND prod before the merge (ADR 0014),
+  `db:verify-rls` clean on both. **Driven end to end**: submit, approve (the
+  snapshot landed at 4,980 worked and 780 overtime minutes), lock, every day
+  turning `Locked` with `Edit` becoming `Correct`, and a 45-minute correction
+  landing on the first open day and linking back to its original.
 
 ### 2026-09-12 — Time wears the design system (`claude/time-wears-the-design-system`)
 
@@ -452,11 +529,11 @@ FORCE RLS, a `--custom` policy migration and isolation coverage
 | Table | Slice | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- | --- |
 | `time_workers` | **Built** | A person the business keeps hours for | Detail row on `parties` (kind `person`), the `crm_party_details` pattern. Unique on `(tenant_id, party_id)`; **partial** unique on `(tenant_id, clerk_user_id)` where not null. The PIN hash (slice 7), `entity_id` (slice 6), pay basis and exempt flag (slices 2 and 5) arrive with their readers |
-| `time_entries` | **Built** | The payable fact | Minutes, never decimal hours. Business day (`date`, string mode), `pay_type`, note, `entered_by_clerk_user_id`, `punch_id`, `source`, version. Composite FKs to `time_workers` (cascade) and `time_punches` (**SET NULL, column-list form**). Partial unique on `(tenant_id, punch_id)` — one entry per punch. CHECKs: minutes > 0, minutes ≤ 1440, `pay_type` and `source` each in their closed set. The target arrives in slice 4 |
+| `time_entries` | **Built** | The payable fact | Minutes, never decimal hours. Business day (`date`, string mode), `pay_type`, note, `entered_by_clerk_user_id`, `punch_id`, `source`, `amends_entry_id` (composite self-FK, NO ACTION), version. Composite FKs to `time_workers` (cascade) and `time_punches` (**SET NULL, column-list form**). Partial unique on `(tenant_id, punch_id)` — one entry per punch. CHECKs: minutes > 0, minutes ≤ 1440, `pay_type` and `source` each in their closed set. The target arrives in slice 4 |
 | `time_settings` | **Built** | One row per tenant, created lazily | `week_starts_on` (0–6), `rounding_minutes` (0, 5, 6, 10, 15, 30), `pay_frequency`, `period_anchor` and `overtime_ruleset`, all CHECKed, plus a CHECK that an anchor can exist only on a biweekly payroll. The ruleset is a SLUG naming a data file, never a set of thresholds. A missing row means the defaults, decided in the read rather than by a backfill |
 | `time_punches` | **Built** | Raw clock evidence | `timestamptz` in/out, who pressed each button, note, version. Composite FK to `time_workers`. Partial unique on `(tenant_id, worker_id) WHERE ended_at IS NULL` — one open punch, enforced by Postgres. CHECK `ended_at > started_at`. The device, the coordinates and the client-generated id for idempotent offline sync arrive in slice 7 with the screen that sends them |
-| `time_periods` | 3 | Materialised pay periods | Status open / closed / paid, `locked_at`. Moved from slice 2 to slice 3 once it was clear a period is pure arithmetic over `time_settings` until it can be APPROVED — approval state is the first fact about a period worth storing, and a table without it would have had no column anybody read |
-| `time_sheets` | 3 | Worker × period | submitted / approved / locked, actors and timestamps, **totals snapshot** |
+| `time_periods` | **Built** | The LOCK on a pay period | `starts_on`/`ends_on` stored (they must survive a change of pay frequency), `locked_at` + `locked_by`, CHECKed to arrive and leave together. A row exists once the period has been locked at least once; `locked_at is null` is open. No status column — there are two states and a timestamp says which, plus when |
+| `time_sheets` | **Built** | One worker's period, submitted then approved | A row exists once submitted; `approved_at is null` means waiting. The five totals plus `ruleset_slug` are the SNAPSHOT and are null until approval, CHECKed to arrive with it. Unique on `(tenant, worker, period_starts_on)`. Period dates stored, not referenced |
 | `time_entry_dimensions` | 4 | What the hour was for | The `dimension_members` link, so the P&L splits labor with no report code. Composite FK on `(tenant_id, …)` like every other referencing table |
 | `time_rates` | 5 | Effective-dated pay | Cost rate, bill rate, burden percent, effective from. A change is a new row. Expected to carry an owners-only policy |
 | `time_breaks` | 5 | Meal and rest periods | Child of a punch. Paid flag, kind. Needed for premium rules, queryable rather than jsonb |
@@ -479,7 +556,12 @@ Built in slice 0:
   `roleMayManageWorkers`), `week.ts` (the weekday names and the strip's labels
   — the ARITHMETIC is `@/lib/timezone`'s)
 - `src/modules/time/read.ts`, `worker-ops.ts`, `entry-ops.ts`, `punch-ops.ts`,
-  `settings-ops.ts` — one writer per table, each taking the caller's `tx`
+  `settings-ops.ts`, `sheet-ops.ts` — one writer per table, each taking the
+  caller's `tx`. `sheet-ops.ts` also holds `assertPeriodOpen`, the guard every
+  write path calls, and `firstOpenDay`, which decides where a correction lands
+- `src/modules/time/attention/source.ts` — timesheets waiting to be approved,
+  registered third in `src/lib/attention-sources/registry.ts`
+- `src/modules/time/components/sheet-controls.tsx` — submit, approve, lock
 - `src/modules/time/actions.ts` — gate → Zod → `withTenant` → revalidate. Two
   gates: `gate()` for writing time, `ownerGate()` for changing who the workers
   are
@@ -522,6 +604,15 @@ Written before the build so they are not rediscovered.
 - **Never fabricate a clock-out.** An open punch past a threshold raises an
   attention item and is closed by a person. An auto-close that silently invents
   hours is a payroll error with a paper trail pointing at us.
+- **Two guards that are each right can be wrong together.** Slice 3's drive
+  found both of this module's real bugs, and neither was a unit-test miss: a
+  sheet control pinned to the first week of a period hid itself from anybody who
+  started mid-fortnight, and the future-date typo guard refused every correction,
+  because a correction legitimately lands in the NEXT period. Walk the product
+  after wiring guards together.
+- **A correction's date is the server's to choose.** `firstOpenDay`, not
+  "today" — a business that locks the period it is standing in would otherwise
+  have nowhere to put one.
 - **No pyramiding, and it is the easiest thing here to break.** An hour already
   priced by a DAILY rule must not face the weekly test again. `evaluateWeek`
   does that by summing each day's STRAIGHT minutes for the weekly comparison,
@@ -570,9 +661,16 @@ Written before the build so they are not rediscovered.
 - **Exempt is a whole-business setting today.** `none` turns overtime off for
   everybody; a per-person exempt flag belongs on `time_workers` and arrives with
   rates in slice 5.
-- Driven through slice 2 on the dev branch (Test tenant). Residue there: two
-  workers, one punch, a fortnight of seeded hours, and a biweekly payroll
-  anchored to 2026-08-30. The Browser pane's `preview_start`
+- Driven through slice 3 on the dev branch (Test tenant). Residue there: two
+  workers, one punch, a fortnight of seeded hours on a biweekly payroll anchored
+  to 2026-08-30, one approved sheet, one locked period and one correction.
+- **Changing the pay frequency after a sheet is approved is unguarded.** The
+  sheet keeps the period dates it was approved for, so nothing is lost or
+  restated — but it will no longer line up with any period the screen computes,
+  so it simply stops being visible. A warning on the frequency picker is the
+  cheap fix; refusing the change outright is probably too strict.
+- **A period is locked for everybody or nobody.** Locking one person's hours
+  while another's stay open is not expressible, and nobody has asked for it. The Browser pane's `preview_start`
   launches from the session's working directory rather than an out-of-repo
   worktree, so the session that built slice 0 could not drive its own code, and
   the main checkout was held by a parallel session's dev server. To look: switch

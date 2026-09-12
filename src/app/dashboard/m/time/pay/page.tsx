@@ -19,8 +19,15 @@ import {
 import { evaluateWeek, hasPremium } from "@/modules/time/core/overtime";
 import { rulesetFor } from "@/modules/time/core/rulesets";
 import { weekLabel } from "@/modules/time/core/week";
+import { roleMayApprove, roleMayWrite } from "@/modules/time/core/errors";
+import {
+  ApproveSheetButtons,
+  PeriodLockButton,
+  SubmitSheetButton,
+} from "@/modules/time/components/sheet-controls";
 import { listEntries } from "@/modules/time/read";
 import { getTimePrefs } from "@/modules/time/settings-ops";
+import { getPeriodLock, listSheets } from "@/modules/time/sheet-ops";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +46,81 @@ export const dynamic = "force-dynamic";
  * deliberately so: a period is arithmetic over the settings until slice 3 gives
  * it approval state, which is the first fact about a period worth storing.
  */
+/** "40h regular · 10h overtime", for the approve dialog and nothing else. */
+function summarise(
+  buckets: { regularMinutes: number; overtimeMinutes: number; doubleTimeMinutes: number },
+  paidNotWorked: number,
+): string {
+  return [
+    `${formatDuration(buckets.regularMinutes)} regular`,
+    buckets.overtimeMinutes > 0
+      ? `${formatDuration(buckets.overtimeMinutes)} overtime`
+      : null,
+    buckets.doubleTimeMinutes > 0
+      ? `${formatDuration(buckets.doubleTimeMinutes)} double time`
+      : null,
+    paidNotWorked > 0 ? `${formatDuration(paidNotWorked)} paid leave` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/**
+ * Where one person's period has got to, and what can be done about it next.
+ *
+ * THE CONTROL IS DECIDED BY THE SAME PREDICATES THE ACTION'S GATE USES
+ * (`roleMayWrite`, `roleMayApprove`), so a button is never drawn for somebody
+ * whose press would be refused — the mistake the permissions sweep of
+ * 2026-09-04 found on six screens.
+ */
+function SheetState({
+  sheet,
+  workerId,
+  name,
+  on,
+  summary,
+  canWrite,
+  canApprove,
+  isLocked,
+}: {
+  sheet: { id: string; version: number; approvedAt: Date | null } | undefined;
+  workerId: string;
+  name: string;
+  on: string;
+  summary: string;
+  canWrite: boolean;
+  canApprove: boolean;
+  isLocked: boolean;
+}) {
+  if (sheet?.approvedAt) {
+    return (
+      <span className="rounded-full bg-success/12 px-2 py-0.5 text-[11px] text-success-foreground">
+        Approved
+      </span>
+    );
+  }
+  if (sheet) {
+    return (
+      <span className="flex items-center gap-2">
+        <span className="rounded-full bg-warning/10 px-2 py-0.5 text-[11px] text-warning-foreground">
+          Waiting for approval
+        </span>
+        {canApprove && (
+          <ApproveSheetButtons
+            sheetId={sheet.id}
+            version={sheet.version}
+            name={name}
+            summary={summary}
+          />
+        )}
+      </span>
+    );
+  }
+  // Nothing submitted. A locked period is past the point of submitting.
+  if (isLocked || !canWrite) return null;
+  return <SubmitSheetButton workerId={workerId} on={on} name={name} />;
+}
+
 export default async function PayPeriodPage({
   searchParams,
 }: {
@@ -53,7 +135,7 @@ export default async function PayPeriodPage({
   const today = todayInTimezone(ctx.tenant.timezone);
   const anchorDate = asked && isDateString(asked) ? asked : today;
 
-  const { prefs, rows } = await withTenant(
+  const { prefs, rows, sheets, lock } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
       const prefs = await getTimePrefs(tx, ctx.tenant.id);
@@ -73,6 +155,8 @@ export default async function PayPeriodPage({
       return {
         prefs,
         rows: await listEntries(tx, ctx.tenant.id, { from, to }),
+        sheets: await listSheets(tx, ctx.tenant.id, period),
+        lock: await getPeriodLock(tx, ctx.tenant.id, period.start),
       };
     },
     { role: ctx.role, userId: ctx.userId },
@@ -86,6 +170,10 @@ export default async function PayPeriodPage({
   const period = payPeriodFor(anchorDate, settings);
   const weeks = workweeksPaidIn(period, prefs.weekStartsOn);
   const ruleset = rulesetFor(prefs.overtimeRuleset);
+  const canWrite = roleMayWrite(ctx.role);
+  const canApprove = roleMayApprove(ctx.role);
+  const isLocked = lock?.lockedAt != null;
+  const sheetByWorker = new Map(sheets.map((s) => [s.workerId, s]));
   const isThisPeriod =
     today >= period.start && today <= period.end;
 
@@ -133,6 +221,22 @@ export default async function PayPeriodPage({
     });
     return { week: w, workers: workers.filter((x) => x.buckets.workedMinutes > 0 || x.paidNotWorked > 0) };
   });
+
+  /*
+   * WHERE EACH PERSON'S SHEET CONTROL GOES. A sheet covers the whole period,
+   * so the control must appear exactly once per person — but pinning it to the
+   * first WEEK of the period hid it from anybody who only worked in the second,
+   * which is how a fortnight's new starter would never have been able to submit
+   * at all. Found by driving. It goes on the first week that person appears in.
+   */
+  const firstWeekFor = new Map<string, string>();
+  for (const { week: w, workers } of perWeek) {
+    for (const worker of workers) {
+      if (!firstWeekFor.has(worker.workerId)) {
+        firstWeekFor.set(worker.workerId, w.start);
+      }
+    }
+  }
 
   const anyRows = perWeek.some((p) => p.workers.length > 0);
   const totals = perWeek.flatMap((p) => p.workers).reduce(
@@ -195,12 +299,31 @@ export default async function PayPeriodPage({
             </Link>
           </Button>
         </div>
-        {!isThisPeriod && (
-          <Button asChild variant="outline" size="sm">
-            <Link href="/dashboard/m/time/pay">This period</Link>
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {!isThisPeriod && (
+            <Button asChild variant="outline" size="sm">
+              <Link href="/dashboard/m/time/pay">This period</Link>
+            </Button>
+          )}
+          {canApprove && anyRows && (
+            <PeriodLockButton
+              on={period.start}
+              locked={isLocked}
+              label={periodLabel(period)}
+            />
+          )}
+        </div>
       </div>
+
+      {/* Said once, at the top, because it explains every missing Edit button
+          on the week screen as well as everything on this one. */}
+      {isLocked && (
+        <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
+          This period is locked. Nothing in these dates can be changed — a
+          mistake found now is put right by adding a correction in the open
+          period, which leaves the original as your pay run saw it.
+        </p>
+      )}
 
       {/* Said plainly, because a reader has to be able to check it against what
           their payroll company does. */}
@@ -267,6 +390,24 @@ export default async function PayPeriodPage({
                         <span className="text-xs text-subtle-foreground">
                           no overtime
                         </span>
+                      )}
+                      {/*
+                        THE STATE AND THE VERB SIT TOGETHER, and only on the
+                        first week of the period: a sheet covers the whole
+                        period, not one week inside it, so repeating the button
+                        on each week would offer the same act twice.
+                      */}
+                      {firstWeekFor.get(w2.workerId) === w.start && (
+                        <SheetState
+                          sheet={sheetByWorker.get(w2.workerId)}
+                          workerId={w2.workerId}
+                          name={w2.name}
+                          on={period.start}
+                          summary={summarise(w2.buckets, w2.paidNotWorked)}
+                          canWrite={canWrite}
+                          canApprove={canApprove}
+                          isLocked={isLocked}
+                        />
                       )}
                     </li>
                   ))}

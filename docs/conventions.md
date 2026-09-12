@@ -182,6 +182,28 @@ a feature PR; **import `@/lib/money` in new code.**
   matches on the exact `when`, which is the second reason not to invent a new
   one. First hit 2026-09-09, `0281` twice
   ([inventory.md](modules/inventory.md)).
+- **`db:migrate` CAN REPORT SUCCESS WITHOUT APPLYING YOUR MIGRATION.** Drizzle
+  decides what to run from a single high-water row — `Number(lastDbMigration
+  .created_at) < migration.folderMillis` — so a migration whose `when` is
+  BELOW the newest applied stamp is skipped in silence, and the command still
+  prints "Migrations complete." That is not only the renumber trap above: a
+  PARALLEL SESSION that migrates the same database while you are working raises
+  the mark past your unapplied stamp, and your migration is then stranded
+  forever. First hit 2026-09-12 on production, by Time slice 3 (`0309`/`0310`
+  generated at 11:07, another session's pair applied at 11:12 and 11:13); the
+  tables were simply absent and nothing said so.
+  **So: never trust "Migrations complete" — run `npx tsx
+  scripts/inspect-migration-state.ts [--dev]` afterwards and read the PENDING
+  line.** It is the only thing that compares the journal against what the
+  database actually has.
+  The repair when it happens: raise the stranded migration's `when` above the
+  newest applied stamp, and — for any database where it IS already applied —
+  update that database's `drizzle.__drizzle_migrations.created_at` to the new
+  stamp in the same breath, or the next run re-applies it. The DDL itself should
+  still go through `npm run db:migrate`; only the ledger is edited by hand.
+  Note this is the exact opposite instruction to the renumber rule above, and
+  the two are told apart by one question: **is this migration already applied to
+  the database in front of you?** Applied, keep the stamp. Stranded, raise it.
 - **A composite FK cannot take a bare `ON DELETE SET NULL`.** Postgres nulls
   every referencing column, `tenant_id` included, and `tenant_id` is NOT NULL on
   every tenant table — so the delete fails with a not-null violation instead of

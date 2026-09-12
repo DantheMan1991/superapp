@@ -7,13 +7,26 @@ import { logAuditInTx } from "@/lib/audit";
 import { requireTenant, type TenantContext } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { todayInTimezone, zonedTimeToInstant } from "@/lib/timezone";
-import { TimeError, friendlyMessage, roleMayManageWorkers, roleMayWrite } from "./core/errors";
+import {
+  TimeError,
+  friendlyMessage,
+  roleMayApprove,
+  roleMayManageWorkers,
+  roleMayWrite,
+} from "./core/errors";
 import { PAY_TYPES } from "./core/pay-types";
-import { PAY_FREQUENCIES } from "./core/periods";
+import { PAY_FREQUENCIES, payPeriodFor } from "./core/periods";
 import { isRoundingChoice } from "./core/rounding";
 import { isRulesetSlug } from "./core/rulesets";
 import { DATE_FORMAT } from "./core/week";
-import { deleteEntry, logTime, updateEntry } from "./entry-ops";
+import { amendEntry, deleteEntry, logTime, updateEntry } from "./entry-ops";
+import {
+  approveSheet,
+  lockPeriod,
+  returnSheet,
+  submitSheet,
+  unlockPeriod,
+} from "./sheet-ops";
 import { clockIn, clockOut, cancelPunch, adjustPunchStart } from "./punch-ops";
 import {
   getTimePrefs,
@@ -562,6 +575,208 @@ export async function setOvertimeRulesetAction(
     );
     revalidate();
     return { ok: true };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+/*
+ * ── SUBMIT, APPROVE, LOCK ────────────────────────────────────────────────────
+ *
+ * Submitting is a `staff` chore and approving is an `owner` decision, and the
+ * split is the whole point of having two steps: somebody who can both submit
+ * and approve their own hours has an approval that certifies nothing.
+ * `roleMayApprove` is the predicate and the screens ask it too.
+ *
+ * Approving and locking are AUDITED. They are the two acts in this module with
+ * a money consequence, and "who agreed these hours?" must have an answer that
+ * is not "nobody remembers".
+ */
+
+async function approverGate(): Promise<TenantContext> {
+  const ctx = await gate();
+  if (!roleMayApprove(ctx.role)) {
+    throw new TimeError("FORBIDDEN", "only an owner approves hours");
+  }
+  return ctx;
+}
+
+/** The pay period a date falls in, under the tenant's current settings. */
+async function periodFor(ctx: TenantContext, on: string) {
+  return await withTenant(
+    ctx.tenant.id,
+    async (tx) => {
+      const prefs = await getTimePrefs(tx, ctx.tenant.id);
+      return {
+        prefs,
+        period: payPeriodFor(on, {
+          frequency: prefs.payFrequency,
+          weekStartsOn: prefs.weekStartsOn,
+          anchor: prefs.periodAnchor,
+        }),
+      };
+    },
+    { role: ctx.role, userId: ctx.userId },
+  );
+}
+
+const submitSchema = z.object({
+  workerId: uuidSchema,
+  /** Any day inside the period being submitted. */
+  on: dateSchema,
+});
+
+export async function submitSheetAction(
+  input: z.input<typeof submitSchema>,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    const ctx = await gate();
+    const parsed = submitSchema.parse(input);
+    const { period } = await periodFor(ctx, parsed.on);
+    const id = await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        submitSheet(tx, ctx.tenant.id, {
+          workerId: parsed.workerId,
+          period,
+          actorClerkUserId: ctx.userId,
+        }),
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return { ok: true, data: { id } };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const approveSchema = z.object({
+  sheetId: uuidSchema,
+  expectedVersion: z.number().int().positive(),
+});
+
+export async function approveSheetAction(
+  input: z.input<typeof approveSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await approverGate();
+    const parsed = approveSchema.parse(input);
+    await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        const prefs = await getTimePrefs(tx, ctx.tenant.id);
+        const totals = await approveSheet(tx, ctx.tenant.id, {
+          sheetId: parsed.sheetId,
+          expectedVersion: parsed.expectedVersion,
+          actorClerkUserId: ctx.userId,
+          prefs,
+        });
+        await logAuditInTx(tx, {
+          action: "time.sheet.approved",
+          tenantId: ctx.tenant.id,
+          actorClerkUserId: ctx.userId,
+          targetType: "time_sheet",
+          targetId: parsed.sheetId,
+          // Minutes and a ruleset slug, no names: the audit log records what
+          // was agreed, never who it was about.
+          meta: {
+            workedMinutes: totals.workedMinutes,
+            overtimeMinutes: totals.overtimeMinutes,
+            doubleTimeMinutes: totals.doubleTimeMinutes,
+            ruleset: totals.rulesetSlug,
+          },
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return { ok: true };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const sheetIdSchema = z.object({ sheetId: uuidSchema });
+
+export async function returnSheetAction(
+  input: z.input<typeof sheetIdSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await approverGate();
+    const { sheetId } = sheetIdSchema.parse(input);
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => returnSheet(tx, ctx.tenant.id, sheetId),
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return { ok: true };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const lockSchema = z.object({ on: dateSchema, locked: z.boolean() });
+
+export async function setPeriodLockAction(
+  input: z.input<typeof lockSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await approverGate();
+    const parsed = lockSchema.parse(input);
+    const { period } = await periodFor(ctx, parsed.on);
+    await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        if (parsed.locked) {
+          await lockPeriod(tx, ctx.tenant.id, period, ctx.userId);
+        } else {
+          await unlockPeriod(tx, ctx.tenant.id, period.start);
+        }
+        await logAuditInTx(tx, {
+          action: parsed.locked ? "time.period.locked" : "time.period.unlocked",
+          tenantId: ctx.tenant.id,
+          actorClerkUserId: ctx.userId,
+          targetType: "time_period",
+          targetId: period.start,
+          meta: { startsOn: period.start, endsOn: period.end },
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return { ok: true };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const amendSchema = z.object({
+  originalEntryId: uuidSchema,
+  minutes: minutesSchema,
+  workDate: dateSchema,
+  payType: payTypeSchema,
+  note: noteSchema,
+});
+
+export async function amendEntryAction(
+  input: z.input<typeof amendSchema>,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    const ctx = await gate();
+    const parsed = amendSchema.parse(input);
+    const id = await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        amendEntry(tx, ctx.tenant.id, {
+          ...parsed,
+          enteredByClerkUserId: ctx.userId,
+          today: todayInTimezone(ctx.tenant.timezone),
+        }),
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return { ok: true, data: { id } };
   } catch (error) {
     return fail(error);
   }

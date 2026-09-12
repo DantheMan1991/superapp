@@ -24,6 +24,12 @@ export type TimeErrorCode =
   | "PAY_FREQUENCY_INVALID"
   | "PERIOD_ANCHOR_REQUIRED"
   | "RULESET_INVALID"
+  | "PERIOD_LOCKED"
+  | "PERIOD_NOT_LOCKED"
+  | "SHEET_NOT_FOUND"
+  | "SHEET_EXISTS"
+  | "SHEET_ALREADY_APPROVED"
+  | "AMEND_NOT_LOCKED"
   | "PUNCH_NOT_FOUND"
   | "ALREADY_CLOCKED_IN"
   | "PUNCH_ALREADY_ENDED"
@@ -87,6 +93,18 @@ export function friendlyMessage(err: unknown): string {
       return "Say which day a pay period starts on.";
     case "RULESET_INVALID":
       return "Pick which overtime rules you follow.";
+    case "PERIOD_LOCKED":
+      return "That pay period is locked. Add a correction in the open period instead.";
+    case "PERIOD_NOT_LOCKED":
+      return "That pay period is not locked.";
+    case "SHEET_NOT_FOUND":
+      return "That timesheet could not be found.";
+    case "SHEET_EXISTS":
+      return "This period has already been sent for approval.";
+    case "SHEET_ALREADY_APPROVED":
+      return "That timesheet has already been approved.";
+    case "AMEND_NOT_LOCKED":
+      return "That entry can still be edited — change it rather than correcting it.";
     case "PUNCH_NOT_FOUND":
       return "That clock could not be found.";
     case "ALREADY_CLOCKED_IN":
@@ -145,5 +163,18 @@ export function roleMayWrite(role: TimeRole): boolean {
  * is the one `ps_time_entries` already lives by.
  */
 export function roleMayManageWorkers(role: TimeRole): boolean {
+  return role === "owner";
+}
+
+/**
+ * **May this role APPROVE a timesheet, or lock a period?**
+ *
+ * Owners. Submitting is a `staff` chore — the person who did the work says it
+ * is ready — but agreeing it, and deciding the hours stop moving, is the
+ * decision somebody is paid on. Separating the two is the whole point of having
+ * a submit step: a person who can both submit and approve their own hours has
+ * an approval that certifies nothing.
+ */
+export function roleMayApprove(role: TimeRole): boolean {
   return role === "owner";
 }

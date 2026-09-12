@@ -5,6 +5,7 @@ import { dateInTimezone } from "@/lib/timezone";
 import { MAX_ENTRY_MINUTES } from "./core/duration";
 import { TimeError } from "./core/errors";
 import { minutesBetween, roundMinutes } from "./core/rounding";
+import { assertPeriodOpen } from "./sheet-ops";
 
 /**
  * The clock. ONE WRITER per table; every function takes the caller's `tx` and
@@ -119,6 +120,14 @@ export async function clockOut(
   const paidMinutes = roundMinutes(rawMinutes, input.roundingMinutes);
   const note = input.note.trim() || punch.note;
   const workDate = dateInTimezone(punch.startedAt, input.timezone);
+
+  /*
+   * CHECKED BEFORE THE PUNCH IS CLOSED, so a clock left running across a pay
+   * run cannot silently add hours to a period somebody has already been paid
+   * for. The clock keeps running and the message says what to do — refusing is
+   * better than closing it into a period that will not accept the entry.
+   */
+  await assertPeriodOpen(tx, tenantId, workDate);
 
   await tx
     .update(schema.timePunches)

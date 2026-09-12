@@ -11,7 +11,7 @@ Time records what was worked. [Work](../work/overview.md) records what still has
 ## What you see
 
 - **Time.** The week. Everybody's hours, newest day first, with a running total for the week and for each day, every clock that is running right now, and each person's regular and overtime hours. This is where you start a clock or log an hour. See [The week](week.md).
-- **Pay period.** The same hours grouped the way you pay them, broken into the weeks inside the period. Read this before you run payroll. See [The pay period](pay-period.md).
+- **Pay period.** The same hours grouped the way you pay them, broken into the weeks inside the period. Where hours are sent for approval, approved, and the period locked once payroll is run. Read this before you pay anybody. See [The pay period](pay-period.md).
 - **People.** Everybody whose hours this business keeps, and the four settings behind every figure: your week start, rounding, how often people are paid, and which overtime rules you follow. Owners work here. See [People](people.md).
 
 ## How to start from nothing
@@ -24,7 +24,7 @@ Time records what was worked. [Work](../work/overview.md) records what still has
 
 ## Not on this page
 
-Plenty, and all of it is coming. Nobody approves a week or locks a period, you cannot say which part of the business an hour was spent on, and Time does not know what anyone is paid — so it deals in hours, never money. There is no export for your payroll provider yet. Every one of those is planned. Ask us where it is up to.
+Plenty, and all of it is coming. You cannot say which part of the business an hour was spent on, and Time does not know what anyone is paid — so it deals in hours, never money. There is no export for your payroll provider yet. Both are planned. Ask us where it is up to.
 
 Time also does not run your payroll and is not going to. When it can work out gross pay, it will hand that to whoever does your payroll rather than calculating tax.
 

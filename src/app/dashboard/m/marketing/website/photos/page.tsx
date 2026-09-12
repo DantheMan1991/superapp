@@ -8,7 +8,7 @@ import { templateFor } from "@/lib/site-templates/resolve";
 import { chooseSite } from "@/lib/sites/choose";
 import { loadSiteDrafts } from "@/lib/sites/read";
 import { listSites } from "@/modules/marketing/site-ops";
-import { isStarterPhoto, pageSpots, shotNotesFor } from "@/lib/sites/shots";
+import { isStarterPhoto, pageSpots, readShotNotes, shotNotesFor, withStoredNotes } from "@/lib/sites/shots";
 import { PageHeader } from "@/components/app/page-header";
 import { assistantOn } from "@/modules/marketing/assistant";
 import { ShotList, type ShotPageView } from "@/modules/marketing/components/shot-list";
@@ -50,7 +50,13 @@ export default async function ShotListRoute({
       id: row?.id ?? page.path,
       path: page.path,
       title: page.title,
-      spots: pageSpots({ path: page.path, content: page.content }, starters, notes),
+      // The written notes, where they still describe the words they were
+      // written from (slice 19); a spot whose section changed reads the
+      // standing line again.
+      spots: withStoredNotes(
+        pageSpots({ path: page.path, content: page.content }, starters, notes),
+        readShotNotes(row?.shotNotes),
+      ),
     };
   });
   return (

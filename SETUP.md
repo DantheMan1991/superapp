@@ -490,6 +490,35 @@ key:
 Everything else in the app works without this key — only the Discovery
 copilot needs it.
 
+## Part 4.55 — Speech: Deepgram (optional, 3 min)
+
+Lets somebody press **Say it** on the "Tell it what happened" box and speak
+instead of typing. Everything works without it — the box still takes typing,
+and the mic button says so rather than failing when pressed.
+
+**Only a BROWSER needs this.** Inside the Yosher mobile app the phone's own
+speech engine does the work: nothing is uploaded, nothing is charged, and the
+audio never leaves the handset (ADR 0049).
+
+1. Sign up at [console.deepgram.com](https://console.deepgram.com).
+2. **API keys** → **Create a New API Key** → name it `yosher` → copy it. It is
+   shown only once.
+3. Paste it into `.env` as `DEEPGRAM_API_KEY` and restart the dev server.
+4. If deployed: add `DEEPGRAM_API_KEY` to the Vercel environment variables and
+   redeploy.
+
+**Cost.** Billed per minute of audio, and a sentence is a few seconds — a
+clock-in costs a small fraction of a cent. Deepgram's free tier covers far more
+dictation than a pilot will produce.
+
+**Audio is never stored.** It goes from the browser, through this server, to
+Deepgram, and is dropped when the request ends. Nothing is written to blob
+storage, nothing is logged, and the transcript is not saved either — it lands
+in the box for a person to read before anything is recorded.
+
+**Swapping vendors** is one file: `src/lib/speech/providers.ts` holds the
+contract and one implementation, and the registry at the bottom names it.
+
 ## Part 4.6 — Banking: encryption key + Plaid (accounting module)
 
 The accounting module's Banking tool needs two more things in `.env`:

@@ -120,6 +120,90 @@ the farm's asset list until they say so.
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-12 — Say it instead of typing it (`claude/speech-seam`)
+
+Voice slice 2, [ADR 0049](../decisions/0049-speech-is-a-fork-in-the-road-not-a-provider.md).
+No migration, and nothing about speech is persisted.
+
+The founder chose "both, behind a seam" from three options: the phone's own
+engine, a server vendor, or both. This is the web half of both.
+
+**The seam is a FORK, not a provider interface**, and that is the thing to know
+before touching it. Every other extension point here declares a contract and
+lets several fillers implement it. Speech cannot, because the two engines do
+not run in the same place — the device engine runs on the handset and has no
+server side to implement. So `pickSpeechRoute` (pure, in `speech/types.ts`) is
+the seam, and only the `server` branch has a registry behind it.
+
+| route | where | cost | audio |
+| --- | --- | --- | --- |
+| `device` | the handset, via the app shell | nothing | never leaves it |
+| `server` | our server calls Deepgram | per minute | leaves to a third party |
+
+**The device engine wins whenever it exists.** Free, no upload, stays on the
+handset. Preferring the paid and less private route because it is more uniform
+would be the wrong default to reach for.
+
+**The probe is a runtime question, never an assumption from the user agent.**
+`deviceEngine` asks whether `window.Capacitor.Plugins.SpeechRecognition` is
+there RIGHT NOW. Being inside the app is not enough — somebody's phone is two
+store releases behind, and ADR 0032's "the web decides what the app shows" cuts
+both ways, so the web has to keep working on every version still installed. An
+old app falls through to the server route; a new one takes the device route
+with no web deploy. **That is why the web half of device speech ships before
+the plugin exists**: it is the compatibility surface that lets the plugin land
+as a pure `mobile/` change, not dead code waiting on a feature.
+
+**Nothing is stored.** Audio arrives in memory, goes to the vendor, and is
+dropped when the request ends — no blob storage, no log line, no row. The
+transcript is not written either: it goes back to the browser and into the
+textarea, and nothing reaches a tenant's data until a person presses the box's
+own button. Saying something out loud is not a second way to write to the herd.
+
+**Tap to start, tap to stop**, not press-and-hold: this is used outdoors in
+gloves, where a finger sliding off mid-sentence truncates what somebody said
+with no way to tell. It stops itself at 30 seconds, with a countdown in the
+last ten so the stop is never a surprise. The microphone track is always
+released on stop — a tab holding it keeps the browser's recording indicator
+lit, which reads as "this app is listening to me".
+
+`DEEPGRAM_API_KEY` is a new OPTIONAL variable (SETUP.md Part 4.55). Absent
+everywhere as this lands, which is why the verified state is the one below.
+
+#### What was verified, and what was not
+
+Driven on the dev branch, signed in as Hilltop Farm:
+
+- **No key** — the box reads `Talking to Yosher is not switched on for this
+  platform yet. Type instead.` and there is no button to press. The probe →
+  route → render path, end to end.
+- **With a placeholder key** — the button renders as `Say it` with the mic
+  icon beside `Read it`, `aria-label="Say it instead of typing"`. The key was
+  removed afterwards.
+
+**NOT verified: the vendor call itself.** There is no Deepgram key on this
+machine or in any environment, so `deepgramProvider.transcribe` has never run
+against the live API. Its response parsing is tested against the documented
+shape (`tests/speech-seam.test.ts`) and the network call is not — first use
+with a real key should be treated as a first use.
+
+**NOT verified: recording.** `getUserMedia` needs a microphone and a permission
+prompt, neither of which this machine can give a headless pane.
+
+#### Open items this leaves
+
+- **No durable rate limit on `/api/tell/transcribe`.** A signed-in session, a
+  2 MB cap and a 30-second recorder are what bound the cost. A counter would be
+  a table, and a table is a migration for something a person has to hold a
+  button to do.
+- **`SpeechInput.vocabulary` is in the contract and not yet supplied.** Feeding
+  the tenant's own pen and paddock names to the vendor is the obvious next
+  accuracy win — the slice 0 drive failed on exactly that, where "the cows"
+  matched no lot — but reading them costs the same queries `proposeTold` is
+  about to make again, and doing it well means doing it once for both.
+- **Slice 2b is the plugin**, entirely inside `mobile/`, and needs a store
+  release plus a real handset to verify.
+
 ### 2026-09-12 — The box leaves livestock, and learns what time it is (`claude/tell-clock-in`)
 
 Voice slice 1. No migration. The slot itself, rather than a new filler of it —

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Panel } from "@/components/app/panel";
+import { DictateButton } from "@/components/app/dictate-button";
 import {
   Select,
   SelectContent,
@@ -51,7 +52,19 @@ interface ActionView {
  * fields, the choices and the words all come from the pack that declared the
  * action.
  */
-export function TellBox({ placeholder }: { placeholder?: string }) {
+export function TellBox({
+  placeholder,
+  speechConfigured = false,
+}: {
+  placeholder?: string;
+  /**
+   * A speech vendor is set up on the server. Answered by the PAGE, because it
+   * is a fact about the deployment and a client component cannot read an
+   * environment variable. False means the mic falls back to the phone's own
+   * engine, or to nothing.
+   */
+  speechConfigured?: boolean;
+}) {
   const router = useRouter();
   const [sentence, setSentence] = useState("");
   const [cards, setCards] = useState<TellCard[] | null>(null);
@@ -139,7 +152,20 @@ export function TellBox({ placeholder }: { placeholder?: string }) {
         </div>
 
         {cards === null ? (
-          <div className="flex justify-end">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {/* Dictation only ever produces TEXT, which lands in the box above
+                exactly as if it had been typed. The reading step, the cards and
+                the button are unchanged — saying it out loud is not a second
+                way to write to the herd (ADR 0039). */}
+            <DictateButton
+              serverConfigured={speechConfigured}
+              disabled={reading}
+              onText={(said) =>
+                setSentence((now) =>
+                  now.trim() === "" ? said : `${now.trim()} ${said}`,
+                )
+              }
+            />
             <Button onClick={read} disabled={reading || sentence.trim() === ""} size="sm">
               {reading ? (
                 <>

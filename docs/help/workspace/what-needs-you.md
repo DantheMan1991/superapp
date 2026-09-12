@@ -12,7 +12,7 @@ Open **What needs you** under `Workspace` in the sidebar. Every row is one thing
 - **Each row.** Its title on the left with a detail line under it, and a badge on the right: {badge:Overdue|destructive} when its date has passed, {badge:Today|primary} when it is due today, {badge:Soon|secondary} when it is due on a later date, or {badge:Open|secondary} when it needs you but has no date. Rows are ordered overdue first, then today, then soon, and within each by date. Click a row to open the record itself. A few rows carry a button at their right edge that does the thing without opening the record; the row disappears once it is done.
 - **Your list.** The list at the top: things assigned to you, and things that are yours because of your role.
 - **`Not assigned to anyone`.** Owners only. A second list under a rule, captioned `Nobody has picked these up. You see them because you own the business, not because they are yours.`
-- **`Tell it what happened`.** A box directly under the title, above the list. Type one sentence — `Clock me in`, `Three chicks dead in pen two` — and it works out what to record. See how to tell it, below. Everyone sees it; each tool decides for itself what you are allowed to record.
+- **`Tell it what happened`.** A box directly under the title, above the list. Type one sentence — or press {button:Say it|outline|mic} and speak it — `Clock me in`, `Three chicks dead in pen two` — and it works out what to record. See how to tell it, below. Everyone sees it; each tool decides for itself what you are allowed to record.
 - **`Email me this each morning`.** A switch at the right of the title. On for everyone to begin with. It is yours alone: an owner cannot turn a staff member's email off, and nobody can turn on yours.
 
 ## How to tell it what happened
@@ -36,6 +36,29 @@ below go away.
    stays gray until every card is complete.
 6. Click {button:Record 2 things|primary}. You see what was recorded, such as
    `Clocked in at 7:42 AM` or `3 head — died — from Pen 2`.
+
+## How to say it instead of typing it
+
+Press {button:Say it|outline|mic} beside {button:Read it|primary|sparkles} and
+talk. Press {button:Stop|primary} when you have finished, and what you said
+appears in the box as text. **Nothing is recorded in Yosher until you read the
+cards and press the button** — speaking is just a faster way to fill the box.
+
+- It stops on its own after **30 seconds**, and shows a countdown for the last
+  ten so it is never a surprise. A sentence is short; say one thing at a time.
+- Say it twice and the second goes on the end of the first, so you can add
+  something you forgot.
+- The first time, your phone or browser will ask permission for the microphone.
+  If you say no, the button stops working until you allow it in your browser's
+  settings — everything else on the page still works.
+- If you see `Talking to Yosher is not switched on for this platform yet`, the
+  business has not set speech up. Typing works exactly the same.
+
+**What happens to the recording.** In the Yosher app on your phone, your phone
+does the listening itself and the recording never leaves it. In a web browser,
+the recording is sent to the service that writes it down and is thrown away as
+soon as the words come back. **Either way nothing is kept** — not the audio,
+not the text, until you press the button to record it.
 
 ## What it can record
 

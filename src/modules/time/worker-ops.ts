@@ -2,7 +2,7 @@ import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { createParty, PartyError } from "@/lib/parties";
-import { TimeError } from "./core/errors";
+import { TimeError, violatedUniqueIndex } from "./core/errors";
 
 /**
  * Who the business can log time for. ONE WRITER per table, the rule
@@ -178,7 +178,7 @@ export async function setWorkerUser(
         : new TimeError("WORKER_NOT_FOUND", "no such worker");
     }
   } catch (err) {
-    if (String(err).includes("time_workers_tenant_user_idx")) {
+    if (violatedUniqueIndex(err) === "time_workers_tenant_user_idx") {
       throw new TimeError(
         "WORKER_EXISTS_FOR_USER",
         "that sign-in is already linked to somebody",

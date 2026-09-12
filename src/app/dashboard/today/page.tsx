@@ -3,6 +3,7 @@ import { AlertTriangle, ListChecks } from "lucide-react";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { Panel } from "@/components/app/panel";
+import { TellBox } from "@/components/app/tell-box";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { todayInTimezone } from "@/lib/timezone";
@@ -77,6 +78,20 @@ export default async function TodayPage() {
         }
         actions={<DigestToggle daily={wantsDaily} />}
       />
+
+      {/* SAY IT INSTEAD OF FINDING THE SCREEN (ADR 0039).
+
+          IT LIVES HERE NOW, AND THAT IS WHAT A SECOND SOURCE MEANT. It sat on
+          the livestock daily round while livestock was the only filler; the
+          `time` source made it reachable by people who never open that page,
+          and the ADR named this page as where it goes. Moving it was a page
+          change and no source changed, exactly as written.
+
+          Above the list because it RECORDS and the list only reports: the
+          fastest thing somebody can do here is say what just happened, and
+          half the time that is what makes an item below go away. Shown to
+          everyone — each source's own verb decides who may record. */}
+      <TellBox placeholder="Clock me in, and three chicks dead in pen two" />
 
 
       {/* A source that could not be asked is stated, never swallowed. An

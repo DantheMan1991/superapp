@@ -38,11 +38,16 @@ type ActionResult<T> = { ok: true; data: T } | { error: string };
  */
 async function gate(): Promise<TellCtx> {
   const ctx = await requireTenant();
+  // Typed on a screen, so the sentence happened now. The phone's gate
+  // (`device-grants/redeem.ts`) is the one where this is not true.
+  const now = new Date();
   return {
     tenantId: ctx.tenant.id,
     userId: ctx.userId,
     role: ctx.role,
-    today: todayInTimezone(ctx.tenant.timezone),
+    now,
+    timezone: ctx.tenant.timezone,
+    today: todayInTimezone(ctx.tenant.timezone, now),
   };
 }
 

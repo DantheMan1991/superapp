@@ -1,4 +1,5 @@
 import "server-only";
+import { timeTellSource } from "@/modules/time/tell/source";
 import { livestockTellSource } from "@/packs/livestock/tell/source";
 import type { TellSource } from "./types";
 
@@ -9,16 +10,22 @@ import type { TellSource } from "./types";
  * name the concrete implementations, and confining that to one file is what
  * keeps every other arrow pointing one way.
  *
- * ONE SOURCE SO FAR, and the box is hosted on that pack's own daily round
- * because of it. The three sentences the plan opens with are all livestock —
- * "fed two bags to the broilers", "three chicks dead in pen two", "moved cows
- * to paddock seven" — and building a second filler before the first has been
- * used would be guessing at what the next one needs.
+ * TWO SOURCES. `livestock` was the first, and the box lived on that pack's
+ * own daily round because of it. `time` is the second, and ADR 0039 named
+ * what that means: *"when a second pack fills the slot the box belongs
+ * somewhere both can be reached from — What needs you — and moving it is a
+ * page change, not a change to any source."* It was, exactly.
  *
  * The ones that would come next, each a file and a line here: `inventory`
  * (stock used or counted), `land` (a paddock rested or topped), `production`
- * (a run's yield). When a second exists the box belongs somewhere both packs
- * can be reached from — What needs you — and moving it is a page change, not
- * a change to any source.
+ * (a run's yield).
+ *
+ * ORDER MATTERS A LITTLE. Every action a tenant has goes into ONE tool
+ * description (`tellToolFor`), so this list is the order the model reads them
+ * in. `time` first because "clock me in" is the sentence said most often and
+ * by the most people, and the catalogue is read top-down.
  */
-export const tellSources: readonly TellSource[] = [livestockTellSource];
+export const tellSources: readonly TellSource[] = [
+  timeTellSource,
+  livestockTellSource,
+];

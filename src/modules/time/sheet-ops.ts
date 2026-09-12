@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, eq, isNull, lte, gte, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
-import { TimeError } from "./core/errors";
+import { TimeError, violatedUniqueIndex } from "./core/errors";
 import { countsAsPaid, countsAsWorked } from "./core/pay-types";
 import { evaluateWeek } from "./core/overtime";
 import { groupByRate, payForWeek } from "./core/pay";
@@ -213,7 +213,7 @@ export async function submitSheet(
       .returning({ id: schema.timeSheets.id });
     return row.id;
   } catch (err) {
-    if (String(err).includes("time_sheets_tenant_worker_period_idx")) {
+    if (violatedUniqueIndex(err) === "time_sheets_tenant_worker_period_idx") {
       throw new TimeError("SHEET_EXISTS", "already submitted for this period");
     }
     throw err;

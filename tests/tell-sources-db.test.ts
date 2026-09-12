@@ -29,6 +29,9 @@ const RUN = !!process.env.DATABASE_URL;
 const d = RUN ? describe : describe.skip;
 
 const TODAY = "2026-09-09";
+// A fixed instant ON that day in the fixture's zone, so `ctx.now` and
+// `ctx.today` agree. Anything that stamps a timestamp reads `now`.
+const NOW = new Date("2026-09-09T15:00:00.000Z");
 
 const model =
   (entries: Array<{ action: string; fields: Record<string, unknown> }>): TellModel =>
@@ -48,6 +51,8 @@ d("telling it what happened", () => {
     tenantId,
     userId: OWNER,
     role: "owner",
+    now: NOW,
+    timezone: "UTC",
     today: TODAY,
   });
   const asOwner = <T,>(fn: (tx: Tx) => Promise<T>) =>

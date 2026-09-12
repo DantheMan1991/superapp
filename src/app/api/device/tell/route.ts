@@ -6,6 +6,7 @@ import { logAudit } from "@/lib/audit";
 import { readProposal, signProposal } from "@/lib/public-token";
 import { buildReadback } from "@/lib/device-grants/readback";
 import {
+  atEffectiveTime,
   clampSpokenAt,
   priorUse,
   recordUse,
@@ -121,7 +122,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const redeemed = await redeemGrant(token);
   if (!redeemed) return unauthorized();
-  const { grantId, ctx } = redeemed;
+  const { grantId } = redeemed;
 
   const raw = await req.json().catch(() => null);
   const parsed = bodySchema.safeParse(raw);
@@ -133,6 +134,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const now = new Date();
   const claimedAt = body.spokenAt ? new Date(body.spokenAt) : null;
   const { effectiveAt } = clampSpokenAt(claimedAt, now);
+  // EVERY use of `ctx` below is dated to when the sentence HAPPENED, not to
+  // when it arrived. A phone queues sentences while it has no signal, and an
+  // action that stamps a timestamp — `time.clock_in` — must never read a clock.
+  const ctx = atEffectiveTime(redeemed.ctx, effectiveAt);
 
   const scoped = <T,>(fn: Parameters<typeof withTenant<T>>[1]) =>
     withTenant(ctx.tenantId, fn, { role: ctx.role, userId: ctx.userId });

@@ -221,7 +221,25 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 ### 2026-09-11 — Slice 1: the clock (`claude/time-1-the-clock`)
 
 `time_punches`, the two columns that say where an entry came from, and the
-rounding policy. Migrations `0302`/`0303`.
+rounding policy. Migrations `0304`/`0305`.
+
+**Generated as `0302`/`0303` and renumbered**, because `claude/preview-links`
+(#509) took those slots from a parallel session and merged first. The repair is
+the one [conventions.md](../conventions.md) prescribes, including the part that
+is easy to get wrong: **the original `when` goes back into the journal entry**
+(`1789184104883` and `1789184144785`), because drizzle applies a migration only
+when `lastApplied.created_at < when` and a fresh stamp would have re-run it
+against tables that exist. `scripts/inspect-migration-state.ts` confirms both
+databases against the renumbered journal.
+
+**It also turned up a live defect on `main`, which the regenerated snapshot
+repairs.** #509's snapshots were produced before that branch took slice 0's
+merge, so `0302_snapshot.json` and `0303_snapshot.json` have no `time_workers`,
+`time_entries` or `time_settings` in them — the newest snapshot on main had
+silently lost three tables, and regenerating against it proposed `CREATE TABLE`
+for all three. `0304_time_clock.sql` therefore carries slice 1's real delta
+rather than what drizzle-kit emitted, while `0304_snapshot.json` is the fresh
+complete one, so whoever generates next diffs against the truth.
 
 - **A punch is evidence; an entry is the payable fact**, and slice 1 is where
   that stops being a sentence in a plan. `time_punches` keeps the two real

@@ -15,6 +15,8 @@ Time records what was worked. [Work](../work/overview.md) records what still has
 - **People.** Everybody whose hours this business keeps, what they are paid, the four settings behind every figure — your week start, rounding, how often people are paid, and which overtime rules you follow — and whether wages go to your books. Owners work here, and pay rates are owners-only. See [People](people.md).
 - **The shared clock.** A tablet by the door that several people punch on with a PIN, for the ones who do not carry the app. Same hours, same week, different way in. See [The shared clock](shared-clock.md).
 
+Time also puts four things on [What needs you](../workspace/what-needs-you.md): a clock somebody forgot to stop, somebody about to cross into overtime, hours nobody has sent for approval, and hours waiting for yours. Each one disappears the moment it is dealt with — there is nothing to tick off.
+
 ## How to start from nothing
 
 1. Open **Time** {icon:clock} in the sidebar. You see `Nobody can have time logged yet`.

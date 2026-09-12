@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { addDays } from "../src/lib/timezone";
+import { weekDays } from "../src/modules/time/core/week";
 import {
+  approachingOvertime,
   evaluateWeek,
   hasPremium,
   minutesUntilWeeklyOvertime,
@@ -403,5 +405,59 @@ describe("workweeksPaidIn — the straddle rule", () => {
       // Consecutive week ends are exactly seven days apart: nothing skipped.
       expect(addDays(seen[i - 1], 7)).toBe(seen[i]);
     }
+  });
+});
+
+describe("approachingOvertime", () => {
+  /**
+   * The ruleset is an ARGUMENT, not a constant closed over. The first draft of
+   * this helper hardcoded FEDERAL and the California case below then evaluated
+   * the week under federal rules while asserting against California's — which
+   * failed, correctly, and looked for a moment like a bug in the code.
+   */
+  const week = (ruleset: typeof FEDERAL, ...dailyMinutes: number[]) =>
+    evaluateWeek(
+      weekDays("2026-09-06").map((date, i) => ({
+        date,
+        workedMinutes: dailyMinutes[i] ?? 0,
+      })),
+      ruleset,
+    );
+
+  it("says nothing on a Monday morning", () => {
+    // A warning that is always on is not a warning.
+    expect(approachingOvertime(week(FEDERAL, 480), FEDERAL)).toBeNull();
+  });
+
+  it("says nothing with a full day still to go", () => {
+    // 32h worked, 8h left — more than half a working day of room.
+    expect(approachingOvertime(week(FEDERAL, 480, 480, 480, 480), FEDERAL)).toBeNull();
+  });
+
+  it("speaks up once there is half a day left", () => {
+    // 36h worked, 4h left. Friday morning on eight-hour days.
+    expect(approachingOvertime(week(FEDERAL, 480, 480, 480, 480, 240), FEDERAL)).toBe(240);
+  });
+
+  it("speaks up louder as the gap closes", () => {
+    expect(approachingOvertime(week(FEDERAL, 480, 480, 480, 480, 450), FEDERAL)).toBe(30);
+  });
+
+  it("STOPS once the week is already over, because nothing can be done", () => {
+    expect(approachingOvertime(week(FEDERAL, 480, 480, 480, 480, 480), FEDERAL)).toBeNull();
+    expect(approachingOvertime(week(FEDERAL, 600, 600, 600, 600, 600), FEDERAL)).toBeNull();
+  });
+
+  it("says nothing at all under a ruleset with no weekly threshold", () => {
+    expect(approachingOvertime(week(NONE, 480, 480, 480, 480, 450), NONE)).toBeNull();
+  });
+
+  it("counts only STRAIGHT minutes toward the gap, so no pyramiding", () => {
+    // California: five ten-hour days. Each day contributes 8 straight, so the
+    // weekly test sees 40 straight after five days — not 50. Four ten-hour days
+    // is 32 straight, which is still 8 short and must stay quiet.
+    expect(approachingOvertime(week(CALIFORNIA, 600, 600, 600, 600), CALIFORNIA)).toBeNull();
+    // A fifth half-day takes it to 36 straight: now it speaks.
+    expect(approachingOvertime(week(CALIFORNIA, 600, 600, 600, 600, 240), CALIFORNIA)).toBe(240);
   });
 });

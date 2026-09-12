@@ -105,6 +105,14 @@ Your on-costs percentage is **not** in any of these figures. That is what an hou
 
 When you approve, the hours **and the money** are saved as they stand. Change a rate afterwards, even backdated, and an approved period keeps the figure you approved. That is the point: what you agreed to pay is a fact, and it should not move because a setting changed later.
 
+## What you are told without looking
+
+Three of this screen's jobs also appear on [What needs you](../workspace/what-needs-you.md), so they reach you in the morning email instead of waiting for somebody to open this page:
+
+- **Somebody about to cross into overtime**, while there is still a decision to take. Owners only, and it stops once the week has already gone over — at that point it is a figure to read here, not a decision.
+- **Hours nobody sent**, once a pay period has ended. It carries a {button:Send|primary} button that does exactly what this screen's does.
+- **Hours waiting for your approval**, with {button:Approve|primary}.
+
 ## Who approves what
 
 Sending hours for approval is something anybody can do. **Approving is the owner's**, and so is locking. That split is the point of having two steps: somebody who could approve their own hours would be certifying nothing.

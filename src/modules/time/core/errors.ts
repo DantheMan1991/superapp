@@ -30,6 +30,8 @@ export type TimeErrorCode =
   | "SHEET_EXISTS"
   | "SHEET_ALREADY_APPROVED"
   | "AMEND_NOT_LOCKED"
+  | "DIMENSION_INVALID"
+  | "SPLIT_TOO_LARGE"
   | "PUNCH_NOT_FOUND"
   | "ALREADY_CLOCKED_IN"
   | "PUNCH_ALREADY_ENDED"
@@ -105,6 +107,10 @@ export function friendlyMessage(err: unknown): string {
       return "That timesheet has already been approved.";
     case "AMEND_NOT_LOCKED":
       return "That entry can still be edited — change it rather than correcting it.";
+    case "DIMENSION_INVALID":
+      return "Pick one thing per kind, and nothing that has been retired.";
+    case "SPLIT_TOO_LARGE":
+      return "A split has to leave some time on the original entry.";
     case "PUNCH_NOT_FOUND":
       return "That clock could not be found.";
     case "ALREADY_CLOCKED_IN":

@@ -22,6 +22,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DimensionTags,
+  type DimensionTypeOption,
+} from "@/components/app/dimension-tags";
 import { logTimeAction } from "../actions";
 import { formatDuration, parseDuration } from "../core/duration";
 import { PAY_TYPES, payTypeLabel } from "../core/pay-types";
@@ -43,11 +47,19 @@ export function LogTimeForm({
   workers,
   defaultWorkerId,
   today,
+  dimensionTypes,
 }: {
   workers: WorkerOption[];
   /** The signed-in person's own worker row, when they have one. */
   defaultWorkerId: string | null;
   today: string;
+  /**
+   * What this business can book an hour to. Empty for most tenants, and
+   * `DimensionTags` renders nothing at all in that case — a business with no
+   * paddocks and no lines of business should not carry a control that opens
+   * an empty popover.
+   */
+  dimensionTypes: DimensionTypeOption[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -55,6 +67,7 @@ export function LogTimeForm({
   const [workerId, setWorkerId] = useState(defaultWorkerId ?? workers[0]?.id ?? "");
   const [payType, setPayType] = useState<string>("worked");
   const [duration, setDuration] = useState("");
+  const [memberIds, setMemberIds] = useState<string[]>([]);
 
   const minutes = parseDuration(duration);
 
@@ -74,6 +87,7 @@ export function LogTimeForm({
         payType: payType as (typeof PAY_TYPES)[number],
         workDate: String(formData.get("workDate") ?? ""),
         note: String(formData.get("note") ?? ""),
+        memberIds,
       });
       if ("error" in result) {
         toast.error(result.error);
@@ -82,6 +96,7 @@ export function LogTimeForm({
       toast.success(`${formatDuration(minutes)} logged`);
       setOpen(false);
       setDuration("");
+      setMemberIds([]);
       router.refresh();
     });
   }
@@ -171,6 +186,21 @@ export function LogTimeForm({
                 placeholder="Fencing on the top field"
               />
             </div>
+            {dimensionTypes.length > 0 && (
+              <div className="grid gap-2">
+                <Label>What it was for</Label>
+                <DimensionTags
+                  types={dimensionTypes}
+                  value={memberIds}
+                  onValue={setMemberIds}
+                  layout="inline"
+                />
+                <p className="text-xs text-subtle-foreground">
+                  Optional, and it is what lets these hours show up as a cost
+                  against that part of the business.
+                </p>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button type="submit" disabled={pending}>

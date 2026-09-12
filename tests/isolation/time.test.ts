@@ -54,6 +54,8 @@ d("time tables (RLS)", () => {
   let workerB = "";
   let entryA = "";
   let punchA = "";
+  let memberA = "";
+  let memberB = "";
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantA, fn, { role: "staff", userId: MATE });
@@ -117,6 +119,29 @@ d("time tables (RLS)", () => {
         })
         .returning();
       punchA = punch.id;
+
+      // A dimension member in each tenant, so slice 4's link table has
+      // something real to point at. Raw inserts like every fixture here: this
+      // suite proves what the DATABASE enforces.
+      const members = await tx
+        .insert(schema.dimensionMembers)
+        .values([
+          {
+            tenantId: tenantA,
+            dimensionType: "enterprise",
+            packEntityId: crypto.randomUUID(),
+            displayName: "Beef",
+          },
+          {
+            tenantId: tenantB,
+            dimensionType: "enterprise",
+            packEntityId: crypto.randomUUID(),
+            displayName: "Their Beef",
+          },
+        ])
+        .returning();
+      memberA = members[0].id;
+      memberB = members[1].id;
     });
   });
 
@@ -482,6 +507,114 @@ d("time tables (RLS)", () => {
           .where(eq(schema.timeSettings.tenantId, tenantA)),
       ),
     ).rejects.toThrow();
+  });
+
+  /* ── what the hour was for (slice 4) ──────────────────────────────────── */
+
+  it("a tag is visible to its own tenant and to nobody else", async () => {
+    await withSystem((tx) =>
+      tx.insert(schema.timeEntryDimensions).values({
+        tenantId: tenantA,
+        entryId: entryA,
+        dimensionType: "enterprise",
+        memberId: memberA,
+      }),
+    );
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.timeEntryDimensions),
+    );
+    expect(mine).toHaveLength(1);
+    const theirs = await asOtherTenant((tx) =>
+      tx.select().from(schema.timeEntryDimensions),
+    );
+    expect(theirs).toEqual([]);
+  });
+
+  it("one member per dimension type per entry", async () => {
+    await expect(
+      withSystem(async (tx) => {
+        const [second] = await tx
+          .insert(schema.dimensionMembers)
+          .values({
+            tenantId: tenantA,
+            dimensionType: "enterprise",
+            packEntityId: crypto.randomUUID(),
+            displayName: "Lamb",
+          })
+          .returning();
+        await tx.insert(schema.timeEntryDimensions).values({
+          tenantId: tenantA,
+          entryId: entryA,
+          dimensionType: "enterprise",
+          memberId: second.id,
+        });
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("an entry cannot be tagged with another tenant's member", async () => {
+    // The composite FK carries `tenant_id`, so this is unrepresentable even
+    // under withSystem, where RLS is not watching.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.timeEntryDimensions).values({
+          tenantId: tenantA,
+          entryId: entryA,
+          dimensionType: "enterprise",
+          memberId: memberB,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("the stated dimension type has to be the member's real one", async () => {
+    // The three-column FK is what makes the denormalized column trustworthy.
+    // Without it, a row could claim a parcel was an enterprise and every
+    // report grouping by type would quietly disagree with itself.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.timeEntryDimensions).values({
+          tenantId: tenantA,
+          entryId: entryA,
+          dimensionType: "parcel",
+          memberId: memberA,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("deleting an entry takes its tags with it", async () => {
+    const spare = await withSystem(async (tx) => {
+      const [entry] = await tx
+        .insert(schema.timeEntries)
+        .values({
+          tenantId: tenantA,
+          workerId: workerA,
+          minutes: 60,
+          workDate: "2026-09-20",
+          enteredByClerkUserId: OWNER,
+        })
+        .returning({ id: schema.timeEntries.id });
+      await tx.insert(schema.timeEntryDimensions).values({
+        tenantId: tenantA,
+        entryId: entry.id,
+        dimensionType: "enterprise",
+        memberId: memberA,
+      });
+      return entry.id;
+    });
+
+    await withSystem((tx) =>
+      tx.delete(schema.timeEntries).where(eq(schema.timeEntries.id, spare)),
+    );
+
+    const left = await withSystem((tx) =>
+      tx
+        .select()
+        .from(schema.timeEntryDimensions)
+        .where(eq(schema.timeEntryDimensions.entryId, spare)),
+    );
+    expect(left).toEqual([]);
   });
 
   /* ── submit, approve, lock (slice 3) ──────────────────────────────────── */

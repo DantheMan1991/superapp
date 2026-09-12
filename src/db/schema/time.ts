@@ -27,6 +27,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { dimensionMembers } from "./ledger";
 import { parties } from "./parties";
 import { tenants } from "./platform";
 
@@ -561,7 +562,76 @@ export const timeSheets = pgTable(
   ],
 );
 
+/**
+ * WHAT AN HOUR WAS FOR: one dimension member per dimension type, per entry.
+ *
+ * ── WHY THERE IS NO TAXONOMY OF ITS OWN ──────────────────────────────────────
+ *
+ * `dimension_members` already IS the mechanism, and five packs already fill it
+ * — `land` syncs parcels and zones, `assets` syncs assets, `inventory` and
+ * `livestock` sync lots, `enterprises` syncs lines of business. Tagging an hour
+ * with a member therefore makes it bookable to a paddock, a herd, a tractor or
+ * a line of business with NO new seam, and the P&L's "Split by" is built from
+ * the distinct types present, so labor lands in a report nobody wrote code for.
+ *
+ * Inventing a `time_targets` table beside it would have been a second answer to
+ * a question the platform had already answered, and the packs would have had to
+ * fill both.
+ *
+ * ── THE SHAPE IS `line_dimensions`' ──────────────────────────────────────────
+ *
+ * `dimension_type` is DENORMALIZED so both rules are the database's rather than
+ * the write path's: one member per type per entry (the unique index), and the
+ * member really is of the type claimed (the three-column FK, which is what
+ * `dimension_members_tenant_type_id_idx` exists to be the target of).
+ *
+ * ── SPLITTING A DAY IS SPLITTING AN ENTRY ────────────────────────────────────
+ *
+ * Five hours on the north field and three on the barn is TWO entries, not one
+ * entry with two tags. That falls out of one-member-per-type and it is the
+ * honest model: the hours really were divided, and a single row carrying both
+ * could never say how much went where.
+ */
+export const timeEntryDimensions = pgTable(
+  "time_entry_dimensions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    entryId: uuid("entry_id").notNull(),
+    dimensionType: text("dimension_type").notNull(),
+    memberId: uuid("member_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("time_entry_dimensions_entry_type_idx").on(
+      t.tenantId,
+      t.entryId,
+      t.dimensionType,
+    ),
+    index("time_entry_dimensions_tenant_member_idx").on(t.tenantId, t.memberId),
+    foreignKey({
+      name: "time_entry_dimensions_entry_fk",
+      columns: [t.tenantId, t.entryId],
+      foreignColumns: [timeEntries.tenantId, timeEntries.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "time_entry_dimensions_member_fk",
+      columns: [t.tenantId, t.dimensionType, t.memberId],
+      foreignColumns: [
+        dimensionMembers.tenantId,
+        dimensionMembers.dimensionType,
+        dimensionMembers.id,
+      ],
+    }),
+  ],
+);
+
 export type TimeWorker = typeof timeWorkers.$inferSelect;
+export type TimeEntryDimension = typeof timeEntryDimensions.$inferSelect;
 export type TimePeriod = typeof timePeriods.$inferSelect;
 export type TimeSheet = typeof timeSheets.$inferSelect;
 export type TimePunch = typeof timePunches.$inferSelect;

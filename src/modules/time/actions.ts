@@ -19,9 +19,18 @@ import { PAY_FREQUENCIES, payPeriodFor } from "./core/periods";
 import { isRoundingChoice } from "./core/rounding";
 import { isRulesetSlug } from "./core/rulesets";
 import { DATE_FORMAT } from "./core/week";
-import { amendEntry, deleteEntry, logTime, updateEntry } from "./entry-ops";
+import {
+  amendEntry,
+  deleteEntry,
+  logTime,
+  setEntryDimensions,
+  splitEntry,
+  updateEntry,
+} from "./entry-ops";
+import { getEntry } from "./read";
 import {
   approveSheet,
+  assertPeriodOpen,
   lockPeriod,
   returnSheet,
   submitSheet,
@@ -223,6 +232,8 @@ const logTimeSchema = z.object({
   workDate: dateSchema,
   payType: payTypeSchema,
   note: noteSchema,
+  /** What it was for. Written in the same transaction as the entry. */
+  memberIds: z.array(uuidSchema).max(10).default([]),
 });
 
 export async function logTimeAction(
@@ -233,14 +244,17 @@ export async function logTimeAction(
     const parsed = logTimeSchema.parse(input);
     const id = await withTenant(
       ctx.tenant.id,
-      (tx) =>
-        logTime(tx, ctx.tenant.id, {
+      async (tx) => {
+        const entryId = await logTime(tx, ctx.tenant.id, {
           ...parsed,
           enteredByClerkUserId: ctx.userId,
           // The tenant's today, not the server's and not the browser's, so one
           // request has one idea of the date (0086).
           today: todayInTimezone(ctx.tenant.timezone),
-        }),
+        });
+        await setEntryDimensions(tx, ctx.tenant.id, entryId, parsed.memberIds);
+        return entryId;
+      },
       { role: ctx.role, userId: ctx.userId },
     );
     revalidate();
@@ -257,6 +271,7 @@ const updateEntrySchema = z.object({
   workDate: dateSchema,
   payType: payTypeSchema,
   note: noteSchema,
+  memberIds: z.array(uuidSchema).max(10).default([]),
 });
 
 export async function updateTimeEntryAction(
@@ -267,11 +282,20 @@ export async function updateTimeEntryAction(
     const parsed = updateEntrySchema.parse(input);
     await withTenant(
       ctx.tenant.id,
-      (tx) =>
-        updateEntry(tx, ctx.tenant.id, {
+      async (tx) => {
+        await updateEntry(tx, ctx.tenant.id, {
           ...parsed,
           today: todayInTimezone(ctx.tenant.timezone),
-        }),
+        });
+        // Same transaction: an edit that saved the hours and lost the tags
+        // would be a silent half-save of the thing reports read.
+        await setEntryDimensions(
+          tx,
+          ctx.tenant.id,
+          parsed.entryId,
+          parsed.memberIds,
+        );
+      },
       { role: ctx.role, userId: ctx.userId },
     );
     revalidate();
@@ -773,6 +797,91 @@ export async function amendEntryAction(
           enteredByClerkUserId: ctx.userId,
           today: todayInTimezone(ctx.tenant.timezone),
         }),
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return { ok: true, data: { id } };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+/*
+ * ── WHAT THE HOUR WAS FOR ────────────────────────────────────────────────────
+ *
+ * Tags are a `staff` chore, like the hour itself: the person who did the work
+ * knows which field they were in. Nothing here is owner-only.
+ */
+
+const memberIdsSchema = z.array(uuidSchema).max(10).default([]);
+
+const setDimensionsSchema = z.object({
+  entryId: uuidSchema,
+  memberIds: memberIdsSchema,
+});
+
+export async function setEntryDimensionsAction(
+  input: z.input<typeof setDimensionsSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const parsed = setDimensionsSchema.parse(input);
+    await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        // Tagging an hour inside a locked period changes what a report says
+        // about a pay run that has already happened, so it is refused with
+        // everything else.
+        const entry = await getEntry(tx, ctx.tenant.id, parsed.entryId);
+        if (!entry) throw new TimeError("ENTRY_NOT_FOUND", "no such entry");
+        await assertPeriodOpen(tx, ctx.tenant.id, entry.workDate);
+        await setEntryDimensions(
+          tx,
+          ctx.tenant.id,
+          parsed.entryId,
+          parsed.memberIds,
+        );
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return { ok: true };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const splitSchema = z.object({
+  entryId: uuidSchema,
+  minutes: minutesSchema,
+  /** What the SPLIT-OFF half was for. The original keeps its own tags. */
+  memberIds: memberIdsSchema,
+});
+
+/**
+ * Divide an entry so each half can say what it was for.
+ *
+ * The split and the new half's tags happen in ONE transaction: a split that
+ * committed without them would leave somebody looking at two identical rows
+ * wondering which was which.
+ */
+export async function splitEntryAction(
+  input: z.input<typeof splitSchema>,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    const ctx = await gate();
+    const parsed = splitSchema.parse(input);
+    const id = await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        const newId = await splitEntry(tx, ctx.tenant.id, {
+          entryId: parsed.entryId,
+          minutes: parsed.minutes,
+          today: todayInTimezone(ctx.tenant.timezone),
+        });
+        await setEntryDimensions(tx, ctx.tenant.id, newId, parsed.memberIds);
+        return newId;
+      },
       { role: ctx.role, userId: ctx.userId },
     );
     revalidate();

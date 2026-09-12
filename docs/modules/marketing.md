@@ -98,9 +98,18 @@ and it turned out to be three times the job. **Migrations 0300 and 0301**
   one and staff read it, staff cannot make one, NOBODY can delete one, another
   tenant's site is unrepresentable even under `withSystem`, one token hash
   platform-wide, and previews dying with their site. 50 passing.
-- **Not driven.** The local Clerk session is signed out and production runs
-  the pre-merge code. The routes register in the build and the table's rules
-  are proven against a real database; no link has been made or opened.
+- **DRIVEN END TO END on the dev branch**, and it caught the bug the whole
+  design was built to avoid. The preview page still passed `mode="draft"` — I
+  had added the mode and never switched the page to it — so the first
+  signed-out fetch came back with every nav link pointing at
+  `/sites/oak-row-farm/draft`. Types could not see it: the argument is a
+  `string` either way. Fixed, then re-checked with `curl` and NO COOKIES: the
+  page, `/about` and `/contact` all 200, the logo 200 `image/png` 17KB, a
+  photo 200 `image/jpeg` 13KB, every address `/p/<token>/…`. A junk token
+  renders "no longer available" with the same words. The owner's list read
+  `Opened 9 times`. After `Stop it`: the page says "no longer available", the
+  logo and the photo both 404, and **the view count stayed at 9** — a refused
+  look is not a look.
 - **Not built here:** comments on a preview (a different table, and it would
   want the passcode this leaves out), and an email that sends the link.
 

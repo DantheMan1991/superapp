@@ -79,7 +79,17 @@ export default async function SitePreviewPage({
       link can see it.
     </div>
   );
-  // `mode="draft"` so every in-site link stays inside the preview and the
-  // page shows the drafts rather than the last published snapshot.
-  return <SitePage site={drafts.view} page={page} mode="draft" banner={banner} />;
+  // `mode="preview"` with the TOKEN as the link key: every in-site link, and
+  // every image, map and logo address, is then built as `/p/<token>/…`.
+  // `draft` here would point the whole nav at `/sites/<slug>/draft`, the
+  // members-only route the person holding this link cannot reach.
+  return (
+    <SitePage
+      site={drafts.view}
+      page={page}
+      mode="preview"
+      linkKey={token}
+      banner={banner}
+    />
+  );
 }

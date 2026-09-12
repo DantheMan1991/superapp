@@ -11,12 +11,14 @@ import { listAssignableMembers, memberLabel } from "@/lib/team";
 import { roleMayManageWorkers } from "@/modules/time/core/errors";
 import {
   AddWorker,
+  RoundingPicker,
   WeekStartPicker,
   WorkerActiveButton,
   WorkerSignInPicker,
 } from "@/modules/time/components/people-controls";
 import { listWorkers } from "@/modules/time/read";
-import { getWeekStartsOn } from "@/modules/time/settings-ops";
+import { roundingLabel } from "@/modules/time/core/rounding";
+import { getTimePrefs } from "@/modules/time/settings-ops";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +36,7 @@ export default async function TimePeoplePage() {
   await requireModuleEnabled(ctx.tenant.id, "time");
   const canManage = roleMayManageWorkers(ctx.role);
 
-  const { workers, members, weekStartsOn, candidates } = await withTenant(
+  const { workers, members, prefs, candidates } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
       const workers = await listWorkers(tx, ctx.tenant.id);
@@ -67,7 +69,7 @@ export default async function TimePeoplePage() {
         workers,
         candidates,
         members: await listAssignableMembers(tx, ctx.tenant.id),
-        weekStartsOn: await getWeekStartsOn(tx, ctx.tenant.id),
+        prefs: await getTimePrefs(tx, ctx.tenant.id),
       };
     },
     { role: ctx.role, userId: ctx.userId },
@@ -158,27 +160,39 @@ export default async function TimePeoplePage() {
         </div>
       )}
 
-      <div className="rounded-lg border p-3">
-        <h2 className="mb-2 text-sm font-medium">Your week starts on</h2>
-        {canManage ? (
-          <WeekStartPicker weekStartsOn={weekStartsOn} />
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            Weeks run from{" "}
-            {
-              [
-                "Sunday",
-                "Monday",
-                "Tuesday",
-                "Wednesday",
-                "Thursday",
-                "Friday",
-                "Saturday",
-              ][weekStartsOn]
-            }
-            .
-          </p>
-        )}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="rounded-lg border p-3">
+          <h2 className="mb-2 text-sm font-medium">Your week starts on</h2>
+          {canManage ? (
+            <WeekStartPicker weekStartsOn={prefs.weekStartsOn} />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Weeks run from{" "}
+              {
+                [
+                  "Sunday",
+                  "Monday",
+                  "Tuesday",
+                  "Wednesday",
+                  "Thursday",
+                  "Friday",
+                  "Saturday",
+                ][prefs.weekStartsOn]
+              }
+              .
+            </p>
+          )}
+        </div>
+        <div className="rounded-lg border p-3">
+          <h2 className="mb-2 text-sm font-medium">Round clocked time to</h2>
+          {canManage ? (
+            <RoundingPicker roundingMinutes={prefs.roundingMinutes} />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {roundingLabel(prefs.roundingMinutes)}.
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );

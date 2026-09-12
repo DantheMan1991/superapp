@@ -13,24 +13,28 @@ import {
   payTypeLabel,
 } from "../src/modules/time/core/pay-types";
 import {
-  addDays,
-  dayLabel,
-  daysBetween,
-  isDateString,
-  startOfWeek,
-  weekDays,
-  weekLabel,
-} from "../src/modules/time/core/week";
+  LONG_PUNCH_MINUTES,
+  ROUNDING_CHOICES,
+  isRoundingChoice,
+  minutesBetween,
+  roundMinutes,
+  roundingLabel,
+} from "../src/modules/time/core/rounding";
+import { dayLabel, weekDays, weekLabel } from "../src/modules/time/core/week";
 
 /**
  * The pure half of Time. Every one of these is arithmetic somebody's paycheck
  * depends on, and none of it needs a database — which is exactly why it is
  * worth a table-driven suite rather than a walk through the UI.
  *
- * The overtime evaluator lands in slice 2 and belongs in this file's successor.
- * The properties it will lean on — a week boundary that survives daylight
- * saving, and a pay type that says whether an hour counts toward the 40 — are
- * proved here first.
+ * The calendar arithmetic this module leans on — `addDays`, `startOfWeek`,
+ * `isDateString` — is NOT here: it lives in `src/lib/timezone.ts` and is proved
+ * in `tests/timezone.test.ts`. Slice 0 wrote a second copy of it inside this
+ * module before noticing; slice 1 deleted that copy.
+ *
+ * The overtime evaluator lands in slice 2 and belongs in this file. The
+ * property it will lean on hardest — a pay type that says whether an hour
+ * counts toward the 40 — is proved here first.
  */
 
 describe("parseDuration", () => {
@@ -150,86 +154,6 @@ describe("pay types", () => {
   });
 });
 
-describe("isDateString", () => {
-  it("accepts real days", () => {
-    expect(isDateString("2026-09-11")).toBe(true);
-    expect(isDateString("2024-02-29")).toBe(true); // a leap year
-  });
-
-  it("refuses days that do not exist", () => {
-    // The format check alone accepts these; a `Date` silently rolls them
-    // forward, which is why the round trip is the test.
-    expect(isDateString("2026-02-31")).toBe(false);
-    expect(isDateString("2025-02-29")).toBe(false);
-    expect(isDateString("2026-13-01")).toBe(false);
-    expect(isDateString("2026-9-11")).toBe(false);
-    expect(isDateString("11/09/2026")).toBe(false);
-    expect(isDateString("")).toBe(false);
-  });
-});
-
-describe("startOfWeek", () => {
-  // 2026-09-11 is a Friday.
-  it("finds the Sunday of a Sunday-start week", () => {
-    expect(startOfWeek("2026-09-11", 0)).toBe("2026-09-06");
-  });
-
-  it("finds the Monday of a Monday-start week", () => {
-    expect(startOfWeek("2026-09-11", 1)).toBe("2026-09-07");
-  });
-
-  it("a day that IS the start returns itself", () => {
-    expect(startOfWeek("2026-09-06", 0)).toBe("2026-09-06");
-    expect(startOfWeek("2026-09-07", 1)).toBe("2026-09-07");
-  });
-
-  it("a Sunday in a Monday-start week belongs to the week before", () => {
-    // The case the `+ 7) % 7` exists for: without it this lands six days into
-    // the future and every Sunday's hours are counted in the wrong week.
-    expect(startOfWeek("2026-09-13", 1)).toBe("2026-09-07");
-  });
-
-  it("works for every start day, every day of one week", () => {
-    for (let start = 0; start < 7; start++) {
-      const starts = weekDays("2026-09-06").map((d) => startOfWeek(d, start));
-      // Seven consecutive days always span exactly two weeks under any start
-      // day, and the boundary falls exactly once.
-      expect(new Set(starts).size).toBe(start === 0 ? 1 : 2);
-      for (const s of starts) {
-        expect(daysBetween(s, "2026-09-06")).toBeLessThanOrEqual(6);
-      }
-    }
-  });
-
-  it("survives the days daylight saving moves", () => {
-    // US DST began 2026-03-08 and ends 2026-11-01, both Sundays. Local-zone
-    // arithmetic loses or gains an hour across them and lands on the wrong
-    // date; UTC has no DST, which is why this file does all its sums there.
-    expect(startOfWeek("2026-03-08", 0)).toBe("2026-03-08");
-    expect(startOfWeek("2026-03-09", 0)).toBe("2026-03-08");
-    expect(startOfWeek("2026-03-14", 0)).toBe("2026-03-08");
-    expect(startOfWeek("2026-11-01", 0)).toBe("2026-11-01");
-    expect(startOfWeek("2026-11-07", 0)).toBe("2026-11-01");
-    expect(addDays("2026-03-07", 1)).toBe("2026-03-08");
-    expect(addDays("2026-10-31", 2)).toBe("2026-11-02");
-  });
-});
-
-describe("addDays and daysBetween", () => {
-  it("crosses months and years", () => {
-    expect(addDays("2026-09-30", 1)).toBe("2026-10-01");
-    expect(addDays("2026-12-31", 1)).toBe("2027-01-01");
-    expect(addDays("2026-01-01", -1)).toBe("2025-12-31");
-    expect(addDays("2024-02-28", 1)).toBe("2024-02-29");
-  });
-
-  it("counts whole days in both directions", () => {
-    expect(daysBetween("2026-09-06", "2026-09-13")).toBe(7);
-    expect(daysBetween("2026-09-13", "2026-09-06")).toBe(-7);
-    expect(daysBetween("2026-09-06", "2026-09-06")).toBe(0);
-  });
-});
-
 describe("weekDays", () => {
   it("is seven days from the start, in order", () => {
     expect(weekDays("2026-09-06")).toEqual([
@@ -250,5 +174,86 @@ describe("labels", () => {
     // its own zone and a date west of Greenwich shows as the day before.
     expect(dayLabel("2026-09-11")).toBe("Fri, Sep 11");
     expect(weekLabel("2026-09-06")).toBe("Sep 6 – Sep 12");
+  });
+});
+
+describe("roundMinutes", () => {
+  it("to the minute is the default and changes nothing", () => {
+    for (const raw of [1, 7, 53, 473, 1440]) {
+      expect(roundMinutes(raw, 0)).toBe(raw);
+    }
+  });
+
+  it("goes to the NEAREST increment, up as well as down", () => {
+    // The whole legal argument for rounding a timesheet is that it is
+    // neutral. These two lines are that neutrality.
+    expect(roundMinutes(473, 15)).toBe(480); // 7h53m up to 8h
+    expect(roundMinutes(487, 15)).toBe(480); // 8h07m down to 8h
+    // The midpoint between 45 and 60 is 52.5, so 53 goes up and 52 goes down.
+    expect(roundMinutes(53, 15)).toBe(60);
+    expect(roundMinutes(52, 15)).toBe(45);
+  });
+
+  it("is neutral across a run of spans", () => {
+    // Over the 60 possible minute offsets in an hour, rounding to a quarter
+    // gains exactly as much as it loses. If this ever fails, the policy has
+    // stopped being lawful, not just inaccurate.
+    let drift = 0;
+    for (let raw = 1; raw <= 60; raw++) drift += roundMinutes(raw, 15) - raw;
+    expect(drift).toBe(0);
+  });
+
+  it("rounds a tie up, toward the worker", () => {
+    expect(roundMinutes(8, 15)).toBe(15);
+    expect(roundMinutes(7, 15)).toBe(0);
+    expect(roundMinutes(3, 6)).toBe(6);
+  });
+
+  it("handles a tenth of an hour, which is how services bill", () => {
+    expect(roundMinutes(8, 6)).toBe(6);
+    expect(roundMinutes(10, 6)).toBe(12);
+    expect(roundMinutes(63, 6)).toBe(66);
+  });
+
+  it("can return zero, which is the policy working rather than a bug", () => {
+    // Five minutes on a quarter-hour policy is worth nothing, by the same rule
+    // that pays a full quarter hour for eight. The caller writes no entry and
+    // says so; forcing a minimum would break the neutrality above.
+    expect(roundMinutes(5, 15)).toBe(0);
+    expect(roundMinutes(2, 6)).toBe(0);
+    expect(roundMinutes(0, 15)).toBe(0);
+    expect(roundMinutes(-10, 15)).toBe(0);
+  });
+
+  it("every offered choice is a real one and has a label", () => {
+    for (const choice of ROUNDING_CHOICES) {
+      expect(isRoundingChoice(choice)).toBe(true);
+      expect(roundingLabel(choice).length).toBeGreaterThan(0);
+    }
+    expect(isRoundingChoice(7)).toBe(false);
+    expect(isRoundingChoice(60)).toBe(false);
+  });
+});
+
+describe("minutesBetween", () => {
+  it("counts whole minutes", () => {
+    const from = new Date("2026-09-11T08:00:00Z");
+    expect(minutesBetween(from, new Date("2026-09-11T16:00:00Z"))).toBe(480);
+    expect(minutesBetween(from, new Date("2026-09-11T08:00:29Z"))).toBe(0);
+    expect(minutesBetween(from, new Date("2026-09-11T08:00:31Z"))).toBe(1);
+  });
+
+  it("is unaffected by daylight saving, because a span is not a date", () => {
+    // 2026-11-01 is the fall-back Sunday in the US. These two instants are
+    // three hours apart on the world's timeline whatever a local clock shows,
+    // which is why the elapsed figure needs no timezone at all.
+    const from = new Date("2026-11-01T04:30:00Z");
+    const to = new Date("2026-11-01T07:30:00Z");
+    expect(minutesBetween(from, to)).toBe(180);
+  });
+
+  it("the long-punch threshold is under a day, so a stuck clock is catchable", () => {
+    expect(LONG_PUNCH_MINUTES).toBeLessThan(1440);
+    expect(LONG_PUNCH_MINUTES).toBeGreaterThan(12 * 60);
   });
 });

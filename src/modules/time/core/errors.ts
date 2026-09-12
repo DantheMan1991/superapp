@@ -20,6 +20,13 @@ export type TimeErrorCode =
   | "WORK_DATE_INVALID"
   | "WORK_DATE_IN_FUTURE"
   | "WEEK_START_INVALID"
+  | "ROUNDING_INVALID"
+  | "PUNCH_NOT_FOUND"
+  | "ALREADY_CLOCKED_IN"
+  | "PUNCH_ALREADY_ENDED"
+  | "PUNCH_ENDS_BEFORE_START"
+  | "PUNCH_STARTS_IN_FUTURE"
+  | "PUNCH_TOO_LONG"
   | "STALE_VERSION"
   | "FORBIDDEN"
   | "FORBIDDEN_EXPERT";
@@ -69,6 +76,20 @@ export function friendlyMessage(err: unknown): string {
       return "That day has not happened yet.";
     case "WEEK_START_INVALID":
       return "Pick the day your week starts on.";
+    case "ROUNDING_INVALID":
+      return "Pick one of the rounding options.";
+    case "PUNCH_NOT_FOUND":
+      return "That clock could not be found.";
+    case "ALREADY_CLOCKED_IN":
+      return "They are already clocked in.";
+    case "PUNCH_ALREADY_ENDED":
+      return "That clock has already stopped. Reload and try again.";
+    case "PUNCH_ENDS_BEFORE_START":
+      return "A clock cannot stop before it started.";
+    case "PUNCH_STARTS_IN_FUTURE":
+      return "A clock cannot start later than now.";
+    case "PUNCH_TOO_LONG":
+      return "That clock has run for more than a day. Correct when it started, then stop it.";
     case "STALE_VERSION":
       return "This entry changed while you were editing it. Reload and try again.";
     case "FORBIDDEN":

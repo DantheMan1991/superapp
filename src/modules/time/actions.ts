@@ -6,12 +6,14 @@ import { withTenant } from "@/db";
 import { logAuditInTx } from "@/lib/audit";
 import { requireTenant, type TenantContext } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
-import { todayInTimezone } from "@/lib/timezone";
+import { todayInTimezone, zonedTimeToInstant } from "@/lib/timezone";
 import { TimeError, friendlyMessage, roleMayManageWorkers, roleMayWrite } from "./core/errors";
 import { PAY_TYPES } from "./core/pay-types";
+import { isRoundingChoice } from "./core/rounding";
 import { DATE_FORMAT } from "./core/week";
 import { deleteEntry, logTime, updateEntry } from "./entry-ops";
-import { setWeekStartsOn } from "./settings-ops";
+import { clockIn, clockOut, cancelPunch, adjustPunchStart } from "./punch-ops";
+import { getTimePrefs, setRoundingMinutes, setWeekStartsOn } from "./settings-ops";
 import { createWorker, setWorkerActive, setWorkerUser } from "./worker-ops";
 
 /**
@@ -294,6 +296,188 @@ export async function setWeekStartsOnAction(
           tenantId: ctx.tenant.id,
           actorClerkUserId: ctx.userId,
           meta: { weekStartsOn },
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return { ok: true };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+/*
+ * ── THE CLOCK ────────────────────────────────────────────────────────────────
+ *
+ * `gate()`, not `ownerGate()`: starting and stopping a clock is the chore the
+ * whole feature exists for, and the person doing it is rarely the owner. A
+ * supervisor clocking a group in is the ordinary case, so nothing here asks
+ * whether the actor IS the worker.
+ *
+ * Every one of these takes `new Date()` ONCE and passes it down, so a request
+ * that crosses a second boundary mid-way cannot disagree with itself about when
+ * the clock started or which day it belongs to.
+ */
+
+const clockInSchema = z.object({
+  workerId: uuidSchema,
+  note: noteSchema,
+});
+
+export async function clockInAction(
+  input: z.input<typeof clockInSchema>,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    const ctx = await gate();
+    const parsed = clockInSchema.parse(input);
+    const id = await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        clockIn(tx, ctx.tenant.id, {
+          ...parsed,
+          actorClerkUserId: ctx.userId,
+          at: new Date(),
+        }),
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return { ok: true, data: { id } };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const clockOutSchema = z.object({
+  punchId: uuidSchema,
+  note: noteSchema,
+});
+
+/**
+ * Returns both numbers so the screen can say what rounding did. `paidMinutes`
+ * of 0 with a null `entryId` is a real outcome, not a failure: see
+ * `core/rounding.ts`.
+ */
+export async function clockOutAction(
+  input: z.input<typeof clockOutSchema>,
+): Promise<
+  ActionResult<{ rawMinutes: number; paidMinutes: number; entryId: string | null }>
+> {
+  try {
+    const ctx = await gate();
+    const parsed = clockOutSchema.parse(input);
+    const at = new Date();
+    const result = await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        const prefs = await getTimePrefs(tx, ctx.tenant.id);
+        return await clockOut(tx, ctx.tenant.id, {
+          ...parsed,
+          actorClerkUserId: ctx.userId,
+          at,
+          roundingMinutes: prefs.roundingMinutes,
+          timezone: ctx.tenant.timezone,
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return {
+      ok: true,
+      data: {
+        rawMinutes: result.rawMinutes,
+        paidMinutes: result.paidMinutes,
+        entryId: result.entryId,
+      },
+    };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const punchIdSchema = z.object({ punchId: uuidSchema });
+
+export async function cancelPunchAction(
+  input: z.input<typeof punchIdSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const { punchId } = punchIdSchema.parse(input);
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => cancelPunch(tx, ctx.tenant.id, punchId),
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return { ok: true };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const adjustPunchSchema = z.object({
+  punchId: uuidSchema,
+  expectedVersion: z.number().int().positive(),
+  /** `<input type="datetime-local">`'s value, read in the TENANT's zone. */
+  startedAtLocal: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, "expected a local date and time"),
+});
+
+/**
+ * Correct when a running clock started — the forgot-to-clock-in case.
+ *
+ * The browser sends a WALL-CLOCK reading with no zone, and it is resolved
+ * against `tenants.timezone` rather than the browser's: somebody travelling, or
+ * a laptop left on the wrong zone, would otherwise move a shift by hours.
+ * `zonedTimeToInstant` is the same seam Scheduling uses for an event's time.
+ */
+export async function adjustPunchStartAction(
+  input: z.input<typeof adjustPunchSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const parsed = adjustPunchSchema.parse(input);
+    const [date, time] = parsed.startedAtLocal.split("T");
+    const startedAt = zonedTimeToInstant(date, time, ctx.tenant.timezone);
+    await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        adjustPunchStart(tx, ctx.tenant.id, {
+          punchId: parsed.punchId,
+          expectedVersion: parsed.expectedVersion,
+          startedAt,
+          at: new Date(),
+        }),
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidate();
+    return { ok: true };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const roundingSchema = z.object({
+  roundingMinutes: z
+    .number()
+    .int()
+    .refine(isRoundingChoice, "not a rounding option"),
+});
+
+export async function setRoundingAction(
+  input: z.input<typeof roundingSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await ownerGate();
+    const { roundingMinutes } = roundingSchema.parse(input);
+    await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        await setRoundingMinutes(tx, ctx.tenant.id, roundingMinutes);
+        await logAuditInTx(tx, {
+          action: "time.settings.rounding_changed",
+          tenantId: ctx.tenant.id,
+          actorClerkUserId: ctx.userId,
+          meta: { roundingMinutes },
         });
       },
       { role: ctx.role, userId: ctx.userId },

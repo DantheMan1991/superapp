@@ -32,4 +32,29 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+        SAYING IT OUT LOUD (ADR 0049). The site records a sentence and posts it
+        to /api/tell/transcribe, which means `getUserMedia` inside the WebView.
+
+        BOTH OF THESE ARE REQUIRED AND NEITHER IS OPTIONAL. Capacitor's
+        BridgeWebChromeClient already does the hard half: it catches the
+        WebView's AUDIO_CAPTURE request and asks Android for
+        RECORD_AUDIO + MODIFY_AUDIO_SETTINGS at runtime. But **a runtime
+        request for a permission the manifest never declared is denied
+        instantly, with no dialog shown** — so without these two lines the app
+        asks, is refused by the system, and tells the person to grant a
+        permission that does not appear in Android's settings at all, because
+        an app is only listed there for what it has declared.
+
+        That is exactly what happened: "it says the app needs permission for my
+        microphone. I can't give the app permission in the phone settings."
+
+        `android.hardware.microphone` is declared NOT required so the Play
+        listing is never filtered off a device without one. Dictation is an
+        optional convenience; the app works by typing on anything.
+    -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 </manifest>

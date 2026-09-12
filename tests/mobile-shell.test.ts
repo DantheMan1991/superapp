@@ -47,6 +47,36 @@ describe("the shell and the web agree", () => {
     expect(packages).toContain(app.appId);
   });
 
+  /**
+   * THE BUG THIS GUARDS SHIPPED, and its symptom was unfollowable advice.
+   *
+   * The site records a sentence through `getUserMedia` inside the WebView.
+   * Capacitor's `BridgeWebChromeClient` catches that and asks Android for
+   * RECORD_AUDIO at runtime — but **a runtime request for a permission the
+   * manifest never declared is denied instantly, with no dialog**, and an app
+   * is listed in Android's permission settings only for what it declared. So
+   * the app said "allow the microphone" and there was no switch anywhere to
+   * do it with. The founder found it on his own phone.
+   *
+   * Asserted here rather than trusted, because the manifest is edited by hand
+   * and nothing else in this repo would ever mention these two strings again.
+   */
+  it("declares the microphone, so Android can actually be asked for it", () => {
+    const manifest = readFileSync(
+      shell(path.join("android", "app", "src", "main", "AndroidManifest.xml")),
+      "utf8",
+    );
+    expect(manifest).toContain("android.permission.RECORD_AUDIO");
+    // Capacitor asks for BOTH together and denies the WebView unless both are
+    // granted, so declaring only the obvious one still fails.
+    expect(manifest).toContain("android.permission.MODIFY_AUDIO_SETTINGS");
+    // Never REQUIRED: dictation is a convenience and the app works by typing
+    // on any device, so the Play listing must not be filtered by it.
+    expect(manifest).toMatch(
+      /android\.hardware\.microphone"\s+android:required="false"/,
+    );
+  });
+
   it("keeps one version in one place", () => {
     const pkg = JSON.parse(readFileSync(shell("package.json"), "utf8")) as { version: string };
     expect(pkg.version).toBe(app.version);

@@ -299,10 +299,22 @@ export function DictateButton({
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
-      // Denied, dismissed, or no microphone. One message: the browser has
-      // already shown its own, and guessing which of the three happened would
-      // be telling somebody something we do not know.
-      toast.error("Yosher needs the microphone. Allow it, or type instead.");
+      // Denied, dismissed, or no microphone. One message per DOOR, because the
+      // two doors have genuinely different remedies — and in the app the wrong
+      // one is unfollowable advice.
+      //
+      // AN APP BUILD THAT NEVER DECLARED `RECORD_AUDIO` cannot be granted the
+      // microphone at all: Android denies the runtime request instantly and
+      // lists no toggle, because an app appears in its permission settings
+      // only for what it declared. "Allow it in settings" then sends somebody
+      // looking for a switch that does not exist — which is precisely what
+      // happened. The web has to cope with every app version still installed
+      // (ADR 0032), so the app's message names the fix that actually works.
+      toast.error(
+        probeCapabilities(serverConfigured).nativeApp
+          ? "This version of the app cannot use the microphone. Update it, or type instead."
+          : "Yosher needs the microphone. Allow it, or type instead.",
+      );
       return;
     }
 

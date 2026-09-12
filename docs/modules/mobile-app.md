@@ -13,6 +13,54 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-12 — The app could never have been given the microphone (`claude/app-microphone`)
+
+Reported from a real phone: *"it says the app needs permission for my
+microphone. I can't give the app permission in the phone settings though."*
+Both halves of that sentence were true, and the second one is the diagnosis.
+
+**The manifest declared `INTERNET` and nothing else.** The site records a
+sentence through `getUserMedia` inside the WebView (ADR 0049). Capacitor's
+`BridgeWebChromeClient` already does the hard half — it catches the WebView's
+`AUDIO_CAPTURE` request and asks Android for `RECORD_AUDIO` +
+`MODIFY_AUDIO_SETTINGS` at runtime (verified against its source, not assumed).
+But **a runtime request for a permission the manifest never declared is denied
+instantly, with no dialog**, and an app appears in Android's permission
+settings only for what it declared. So the app asked, the system refused
+silently, and the web told him to go and grant a permission that was not listed
+anywhere. There was no switch to find.
+
+Both permissions are now declared, plus
+`android.hardware.microphone required="false"` so the Play listing is never
+filtered off a device without one — dictation is a convenience and the app
+works by typing on anything.
+
+**This was a web decision the shell could not honour.** ADR 0049 says the app
+uses the phone's own engine and uploads nothing; because that plugin does not
+exist yet, `pickSpeechRoute` falls through to the SERVER route inside the app,
+deliberately, so an old build still works. What nobody checked is whether *any*
+build could do the thing it was falling back to. Writing a fallback is not
+finishing it.
+
+The failure message is now door-aware for the same reason. In a browser,
+"allow it" is followable. In an app build that never declared the permission it
+is not, so the app says **"This version of the app cannot use the microphone.
+Update it, or type instead."** — the web has to cope with every app version
+still installed (ADR 0032), including the ones that cannot be fixed by
+allowing anything.
+
+`tests/mobile-shell.test.ts` asserts all three manifest lines. The manifest is
+hand-edited and nothing else in this repo would ever mention those strings
+again.
+
+Version 1.0.1, `versionCode` 2, bumped across `app.json`, `package.json` and
+`build.gradle` together.
+
+**Not verified on a handset by me** — this machine has no Android SDK, and the
+workflow's debug APK is what proves it. The check after installing is
+Settings → Apps → Yosher → Permissions, which should now list Microphone at
+all, where before it listed nothing to switch.
+
 ### 2026-09-06 — Slice 3: the launch (`claude/mobile-app-3-the-launch`)
 
 The founder, a minute after installing: a blue screen with the logo zooming
@@ -236,6 +284,14 @@ themselves leaves a tenant with no owner, which the platform owner resolves
 from `/admin` — the same as any other departure.
 
 ## Open items
+
+- **iOS will need `NSMicrophoneUsageDescription` the day `mobile/ios/` is
+  generated.** There is no iOS project yet, so there is nothing to edit — but
+  the same failure is waiting there in a different costume: a WKWebView asking
+  for the microphone with no usage string in `Info.plist` does not prompt, it
+  **crashes the app**. Worse than Android's silent denial, and the fix is one
+  key. Written down here because `cap add ios` will generate a plist that does
+  not have it.
 
 - **Slice 1 shipped without signing.** What remains of the shell itself: a
   signed Android release build (an upload key in GitHub secrets, once the

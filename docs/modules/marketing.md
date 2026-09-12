@@ -92,12 +92,26 @@ migration: every child table already cascades on `sites`.
   followed by the same, the full cascade with the blob pathnames handed back
   (checked under `withSystem`, so RLS is not the reason a row looks gone), and
   another tenant's site refused and still present afterwards. 45 passing.
-- **NOT DRIVEN IN THE UI.** The local dev server's Clerk session had expired
-  and only the founder can sign it back in; production runs the pre-merge code
-  and has one site nobody wants deleted. The ops are proven against a real
-  database; the button and its confirm are not. Given that the two defects
-  before this one were both UI reachability, that gap is worth closing before
-  anyone relies on it.
+- **DRIVEN ON PRODUCTION** (2026-09-11), in the operator tenant, after the
+  merge and once delete existed to make a throwaway safe: built
+  `scratch-delete-test`, which landed straight on its own screen and put
+  `All websites` in the header beside `Add a website` now that there were two.
+  The confirm asked, verbatim: *"Delete scratch-delete-test? This removes 3
+  pages, 0 photos, 0 messages, and cannot be undone. Your customers and
+  follow-ups are kept — they live in your CRM and your work list, not on the
+  website."* The toast confirmed, the URL dropped its `?site=` and the one
+  remaining site opened straight in with `All websites` gone again. **The
+  database afterwards: one site, and ZERO orphaned rows** across `site_pages`,
+  `site_images` and site-owned `brand_kits`; the audit row carried
+  `{slug, pages: 3, photos: 0, enquiries: 0}`. Yosher Homestead was untouched —
+  its 9 sections, its own kit, its logo.
+  **The PUBLISHED refusal is still proven by test only**: exercising it in the
+  UI would mean putting a junk site on the real domain for a few seconds, and
+  the isolation case already covers it.
+  *(The confirm was accepted by replacing `window.confirm` so its exact wording
+  could be asserted rather than dismissed by a native dialog the harness cannot
+  read. Everything either side of it — the button, the action, the navigation —
+  was the real thing.)*
 
 ### 2026-09-11 — The site wears its own look everywhere (`claude/the-site-wears-its-own-look`)
 

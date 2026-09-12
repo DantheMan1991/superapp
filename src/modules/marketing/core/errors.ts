@@ -39,7 +39,12 @@ export type MarketingErrorCode =
   | "DOMAIN_PROVIDER"
   | "ASSISTANT_OFF"
   | "ASSISTANT_BUSY"
-  | "ASSISTANT_FAILED";
+  | "ASSISTANT_FAILED"
+  | "CHANNEL_MISSING"
+  | "CHANNEL_LIMIT"
+  | "CHANNEL_DUPLICATE"
+  | "CHANNEL_NOT_ON_A_SITE"
+  | "FOOTER_FULL";
 
 export class MarketingError extends Error {
   constructor(
@@ -126,6 +131,16 @@ export function friendlyMessage(err: unknown): string {
         return "The assistant has been asked a lot this hour. Try again in a little while.";
       case "ASSISTANT_FAILED":
         return "The assistant couldn't write that. Try again, or ask for it differently.";
+      case "CHANNEL_MISSING":
+        return "That account is no longer there.";
+      case "CHANNEL_LIMIT":
+        return "That's 12 accounts, which is as many as one brand can hold. Remove one first.";
+      case "CHANNEL_DUPLICATE":
+        return "That account is already here. An account belongs to one brand, so remove it from the other one first.";
+      case "CHANNEL_NOT_ON_A_SITE":
+        return "This account belongs to the business rather than to one of its websites, so there is no footer to put it in.";
+      case "FOOTER_FULL":
+        return "The footer already shows eight marks, which is as many as it holds. Remove one on the Website screen first.";
     }
   }
   return "Something went wrong. Please try again.";

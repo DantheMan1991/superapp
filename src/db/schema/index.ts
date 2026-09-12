@@ -40,6 +40,10 @@ export * from "./brand";
 // The business's public website: pages of typed sections, read by strangers
 // through one trusted slug lookup and then the ordinary tenant context.
 export * from "./sites";
+// The accounts a brand posts to. A channel belongs to one of the business's
+// websites — which is what a brand is since ADR 0045 — or to the business
+// itself, and is not the same thing as a mark in the site's footer (ADR 0047).
+export * from "./social";
 // Layer 2a — pack-owned tables. Same rules as any domain above; the separation
 // that matters is in `src/packs/`, where the code lives.
 export * from "./assets";

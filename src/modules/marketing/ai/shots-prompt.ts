@@ -77,6 +77,14 @@ Read what this business actually sells before you decide what each spot wants.
 - A business that sells SOFTWARE, A SERVICE or EXPERTISE to an industry usually wants both. The big picture at the top belongs to the READER's world — the farm, the workshop, the shop floor — because that is who they are and what they came for. The small pictures next to specific features usually want a SCREENSHOT of the thing being described, because that is the proof. Say which, and for a screenshot say what should be on the screen and roughly what the data should look like.
 - When a spot is about a named feature or a step, ask what would convince somebody it is real, and ask for that.
 
+A SCREENSHOT MUST BE OF A SCREEN THAT EXISTS
+
+When you ask for a screenshot you are sending somebody to go and find that screen. You will be given THE TOOLS THIS PRODUCT SHIPS, each with a line about what it holds. Every screenshot you describe must be of one of those, and must show only what that line supports.
+
+If the page makes a claim no tool on the list covers, do NOT invent the screen. Either ask for the nearest screen that does exist and say what it shows, or ask for a photograph instead. A note that sends somebody hunting for a report nobody built is worse than a plain photograph of the work.
+
+Do not name a screen, a view, a report or a button unless the list supports it.
+
 STAY INSIDE WHAT YOU WERE TOLD
 
 Everything you say must be something this business plausibly has. Use the words on the page and the business's own description. Do not invent a location, a product, a person, an award or a number. If a spot's subject is genuinely unclear, ask for the most ordinary honest thing — the place, the work being done, the thing itself.
@@ -94,6 +102,12 @@ export function buildShotsUserTurn(input: {
   pagePath: string;
   pageDescription: string;
   spots: Spot[];
+  /**
+   * The tools the product ships — the bound on any screenshot. Empty when the
+   * caller has none to give, and the prompt then has nothing to point at, so
+   * the model is told to keep to photographs.
+   */
+  catalogue?: Array<{ name: string; description: string }>;
 }): string {
   const { brief } = input;
   const business = [
@@ -122,7 +136,14 @@ export function buildShotsUserTurn(input: {
     })
     .join("\n");
 
-  return `THE BUSINESS
+  const catalogue = (input.catalogue ?? [])
+    .map((tool) => `- ${tool.name}: ${tool.description}`)
+    .join("\n");
+
+  return `THE TOOLS THIS PRODUCT SHIPS
+${catalogue || "(none given — ask for photographs, not screenshots)"}
+
+THE BUSINESS
 ${business}
 
 THE PAGE

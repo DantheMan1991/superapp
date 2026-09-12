@@ -56,6 +56,50 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-11 — A screenshot has to be of a screen that exists (`claude/a-screenshot-of-a-screen-that-exists`)
+
+Pressing Suggest on the Yosher Homestead home page worked — 22 notes, 14
+screenshots and 8 photographs, split sensibly, and the hero came back as
+*"Stand back at the edge of a pasture in early morning or late afternoon light
+and take a wide landscape shot of the cattle grazing with fence line and open
+sky above them. Leave the left or upper third fairly empty so the headline can
+sit over it."* **Two of the fourteen described screens that do not exist**: an
+"enterprise profit view" (profit per enterprise is `enterprises` slice 4 and
+parked) and a storefront "with an add-to-cart button" (retail slice 6,
+unbuilt). It was reasoning from what the PAGE claims, which is exactly how the
+page's own careful wording — "costs land against the enterprise" — became a
+profit report. No migration.
+
+- **`productCatalogue`** (`src/lib/modules.ts`) reads every `modules` row with
+  `status = 'available'` — id, name and the one line each keeps about itself —
+  and the prompt is told a screenshot must be of one of them and must show only
+  what that line supports. A `coming_soon` row is left out: an empty slot has
+  no screen to photograph. The descriptions are maintained to track what
+  actually ships (`scripts/seed.ts`), which is what makes them usable as a
+  bound at all.
+- **NOT THE TENANT'S SWITCHED-ON MODULES, and the distinction is easy to get
+  backwards.** A business whose website SELLS this software to an industry is
+  usually not itself in that industry: the operator tenant runs Professional
+  services and none of the farm packs, while its Homestead site sells exactly
+  the farm packs. Asking what that tenant has on would have described the wrong
+  screens — worse than the generic note, not better. What bounds a screenshot
+  is what the PRODUCT has.
+- **The escape hatch is a photograph.** Told that a claim is uncovered, the
+  model is instructed to ask for the nearest screen that does exist or for a
+  photograph instead — never to invent the screen. A note that sends somebody
+  hunting for a report nobody built is worse than a plain photograph of the
+  work.
+- **The catalogue is the first thing in the user turn**, before the business
+  and the spots, and a test asserts that order: it is the bound on the answer,
+  not a detail of it. With no catalogue the turn says so and asks for
+  photographs only.
+- **Tests**: two more in `tests/site-shot-notes.test.ts` — the catalogue
+  reaching the turn ahead of the business, and the no-catalogue turn telling
+  the model to keep to photographs.
+- **Not re-driven.** The first press is the evidence for the shape; whether the
+  bound actually stops the two bad screenshots needs a second press against the
+  real model, and the page's notes would be overwritten by it.
+
 ### 2026-09-11 — The shot list says what to shoot (`claude/what-shot-to-take`)
 
 The founder, looking at the Yosher Homestead shot list: *"it would be nice if

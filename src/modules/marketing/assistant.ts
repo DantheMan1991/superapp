@@ -156,6 +156,8 @@ export async function writeShotNotes(
     pagePath: string;
     pageDescription: string;
     spots: Spot[];
+    /** The tools the product ships — what bounds a screenshot (`productCatalogue`). */
+    catalogue?: Array<{ name: string; description: string }>;
   },
   call: ModelCall = callAssistantModel,
 ): Promise<Record<string, string>> {

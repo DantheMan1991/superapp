@@ -21,8 +21,10 @@ There are two ways to record time here. Click {button:Start a clock|outline} whe
 - **Worked this week.** A list of each person and how their week breaks down, biggest first: `40h regular`, then `10h overtime` and `1h double time` when there are any. The rules being used are named on the right. It appears when two or more people worked, or whenever anybody has earned overtime. Paid leave and holiday are left out of these numbers, because they are not hours worked and never count toward overtime.
 - **`4h before overtime`.** Sits on somebody's line once they are within eight hours of the weekly threshold. This is the point of showing a week rather than a fortnight: it is a decision you can still make on a Wednesday, not a number you read after payroll.
 - **A day.** One block per day that has hours on it, newest first. The heading is the day, like `Fri, Sep 11`, with that day's total on the right. Days with nothing on them are left out, so a week with one busy Tuesday is one block and not seven. A day inside a pay period you have locked carries a {badge:Locked|warning} chip.
-- **A row.** One line per entry: who worked, how long, and what they did. When the hours were not worked, a badge says which kind, like {badge:Paid leave}. Worked hours carry no badge, since that is the ordinary case. `clock` at the end means the entry came from a clock rather than being typed; hover it to see what it was rounded to.
+- **A row.** One line per entry: who worked, how long, what they did, and what it was booked to. When the hours were not worked, a badge says which kind, like {badge:Paid leave}. Worked hours carry no badge, since that is the ordinary case. `clock` at the end means the entry came from a clock rather than being typed; hover it to see what it was rounded to.
 - **{button:Edit|ghost}.** At the end of each row. Opens the same box again, filled in, with a {button:Delete|destructive} button in it.
+- **A tag.** A small chip at the end of a row, like `Beef` or `North Paddock`, for each thing the hours were booked to. Nothing shows when the hours were not booked to anything.
+- **{button:Split|ghost}.** Beside {button:Edit|ghost}. Takes part of an entry out so the two halves can be booked to different things. The day's total does not change.
 - **{button:Correct|ghost}.** Takes the place of {button:Edit|ghost} on any day inside a locked period. It does not change the entry — it adds a correction in the open period instead. See [the pay period](pay-period.md).
 
 ## How to log an hour
@@ -43,7 +45,19 @@ There are two ways to record time here. Click {button:Start a clock|outline} whe
 4. Check `Day`. It starts on today and will not let you pick a day in the future.
 5. Leave `Kind` on `Worked` unless these hours were not worked. The choices are `Worked`, `Paid leave`, `Holiday` and `Unpaid`. This matters more than it looks: when overtime arrives, only `Worked` hours will count toward it.
 6. Type what they did under `What they did`. Up to 1000 characters, and you can leave it empty.
-7. Click {button:Log time|primary}. You see `7h 30m logged` and the entry appears in the week.
+7. Under `What it was for`, pick what these hours were spent on. There is one picker per kind of thing your business keeps — a line of business, a field, an animal, a piece of equipment — and you can pick one of each, or none. This section does not appear at all until you have something to pick.
+8. Click {button:Log time|primary}. You see `7h 30m logged` and the entry appears in the week.
+
+## How to split an hour between two things
+
+Somebody spends the morning on one thing and the afternoon on another, and logs it as one block. Rather than deleting it and starting again:
+
+1. Click {button:Split|ghost} on the row.
+2. Under `How much to take out`, type the part that was something else. The line underneath tells you what is left on the original, like `Leaves 2h 30m on the original.`
+3. Under `What the split-off part was for`, pick what that part was spent on.
+4. Click {button:Split|primary}. You see `Split into 2h 30m and 1h` and two rows where there was one.
+
+The original keeps its own tags and the day's total is exactly what it was. You can split a row as many times as you need.
 
 ## How to use the clock
 
@@ -115,9 +129,17 @@ The week you are reading is in the address bar, so you can send somebody a link 
 | `That person has left.` | Somebody marked this person as having left. Bring them back on [People](people.md) first. |
 | `This entry changed while you were editing it.` | Somebody else saved this entry while your box was open. Reload the page and make your change again. |
 | `That pay period is locked.` | The day you picked is inside a period you have locked. Use {button:Correct|ghost} on the entry instead. |
+| `A split has to leave some time on the original entry.` | You asked to take out the whole entry, or more than it holds. |
+| `Pick one thing per kind, and nothing that has been retired.` | Something was booked twice to the same kind of thing, or to something no longer in use. Reload the page and pick again. |
 | `Correction added to the open period` | Your correction was saved, dated in the first period that is still open. |
 | `no overtime` | That person's week was checked against your rules and stayed under every threshold. |
 | `Accountant access is read-only.` | You are signed in as an accountant. You can read every hour and change nothing. |
+
+## What booking an hour to something is for
+
+Every hour you book is an hour your business can account for. Once these hours become a cost, a line of business or a field can show what its labour actually came to — the same way your other costs already do. Nothing is lost by leaving hours unbooked; you just will not see them broken down.
+
+You do not tell us what kinds of things you have. Whatever your business already keeps — fields, herds, equipment, lines of business — shows up here on its own.
 
 ## Why this screen is a week
 

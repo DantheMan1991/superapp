@@ -67,6 +67,16 @@ const MODULE_SLUGS = [
   // from this array in both directions. A new module belongs here in the slice
   // that creates its directory.
   "work",
+  // Added 2026-09-12, FOUR slices late, in exactly the way the note above
+  // records for `work`. `src/modules/time/` has existed since slice 0 and was
+  // not listed, so nothing stopped it importing another module and nothing
+  // stopped another module importing it. It was clean when this was noticed —
+  // Time imported nothing — but only by luck, and slice 4 was about to want
+  // accounting's dimension reader. That want is what `src/lib/dimensions.ts`
+  // answers instead. A new module belongs here in the slice that creates its
+  // directory; this is the second time that sentence has been written after
+  // the fact.
+  "time",
 ];
 
 const CROSS_MODULE_MESSAGE =

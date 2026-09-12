@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, gte, isNull, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 
 /**
@@ -246,4 +246,48 @@ export async function listOpenPunches(
       Math.round((now - row.startedAt.getTime()) / 60_000),
     ),
   }));
+}
+
+export interface EntryDimension {
+  entryId: string;
+  dimensionType: string;
+  memberId: string;
+  name: string;
+}
+
+/**
+ * What a set of entries was for, as a flat list the caller groups.
+ *
+ * A SECOND QUERY RATHER THAN A JOIN on `listEntries`. An entry with three tags
+ * would otherwise come back three times, and every caller would have to
+ * de-duplicate before it could add up an hour — the shape that makes a total
+ * wrong in a way nobody notices until the totals are money.
+ */
+export async function listEntryDimensions(
+  tx: Tx,
+  tenantId: string,
+  entryIds: readonly string[],
+): Promise<EntryDimension[]> {
+  if (entryIds.length === 0) return [];
+  return await tx
+    .select({
+      entryId: schema.timeEntryDimensions.entryId,
+      dimensionType: schema.timeEntryDimensions.dimensionType,
+      memberId: schema.timeEntryDimensions.memberId,
+      name: schema.dimensionMembers.displayName,
+    })
+    .from(schema.timeEntryDimensions)
+    .innerJoin(
+      schema.dimensionMembers,
+      and(
+        eq(schema.dimensionMembers.tenantId, schema.timeEntryDimensions.tenantId),
+        eq(schema.dimensionMembers.id, schema.timeEntryDimensions.memberId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.timeEntryDimensions.tenantId, tenantId),
+        inArray(schema.timeEntryDimensions.entryId, [...entryIds]),
+      ),
+    );
 }

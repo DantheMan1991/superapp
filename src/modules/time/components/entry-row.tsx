@@ -23,8 +23,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  DimensionTags,
+  type DimensionTypeOption,
+} from "@/components/app/dimension-tags";
+import {
   amendEntryAction,
   deleteTimeEntryAction,
+  splitEntryAction,
   updateTimeEntryAction,
 } from "../actions";
 import { decimalHours, formatDuration, parseDuration } from "../core/duration";
@@ -40,6 +45,8 @@ export interface EntryView {
   workerName: string;
   /** Shown only when somebody else typed it — see below. */
   enteredBy: string | null;
+  /** The dimension members this entry already carries. */
+  memberIds: string[];
 }
 
 /**
@@ -53,12 +60,21 @@ export interface EntryView {
  * locked entries then, which is the right time for the guard because that is
  * the first moment the state it guards against can exist.
  */
-export function EntryRow({ entry, today }: { entry: EntryView; today: string }) {
+export function EntryRow({
+  entry,
+  today,
+  dimensionTypes,
+}: {
+  entry: EntryView;
+  today: string;
+  dimensionTypes: DimensionTypeOption[];
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [payType, setPayType] = useState(entry.payType);
   const [duration, setDuration] = useState(decimalHours(entry.minutes));
+  const [memberIds, setMemberIds] = useState<string[]>(entry.memberIds);
 
   const minutes = parseDuration(duration);
 
@@ -75,6 +91,7 @@ export function EntryRow({ entry, today }: { entry: EntryView; today: string }) 
         payType: payType as (typeof PAY_TYPES)[number],
         workDate: String(formData.get("workDate") ?? ""),
         note: String(formData.get("note") ?? ""),
+        memberIds,
       });
       if ("error" in result) {
         toast.error(result.error);
@@ -170,6 +187,17 @@ export function EntryRow({ entry, today }: { entry: EntryView; today: string }) 
                 defaultValue={entry.note}
               />
             </div>
+            {dimensionTypes.length > 0 && (
+              <div className="grid gap-2">
+                <Label>What it was for</Label>
+                <DimensionTags
+                  types={dimensionTypes}
+                  value={memberIds}
+                  onValue={setMemberIds}
+                  layout="inline"
+                />
+              </div>
+            )}
           </div>
           <DialogFooter className="sm:justify-between">
             <Button
@@ -293,6 +321,119 @@ export function AmendEntryButton({
             </Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Divide an entry so each half can say what it was for.
+ *
+ * "Five hours on the north field and three on the barn" is two entries, not one
+ * entry with two tags — the hours really were divided, and a single row
+ * carrying both could never say how much went where.
+ *
+ * THE DAY'S TOTAL NEVER MOVES. The original keeps the remainder, so somebody
+ * watching a figure they already believe does not see it change.
+ */
+export function SplitEntryButton({
+  entry,
+  dimensionTypes,
+}: {
+  entry: EntryView;
+  dimensionTypes: DimensionTypeOption[];
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [duration, setDuration] = useState("");
+  const [memberIds, setMemberIds] = useState<string[]>([]);
+
+  const minutes = parseDuration(duration);
+  const left = entry.minutes - minutes;
+
+  function submit() {
+    if (minutes <= 0) {
+      toast.error("How long? Try 1:30, 1.5 or 90m.");
+      return;
+    }
+    if (left <= 0) {
+      toast.error("A split has to leave some time on the original entry.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await splitEntryAction({
+        entryId: entry.id,
+        minutes,
+        memberIds,
+      });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(
+        `Split into ${formatDuration(left)} and ${formatDuration(minutes)}`,
+      );
+      setOpen(false);
+      setDuration("");
+      setMemberIds([]);
+      router.refresh();
+    });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm">
+          Split
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Split this entry</DialogTitle>
+          <DialogDescription>
+            {entry.workerName} has {formatDuration(entry.minutes)} on{" "}
+            {entry.workDate}. Take part of it out so it can be booked to
+            something else. The day&apos;s total does not change.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4 py-4">
+          <div className="grid gap-2">
+            <Label htmlFor={`sp-${entry.id}`}>How much to take out</Label>
+            <Input
+              id={`sp-${entry.id}`}
+              autoFocus
+              value={duration}
+              onChange={(e) => setDuration(e.target.value)}
+              placeholder="1:30, 1.5 or 90m"
+            />
+            <p className="text-xs text-subtle-foreground">
+              {duration.trim() === ""
+                ? "The part that was something else."
+                : minutes <= 0
+                  ? "Not a length we can read."
+                  : left <= 0
+                    ? "That is the whole entry. Leave something behind."
+                    : `Leaves ${formatDuration(left)} on the original.`}
+            </p>
+          </div>
+          {dimensionTypes.length > 0 && (
+            <div className="grid gap-2">
+              <Label>What the split-off part was for</Label>
+              <DimensionTags
+                types={dimensionTypes}
+                value={memberIds}
+                onValue={setMemberIds}
+                layout="inline"
+              />
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button type="button" disabled={pending} onClick={submit}>
+            {pending ? "Splitting…" : "Split"}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

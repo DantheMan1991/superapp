@@ -177,6 +177,59 @@ read.
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-12 — Paste the address; the name comes out of it (`claude/paste-the-address`)
+
+Two bugs the founder hit within minutes of S1 merging, both mine, and the
+second is a design mistake rather than a slip. No migration.
+
+- **THE FORM WAS THE WRONG WAY ROUND.** It asked for an account NAME and
+  derived the address from it — so typing `oakrowfarm` produced
+  `https://www.facebook.com/oakrowfarm`, which is a perfectly well-formed
+  address for somebody else's page. **A Facebook page only lives at
+  `facebook.com/<username>` when it has a username**; plenty are
+  `facebook.com/profile.php?id=61550…` or `facebook.com/p/Some-Name-61550…`.
+  LinkedIn is `/company/` for a business and `/in/` for a person. YouTube
+  honours `@handle`, `/c/` and `/channel/UC…`. The guess looked right, was
+  saved silently, and pointed at nobody — and because `footerLinkFor` fell back
+  to the same guess, it could have put that dead link on a public page.
+  **The precedent was in this module all along.** The website's own footer form
+  says *"paste the address of your page and the network fills in from it"*
+  (`website.md`, 6c) and uses `guessNetwork`. Social now works the same way:
+  `Address of the account` is the first field and the only one an owner has to
+  know, `guessNetwork` sets the network from it, and `handleFromUrl` reads the
+  name out of it — including the id from `profile.php?id=`, the slug from
+  `/p/Oak-Row-Farm-615…`, and the account after `/company/`, `/in/`, `/c/` and
+  `/channel/`. The name stays editable and is still the workspace-unique key.
+  `profileUrlFor` is gone; `profileUrlExample` survives to fill a PLACEHOLDER,
+  which is the only honest place for a shape nobody verified. `footerLinkFor`
+  no longer falls back at all — a mark on a public page is the last place to
+  put an address derived from a name.
+- **"You have to hit Add account twice."** The posts screen's empty state
+  offered `Add an account`, which landed on the accounts screen — whose empty
+  state offered `Add an account`. Two clicks, same words, and the first one
+  looked like it had failed. It now carries `?add=1` and the form opens on
+  arrival. It also carries `?brand=`, which it did not: from a brand's posts on
+  a multi-brand tenant it had dropped you on the brand LIST.
+- **A THIRD one, found by driving the fix itself**: pasting a second address —
+  which is the first thing anybody does after pasting a wrong one — left the
+  PREVIOUS address's name behind and would have saved it. The form now tracks
+  whether the owner NAMED the account: a name they typed survives a re-paste, a
+  name Yosher read out of an address follows the address, and an account being
+  edited starts as named so changing its address never silently renames it.
+- **Both were invisible to every test and to the drive.** The drive typed a
+  handle into the form and read back the address it had just generated, which
+  is the definition of a test that agrees with itself; and it never pressed the
+  button on the POSTS screen, only the one on the accounts screen. Neither is
+  exotic — they are the first two things a person does.
+- **Tests**: `handleFromUrl` covers the ordinary shapes and the four that broke
+  the guess (`profile.php?id=`, `/p/`, `/company/` vs `/in/`, and YouTube's
+  three), plus query strings, trailing slashes and an unreadable address; and
+  `footerLinkFor` is now asserted to make NOTHING rather than a guess when no
+  address is stored.
+- **Existing rows keep whatever address they hold** — including the two on the
+  dev-branch Test tenant, whose Facebook address was the bad guess. Nothing
+  migrates; the screen edits them.
+
 ### 2026-09-12 — Social S1: a post, finished (`claude/a-post-that-is-finished`)
 
 The second slice of the social run: writing a post, cutting a photo to it,
@@ -1047,6 +1100,19 @@ mismatch is visible where it can be fixed.
 - `src/lib/sites/shots.ts` — the shot list (18, ADR 0031): `pageSpots`, `spotKey`/`parseSpotKey`, `placePhoto`, `shotSummary`/`shotLine`, `emptySpotCount`, `isStarterPhoto`, `GENERIC_SHOTS`, `shotNotesFor` (pure); `SiteTemplate.shots` and `TemplatePicture.shot` in `src/lib/site-templates/types.ts`; `placePhotoAction` in `page-actions.ts`; `components/shot-list.tsx` and `src/app/dashboard/m/marketing/website/photos/page.tsx`; the `Photos` card on the Website page; `docs/help/marketing/shot-list.md`; `tests/site-shots.test.ts`
 
 ## Decisions & gotchas
+
+- **AN ADDRESS IS PASTED, NEVER DERIVED FROM A NAME.** S1 shipped a form that
+  built `facebook.com/<name>` from a typed name; a page without a username is
+  `profile.php?id=…`, so the guess was well-formed and pointed at nobody. The
+  direction that works is the one the website's footer form has used since 6c:
+  paste the address, and read the network (`guessNetwork`) and the name
+  (`handleFromUrl`) out of it. `profileUrlExample` exists only to fill a
+  placeholder. **The general rule: derive the thing a person cannot look up
+  from the thing they can, not the reverse.**
+- **A button must not lead to the same button.** The posts screen's
+  `Add an account` landed on a screen whose empty state offered
+  `Add an account`; the first click read as a failure. It carries `?add=1` now.
+  Worth checking on any empty state whose action is a LINK rather than a verb.
 
 - **THE DEV BRANCH HELD TWO TABLES PRODUCTION DID NOT** — resolved the same
   day by #514/#515, and both read 185 now. Noticed on 2026-09-12: `verify-rls`

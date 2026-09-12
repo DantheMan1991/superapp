@@ -104,29 +104,74 @@ const PROFILE_PREFIX: Partial<Record<SocialNetwork, string>> = {
 };
 
 /**
- * The address a handle almost certainly lives at, so the owner types one field
- * instead of two. A GUESS, and the form shows it as a filled-in value the
- * owner can overwrite — LinkedIn in particular is `/company/` for a business
- * and `/in/` for a person, and YouTube still honours several shapes.
+ * What an address on this network USUALLY looks like — a placeholder, never a
+ * value.
  *
- * Empty for `other`, which is the one network whose address cannot be derived
- * from anything; that form asks for the link itself.
+ * **THE FORM USED TO DERIVE THE ADDRESS FROM A TYPED NAME, AND THAT WAS
+ * BACKWARDS.** A Facebook page is `facebook.com/<username>` only when it has a
+ * username; plenty are `facebook.com/profile.php?id=61550…` or
+ * `facebook.com/p/Some-Name-61550…`. LinkedIn is `/company/` for a business and
+ * `/in/` for a person. YouTube honours `@handle`, `/c/` and `/channel/UC…`. So
+ * a name typed into a box produced an address that LOOKED right, was silently
+ * saved, and pointed at nobody — the founder hit it on his own page the day S1
+ * merged.
+ *
+ * The site's own footer form had it right all along ("paste the address of your
+ * page and the network fills in from it"), and this now works the same way:
+ * paste the real address, and the network and the name come FROM it. This
+ * function survives only to show the shape in a placeholder.
  */
-export function profileUrlFor(network: SocialNetwork, handle: string): string {
+export function profileUrlExample(network: SocialNetwork): string {
   const prefix = PROFILE_PREFIX[network];
-  const clean = normalizeHandle(handle);
-  if (!prefix || clean === "") return "";
-  return `${prefix}${clean}`;
+  return prefix ? `${prefix}yourname` : "https://example.com/yourpage";
 }
 
-/** The footer mark this channel would become, for the one-tap offer on the screen. */
+/**
+ * Path segments that name a KIND of page rather than the account: what comes
+ * after them is the account. `/company/oak-row`, `/channel/UCabc`, `/p/Oak-Row-123`.
+ */
+const PATH_PREFIXES = new Set(["p", "c", "channel", "company", "in", "user", "pages", "profile"]);
+
+/**
+ * The account's name, read OUT of its address — the direction that actually
+ * works.
+ *
+ * `handle` is still the workspace-unique key and still editable, but it is no
+ * longer the thing an owner has to know: they paste what their browser shows
+ * and this reads the identifying part out of it. A page with no username at all
+ * yields its numeric id, which is ugly and is also exactly what identifies it.
+ */
+export function handleFromUrl(url: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url.trim());
+  } catch {
+    return "";
+  }
+  // `facebook.com/profile.php?id=615…` — the id IS the account.
+  const id = parsed.searchParams.get("id");
+  if (id && /^\d+$/.test(id)) return id;
+  const segments = parsed.pathname.split("/").filter((seg) => seg !== "");
+  const meaningful = segments.filter(
+    (seg) => !PATH_PREFIXES.has(seg.toLowerCase().replace(/\.php$/, "")),
+  );
+  return normalizeHandle(meaningful[0] ?? "");
+}
+
+/**
+ * The footer mark this channel would become, for the one-tap offer on the screen.
+ *
+ * No fallback to a guessed address any more: the stored one is the address the
+ * owner pasted, and a mark on a public page is the last place to put something
+ * derived from a name that may not be the account's at all.
+ */
 export function footerLinkFor(channel: {
   network: SocialNetwork;
   handle: string;
   label: string;
   profileUrl: string;
 }): { network: SocialNetwork; url: string; label: string } | null {
-  const url = channel.profileUrl.trim() || profileUrlFor(channel.network, channel.handle);
+  const url = channel.profileUrl.trim();
   if (url === "") return null;
   return {
     network: channel.network,

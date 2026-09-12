@@ -4,7 +4,7 @@
 > **Route:** /dashboard/m/marketing/social/accounts
 > **Order:** 240
 
-Open **Marketing** in the sidebar, click `Social`, and click {button:Accounts|outline}. Add each account you post from with {button:Add an account|primary|plus}: pick the network, type the account name, and Yosher fills in the address. Two boxes underneath ask who reads that account and how you sound there; they are for later, when Yosher writes posts for you, and you can leave them blank today. Nothing on this page posts anything or signs you in anywhere.
+Open **Marketing** in the sidebar, click `Social`, and click {button:Accounts|outline}. Add each account you post from with {button:Add an account|primary|plus}: **open the account in your browser and paste its address**, and Yosher works out the network and the name from it. Two boxes underneath ask who reads that account and how you sound there; they are for later, when Yosher writes posts for you, and you can leave them blank today. Nothing on this page posts anything or signs you in anywhere.
 
 ## What you see
 
@@ -26,10 +26,10 @@ Open **Marketing** in the sidebar, click `Social`, and click {button:Accounts|ou
 
 ### The fields, when you add or edit an account
 
-- **`Network`.** A list: `Facebook`, `Instagram`, `YouTube`, `TikTok`, `LinkedIn`, `X`, `Pinterest` and `Another site`. Changing it clears the address, since the old one belonged to the old network.
-- **`Account name`.** Your name on that network, without the @. Under it, `Without the @. Yosher fills in the address below.` On `Another site` this is labeled `Name on that site`.
+- **`Address of the account`**, the first box and the one that matters. Open the account in your browser and copy the whole address from the address bar. Under it, `Open the account and copy the whole address from your browser. Yosher works out the network and the name from it.` Paste it and the `Network` below changes to match and the `Account name` fills in.
+- **`Network`.** A list: `Facebook`, `Instagram`, `YouTube`, `TikTok`, `LinkedIn`, `X`, `Pinterest` and `Another site`. Set from the address you pasted; change it by hand if Yosher guessed wrong.
+- **`Account name`.** What Yosher calls this account in its own lists, read out of the address. Under it, `Yosher will call this one oakrowfarm. Type a different name if you would rather.` Typing your own replaces it, and the line reads `What Yosher calls this account in its own lists. It never changes the address.` On `Another site` this is labeled `Name on that site`.
 - **`What to call it`.** Only on `Another site`, and required there: what the list should call it, such as `Our Substack`.
-- **`Address`.** Filled in from the account name as you type, such as `https://www.facebook.com/oakrowfarm`. Type over it when the guess is wrong; LinkedIn in particular is `/company/` for a business and `/in/` for a person. On `Another site` nothing is guessed and you paste the address yourself.
 - **`Who reads this one`.** A couple of lines about the people who see this account. Up to 400 characters.
 - **`How you sound here`.** A couple of lines about the voice: plain or playful, short or long, what you never say. Up to 400 characters. Under both, `Both are for later: when Yosher writes a post for this account, these two are what it reads first. Leave them blank for now if you would rather.`
 - **The note on `Another site`.** `Yosher can plan and write for this one, and you post it yourself. It is the one kind of account Yosher will never be able to post to on its own.`
@@ -38,10 +38,12 @@ Open **Marketing** in the sidebar, click `Social`, and click {button:Accounts|ou
 ## How to add an account
 
 1. Open **Marketing**, click `Social`, and click {button:Add an account|primary|plus}.
-2. Pick the `Network`.
-3. Type the `Account name` without the @, such as `oakrowfarm`. Watch `Address` fill in, and correct it if the guess is wrong.
+2. In another tab, open the account — your Facebook page, your Instagram profile — and copy the whole address from your browser's address bar.
+3. Paste it into `Address of the account`. `Network` and `Account name` fill in from it.
 4. Fill in `Who reads this one` and `How you sound here`, or leave them for now.
 5. Click {button:Add|primary}. You see `Account added.` and the row appears in the list.
+
+**Paste the address rather than typing a name.** A Facebook page only lives at `facebook.com/yourname` when it has a username set; plenty are `facebook.com/profile.php?id=61550…` instead, and a LinkedIn business is `/company/` where a person is `/in/`. Copying the address is the only way to be sure the link goes where you mean.
 
 ## How to show an account at the bottom of your website
 
@@ -72,7 +74,8 @@ An account belongs to one brand. If you try to add the same account under a seco
 | `Paused.` / `Back on.` | The account is set aside, or picked up again. |
 | `Removed.` | The account is gone. Anything in your website's footer is untouched. |
 | `Added to the website's footer.` | The mark is live at the bottom of every page of that website. |
-| `Type the account's name, such as oakrowfarm.` | The `Account name` box is empty. |
+| `Paste the account's address, the way it looks in your browser.` | The `Address of the account` box is empty. |
+| `Yosher couldn't read a name out of that address. Type one for it.` | The address has no name in it Yosher can use — type one into `Account name` yourself. |
 | `Give this one a name, so the list can say what it is.` | `Another site` needs `What to call it` filled in. |
 | `Paste the address of the account, starting with https://.` | `Another site` has no address, and Yosher cannot guess one. |
 | `The address should be a full one starting with https://.` | What is in `Address` is not a web address. |

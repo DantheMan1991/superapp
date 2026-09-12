@@ -18,7 +18,7 @@ Open **Marketing** in the sidebar and click `Social`. Click {button:Write a post
   - *The first words of the post*, or `Facebook post, nothing written yet`.
   - *The account*, such as `Facebook · @oakrowfarm`, then the time it is set for, then `Photo` when one is on it.
   - *{badge:Draft}*, *{badge:Scheduled}*, *{badge:Time to post|primary}* once Yosher has reminded you, or *{badge:Posted|secondary}*.
-- **`Nothing written yet`**, before your first post, with `Write a post, put a photo on it, and put it on the calendar. Yosher reminds you when it is time to post it.` With no accounts yet it reads `Add an account first, then posts you write here can be aimed at it.` and offers {button:Add an account|outline}.
+- **`Nothing written yet`**, before your first post, with `Write a post, put a photo on it, and put it on the calendar. Yosher reminds you when it is time to post it.` With no accounts yet it reads `Add an account first, then posts you write here can be aimed at it.` and offers {button:Add an account|outline}, which opens [Your social accounts](social-accounts.md) with the form already up.
 - **The line at the bottom.** `Yosher reminds you when a scheduled post is due, in What needs you. It cannot post for you yet — copy the words, save the picture, post it, then mark it posted.`
 
 ## How to write and schedule a post

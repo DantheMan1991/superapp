@@ -12,8 +12,8 @@ import {
   VOICE_MAX,
   footerHasLink,
   footerLinkFor,
+  handleFromUrl,
   normalizeHandle,
-  profileUrlFor,
 } from "@/lib/social/channels";
 import { isWebUrl, SOCIAL_NETWORKS } from "@/lib/sites/links";
 import { readSiteSettings, SiteSettingsSchema, SOCIAL_LINKS_MAX } from "@/lib/sites/schema";
@@ -94,10 +94,11 @@ export async function toChannelView(row: SocialChannel): Promise<ChannelView> {
 /**
  * The fields, checked once for both the add and the edit.
  *
- * `profileUrl` is optional in the input and derived when it is missing, so
- * the ordinary path is one field — the handle — and the address is filled in.
- * When it IS given it must be a real web address: a footer mark can be made
- * from it, and `isSafeHref`'s four shapes are too generous for a profile.
+ * **THE ADDRESS IS THE INPUT AND THE NAME IS DERIVED**, not the other way
+ * round. Deriving `facebook.com/<name>` from a typed name produced an address
+ * that looked right and pointed at nobody, because a page without a username
+ * is `profile.php?id=…`. The owner pastes what their browser shows; the name
+ * is read out of it and stays editable.
  */
 const channelFields = z.object({
   network: z.enum(SOCIAL_NETWORKS),
@@ -120,21 +121,27 @@ type CheckedFields = {
 function checkFields(
   input: z.infer<typeof channelFields>,
 ): { ok: true; fields: CheckedFields } | { ok: false; message: string } {
-  const handle = normalizeHandle(input.handle);
   const label = input.label.trim();
-  if (handle === "") {
-    return { ok: false, message: "Type the account's name, such as oakrowfarm." };
-  }
-  if (input.network === "other" && label === "") {
-    return { ok: false, message: "Give this one a name, so the list can say what it is." };
-  }
-  const profileUrl = input.profileUrl.trim() || profileUrlFor(input.network, handle);
+  const profileUrl = input.profileUrl.trim();
   if (profileUrl === "") {
-    // Only `other` can reach here: nothing else fails to derive an address.
-    return { ok: false, message: "Paste the address of the account, starting with https://." };
+    return {
+      ok: false,
+      message: "Paste the account's address, the way it looks in your browser.",
+    };
   }
   if (!isWebUrl(profileUrl)) {
     return { ok: false, message: "The address should be a full one starting with https://." };
+  }
+  // Read out of the address when the owner has not typed one of their own.
+  const handle = normalizeHandle(input.handle) || handleFromUrl(profileUrl);
+  if (handle === "") {
+    return {
+      ok: false,
+      message: "Yosher couldn't read a name out of that address. Type one for it.",
+    };
+  }
+  if (input.network === "other" && label === "") {
+    return { ok: false, message: "Give this one a name, so the list can say what it is." };
   }
   return {
     ok: true,

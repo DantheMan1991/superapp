@@ -38,11 +38,15 @@ export const dynamic = "force-dynamic";
 export default async function SocialPage({
   searchParams,
 }: {
-  searchParams: Promise<{ brand?: string }>;
+  searchParams: Promise<{ brand?: string; add?: string }>;
 }) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "marketing");
-  const asked = (await searchParams).brand ?? "";
+  const params = await searchParams;
+  const asked = params.brand ?? "";
+  // Arrived from the posts screen's "Add an account": open the form, rather
+  // than showing a second button with the same words on it.
+  const openForm = params.add === "1";
 
   const { sites, channels } = await withTenant(
     ctx.tenant.id,
@@ -159,6 +163,7 @@ export default async function SocialPage({
         channels={views}
         siteId={brand.siteId}
         footerUrls={footerUrls}
+        startAdding={openForm}
         canWrite={canWrite}
       />
       <p className="max-w-prose text-sm text-muted-foreground">

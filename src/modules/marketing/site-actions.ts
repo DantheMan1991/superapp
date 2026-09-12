@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { schema, withTenant } from "@/db";
 import { logAuditInTx } from "@/lib/audit";
-import { resolveBrandFor } from "@/lib/brand/read";
+import { resolveBrandFor, resolveBrandForSite } from "@/lib/brand/read";
 import { isModuleEnabled } from "@/lib/modules";
 import { siteBlockCatalog } from "@/lib/site-blocks/resolve";
 import type { BlockCatalogEntry } from "@/lib/site-blocks/types";
@@ -205,7 +205,9 @@ export async function rewriteSiteCopyAction(input: unknown): Promise<ActionResul
       async (tx) => {
         const site = await findSiteById(tx, ctx.tenantId, siteId);
         if (!site) throw new MarketingError("SITE_MISSING", "no site");
-        const brand = await resolveBrandFor(tx, ctx.tenantId, null);
+        // The site's own brand (ADR 0045). The BUSINESS kit is still right in
+        // `createSiteAction` above, where there is no site yet to have one.
+        const brand = await resolveBrandForSite(tx, ctx.tenantId, site.id);
         const tenant = await tx.query.tenants.findFirst({
           where: eq(schema.tenants.id, ctx.tenantId),
           columns: { industry: true },

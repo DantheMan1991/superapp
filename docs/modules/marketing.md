@@ -56,6 +56,40 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-11 — The site wears its own look everywhere (`claude/the-site-wears-its-own-look`)
+
+**Found by driving it on production**, in the Yosher App workspace, which no
+session had been able to reach before. Gave the seeded Yosher Homestead site
+its own look, drew it its own wordmark — and the page header still showed
+Yosher's logo. No migration.
+
+- **A LOOK PER WEBSITE SHIPPED HALF-WIRED.** Seven brand reads were enumerated
+  in that session's own analysis and **two were changed**. The header logo
+  (`src/lib/sites/logo.ts`), the favicon (`icon.ts`), the drawn map's pin
+  colour (`map.ts`), the assistant's brief (`assistant-actions.ts`) and the
+  rewrite (`site-actions.ts`) all still read `resolveBrandFor(tx, tenantId,
+  null)` — the BUSINESS's brand. All five now resolve the site's.
+- **The failure is invisible at runtime, which is why it survived review.**
+  `resolveBrandFor` returns a real brand and renders a real logo; it is simply
+  the wrong business's, and only on a tenant that has given a site a look of
+  its own — which no fixture had, and which is precisely the tenant the
+  feature exists for. Every line looked like the line beside it.
+- **`tests/site-brand-contract.test.ts` is a SCAN, not a behaviour test**: no
+  file under `src/lib/sites/` may call `resolveBrandFor`, because everything
+  there serves one site by definition. It was run against the old code first
+  and named `logo.ts`, `icon.ts` and `map.ts`. The two places the business kit
+  is still correct are listed in the test with their reasons —
+  `createSiteAction` (no site exists yet) and the kit editor's preview.
+- **What the drive DID confirm**, all on production: the Website screen opens
+  straight into the one site and offers `Add a website`; the seeded page
+  renders its nine sections in order; `Give it its own look` creates the site
+  kit and the panel becomes the full editor inheriting the business's colours;
+  a name and tagline save to the SITE and the business kit keeps its own; the
+  Warm look reached the page (serif headings, 10px buttons where the business
+  has pills); and **`Draw a logo` pre-filled "Yosher Homestead" / "YH" from the
+  site's kit** and drew six wordmarks in the site's colours, one of which is
+  now the site's own.
+
 ### 2026-09-10 — The enquiry says which site it came from (`claude/which-site-sent-the-lead`)
 
 Both public doors this module owns — the enquiry form

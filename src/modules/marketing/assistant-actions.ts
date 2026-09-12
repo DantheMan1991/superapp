@@ -5,7 +5,7 @@ import { get } from "@vercel/blob";
 import { z } from "zod";
 import { schema, withTenant } from "@/db";
 import { blobToken, isTenantBlobPath } from "@/lib/blob";
-import { resolveBrandFor } from "@/lib/brand/read";
+import { resolveBrandForSite } from "@/lib/brand/read";
 import { isModuleEnabled } from "@/lib/modules";
 import { overPublicCap } from "@/lib/public-caps";
 import { PageContentSchema, readSiteSettings, SectionSchema, type PageContent, type Section } from "@/lib/sites/schema";
@@ -63,7 +63,10 @@ async function pageBrief(ctx: MarketingCtx, pageId: string) {
         where: and(eq(schema.sitePages.tenantId, ctx.tenantId), eq(schema.sitePages.siteId, site.id)),
         columns: { id: true, title: true },
       });
-      const brand = await resolveBrandFor(tx, ctx.tenantId, null);
+      // The SITE's brand (ADR 0045): the name and tagline the writer works
+      // from must be the ones on the page it is writing, or a sub-brand's
+      // words come back in the parent business's voice.
+      const brand = await resolveBrandForSite(tx, ctx.tenantId, site.id);
       const tenant = await tx.query.tenants.findFirst({
         where: eq(schema.tenants.id, ctx.tenantId),
         columns: { industry: true },

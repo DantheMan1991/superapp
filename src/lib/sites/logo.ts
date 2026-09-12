@@ -2,7 +2,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { withTenant } from "@/db";
 import { streamBlobResponse } from "@/lib/blob-stream";
-import { resolveBrandFor } from "@/lib/brand/read";
+import { resolveBrandForSite } from "@/lib/brand/read";
 import type { SiteHit } from "./read";
 
 /**
@@ -18,7 +18,13 @@ export async function siteLogoResponse(
   ifNoneMatch: string | null,
 ): Promise<Response> {
   if (!hit) return NextResponse.json({ error: "not found" }, { status: 404 });
-  const brand = await withTenant(hit.tenantId, (tx) => resolveBrandFor(tx, hit.tenantId, null));
+  // The SITE's logo, not the business's (ADR 0045): a site that was given
+  // its own brand must serve its own mark here, or the header still reads
+  // as the parent business. A site with no kit of its own resolves to the
+  // business's, so nothing changed for a business with one brand.
+  const brand = await withTenant(hit.tenantId, (tx) =>
+    resolveBrandForSite(tx, hit.tenantId, hit.id),
+  );
   if (!brand.logo) return NextResponse.json({ error: "not found" }, { status: 404 });
   const response = await streamBlobResponse({
     pathname: brand.logo.pathname,

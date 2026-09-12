@@ -24,12 +24,13 @@ import {
   CHANNEL_URL_MAX,
   canEverConnect,
   channelDisplay,
+  handleFromUrl,
   normalizeHandle,
-  profileUrlFor,
+  profileUrlExample,
   VOICE_MAX,
   type ChannelStatus,
 } from "@/lib/social/channels";
-import { SOCIAL_NETWORK_LABELS, SOCIAL_NETWORKS, type SocialNetwork } from "@/lib/sites/links";
+import { guessNetwork, SOCIAL_NETWORK_LABELS, SOCIAL_NETWORKS, type SocialNetwork } from "@/lib/sites/links";
 import {
   addChannelAction,
   editChannelAction,
@@ -53,6 +54,8 @@ export interface ChannelsPanelProps {
   siteId: string | null;
   /** What the footer of that website currently shows, to say when a mark is already there. */
   footerUrls: { network: string; url: string }[];
+  /** Open the form on arrival — set when the posts screen sent them here to add one. */
+  startAdding?: boolean;
   canWrite: boolean;
 }
 
@@ -84,10 +87,10 @@ function sameAccount(a: string, b: string): boolean {
   return tidy(a) === tidy(b);
 }
 
-export function ChannelsPanel({ channels, siteId, footerUrls, canWrite }: ChannelsPanelProps) {
+export function ChannelsPanel({ channels, siteId, footerUrls, startAdding = false, canWrite }: ChannelsPanelProps) {
   const router = useRouter();
   const { confirm, confirmDialog } = useConfirm();
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(startAdding && canWrite);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -131,7 +134,8 @@ export function ChannelsPanel({ channels, siteId, footerUrls, canWrite }: Channe
       >
         <ul className="divide-y divide-divider">
           {channels.map((c) => {
-            const url = c.profileUrl || profileUrlFor(c.network as SocialNetwork, c.handle);
+            // The stored address is the account's; nothing is guessed from a name.
+            const url = c.profileUrl;
             const inFooter = footerUrls.some(
               (f) => f.network === c.network && sameAccount(f.url, url),
             );
@@ -312,26 +316,53 @@ function ChannelForm({
   onCancel: () => void;
 }) {
   const [draft, setDraft] = useState<Draft>(initial);
-  // Empty means "use the guess", so the field shows the guess and the action
-  // derives the same one. Typing over it makes the value the owner's.
-  const guess = profileUrlFor(draft.network, draft.handle);
-  const shown = draft.profileUrl || guess;
   const isOther = draft.network === "other";
+  // What the name will be if the owner types none: read out of the address.
+  const derived = handleFromUrl(draft.profileUrl);
+
+  /**
+   * Pasting an address sets the network and the name from it — the same move
+   * the site's footer form makes, and the reason this form is the way round it
+   * is. A network the owner has already chosen by hand is not overridden, and
+   * neither is a name they have typed.
+   */
+  function pasteAddress(value: string) {
+    setDraft((d) => {
+      const found = guessNetwork(value);
+      return {
+        ...d,
+        profileUrl: value,
+        network: found ?? d.network,
+        handle: d.handle.trim() === "" ? handleFromUrl(value) : d.handle,
+      };
+    });
+  }
   return (
     <div className="space-y-4">
+      {/* THE ADDRESS COMES FIRST, because it is the thing the owner can actually
+          look up, and everything else is read out of it. */}
+      <div className="space-y-2">
+        <Label htmlFor="channel-url">Address of the account</Label>
+        <Input
+          id="channel-url"
+          value={draft.profileUrl}
+          maxLength={CHANNEL_URL_MAX}
+          autoFocus
+          placeholder={profileUrlExample(draft.network)}
+          className="font-mono text-sm"
+          onChange={(e) => pasteAddress(e.target.value)}
+        />
+        <p className="text-xs text-muted-foreground">
+          Open the account and copy the whole address from your browser. Yosher works out the
+          network and the name from it.
+        </p>
+      </div>
       <div className="flex flex-wrap gap-3">
         <div className="space-y-2">
           <Label htmlFor="channel-network">Network</Label>
           <Select
             value={draft.network}
-            onValueChange={(v) =>
-              setDraft((d) => ({
-                ...d,
-                network: v as SocialNetwork,
-                // The old address belonged to the old network.
-                profileUrl: "",
-              }))
-            }
+            onValueChange={(v) => setDraft((d) => ({ ...d, network: v as SocialNetwork }))}
           >
             <SelectTrigger id="channel-network" className="h-9 w-44">
               <SelectValue />
@@ -353,11 +384,13 @@ function ChannelForm({
             id="channel-handle"
             value={draft.handle}
             maxLength={80}
-            placeholder="oakrowfarm"
+            placeholder={derived || "oakrowfarm"}
             onChange={(e) => setDraft((d) => ({ ...d, handle: e.target.value }))}
           />
           <p className="text-xs text-muted-foreground">
-            Without the @. Yosher fills in the address below.
+            {draft.handle.trim() === "" && derived !== ""
+              ? `Yosher will call this one ${derived}. Type a different name if you would rather.`
+              : "What Yosher calls this account in its own lists. It never changes the address."}
           </p>
         </div>
       </div>
@@ -373,17 +406,6 @@ function ChannelForm({
           />
         </div>
       )}
-      <div className="space-y-2">
-        <Label htmlFor="channel-url">Address</Label>
-        <Input
-          id="channel-url"
-          value={shown}
-          maxLength={CHANNEL_URL_MAX}
-          placeholder="https://www.facebook.com/oakrowfarm"
-          className="font-mono text-sm"
-          onChange={(e) => setDraft((d) => ({ ...d, profileUrl: e.target.value }))}
-        />
-      </div>
       <div className="space-y-2">
         <Label htmlFor="channel-audience">Who reads this one</Label>
         <Textarea
@@ -418,7 +440,11 @@ function ChannelForm({
       )}
       <div className="flex flex-wrap items-center gap-2">
         <Button
-          disabled={pending || normalizeHandle(draft.handle) === ""}
+          disabled={
+            pending ||
+            draft.profileUrl.trim() === "" ||
+            (normalizeHandle(draft.handle) === "" && derived === "")
+          }
           onClick={() => onSubmit(draft)}
         >
           {submitLabel}

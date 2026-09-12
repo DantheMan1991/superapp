@@ -40,13 +40,19 @@ export interface PostsPanelProps {
   posts: PostView[];
   /** The accounts a new post can be written against — active ones only. */
   channels: { id: string; network: string; handle: string; label: string }[];
+  /**
+   * Where "Add an account" goes, with this brand and `add=1` on it — so the
+   * button opens the form rather than landing on a screen with the SAME BUTTON
+   * on it, which is what it did when S1 shipped.
+   */
+  accountsHref: string;
   /** The tenant's today, `YYYY-MM-DD`, so "Today" means their today. */
   today: string;
   timezone: string;
   canWrite: boolean;
 }
 
-export function PostsPanel({ posts, channels, today, timezone, canWrite }: PostsPanelProps) {
+export function PostsPanel({ posts, channels, accountsHref, today, timezone, canWrite }: PostsPanelProps) {
   const router = useRouter();
   const [channelId, setChannelId] = useState(channels[0]?.id ?? "");
   const [pending, startTransition] = useTransition();
@@ -120,7 +126,7 @@ export function PostsPanel({ posts, channels, today, timezone, canWrite }: Posts
               action={
                 channels.length === 0 ? (
                   <Button asChild variant="outline">
-                    <Link href="/dashboard/m/marketing/social/accounts">Add an account</Link>
+                    <Link href={accountsHref}>Add an account</Link>
                   </Button>
                 ) : undefined
               }

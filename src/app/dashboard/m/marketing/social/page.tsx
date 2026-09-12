@@ -96,9 +96,11 @@ export default async function SocialPostsPage({
   // Only ACTIVE accounts are offered for a new post: a paused one is set aside
   // on purpose, and offering it here would be the pause meaning nothing.
   const mine = channels.filter((c) => c.siteId === brand.siteId && c.status === "active");
-  const accountsHref = `/dashboard/m/marketing/social/accounts${
-    brands.length > 1 ? `?brand=${brand.key}` : ""
-  }`;
+  const accountsQuery = brands.length > 1 ? `?brand=${brand.key}` : "";
+  const accountsHref = `/dashboard/m/marketing/social/accounts${accountsQuery}`;
+  // With `add=1` the accounts screen opens its form straight away. Without it,
+  // a brand with no accounts met "Add an account" twice in a row.
+  const addAccountHref = `${accountsHref}${accountsQuery === "" ? "?" : "&"}add=1`;
 
   return (
     <div className="space-y-6">
@@ -137,6 +139,7 @@ export default async function SocialPostsPage({
       )}
       <PostsPanel
         posts={views}
+        accountsHref={addAccountHref}
         channels={mine.map((c) => ({
           id: c.id,
           network: c.network,

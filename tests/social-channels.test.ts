@@ -5,8 +5,9 @@ import {
   channelTitle,
   footerHasLink,
   footerLinkFor,
+  handleFromUrl,
   normalizeHandle,
-  profileUrlFor,
+  profileUrlExample,
 } from "../src/lib/social/channels";
 import { BUSINESS_BRAND_KEY, chooseBrand, listBrands } from "../src/lib/social/brands";
 
@@ -33,22 +34,54 @@ describe("normalizeHandle", () => {
   });
 });
 
-describe("profileUrlFor", () => {
-  it("guesses the address from the handle for every network that has a shape", () => {
-    expect(profileUrlFor("facebook", "@OakRowFarm")).toBe("https://www.facebook.com/oakrowfarm");
-    expect(profileUrlFor("instagram", "oakrowfarm")).toBe("https://www.instagram.com/oakrowfarm");
-    expect(profileUrlFor("x", "oakrow")).toBe("https://x.com/oakrow");
-    expect(profileUrlFor("youtube", "oakrow")).toBe("https://www.youtube.com/@oakrow");
-    expect(profileUrlFor("tiktok", "oakrow")).toBe("https://www.tiktok.com/@oakrow");
-    expect(profileUrlFor("linkedin", "oak-row")).toBe("https://www.linkedin.com/company/oak-row");
+describe("handleFromUrl", () => {
+  /**
+   * The direction that works. Deriving an ADDRESS from a typed name shipped a
+   * link that looked right and pointed at nobody — the founder hit it on his
+   * own Facebook page the day S1 merged, because a page without a username is
+   * `profile.php?id=…` and never `facebook.com/<name>`.
+   */
+  it("reads the name out of the ordinary shapes", () => {
+    expect(handleFromUrl("https://www.facebook.com/oakrowfarm")).toBe("oakrowfarm");
+    expect(handleFromUrl("https://www.instagram.com/OakRowFarm/")).toBe("oakrowfarm");
+    expect(handleFromUrl("https://x.com/oakrow")).toBe("oakrow");
+    expect(handleFromUrl("https://www.tiktok.com/@oakrow")).toBe("oakrow");
+    expect(handleFromUrl("https://www.pinterest.com/oakrow/")).toBe("oakrow");
   });
 
-  it("guesses nothing for `other`, which is why that form asks for the link", () => {
-    expect(profileUrlFor("other", "oakrow")).toBe("");
+  it("reads the shapes that broke the old guess", () => {
+    // A Facebook page with no username at all: the id IS the account.
+    expect(handleFromUrl("https://www.facebook.com/profile.php?id=61550123456789")).toBe(
+      "61550123456789",
+    );
+    // The newer page address.
+    expect(handleFromUrl("https://www.facebook.com/p/Oak-Row-Farm-61550123/")).toBe(
+      "oak-row-farm-61550123",
+    );
+    // LinkedIn is /company/ for a business and /in/ for a person.
+    expect(handleFromUrl("https://www.linkedin.com/company/oak-row-farm/")).toBe("oak-row-farm");
+    expect(handleFromUrl("https://www.linkedin.com/in/dan-houser")).toBe("dan-houser");
+    // YouTube honours three.
+    expect(handleFromUrl("https://www.youtube.com/@oakrowfarm")).toBe("oakrowfarm");
+    expect(handleFromUrl("https://www.youtube.com/c/OakRowFarm")).toBe("oakrowfarm");
+    expect(handleFromUrl("https://www.youtube.com/channel/UCabc123")).toBe("ucabc123");
   });
 
-  it("guesses nothing from an empty handle", () => {
-    expect(profileUrlFor("facebook", "  @ ")).toBe("");
+  it("keeps query and trailing slashes out of the name", () => {
+    expect(handleFromUrl("https://www.instagram.com/oakrowfarm/?hl=en")).toBe("oakrowfarm");
+  });
+
+  it("gives back nothing rather than guessing, when there is nothing to read", () => {
+    expect(handleFromUrl("not a url")).toBe("");
+    expect(handleFromUrl("https://www.facebook.com/")).toBe("");
+    expect(handleFromUrl("")).toBe("");
+  });
+});
+
+describe("profileUrlExample", () => {
+  it("shows the SHAPE of an address, as a placeholder and never a value", () => {
+    expect(profileUrlExample("facebook")).toBe("https://www.facebook.com/yourname");
+    expect(profileUrlExample("other")).toBe("https://example.com/yourpage");
   });
 });
 
@@ -89,10 +122,12 @@ describe("footerLinkFor", () => {
     ).toEqual({ network: "facebook", url: "https://www.facebook.com/oakrowfarm", label: "" });
   });
 
-  it("falls back to the guess when no address was stored", () => {
+  it("makes NOTHING when no address was stored, rather than guessing one", () => {
+    // A mark on a public page is the last place to put an address derived from
+    // a name that may not be the account's at all.
     expect(
-      footerLinkFor({ network: "instagram", handle: "oakrowfarm", label: "", profileUrl: "" })?.url,
-    ).toBe("https://www.instagram.com/oakrowfarm");
+      footerLinkFor({ network: "instagram", handle: "oakrowfarm", label: "", profileUrl: "" }),
+    ).toBeNull();
   });
 
   it("carries the label only for `other`, and cuts it to the footer's own shorter cap", () => {

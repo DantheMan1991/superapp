@@ -72,6 +72,42 @@ export const timeWorkers = pgTable(
      */
     clerkUserId: text("clerk_user_id"),
     /**
+     * The PIN this person punches with on a SHARED DEVICE. scrypt,
+     * `base64(salt).base64(hash)`, via `hashPasscode` — the same treatment a
+     * document share's passcode gets, because it is the same kind of secret: a
+     * short thing a human types, so a fast digest would be a lookup table.
+     *
+     * Null is the ordinary state and means "does not use the shared clock".
+     * **Deliberately NOT unique.** A PIN does not identify anybody on its own —
+     * you tap your name first and then type it — so two people sharing `4821`
+     * is a coincidence, not a collision. Uniqueness would leak "that one is
+     * taken" to whoever was choosing.
+     *
+     * **AND IT LIVES ON A MEMBER-WIDE TABLE ON PURPOSE**, unlike `time_rates`,
+     * which has an owners-only policy. The question to ask is what reading this
+     * would GAIN somebody, and for a signed-in member the answer is nothing:
+     * staff can already clock any worker in or out from the ordinary panel,
+     * because a supervisor logging a crew's afternoon is the whole point of
+     * `started_by_clerk_user_id`. The Clerk session is the security boundary
+     * here; the PIN only decides which of several people standing at one tablet
+     * is punching, and its threat is the passer-by with no session at all. An
+     * owners-only policy would buy nothing and would stop the keypad working
+     * for the staff account a barn tablet should be signed in as.
+     *
+     * `listWorkers` still selects named columns and never this one, so it does
+     * not reach a screen. Keep it that way.
+     */
+    pinHash: text("pin_hash"),
+    /**
+     * Wrong PINs since the last right one, with when the last wrong one was.
+     *
+     * Together they ARE the lockout; there is no locked column, because a
+     * third copy of the same fact is a third thing to keep in step.
+     * `core/pin.ts` does the arithmetic and the lock expires by itself.
+     */
+    pinFailedCount: integer("pin_failed_count").notNull().default(0),
+    pinFailedAt: timestamp("pin_failed_at", { withTimezone: true }),
+    /**
      * Somebody who has left. NOT a delete: their hours are history, and a
      * business that could erase a worker could erase what it paid them.
      */
@@ -146,6 +182,36 @@ export const timePunches = pgTable(
     endedByClerkUserId: text("ended_by_clerk_user_id"),
     /** Carried onto the entry at clock-out, so it is typed once. */
     note: text("note").notNull().default(""),
+    /**
+     * **THE ID THE DEVICE MINTED BEFORE IT REACHED THE NETWORK**, and the one
+     * column in this table that could not be added later.
+     *
+     * A barn has no signal worth the name. A clock-in whose request succeeded
+     * but whose acknowledgement was lost looks exactly like one that failed, so
+     * the device retries — and without this the retry either double-punches or,
+     * here, trips the one-open-punch index and tells an honest person they are
+     * already clocked in. With it, the retry finds its own punch and returns
+     * it. `retail_sales.client_ref` is the same trick for the same reason, and
+     * that pack's note applies word for word: the rest of offline is client
+     * code that can be replaced at will; idempotent writing is the half that
+     * needs a migration and a reconciliation of everything already taken.
+     *
+     * Null for a punch started from the ordinary clock panel. Many nulls are
+     * fine — the index below is partial, so they are all distinct.
+     *
+     * CLOCK-OUT needs no equivalent: `time_entries_punch_idx` already allows
+     * one entry per punch, so a retried stop cannot produce a second one.
+     */
+    clientRef: text("client_ref"),
+    /**
+     * What the shared device calls itself — "Barn door", "Milking parlour".
+     *
+     * Free text and empty by default, because it is a LABEL and not an
+     * identity: nothing authorises on it, nothing joins on it. It exists so a
+     * disagreement about an afternoon has one more fact in it than "somebody
+     * pressed a button". Kept by the device itself, not by the server.
+     */
+    deviceLabel: text("device_label").notNull().default(""),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -162,6 +228,11 @@ export const timePunches = pgTable(
       .on(t.tenantId, t.workerId)
       .where(sql`${t.endedAt} is null`),
     index("time_punches_tenant_started_idx").on(t.tenantId, t.startedAt),
+    // Partial, so the many punches with no client id do not collide. This is
+    // what makes a retry from a device with no signal a no-op.
+    uniqueIndex("time_punches_client_ref_idx")
+      .on(t.tenantId, t.clientRef)
+      .where(sql`${t.clientRef} is not null`),
     foreignKey({
       name: "time_punches_worker_fk",
       columns: [t.tenantId, t.workerId],
@@ -255,11 +326,15 @@ export const timeEntries = pgTable(
     amendsEntryId: uuid("amends_entry_id"),
     /**
      * How this entry came to exist. `timer` means a punch produced it, so a
-     * screen can say the minutes were rounded rather than typed.
+     * screen can say the minutes were rounded rather than typed. `kiosk` means
+     * the punch came from a SHARED DEVICE, where the person who pressed the
+     * button and the person who worked are different by design — so the two
+     * are worth telling apart when a timesheet is queried.
      *
-     * CHECKED, and widened by the slice that adds a writer — `kiosk`, `import`,
-     * `tell` and `paste` each arrive with the door that writes them. A value
-     * set listing doors nobody has built would be a promise in a constraint.
+     * CHECKED, and widened by the slice that adds a writer. `kiosk` arrived in
+     * slice 7 with the keypad that writes it; `import`, `tell` and `paste` are
+     * still doors nobody has built, and listing them would be a promise in a
+     * constraint.
      */
     source: text("source").notNull().default("manual"),
     /**
@@ -325,7 +400,10 @@ export const timeEntries = pgTable(
       "time_entries_pay_type",
       sql`${t.payType} in ('worked', 'paid_leave', 'holiday', 'unpaid')`,
     ),
-    check("time_entries_source", sql`${t.source} in ('manual', 'timer')`),
+    check(
+      "time_entries_source",
+      sql`${t.source} in ('manual', 'timer', 'kiosk')`,
+    ),
     // An entry cannot amend itself; deeper cycles are the write path's problem,
     // but the database can refuse the trivial one a bad copy produces. The same
     // guard `schedule_items.parent_id` and `work_items.parent_id` carry.

@@ -12,7 +12,9 @@ Open **Time** {icon:clock} in the sidebar, then click {button:People|outline}. A
 - **The sign-in picker.** The second thing on each line. It says `No sign-in` for somebody who does not use the app, or the name of the person's account. Changing it saves immediately and you see `Saved`.
 - **{button:Has left|ghost}.** Marks somebody as having left. They stop being offered when you log time and their past hours stay exactly where they are. The button then reads {button:Bring back|ghost}.
 - **{button:Add someone|primary}.** Opens the box for adding a person. Owners only.
+- **{button:Shared clock|outline}.** Opens [The shared clock](shared-clock.md) — the screen you leave on a tablet by the door.
 - **{button:Time|outline}.** Takes you back to the week.
+- **{button:Give a PIN|ghost}.** Beside each person, for owners. Once they have one the line shows a `PIN set` chip and the button reads {button:Change PIN|ghost}, with {button:Remove PIN|ghost} beside it. A `locked out` chip and {button:Let them try again|outline} appear only while somebody is locked out.
 - **Your week starts on.** A picker at the bottom left, from `Sunday` to `Saturday`. This is not just how the page looks. It is the day your week runs from, so it decides which week an hour falls in, and when overtime arrives it will decide that too. Pick the day your business actually counts from.
 - **Round clocked time to.** A picker beside it: `To the minute`, `5 minutes`, `6 minutes (a tenth of an hour)`, `10 minutes`, `15 minutes (a quarter hour)` or `30 minutes`. It only affects time from a clock. Hours you type are kept exactly as you type them.
 - **People are paid.** `Weekly`, `Every two weeks`, `Twice a month` or `Monthly`. This is when people are **paid**, which is not how overtime is measured — overtime is always worked out for each week on its own. Choosing `Every two weeks` asks you for a starting date, because nothing in the calendar says which of two weeks begins a period.
@@ -29,6 +31,25 @@ Open **Time** {icon:clock} in the sidebar, then click {button:People|outline}. A
 5. Click {button:Add|primary}. You see `Added` and they appear in the list.
 
 Each sign-in can only belong to one person on this list. Anybody who does not sign in needs nothing, so you can add as many of those as you like.
+
+## How to give somebody a PIN
+
+A PIN lets somebody punch on the shared clock by the door. They do not need a sign-in, an email or a phone — which is the whole point.
+
+1. Click {button:Give a PIN|ghost} beside their name.
+2. Type 4 to 8 digits. Not `1234`, not `0000`, and not a run of digits — those are refused, because they are the first ones anybody tries.
+3. Click {button:Save|primary}. You see `Marta Quinn can use the shared clock`.
+4. **Tell them what it is.** There is no way to send it and no way to read it back later — we keep only a scrambled copy, so even we cannot tell you what somebody's PIN is. If they forget it, set a new one.
+
+{button:Remove PIN|ghost} takes it away again. Their name stops appearing on the shared clock and everything they have already worked stays exactly as it is — you can still log their hours by hand.
+
+**A PIN does not identify anybody on its own**, because you tap your name before you type it. So two people can have the same four digits without it mattering, and nothing tells you whether a PIN is already in use.
+
+## How to let somebody back in
+
+Five wrong PINs in a row and that person's PIN stops answering for fifteen minutes. A `locked out` chip appears beside their name.
+
+It clears itself when the fifteen minutes are up. To let them back in sooner, click {button:Let them try again|outline}. That does not change their PIN.
 
 ## How to record that somebody has left
 
@@ -130,6 +151,9 @@ If you are not sure, leave it on `To the minute`. It is the only setting that ne
 | `An hourly rate like 22.50.` | The pay box was empty or was not a number. |
 | `Burden is a whole percent between 0 and 200.` | On-costs must be a whole number in that range. |
 | `Nobody has a rate yet.` | No rates have been set. Hours are still recorded and added up without them. |
+| `A PIN is 4 to 8 digits.` | The PIN was empty, too short, too long, or had something other than digits in it. |
+| `That PIN is too easy to guess. Avoid 1234, 0000 and runs of digits.` | Pick something less obvious. |
+| `Marta Quinn can use the shared clock` | The PIN saved. |
 | `Wages will go to your books` / `Wages will stay here` | The tick box saved. |
 | `Wages from this business are already in the books…` | You tried to stop posting while an accrual is still standing. Unlock those periods first. |
 | `Your chart of accounts does not have the payroll accounts this needs…` | 6450, 6500 or 2300 is missing, renamed away or duplicated. Re-provision your chart from Accounting. |
@@ -142,6 +166,8 @@ You cannot record what anybody **does** — a job title, a trade, a department. 
 Wages go to one set of books: the company you have marked as your default in Accounting. If a second company employs its own people, Time does not yet know that.
 
 There is no separate rounding for different people, and no way to round a punch up automatically at the end of a shift.
+
+You cannot see what somebody's PIN is. We keep a scrambled copy and nothing can turn it back into digits — if it is forgotten, set a new one.
 
 Pay is hourly only. There is no salary, no piece rate, no bonus and no shift differential, and rates are whole cents — `15.38`, not `15.375`.
 

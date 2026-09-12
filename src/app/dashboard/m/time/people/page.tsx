@@ -10,6 +10,12 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { listAssignableMembers, memberLabel } from "@/lib/team";
 import { roleMayManageWorkers } from "@/modules/time/core/errors";
+import { isPinLocked } from "@/modules/time/core/pin";
+import {
+  ClearPinButton,
+  ResetLockoutButton,
+  SetPinButton,
+} from "@/modules/time/components/pin-controls";
 import {
   AddWorker,
   OvertimeRulesetPicker,
@@ -111,6 +117,9 @@ export default async function TimePeoplePage() {
         actions={
           <div className="flex items-center gap-2">
             <Button asChild variant="outline" size="sm">
+              <Link href="/dashboard/m/time/clock">Shared clock</Link>
+            </Button>
+            <Button asChild variant="outline" size="sm">
               <Link href="/dashboard/m/time">Time</Link>
             </Button>
             {canManage && (
@@ -166,6 +175,41 @@ export default async function TimePeoplePage() {
                       ? (labelByUser.get(worker.clerkUserId) ?? "Signs in")
                       : "No sign-in"}
                   </span>
+                )}
+                {/* The shared clock, and whether this person can use it.
+                    `isPinLocked` is derived from the counter and the
+                    timestamp, so the warning and the reset button appear and
+                    vanish on their own as the lockout expires. */}
+                {worker.hasPin && (
+                  <span className="shrink-0 rounded-full bg-subtle px-2 py-0.5 text-xs text-muted-foreground">
+                    PIN set
+                  </span>
+                )}
+                {canManage &&
+                  isPinLocked(
+                    worker.pinFailedCount,
+                    worker.pinFailedAt,
+                    new Date(),
+                  ) && (
+                    <>
+                      <span className="shrink-0 rounded-full bg-warning/10 px-2 py-0.5 text-xs text-warning-foreground">
+                        locked out
+                      </span>
+                      <ResetLockoutButton
+                        workerId={worker.id}
+                        name={worker.name}
+                      />
+                    </>
+                  )}
+                {canManage && worker.isActive && (
+                  <SetPinButton
+                    workerId={worker.id}
+                    name={worker.name}
+                    hasPin={worker.hasPin}
+                  />
+                )}
+                {canManage && worker.hasPin && (
+                  <ClearPinButton workerId={worker.id} name={worker.name} />
                 )}
                 {canManage && (
                   <WorkerActiveButton

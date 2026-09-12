@@ -11,7 +11,7 @@ There are two ways to record time here. Click {button:Start a clock|outline} whe
 ## What you see
 
 - **The heading.** `Time`, and under it how much was worked this week. When somebody was paid without working, a second figure follows it, like `4h paid but not worked`. Before anything is logged it reads `What everybody worked, week by week.`
-- **{button:People|outline}.** Takes you to [People](people.md), where you add somebody new or change the day your week starts on.
+- **{button:People|outline}.** Takes you to [People](people.md), where you add somebody new or change the day your week starts on. The shared clock for a tablet by the door is reached from there too — see [The shared clock](shared-clock.md).
 - **{button:Pay period|outline}.** Takes you to [the pay period](pay-period.md), where the same hours are grouped the way you pay them.
 - **{button:Start a clock|outline}.** Starts a running clock for somebody. Grayed out when everybody on the list is already on the clock.
 - **{button:Log time|primary}.** Opens the box for writing down hours already worked. It is grayed out until at least one person is on the People list.

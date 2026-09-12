@@ -122,6 +122,80 @@ export const sites = pgTable(
   ],
 );
 
+/**
+ * A LINK THAT SHOWS AN UNPUBLISHED SITE TO SOMEBODY WHO CANNOT SIGN IN.
+ *
+ * The whole point of the website tool is handing a business its site; until
+ * this existed the only way to show one was to publish it and hope, because
+ * `/sites/<slug>/draft` demands a member of that tenant. An agency building a
+ * site for a client had no way to say "here it is, what do you think?".
+ *
+ * **The trust model is the document share's, verbatim** (ADR 0046,
+ * `src/modules/documents/shares/resolve.ts`): `withSystem` does the token →
+ * tenant hop and NOTHING else, and every read after it runs under
+ * `withTenant` as `staff`. Widening that one lookup is the dangerous
+ * refactor.
+ *
+ * DELIBERATELY THINNER THAN A DOCUMENT SHARE, because what is behind it is
+ * different: marketing copy the owner intends to publish, not files.
+ *
+ *   - **No passcode.** A client who has to be given a password as well as a
+ *     link is a client who replies asking for the password. The token IS the
+ *     secret, it expires, and it can be revoked.
+ *   - **No use cap.** Somebody reviewing a site refreshes it, sends it to
+ *     their spouse, opens it again on a phone. A cap would read as the link
+ *     being broken.
+ *   - **`expires_at` is NOT NULL anyway**, which is the one rule kept whole
+ *     from the document share: there are no never-expiring anonymous links in
+ *     this product.
+ *
+ * `last_viewed_at` and `view_count` are here because the question an owner
+ * actually asks is "have they looked at it yet?", and without this the answer
+ * is a phone call.
+ */
+export const sitePreviews = pgTable(
+  "site_previews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    siteId: uuid("site_id").notNull(),
+    /** SHA-256 of the token. The raw token is never stored. */
+    tokenHash: text("token_hash").notNull(),
+    /** The token under `APP_ENCRYPTION_KEY`, so the link can be shown again. */
+    tokenCiphertext: text("token_ciphertext").notNull(),
+    /** Whose review this is for — "Hilltop Farm", "Dan". Shown to nobody but the owner. */
+    label: text("label").notNull().default(""),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedByClerkUserId: text("revoked_by_clerk_user_id"),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    lastViewedAt: timestamp("last_viewed_at", { withTimezone: true }),
+    viewCount: integer("view_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("site_previews_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("site_previews_tenant_idx").on(t.tenantId),
+    index("site_previews_site_idx").on(t.siteId),
+    /** The token is looked up across every tenant under `withSystem`; it must be unique platform-wide. */
+    uniqueIndex("site_previews_token_idx").on(t.tokenHash),
+    /**
+     * A preview dies with its site, and cannot name another tenant's site
+     * even under `withSystem` — the composite key carries the tenant.
+     */
+    foreignKey({
+      name: "site_previews_site_fk",
+      columns: [t.tenantId, t.siteId],
+      foreignColumns: [sites.tenantId, sites.id],
+    }).onDelete("cascade"),
+    check("site_previews_label_length", sql`length(${t.label}) <= 80`),
+  ],
+);
+
 export const sitePages = pgTable(
   "site_pages",
   {

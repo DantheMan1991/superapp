@@ -56,6 +56,54 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-11 — Showing a site to somebody who cannot sign in (`claude/show-it-to-someone`)
+
+The founder asked what else the website tool needed; this was my first answer
+and it turned out to be three times the job. **Migrations 0300 and 0301**
+(`site_previews` + its policies), applied to dev AND prod before the merge.
+[ADR 0046](../decisions/0046-a-preview-link-shows-an-unpublished-site-and-the-token-stands-in-for-the-slug.md).
+
+- **The gap:** the point of this module is handing a business its site, and
+  the only way to show one was to PUBLISH it — `/sites/<slug>/draft` demands a
+  member of that tenant. An agency had no way to say "here it is, what do you
+  think?", only "it is live, tell me what is wrong."
+- **`/p/<token>/` mirrors `/sites/<slug>/` completely** — the page and its
+  paths, images, the map, the logo. `SiteMode` gains `preview` and the
+  renderer substitutes the token for `site.slug` ONCE at the top, rather than
+  threading a second key through the thirteen components that take `mode`. A
+  missed call site there would be a link silently pointing at the members-only
+  route, and the compiler cannot see it because the argument is a `string`
+  either way.
+- **TWO THINGS THAT WOULD HAVE SHIPPED BROKEN, both found by building it.** A
+  preview would have had NO PHOTOGRAPHS: an unpublished site's images need
+  either a member session or a published site, and a client has neither. And
+  every in-site link would have 404'd, because `draft` mode builds them as
+  `/sites/<slug>/draft…`. Neither is visible on a one-page site with no
+  pictures, which is exactly what Yosher Homestead was when I first looked.
+- **Thinner than a document share on purpose**: no passcode, no use cap. What
+  is behind it is copy the owner intends to publish. `expires_at` stays NOT
+  NULL — the one rule kept whole.
+- **No DELETE policy at all.** Revoking is an UPDATE. A link handed to
+  somebody outside the business is not the owner's to erase, and it dies only
+  with its site.
+- **A preview is not a visit.** `isLiveMode` now gates the visitor beacon, the
+  structured data and the canonical URL; the enquiry and booking forms show
+  but are disabled. A client reviewing their own site must not create a real
+  lead or inflate the owner's numbers.
+- **Found and fixed on the way:** `memberMapResponse` still resolved the
+  tenant's site with `findFirst` by tenant alone — left behind by ADR 0045,
+  and with two sites it drew one site's pin in the OTHER'S BRAND COLOUR. It
+  takes a site id now and the member map route reads one from the query.
+- **Tests**: five cases in `tests/isolation/sites.test.ts` — an owner makes
+  one and staff read it, staff cannot make one, NOBODY can delete one, another
+  tenant's site is unrepresentable even under `withSystem`, one token hash
+  platform-wide, and previews dying with their site. 50 passing.
+- **Not driven.** The local Clerk session is signed out and production runs
+  the pre-merge code. The routes register in the build and the table's rules
+  are proven against a real database; no link has been made or opened.
+- **Not built here:** comments on a preview (a different table, and it would
+  want the passcode this leaves out), and an email that sends the link.
+
 ### 2026-09-11 — A screenshot has to be of a screen that exists (`claude/a-screenshot-of-a-screen-that-exists`)
 
 Pressing Suggest on the Yosher Homestead home page worked — 22 notes, 14

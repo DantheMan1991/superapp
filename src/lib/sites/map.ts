@@ -152,6 +152,7 @@ export async function siteMapResponse(hit: SiteHit | null, key: string, ifNoneMa
 /** The same picture for a signed-in member: the editor's preview and an unpublished draft. */
 export async function memberMapResponse(
   ctx: { tenantId: string; role: "owner" | "staff" | "expert" },
+  siteId: string,
   key: string,
   ifNoneMatch: string | null,
 ): Promise<Response> {
@@ -160,8 +161,11 @@ export async function memberMapResponse(
   const found = await withTenant(
     ctx.tenantId,
     async (tx) => {
+      // NAMED, not found. This used to take the tenant's first site, which
+      // stopped being an answer at ADR 0045 — with two sites it drew one
+      // site's pin in the other's brand colour.
       const site = await tx.query.sites.findFirst({
-        where: eq(schema.sites.tenantId, ctx.tenantId),
+        where: and(eq(schema.sites.tenantId, ctx.tenantId), eq(schema.sites.id, siteId)),
         columns: { id: true },
       });
       return site ? pinAndColour(tx, ctx.tenantId, site.id, false) : null;

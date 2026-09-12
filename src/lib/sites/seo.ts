@@ -1,4 +1,4 @@
-import type { HostKind } from "./slug";
+import type { HostKind, SiteMode } from "./slug";
 
 /**
  * What search engines and browsers ask a site for besides its pages —
@@ -120,9 +120,14 @@ export function hash32(text: string): string {
  * one — the canonical, wherever the page was reached — else the free
  * address for a host, else the platform path.
  */
+/**
+ * A preview reads as `path` here. It has no canonical public address —
+ * nothing that needs one (structured data, the share image, a moved-slug
+ * redirect) is drawn on a preview, because `isLiveMode` gates all three.
+ */
 export function siteBaseUrlFor(
   site: { slug: string; customHost: string | null },
-  mode: "path" | "host" | "draft",
+  mode: SiteMode,
   env: { NEXT_PUBLIC_APP_URL?: string; SITE_DOMAIN?: string; NODE_ENV?: string },
 ): string {
   if (site.customHost) return `https://${site.customHost}`;

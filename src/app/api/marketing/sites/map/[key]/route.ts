@@ -17,5 +17,17 @@ export async function GET(
   const { key } = await params;
   const ctx = await resolveTenantContext();
   if (!ctx) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  return memberMapResponse({ tenantId: ctx.tenant.id, role: ctx.role }, key, req.headers.get("if-none-match"));
+  // WHICH SITE. A tenant may have several (ADR 0045); this used to serve
+  // whichever came first, which drew one site's pin in the other's colour.
+  // A missing or unknown id is the same 404 as no map at all.
+  const siteId = req.nextUrl.searchParams.get("site") ?? "";
+  if (!/^[0-9a-f-]{36}$/i.test(siteId)) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  return memberMapResponse(
+    { tenantId: ctx.tenant.id, role: ctx.role },
+    siteId,
+    key,
+    req.headers.get("if-none-match"),
+  );
 }

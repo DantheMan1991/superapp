@@ -2101,6 +2101,20 @@
       "when": 1789176617288,
       "tag": "0299_open_victor_mancha",
       "breakpoints": true
+    },
+    {
+      "idx": 300,
+      "version": "7",
+      "when": 1789181501733,
+      "tag": "0300_nifty_red_shift",
+      "breakpoints": true
+    },
+    {
+      "idx": 301,
+      "version": "7",
+      "when": 1789181543674,
+      "tag": "0301_watery_whistler",
+      "breakpoints": true
     }
   ]
 }

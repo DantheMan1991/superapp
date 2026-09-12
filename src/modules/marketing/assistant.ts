@@ -17,7 +17,14 @@ import {
   REWRITE_SECTION_TOOL,
   sectionWords,
 } from "./ai/assistant-prompt";
+import type { Spot } from "@/lib/sites/shots";
+import { buildShotsUserTurn, WRITE_SHOTS_PROMPT, WRITE_SHOTS_TOOL } from "./ai/shots-prompt";
 import { MarketingError } from "./core/errors";
+
+/** What the model must hand back; anything else is the one friendly refusal. */
+const ShotNotesAnswer = z.object({
+  shots: z.array(z.object({ key: z.string().max(40), note: z.string().max(600) })).max(80),
+});
 
 /**
  * The assistant in the editor — the half that talks to the model (slice
@@ -129,4 +136,51 @@ export async function describePhoto(
   const parsed = AltTextSchema.safeParse(raw);
   if (!parsed.success) throw refused("photo answer was not a description");
   return parsed.data.description;
+}
+
+/**
+ * What to photograph on one page, one note per spot (slice 19).
+ *
+ * ONE CALL FOR THE WHOLE PAGE, not one per spot: the notes have to sit
+ * together — the cover and the cards beneath it are a set, and a model
+ * answering each in isolation repeats itself and cannot decide that THIS
+ * spot is the screenshot because THAT one took the wide view.
+ *
+ * A key it invents is dropped and a key it misses keeps its standing note,
+ * so a partial answer is still worth having.
+ */
+export async function writeShotNotes(
+  input: {
+    brief: SiteBrief;
+    pageTitle: string;
+    pagePath: string;
+    pageDescription: string;
+    spots: Spot[];
+  },
+  call: ModelCall = callAssistantModel,
+): Promise<Record<string, string>> {
+  if (input.spots.length === 0) return {};
+  let raw: unknown;
+  try {
+    raw = await call({
+      tool: WRITE_SHOTS_TOOL,
+      content: [
+        { type: "text", text: WRITE_SHOTS_PROMPT },
+        { type: "text", text: buildShotsUserTurn(input) },
+      ],
+      maxTokens: 8000,
+    });
+  } catch (err) {
+    throw refused("shot list call failed", err);
+  }
+  const parsed = ShotNotesAnswer.safeParse(raw);
+  if (!parsed.success) throw refused("shot list answer was not a list of notes");
+  const wanted = new Set(input.spots.map((s) => s.key));
+  const out: Record<string, string> = {};
+  for (const shot of parsed.data.shots) {
+    if (!wanted.has(shot.key)) continue;
+    const note = shot.note.trim();
+    if (note) out[shot.key] = note;
+  }
+  return out;
 }

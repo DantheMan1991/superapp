@@ -56,6 +56,56 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-11 — The shot list says what to shoot (`claude/what-shot-to-take`)
+
+The founder, looking at the Yosher Homestead shot list: *"it would be nice if
+the photos tool gave a better description of what shot to take. ie (shot with
+beautiful grass field with blue skys and cows on the field)"* — and then the
+half that decides the design: *"it needs to be aware of what is being built …
+there will probably need to be some farming photos but also probably some
+screen shots of the software."* **Migration 0299** (one jsonb column), applied
+to dev AND prod before the merge.
+
+- **WHY THE STANDING NOTES COULD NEVER BE BETTER.** `GENERIC_SHOTS` is eight
+  sentences true of any business, and "Something that says what you do at a
+  glance" is not a shot anybody can go and take. Three things stacked up on
+  that page: the general template carries NO shot notes, so every spot fell
+  back to the generic; the farm template writes notes for only its 3 starter
+  spots; and the farm template's notes describe **a farm's own site**, which
+  Yosher Homestead is not — it is software SOLD TO farms. A fixed note could
+  not have been right there however well written.
+- **The subject depends on what the business sells, so only the assistant can
+  say it.** Same words on a page, two shot lists: a farm wants its pasture in
+  the hero and its cuts on the tiles; a business selling software to farms
+  wants the pasture in the hero too — it is the reader's world — and a
+  SCREENSHOT on the feature card beside it. The prompt teaches exactly that
+  distinction and tells the model to choose per spot, and the strongest signal
+  it gets is `settings.about`, the owner's own words.
+- **One call for the whole page, never one per spot.** The notes are a set:
+  a model answering each in isolation repeats itself and cannot decide that
+  THIS spot is the screenshot because THAT one took the wide view.
+- **THE PIN IS THE DESIGN.** A spot's key carries a section INDEX, so
+  inserting or reordering a section would slide a note onto its neighbour.
+  Each stored note keeps `for` — the section label, heading and label it was
+  written from — and shows only while those still match; otherwise the spot
+  quietly reads its standing line again. Not flagged and not deleted: advice
+  about a section that changed is worse than none, and asking again is one
+  press. Same rule `settings.map` uses for its pin.
+- **Editable, because the owner knows the farm and the model knows the page.**
+  A note is a paragraph until it is clicked — a shot list is read far more
+  often than edited, usually on a phone in a field, and a page of text boxes
+  reads as a form to fill in. Emptying one is a REMOVAL, not an empty string:
+  the spot goes back to its standing line.
+- **Tests**: `tests/site-shot-notes.test.ts` — the pin holding, letting go on
+  a rewrite, and letting go when a section is INSERTED ABOVE and the key still
+  matches (the case the pin exists for); a stale note falling back quietly;
+  `storeFrom` dropping a key the model invented; `readShotNotes` surviving
+  anything at all in the column; and the user turn carrying the business's own
+  words plus each spot's key, shape and role AS WORDS rather than as the enum.
+- **Not built here:** notes for a whole site in one press (it is per page), and
+  any use of the note by the uploader — it is written for a person with a
+  camera, and nothing reads it back.
+
 ### 2026-09-11 — A website can be removed (`claude/a-website-can-be-removed`)
 
 Lifting the one-site limit made "add a website" reachable and left no way to

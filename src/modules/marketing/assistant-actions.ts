@@ -8,9 +8,22 @@ import { blobToken, isTenantBlobPath } from "@/lib/blob";
 import { resolveBrandForSite } from "@/lib/brand/read";
 import { isModuleEnabled } from "@/lib/modules";
 import { overPublicCap } from "@/lib/public-caps";
-import { PageContentSchema, readSiteSettings, SectionSchema, type PageContent, type Section } from "@/lib/sites/schema";
+import { PageContentSchema, readPageContent, readSiteSettings, SectionSchema, type PageContent, type Section } from "@/lib/sites/schema";
+import {
+  isStarterPhoto,
+  pageSpots,
+  readShotNotes,
+  shotNotesFor,
+  spotSubject,
+  storeFrom,
+  type ShotNoteStore,
+} from "@/lib/sites/shots";
+import { templateFor } from "@/lib/site-templates/resolve";
+import { listSiteImages } from "@/lib/sites/read";
+import { logAuditInTx } from "@/lib/audit";
+import { revalidatePath } from "next/cache";
 import { PAGE_SENTENCE_MAX, REWRITE_INSTRUCTION_MAX } from "./ai/assistant-prompt";
-import { assistantOn, describePhoto, draftPageContent, rewriteSectionWords } from "./assistant";
+import { assistantOn, describePhoto, draftPageContent, rewriteSectionWords, writeShotNotes } from "./assistant";
 import { MarketingError } from "./core/errors";
 import { fail, gate, type ActionResult } from "./gate";
 import type { MarketingCtx } from "./kit-ops";
@@ -146,6 +159,168 @@ export async function describePhotoAction(input: unknown): Promise<ActionResult<
     const bytes = new Uint8Array(await new Response(result.stream).arrayBuffer());
     const alt = await describePhoto({ bytes, mimeType: image.mimeType });
     return { ok: true, data: { alt } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * THE SHOT LIST (slice 19)
+ *
+ * Two actions, and they are deliberately separate: asking the assistant costs
+ * a call and a wait, and correcting one line should cost neither. The owner
+ * knows the farm; the model knows the page. Whoever is right about a spot
+ * should be able to say so without re-running the other.
+ * ------------------------------------------------------------------------ */
+
+/** The shot list's own route, so a written or corrected note shows at once. */
+function revalidateShots(): void {
+  revalidatePath("/dashboard/m/marketing/website/photos");
+}
+
+const shotsInput = z.object({ pageId: z.string().uuid() });
+
+/**
+ * Write a note for every spot on one page, and store them.
+ *
+ * The page is read, the model is called OUTSIDE the transaction (the house
+ * rule that a transaction never waits on the network), and the answer is
+ * written in a second one. The spots are recomputed from the same draft that
+ * was read, so a note cannot be pinned to words that changed while the model
+ * was thinking — and if they did change, `storedNoteIsFor` drops it on the
+ * next read rather than showing advice about a section that moved.
+ */
+export async function suggestShotsAction(input: unknown): Promise<ActionResult<{ written: number }>> {
+  try {
+    const ctx = await open();
+    const parsed = shotsInput.safeParse(input);
+    if (!parsed.success) return { error: "Which page?" };
+    const { pageId } = parsed.data;
+
+    const read = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const page = await tx.query.sitePages.findFirst({
+          where: and(eq(schema.sitePages.tenantId, ctx.tenantId), eq(schema.sitePages.id, pageId)),
+          columns: { id: true, title: true, path: true, draft: true, siteId: true },
+        });
+        if (!page) throw new MarketingError("PAGE_MISSING", "no page");
+        const site = await findSiteById(tx, ctx.tenantId, page.siteId);
+        if (!site) throw new MarketingError("SITE_MISSING", "no site");
+        const brand = await resolveBrandForSite(tx, ctx.tenantId, site.id);
+        const tenant = await tx.query.tenants.findFirst({
+          where: eq(schema.tenants.id, ctx.tenantId),
+          columns: { industry: true },
+        });
+        const images = await listSiteImages(tx, ctx.tenantId, site.id);
+        return {
+          page,
+          brand,
+          settings: readSiteSettings(site.settings),
+          industry: tenant?.industry,
+          starters: new Set(images.filter((i) => isStarterPhoto(i.pathname)).map((i) => i.id)),
+        };
+      },
+      { role: ctx.role },
+    );
+
+    const content = readPageContent(read.page.draft);
+    const spots = pageSpots(
+      { path: read.page.path, content },
+      read.starters,
+      shotNotesFor(templateFor(read.industry)),
+    );
+    if (spots.length === 0) return { ok: true, data: { written: 0 } };
+
+    const notes = await writeShotNotes({
+      brief: siteBriefFor({
+        brand: read.brand,
+        industry: industryLabel(read.industry),
+        settings: read.settings,
+      }),
+      pageTitle: read.page.title,
+      pagePath: read.page.path,
+      pageDescription: content.description,
+      spots,
+    });
+
+    const store = storeFrom(spots, notes);
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const [updated] = await tx
+          .update(schema.sitePages)
+          .set({ shotNotes: store, updatedAt: new Date() })
+          .where(and(eq(schema.sitePages.tenantId, ctx.tenantId), eq(schema.sitePages.id, pageId)))
+          .returning({ id: schema.sitePages.id });
+        if (!updated) throw new MarketingError("FORBIDDEN", "notes not saved");
+        await logAuditInTx(tx, {
+          action: "marketing.site.shots_written",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "site_page",
+          targetId: pageId,
+          meta: { spots: spots.length, written: Object.keys(store).length },
+        });
+      },
+      { role: ctx.role },
+    );
+    revalidateShots();
+    return { ok: true, data: { written: Object.keys(store).length } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const oneShotInput = z.object({
+  pageId: z.string().uuid(),
+  key: z.string().max(40),
+  note: z.string().trim().max(600),
+});
+
+/**
+ * One note, as the owner would rather have it said. No model call.
+ *
+ * An emptied note is a REMOVAL, not an empty string: the spot goes back to
+ * its standing line, which is what somebody clearing a box means. The pin is
+ * written from the spot as it is now, so correcting a note also re-pins it.
+ */
+export async function saveShotNoteAction(input: unknown): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const parsed = oneShotInput.safeParse(input);
+    if (!parsed.success) return { error: "Check the note and try again." };
+    const { pageId, key, note } = parsed.data;
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const page = await tx.query.sitePages.findFirst({
+          where: and(eq(schema.sitePages.tenantId, ctx.tenantId), eq(schema.sitePages.id, pageId)),
+          columns: { id: true, path: true, draft: true, shotNotes: true, siteId: true },
+        });
+        if (!page) throw new MarketingError("PAGE_MISSING", "no page");
+        const site = await findSiteById(tx, ctx.tenantId, page.siteId);
+        if (!site) throw new MarketingError("SITE_MISSING", "no site");
+        const spot = pageSpots({ path: page.path, content: readPageContent(page.draft) }).find(
+          (s) => s.key === key,
+        );
+        if (!spot) throw new MarketingError("INVALID_INPUT", "no such spot");
+
+        const store: ShotNoteStore = { ...readShotNotes(page.shotNotes) };
+        if (note) store[key] = { note, for: spotSubject(spot) };
+        else delete store[key];
+
+        const [updated] = await tx
+          .update(schema.sitePages)
+          .set({ shotNotes: store, updatedAt: new Date() })
+          .where(and(eq(schema.sitePages.tenantId, ctx.tenantId), eq(schema.sitePages.id, pageId)))
+          .returning({ id: schema.sitePages.id });
+        if (!updated) throw new MarketingError("FORBIDDEN", "note not saved");
+      },
+      { role: ctx.role },
+    );
+    revalidateShots();
+    return { ok: true };
   } catch (err) {
     return fail(err);
   }

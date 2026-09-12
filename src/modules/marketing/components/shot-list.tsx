@@ -3,16 +3,18 @@ import { useRef, useState, useSyncExternalStore, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { uploadPresigned } from "@vercel/blob/client";
-import { Camera, ImagePlus, Images } from "lucide-react";
+import { Camera, ImagePlus, Images, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Panel } from "@/components/app/panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { SHAPE_LABELS, shotLine, shotSummary, type Spot } from "@/lib/sites/shots";
 import { registerSitePhotoAction, type SitePhotoView } from "../image-actions";
 import { placePhotoAction } from "../page-actions";
+import { saveShotNoteAction, suggestShotsAction } from "../assistant-actions";
 import { SuggestDescription } from "./assistant-controls";
 import { memberPhotoSrc, PHOTO_ACCEPT, PhotoLibraryDialog } from "./photo-picker";
 
@@ -86,11 +88,16 @@ export function ShotList({
             <h2 className="font-heading text-lg font-semibold tracking-heading">
               {page.title} <span className="text-sm font-normal text-muted-foreground">{page.path}</span>
             </h2>
-            {canWrite && (
-              <Link href={`${EDITOR}/${page.id}`} className="text-sm text-muted-foreground hover:text-foreground">
-                Edit the page
-              </Link>
-            )}
+            <div className="flex flex-wrap items-center gap-3">
+              {canWrite && assistantOn && page.spots.length > 0 && (
+                <SuggestShotsButton pageId={page.id} />
+              )}
+              {canWrite && (
+                <Link href={`${EDITOR}/${page.id}`} className="text-sm text-muted-foreground hover:text-foreground">
+                  Edit the page
+                </Link>
+              )}
+            </div>
           </div>
           {page.spots.length === 0 ? (
             <Panel className="p-5 text-sm text-muted-foreground">No place for a photo on this page.</Panel>
@@ -230,9 +237,12 @@ function SpotRow({
             {spot.heading && spot.heading !== spot.label ? `: ${spot.heading}` : ""}
           </p>
         </div>
-        <p className="text-sm">
-          {spot.status === "starter" ? `Yosher drew this one to hold the place. ${spot.note}` : spot.note}
-        </p>
+        {spot.status === "starter" && (
+          <p className="text-xs text-subtle-foreground">
+            Yosher drew this one to hold the place.
+          </p>
+        )}
+        <ShotNote pageId={pageId} spot={spot} canWrite={canWrite} />
         {canWrite && filled && image && (
           <div className="space-y-1">
             <Label htmlFor={`alt-${pageId}-${spot.key}`}>Describe the photo</Label>
@@ -310,5 +320,138 @@ function SpotRow({
         />
       )}
     </div>
+  );
+}
+
+/**
+ * What to take here — the standing line, or the one somebody asked the
+ * assistant for and then corrected.
+ *
+ * READ-ONLY UNTIL SOMEBODY TOUCHES IT. A shot list is read far more often
+ * than it is edited, usually on a phone in a field, and a page of text boxes
+ * reads as a form to fill in rather than a list to work through. The note is
+ * a paragraph until it is clicked.
+ */
+function ShotNote({
+  pageId,
+  spot,
+  canWrite,
+}: {
+  pageId: string;
+  spot: Spot;
+  canWrite: boolean;
+}) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(spot.note);
+  const [pending, startTransition] = useTransition();
+
+  if (!canWrite || !editing) {
+    return (
+      <div className="space-y-1">
+        <p className="text-sm">{spot.note}</p>
+        {canWrite && (
+          <button
+            type="button"
+            onClick={() => {
+              setValue(spot.note);
+              setEditing(true);
+            }}
+            className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          >
+            {spot.written ? "Say it differently" : "Write what to take"}
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <Textarea
+        value={value}
+        maxLength={600}
+        rows={3}
+        autoFocus
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="What to point the camera at, or what to capture on screen."
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          disabled={pending}
+          onClick={() =>
+            startTransition(async () => {
+              const result = await saveShotNoteAction({ pageId, key: spot.key, note: value });
+              if ("error" in result) {
+                toast.error(result.error);
+                return;
+              }
+              setEditing(false);
+              toast.success("Saved.");
+              router.refresh();
+            })
+          }
+        >
+          {pending ? "Saving…" : "Save"}
+        </Button>
+        <Button variant="ghost" size="sm" disabled={pending} onClick={() => setEditing(false)}>
+          Cancel
+        </Button>
+        {spot.written && (
+          <button
+            type="button"
+            disabled={pending}
+            // Emptying it is a REMOVAL: the spot goes back to its standing
+            // line, which is what clearing a box means.
+            onClick={() =>
+              startTransition(async () => {
+                const result = await saveShotNoteAction({ pageId, key: spot.key, note: "" });
+                if ("error" in result) {
+                  toast.error(result.error);
+                  return;
+                }
+                setEditing(false);
+                router.refresh();
+              })
+            }
+            className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          >
+            Use the standard note
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Ask the assistant what to shoot on this page. One call, every spot. */
+function SuggestShotsButton({ pageId }: { pageId: string }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={pending}
+      onClick={() =>
+        startTransition(async () => {
+          const result = await suggestShotsAction({ pageId });
+          if ("error" in result) {
+            toast.error(result.error);
+            return;
+          }
+          toast.success(
+            result.data?.written
+              ? `Written for ${result.data.written} ${result.data.written === 1 ? "spot" : "spots"}.`
+              : "Nothing to write here.",
+          );
+          router.refresh();
+        })
+      }
+    >
+      <Sparkles className="size-4" />
+      {pending ? "Thinking…" : "Suggest what to shoot"}
+    </Button>
   );
 }

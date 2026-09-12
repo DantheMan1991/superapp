@@ -68,6 +68,13 @@ export interface Spot {
   label: string;
   /** What to take there. */
   note: string;
+  /**
+   * True when `note` is one somebody asked the assistant for (or edited
+   * afterwards), rather than the template's or the core's standing line.
+   * The screen says which, because advice written about THIS page is worth
+   * reading closely and a generic line is not.
+   */
+  written: boolean;
   /** A hero can be a band and a card can carry an icon: no photo is a fair choice there. */
   optional: boolean;
   status: SpotStatus;
@@ -190,6 +197,9 @@ export function pageSpots(
         shape: ROLE_SHAPES[role],
         label,
         note: fill(note, name),
+        // A template's or the core's standing line. `withStoredNotes` flips
+        // this where somebody asked for one about THIS page.
+        written: false,
         optional,
         status: statusOf(image, starters),
         image,
@@ -308,4 +318,99 @@ export function placePhoto(content: PageContent, key: SpotKey, ref: ImageRef): P
     next = { ...section, items: [...section.items, { image: ref, caption: "" }] };
   }
   return { ok: true, content: { ...content, sections: content.sections.map((s, i) => (i === key.section ? next : s)) } };
+}
+
+/* ---------------------------------------------------------------------------
+ * WRITTEN SHOT NOTES (slice 19)
+ *
+ * The generic lines above are true of any business and therefore say nothing
+ * about this one. A note worth acting on describes the actual picture — and
+ * what that picture IS depends on what the business sells, which the page
+ * cannot know: a farm's own site wants its pasture, and a site selling
+ * software TO farms wants that pasture in the hero and a screenshot on the
+ * feature cards. Only something reading the whole page and the business's
+ * own words can tell those apart, so the notes are asked for, stored on the
+ * page, and editable.
+ * ------------------------------------------------------------------------ */
+
+/** One stored note, and the words it was written from. */
+export interface StoredShotNote {
+  note: string;
+  /** `spotSubject` at the time of writing. */
+  for: string;
+}
+
+export type ShotNoteStore = Record<string, StoredShotNote>;
+
+/**
+ * The words a note is about, and the pin that decides whether it still
+ * applies. A spot's key carries a section INDEX, so inserting or reordering
+ * a section would slide a note onto its neighbour; comparing the words
+ * catches that AND a rewrite of the same section, with one rule.
+ *
+ * Deliberately the heading and the label only — not the body. A note stays
+ * good while the subject is the same, and rewriting a card's paragraph does
+ * not change what to photograph above it.
+ */
+export function spotSubject(spot: Pick<Spot, "sectionLabel" | "heading" | "label">): string {
+  return [spot.sectionLabel, spot.heading, spot.label]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/** A stored note applies only to the words it was written from (`settings.map`'s rule). */
+export function storedNoteIsFor(
+  stored: StoredShotNote | undefined,
+  spot: Pick<Spot, "sectionLabel" | "heading" | "label">,
+): boolean {
+  if (!stored || !stored.note.trim()) return false;
+  return stored.for.trim() === spotSubject(spot);
+}
+
+/**
+ * The spots with their written notes where those still apply. A spot whose
+ * words have changed since its note was written quietly reads the generic
+ * line again — the note is not shown as stale and not deleted, because
+ * asking again rewrites it and the old words are no guide to the new ones.
+ */
+export function withStoredNotes(spots: Spot[], stored: ShotNoteStore): Spot[] {
+  return spots.map((spot) => {
+    const hit = stored[spot.key];
+    if (!storedNoteIsFor(hit, spot)) return spot;
+    return { ...spot, note: hit!.note, written: true };
+  });
+}
+
+/** What the store looks like after a write: only the spots still on the page. */
+export function storeFrom(
+  spots: Pick<Spot, "key" | "sectionLabel" | "heading" | "label">[],
+  notes: Record<string, string>,
+): ShotNoteStore {
+  const out: ShotNoteStore = {};
+  for (const spot of spots) {
+    const note = notes[spot.key]?.trim();
+    if (!note) continue;
+    out[spot.key] = { note, for: spotSubject(spot) };
+  }
+  return out;
+}
+
+/**
+ * The stored map as it comes off the row. Anything that is not a note is
+ * dropped rather than thrown at: this is advice, and a malformed entry
+ * should cost its own spot's note and nothing else.
+ */
+export function readShotNotes(raw: unknown): ShotNoteStore {
+  if (!raw || typeof raw !== "object") return {};
+  const out: ShotNoteStore = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!value || typeof value !== "object") continue;
+    const note = (value as { note?: unknown }).note;
+    const forWords = (value as { for?: unknown }).for;
+    if (typeof note !== "string" || typeof forWords !== "string") continue;
+    if (!note.trim()) continue;
+    out[key] = { note, for: forWords };
+  }
+  return out;
 }

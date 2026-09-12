@@ -24,9 +24,10 @@
  * policy. Nothing here has a public policy; "no context → no rows" still
  * holds at the database.
  *
- * One site per tenant in this slice. A per-company site (the brand kit's
- * `entity_id` pattern) is a plausible later ask and would be a column and a
- * unique-index change, not a redesign.
+ * **MANY SITES PER TENANT** since ADR 0045: a business with two brands wants
+ * a site each, with its own address, look, logo and domain. Everything that
+ * hangs off a site keys on `site_id` and always did; what changed is that
+ * "the tenant's site" is no longer a question with an answer.
  */
 import { sql } from "drizzle-orm";
 import {
@@ -138,6 +139,24 @@ export const sitePages = pgTable(
     draft: jsonb("draft").notNull().default({ description: "", sections: [] }),
     /** The same shape, frozen at publish time. What the internet sees. */
     published: jsonb("published"),
+    /**
+     * WHAT TO PHOTOGRAPH, per spot on this page — written by the assistant
+     * when somebody asks for it, and editable afterwards (slice 19).
+     *
+     * `{ "<spotKey>": { note, for } }`. The spots THEMSELVES are still read
+     * from the page and never stored (ADR 0031); what is stored is the
+     * advice, which the page cannot derive because it depends on what the
+     * business sells — a farm wants a photograph of its pasture, and a
+     * business selling software TO farms wants a screenshot beside it.
+     *
+     * `for` is the words the note was written from. A spot key is a section
+     * INDEX, so inserting or reordering a section would otherwise slide a
+     * note onto a neighbour; comparing the words catches that and an edit
+     * both, and the note quietly falls back to the generic one. The same
+     * trick `settings.map` uses for its pin, for the same reason: kept only
+     * for the thing it was made from.
+     */
+    shotNotes: jsonb("shot_notes").notNull().default({}),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

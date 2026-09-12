@@ -1,0 +1,1 @@
+ALTER TABLE "site_pages" ADD COLUMN "shot_notes" jsonb DEFAULT '{}'::jsonb NOT NULL;

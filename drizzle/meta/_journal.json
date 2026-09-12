@@ -2094,6 +2094,13 @@
       "when": 1789090607455,
       "tag": "0298_cute_ma_gnuci",
       "breakpoints": true
+    },
+    {
+      "idx": 299,
+      "version": "7",
+      "when": 1789176617288,
+      "tag": "0299_open_victor_mancha",
+      "breakpoints": true
     }
   ]
 }

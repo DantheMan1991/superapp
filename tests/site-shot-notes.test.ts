@@ -168,6 +168,38 @@ describe("what the model is told", () => {
     expect(turn).toContain("the headline sitting ON it");
   });
 
+  it("bounds a screenshot with the tools the PRODUCT ships", () => {
+    const turn = buildShotsUserTurn({
+      brief,
+      pageTitle: "Home",
+      pagePath: "/",
+      pageDescription: "",
+      spots: [spot()],
+      catalogue: [
+        { name: "Livestock", description: "Animals tracked as lots — health, movement, breeding and what each one has cost." },
+        { name: "Land", description: "Parcels and the zones inside them." },
+      ],
+    });
+    expect(turn).toContain("THE TOOLS THIS PRODUCT SHIPS");
+    expect(turn).toContain("Livestock: Animals tracked as lots");
+    // The catalogue comes FIRST, before the business and the spots: it is the
+    // bound on the answer, not a detail of it.
+    expect(turn.indexOf("THE TOOLS")).toBeLessThan(turn.indexOf("THE BUSINESS"));
+  });
+
+  it("tells the model to keep to photographs when it is given no catalogue", () => {
+    // A screenshot note with nothing to point at is the exact failure this
+    // bound exists to stop: it sends somebody hunting for a screen.
+    const turn = buildShotsUserTurn({
+      brief,
+      pageTitle: "Home",
+      pagePath: "/",
+      pageDescription: "",
+      spots: [spot()],
+    });
+    expect(turn).toContain("ask for photographs, not screenshots");
+  });
+
   it("says when a spot is optional, so a note can decline it", () => {
     const turn = buildShotsUserTurn({
       brief,

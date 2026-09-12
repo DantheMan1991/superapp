@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
-import { withTenant, schema } from "@/db";
+import { withTenant, schema, type Tx } from "@/db";
 import type { Module, TenantModule } from "@/db/schema";
 
 export interface ActiveModule {
@@ -85,3 +85,31 @@ export async function moduleCategory(
   });
 }
 
+/**
+ * EVERY TOOL THE PRODUCT ACTUALLY SHIPS, with the one line each says about
+ * itself — the platform's catalogue, not one tenant's switched-on list.
+ *
+ * The distinction is the whole point and it is easy to get backwards. A
+ * business whose website SELLS this software to an industry is usually not
+ * itself in that industry: the operator tenant runs Professional services and
+ * none of the farm packs, while its Homestead site sells exactly the farm
+ * packs. Asking what THAT tenant has on would describe the wrong screens.
+ * What bounds a screenshot is what exists in the product at all.
+ *
+ * `coming_soon` rows are left out: an empty slot has no screen to photograph.
+ * The descriptions are maintained to track what actually ships
+ * (`scripts/seed.ts`), which is what makes them usable as a bound.
+ */
+export async function productCatalogue(
+  tx: Tx,
+): Promise<Array<{ id: string; name: string; description: string }>> {
+  return tx
+    .select({
+      id: schema.modules.id,
+      name: schema.modules.name,
+      description: schema.modules.description,
+    })
+    .from(schema.modules)
+    .where(eq(schema.modules.status, "available"))
+    .orderBy(asc(schema.modules.sortOrder));
+}

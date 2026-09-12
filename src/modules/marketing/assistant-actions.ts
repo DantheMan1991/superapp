@@ -6,7 +6,7 @@ import { z } from "zod";
 import { schema, withTenant } from "@/db";
 import { blobToken, isTenantBlobPath } from "@/lib/blob";
 import { resolveBrandForSite } from "@/lib/brand/read";
-import { isModuleEnabled } from "@/lib/modules";
+import { isModuleEnabled, productCatalogue } from "@/lib/modules";
 import { overPublicCap } from "@/lib/public-caps";
 import { PageContentSchema, readPageContent, readSiteSettings, SectionSchema, type PageContent, type Section } from "@/lib/sites/schema";
 import {
@@ -213,7 +213,14 @@ export async function suggestShotsAction(input: unknown): Promise<ActionResult<{
           columns: { industry: true },
         });
         const images = await listSiteImages(tx, ctx.tenantId, site.id);
+        // NOT this tenant's switched-on modules: a business whose site sells
+        // this software to an industry is usually not itself in it. The
+        // operator tenant runs Professional services and none of the farm
+        // packs, while its Homestead site sells exactly the farm packs. What
+        // bounds a screenshot is what the PRODUCT has (`productCatalogue`).
+        const catalogue = await productCatalogue(tx);
         return {
+          catalogue,
           page,
           brand,
           settings: readSiteSettings(site.settings),
@@ -242,6 +249,7 @@ export async function suggestShotsAction(input: unknown): Promise<ActionResult<{
       pagePath: read.page.path,
       pageDescription: content.description,
       spots,
+      catalogue: read.catalogue,
     });
 
     const store = storeFrom(spots, notes);

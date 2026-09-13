@@ -1,7 +1,7 @@
 # 0039 — A pack declares what it can be told in one sentence, and its own verb records it
 
 - **Date:** 2026-09-09
-- **Status:** Accepted, amended by [0050](0050-a-safe-verb-records-itself.md) (a verb may declare that a complete card of it records itself) and [0051](0051-the-way-in-is-the-shell-not-a-page.md) (the box lives in the shell, not on a page — superseding the placement consequence below); everything else here stands
+- **Status:** Accepted, amended by [0050](0050-a-safe-verb-records-itself.md) (a verb may declare that a complete card of it records itself) [0051](0051-the-way-in-is-the-shell-not-a-page.md) (the box lives in the shell, not on a page — superseding the placement consequence below) and [0052](0052-the-model-says-the-words-and-the-pack-goes-looking.md) (a choice is SEARCHED rather than enumerated; the reason behind "never nearest" is kept, the mechanism is replaced); everything else here stands
 - **Affects:** `src/lib/tell-sources/` (a declared extension point), the livestock pack as its first filler, the daily round page
 
 ## Context
@@ -41,7 +41,10 @@ are true:
   the second takes only the confirmed cards.
 - **Choices resolve by label, never nearest.** A word matching no paddock is
   kept as a HINT beside the empty field. "Pen" does not pick "Pen 2" when
-  "Pen 3" exists.
+  "Pen 3" exists. **(ADR 0052 replaced the mechanism and kept the reason: a
+  choice is now searched rather than picked off a menu, several candidates
+  become a question, and only what nobody could argue with is settled
+  automatically. "Pen" still does not pick "Pen 2".)**
 - **The pack's refusals are the refusals.** `record` calls the verb the
   pack's own screens call.
 

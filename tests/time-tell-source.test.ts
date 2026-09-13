@@ -40,6 +40,7 @@ d("clock me in", () => {
     role: "staff",
     now,
     timezone: "America/New_York",
+    industry: "homestead-farm",
     today: "2026-09-12",
   });
 

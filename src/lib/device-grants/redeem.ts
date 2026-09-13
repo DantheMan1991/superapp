@@ -84,6 +84,7 @@ export async function redeemGrant(
         tenantId: schema.deviceGrants.tenantId,
         clerkUserId: schema.deviceGrants.clerkUserId,
         timezone: schema.tenants.timezone,
+        industry: schema.tenants.industry,
         membershipRole: schema.memberships.role,
       })
       .from(schema.deviceGrants)
@@ -133,6 +134,7 @@ export async function redeemGrant(
         // once `clampSpokenAt` has answered.
         now,
         timezone: found.timezone,
+        industry: found.industry,
         today: todayInTimezone(found.timezone, now),
       },
     };

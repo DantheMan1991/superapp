@@ -4,6 +4,7 @@ import { withTenant } from "@/db";
 import { logAuditInTx } from "@/lib/audit";
 import { getActiveModules } from "@/lib/modules";
 import { callTellModel, claimCooldown, type TellModel } from "./model";
+import { resolveFound } from "./find";
 import { tellSources } from "./registry";
 import {
   checkEntry,
@@ -16,6 +17,7 @@ import {
   TellRefusal,
   type TellAction,
   type TellCtx,
+  type TellField,
   type TellSource,
   type TellValues,
 } from "./types";
@@ -105,6 +107,30 @@ async function enabledModules(tenantId: string): Promise<Set<string>> {
 
 /* -- Propose -------------------------------------------------------------- */
 
+/**
+ * A field as the BOX sees it — everything except the code.
+ *
+ * `TellField.find` is a FUNCTION, and the box is a client component: handing
+ * it one is "Functions cannot be passed directly to Client Components", which
+ * is a runtime error and nothing else catches it. `tsc` is happy, the build is
+ * happy, three thousand tests are happy, and the first sentence anybody types
+ * fails. Found by driving it.
+ *
+ * Picked field by field rather than deleted, so the NEXT function added to the
+ * contract cannot leak through the same hole by default.
+ */
+function forTheBox(field: TellField) {
+  return {
+    key: field.key,
+    label: field.label,
+    kind: field.kind,
+    required: field.required,
+    hint: field.hint,
+    choices: field.choices,
+    defaultToday: field.defaultToday,
+  };
+}
+
 export interface TellProposal {
   cards: TellCard[];
   /** Every action the tenant has, so the box can draw and re-check a card. */
@@ -112,7 +138,7 @@ export interface TellProposal {
     slug: string;
     title: string;
     label: string;
-    fields: TellAction["fields"];
+    fields: ReturnType<typeof forTheBox>[];
     /** ADR 0050 — the box records a complete card of this one without asking. */
     unattended: boolean;
   }>;
@@ -142,13 +168,29 @@ export async function proposeTold(
   const entries = validateProposal(raw);
   if (!entries) throw new TellError("NO_RESULT", "schema mismatch");
 
+  /*
+   * SECOND PASS, AND IT NEEDS A TRANSACTION. `resolveEntries` is pure and does
+   * everything that can be decided from the sentence alone; a `find` field can
+   * only be settled by going and looking at this tenant's rows, which is what
+   * removes the ceiling and what lets "the cows" find the cattle (`find.ts`).
+   *
+   * Its own `withTenant` rather than the one above, because the model call sits
+   * between them and a transaction held open across seconds of network latency
+   * is how a connection pool is exhausted.
+   */
+  const cards = await withTenant(
+    ctx.tenantId,
+    (tx) => resolveFound(tx, ctx, resolveEntries(entries, actions, ctx.today), actions),
+    { role: ctx.role, userId: ctx.userId },
+  );
+
   return {
-    cards: resolveEntries(entries, actions, ctx.today),
+    cards,
     actions: loaded.map((l) => ({
       slug: l.action.slug,
       title: l.action.title,
       label: l.source.label,
-      fields: l.action.fields,
+      fields: l.action.fields.map(forTheBox),
       unattended: l.action.unattended === true,
     })),
   };

@@ -53,6 +53,7 @@ d("telling it what happened", () => {
     role: "owner",
     now: NOW,
     timezone: "UTC",
+    industry: "homestead-farm",
     today: TODAY,
   });
   const asOwner = <T,>(fn: (tx: Tx) => Promise<T>) =>
@@ -131,9 +132,47 @@ d("telling it what happened", () => {
       "livestock.loss",
       "livestock.move",
     ]);
-    // The pen is offered by name, and the feed by name and unit.
+    /*
+     * THE ANIMALS ARE SEARCHED, NOT LISTED. This asserted the opposite until
+     * the menu was removed: every lot's name used to be written into the
+     * model's prompt, which is what could not scale and what made "checked the
+     * cows" match nothing. `find` replaces it, so there is deliberately no
+     * list here to assert — a farm with three hundred pens now sends the same
+     * prompt as one with three.
+     */
     const lotField = proposal.actions[0].fields.find((f) => f.key === "lot")!;
-    expect(lotField.choices?.map((c) => c.label)).toEqual(["Pen 2"]);
+    expect(lotField.choices).toBeUndefined();
+
+    /*
+     * NOTHING IN A PROPOSAL MAY BE A FUNCTION.
+     *
+     * The box is a client component, and handing React a function across that
+     * boundary is "Functions cannot be passed directly to Client Components" —
+     * a RUNTIME error that `tsc`, the linter, the build and three thousand
+     * tests all waved through. The first sentence anybody typed failed, and it
+     * was found by driving the app rather than by any of them.
+     *
+     * Asserted over the whole proposal rather than over `find` by name, so the
+     * next function added to the contract cannot slip through the same hole.
+     */
+    const functionsIn = (value: unknown, path = ""): string[] => {
+      if (typeof value === "function") return [path || "(root)"];
+      if (Array.isArray(value)) {
+        return value.flatMap((v, i) => functionsIn(v, `${path}[${i}]`));
+      }
+      if (value && typeof value === "object") {
+        return Object.entries(value).flatMap(([k, v]) =>
+          functionsIn(v, path ? `${path}.${k}` : k),
+        );
+      }
+      return [];
+    };
+    expect(functionsIn(proposal)).toEqual([]);
+
+    // The feed IS still listed, and on purpose: an item's name carries its
+    // unit ("Grower crumble (lb)"), which is the difference between two bags
+    // and two pounds. A short list nobody has to guess at is still the right
+    // shape for it.
     const feed = proposal.actions.find((a) => a.slug === "livestock.feed")!;
     expect(feed.fields.find((f) => f.key === "item")!.choices?.[0].label).toBe(
       "Grower crumble (lb)",

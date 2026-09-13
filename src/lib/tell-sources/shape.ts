@@ -1,5 +1,11 @@
 import { z } from "zod";
-import type { TellAction, TellField, TellValue, TellValues } from "./types";
+import type {
+  TellAction,
+  TellCandidate,
+  TellField,
+  TellValue,
+  TellValues,
+} from "./types";
 
 /**
  * The SHAPE of a told sentence: the limits, the model's tool built from every
@@ -27,8 +33,17 @@ export const PROPOSE_TOOL_NAME = "record_what_happened";
 function fieldLine(f: TellField): string {
   const bits = [`${f.key} (${f.kind}${f.required ? ", required" : ""})`, f.hint];
   if (f.kind === "choice") {
-    const labels = (f.choices ?? []).map((c) => `“${c.label}”`).join(", ");
-    bits.push(`One of: ${labels || "(none yet)"} — copied exactly when the sentence clearly means it, otherwise the sentence's own words.`);
+    if (f.find) {
+      // NOTHING ENUMERATED. The model reports what was SAID and the pack goes
+      // and looks (`TellField.find`) — which is what removes the ceiling and
+      // what lets "the cows" find the cattle.
+      bits.push(
+        "The words the sentence used for it, exactly as said — “the cows”, “the back field”, “Rosie”. Never invent a name you were not given, and never leave it out because you are unsure which one is meant: saying the words is what lets it be looked up.",
+      );
+    } else {
+      const labels = (f.choices ?? []).map((c) => `“${c.label}”`).join(", ");
+      bits.push(`One of: ${labels || "(none yet)"} — copied exactly when the sentence clearly means it, otherwise the sentence's own words.`);
+    }
   }
   if (f.kind === "date") bits.push("As YYYY-MM-DD. Omit for today.");
   return `    - ${bits.join(" ")}`;
@@ -124,6 +139,16 @@ export interface TellCard {
    * never silently dropped.
    */
   hints: Record<string, string>;
+  /**
+   * Field key → the things those words could have meant, when a `find` came
+   * back with more than one and nothing could tell them apart.
+   *
+   * A SHORTLIST IS A QUESTION, not a failure. The old behaviour for an
+   * unmatched word was an empty field and an amber warning; this is two or
+   * three real things with a line each saying what they are, which is what a
+   * person would have asked.
+   */
+  options?: Record<string, TellCandidate[]>;
 }
 
 export function isCalendarDate(s: string): boolean {
@@ -207,6 +232,13 @@ export function resolveEntries(
           }
           break;
         case "choice": {
+          if (f.find) {
+            // LEFT FOR `resolveFound`, which runs inside the tenant's
+            // transaction because looking things up needs one. The words are
+            // parked as a hint so nothing is lost if that pass cannot finish.
+            hints[f.key] = said.slice(0, 120);
+            break;
+          }
           const value = matchChoice(f, said);
           if (value !== null) resolved = value;
           else hints[f.key] = said.slice(0, 120);
@@ -259,7 +291,21 @@ export function checkEntry(
         }
         break;
       case "choice":
-        if (typeof v !== "string" || !(f.choices ?? []).some((c) => c.value === v)) {
+        if (typeof v !== "string" || v === "") {
+          return `${f.label} is missing.`;
+        }
+        /*
+         * A SEARCHED FIELD HAS NO LIST TO BE IN, and checking it against an
+         * absent one rejected everything — every card, every action, the whole
+         * feature. Found the moment livestock's lots stopped being enumerated.
+         *
+         * What replaces the check is not nothing. The value came from the
+         * pack's own `find`, and `record` hands it to the pack's own verb,
+         * which refuses an id it does not recognise in its own words — the
+         * same verb the pack's screens call. A second opinion here would be
+         * the weaker one, and it is the one that would drift.
+         */
+        if (!f.find && !(f.choices ?? []).some((c) => c.value === v)) {
           return `${f.label} is not one of the choices.`;
         }
         break;

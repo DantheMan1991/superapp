@@ -34,6 +34,7 @@ d("telling work what needs doing", () => {
     role: "staff",
     now: new Date("2026-09-12T14:00:00.000Z"),
     timezone: "America/New_York",
+    industry: "homestead-farm",
     today: "2026-09-12",
   });
 

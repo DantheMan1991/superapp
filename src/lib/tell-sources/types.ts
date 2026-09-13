@@ -73,6 +73,18 @@ export interface TellCtx {
   /** The tenant's zone. Needed by anything that turns `now` into a day. */
   timezone: string;
   /**
+   * The tenant's industry, so a source can reach its own `packConfig` through
+   * `packContext()`.
+   *
+   * A TENANT FACT, like the timezone, and carried for the same reason: both
+   * gates already know it and a source that had to look it up would open a
+   * transaction to answer a question the caller could have answered for free.
+   * What a source DOES with it is its own business — livestock reads the
+   * farm's words for its animals, which is how "the cows" finds the cattle
+   * without the pack ever learning it is on a farm.
+   */
+  industry: string;
+  /**
    * The tenant's today, so "this morning" and "yesterday" mean the right day.
    * DERIVED from `now` and `timezone` — `todayInTimezone(timezone, now)` — and
    * carried because almost every action wants the date and not the instant.
@@ -89,6 +101,25 @@ export interface TellChoice {
   label: string;
 }
 
+/**
+ * One thing the words COULD have meant, with enough beside it to tell it from
+ * its neighbours.
+ *
+ * `detail` is what makes this work where a bare list did not. "Meadow" and
+ * "Spring broilers 2026" are two names; "Meadow — Cattle · 12 head · North 40"
+ * and "Spring broilers 2026 — Poultry · 840 head" are two THINGS, and somebody
+ * who said "the cows" meant the first. It is shown to the person and given to
+ * the model, and it is the only reason either can choose sensibly.
+ *
+ * LABELS AND SHAPE ONLY, never money and never who owns it (S9).
+ */
+export interface TellCandidate {
+  value: string;
+  label: string;
+  /** "Cattle · 12 head · North 40". One line, no more. */
+  detail?: string;
+}
+
 export interface TellField {
   /** Stable per field within its action. "head". */
   key: string;
@@ -99,8 +130,36 @@ export interface TellField {
   required?: boolean;
   /** One sentence: the model's instruction, and the field's tooltip. */
   hint: string;
-  /** `choice` only. Labels are names, nothing more (see the header). */
+  /**
+   * `choice` only, and only when the whole list is SHORT. Labels are names,
+   * nothing more (see the header).
+   *
+   * Every one of these is written into the model's prompt, which is why a
+   * field whose list can grow past a few dozen must use `find` instead.
+   */
   choices?: TellChoice[];
+  /**
+   * FIND THE THINGS THESE WORDS COULD MEAN — the alternative to `choices`, and
+   * the answer to two problems that turned out to be one.
+   *
+   * A list in the prompt does not scale: a business with two thousand
+   * customers cannot have them all written into every sentence it says. And a
+   * list demands an EXACT pick, so "checked the cows" matched nothing at all,
+   * because no lot is called "the cows". The founder hit both — the second one
+   * first, on his own farm.
+   *
+   * With this, the model reports what the person SAID, in their words, and the
+   * pack goes and looks. Nothing is enumerated, so there is no ceiling; and
+   * the pack can look however it likes, so "the cows" can find the cattle.
+   *
+   * Return the plausible ones, best first, and **do not be shy**: several
+   * candidates is a question worth asking, whereas none is a dead end. A pack
+   * whose text search finds nothing should return what it has (bounded), so
+   * something can still be chosen from context.
+   *
+   * `said` is the person's own words for this field, never an id.
+   */
+  find?(tx: Tx, ctx: TellCtx, said: string): Promise<TellCandidate[]>;
   /** `date` only: fill with the tenant's today when the sentence says nothing. */
   defaultToday?: boolean;
 }

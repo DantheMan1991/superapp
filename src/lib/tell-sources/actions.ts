@@ -7,12 +7,13 @@ import { todayInTimezone } from "@/lib/timezone";
 import { clampSpokenAt, type SpokenAt } from "./spoken-at";
 import {
   friendlyTellError,
+  previewTold,
   proposeTold,
   recordTold,
   type TellProposal,
 } from "./resolve";
 import { confirmedEntriesSchema, TELL_MAX_CHARS, type TellCard } from "./shape";
-import type { TellCtx } from "./types";
+import type { TellCtx, TellPreview } from "./types";
 
 /**
  * Tell it what happened, then confirm it (onboarding slice 6).
@@ -92,6 +93,39 @@ export async function proposeTellAction(
     return { ok: true, data: await proposeTold(ctx, parsed.data.sentence) };
   } catch (err) {
     return { error: friendlyTellError(err) };
+  }
+}
+
+const previewSchema = z.object({
+  actionSlug: z.string().min(1).max(120),
+  values: z.record(z.string().max(64), z.union([z.string(), z.number(), z.null()])),
+});
+
+/**
+ * What one card will do, asked again every time it changes (ADR 0054 §2).
+ *
+ * **WRITES NOTHING**, and the split is the same one `proposeTell` keeps: this
+ * reads, `recordTell` writes, and a person stands between them. It carries
+ * `spokenAt` for the same reason the other two do — a preview of a sentence
+ * from yesterday evening has to be worked out against yesterday evening.
+ *
+ * A failure here is answered with `null` rather than an error. The card is
+ * still correct without a preview and the pack's verb is still what refuses;
+ * interrupting somebody because the arithmetic above the button could not be
+ * done would be the tail wagging the dog.
+ */
+export async function previewTellAction(input: {
+  actionSlug: string;
+  values: TellCard["values"];
+  spokenAt?: string;
+}): Promise<ActionResult<TellPreview | null>> {
+  try {
+    const parsed = previewSchema.safeParse(input);
+    if (!parsed.success) return { ok: true, data: null };
+    const { ctx } = await gate(input.spokenAt);
+    return { ok: true, data: await previewTold(ctx, parsed.data.actionSlug, parsed.data.values) };
+  } catch {
+    return { ok: true, data: null };
   }
 }
 

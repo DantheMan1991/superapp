@@ -274,6 +274,26 @@ function isSearched(field: Pick<TellAction, "fields">["fields"][number]): boolea
   );
 }
 
+/**
+ * **THE VALUES A PREVIEW WAS COMPUTED FOR** (ADR 0054 §2).
+ *
+ * A preview is worked out server-side and then a person edits the card. The
+ * arithmetic above the button must not survive the edit that invalidated it —
+ * **a stale preview is worse than none**, because the whole point is to be the
+ * thing somebody trusts INSTEAD of reading the fields.
+ *
+ * So every preview is stamped with the values it describes, and the box shows
+ * it only while that stamp still matches. Keys are sorted, so the same card
+ * cannot produce two spellings of the same state and refetch forever.
+ */
+export function previewKey(values: TellValues): string {
+  return JSON.stringify(
+    Object.keys(values)
+      .sort()
+      .map((k) => [k, values[k] ?? null]),
+  );
+}
+
 export function checkEntry(
   values: TellValues,
   action: Pick<TellAction, "fields">,

@@ -42,11 +42,13 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  previewTellAction,
   proposeTellAction,
   recordTellAction,
 } from "@/lib/tell-sources/actions";
 import {
   checkEntry,
+  previewKey,
   readyToRecordUnasked,
   TELL_MAX_CHARS,
   type TellCard,
@@ -54,6 +56,7 @@ import {
 import type {
   TellCandidate,
   TellField,
+  TellPreview,
   TellValue,
 } from "@/lib/tell-sources/types";
 import { cn } from "@/lib/utils";
@@ -66,6 +69,7 @@ interface ActionView {
   label: string;
   fields: Array<TellField & { searched?: boolean }>;
   unattended: boolean;
+  hasPreview: boolean;
 }
 
 /**
@@ -170,6 +174,23 @@ export function TellBox({
    * send the time it was SAID rather than the time it was sent. A ref, because
    * nothing renders from it.
    */
+  /*
+   * ── WHAT THIS CARD WILL DO (tell.md, slice A2; [ADR 0054](../../../docs/decisions/0054-tell-may-draft-never-send.md) §2) ──
+   *
+   * The card shows the FIELDS the model parsed, and for anything consequential
+   * that is the wrong thing to check. `Feed store · $240 · today` looks exactly
+   * as correct whether it is about to hit `5010 Feed` or `6200 Supplies`.
+   *
+   * Held per card index AND stamped with the values it describes, because a
+   * person edits a card and **a stale preview is worse than none** — the whole
+   * point is to be the thing somebody trusts instead of re-reading the fields.
+   * A card removed from the middle shifts every index after it; the stamp is
+   * what makes that safe rather than the indexing.
+   */
+  const [previews, setPreviews] = useState<
+    Record<number, { key: string; data: TellPreview | null }>
+  >({});
+
   const queued = useSyncExternalStore(subscribeQueue, readQueue, queueOnTheServer);
   // Set only from things a person did — `replay` and the online listener —
   // never from `read`, which is also reached during render.
@@ -207,6 +228,7 @@ export function TellBox({
     setSentence("");
     setCards(null);
     setActions([]);
+    setPreviews({});
   }
 
   /**
@@ -368,6 +390,39 @@ export function TellBox({
     });
   }
 
+  /*
+   * ONE AT A TIME, AFTER A PAUSE. Typing into a field must not send one of
+   * these per keystroke, and the cards are few enough that fetching the first
+   * unstamped one and letting the next render find the next converges in a
+   * blink. Setting state happens in the timer, not in the body — the same line
+   * the online listener sits on.
+   */
+  useEffect(() => {
+    if (!cards) return;
+    const next = cards.findIndex((card, i) => {
+      const action = actions.find((a) => a.slug === card.actionSlug);
+      if (!action?.hasPreview) return false;
+      return previews[i]?.key !== previewKey(card.values);
+    });
+    if (next === -1) return;
+
+    const card = cards[next];
+    const key = previewKey(card.values);
+    const timer = setTimeout(() => {
+      void previewTellAction({
+        actionSlug: card.actionSlug,
+        values: card.values,
+        spokenAt: replaying?.spokenAt,
+      }).then((result) => {
+        setPreviews((held) => ({
+          ...held,
+          [next]: { key, data: "error" in result ? null : result.data },
+        }));
+      });
+    }, 350);
+    return () => clearTimeout(timer);
+  });
+
   /** A queued sentence goes back through the SAME path a fresh one takes. */
   function replay(item: QueuedSentence) {
     setSentence(item.said);
@@ -408,6 +463,48 @@ export function TellBox({
         delete options[key];
         return { ...c, values: { ...c.values, [key]: value }, hints, options };
       }),
+    );
+  }
+
+  /**
+   * The consequence, above the button.
+   *
+   * Three states and they must look different: not worked out yet, worked out
+   * and here, and nothing to say. **"Could not work it out" must never look
+   * like "nothing will happen"** — for a card that moves a quantity those are
+   * opposite facts, and a blank space says the wrong one confidently.
+   */
+  function whatItWillDo(card: TellCard, i: number) {
+    const action = actionOf(card.actionSlug);
+    if (!action?.hasPreview) return null;
+
+    const held = previews[i];
+    if (held?.key !== previewKey(card.values)) {
+      return (
+        <p className="text-xs text-muted-foreground">Working out what this will do…</p>
+      );
+    }
+    if (!held.data) {
+      return (
+        <p className="text-xs text-muted-foreground">
+          Could not work out what this will do — it will still record.
+        </p>
+      );
+    }
+    return (
+      <div className="space-y-1 rounded-md bg-muted/50 p-2.5">
+        {held.data.lines.map((line, k) => (
+          <p key={k} className="flex items-baseline justify-between gap-3 text-xs">
+            <span className="text-muted-foreground">{line.label}</span>
+            {line.value !== undefined && (
+              <span className="font-medium tabular-nums">{line.value}</span>
+            )}
+          </p>
+        ))}
+        {held.data.warning && (
+          <p className="pt-0.5 text-xs text-amber-600">{held.data.warning}</p>
+        )}
+      </div>
     );
   }
 
@@ -663,6 +760,8 @@ export function TellBox({
                           </div>
                         ))}
                       </div>
+
+                      {whatItWillDo(card, i)}
 
                       {problems[i] && (
                         <p className="text-xs text-amber-600">{problems[i]}</p>

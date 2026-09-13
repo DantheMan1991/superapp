@@ -80,6 +80,16 @@ somewhere first in order to record something.
 3. You get a card for each thing it found, with the fields already filled in.
    Read every one. Change anything that is wrong, and click {icon:x} on a card
    you do not want.
+   - **Some cards show what they will DO**, in a small box under the fields:
+     `Pen 2 now` `25 head`, `died` `−3`, `Pen 2 after this` `22 head`. That is
+     the number worth checking — the right count against the wrong pen looks
+     perfectly correct in the fields and obvious here.
+   - It is worked out again every time you change something, so it always
+     describes the card as it stands. While it is thinking you see
+     `Working out what this will do…`.
+   - An amber line means something true you should know before recording, such
+     as `That is 3 more than Pen 2 is counted as having.` It is a warning, not
+     a refusal: you can still record it if you mean to.
 4. Anything it could not place is left empty with an amber line under it:
    `It heard "the back pen" — pick or type the right one.` Pick from the list.
    Each row names the thing and then what it is, so you can tell two similar

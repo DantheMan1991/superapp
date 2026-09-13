@@ -2,6 +2,7 @@ import type { Tx } from "@/db";
 import {
   TellRefusal,
   type TellAction,
+  type TellCandidate,
   type TellChoice,
   type TellCtx,
   type TellSource,
@@ -9,6 +10,7 @@ import {
 } from "@/lib/tell-sources/types";
 import { listItems, listLots, movementKindsForLots } from "@/packs/inventory/ops";
 import { listZones } from "@/packs/land/ops";
+import { packContext } from "@/lib/packs/tenant-context";
 import { summariseHead } from "../core/herd";
 import {
   LivestockError,
@@ -70,8 +72,16 @@ function refusal(err: unknown): unknown {
     : err;
 }
 
-/** The lots with animals standing in them, by name. */
-async function liveLots(tx: Tx, tenantId: string): Promise<TellChoice[]> {
+/** A lot with animals standing in it, and what tells it from its neighbours. */
+interface LiveLot {
+  value: string;
+  label: string;
+  species: string;
+  head: number;
+}
+
+/** The lots with animals standing in them. */
+async function liveLots(tx: Tx, tenantId: string): Promise<LiveLot[]> {
   const lots = await listLivestockLots(tx, tenantId);
   if (lots.length === 0) return [];
   const [inventoryLots, movements] = await Promise.all([
@@ -87,10 +97,94 @@ async function liveLots(tx: Tx, tenantId: string): Promise<TellChoice[]> {
     .map((lot) => ({
       value: lot.id,
       label: byId.get(lot.inventoryLotId)?.code ?? "",
+      species: lot.species,
       head: summariseHead(movements.get(lot.inventoryLotId) ?? []).balance,
     }))
-    .filter((c) => c.label !== "" && c.head > 0)
-    .map(({ value, label }) => ({ value, label }));
+    .filter((c) => c.label !== "" && c.head > 0);
+}
+
+/** "Meadow — Cattle · 12 head". What lets a person, or a model, choose. */
+function describe(lot: LiveLot): string {
+  const species = lot.species
+    ? lot.species.charAt(0).toUpperCase() + lot.species.slice(1)
+    : "";
+  const head = `${lot.head} head`;
+  return species ? `${species} · ${head}` : head;
+}
+
+function words(value: string): string[] {
+  return value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter((w) => w !== "");
+}
+
+/**
+ * WHAT THESE WORDS COULD MEAN — the search behind `lotField`.
+ *
+ * Three passes, loosest last, and the order is the whole design:
+ *
+ *  1. **The name.** "Meadow", "Rosie", "PEN-1". An exact name wins outright
+ *     and a contained one is still a strong signal.
+ *  2. **The species, in the words people actually use.** "the cows" is not a
+ *     name and never will be; `speciesWords` comes from the INDUSTRY PROFILE
+ *     (`src/industries/homestead-farm`), because a pack that knew a cow was
+ *     cattle would know it was on a farm.
+ *  3. **Everything alive.** When nothing matched, offer what there is rather
+ *     than nothing at all. A shortlist is a question; an empty result is a
+ *     dead end, and the dead end is what the founder hit.
+ *
+ * Never fuzzy, never "nearest". "Pen 3" is one character from "Pen 2" and
+ * choosing between them on edit distance is exactly how the wrong pen gets
+ * animals moved into it.
+ */
+function findLots(lots: LiveLot[], speciesWords: Record<string, string[]>) {
+  return (said: string): TellCandidate[] => {
+    const asked = words(said);
+    if (asked.length === 0) return [];
+    const spoken = new Set(asked);
+    const phrase = asked.join(" ");
+
+    const named = lots.filter((lot) => {
+      const label = words(lot.label).join(" ");
+      return label !== "" && (label === phrase || phrase.includes(label));
+    });
+    if (named.length > 0) return named.map(toCandidate);
+
+    const species = Object.entries(speciesWords)
+      .filter(([, ws]) => ws.some((w) => spoken.has(w.toLowerCase())))
+      .map(([name]) => name.toLowerCase());
+    if (species.length > 0) {
+      const kind = lots.filter((lot) =>
+        species.includes((lot.species ?? "").toLowerCase()),
+      );
+      if (kind.length > 0) return kind.map(toCandidate);
+    }
+
+    return lots.map(toCandidate);
+  };
+}
+
+function toCandidate(lot: LiveLot): TellCandidate {
+  return { value: lot.value, label: lot.label, detail: describe(lot) };
+}
+
+/**
+ * The farm's own words for its animals, from the industry profile. An industry
+ * that supplies none simply searches by name, which is the honest default.
+ */
+function speciesWordsFrom(packConfig: unknown): Record<string, string[]> {
+  const config = packConfig as { speciesWords?: unknown } | null | undefined;
+  const raw = config?.speciesWords;
+  if (typeof raw !== "object" || raw === null) return {};
+  const out: Record<string, string[]> = {};
+  for (const [species, list] of Object.entries(raw as Record<string, unknown>)) {
+    if (Array.isArray(list)) {
+      out[species] = list.filter((w): w is string => typeof w === "string");
+    }
+  }
+  return out;
 }
 
 export const livestockTellSource: TellSource = {
@@ -107,13 +201,19 @@ export const livestockTellSource: TellSource = {
     const lots = await liveLots(tx, ctx.tenantId);
     if (lots.length === 0) return [];
 
+    const pack = await packContext(tx, ctx.tenantId, ctx.industry, "livestock");
+    const search = findLots(lots, speciesWordsFrom(pack.config));
     const lotField = {
       key: "lot",
       label: "Which animals",
       kind: "choice" as const,
       required: true,
       hint: "The pen, group or animal the sentence is about.",
-      choices: lots,
+      // SEARCHED, NOT LISTED. Nothing is written into the model's prompt; the
+      // words come back as they were said and this goes and looks. It is what
+      // lets "the cows" find the cattle, and it is why a farm with three
+      // hundred pens costs the same as one with three.
+      find: async (_tx: Tx, _ctx: TellCtx, said: string) => search(said),
     };
     const dayField = {
       key: "on",

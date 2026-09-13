@@ -133,6 +133,62 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-09-13 — "The cows" finds the cattle (`claude/tell-search-seam`)
+
+[ADR 0052](../decisions/0052-the-model-says-the-words-and-the-pack-goes-looking.md),
+which amends ADR 0039's second rule. No migration.
+
+A `choice` field was a MENU with an exact-match rule — every name written into
+the model's prompt, and an exact pick demanded back. One design, two failures,
+both found by the founder within a day:
+
+- **It could not scale.** Two thousand customers will not fit in a prompt,
+  which is why CRM, accounting and documents could never be told anything.
+  That gap WAS the distance between three tools and *"it should work with every
+  tool"*.
+- **It could not think.** *"checked the cows"* matched nothing, because no lot
+  is called that. *"I didn't want to have to say the exactly right things. It
+  should be intelligent and conversational."*
+
+Two complaints, one cause. `TellField.find(tx, ctx, said)` replaces `choices`:
+the model reports the words, the pack goes and looks. Nothing is enumerated, so
+a farm with three hundred pens sends the same prompt as one with three.
+
+**A shortlist is a question.** Candidates carry a `detail` line — two NAMES are
+not a choice, two THINGS are — and the box shows them as real options rather
+than an amber warning over a blank field.
+
+Driven on dev, which is the whole point:
+
+> *checked the cows this morning, water trough was frozen*
+> → **You said "the cows". Which one?**
+> → `Meadow` Cattle · 1 head · `840 0042` Cattle · 1 head · `Clover` Cattle · 1
+> head · `Bluebell` Cattle · 1 head
+
+**"never nearest" is kept**, with the reason moved rather than dropped:
+`decide()` settles a single candidate or an exact name and nothing else.
+Ranking by similarity is how that rule comes back by accident — "Pen 3" is one
+character from "Pen 2".
+
+**The vocabulary is the industry's.** "cows → cattle" lives in the
+homestead-farm profile beside the species list it already supplied, because a
+pack that knew a cow was cattle would know it was on a farm. `TellCtx` gained
+`industry` so a source can reach its own `packConfig`.
+
+#### Two things only the running app could have found
+
+- **Every card was rejected** with "Which animals is not one of the choices."
+  `checkEntry` validated a searched field against a list that no longer exists.
+- **A proposal may not contain a function.** `find` is one, and the box is a
+  client component — handing React a function across that boundary is a runtime
+  error that `tsc`, the linter, the build and 3,377 tests all waved through.
+  `forTheBox()` now picks serialisable fields by name, and the test walks the
+  whole proposal for functions rather than checking `find` by name.
+
+Livestock's FEED field is still a list, deliberately: an item's name carries its
+unit ("Grower crumble (lb)"), which is the difference between two bags and two
+pounds. Work's job list is short by nature and unchanged.
+
 ### 2026-09-09 — What the pen still carries (`claude/what-the-pen-still-carries`)
 
 **Closes the open paragraph of the entry below.** PR #471 signed the feed

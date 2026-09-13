@@ -95,6 +95,38 @@ export const homesteadFarm: IndustryProfile = {
     livestock: {
       species: ["cattle", "swine", "poultry"],
       /**
+       * WHAT PEOPLE ACTUALLY CALL THEM, so a sentence can be told loosely.
+       *
+       * Nobody says "checked the cattle". They say the cows, the birds, the
+       * hogs — and the founder's first real try was *"checked the cows"*,
+       * which matched nothing at all because no lot is called that.
+       *
+       * HERE AND NOT IN THE PACK, for the same reason `species` is here: the
+       * pack must never know which industry it is running in
+       * (extension-model.md §2). A pack that knew a cow was cattle would know
+       * it was on a farm. This is a farm's vocabulary, contributed by the
+       * farm's profile, and a different industry's list would read entirely
+       * differently.
+       *
+       * Singular and plural both, because both get said and neither stems
+       * reliably into the other.
+       */
+      speciesWords: {
+        cattle: [
+          "cow", "cows", "cattle", "beef", "heifer", "heifers",
+          "steer", "steers", "bull", "bulls", "calf", "calves",
+        ],
+        swine: [
+          "pig", "pigs", "hog", "hogs", "swine", "sow", "sows",
+          "boar", "boars", "piglet", "piglets",
+        ],
+        poultry: [
+          "chicken", "chickens", "hen", "hens", "bird", "birds",
+          "poultry", "broiler", "broilers", "chick", "chicks",
+          "layer", "layers", "rooster", "roosters", "turkey", "turkeys",
+        ],
+      },
+      /**
        * The divisor in the tape formula — **heart girth² × body length ÷ this**
        * — per species, in inches and pounds.
        *

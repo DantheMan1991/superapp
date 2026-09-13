@@ -182,7 +182,9 @@ export function TellBox({
         if (j !== i) return c;
         const hints = { ...c.hints };
         delete hints[key];
-        return { ...c, values: { ...c.values, [key]: value }, hints };
+        const options = { ...(c.options ?? {}) };
+        delete options[key];
+        return { ...c, values: { ...c.values, [key]: value }, hints, options };
       }),
     );
   }
@@ -310,12 +312,48 @@ export function TellBox({
                               value={card.values[f.key] ?? null}
                               onChange={(v) => setValue(i, f.key, v)}
                             />
-                            {card.hints[f.key] && (
+                            {card.options?.[f.key]?.length ? (
+                              /*
+                               * A SHORTLIST IS A QUESTION, not a warning.
+                               *
+                               * It knows what you meant well enough to find
+                               * two or three real things; the only thing left
+                               * is which. Each one says what it IS — "Cattle ·
+                               * 12 head" — because two names are not a choice
+                               * and two things are.
+                               */
+                              <div className="space-y-1.5">
+                                <p className="text-xs text-muted-foreground">
+                                  You said &ldquo;{card.hints[f.key]}&rdquo;. Which one?
+                                </p>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {card.options[f.key].map((option) => (
+                                    <Button
+                                      key={option.value}
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-auto flex-col items-start gap-0 py-1.5"
+                                      onClick={() => setValue(i, f.key, option.value)}
+                                    >
+                                      <span className="text-xs font-medium">
+                                        {option.label}
+                                      </span>
+                                      {option.detail && (
+                                        <span className="text-[11px] font-normal text-muted-foreground">
+                                          {option.detail}
+                                        </span>
+                                      )}
+                                    </Button>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : card.hints[f.key] ? (
                               <p className="text-xs text-amber-600">
                                 It heard &ldquo;{card.hints[f.key]}&rdquo; — pick or type
                                 the right one.
                               </p>
-                            )}
+                            ) : null}
                           </div>
                         ))}
                       </div>

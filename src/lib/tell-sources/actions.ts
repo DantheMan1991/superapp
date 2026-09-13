@@ -47,6 +47,7 @@ async function gate(): Promise<TellCtx> {
     role: ctx.role,
     now,
     timezone: ctx.tenant.timezone,
+    industry: ctx.tenant.industry,
     today: todayInTimezone(ctx.tenant.timezone, now),
   };
 }

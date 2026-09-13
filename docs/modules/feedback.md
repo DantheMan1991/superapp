@@ -46,8 +46,14 @@ and none of them is worth building against a loop that does not close.
   operator's internal note lives in the same table as the conversation, and the
   test writes one and asserts the reporter cannot see it — directly, or by
   asking for its id.
-- Two guides. Not driven in a browser: the pane has been signed out since
-  2026-09-09.
+- Two guides.
+- **DRIVEN, end to end, on Hilltop Farm (dev branch)** — file from the
+  Accounting overview, answer from the console, note, status, and back to the
+  client's copy. It found four things, all fixed in this slice and all listed
+  under Decisions & gotchas: **a raw `sql` fragment handing back a STRING where
+  the code compared Dates** (the one that mattered), the sheet stuck at three
+  quarters width on a phone, `screenLabel` saying "accounting" to the client,
+  and "somebody · them@example.com" on the console header.
 
 ## The slice order
 
@@ -142,6 +148,36 @@ another.
   `getMailBadge` set: one SELECT over rows the person already owns, on every
   page in the product.
 
+### Found by driving it, 2026-09-13
+
+- **A raw `sql` fragment carries no column type, and `sql<Date>` is a lie
+  `tsc` believes.** `lastOperatorMessageAt` and `lastClientMessageAt` are
+  correlated subqueries, so drizzle handed back the driver's raw
+  `2026-09-13 10:27:00+00` STRING. `hasUnreadReply` compares `said >
+  clientReadAt`; a string against a Date sends both through ToNumber, both are
+  NaN, and the predicate returned **false for ever** — no throw, no warning.
+  The client's row said "no new reply" while the dot on the button, counted in
+  SQL, said there was one; only that disagreement gave it away, on screen.
+  `needsOperator` had the identical hole, invisible because a `new` report
+  short-circuits before reaching the date. Fixed with `.mapWith(column)`, which
+  runs the value through the same decoder a plain `select` uses.
+  `tests/feedback-db.test.ts` now asserts the TYPE of every derived value,
+  because asserting a comparison between two NaNs proves nothing. **Any future
+  raw aggregate in this file needs the same treatment.**
+- **`data-[side=right]:w-3/4` on `SheetContent` outranks a plain `w-full`**, so
+  the sheet rendered at three quarters on a phone and the override was silently
+  dead. The data-variant form is required; `help-button.tsx` already used it.
+  The report sheet goes FULL width on a phone and the help panel does not —
+  that panel stays narrow so the reader can see the control the guide names,
+  and nothing in this sheet refers to the page behind it.
+- **`screenLabel` said "accounting" to the client.** The module's real display
+  name lives in the feature registry, which `core.ts` may not import without
+  dragging `src/modules/**` into a browser bundle, so the slug is prettied to
+  sentence case instead — the rail's own convention ("Taking payments").
+- **Two facts that read as a disagreement.** The console showed `Screen:
+  Accounting` above `Module: accounting`. The `Module` row is gone; the slug is
+  in `Path` in full.
+
 ## Open items
 
 - **Nothing pushes** (slice 1). A reply reaches the client as a dot; a report
@@ -157,6 +193,7 @@ another.
   the day there are two of them.
 - **No de-duplication.** Five people reporting the same bug is five threads.
   The console can say so in a note; nothing links them.
-- **Never driven in a browser.** The isolation suite and the build are green,
-  and nobody has pressed the button — the browser pane has been signed out
-  since 2026-09-09 and only the founder can sign it back in.
+- **The mobile app has not been tried.** The web was driven in a browser at
+  desktop and at 375px, but no report has been filed from the Capacitor shell,
+  so `surface = 'app'` and `app_version` are proven only by the user-agent
+  parser's own tests.

@@ -92,6 +92,16 @@ reports through the same button into the same table, and the console reads them
 beside every client's. That is ADR 0041 working: Yosher is an ordinary tenant to
 RLS, and nothing here special-cases it.
 
+**Driving it found the bug the tests could not.** `hasUnreadReply` was
+correct about two Dates and was never given two Dates: a correlated subquery
+written as a raw `sql` fragment returns the driver's string, the comparison
+went to NaN, and the predicate answered false for ever without throwing. The
+pure test passed, the isolation suite passed, the build was green, and the
+screen showed a dot on the button beside a row that said there was nothing to
+read. Neither half was wrong on its own — only together. Worth recording as a
+shape rather than a bug: **a derived boolean has to be tested against the rows
+the database actually returns, not against the rows the types promise.**
+
 **What would make us revisit this.** A client whose staff all report the same
 bug five times, which is the cost of the own-rows-only policy showing up in
 practice — the fix is a workspace-visible flag on the report, chosen by the

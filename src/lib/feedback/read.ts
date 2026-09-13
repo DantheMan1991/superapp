@@ -76,22 +76,44 @@ export interface ThreadMessage {
  * console reads the real thread separately; what this column answers is "when
  * did the CLIENT last hear from us", and a note they cannot see is not a
  * thing they heard.
+ *
+ * ── `.mapWith()` IS LOAD-BEARING. DO NOT DROP IT. ────────────────────────────
+ *
+ * A raw `sql` fragment carries NO COLUMN TYPE, so drizzle hands back whatever
+ * the driver produced — for a `timestamptz` that is the STRING
+ * `2026-09-13 10:27:00+00`, not a Date. The `sql<Date | null>` annotation is a
+ * TypeScript claim about a value nothing checks, so `tsc` believes it and the
+ * runtime does not.
+ *
+ * What that cost: `hasUnreadReply` compares `said > report.clientReadAt`. A
+ * string against a Date sends both through ToNumber, both become NaN, the
+ * comparison is false, and the predicate returns FALSE FOR EVER. Nothing
+ * throws. The dot on the button — counted in SQL — said one unread reply while
+ * the row beside it said none, and only that disagreement gave it away while
+ * driving the screen. `needsOperator` had the same hole, unseen because a
+ * `new` report short-circuits before it reaches the date.
+ *
+ * `.mapWith(column)` runs the value through THAT COLUMN's decoder, which is
+ * the same one a plain `select` uses — so the fragment and the real column can
+ * no longer disagree. `tests/feedback-db.test.ts` asserts the TYPE of every
+ * one of these, because asserting the truth of a comparison between two NaNs
+ * proves nothing.
  */
 const lastOperatorMessageAt = sql<Date | null>`(
   select max(m."created_at") from "feedback_messages" m
   where m."report_id" = "feedback_reports"."id"
     and m."side" = 'operator' and m."internal" = false
-)`;
+)`.mapWith(schema.feedbackMessages.createdAt);
 
 const lastClientMessageAt = sql<Date | null>`(
   select max(m."created_at") from "feedback_messages" m
   where m."report_id" = "feedback_reports"."id" and m."side" = 'client'
-)`;
+)`.mapWith(schema.feedbackMessages.createdAt);
 
 const visibleMessageCount = sql<number>`(
   select count(*)::int from "feedback_messages" m
   where m."report_id" = "feedback_reports"."id" and m."internal" = false
-)`;
+)`.mapWith(Number);
 
 const reportColumns = {
   id: schema.feedbackReports.id,

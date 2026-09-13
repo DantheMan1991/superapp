@@ -260,7 +260,11 @@ export default async function DashboardLayout({
           inside `children` and this layout is the only thing that knows the
           count. Outside it — /admin, the public share page — there is no
           provider and `ReportButton` draws nothing. */}
-      <FeedbackProvider unread={unreadFeedback} enabled={!ctx.support}>
+      <FeedbackProvider
+        unread={unreadFeedback}
+        enabled={!ctx.support}
+        tenantId={ctx.tenant.id}
+      >
         {children}
       </FeedbackProvider>
     </AppShell>

@@ -67,6 +67,20 @@ export function sitePhotoPathPrefix(tenantId: string): string {
 }
 
 /**
+ * A screenshot on a feedback report (ADR 0053, slice 2). Platform-level rather
+ * than a module's, like the brand prefix above: feedback is on for every
+ * tenant, and the console streams from here for a workspace it is not a member
+ * of.
+ *
+ * Keyed by the REPORTER'S TENANT even though the console reads it. Storage
+ * follows the row, and the row is the client's — so a workspace that leaves
+ * takes its screenshots with it rather than stranding them under ours.
+ */
+export function feedbackPathPrefix(tenantId: string): string {
+  return `feedback/${tenantId}/`;
+}
+
+/**
  * Every prefix a tenant is allowed to own, across modules. Used to validate
  * any client-supplied pathname before it is trusted as a blob location.
  *
@@ -84,6 +98,7 @@ export function isTenantBlobPath(tenantId: string, pathname: string): boolean {
     pathname.startsWith(dmsPathPrefix(tenantId, "signatures")) ||
     pathname.startsWith(dmsPathPrefix(tenantId, "signed")) ||
     pathname.startsWith(brandPathPrefix(tenantId)) ||
-    pathname.startsWith(sitePhotoPathPrefix(tenantId))
+    pathname.startsWith(sitePhotoPathPrefix(tenantId)) ||
+    pathname.startsWith(feedbackPathPrefix(tenantId))
   );
 }

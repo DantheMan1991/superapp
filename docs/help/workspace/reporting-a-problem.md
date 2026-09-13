@@ -19,6 +19,8 @@ You never have to say which screen you were on. The button sends that with your 
   - `A question` — you are not sure how this is meant to work.
 - **`In a few words`.** A short title, up to 140 characters. This is what you and we both see in a list, so make it the thing itself: `Totals do not add up`, not `problem`.
 - **`What happened?`.** The long box. For something broken, tell us what you pressed, what you expected, and what it did instead. For an idea, tell us what you are trying to do.
+- **{button:Add a screenshot|outline}.** Opens your camera roll on a phone, or your files on a computer. Pick a picture of the screen and it uploads straight away, so the wait happens while you are still typing. Once one is on, the button reads `Add another`.
+- **The file, listed under the button.** Its name and its size. Click the {icon:x} beside it to take it off again before you send.
 - **{button:Send|primary}.** Stays gray until the title has at least three characters and the long box has something in it.
 - **`your reports`.** The link at the bottom of the panel. Everything you have sent, and what we said back.
 
@@ -29,6 +31,17 @@ You never have to say which screen you were on. The button sends that with your 
 3. Type a short title in `In a few words`.
 4. In `What happened?`, write what you pressed, what you expected, and what it did instead.
 5. Click {button:Send|primary}. The panel closes and you see `Sent. We will answer you in Your reports.`
+
+## How to send a picture of it
+
+A picture of the screen is worth more than any description of it, and it is usually faster to take one than to explain.
+
+1. Take a screenshot on your phone or computer first, the normal way.
+2. Open {icon:message} and click {button:Add a screenshot|outline}.
+3. Pick the picture. It uploads while you carry on typing, then appears under the button with its name and size.
+4. Add up to three. Click {button:Send|primary} when you are done.
+
+Pictures, or a PDF, up to 10MB each. If you pick something else you see `pictures or a PDF, up to 10MB`, and that file is left out while the rest go on.
 
 ## How to suggest a change
 
@@ -69,10 +82,13 @@ We never send what is on the page — no names, no numbers, no records. Only whe
 | `Sent. We will answer you in Your reports.` | It reached us. Nothing else to do. |
 | `That needs a short title and a description before it can be sent.` | The title is under three characters, or the long box is empty. Fill both in. |
 | `We answered one of your reports` | At the top of the panel: click it to read the answer. |
+| `pictures or a PDF, up to 10MB` | That file is not a kind we take, or it is too big. The others still go. |
+| `Up to 3 files. The rest were left out.` | You picked more than three at once. The first three are on. |
+| `That file did not upload.` | The upload did not finish. Try it again; nothing else in the box is lost. |
 
 ## Not on this page
 
-You cannot attach a photo or a screenshot yet. If a picture would help, say so in the box and we will ask for it. You also cannot see what anybody else at your business has reported — a report is yours alone. You cannot reply to our email either: answer on [Your reports](your-reports.md) so the whole conversation stays in one place.
+You cannot see what anybody else at your business has reported — a report is yours alone. You cannot reply to our email either: answer on [Your reports](your-reports.md) so the whole conversation stays in one place. We cannot send you a picture back yet, only read the ones you send.
 
 ## Who can do what
 

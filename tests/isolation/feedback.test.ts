@@ -400,6 +400,183 @@ d("feedback (RLS)", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Attachments (slice 2)
+  // -------------------------------------------------------------------------
+
+  it("shows the reporter the files on their own messages", async () => {
+    const [clientMessage] = await withSystem((tx) =>
+      tx
+        .select({ id: schema.feedbackMessages.id })
+        .from(schema.feedbackMessages)
+        .where(
+          and(
+            eq(schema.feedbackMessages.reportId, mine),
+            eq(schema.feedbackMessages.side, "client"),
+          ),
+        )
+        .limit(1),
+    );
+    const [file] = await withSystem((tx) =>
+      tx
+        .insert(schema.feedbackAttachments)
+        .values({
+          tenantId: tenantA,
+          reportId: mine,
+          messageId: clientMessage.id,
+          blobPathname: `feedback/${tenantA}/${STAMP}-shot.png`,
+          fileName: "shot.png",
+          mimeType: "image/png",
+          byteSize: 1234,
+          clerkUserId: REPORTER,
+        })
+        .returning(),
+    );
+    const seen = await asReporter((tx) =>
+      tx.select().from(schema.feedbackAttachments),
+    );
+    expect(seen.map((r) => r.id)).toEqual([file.id]);
+  });
+
+  it("hides a file on an INTERNAL note from the reporter", async () => {
+    // Cannot happen yet — only clients upload. The clause exists so that the
+    // day an operator picker is added, the leak is already closed rather than
+    // waiting to be noticed. Delete this and that day arrives silently.
+    const [note] = await withSystem((tx) =>
+      tx
+        .select({ id: schema.feedbackMessages.id })
+        .from(schema.feedbackMessages)
+        .where(eq(schema.feedbackMessages.id, noteId))
+        .limit(1),
+    );
+    await withSystem((tx) =>
+      tx.insert(schema.feedbackAttachments).values({
+        tenantId: tenantA,
+        reportId: mine,
+        messageId: note.id,
+        blobPathname: `feedback/${tenantA}/${STAMP}-secret.png`,
+        fileName: "secret.png",
+        mimeType: "image/png",
+        byteSize: 99,
+        clerkUserId: BOSS,
+      }),
+    );
+    const seen = await asReporter((tx) =>
+      tx.select().from(schema.feedbackAttachments),
+    );
+    expect(seen.map((r) => r.fileName)).not.toContain("secret.png");
+    // And the console still has it.
+    const all = await withSystem((tx) =>
+      tx
+        .select()
+        .from(schema.feedbackAttachments)
+        .where(eq(schema.feedbackAttachments.reportId, mine)),
+    );
+    expect(all.map((r) => r.fileName)).toContain("secret.png");
+  });
+
+  it("shows another business none of it", async () => {
+    const seen = await asOutsider((tx) =>
+      tx.select().from(schema.feedbackAttachments),
+    );
+    expect(seen).toHaveLength(0);
+  });
+
+  it("refuses a file filed onto somebody else's report", async () => {
+    const [bossMessage] = await withSystem((tx) =>
+      tx
+        .insert(schema.feedbackMessages)
+        .values({
+          tenantId: tenantA,
+          reportId: bossReport,
+          side: "client",
+          clerkUserId: BOSS,
+          body: "The boss's own message.",
+        })
+        .returning({ id: schema.feedbackMessages.id }),
+    );
+    await expect(
+      asReporter((tx) =>
+        tx.insert(schema.feedbackAttachments).values({
+          tenantId: tenantA,
+          reportId: bossReport,
+          messageId: bossMessage.id,
+          blobPathname: `feedback/${tenantA}/${STAMP}-intrude.png`,
+          fileName: "intrude.png",
+          mimeType: "image/png",
+          byteSize: 10,
+          clerkUserId: REPORTER,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a file filed in somebody else's name", async () => {
+    const [clientMessage] = await withSystem((tx) =>
+      tx
+        .select({ id: schema.feedbackMessages.id })
+        .from(schema.feedbackMessages)
+        .where(
+          and(
+            eq(schema.feedbackMessages.reportId, mine),
+            eq(schema.feedbackMessages.side, "client"),
+          ),
+        )
+        .limit(1),
+    );
+    await expect(
+      asReporter((tx) =>
+        tx.insert(schema.feedbackAttachments).values({
+          tenantId: tenantA,
+          reportId: mine,
+          messageId: clientMessage.id,
+          blobPathname: `feedback/${tenantA}/${STAMP}-forged.png`,
+          fileName: "forged.png",
+          mimeType: "image/png",
+          byteSize: 10,
+          clerkUserId: BOSS,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("has no UPDATE and no DELETE policy on an attachment", async () => {
+    const updated = await asReporter((tx) =>
+      tx
+        .update(schema.feedbackAttachments)
+        .set({ fileName: "renamed.png" })
+        .where(eq(schema.feedbackAttachments.reportId, mine))
+        .returning(),
+    );
+    expect(updated).toHaveLength(0);
+    const deleted = await asReporter((tx) =>
+      tx
+        .delete(schema.feedbackAttachments)
+        .where(eq(schema.feedbackAttachments.reportId, mine))
+        .returning(),
+    );
+    expect(deleted).toHaveLength(0);
+  });
+
+  it("holds one pathname once across the whole platform", async () => {
+    // Two rows pointing at one blob would make a delete take out somebody
+    // else's file. The upload door adds a random suffix; this is the net.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.feedbackAttachments).values({
+          tenantId: tenantB,
+          reportId: theirs,
+          messageId: noteId,
+          blobPathname: `feedback/${tenantA}/${STAMP}-shot.png`,
+          fileName: "collision.png",
+          mimeType: "image/png",
+          byteSize: 10,
+          clerkUserId: OUTSIDER,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  // -------------------------------------------------------------------------
   // The database's own promises
   // -------------------------------------------------------------------------
 

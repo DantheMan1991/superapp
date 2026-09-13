@@ -23,6 +23,10 @@ import {
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { fileReportAction } from "@/lib/feedback/actions";
+import {
+  AttachmentPicker,
+  type PickedFile,
+} from "@/components/app/attachment-picker";
 import { KIND_CHOICES, screenLabel } from "@/lib/feedback/core";
 import {
   FEEDBACK_BODY_MAX,
@@ -64,6 +68,13 @@ interface FeedbackState {
   /** Replies this person has not read, across all their reports. */
   unread: number;
   /**
+   * The blob namespace a screenshot uploads into (slice 2). Carried through the
+   * provider because the picker is rendered deep inside `children` and only the
+   * layout knows which workspace this is; re-checked server-side at the upload
+   * door and again when the row is written.
+   */
+  tenantId: string;
+  /**
    * False in a support view. A superadmin looking at a client's workspace must
    * not file a report in their name — the server refuses it anyway
    * (`requireTenant` throws on a non-GET), so this only keeps a button that
@@ -75,6 +86,7 @@ interface FeedbackState {
 const FeedbackContext = createContext<FeedbackState>({
   unread: 0,
   enabled: false,
+  tenantId: "",
 });
 
 /**
@@ -86,18 +98,24 @@ const FeedbackContext = createContext<FeedbackState>({
 export function FeedbackProvider({
   unread,
   enabled,
+  tenantId,
   children,
 }: FeedbackState & { children: ReactNode }) {
   return (
-    <FeedbackContext.Provider value={{ unread, enabled }}>
+    <FeedbackContext.Provider value={{ unread, enabled, tenantId }}>
       {children}
     </FeedbackContext.Provider>
   );
 }
 
+/** The picker needs the namespace; the reply box on the thread page too. */
+export function useFeedbackTenantId(): string {
+  return useContext(FeedbackContext).tenantId;
+}
+
 export function ReportButton({ className }: { className?: string }) {
   const pathname = usePathname();
-  const { unread, enabled } = useContext(FeedbackContext);
+  const { unread, enabled, tenantId } = useContext(FeedbackContext);
   const [open, setOpen] = useState(false);
 
   if (!enabled) return null;
@@ -173,6 +191,7 @@ export function ReportButton({ className }: { className?: string }) {
             )}
             <ReportForm
               pathname={pathname}
+              tenantId={tenantId}
               onSent={() => setOpen(false)}
             />
             <p className="mt-6 border-t border-border pt-4 text-xs text-muted-foreground">
@@ -195,14 +214,17 @@ export function ReportButton({ className }: { className?: string }) {
 
 function ReportForm({
   pathname,
+  tenantId,
   onSent,
 }: {
   pathname: string;
+  tenantId: string;
   onSent: () => void;
 }) {
   const [kind, setKind] = useState<FeedbackKind>("bug");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [files, setFiles] = useState<PickedFile[]>([]);
   const [pending, start] = useTransition();
 
   const submit = () => {
@@ -218,6 +240,8 @@ function ReportForm({
         route: pathname,
         routeQuery: window.location.search.slice(0, 512),
         viewport: `${window.innerWidth}x${window.innerHeight}`,
+        // Pathnames only. The server re-reads each blob's real type and size.
+        attachments: files.map((f) => f.pathname),
       });
       if (!result.ok) {
         toast.error(result.error);
@@ -225,6 +249,7 @@ function ReportForm({
       }
       setTitle("");
       setBody("");
+      setFiles([]);
       onSent();
       toast.success("Sent. We will answer you in Your reports.");
     });
@@ -295,6 +320,13 @@ function ReportForm({
           }
         />
       </div>
+
+      <AttachmentPicker
+        tenantId={tenantId}
+        files={files}
+        onChange={setFiles}
+        disabled={pending}
+      />
 
       <Button
         type="submit"

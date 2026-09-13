@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { schema, withSystem, withTenant, type Tx } from "@/db";
 import type { TenantContext } from "@/lib/auth";
 
@@ -64,6 +64,53 @@ export interface ThreadMessage {
   body: string;
   internal: boolean;
   createdAt: Date;
+  /** What came with it (slice 2). Empty for most messages. */
+  attachments: ThreadAttachment[];
+}
+
+export interface ThreadAttachment {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  byteSize: number;
+}
+
+/**
+ * The files on a set of messages, in one query rather than one per message.
+ *
+ * Returned as a map so the caller can hang them off the thread it already
+ * has — a join would multiply the message rows by their attachments and make
+ * every consumer de-duplicate. Most messages have none, so the common case is
+ * an empty map and a `?? []` at the call site.
+ *
+ * Runs in the CALLER'S transaction, which is what decides what comes back: the
+ * client's own reads see only their own non-internal messages' files, the
+ * console's `withSystem` reads see everything.
+ */
+async function attachmentsByMessage(
+  tx: Tx,
+  messageIds: readonly string[],
+): Promise<Map<string, ThreadAttachment[]>> {
+  const map = new Map<string, ThreadAttachment[]>();
+  if (messageIds.length === 0) return map;
+  const rows = await tx
+    .select({
+      id: schema.feedbackAttachments.id,
+      messageId: schema.feedbackAttachments.messageId,
+      fileName: schema.feedbackAttachments.fileName,
+      mimeType: schema.feedbackAttachments.mimeType,
+      byteSize: schema.feedbackAttachments.byteSize,
+    })
+    .from(schema.feedbackAttachments)
+    .where(inArray(schema.feedbackAttachments.messageId, [...messageIds]))
+    .orderBy(asc(schema.feedbackAttachments.createdAt));
+  for (const row of rows) {
+    const { messageId, ...file } = row;
+    const list = map.get(messageId);
+    if (list) list.push(file);
+    else map.set(messageId, [file]);
+  }
+  return map;
 }
 
 /**
@@ -232,7 +279,17 @@ export async function getMyReport(
         ),
       )
       .orderBy(asc(schema.feedbackMessages.createdAt));
-    return { report, messages };
+    const files = await attachmentsByMessage(
+      tx,
+      messages.map((m) => m.id),
+    );
+    return {
+      report,
+      messages: messages.map((m) => ({
+        ...m,
+        attachments: files.get(m.id) ?? [],
+      })),
+    };
   });
 }
 
@@ -356,8 +413,20 @@ export async function getReportForConsole(id: string): Promise<{
       .from(schema.feedbackMessages)
       .where(eq(schema.feedbackMessages.reportId, id))
       .orderBy(asc(schema.feedbackMessages.createdAt));
+    const files = await attachmentsByMessage(
+      tx,
+      messages.map((m) => m.id),
+    );
     const { userAgent, viewport, ...rest } = report;
-    return { report: rest, messages, userAgent, viewport };
+    return {
+      report: rest,
+      messages: messages.map((m) => ({
+        ...m,
+        attachments: files.get(m.id) ?? [],
+      })),
+      userAgent,
+      viewport,
+    };
   });
 }
 

@@ -7,6 +7,7 @@ import {
   FeedbackKindChip,
   FeedbackStatusChip,
 } from "@/components/app/feedback-chips";
+import { AttachmentList } from "@/components/app/attachment-list";
 import { requireTenant } from "@/lib/auth";
 import { getMyReport } from "@/lib/feedback/read";
 import {
@@ -113,6 +114,7 @@ export default async function FeedbackThreadPage({
                   typed into a box, and rendering it as markup would let a
                   stray underscore eat half a sentence. */}
               <p className="mt-1 whitespace-pre-wrap text-sm">{message.body}</p>
+              <AttachmentList attachments={message.attachments} />
             </div>
           );
         })}

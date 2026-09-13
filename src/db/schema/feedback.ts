@@ -38,6 +38,7 @@ import {
   check,
   foreignKey,
   index,
+  integer,
   pgTable,
   text,
   timestamp,
@@ -224,6 +225,11 @@ export const feedbackMessages = pgTable(
       foreignColumns: [feedbackReports.tenantId, feedbackReports.id],
       name: "feedback_messages_report_fk",
     }).onDelete("cascade"),
+    // The pair `feedback_attachments`' composite FK points at (slice 2). Added
+    // to an existing table rather than born with it, which is why it is a
+    // second migration — a composite FK cannot reference columns that carry no
+    // unique constraint.
+    uniqueIndex("feedback_messages_tenant_id_id_idx").on(t.tenantId, t.id),
     // The thread, in order. Both surfaces read exactly this.
     index("feedback_messages_thread_idx").on(t.reportId, t.createdAt),
     check("feedback_messages_side", sql`${t.side} in ('client', 'operator')`),
@@ -236,3 +242,74 @@ export const feedbackMessages = pgTable(
   ],
 );
 export type FeedbackMessage = typeof feedbackMessages.$inferSelect;
+
+/**
+ * A PICTURE OF WHAT THEY SAW. One row per file on one message.
+ *
+ * ── ATTACHED TO A MESSAGE, NOT TO A REPORT ───────────────────────────────────
+ *
+ * A screenshot arrives WITH a sentence, and the sentence is what explains it.
+ * Hanging files off the report instead would produce a pile at the bottom of a
+ * thread with no way to tell which one "here is the other screen" referred to.
+ * `report_id` is carried as well, redundantly, because every read starts from
+ * a report and the policy would otherwise need a second join to prove
+ * ownership.
+ *
+ * ── THE CLIENT UPLOADS; TODAY NOBODY ELSE DOES ───────────────────────────────
+ *
+ * Slice 2 gives the picker to the reporter only. The column shape already
+ * allows an operator's — the row hangs off a message and a message has a side
+ * — so adding it later is a picker and a policy clause, not a migration. What
+ * that costs today is written up as an open item rather than pretended away.
+ *
+ * ── AN ATTACHMENT ON AN INTERNAL NOTE MUST NOT LEAK ──────────────────────────
+ *
+ * It cannot exist yet, because only clients upload. The SELECT policy still
+ * proves the parent message is `internal = false`, for the same reason the
+ * message policy does: the day somebody adds an operator picker, the leak is
+ * already closed rather than waiting to be noticed.
+ */
+export const feedbackAttachments = pgTable(
+  "feedback_attachments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    reportId: uuid("report_id").notNull(),
+    messageId: uuid("message_id").notNull(),
+    /**
+     * Where the bytes are. UNIQUE across the platform: a pathname is minted
+     * with a random suffix by the upload door, so a collision would mean two
+     * rows pointing at one blob and a delete taking out somebody else's file.
+     */
+    blobPathname: text("blob_pathname").notNull(),
+    /** As the phone named it. Hostile text — `sanitizeFileName` before use. */
+    fileName: text("file_name").notNull(),
+    /** Re-read from the stored blob, never taken from the browser's claim. */
+    mimeType: text("mime_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    /** Who put it there. The message's author, restated for the policy. */
+    clerkUserId: text("clerk_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      columns: [t.tenantId, t.reportId],
+      foreignColumns: [feedbackReports.tenantId, feedbackReports.id],
+      name: "feedback_attachments_report_fk",
+    }).onDelete("cascade"),
+    // The message is the owner; losing it loses the file with it.
+    foreignKey({
+      columns: [t.tenantId, t.messageId],
+      foreignColumns: [feedbackMessages.tenantId, feedbackMessages.id],
+      name: "feedback_attachments_message_fk",
+    }).onDelete("cascade"),
+    uniqueIndex("feedback_attachments_pathname_idx").on(t.blobPathname),
+    index("feedback_attachments_message_idx").on(t.messageId),
+    index("feedback_attachments_report_idx").on(t.reportId),
+  ],
+);
+export type FeedbackAttachment = typeof feedbackAttachments.$inferSelect;

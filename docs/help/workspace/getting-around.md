@@ -125,8 +125,12 @@ and it reads all three back; more than three and it just says how many.
   for when you are dictating with people around. It becomes {icon:volume-x} and
   stays that way on this device until you turn it back on. Nothing else changes:
   everything it would have said is still on the screen.
-- Some browsers cannot speak at all. There is no button when that is the case,
-  and everything else works the same.
+- Some browsers and some phones cannot speak at all. There is no button when
+  that is the case, and everything else works the same.
+- If it turns out a device cannot read things out, you see `This device would
+  not read it out. Everything it says is still on the screen.` once, and the
+  button goes away. Nothing else changes — every word it would have said is
+  written in front of you.
 
 ## When there is no signal
 

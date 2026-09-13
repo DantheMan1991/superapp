@@ -131,6 +131,69 @@ screen.
 
 ## Build log
 
+### 2026-09-13 — The phone would not speak (`claude/the-phone-would-not-speak`)
+
+**The founder, after driving D1:** *"I get voice feedback on the computer, but
+the phone app does not."*
+
+**MEASURED, NOT GUESSED.** Loading yosherapp.com in an embedded Chromium and
+asking it:
+
+```
+  hasEngine: true
+  voicesImmediately: 0      ← the whole bug, most likely
+```
+
+`speechSynthesis.getVoices()` answers `[]` on the first call and fills in when
+`voiceschanged` fires. A desktop browser has voices warm long before anybody
+presses anything; **a freshly launched app does not**, and an engine asked to
+speak with no voices loaded drops the utterance SILENTLY — no error, no sound.
+Seconds later the same tab reported three voices, which is exactly the shape of
+"works on the computer, not in the app".
+
+Three known WebView failures are fixed together, since they are indistinguishable
+from outside and all three are cheap:
+
+- **Wait for the voice list**, with a one-second cap because some engines never
+  fire `voiceschanged` at all and going ahead with the default beats silence.
+- **A tick between `cancel()` and `speak()`.** Doing both in one turn is a
+  documented Android WebView race in which the new utterance is discarded with
+  the old one — and cancelling first is not optional, because two answers said
+  quickly must not queue up: the second is the one that is true.
+- **`resume()` before speaking.** A queue stuck `paused` speaks nothing and
+  reports nothing until something calls it.
+
+**AND ONE THE AUTHOR PUT THERE.** `warmUpSpeech` ran on EVERY press of the
+microphone, so a barn morning queued a dozen silent utterances behind each other;
+on an engine where a whitespace utterance never reports finishing, that is a
+queue that never drains and nothing after it is ever heard. Once per page is all
+the unlocking ever needed.
+
+**THE VOICE IS CHOSEN FIRST AND THE LANGUAGE FOLLOWS IT**, which the measurement
+forced: the page declares `lang="en"` and every installed voice is `en-US`, so an
+exact match finds **nothing** and only the two-letter fallback picks one. Setting
+`lang` from the page and the voice from the fallback would hand the engine a pair
+that disagree.
+
+#### A feature that fails silently is one nobody can report
+
+That is the real lesson, and it cost a round trip. `canSpeak()` only asked
+whether the API existed — which it does, on the phone that made no sound — so the
+app showed a speaker button that did nothing and said nothing about it.
+
+An utterance that errors, or that neither starts nor fails within three seconds,
+now proves the device silent: the button goes away (a control that does nothing
+is worse than an absent one) and the box says *"This device would not read it
+out. Everything it says is still on the screen."* once. **Whether there is a
+voice is therefore no longer constant for a page's life**, so both facts moved
+onto one subscription that can report the change.
+
+**STILL NOT WATCHED WORKING ON A PHONE.** This is a fix believed in, with one of
+its three causes reproduced in an embedded browser, not a fix verified on the
+device that reported it. If it still makes no sound, the new message is the thing
+to report — it says whether the engine was asked and refused, or never asked at
+all.
+
 ### 2026-09-13 — Slices A3 and A4: Phase A closes (`claude/phase-a-closes`)
 
 Both are housekeeping, and both exist so that Phase B can add ten sources

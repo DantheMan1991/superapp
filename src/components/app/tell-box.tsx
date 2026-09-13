@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore, useTransition } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CloudOff, Loader2, Sparkles, Volume2, VolumeX, X } from "lucide-react";
 import { toast } from "sonner";
@@ -26,12 +26,12 @@ import { WORTH_MENTIONING_MS } from "@/lib/tell-sources/spoken-at";
 import {
   canSpeak,
   isHushed,
+  isSilentDevice,
   noVoiceOnTheServer,
   sayIt,
   setHushed,
   spokenConfirmation,
-  subscribeHush,
-  subscribeNever,
+  subscribeVoice,
 } from "@/lib/speech/say";
 import {
   Select,
@@ -155,12 +155,38 @@ export function TellBox({
     if (wasSpoken) sayIt(text);
   };
 
-  // Both are browser facts with no server answer, so they are read as a
-  // store rather than pulled into state by an effect — see `say.ts`. The
-  // server snapshot is "no voice", which is also what a browser without one
-  // reports, so the first paint is the same either way.
-  const canHear = useSyncExternalStore(subscribeNever, canSpeak, noVoiceOnTheServer);
-  const hushed = useSyncExternalStore(subscribeHush, isHushed, noVoiceOnTheServer);
+  /*
+   * Browser facts with no server answer, read as a store rather than pulled
+   * into state by an effect — see `say.ts`. The server snapshot is "no voice",
+   * which is also what a browser without one reports, so the first paint is the
+   * same either way.
+   *
+   * **WHETHER THERE IS A VOICE IS NO LONGER CONSTANT.** It used to be read once
+   * and never again; an engine can now prove itself silent at the first thing
+   * it is asked to say, which is what an Android WebView with nothing behind
+   * `speechSynthesis` does — takes the utterance, reports success, makes no
+   * sound.
+   */
+  const canHear = useSyncExternalStore(subscribeVoice, canSpeak, noVoiceOnTheServer);
+  const hushed = useSyncExternalStore(subscribeVoice, isHushed, noVoiceOnTheServer);
+  const silent = useSyncExternalStore(subscribeVoice, isSilentDevice, noVoiceOnTheServer);
+
+  /*
+   * **SAY WHY IT STOPPED TALKING, ONCE.** A feature that fails silently is one
+   * nobody can report — the founder's note was *"the phone app does not"*, with
+   * nothing on screen to say whether it had tried. The speaker button goes away
+   * on its own (a control that does nothing is worse than an absent one), and
+   * this is the sentence that stops that looking like a bug in the button.
+   *
+   * A ref, not state: nothing renders from it, and it exists only so this is
+   * said once rather than on every render that follows.
+   */
+  const toldAboutSilence = useRef(false);
+  useEffect(() => {
+    if (!silent || toldAboutSilence.current) return;
+    toldAboutSilence.current = true;
+    toast.info("This device would not read it out. Everything it says is still on the screen.");
+  });
 
   /*
    * ── SENTENCES WAITING FOR SIGNAL (tell.md, slice D2) ─────────────────────

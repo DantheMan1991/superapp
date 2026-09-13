@@ -58,6 +58,22 @@ public class TellPlugin extends Plugin {
     }
 
     /**
+     * The microphone opened, or closed with nothing.
+     *
+     * `SpeechRecognizer` draws NOTHING — that is the whole reason it is fast —
+     * so the page is the only thing that can show a person their phone is
+     * recording. Without this it would paint an idle sheet over a live
+     * microphone, which is worse than the slow version it replaced.
+     */
+    static void announceListening(boolean on) {
+        TellPlugin plugin = current;
+        if (plugin == null) return;
+        JSObject payload = new JSObject();
+        payload.put("listening", on);
+        plugin.notifyListeners("listening", payload);
+    }
+
+    /**
      * Hand over whatever is waiting, and forget it.
      *
      * Returns `{ utterance: null }` when there is nothing, which is the
@@ -70,6 +86,10 @@ public class TellPlugin extends Plugin {
 
         JSObject result = new JSObject();
         result.put("utterance", waiting);
+        // Answered in the SAME call, because the page asks this once on mount
+        // and the two facts are read together: either words are waiting, or
+        // the microphone is still open and words are coming.
+        result.put("listening", MainActivity.listening);
         call.resolve(result);
     }
 }

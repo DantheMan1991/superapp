@@ -61,6 +61,7 @@ export function TellBox({
   onRecorded,
   labelHidden = false,
   said,
+  phoneListening = false,
 }: {
   placeholder?: string;
   /** Start listening as soon as this mounts — the launcher's press was the tap. */
@@ -73,6 +74,12 @@ export function TellBox({
    * records itself.
    */
   said?: string;
+  /**
+   * The PHONE's microphone is open right now, captured by the shell before
+   * this page existed. Shown as a state rather than a control: there is
+   * nothing to press, because the recording is not this page's to stop.
+   */
+  phoneListening?: boolean;
   /** Told after anything is recorded, so a sheet can close itself. */
   onRecorded?: () => void;
   /**
@@ -200,7 +207,17 @@ export function TellBox({
           />
         </div>
 
-        {cards === null ? (
+        {phoneListening ? (
+          // No buttons at all. The recording belongs to the shell, and a Stop
+          // this page cannot honour would be a lie.
+          <p className="flex items-center gap-2 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+            <span className="relative flex size-2.5 shrink-0">
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75" />
+              <span className="relative inline-flex size-2.5 rounded-full bg-primary" />
+            </span>
+            Listening&hellip; stop talking when you are done.
+          </p>
+        ) : cards === null ? (
           <div className="flex flex-wrap items-center justify-end gap-2">
             {/* Dictation only ever produces TEXT, which lands in the box above
                 exactly as if it had been typed. The reading step, the cards and

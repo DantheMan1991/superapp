@@ -29,9 +29,28 @@ web is the thing being waited for.
 
 **So the shell listens for itself, and it is the first thing in `mobile/` that
 decides anything.** `MainActivity` sees `yosher://tell` on its launch intent
-and fires `RecognizerIntent` immediately — a system screen that appears in the
-time it takes to draw one. The app loads behind it, and by the time the page is
-ready the words are already waiting.
+and starts the microphone immediately, in this process. The app loads behind
+it, and by the time the page is ready the words are already waiting.
+
+**The first version of this used `RecognizerIntent` and did not help.** The
+founder: *"it really didn't speed it up. It takes a while for Android's
+recogniser to fire up."* Right again, and for a specific reason — that intent
+**launches Google's speech app as a whole separate activity**, which has its
+own cold start. One slow launch had been traded for two.
+
+`SpeechRecognizer` binds to the same service IN PROCESS: no second activity,
+no second launch, started before Capacitor has finished building its bridge.
+The cost is that it draws NOTHING, which is why `listening` is published to the
+page — the sheet shows "Listening…" the moment it paints, rather than an idle
+box over a live microphone.
+
+**And no logo, no fade.** The site plays a 1.5-second launch animation on its
+first paint inside the app (650ms in, 450ms hold, 400ms out) — pure dead time
+on a launch whose whole point is speed. The shell now sets the site's OWN
+`yosher_launched` cookie before the page loads, which is the mechanism
+`src/lib/launch.ts` already had for "this launch has had its animation".
+Reusing it rather than inventing a second flag: a flag the web had to learn
+about is a flag that could disagree with the cookie.
 
 This is also, arriving by a different road, exactly what
 [ADR 0049](../decisions/0049-speech-is-a-fork-in-the-road-not-a-provider.md)
@@ -67,7 +86,7 @@ would paint an empty box and then fill it.
 - **`registerPlugin` BEFORE `super.onCreate`.** Capacitor builds its bridge
   there; a plugin registered afterwards is not in it.
 
-Version 1.0.3, `versionCode` 4.
+Version 1.0.4, `versionCode` 5.
 
 **Not verified by me at all** — this is Java on a machine with no Android SDK.
 CI compiles it, which proves it builds and nothing more. Whether the recogniser

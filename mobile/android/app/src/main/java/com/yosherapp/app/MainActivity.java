@@ -1,10 +1,16 @@
 package com.yosherapp.app;
 
-import android.content.ActivityNotFoundException;
+import android.Manifest;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
+import android.webkit.CookieManager;
+
+import androidx.core.content.ContextCompat;
 
 import com.getcapacitor.BridgeActivity;
 
@@ -16,115 +22,223 @@ import java.util.ArrayList;
  *
  * ── WHY THERE IS JAVA HERE AT ALL ───────────────────────────────────────────
  *
- * Everything else about this app is a decision the web makes (ADR 0032), and
- * the home-screen shortcut was deliberately built that way — the shortcut
- * fired a url and `tell-launcher.tsx` decided what it meant. It worked, and it
- * was too slow, for a reason no amount of web work can fix:
+ * Everything else about this app is a decision the web makes (ADR 0032). The
+ * home-screen shortcut was built that way too — it fired a url and
+ * `tell-launcher.tsx` decided what it meant. It worked, and it was too slow,
+ * for a reason no amount of web work can fix:
  *
  *     long-press → Android starts the app → the WebView downloads
  *     yosherapp.com → the server renders the dashboard → JavaScript hydrates
  *     → only NOW does any code exist that can ask for a microphone
  *
- * The founder's words were "it takes way too long to load the app before the
- * microphone starts working. It needs to be immediate." He is right, and
- * nothing about the microphone is slow — he is waiting for a website.
+ * Nothing about the microphone was slow. The founder was waiting for a
+ * website.
  *
- * So the shortcut now opens the phone's OWN speech recogniser immediately,
- * which is a system screen and appears in the time it takes to draw one. The
- * app loads behind it. By the time the page is ready the words are already
- * waiting, and `TellPlugin` hands them over.
+ * ── AND WHY IT IS `SpeechRecognizer`, NOT `RecognizerIntent` ────────────────
  *
- * This is also, arriving by a different road, what ADR 0049 always wanted for
- * the app: the phone's own engine, no upload, and nothing charged per minute.
+ * The first version fired `RecognizerIntent`, and the founder's answer was
+ * *"it really didn't speed it up. It takes a while for Android's recogniser to
+ * fire up."* Right again, for a specific reason: that intent **launches
+ * Google's speech app as a whole separate activity**, which has its own cold
+ * start. One slow launch had been traded for two.
+ *
+ * `SpeechRecognizer` binds to the same service IN THIS PROCESS. No second
+ * activity and no second launch — it is started here before Capacitor has
+ * finished building its bridge, so **the microphone is live while the WebView
+ * is still downloading.**
+ *
+ * The cost is that it draws nothing: there is no UI until the site loads and
+ * shows its own "Listening…". That is the right trade for somebody holding a
+ * bucket, and it is why `listening` is published — the page can say so the
+ * moment it paints, rather than looking idle while the phone is recording.
  */
 public class MainActivity extends BridgeActivity {
 
-    /** `yosher://tell` — the same url the shortcut fires and the web listens for. */
+    /** `yosher://tell` — the url the shortcut fires and the web listens for. */
     private static final String TELL_SCHEME = "yosher";
     private static final String TELL_HOST = "tell";
 
-    private static final int ASK_SPEECH = 9001;
+    /** Where the app lives, so the launch cookie is set for the right site. */
+    private static final String SITE = "https://yosherapp.com";
 
     /**
      * What was said before the page was ready, waiting to be collected.
      *
-     * STATIC, and the reason is the whole point of this class: the recogniser
-     * usually finishes BEFORE the WebView has a plugin to hand it to, so the
-     * words have to outlive any instance that might be recreated by a rotation
-     * or a low-memory kill on the way back. `TellPlugin.takePending()` clears
-     * it, so a sentence is collected exactly once.
+     * STATIC, and that is the point of this class: the recogniser usually
+     * finishes BEFORE the WebView has a plugin to hand it to, so the words have
+     * to outlive any instance a rotation might recreate.
+     * `TellPlugin.takePending()` clears it, so a sentence is collected once.
      */
     static volatile String pendingUtterance = null;
 
+    /** True between "the microphone opened" and "it stopped". Read by the page. */
+    static volatile boolean listening = false;
+
+    private SpeechRecognizer recognizer = null;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        // BEFORE super.onCreate: Capacitor builds its bridge there, and a
-        // plugin registered afterwards is not in it.
+        // BEFORE super.onCreate, because that is where Capacitor builds its
+        // bridge and starts the page loading. Both of these have to happen
+        // first or they happen too late.
+        boolean tell = isTellLaunch(getIntent());
+        if (tell) skipTheLaunchAnimation();
         registerPlugin(TellPlugin.class);
+
         super.onCreate(savedInstanceState);
-        maybeListen(getIntent());
+
+        if (tell) listenNow();
     }
 
     /**
-     * The app was already running. `launchMode="singleTask"` means a second
-     * long-press lands here rather than in `onCreate`, and it must listen just
-     * the same — this is the FAST path, where the page is already loaded.
+     * The app was already running. `launchMode="singleTask"` sends a second
+     * long-press here rather than to `onCreate`, and it must listen just the
+     * same — this is the fast path, where the page is already loaded.
      */
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        maybeListen(intent);
+        if (isTellLaunch(intent)) listenNow();
     }
 
-    private void maybeListen(Intent intent) {
-        if (intent == null) return;
+    private boolean isTellLaunch(Intent intent) {
+        if (intent == null) return false;
         Uri data = intent.getData();
-        if (data == null) return;
-        if (!TELL_SCHEME.equals(data.getScheme())) return;
-        if (!TELL_HOST.equals(data.getHost())) return;
+        if (data == null) return false;
+        return TELL_SCHEME.equals(data.getScheme()) && TELL_HOST.equals(data.getHost());
+    }
 
-        Intent speech = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-        speech.putExtra(
+    /**
+     * NO LOGO, NO FADE, on a launch whose whole point is speed.
+     *
+     * The site plays a 1.5-second animation on its first paint inside the app
+     * (`src/lib/launch.ts`: 650ms in, 450ms hold, 400ms out) and skips it when
+     * a session cookie says this launch has already had one. Setting that
+     * cookie here, before the page loads, is how the shell asks for the quiet
+     * version — the founder's *"just open as fast as possible"*.
+     *
+     * Deliberately reusing the site's own mechanism rather than inventing a
+     * second one: a flag the web had to learn about would be a flag that could
+     * disagree with the cookie.
+     */
+    private void skipTheLaunchAnimation() {
+        try {
+            CookieManager cookies = CookieManager.getInstance();
+            cookies.setAcceptCookie(true);
+            cookies.setCookie(SITE, "yosher_launched=1; path=/; SameSite=Lax");
+        } catch (Exception e) {
+            // A cookie store that refuses is a slower launch, not a broken one.
+        }
+    }
+
+    /**
+     * Start the microphone, now, in this process.
+     *
+     * `SpeechRecognizer` must be created and driven on the main thread, which
+     * `onCreate` and `onNewIntent` both already are.
+     */
+    private void listenNow() {
+        // Not granted means the WebView has never asked. Do nothing rather than
+        // throw a permission dialog on top of a launch: the page's own
+        // microphone button asks properly, with a sentence explaining why.
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) return;
+
+        stopListening();
+        try {
+            recognizer = SpeechRecognizer.createSpeechRecognizer(this);
+        } catch (Exception e) {
+            recognizer = null;
+            return;
+        }
+
+        recognizer.setRecognitionListener(new RecognitionListener() {
+            @Override
+            public void onReadyForSpeech(Bundle params) {
+                listening = true;
+                TellPlugin.announceListening(true);
+            }
+
+            @Override
+            public void onResults(Bundle results) {
+                ArrayList<String> said =
+                    results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                done(said == null || said.isEmpty() ? null : said.get(0));
+            }
+
+            @Override
+            public void onError(int error) {
+                // Nothing heard, a timeout, a busy service. All ordinary: the
+                // page still has its own button.
+                done(null);
+            }
+
+            private void done(String heard) {
+                listening = false;
+                if (heard != null && !heard.trim().isEmpty()) {
+                    // Kept AND announced, because which happens first depends on
+                    // how long somebody talked and how fast the network is —
+                    // and neither ordering may lose the sentence.
+                    pendingUtterance = heard;
+                    TellPlugin.announce(heard);
+                } else {
+                    TellPlugin.announceListening(false);
+                }
+            }
+
+            @Override public void onBeginningOfSpeech() {}
+            @Override public void onRmsChanged(float rmsdB) {}
+            @Override public void onBufferReceived(byte[] buffer) {}
+            @Override public void onEndOfSpeech() {}
+            @Override public void onPartialResults(Bundle partialResults) {}
+            @Override public void onEvent(int eventType, Bundle params) {}
+        });
+
+        Intent listen = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        listen.putExtra(
             RecognizerIntent.EXTRA_LANGUAGE_MODEL,
             RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
         );
-        speech.putExtra(RecognizerIntent.EXTRA_PROMPT, "Tell Yosher what happened");
-        // One answer. The web reads a sentence back before recording anything,
-        // so a list of maybes would be a choice nobody asked to make.
-        speech.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+        listen.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getPackageName());
+        listen.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+        // Hints, which many recognisers ignore. Generous, because somebody who
+        // pressed a shortcut may take a breath before starting: cutting them off
+        // is worse than waiting a moment longer.
+        listen.putExtra(
+            RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,
+            1500L
+        );
+        listen.putExtra(
+            RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS,
+            1500L
+        );
 
         try {
-            startActivityForResult(speech, ASK_SPEECH);
-        } catch (ActivityNotFoundException e) {
-            // No recogniser on this device — some Android builds ship without
-            // one. Nothing is broken: the page still has its own microphone
-            // button, which is what the web falls back to anyway.
+            recognizer.startListening(listen);
+        } catch (Exception e) {
+            stopListening();
         }
     }
 
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (requestCode == ASK_SPEECH) {
-            if (resultCode == RESULT_OK && data != null) {
-                ArrayList<String> said =
-                    data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
-                if (said != null && !said.isEmpty()) {
-                    String heard = said.get(0);
-                    if (heard != null && !heard.trim().isEmpty()) {
-                        // Told to the page if it is listening, and kept if it
-                        // is not. BOTH, because which happens first depends on
-                        // how long somebody talked and how fast the network is
-                        // — and neither ordering may lose the sentence.
-                        pendingUtterance = heard;
-                        TellPlugin.announce(heard);
-                    }
-                }
-            }
-            // A cancelled recogniser is an ordinary outcome: somebody opened
-            // it by mistake and pressed back. The app carries on loading.
-            return;
+    private void stopListening() {
+        listening = false;
+        if (recognizer == null) return;
+        try {
+            recognizer.cancel();
+            recognizer.destroy();
+        } catch (Exception e) {
+            // Already gone.
         }
-        super.onActivityResult(requestCode, resultCode, data);
+        recognizer = null;
+    }
+
+    @Override
+    public void onDestroy() {
+        stopListening();
+        super.onDestroy();
     }
 }

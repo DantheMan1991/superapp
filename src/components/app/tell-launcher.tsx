@@ -13,6 +13,7 @@ import {
 import { TellBox } from "@/components/app/tell-box";
 import { cn } from "@/lib/utils";
 import {
+  listeningFrom,
   readNativeBridge,
   urlWantsToTell,
   utteranceFrom,
@@ -71,6 +72,13 @@ export function TellLauncher({
    * the bug that would replace the slow one.
    */
   const [heard, setHeard] = useState<string | null>(null);
+  /**
+   * The PHONE is recording right now, and this page is the only thing that can
+   * say so — `SpeechRecognizer` draws nothing, which is exactly why it is
+   * fast. Without this the sheet would paint an idle box over a live
+   * microphone, which is worse than the slow version it replaced.
+   */
+  const [phoneListening, setPhoneListening] = useState(false);
   /**
    * Does this build capture speech natively? A fact about the shell this page
    * is running inside, not a piece of state — so it is read the way
@@ -153,6 +161,7 @@ export function TellLauncher({
     /** Open with the words already in hand, whichever way they arrived. */
     const take = (said: string) => {
       if (dropped) return;
+      setPhoneListening(false);
       setHeard(said);
       setOpen(true);
     };
@@ -168,7 +177,21 @@ export function TellLauncher({
           if (said) {
             opened.current = true;
             take(said);
+          } else if (listeningFrom(pending)) {
+            // STILL TALKING. The page won the race, which is the good problem:
+            // open now and show that the phone is recording, rather than
+            // sitting idle until the words land.
+            opened.current = true;
+            setPhoneListening(true);
+            setOpen(true);
           }
+          const whileListening = await tell.addListener("listening", (payload) => {
+            const on = listeningFrom(payload);
+            setPhoneListening(on);
+            if (on) setOpen(true);
+          });
+          if (dropped) void whileListening.remove();
+          else handles.push(whileListening);
           // And the other way round — a second long-press while the app is
           // already open, or a slow talker on a fast connection.
           const listener = await tell.addListener("utterance", (payload) => {
@@ -265,10 +288,12 @@ export function TellLauncher({
               // sentence it has already been given.
               autoListen={open && !nativeEars}
               said={heard ?? undefined}
+              phoneListening={phoneListening}
               labelHidden
               speechConfigured={speechConfigured}
               onRecorded={() => {
                 setHeard(null);
+                setPhoneListening(false);
                 setOpen(false);
               }}
               placeholder="Clock me in, and three chicks dead in pen two"

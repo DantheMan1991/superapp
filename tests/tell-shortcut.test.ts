@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  listeningFrom,
   readNativeBridge,
   TELL_URL,
   urlWantsToTell,
@@ -180,5 +181,28 @@ describe("the shell's own ears", () => {
     expect(
       readNativeBridge(nativeWindow({ Tell: { takePending: () => {} } }))?.tell,
     ).toBeNull();
+  });
+});
+
+describe("whether the phone is recording right now", () => {
+  it("is true only when the shell says so in as many words", () => {
+    expect(listeningFrom({ listening: true })).toBe(true);
+  });
+
+  it("is false for absent, which is what an older shell sends", () => {
+    // A build that never listens on its own sends no flag, and must not be
+    // read as listening — the page would paint a live microphone over nothing.
+    expect(listeningFrom({})).toBe(false);
+    expect(listeningFrom({ utterance: "clock me in" })).toBe(false);
+    expect(listeningFrom(null)).toBe(false);
+    expect(listeningFrom(undefined)).toBe(false);
+  });
+
+  it("is false for anything truthy that is not exactly true", () => {
+    // Strict, because the consequence of a false positive is a sheet that
+    // shows "Listening…" forever over a microphone that is not open.
+    expect(listeningFrom({ listening: "true" })).toBe(false);
+    expect(listeningFrom({ listening: 1 })).toBe(false);
+    expect(listeningFrom({ listening: false })).toBe(false);
   });
 });

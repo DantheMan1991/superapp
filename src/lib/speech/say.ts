@@ -83,12 +83,67 @@ export function spokenConfirmation(summaries: readonly string[]): string {
 
 /* -- the half that touches the browser ------------------------------------- */
 
+/**
+ * ── WHY THIS HALF IS LONGER THAN IT LOOKS LIKE IT SHOULD BE ──────────────────
+ *
+ * The founder, 2026-09-13: *"I get voice feedback on the computer, but the phone
+ * app does not."* Everything below is the difference between those two, and none
+ * of it is exotic — it is the same three things that break Web Speech in an
+ * Android WebView, all of which a desktop browser hides:
+ *
+ *  1. **Voices arrive late.** `getVoices()` answers `[]` on first call and fills
+ *     in when `voiceschanged` fires. Speak before that and the engine drops the
+ *     utterance SILENTLY — no error, no sound. A desktop browser has voices warm
+ *     long before anybody presses anything, which is exactly why it works there.
+ *  2. **`cancel()` then `speak()` in the same turn is a race.** The new
+ *     utterance goes out with the old one. Desktop tolerates it; WebView does
+ *     not.
+ *  3. **The queue gets stuck `paused`** and then speaks nothing and says
+ *     nothing, until something calls `resume()`.
+ *
+ * And one of my own: `warmUpSpeech` ran on EVERY press of the microphone, so a
+ * barn morning queued a dozen silent utterances behind each other. On an engine
+ * where a whitespace utterance never fires `end`, that is a queue that never
+ * drains.
+ *
+ * **NONE OF THIS HAS BEEN WATCHED WORKING ON A PHONE.** It is a fix believed in,
+ * not a fix verified, which is why the last part of this file exists: when the
+ * engine proves it cannot speak, the app stops claiming it can and says so once.
+ * A feature that fails silently is one nobody can report.
+ */
+
 /** Per device, per browser. A convenience, never state anything depends on. */
 const HUSH_KEY = "yosher.tell.hush";
 
-/** Every engine is behind `window`, and a server render has none. */
+/** Proven unable to speak: an utterance errored, or never started. */
+let silent = false;
+const listeners = new Set<() => void>();
+
+function changed(): void {
+  for (const listener of listeners) listener();
+}
+
+/** There is an engine, and it has not yet proved itself useless. */
 export function canSpeak(): boolean {
-  return typeof window !== "undefined" && "speechSynthesis" in window;
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return false;
+  return !silent;
+}
+
+/**
+ * The engine took an utterance and made no sound.
+ *
+ * Said once. From here the speaker button goes away — a control that does
+ * nothing is worse than an absent one — and the box says why, because the
+ * alternative is somebody wondering whether they pressed it wrong.
+ */
+function provedSilent(): void {
+  if (silent) return;
+  silent = true;
+  changed();
+}
+
+export function isSilentDevice(): boolean {
+  return silent;
 }
 
 /**
@@ -96,7 +151,7 @@ export function canSpeak(): boolean {
  *
  * Reads can throw outright — a private window, site data blocked, a thumbnail
  * capture — so every access is wrapped and the failure means "not hushed",
- * which is the behaviour somebody who never touched the toggle expects.
+ * which is what somebody who never touched the toggle expects.
  */
 export function isHushed(): boolean {
   try {
@@ -112,28 +167,26 @@ export function setHushed(hushed: boolean): void {
     else window.localStorage.removeItem(HUSH_KEY);
   } catch {
     // A device that cannot remember the preference still honours it for the
-    // rest of this page's life, because the listeners below are told either
-    // way and `isHushed` is read again from wherever it can be read.
+    // rest of this page's life, because the listeners are told either way.
   }
   if (hushed) hush();
-  for (const listener of listeners) listener();
+  changed();
 }
 
-/* -- read it the way React wants a browser fact read ----------------------- */
+/* -- reading a browser fact the way React wants it read -------------------- */
 
 /**
- * **`useSyncExternalStore`, NOT AN EFFECT.** Both facts below live in the
- * browser and neither exists during a server render, so the obvious
- * `useEffect(() => setX(read()))` is two paints and a lint error
- * (`react-hooks/set-state-in-effect`). This is the shape React added for
- * exactly this: a snapshot, a server snapshot, and a way to be told it changed.
+ * **`useSyncExternalStore`, NOT AN EFFECT.** These live in the browser and have
+ * no server answer, so `useEffect(() => setX(read()))` is two paints and a lint
+ * error. This is the shape React added for it: a snapshot, a server snapshot,
+ * and a way to be told it changed.
+ *
+ * Both facts share one subscription now. Whether there is a voice at all USED to
+ * be constant for a page's life; it is not, because the engine can prove itself
+ * silent at the first thing it is asked to say.
  */
-const listeners = new Set<() => void>();
-
-export function subscribeHush(onChange: () => void): () => void {
+export function subscribeVoice(onChange: () => void): () => void {
   listeners.add(onChange);
-  // Two tabs open on a phone is not unusual, and a preference that disagrees
-  // between them is a preference somebody stops trusting.
   const fromAnotherTab = (e: StorageEvent) => {
     if (e.key === null || e.key === HUSH_KEY) onChange();
   };
@@ -144,31 +197,31 @@ export function subscribeHush(onChange: () => void): () => void {
   };
 }
 
-/** Whether there is an engine at all never changes within a page's life. */
-export function subscribeNever(): () => void {
-  return () => {};
-}
-
 /** On the server there is no voice, so nothing is hushed and nothing speaks. */
 export function noVoiceOnTheServer(): boolean {
   return false;
 }
 
+/* -- the engine ------------------------------------------------------------ */
+
+let warmed = false;
+
 /**
  * **THE GESTURE TRICK, AND IT IS NOT OPTIONAL ON iOS.**
  *
- * Mobile Safari will only start speech inside a user gesture. Everything this
- * says comes AFTER an await — the model call, the server action — by which
- * point the gesture is long gone and `speak()` is silently ignored. Nothing
- * throws; the phone simply never talks, on the one platform where it matters
- * most.
+ * Mobile Safari starts speech only inside a user gesture, and everything this
+ * says comes AFTER an await — the model call, the server action — by which point
+ * the gesture is gone and `speak()` is silently ignored.
  *
- * Speaking a silent utterance on the press that starts listening unlocks the
- * engine for the rest of the page's life. Called from the dictate button, which
- * is the one place a real tap is guaranteed.
+ * **ONCE PER PAGE, NOT ONCE PER PRESS.** It used to run on every press of the
+ * microphone, which on a busy morning queues a dozen silent utterances behind
+ * each other; on an engine where a whitespace utterance never reports finishing,
+ * that queue never drains and nothing after it is ever heard. One is all the
+ * unlocking ever needed.
  */
 export function warmUpSpeech(): void {
-  if (!canSpeak()) return;
+  if (warmed || !canSpeak()) return;
+  warmed = true;
   try {
     const warm = new SpeechSynthesisUtterance(" ");
     warm.volume = 0;
@@ -181,7 +234,7 @@ export function warmUpSpeech(): void {
 
 /** Stop talking, now. */
 export function hush(): void {
-  if (!canSpeak()) return;
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
   try {
     window.speechSynthesis.cancel();
   } catch {
@@ -189,25 +242,132 @@ export function hush(): void {
   }
 }
 
+/** What the page is written in, so the engine picks a voice for it. */
+function preferredLang(): string {
+  try {
+    return document.documentElement.lang || navigator.language || "en-US";
+  } catch {
+    return "en-US";
+  }
+}
+
+function voicesNow(): SpeechSynthesisVoice[] {
+  try {
+    return window.speechSynthesis.getVoices();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Wait for the voice list, but never forever.
+ *
+ * Some engines never fire `voiceschanged` at all, and going ahead with no voice
+ * named is better than a promise nobody keeps — the engine usually has a default
+ * even when it will not enumerate one.
+ */
+function whenVoicesReady(run: () => void): void {
+  if (voicesNow().length > 0) {
+    run();
+    return;
+  }
+  let ran = false;
+  const go = () => {
+    if (ran) return;
+    ran = true;
+    try {
+      window.speechSynthesis.removeEventListener("voiceschanged", go);
+    } catch {
+      /* nothing was listening */
+    }
+    run();
+  };
+  try {
+    window.speechSynthesis.addEventListener("voiceschanged", go);
+  } catch {
+    /* an engine too old to be listened to */
+  }
+  window.setTimeout(go, 1_000);
+}
+
+/** How long an utterance may sit having neither started nor failed. */
+const NEVER_STARTED_MS = 3_000;
+
+function utter(words: string): void {
+  const synth = window.speechSynthesis;
+  try {
+    synth.cancel();
+    // A queue stuck `paused` speaks nothing and reports nothing until this is
+    // called. Harmless when it is not stuck.
+    synth.resume();
+  } catch {
+    /* nothing to cancel or resume */
+  }
+
+  /*
+   * A TICK BETWEEN CANCEL AND SPEAK. Doing both in one turn is a documented
+   * Android WebView race in which the new utterance is discarded with the old
+   * one — and cancelling first is not optional, because two answers said
+   * quickly must not queue up: the second is the one that is true.
+   */
+  window.setTimeout(() => {
+    try {
+      const utterance = new SpeechSynthesisUtterance(words);
+      // Slightly under the default. A confirmation is heard once, outdoors,
+      // possibly over an engine, and a rushed one has to be read on the screen
+      // anyway — which is the interaction this exists to remove.
+      utterance.rate = 0.95;
+
+      /*
+       * **THE VOICE FIRST, THEN THE LANGUAGE TO MATCH IT.**
+       *
+       * Measured in an embedded Chromium on 2026-09-13: the page declares
+       * `lang="en"` and every installed voice is `en-US`, so an exact match
+       * finds NOTHING and only the two-letter fallback picks one. Setting
+       * `lang` from the page and the voice from the fallback would then hand
+       * the engine a pair that disagree — so the chosen voice names the
+       * language, and the page is only the starting point for choosing.
+       */
+      const wanted = preferredLang();
+      const voice =
+        voicesNow().find((v) => v.lang === wanted) ??
+        voicesNow().find((v) => v.lang?.startsWith(wanted.slice(0, 2))) ??
+        voicesNow().find((v) => v.default);
+      if (voice) utterance.voice = voice;
+      utterance.lang = voice?.lang || wanted;
+
+      let started = false;
+      utterance.onstart = () => {
+        started = true;
+      };
+      utterance.onerror = () => provedSilent();
+      synth.speak(utterance);
+
+      // Neither started nor errored: the engine took it and threw it away,
+      // which is how a WebView with nothing behind it behaves. The ONLY way to
+      // notice that, since nothing is reported.
+      window.setTimeout(() => {
+        if (!started) provedSilent();
+      }, NEVER_STARTED_MS);
+    } catch {
+      provedSilent();
+    }
+  }, 0);
+}
+
 /**
  * Say it, unless this device asked for quiet.
  *
- * **CANCELS FIRST, ALWAYS.** Two sentences said quickly must not queue up
- * behind each other — the second answer is the one that is true, and hearing
- * the first one finish is how somebody walks away believing the wrong thing.
+ * **CANCELS FIRST, ALWAYS.** Two answers said quickly must not queue up behind
+ * each other — the second one is the one that is true, and hearing the first
+ * finish is how somebody walks away believing the wrong thing.
  */
 export function sayIt(text: string): void {
   const words = text.trim();
   if (words === "" || !canSpeak() || isHushed()) return;
   try {
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(words);
-    // Slightly under the default. A confirmation is heard once, outdoors,
-    // possibly over an engine, and a rushed one has to be read on the screen
-    // anyway — which is the interaction this exists to remove.
-    utterance.rate = 0.95;
-    window.speechSynthesis.speak(utterance);
+    whenVoicesReady(() => utter(words));
   } catch {
-    // Silence is an acceptable outcome. Everything spoken is also on screen.
+    provedSilent();
   }
 }

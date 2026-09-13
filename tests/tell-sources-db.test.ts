@@ -131,7 +131,20 @@ d("telling it what happened", () => {
     });
 
     const proposal = await propose("nothing much", []);
+    /*
+     * **THE WHOLE LIST, AND ON PURPOSE.** This fixture keeps `livestock`,
+     * `inventory` and `land` switched on, so every source those modules have
+     * contributes here — and asserting the exact set means **adding a source
+     * cannot happen without somebody acknowledging that it changes what every
+     * tenant is offered.** Slice B1 added three and this is where it showed.
+     *
+     * `land` has no source of its own; its rows are what make
+     * `livestock.move` possible.
+     */
     expect(proposal.actions.map((a) => a.slug).sort()).toEqual([
+      "inventory.adjusted",
+      "inventory.counted",
+      "inventory.used",
       "livestock.check",
       "livestock.feed",
       "livestock.loss",
@@ -145,7 +158,11 @@ d("telling it what happened", () => {
      * list here to assert — a farm with three hundred pens now sends the same
      * prompt as one with three.
      */
-    const lotField = proposal.actions[0].fields.find((f) => f.key === "lot")!;
+    // NAMED, NOT POSITIONAL. This was `actions[0]` until inventory joined the
+    // registry ahead of livestock and the first action stopped having a lot at
+    // all — an index into a list whose order is a product decision.
+    const check = proposal.actions.find((a) => a.slug === "livestock.check")!;
+    const lotField = check.fields.find((f) => f.key === "lot")!;
     expect(lotField.choices).toBeUndefined();
 
     /*

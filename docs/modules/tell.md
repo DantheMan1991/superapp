@@ -648,6 +648,19 @@ No code changed.
 
 ## Decisions & gotchas
 
+- **ADDING A SOURCE BREAKS EVERY FIXTURE THAT ASSERTS AN ACTION LIST, AND THAT
+  IS WORKING AS INTENDED.** `tests/tell-sources-db.test.ts` enables `livestock`,
+  `inventory` and `land`, so slice B1's three new actions appeared in a list it
+  checks exactly — CI caught it, having run every suite rather than the five that
+  looked relevant. **Before pushing a new source, run every `*-tell-*` and
+  `tell-*` db suite, not the ones you touched.** The exact assertion is kept on
+  purpose: a source cannot be added without somebody acknowledging it changes
+  what every tenant is offered.
+- **Never index into `proposal.actions`.** The same slice moved `actions[0]`
+  from a livestock action to an inventory one, because the registry's order is a
+  product decision (most-said first) and not a fixture's to rely on. Find by
+  slug.
+
 - **Nothing in a proposal may be a function.** The box is a client component,
   and handing React a function across that boundary is a RUNTIME error that
   `tsc`, the linter, the build and the whole suite waved through. Asserted over

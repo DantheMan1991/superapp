@@ -39,18 +39,16 @@ export const MAX_GRANTS_PER_PERSON = 5;
  */
 export const PROPOSAL_TTL_MS = 5 * 60 * 1_000;
 
-/**
- * How far the phone's own clock may differ from the server's before it stops
- * being believed.
+/*
+ * `SPOKEN_AT_TOLERANCE_MS` WAS HERE and is deliberately not replaced by one
+ * number ([ADR 0055](../../../docs/decisions/0055-a-queued-sentence-is-old-not-wrong.md)).
  *
- * A DEVICE CLOCK IS USER-SETTABLE, AND FOR A CLOCK-IN THE DIFFERENCE IS
- * WAGES. Inside the tolerance the phone is trusted, which matters because a
- * sentence queued in a barn with no signal may not reach us for hours and its
- * REAL time is the one it was spoken at. Outside it, the server's clock wins
- * and `device_grant_uses` keeps both, so a phone whose owner set the date
- * back is visible rather than quietly believed.
+ * A single symmetric ±15 minutes was answering two different questions — how
+ * WRONG might this clock be, and how OLD might this sentence be — and the
+ * second one is not symmetric and is not minutes. The pair that replaced it,
+ * `SPOKEN_AT_FUTURE_SKEW_MS` and `SPOKEN_AT_MAX_AGE_MS`, lives in
+ * `tell-sources/spoken-at.ts` beside the rule that reads them.
  */
-export const SPOKEN_AT_TOLERANCE_MS = 15 * 60 * 1_000;
 
 /**
  * The rate limit, per grant. Every sentence is a model call, so a phone in

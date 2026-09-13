@@ -119,7 +119,7 @@ screen.
 | # | Idea | Why it might be the best one here |
 | --- | --- | --- |
 | **D1** ✅ | **Say it back — shipped 2026-09-13** ([#543](https://github.com/DantheMan1991/superapp/pull/543)). The confirmation is SPOKEN, not shown — press, speak, hear `Clocked in at 7:42`. Never look at the phone | In a barn holding a bucket this is the entire win — it turns a two-look interaction into a no-look one. Nothing needs installing (`speechSynthesis` is a browser API and both native shells are WebViews) and nothing is built either: **there is no text-to-speech anywhere in this repo today**, and whether it works inside the app's WebView is the first thing to check rather than the first thing to assume |
-| **D2** | **Say it with no signal.** A field has no bars. Queue the sentence and record it when there is signal, with the phone saying so | [0049](../decisions/0049-speech-is-a-fork-in-the-road-not-a-provider.md) makes this tractable: inside the app the TRANSCRIPT is produced on the handset, so what has to be queued is a short string, not audio. **Without this the feature fails exactly where it is needed most** |
+| **D2** | **Say it with no signal.** A field has no bars. Queue the sentence and record it when there is signal, with the phone saying so. **Its prerequisite shipped 2026-09-13** — [ADR 0055](../decisions/0055-a-queued-sentence-is-old-not-wrong.md), without which every queued sentence would be stamped at the moment it uploaded | [0049](../decisions/0049-speech-is-a-fork-in-the-road-not-a-provider.md) makes this tractable: inside the app the TRANSCRIPT is produced on the handset, so what has to be queued is a short string, not audio. **Without this the feature fails exactly where it is needed most** |
 | **D3** | **Correct it by voice.** *"No, pen three"* amends the card instead of starting the sentence again | The card is two feet away and your hands are full |
 | **D4** | **The business's own words.** *"The girls"* means the laying flock on this farm and nothing on the next one. Learn it from corrections, per tenant | `speciesWords` already proves the shape, from the industry profile. This is the tenant-level version, and it is what makes it feel like it knows the place |
 | **D5** | **"What can I say?"** A short, discoverable list per tool | The founder's own first attempt hit `Nothing to record from that` with no way to tell "you said it wrong" from "this is not set up for you". Half-fixed; finish it |
@@ -130,6 +130,45 @@ screen.
 | **D10** | **Say both rather than guess.** When the model was torn between two ACTIONS, show both and let one tap settle it | Rule 2 already does this for choices within an action. It does not yet do it for the action itself |
 
 ## Build log
+
+### 2026-09-13 — A queued sentence is old, not wrong ([ADR 0055](../decisions/0055-a-queued-sentence-is-old-not-wrong.md)) (`claude/a-queued-sentence-is-old-not-wrong`)
+
+**Slice D2's prerequisite, and it turned out to be a defect rather than a gap.**
+
+[ADR 0048](../decisions/0048-a-phone-holds-a-grant-that-may-only-tell.md) decided
+a claimed time is *"clamped to ±15 minutes of the server's"*, and justified it
+with *"a sentence queued in a barn with no signal may not reach us for hours."*
+**Those two sentences cannot both be true.** A sentence spoken at 07:00 and
+uploaded at 10:00 is three hours out, so `Math.abs(claimed − now) > 15 minutes`
+threw the claim away and recorded the clock-in at 10:00 — three hours of wages,
+silently, EVERY time rather than only when somebody is cheating. The test beside
+it was titled *"is believed inside the tolerance, because a queued sentence is
+old on purpose"* and then tested ten minutes.
+
+**One number was answering two questions.** How WRONG might this clock be is
+symmetric and measured in minutes; how OLD might this sentence be is
+one-directional and measured in hours. Age was being read as evidence of drift.
+
+Now: **believe the past, bound the future.** Forty-eight hours backwards, two
+minutes forwards — because back-dating a clock-in pays and post-dating one does
+not, so the two directions do not deserve the same generosity. `clampSpokenAt`
+also returns `delayedMs`, so a caller can SAY a sentence is three hours old
+rather than leaving the difference to be found in two columns of a table.
+
+**It moved to `src/lib/tell-sources/spoken-at.ts`**, out of `device-grants`.
+The thing being timestamped is a told sentence, not a grant: the web box has no
+grant at all and needs the same answer for its queue, and a second copy of this
+rule is how two paths come to disagree about somebody's wages. Its tests moved
+with it and stopped queueing behind a database for no reason.
+
+**The honest cost, recorded in the ADR rather than buried:** back-dating inside
+forty-eight hours is now believable where it was not. Both times are still
+stored, the delay is now returned so it can be put in front of somebody, and the
+alternative fails the ordinary case continuously in order to inconvenience a
+dishonest one occasionally.
+
+No migration — `device_grant_uses` already keeps both times. What changed is
+which of them becomes `effectiveAt`.
 
 ### 2026-09-13 — Slice D1: it says the answer back (`claude/tell-says-it-back`)
 

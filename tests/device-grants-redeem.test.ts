@@ -3,12 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { withSystem, withTenant, schema } from "../src/db";
 import { mintGrant, revokeGrant } from "../src/lib/device-grants/ops";
-import {
-  clampSpokenAt,
-  redeemGrant,
-  roleForGrant,
-} from "../src/lib/device-grants/redeem";
-import { SPOKEN_AT_TOLERANCE_MS } from "../src/lib/device-grants/types";
+import { redeemGrant, roleForGrant } from "../src/lib/device-grants/redeem";
 // The local gate the other non-isolation database suites use. NOT `_shared`'s
 // `d`: that module belongs to the isolation certification, and this file is
 // the behaviour on top of it rather than part of it.
@@ -171,26 +166,6 @@ describe("a grant is never an owner", () => {
   });
 });
 
-describe("the phone's clock", () => {
-  const now = new Date("2026-09-12T14:00:00.000Z");
-
-  it("is believed inside the tolerance, because a queued sentence is old on purpose", () => {
-    const claimed = new Date(now.getTime() - 10 * 60 * 1_000);
-    expect(clampSpokenAt(claimed, now)).toEqual({ effectiveAt: claimed, clamped: false });
-  });
-
-  it("loses to the server outside it, in either direction", () => {
-    const back = new Date(now.getTime() - SPOKEN_AT_TOLERANCE_MS - 1_000);
-    expect(clampSpokenAt(back, now)).toEqual({ effectiveAt: now, clamped: true });
-    const forward = new Date(now.getTime() + SPOKEN_AT_TOLERANCE_MS + 1_000);
-    expect(clampSpokenAt(forward, now)).toEqual({ effectiveAt: now, clamped: true });
-  });
-
-  it("falls back to the server when the phone says nothing, or says nonsense", () => {
-    expect(clampSpokenAt(null, now)).toEqual({ effectiveAt: now, clamped: false });
-    expect(clampSpokenAt(new Date("nope"), now)).toEqual({
-      effectiveAt: now,
-      clamped: false,
-    });
-  });
-});
+// The phone's clock moved to `tests/tell-spoken-at.test.ts` with the rule
+// itself (ADR 0055). It is pure, it is no longer about grants, and it was
+// queueing behind a database in this file for no reason.

@@ -5,9 +5,9 @@ import { withTenant } from "@/db";
 import { logAudit } from "@/lib/audit";
 import { readProposal, signProposal } from "@/lib/public-token";
 import { buildReadback } from "@/lib/device-grants/readback";
+import { clampSpokenAt } from "@/lib/tell-sources/spoken-at";
 import {
   atEffectiveTime,
-  clampSpokenAt,
   priorUse,
   recordUse,
   redeemGrant,

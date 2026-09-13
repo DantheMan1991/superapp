@@ -8,7 +8,6 @@ import { grantExpiryFrom } from "./ops";
 import {
   looksLikeDeviceToken,
   RATE_WINDOW_MS,
-  SPOKEN_AT_TOLERANCE_MS,
 } from "./types";
 
 /** The three ends a request can come to. Mirrors the `device_use_outcome` enum. */
@@ -184,31 +183,17 @@ export function roleForGrant(
   return membershipRole === "expert" ? "expert" : "staff";
 }
 
-/**
- * What time the sentence happened, given what the phone claims.
+/*
+ * `clampSpokenAt` USED TO LIVE HERE and now lives in
+ * `tell-sources/spoken-at.ts` ([ADR 0055](../../../docs/decisions/0055-a-queued-sentence-is-old-not-wrong.md)).
  *
- * Inside the tolerance the phone wins, and it has to: a sentence spoken in a
- * barn with no signal may not reach us for hours, and its real time is the
- * one it was SPOKEN at, not the one it was uploaded at. Outside the
- * tolerance the server wins, because a device clock is user-settable and for
- * a clock-in the difference is wages.
- *
- * Both values are written to `device_grant_uses`, so a phone whose owner set
- * the date back is a row somebody can find rather than a silent belief.
+ * Two reasons, and the second is the one that matters. The rule it enforced was
+ * wrong — a symmetric ±15 minutes refused the very case it was written for, a
+ * sentence spoken hours earlier in a barn with no signal. And the thing being
+ * timestamped is a told SENTENCE, not a grant: the web box has no grant at all
+ * and needs the same answer for its offline queue, and a second copy of this
+ * rule is how two paths come to disagree about somebody's wages.
  */
-export function clampSpokenAt(
-  claimed: Date | null,
-  serverNow: Date,
-): { effectiveAt: Date; clamped: boolean } {
-  if (!claimed || Number.isNaN(claimed.getTime())) {
-    return { effectiveAt: serverNow, clamped: false };
-  }
-  const drift = Math.abs(claimed.getTime() - serverNow.getTime());
-  if (drift > SPOKEN_AT_TOLERANCE_MS) {
-    return { effectiveAt: serverNow, clamped: true };
-  }
-  return { effectiveAt: claimed, clamped: false };
-}
 
 /**
  * Has this exact request already been answered? The phone queues sentences

@@ -1,7 +1,7 @@
 # 0048 — A phone holds a grant that may only tell, and it dies with the membership
 
 - **Date:** 2026-09-12
-- **Status:** Accepted
+- **Status:** Accepted, amended by [0055](0055-a-queued-sentence-is-old-not-wrong.md) — the ±15-minute clock clamp below is replaced by an asymmetric rule, because that one refused the very case it was written for. Everything else here stands.
 - **Affects:** `src/lib/device-grants/` (the second gate), `src/app/api/device/tell/`, `device_grants` + `device_grant_uses`, `src/lib/tell-sources/model.ts` (the cooldown key)
 
 ## Context

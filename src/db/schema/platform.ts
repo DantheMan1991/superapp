@@ -488,11 +488,15 @@ export const deviceUseOutcome = pgEnum("device_use_outcome", [
  * rule `audit_log` follows (security.md S9). The sentence itself lives on the
  * in-memory proposal for `PROPOSAL_TTL_MS` and is then gone.
  *
- * `claimed_at` IS THE PHONE'S OWN CLOCK AND IS NOT BELIEVED. A device clock
- * is user-settable, and for a clock-in the difference is wages, so
- * `redeem.ts` clamps it to the server's within `SPOKEN_AT_TOLERANCE_MS` and
- * stores both. A phone whose owner set the date back is visible here rather
- * than silently trusted.
+ * `claimed_at` IS THE PHONE'S OWN CLOCK AND IS ONLY PARTLY BELIEVED. A device
+ * clock is user-settable, and for a clock-in the difference is wages —
+ * but a sentence queued in a barn with no signal is OLD rather than wrong, and
+ * one symmetric tolerance cannot tell those apart. `tell-sources/spoken-at.ts`
+ * believes the past up to `SPOKEN_AT_MAX_AGE_MS` and the future only within
+ * `SPOKEN_AT_FUTURE_SKEW_MS`, because back-dating a clock-in pays and
+ * post-dating one does not ([ADR 0055](../../../docs/decisions/0055-a-queued-sentence-is-old-not-wrong.md)).
+ * Both times are still stored, so a phone whose owner set the date back is
+ * visible here rather than silently trusted.
  */
 export const deviceGrantUses = pgTable(
   "device_grant_uses",

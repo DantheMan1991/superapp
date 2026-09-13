@@ -9,10 +9,10 @@ Open **Livestock** in the sidebar. Five tabs run along the top of every screen: 
 ## What you see
 
 - **A {{livestockLot|lower}}.** A group of animals kept and costed together. A pen of feeders, a flock of layers.
-- **An animal.** One you have named, with a page of her own. Her weights, treatments, photos and calves are all hers. An animal is a {{livestockLot|lower}} of one, so both live on the same kind of page.
+- **An animal.** One you have named, with a page of her own. Her weights, treatments, photos and calves are all hers. She has the same kind of page as a {{livestockLot|lower}}, showing the parts that belong to one animal and leaving out the ones that only make sense for a group.
 - **`Counted as`.** The stock line the head are counted in. Head of it go up when they arrive and down when they leave, and their cost lands against it. Beef and dairy are two, even though both are cattle.
 - **`Overview`.** Every {{livestockLot|lower}} with its species, where it is, its age, its loss rate and its withdrawal. See [Your animals](lots.md).
-- **One {{livestockLot|lower}}'s page.** Head, losses, age, feed, weight, withdrawal, where they are, breeding, tags, checks, treatments and weighings. See [One {{livestockLot|lower}}](lot.md).
+- **One {{livestockLot|lower}}'s page.** Head, losses, age, feed, weight, withdrawal, where they are, breeding, tags, checks, treatments and weighings. See [One {{livestockLot|lower}} or one animal](lot.md).
 - **`Daily round`.** One tap to say you looked and they are fine. See [The daily round](daily-round.md).
 - **`Feed`.** The largest cash cost, and what each {{livestockLot|lower}} carried of it. See [Feed](feed.md).
 - **`Breeding`.** Who is due and when, from the day the sire went in. See [Breeding](breeding.md).

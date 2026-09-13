@@ -224,10 +224,19 @@ export const inventoryItems = pgTable(
  * A LOT: a particular batch of an item, with lineage.
  *
  * **THE SPINE, and the reason `livestock` requires this pack.** Every animal
- * record is a lot and an individual is a lot of one — 10 named cows, 6 pigs as
- * a group, 50 layers as a flock, 1,000 broilers as ~14 pens are all the same
- * shape. Modelling individuals and groups as two entities would give every
- * downstream table two code paths and a polymorphic target.
+ * record sits on a lot row — 10 named cows, 6 pigs as a group, 50 layers as a
+ * flock, 1,000 broilers as ~14 pens are all the same shape here. Modelling
+ * individuals and groups as two entities would give every downstream table two
+ * code paths and a polymorphic target.
+ *
+ * **THE WORD STOPS AT THIS LAYER.** *"An individual is a lot of one"* used to be
+ * the sentence here and was retired on 2026-08-27: a lot is a GROUP of animals,
+ * an animal is an animal, and `livestock_lots.record_kind` says which a record
+ * is. The row under a named cow still exists because it carries her cost, her
+ * stock valuation and her capitalisation to breeding stock — take it away and
+ * she cannot be sold, costed or depreciated. Nothing built on this table may
+ * call her a lot on a screen. See `docs/modules/livestock.md`, "The model,
+ * settled".
  *
  * **LINEAGE IS DEMANDED BY TWO UNRELATED FORCES**, which is what makes it
  * convincing rather than merely tidy: batch-and-pen management on one side,

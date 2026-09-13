@@ -167,7 +167,7 @@ export const livestockLots = pgTable(
      * (`drizzle/0192`), and CASCADE would let deleting one cow take her
      * descendants' records with her.
      *
-     * **A PARENT NEED NOT BE A LOT OF ONE.** Fifty layers are one lot, and
+     * **A PARENT NEED NOT BE A SINGLE ANIMAL.** Fifty layers are one lot, and
      * "these chicks came from that flock" is both true and the only pedigree a
      * flock will ever have. Requiring an individual here would make the whole
      * mechanism unusable for poultry, which is most of the animals on the pilot
@@ -577,7 +577,7 @@ export const livestockFeedDraws = pgTable(
  * from a TAPE against allocated pasture cost is *estimated* and is a trend to
  * watch. That distinction dies the moment both are stored as "weight".
  *
- * **THE OBSERVATION IS ABOUT THE LOT, AND AN INDIVIDUAL IS A LOT OF ONE.** So
+ * **THE OBSERVATION IS ABOUT THE RECORD, GROUP OR ANIMAL ALIKE.** So
  * one shape covers both: `sample_size` head went on the scale and together they
  * weighed `sample_weight_lb`. Ten broilers in a crate is `10`; a cow through a
  * chute is `1`. The average per head is a DIVISION AT READ TIME and is never

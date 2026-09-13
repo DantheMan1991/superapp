@@ -1165,11 +1165,12 @@ export async function returnToMarket(
 // ------------------------------------------------------------ individuals ---
 
 /**
- * **AN INDIVIDUAL IS A LOT OF ONE, and until now nothing said so on screen.**
+ * **A NAMED ANIMAL HAS ALWAYS HAD A RECORD, and until now nothing said so on
+ * screen.**
  *
  * The model has always supported it — identifiers, weights, treatments, photos
- * and pedigree parents all hang off the LOT, so a lot holding one head IS an
- * animal and every one of those tables means what you would expect. What was
+ * and pedigree parents all hang off the same row, so a record holding one head
+ * IS an animal and every one of those tables means what you would expect. What was
  * missing was any way to ASK for that: the founder's question on 2026-08-27 was
  * *"you create a lot and then you add head to the lot, but I don't see how you
  * track each individual animal in the lot"*, and the honest answer was that you
@@ -1700,8 +1701,8 @@ export async function splitIntoIndividuals(
  * Start ONE animal: the lot, its name, and the single head — in one act.
  *
  * **The head is placed here rather than left to a second step**, and that is the
- * whole difference from `createLivestockLot`. A lot of one that contains no
- * animal is a record of nothing, and "create it, then go and add a head to it"
+ * whole difference from `createLivestockLot`. An animal's record holding no
+ * head is a record of nothing, and "create it, then go and add a head to it"
  * was the two-step that made the individual case feel like it was not really
  * supported.
  *

@@ -527,7 +527,8 @@ export async function recordBirthAction(input: unknown) {
 
 /**
  * **RECORD SOME OF A LOT AS INDIVIDUALS.** One name per animal; each becomes a
- * lot of one, carrying the biology across and wearing its name as an identifier.
+ * record of her own holding a single head, carrying the biology across and
+ * wearing her name as an identifier.
  *
  * The names arrive as a single block of text because that is how somebody has
  * them — off a clipboard, out of a notebook, read off ten ear tags in a row —

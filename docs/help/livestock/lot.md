@@ -1,4 +1,4 @@
-# One {{livestockLot|lower}}
+# One {{livestockLot|lower}} or one animal
 
 > Everything about one group or one named animal: head, losses, feed, weight, withdrawal, where they are, breeding, tags, checks and treatments.
 > **Route:** /dashboard/m/livestock/*

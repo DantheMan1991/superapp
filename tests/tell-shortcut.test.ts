@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { readNativeBridge, TELL_URL, urlWantsToTell } from "../src/lib/native-bridge";
+import {
+  listeningFrom,
+  readNativeBridge,
+  TELL_URL,
+  urlWantsToTell,
+  utteranceFrom,
+} from "../src/lib/native-bridge";
 
 /**
  * One tap from the home screen: long-press the icon and the app opens already
@@ -117,5 +123,86 @@ describe("the shell declares the door", () => {
     const manifest = readFileSync(shell("AndroidManifest.xml"), "utf8");
     expect(manifest).toContain('android:name="android.app.shortcuts"');
     expect(manifest).toContain('android:resource="@xml/shortcuts"');
+  });
+});
+
+describe("the sentence the phone heard before the page existed", () => {
+  it("takes the words out of either shape the shell sends", () => {
+    // `takePending()` resolves with one; the "utterance" event carries one.
+    expect(utteranceFrom({ utterance: "clock me in" })).toBe("clock me in");
+    expect(utteranceFrom({ utterance: "  three chicks dead  " })).toBe(
+      "three chicks dead",
+    );
+  });
+
+  it("is null for nothing waiting, which is the ordinary answer", () => {
+    // Every launch that is not a long-press answers this way.
+    expect(utteranceFrom({ utterance: null })).toBeNull();
+    expect(utteranceFrom({})).toBeNull();
+    expect(utteranceFrom(null)).toBeNull();
+    expect(utteranceFrom(undefined)).toBeNull();
+  });
+
+  it("is null for a recogniser that heard only silence", () => {
+    expect(utteranceFrom({ utterance: "" })).toBeNull();
+    expect(utteranceFrom({ utterance: "   " })).toBeNull();
+  });
+
+  it("is null for anything that is not a sentence", () => {
+    expect(utteranceFrom({ utterance: 42 })).toBeNull();
+    expect(utteranceFrom({ utterance: ["clock me in"] })).toBeNull();
+    expect(utteranceFrom("clock me in")).toBeNull();
+  });
+});
+
+describe("the shell's own ears", () => {
+  const nativeWindow = (plugins: Record<string, unknown>) => ({
+    Capacitor: {
+      isNativePlatform: () => true,
+      getPlatform: () => "android",
+      Plugins: plugins,
+    },
+  });
+
+  it("is found when the build carries a usable hatch", () => {
+    expect(
+      readNativeBridge(
+        nativeWindow({ Tell: { takePending: () => {}, addListener: () => {} } }),
+      )?.tell,
+    ).not.toBeNull();
+  });
+
+  it("is null on an older build, which is what keeps the web recorder working", () => {
+    // THE WHOLE REASON THIS IS A RUNTIME PROBE. A phone two releases behind
+    // has no native capture, and its shortcut must still fall back to the
+    // web's own microphone rather than waiting for words that never come.
+    expect(readNativeBridge(nativeWindow({}))?.tell).toBeNull();
+    expect(readNativeBridge(nativeWindow({ Tell: {} }))?.tell).toBeNull();
+    expect(
+      readNativeBridge(nativeWindow({ Tell: { takePending: () => {} } }))?.tell,
+    ).toBeNull();
+  });
+});
+
+describe("whether the phone is recording right now", () => {
+  it("is true only when the shell says so in as many words", () => {
+    expect(listeningFrom({ listening: true })).toBe(true);
+  });
+
+  it("is false for absent, which is what an older shell sends", () => {
+    // A build that never listens on its own sends no flag, and must not be
+    // read as listening — the page would paint a live microphone over nothing.
+    expect(listeningFrom({})).toBe(false);
+    expect(listeningFrom({ utterance: "clock me in" })).toBe(false);
+    expect(listeningFrom(null)).toBe(false);
+    expect(listeningFrom(undefined)).toBe(false);
+  });
+
+  it("is false for anything truthy that is not exactly true", () => {
+    // Strict, because the consequence of a false positive is a sheet that
+    // shows "Listening…" forever over a microphone that is not open.
+    expect(listeningFrom({ listening: "true" })).toBe(false);
+    expect(listeningFrom({ listening: 1 })).toBe(false);
+    expect(listeningFrom({ listening: false })).toBe(false);
   });
 });

@@ -1,7 +1,7 @@
 {
   "appId": "com.yosherapp.app",
   "appName": "Yosher",
-  "version": "1.0.2",
+  "version": "1.0.5",
   "url": "https://yosherapp.com",
   "startPath": "/dashboard",
   "userAgentMarker": "YosherApp"

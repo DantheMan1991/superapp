@@ -42,6 +42,24 @@
         </provider>
     </application>
 
+    <!--
+        WITHOUT THIS THE RECOGNISER IS INVISIBLE. Android 11 made packages
+        opaque by default: an app can only see, and start, components it has
+        declared an interest in. `RecognizerIntent` resolves to a service in
+        ANOTHER app (Google's, usually), so without this block
+        `startActivityForResult` throws ActivityNotFoundException on every
+        modern phone — and the failure is silent, because the catch treats a
+        missing recogniser as an ordinary device without one.
+
+        Declared as an intent rather than a package name because which app
+        provides speech recognition is the phone's business, not ours.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />

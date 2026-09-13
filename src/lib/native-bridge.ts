@@ -40,6 +40,29 @@ export interface AppPlugin {
   ): Promise<PushListenerHandle> | PushListenerHandle;
 }
 
+/**
+ * The shell's own speech hatch (`TellPlugin`).
+ *
+ * Present only on a build that captures speech natively. When it is here the
+ * web must NOT start its own recorder on a shortcut launch — the phone already
+ * listened, before the page existed, and two microphones for one sentence is
+ * the bug that would replace the slow one.
+ */
+export interface TellPlugin {
+  /**
+   * Whatever was said before the page loaded, cleared as it is handed over —
+   * and whether the microphone is STILL open, which is the other half of the
+   * same question on a cold start.
+   */
+  takePending(): Promise<
+    { utterance?: string | null; listening?: boolean } | null | undefined
+  >;
+  addListener(
+    event: "utterance" | "listening",
+    callback: (payload: unknown) => void,
+  ): Promise<PushListenerHandle> | PushListenerHandle;
+}
+
 export interface NativeBridge {
   platform: NativePlatform;
   /** Null when the shell does not carry the plugin (a build before push existed). */
@@ -51,6 +74,8 @@ export interface NativeBridge {
    * the WEB decides what it means (ADR 0032).
    */
   app: AppPlugin | null;
+  /** Null in a browser, and on any app build before native capture. */
+  tell: TellPlugin | null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -79,11 +104,37 @@ export function readNativeBridge(w: unknown): NativeBridge | null {
     appPlugin !== null &&
     typeof appPlugin.getLaunchUrl === "function" &&
     typeof appPlugin.addListener === "function";
+  const tell = plugins && isRecord(plugins.Tell) ? plugins.Tell : null;
+  const tellUsable =
+    tell !== null &&
+    typeof tell.takePending === "function" &&
+    typeof tell.addListener === "function";
   return {
     platform,
     push: usable ? (push as unknown as PushPlugin) : null,
     app: appUsable ? (appPlugin as unknown as AppPlugin) : null,
+    tell: tellUsable ? (tell as unknown as TellPlugin) : null,
   };
+}
+
+/**
+ * Is the phone's microphone open right now?
+ *
+ * `SpeechRecognizer` draws nothing — that is why it is fast — so this is the
+ * only way the page can show somebody their phone is recording. Absent means
+ * NO: a shell that never sends the flag is one that never listens on its own.
+ */
+export function listeningFrom(payload: unknown): boolean {
+  return isRecord(payload) && payload.listening === true;
+}
+
+/** The sentence out of a `takePending` answer or an `utterance` event, or null. */
+export function utteranceFrom(payload: unknown): string | null {
+  if (!isRecord(payload)) return null;
+  const said = payload.utterance;
+  if (typeof said !== "string") return null;
+  const trimmed = said.trim();
+  return trimmed === "" ? null : trimmed;
 }
 
 /**

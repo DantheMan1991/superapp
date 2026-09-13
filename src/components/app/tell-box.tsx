@@ -60,10 +60,26 @@ export function TellBox({
   autoListen = false,
   onRecorded,
   labelHidden = false,
+  said,
+  phoneListening = false,
 }: {
   placeholder?: string;
   /** Start listening as soon as this mounts — the launcher's press was the tap. */
   autoListen?: boolean;
+  /**
+   * A sentence somebody has ALREADY said, captured elsewhere — by the phone's
+   * own recogniser before this page existed (`MainActivity`). It arrives in
+   * the box and is read straight away, exactly as if it had been dictated
+   * here: the same cards, the same confirmations, the same rule about what
+   * records itself.
+   */
+  said?: string;
+  /**
+   * The PHONE's microphone is open right now, captured by the shell before
+   * this page existed. Shown as a state rather than a control: there is
+   * nothing to press, because the recording is not this page's to stop.
+   */
+  phoneListening?: boolean;
   /** Told after anything is recorded, so a sheet can close itself. */
   onRecorded?: () => void;
   /**
@@ -86,6 +102,19 @@ export function TellBox({
   const [actions, setActions] = useState<ActionView[]>([]);
   const [reading, startReading] = useTransition();
   const [saving, startSaving] = useTransition();
+
+  /*
+   * WORDS THAT ARRIVED FROM OUTSIDE are read once, during render, for the
+   * reason the url is: an effect would paint an empty box and then fill it.
+   * The box is remounted per sentence by its `key`, so this runs once per
+   * thing said rather than once per component.
+   */
+  const [took, setTook] = useState(false);
+  if (said && !took) {
+    setTook(true);
+    setSentence(said);
+    read(said);
+  }
 
   const actionOf = (slug: string) => actions.find((a) => a.slug === slug);
   const problems = (cards ?? []).map((c) => {
@@ -178,7 +207,17 @@ export function TellBox({
           />
         </div>
 
-        {cards === null ? (
+        {phoneListening ? (
+          // No buttons at all. The recording belongs to the shell, and a Stop
+          // this page cannot honour would be a lie.
+          <p className="flex items-center gap-2 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+            <span className="relative flex size-2.5 shrink-0">
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75" />
+              <span className="relative inline-flex size-2.5 rounded-full bg-primary" />
+            </span>
+            Listening&hellip; stop talking when you are done.
+          </p>
+        ) : cards === null ? (
           <div className="flex flex-wrap items-center justify-end gap-2">
             {/* Dictation only ever produces TEXT, which lands in the box above
                 exactly as if it had been typed. The reading step, the cards and

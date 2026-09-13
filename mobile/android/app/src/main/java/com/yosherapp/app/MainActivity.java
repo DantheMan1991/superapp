@@ -127,8 +127,19 @@ public class MainActivity extends BridgeActivity {
             CookieManager cookies = CookieManager.getInstance();
             cookies.setAcceptCookie(true);
             cookies.setCookie(SITE, "yosher_launched=1; path=/; SameSite=Lax");
+            // Written to disk rather than left in memory. `setCookie` is
+            // asynchronous, and the page load starts moments later in
+            // `super.onCreate` — without this the request can go out before
+            // the store has the cookie in it, which is the whole failure this
+            // method exists to avoid.
+            cookies.flush();
         } catch (Exception e) {
-            // A cookie store that refuses is a slower launch, not a broken one.
+            // THIS IS ALLOWED TO FAIL, and it did once. `CookieManager` before
+            // any WebView exists is exactly the sort of thing that works on
+            // one Android version and silently does nothing on another. When
+            // it does nothing the page still skips the animation, one frame
+            // late, from `launch-overlay.tsx` — that is the reliable half and
+            // this is the one with no flash at all.
         }
     }
 

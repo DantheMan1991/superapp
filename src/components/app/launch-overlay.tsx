@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { LAUNCH_COOKIE } from "@/lib/launch";
+import { readNativeBridge, urlWantsToTell } from "@/lib/native-bridge";
 
 /**
  * The launch animation, played once per app launch (src/lib/launch.ts):
@@ -32,11 +33,52 @@ export function LaunchOverlay() {
   const [done, setDone] = useState(false);
 
   useEffect(() => {
-    const out = window.setTimeout(() => setLeaving(true), IN_MS + HOLD_MS);
-    const end = window.setTimeout(() => {
+    let out = 0;
+    let end = 0;
+
+    /** Remember the launch has had its animation, however it ended. */
+    const remember = () => {
       // A session cookie: gone when the app is closed, which is the next time
       // the launch should play. The server reads it and renders no overlay.
       document.cookie = `${LAUNCH_COOKIE}=1; path=/; SameSite=Lax`;
+    };
+
+    /*
+     * NOT ON A LAUNCH THAT IS ABOUT SPEED.
+     *
+     * Long-pressing the icon and picking "Say it" means somebody wants to
+     * record something NOW; a second and a half of logo is a second and a half
+     * of them talking to a mark. The founder counted it twice.
+     *
+     * The shell also sets the cookie natively before the page loads, which
+     * skips this on the SERVER and is the version with no flash at all. It is
+     * kept as well as this, not instead: `CookieManager` before a WebView
+     * exists is exactly the sort of thing that works on one Android version
+     * and silently does nothing on another — and when it does nothing, this is
+     * what keeps the promise. One frame instead of fifteen hundred
+     * milliseconds.
+     */
+    const bridge = readNativeBridge(window);
+    if (bridge?.app) {
+      void (async () => {
+        try {
+          const launch = await bridge.app!.getLaunchUrl();
+          if (urlWantsToTell(launch?.url)) {
+            window.clearTimeout(out);
+            window.clearTimeout(end);
+            remember();
+            setDone(true);
+          }
+        } catch {
+          // No answer: the ordinary animation plays, which is the old
+          // behaviour and never wrong, only slow.
+        }
+      })();
+    }
+
+    out = window.setTimeout(() => setLeaving(true), IN_MS + HOLD_MS);
+    end = window.setTimeout(() => {
+      remember();
       setDone(true);
     }, TOTAL_MS);
     return () => {

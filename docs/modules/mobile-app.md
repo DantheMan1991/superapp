@@ -46,11 +46,25 @@ box over a live microphone.
 
 **And no logo, no fade.** The site plays a 1.5-second launch animation on its
 first paint inside the app (650ms in, 450ms hold, 400ms out) — pure dead time
-on a launch whose whole point is speed. The shell now sets the site's OWN
-`yosher_launched` cookie before the page loads, which is the mechanism
-`src/lib/launch.ts` already had for "this launch has had its animation".
-Reusing it rather than inventing a second flag: a flag the web had to learn
-about is a flag that could disagree with the cookie.
+on a launch whose whole point is speed.
+
+The first attempt was native only: set the site's OWN `yosher_launched` cookie
+before the page loads, reusing the mechanism `src/lib/launch.ts` already had.
+**It silently did nothing**, and the founder counted the same second and a half
+again. `CookieManager` before any WebView exists is exactly the sort of thing
+that works on one Android version and quietly fails on another — and the
+`catch` that treated a refusing cookie store as "a slower launch, not a broken
+one" is what made the failure invisible.
+
+So there are two halves now, and the reliable one is in the web:
+`launch-overlay.tsx` asks `getLaunchUrl()` on mount and removes itself at once
+when the answer is `yosher://tell` — **one frame instead of fifteen hundred
+milliseconds**, with no dependence on a cookie landing in time. The native
+cookie is kept as well (now with `flush()`), because when it does work the
+overlay never renders at all and there is no flash whatsoever.
+
+Belt and braces, deliberately: a thing that failed silently once gets a second
+mechanism that cannot fail the same way.
 
 This is also, arriving by a different road, exactly what
 [ADR 0049](../decisions/0049-speech-is-a-fork-in-the-road-not-a-provider.md)
@@ -86,7 +100,7 @@ would paint an empty box and then fill it.
 - **`registerPlugin` BEFORE `super.onCreate`.** Capacitor builds its bridge
   there; a plugin registered afterwards is not in it.
 
-Version 1.0.4, `versionCode` 5.
+Version 1.0.5, `versionCode` 6.
 
 **Not verified by me at all** — this is Java on a machine with no Android SDK.
 CI compiles it, which proves it builds and nothing more. Whether the recogniser

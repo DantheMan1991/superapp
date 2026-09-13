@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Long-press the Yosher icon and the app opens ALREADY LISTENING.
+
+    ── NOT A LINE OF JAVA, AND THAT IS THE DESIGN ──────────────────────────────
+
+    The shortcut fires `yosher://tell`. Capacitor hands that url to the page
+    (`getLaunchUrl` on a cold start, `appUrlOpen` on a warm one) and
+    `tell-launcher.tsx` decides what it means. The web decides what the app
+    shows (ADR 0032), so the shell declares the door and nothing else — which
+    is also why changing what a long-press DOES needs a web deploy and not a
+    store release.
+
+    ── WHY A CUSTOM SCHEME AND NOT AN https URL ────────────────────────────────
+
+    A shortcut firing `https://yosherapp.com/dashboard?tell=1` opens the
+    phone's BROWSER unless the app has verified App Links — which needs an
+    `assetlinks.json` carrying the signing certificate's fingerprint, and the
+    debug key and the Play key have different ones. It would work for exactly
+    one of the two builds anybody is holding. A scheme the app owns has none of
+    that.
+
+    `android:enabled="true"` and a static shortcut rather than a dynamic one:
+    there is nothing to compute, it is the same shortcut for everybody, and a
+    static one is there the moment the app is installed rather than after the
+    first launch.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="tell"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_tell"
+        android:shortcutShortLabel="@string/shortcut_tell_short"
+        android:shortcutLongLabel="@string/shortcut_tell_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="yosher://tell"
+            android:targetPackage="com.yosherapp.app"
+            android:targetClass="com.yosherapp.app.MainActivity" />
+    </shortcut>
+</shortcuts>

@@ -13,6 +13,55 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-12 — One tap from the home screen (`claude/tell-shortcut`)
+
+Long-press the Yosher icon and the app opens **already listening**. The
+nearest thing to *"without me even opening the app"* that Android allows
+without a foreground service, and it is on the device the founder actually
+uses.
+
+**Not a line of Java, and that is the design.** The shortcut fires
+`yosher://tell`; Capacitor hands that url to the page — `getLaunchUrl` on a
+cold start, `appUrlOpen` on a warm one — and `tell-launcher.tsx` decides it
+means "open and start listening". The shell declares the door and the web
+decides what it means (ADR 0032), so **changing what a long-press DOES is a
+web deploy, not a store release.**
+
+`src/lib/native-bridge.ts` gained the `App` plugin beside `push`, found the
+same way: probed off `window.Capacitor.Plugins` at runtime, null on a build
+that predates it. An older shell simply has no shortcut and its floating
+button is untouched.
+
+**A custom scheme rather than an https url**, and the reason is not taste. A
+shortcut firing `https://yosherapp.com/...` opens the phone's BROWSER unless
+the app has verified App Links — which needs an `assetlinks.json` carrying the
+signing certificate's fingerprint, and the debug key and the Play key have
+different ones. It would work for exactly one of the two builds anybody is
+holding.
+
+**No `<data android:scheme="yosher" />` filter in the manifest**, deliberately.
+The shortcut's intent names the activity explicitly and an explicit intent
+needs no filter; adding one would publish a `yosher://` door any app or web
+page could knock on, for nothing this shortcut does not already have.
+
+`?tell=1` on any dashboard url does the same thing, parsed rather than
+substring-matched so a customer called "tell=1" never opens a microphone. That
+second spelling exists because a second door is coming — a Siri intent handing
+over to the site — and it should not need a second mechanism. It is also the
+half that could be driven: `/dashboard/m/land?tell=1` opened the sheet and the
+param was taken back out of the url, so a refresh does not reopen it.
+
+`tests/tell-shortcut.test.ts` asserts the two packages agree on the one string
+that matters (`android:data` vs `TELL_URL`), because nothing else would catch a
+change to either side and the symptom would be a long-press that opens the app
+and does nothing.
+
+Version 1.0.2, `versionCode` 3.
+
+**Not verified on a handset by me** — the long-press menu, the cold start and
+the warm `appUrlOpen` all need a real phone. The debug APK on the PR is what
+proves it.
+
 ### 2026-09-12 — The app could never have been given the microphone (`claude/app-microphone`)
 
 Reported from a real phone: *"it says the app needs permission for my

@@ -120,6 +120,23 @@ the farm's asset list until they say so.
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-12 — The launcher can be opened by a url (`claude/tell-shortcut`)
+
+A small seam with a large consequence: `TellLauncher` now opens, and starts
+listening, when the url asks it to — `?tell=1` on any dashboard page, or the
+app's `yosher://tell` arriving through Capacitor.
+
+That is what lets a home-screen long-press open the microphone
+([mobile-app.md](mobile-app.md)) **without a line of native code deciding
+anything**, and it is the same seam a Siri intent will hand over to.
+
+The url half is answered DURING RENDER rather than in an effect — React's
+documented way to react to a changed prop, and the pattern `app-shell.tsx`
+already uses to close its drawer. An effect would paint a closed sheet and then
+open it, which `react-hooks/set-state-in-effect` refuses. The param is then
+taken back out with `router.replace`, so a refresh or a back button does not
+reopen the microphone.
+
 ### 2026-09-12 — A third filler, and the first that is not a farm (`claude/tell-work`)
 
 Voice slice 4. The slot itself; the source is written up in [work.md](work.md).

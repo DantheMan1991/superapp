@@ -30,10 +30,27 @@ export interface PushPlugin {
   ): Promise<PushListenerHandle> | PushListenerHandle;
 }
 
+/** The subset of @capacitor/app the page uses. */
+export interface AppPlugin {
+  /** The url the app was COLD-STARTED with, or null. */
+  getLaunchUrl(): Promise<{ url?: string } | null | undefined>;
+  addListener(
+    event: "appUrlOpen",
+    callback: (payload: unknown) => void,
+  ): Promise<PushListenerHandle> | PushListenerHandle;
+}
+
 export interface NativeBridge {
   platform: NativePlatform;
   /** Null when the shell does not carry the plugin (a build before push existed). */
   push: PushPlugin | null;
+  /**
+   * Null on a build before the home-screen shortcut existed. Reaching the app
+   * through `@capacitor/app` is how a shortcut says "open already listening"
+   * without a line of Java: the shortcut fires a url, this delivers it, and
+   * the WEB decides what it means (ADR 0032).
+   */
+  app: AppPlugin | null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -57,7 +74,55 @@ export function readNativeBridge(w: unknown): NativeBridge | null {
     typeof push.addListener === "function" &&
     typeof push.checkPermissions === "function" &&
     typeof push.requestPermissions === "function";
-  return { platform, push: usable ? (push as unknown as PushPlugin) : null };
+  const appPlugin = plugins && isRecord(plugins.App) ? plugins.App : null;
+  const appUsable =
+    appPlugin !== null &&
+    typeof appPlugin.getLaunchUrl === "function" &&
+    typeof appPlugin.addListener === "function";
+  return {
+    platform,
+    push: usable ? (push as unknown as PushPlugin) : null,
+    app: appUsable ? (appPlugin as unknown as AppPlugin) : null,
+  };
+}
+
+/**
+ * THE SHORTCUT'S OWN ADDRESS. Long-pressing the app icon fires this, and the
+ * web is what decides it means "open already listening".
+ *
+ * A CUSTOM SCHEME rather than an https url, and the reason is not taste: a
+ * shortcut firing `https://yosherapp.com/...` opens the phone's BROWSER unless
+ * the app has verified App Links, which needs an `assetlinks.json` carrying
+ * the signing certificate's fingerprint — and the debug key and the Play key
+ * have different ones, so it would work for exactly one of the two builds
+ * anybody is holding. A scheme the app owns has none of that.
+ */
+export const TELL_URL = "yosher://tell";
+
+/**
+ * Does this url mean "start listening"? Pure, and deliberately generous about
+ * SHAPE and strict about meaning.
+ *
+ * Two spellings, because two doors will use it: the app's shortcut fires
+ * `yosher://tell`, and anything web-side — a bookmark, a future Siri intent
+ * handing over to the site — can reach the same place with `?tell=1` on any
+ * dashboard url. Recognising both here is what stops the second door needing
+ * a second mechanism.
+ */
+export function urlWantsToTell(url: unknown): boolean {
+  if (typeof url !== "string" || url === "") return false;
+  const lower = url.toLowerCase();
+  if (lower === TELL_URL || lower.startsWith(`${TELL_URL}?`) || lower.startsWith(`${TELL_URL}/`)) {
+    return true;
+  }
+  // `?tell=1` on an ordinary page. Parsed rather than matched as a substring,
+  // so a customer called "tell=1" in a search query never opens a microphone.
+  try {
+    const parsed = new URL(url, "https://yosherapp.com");
+    return parsed.searchParams.get("tell") === "1";
+  } catch {
+    return false;
+  }
 }
 
 /** The tap on a notification carries `data.url`; anything else lands on the day's page. */

@@ -4,4 +4,7 @@
     <string name="title_activity_main">Yosher</string>
     <string name="package_name">com.yosherapp.app</string>
     <string name="custom_url_scheme">com.yosherapp.app</string>
+    <!-- The long-press shortcut. Short label is what fits under an icon. -->
+    <string name="shortcut_tell_short">Say it</string>
+    <string name="shortcut_tell_long">Tell Yosher what happened</string>
 </resources>

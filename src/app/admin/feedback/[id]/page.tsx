@@ -82,8 +82,14 @@ export default async function AdminFeedbackThreadPage({
                 {report.tenantName}
               </Link>
               {report.isOperatorTenant && " (us)"} ·{" "}
-              {report.reporterName || "somebody"}
-              {report.reporterEmail && ` · ${report.reporterEmail}`}
+              {/* Name AND address only when we have both. A workspace whose
+                  members have never set a name renders `profiles.name` empty,
+                  and the first version printed "somebody · them@example.com" —
+                  a placeholder standing next to the answer it was standing in
+                  for. The list page's fallback chain, copied. */}
+              {report.reporterName
+                ? `${report.reporterName}${report.reporterEmail ? ` · ${report.reporterEmail}` : ""}`
+                : report.reporterEmail || "somebody"}
             </span>
           </span>
         }
@@ -111,7 +117,11 @@ export default async function AdminFeedbackThreadPage({
             }
           />
           <Fact label="Viewport" value={viewport} />
-          <Fact label="Module" value={report.featureSlug} />
+          {/* No "Module" row. `feature_slug` is stored and is what the list
+              groups by, but showing it here said "accounting" directly under a
+              Screen reading "Accounting" — two facts that look like a
+              disagreement and are the same word twice. The slug is in `Path`
+              anyway, in full, on hover. */}
           <Fact label="Sent" value={formatWhen(report.createdAt, zone)} />
           <div className="col-span-2 min-w-0 sm:col-span-4">
             <dt className="text-xs text-muted-foreground">Browser</dt>

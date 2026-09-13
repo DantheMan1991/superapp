@@ -129,7 +129,23 @@ export function ReportButton({ className }: { className?: string }) {
       </Button>
 
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">
+        <SheetContent
+          side="right"
+          /*
+            THE DATA-VARIANT FORM, and a plain `w-full` here does nothing:
+            `SheetContent`'s own base class carries `data-[side=right]:w-3/4`,
+            which outranks an unqualified utility, so the first version rendered
+            at three quarters on a phone and the override was silently dead.
+            `help-button.tsx` next door already uses this form.
+
+            FULL WIDTH ON A PHONE, unlike the help panel — deliberately. That
+            panel stays narrow so the reader can still SEE the control the guide
+            is naming; nothing in this sheet refers to the page behind it, and
+            typing a bug report into 281px of a 375px screen is the cramped half
+            of a trade with nothing on the other side.
+          */
+          className="overflow-y-auto data-[side=right]:w-full data-[side=right]:sm:max-w-md"
+        >
           <SheetHeader>
             <SheetTitle>Something to report</SheetTitle>
             <SheetDescription>

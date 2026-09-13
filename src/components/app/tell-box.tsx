@@ -1,14 +1,24 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Sparkles, X } from "lucide-react";
+import { Loader2, Sparkles, Volume2, VolumeX, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Panel } from "@/components/app/panel";
 import { DictateButton } from "@/components/app/dictate-button";
+import {
+  canSpeak,
+  isHushed,
+  noVoiceOnTheServer,
+  sayIt,
+  setHushed,
+  spokenConfirmation,
+  subscribeHush,
+  subscribeNever,
+} from "@/lib/speech/say";
 import {
   Select,
   SelectContent,
@@ -108,6 +118,29 @@ export function TellBox({
   const [saving, startSaving] = useTransition();
 
   /*
+   * ── SAYING IT BACK (tell.md, slice D1) ───────────────────────────────────
+   *
+   * **IT ONLY SPEAKS WHEN IT WAS SPOKEN TO.** A ref rather than state because
+   * nothing renders from it and a re-render on every keystroke to track how
+   * the words arrived would be paying for a fact only two callbacks read.
+   *
+   * Set where words arrive by voice, cleared the moment somebody types —
+   * because somebody typing is somebody looking, and talking at them is the
+   * noise that gets a feature switched off.
+   */
+  const spoken = useRef(false);
+  const speak = (text: string) => {
+    if (spoken.current) sayIt(text);
+  };
+
+  // Both are browser facts with no server answer, so they are read as a
+  // store rather than pulled into state by an effect — see `say.ts`. The
+  // server snapshot is "no voice", which is also what a browser without one
+  // reports, so the first paint is the same either way.
+  const canHear = useSyncExternalStore(subscribeNever, canSpeak, noVoiceOnTheServer);
+  const hushed = useSyncExternalStore(subscribeHush, isHushed, noVoiceOnTheServer);
+
+  /*
    * WORDS THAT ARRIVED FROM OUTSIDE are read once, during render, for the
    * reason the url is: an effect would paint an empty box and then fill it.
    * The box is remounted per sentence by its `key`, so this runs once per
@@ -117,6 +150,11 @@ export function TellBox({
   if (said && !took) {
     setTook(true);
     setSentence(said);
+    // Everything that reaches this prop came through a microphone — the
+    // shell's launcher, the app's `yosher://tell`, the home-screen shortcut.
+    // Somebody who spoke into their pocket is the person who most needs to be
+    // answered out loud.
+    spoken.current = true;
     read(said);
   }
 
@@ -139,6 +177,8 @@ export function TellBox({
       const result = await proposeTellAction({ sentence: said });
       if ("error" in result) {
         toast.error(result.error);
+        // A refusal is the one thing somebody walking away must not miss.
+        speak(result.error);
         return;
       }
       const view = result.data.actions as ActionView[];
@@ -148,6 +188,7 @@ export function TellBox({
         // An explicit message, not an empty panel: "nothing found" and "it
         // broke" must not look the same.
         toast.info("Nothing to record from that.");
+        speak("Nothing to record from that.");
         return;
       }
       // ADR 0050 — straight through when every card is a complete one of an
@@ -167,12 +208,18 @@ export function TellBox({
       });
       if ("error" in result) {
         toast.error(result.error);
+        speak(result.error);
         return;
       }
       const n = result.data.summaries.length;
       toast.success(
         n === 1 ? result.data.summaries[0] : `Recorded ${n} things`,
       );
+      // NOT the toast's own words. The toast counts past one because a stack
+      // of them is unreadable; a voice has no such problem, and hearing all
+      // three answers to "pen one fine, pen two fine, pen three the water was
+      // frozen" is the whole reason somebody said it in one breath.
+      speak(spokenConfirmation(result.data.summaries));
       reset();
       router.refresh();
       onRecorded?.();
@@ -206,7 +253,11 @@ export function TellBox({
           <Textarea
             id="tell-sentence"
             value={sentence}
-            onChange={(e) => setSentence(e.target.value)}
+            onChange={(e) => {
+              setSentence(e.target.value);
+              // Typing is looking. From here on the screen is the answer.
+              spoken.current = false;
+            }}
             rows={2}
             maxLength={TELL_MAX_CHARS}
             placeholder={placeholder ?? "Three chicks dead in pen two"}
@@ -229,11 +280,35 @@ export function TellBox({
                 exactly as if it had been typed. The reading step, the cards and
                 the button are unchanged — saying it out loud is not a second
                 way to write to the herd (ADR 0039). */}
+            {/* ONLY ONCE IT HAS AN ENGINE TO SILENCE. A control that does
+                nothing is worse than an absent one, and a browser with no
+                speech synthesis would render exactly that. */}
+            {canHear && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-pressed={hushed}
+                title={
+                  hushed
+                    ? "Answers are shown, not read out"
+                    : "Answers are read out when you speak"
+                }
+                onClick={() => setHushed(!hushed)}
+              >
+                {hushed ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+                <span className="sr-only">
+                  {hushed ? "Read answers out loud" : "Stop reading answers out loud"}
+                </span>
+              </Button>
+            )}
             <DictateButton
               serverConfigured={speechConfigured}
               startOnMount={autoListen}
               disabled={reading}
               onText={(said) => {
+                // Spoken, so it will be answered out loud.
+                spoken.current = true;
                 // STRAIGHT INTO THE READING. Somebody who has just spoken a
                 // sentence has already committed to it; making them press a
                 // second button to have it read is a tap that asks nothing.

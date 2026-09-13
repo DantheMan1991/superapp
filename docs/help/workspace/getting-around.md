@@ -103,6 +103,21 @@ anything. What you said is read straight away.
 So clocking in is one press: {button:Say it|outline|mic}, "clock me in", done.
 Anything that moves animals or stock still shows you a card to check first.
 
+**And it answers out loud.** When you speak to it, it reads the answer back —
+`Clocked in at 7:42 AM`, or `3 head, died, from Pen 2` — so you can put the
+phone away without looking at it. It reads refusals out too, which is the one
+you need most when you are already walking away. Say three things in one breath
+and it reads all three back; more than three and it just says how many.
+
+- **It only talks when you talk to it.** Type a sentence and it stays quiet,
+  because you are already looking at the screen.
+- **{icon:volume-2} beside {button:Say it|outline|mic} turns the talking off**,
+  for when you are dictating with people around. It becomes {icon:volume-x} and
+  stays that way on this device until you turn it back on. Nothing else changes:
+  everything it would have said is still on the screen.
+- Some browsers cannot speak at all. There is no button when that is the case,
+  and everything else works the same.
+
 - **It knows when you have finished** by listening for you to stop. It works
   out how loud the room is first, so a running tractor does not fool it. If it
   cannot tell, press {button:Listening…|primary} to finish.

@@ -13,6 +13,52 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-13 — A long-press must never open nothing (`claude/tell-always-opens`)
+
+*"The microphone is turning on for a second but it doesn't load the tool in
+Yosher now."* A regression, and mine.
+
+**The launcher only opened the sheet when the phone had words or was still
+recording.** A recogniser that died early satisfied neither, so the press
+wasted itself: no sheet, no microphone, nothing. Worse than the slow version it
+replaced, because the slow one at least always got somewhere.
+
+Two causes, both fixed:
+
+**It was started too early.** `SpeechRecognizer` created in `onCreate`, before
+the activity is foregrounded, fails immediately on many devices — ERROR_CLIENT,
+straight past `onReadyForSpeech`, which is precisely "on for a second". It now
+starts in `onResume`. A few milliseconds later, and still long before the page
+has loaded, which was the whole point.
+
+**And nothing caught it when it did fail.** `wasTold()` is now asked FIRST and
+the sheet opens on a yes **whatever the microphone did**; everything after
+decides what it opens WITH, never whether. When the shell tried and came back
+empty the page records with its own microphone — which is exactly what the
+shortcut did before native capture existed. Every path where `listenNow()`
+declines now announces it, so the page stops waiting and takes over rather than
+sitting on a promise nobody kept.
+
+`autoListen` is `!nativeEars || webShouldListen`: the phone records when it
+can, this page when it cannot, **never both and never neither**.
+
+One hazard fixed while in there: the recogniser was being destroyed from inside
+its own `onResults`/`onError`, which is documented to misbehave and can take
+the app down. It is posted to the next loop instead.
+
+Version 1.0.7, `versionCode` 8.
+
+#### The logo, settled
+
+The founder confirmed what the recording showed: **both logos, one after the
+other.** Android's static app icon on navy, then the web's animated mark, then
+the page. The mark is now "very brief" — the one frame that
+[the previous entry](#) promised — so that half is done.
+
+The icon is Android's own splash and is not ours to remove: it stays until the
+app draws its first frame, which here means until the page loads. **What is
+left to measure is how long that is**, with nothing on top of it.
+
 ### 2026-09-13 — The logo, on the third attempt (`claude/logo-really-gone`)
 
 The founder, with a screen recording: *"Still shows the logo with a long

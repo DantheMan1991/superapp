@@ -14,6 +14,7 @@ import { TellBox } from "@/components/app/tell-box";
 import { cn } from "@/lib/utils";
 import {
   listeningFrom,
+  toldFrom,
   readNativeBridge,
   urlWantsToTell,
   utteranceFrom,
@@ -79,6 +80,17 @@ export function TellLauncher({
    * microphone, which is worse than the slow version it replaced.
    */
   const [phoneListening, setPhoneListening] = useState(false);
+  /**
+   * The shell listened and came back with nothing, so this page has to.
+   *
+   * A LONG-PRESS MUST NEVER END IN AN EMPTY SCREEN. The first version only
+   * opened when the phone had words or was still recording — so a recogniser
+   * that died early (which happens: busy service, no speech, started before
+   * the activity was ready) left the sheet shut and the press wasted. That is
+   * worse than the slow version it replaced, because at least the slow one
+   * always got you somewhere.
+   */
+  const [webShouldListen, setWebShouldListen] = useState(false);
   /**
    * Does this build capture speech natively? A fact about the shell this page
    * is running inside, not a piece of state — so it is read the way
@@ -169,6 +181,15 @@ export function TellLauncher({
     void (async () => {
       try {
         if (tell) {
+          // WAS THIS A LONG-PRESS? Asked first and answered by the shell, and
+          // the sheet opens on a yes WHATEVER the microphone did. Everything
+          // below decides what it opens WITH, never whether.
+          const told = toldFrom(await tell.wasTold());
+          if (told && !dropped) {
+            opened.current = true;
+            setOpen(true);
+          }
+
           // THE COLD-START CASE, and the usual one: somebody finished speaking
           // while the site was still downloading, so the words were waiting
           // before this component existed.
@@ -179,16 +200,27 @@ export function TellLauncher({
             take(said);
           } else if (listeningFrom(pending)) {
             // STILL TALKING. The page won the race, which is the good problem:
-            // open now and show that the phone is recording, rather than
-            // sitting idle until the words land.
+            // show that the phone is recording rather than sitting idle until
+            // the words land.
             opened.current = true;
             setPhoneListening(true);
             setOpen(true);
+          } else if (told) {
+            // THE SHELL TRIED AND CAME BACK WITH NOTHING. Take over here: this
+            // is the path that used to dead-end, and the founder found it —
+            // "the microphone is turning on for a second but it doesn't load
+            // the tool". The web's own recorder is exactly what the shortcut
+            // used before native capture existed.
+            setWebShouldListen(true);
           }
           const whileListening = await tell.addListener("listening", (payload) => {
             const on = listeningFrom(payload);
             setPhoneListening(on);
-            if (on) setOpen(true);
+            // The phone taking over means this page must not also record.
+            if (on) {
+              setWebShouldListen(false);
+              setOpen(true);
+            }
           });
           if (dropped) void whileListening.remove();
           else handles.push(whileListening);
@@ -286,7 +318,10 @@ export function TellLauncher({
               // The phone already listened, so the web must not. Otherwise the
               // sheet opens and immediately asks for a microphone on top of a
               // sentence it has already been given.
-              autoListen={open && !nativeEars}
+              // The phone records when it can and this page when it cannot.
+              // Never both, and — since the founder found the hole — never
+              // neither.
+              autoListen={open && (!nativeEars || webShouldListen)}
               said={heard ?? undefined}
               phoneListening={phoneListening}
               labelHidden
@@ -294,6 +329,7 @@ export function TellLauncher({
               onRecorded={() => {
                 setHeard(null);
                 setPhoneListening(false);
+                setWebShouldListen(false);
                 setOpen(false);
               }}
               placeholder="Clock me in, and three chicks dead in pen two"

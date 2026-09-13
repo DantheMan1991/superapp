@@ -94,6 +94,20 @@ public class MainActivity extends BridgeActivity {
 
     private SpeechRecognizer recognizer = null;
 
+    /**
+     * A long-press is waiting for the activity to be visible before the
+     * microphone opens.
+     *
+     * STARTED IN `onResume`, NOT `onCreate`, and that is a correction rather
+     * than a preference. `SpeechRecognizer` started before the activity is
+     * foregrounded fails immediately on many devices — ERROR_CLIENT, straight
+     * past `onReadyForSpeech` — which is exactly what the founder saw: *"the
+     * microphone is turning on for a second but it doesn't load the tool."*
+     * A few milliseconds later is still long before the page has loaded, which
+     * was the whole point.
+     */
+    private boolean listenWhenVisible = false;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         // BEFORE super.onCreate, because that is where Capacitor builds its
@@ -106,7 +120,8 @@ public class MainActivity extends BridgeActivity {
 
         super.onCreate(savedInstanceState);
 
-        if (tell) listenNow();
+        // Queued rather than started: see `listenWhenVisible`.
+        listenWhenVisible = tell;
     }
 
     /**
@@ -122,6 +137,18 @@ public class MainActivity extends BridgeActivity {
             // A warm long-press. The page is already up and has no animation
             // to skip, but the flag is kept honest either way.
             launchedToTell = true;
+            // A warm long-press is already visible, so this runs immediately;
+            // `onResume` follows anyway and finds nothing left to do.
+            listenWhenVisible = true;
+            listenNow();
+        }
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        if (listenWhenVisible) {
+            listenWhenVisible = false;
             listenNow();
         }
     }
@@ -174,20 +201,33 @@ public class MainActivity extends BridgeActivity {
      * `onCreate` and `onNewIntent` both already are.
      */
     private void listenNow() {
+        if (recognizer != null) return; // already going
+
         // Not granted means the WebView has never asked. Do nothing rather than
         // throw a permission dialog on top of a launch: the page's own
         // microphone button asks properly, with a sentence explaining why.
+        //
+        // EITHER WAY THE PAGE STILL OPENS. `launchedToTell` is already set, so
+        // `tell-launcher.tsx` opens the sheet and records with the WEB's own
+        // microphone instead. Every way this method can decline has to end
+        // somewhere, and a long-press that opens nothing is the one outcome
+        // that is not allowed.
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED) {
+            TellPlugin.announceListening(false);
             return;
         }
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) return;
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            TellPlugin.announceListening(false);
+            return;
+        }
 
         stopListening();
         try {
             recognizer = SpeechRecognizer.createSpeechRecognizer(this);
         } catch (Exception e) {
             recognizer = null;
+            TellPlugin.announceListening(false);
             return;
         }
 
@@ -214,6 +254,14 @@ public class MainActivity extends BridgeActivity {
 
             private void done(String heard) {
                 listening = false;
+                // FREED ON THE NEXT LOOP, never from inside this callback.
+                // `destroy()` called from within the recogniser's own
+                // `onResults`/`onError` is documented to misbehave and can take
+                // the app down with it. Posting also keeps `listenNow`'s
+                // "already going" guard honest: it clears the field once this
+                // one is genuinely finished, so a warm long-press can start
+                // another.
+                runOnUiThread(MainActivity.this::stopListening);
                 if (heard != null && !heard.trim().isEmpty()) {
                     // Kept AND announced, because which happens first depends on
                     // how long somebody talked and how fast the network is —
@@ -256,6 +304,7 @@ public class MainActivity extends BridgeActivity {
             recognizer.startListening(listen);
         } catch (Exception e) {
             stopListening();
+            TellPlugin.announceListening(false);
         }
     }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Mic } from "lucide-react";
 import {
@@ -12,7 +12,11 @@ import {
 } from "@/components/ui/sheet";
 import { TellBox } from "@/components/app/tell-box";
 import { cn } from "@/lib/utils";
-import { readNativeBridge, urlWantsToTell } from "@/lib/native-bridge";
+import {
+  readNativeBridge,
+  urlWantsToTell,
+  utteranceFrom,
+} from "@/lib/native-bridge";
 
 /**
  * SAY IT FROM ANYWHERE. The floating control, on every page of the dashboard.
@@ -45,6 +49,9 @@ import { readNativeBridge, urlWantsToTell } from "@/lib/native-bridge";
  * It closes itself once something is recorded, so the whole interaction for
  * "clock me in" is: press, speak, done.
  */
+/** Nothing to subscribe to: which shell this is does not change while open. */
+const subscribeToNothing = () => () => {};
+
 export function TellLauncher({
   speechConfigured,
 }: {
@@ -55,6 +62,27 @@ export function TellLauncher({
   const router = useRouter();
   const params = useSearchParams();
   const opened = useRef(false);
+  /**
+   * A sentence the PHONE heard before this page existed.
+   *
+   * When it is set, the sheet opens with the words already in it and reads
+   * them immediately — and, critically, does NOT start the web's own
+   * recorder. The phone already listened. Two microphones for one sentence is
+   * the bug that would replace the slow one.
+   */
+  const [heard, setHeard] = useState<string | null>(null);
+  /**
+   * Does this build capture speech natively? A fact about the shell this page
+   * is running inside, not a piece of state — so it is read the way
+   * `dictate-button.tsx` reads its capabilities, with a null server snapshot,
+   * rather than probed in an effect and pushed into state. It returns a
+   * boolean, so React's identity check is a value check and it is stable.
+   */
+  const nativeEars = useSyncExternalStore(
+    subscribeToNothing,
+    () => readNativeBridge(window)?.tell != null,
+    () => false,
+  );
 
   /*
    * ONE TAP FROM THE HOME SCREEN.
@@ -117,40 +145,68 @@ export function TellLauncher({
   useEffect(() => {
     const bridge = readNativeBridge(window);
     const app = bridge?.app;
-    if (!app) return;
+    const tell = bridge?.tell;
 
-    let handle: { remove(): void | Promise<void> } | null = null;
+    let handles: Array<{ remove(): void | Promise<void> }> = [];
     let dropped = false;
+
+    /** Open with the words already in hand, whichever way they arrived. */
+    const take = (said: string) => {
+      if (dropped) return;
+      setHeard(said);
+      setOpen(true);
+    };
 
     void (async () => {
       try {
+        if (tell) {
+          // THE COLD-START CASE, and the usual one: somebody finished speaking
+          // while the site was still downloading, so the words were waiting
+          // before this component existed.
+          const pending = await tell.takePending();
+          const said = utteranceFrom(pending);
+          if (said) {
+            opened.current = true;
+            take(said);
+          }
+          // And the other way round — a second long-press while the app is
+          // already open, or a slow talker on a fast connection.
+          const listener = await tell.addListener("utterance", (payload) => {
+            const now = utteranceFrom(payload);
+            if (now) take(now);
+          });
+          if (dropped) void listener.remove();
+          else handles.push(listener);
+        }
+
+        if (!app) return;
         const launch = await app.getLaunchUrl();
-        if (!dropped && !opened.current && urlWantsToTell(launch?.url)) {
+        // Only open ourselves when the shell did NOT already listen. On a
+        // build with native capture the recogniser is what opens; jumping in
+        // here would put a second microphone on top of it.
+        if (!dropped && !tell && !opened.current && urlWantsToTell(launch?.url)) {
           opened.current = true;
           setOpen(true);
         }
-        const listener = await app.addListener("appUrlOpen", (payload) => {
+        const urlListener = await app.addListener("appUrlOpen", (payload) => {
           const url =
             typeof payload === "object" && payload !== null
               ? (payload as { url?: unknown }).url
               : null;
-          // A warm open can arrive at any time. Not guarded by `opened`,
-          // because a SECOND long-press after a recording finished should
-          // work — that guard is only about the cold-start url being read
-          // twice.
-          if (urlWantsToTell(url)) setOpen(true);
+          if (!tell && urlWantsToTell(url)) setOpen(true);
         });
-        if (dropped) void listener.remove();
-        else handle = listener;
+        if (dropped) void urlListener.remove();
+        else handles.push(urlListener);
       } catch {
-        // A shell without the plugin, or a phone that refuses. The floating
+        // A shell without the plugins, or a phone that refuses. The floating
         // button is untouched; only the shortcut is missing.
       }
     })();
 
     return () => {
       dropped = true;
-      void handle?.remove();
+      for (const handle of handles) void handle.remove();
+      handles = [];
     };
   }, []);
 
@@ -203,11 +259,18 @@ export function TellLauncher({
                 fresh sentence and a fresh listen rather than reviving whatever
                 was left on screen last time. */}
             <TellBox
-              key={open ? "open" : "closed"}
-              autoListen={open}
+              key={heard ?? (open ? "open" : "closed")}
+              // The phone already listened, so the web must not. Otherwise the
+              // sheet opens and immediately asks for a microphone on top of a
+              // sentence it has already been given.
+              autoListen={open && !nativeEars}
+              said={heard ?? undefined}
               labelHidden
               speechConfigured={speechConfigured}
-              onRecorded={() => setOpen(false)}
+              onRecorded={() => {
+                setHeard(null);
+                setOpen(false);
+              }}
               placeholder="Clock me in, and three chicks dead in pen two"
             />
           </div>

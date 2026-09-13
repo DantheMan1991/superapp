@@ -66,8 +66,10 @@ Instead of finding the right screen and the right dialog, say it.
 page.** Press it and start talking.
 
 **On a phone, you do not even have to open Yosher first.** Press and hold the
-Yosher icon on your home screen and pick **Say it** — the app opens already
-listening. Drag that onto your home screen and it becomes a button of its own. It is there while you are looking at an
+Yosher icon on your home screen and pick **Say it**. Your phone starts
+listening straight away — you do not wait for Yosher to open, because the phone
+does the listening itself and hands the words over once the app is ready. Drag
+**Say it** onto your home screen and it becomes a button of its own. It is there while you are looking at an
 invoice, walking the daily round, or anywhere else — you never have to go
 somewhere first in order to record something.
 

@@ -13,6 +13,67 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-12 — The phone listens before the web exists (`claude/native-speech`)
+
+The shortcut worked and was too slow. The founder: *"it takes way too long to
+load the app before the microphone starts working. It needs to be immediate."*
+
+He was right, and **nothing about the microphone was slow.** The sequence was:
+
+    long-press → Android starts the app → the WebView downloads
+    yosherapp.com → the server renders the dashboard → JavaScript hydrates
+    → only NOW does any code exist that can ask for a microphone
+
+He was waiting for a website. No amount of web work fixes that, because the
+web is the thing being waited for.
+
+**So the shell listens for itself, and it is the first thing in `mobile/` that
+decides anything.** `MainActivity` sees `yosher://tell` on its launch intent
+and fires `RecognizerIntent` immediately — a system screen that appears in the
+time it takes to draw one. The app loads behind it, and by the time the page is
+ready the words are already waiting.
+
+This is also, arriving by a different road, exactly what
+[ADR 0049](../decisions/0049-speech-is-a-fork-in-the-road-not-a-provider.md)
+wanted for the app: the phone's own engine, no upload, nothing charged per
+minute. The route it predicted was a Capacitor speech plugin the web would call;
+what actually earned it was latency, and the plugin is not needed.
+
+**`TellPlugin` is a hatch and nothing more** — no decisions, no knowledge of
+what a sentence means. Two ways out, because the ordering genuinely varies:
+`takePending()` for the cold start (the usual case, where somebody finished
+speaking while the site was still downloading) and an `utterance` event for the
+warm one (a second long-press, or a slow talker on a fast connection).
+`pendingUtterance` is cleared as it is taken, so a sentence is recorded once.
+
+**The web must NOT record when the shell already did.** `nativeEars` probes for
+the hatch and suppresses `autoListen`, because two microphones for one sentence
+is the bug that would have replaced the slow one. An older build has no hatch,
+probes false, and keeps the web recorder it has always had — the web copes with
+every app version still installed (ADR 0032).
+
+Once the words arrive they are ordinary. The same cards, the same
+confirmations, the same rule about what records itself (ADR 0050). `TellBox`
+gained `said`, read once during render for the reason the url is: an effect
+would paint an empty box and then fill it.
+
+#### The two lines that would have made it fail silently
+
+- **`<queries>` for `android.speech.RecognitionService`.** Android 11 made
+  packages opaque, and the recogniser lives in another app. Without the
+  declaration `startActivityForResult` throws `ActivityNotFoundException` on
+  every modern phone — and the catch treats that as "a device without a
+  recogniser", so it would have looked like the feature simply did nothing.
+- **`registerPlugin` BEFORE `super.onCreate`.** Capacitor builds its bridge
+  there; a plugin registered afterwards is not in it.
+
+Version 1.0.3, `versionCode` 4.
+
+**Not verified by me at all** — this is Java on a machine with no Android SDK.
+CI compiles it, which proves it builds and nothing more. Whether the recogniser
+opens fast, whether the words survive the hand-off, and whether a second
+long-press works while the app is open are all things only a handset can say.
+
 ### 2026-09-12 — One tap from the home screen (`claude/tell-shortcut`)
 
 Long-press the Yosher icon and the app opens **already listening**. The

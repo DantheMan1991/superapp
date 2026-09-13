@@ -177,7 +177,14 @@ describe("the shell's bridge, as the page sees it", () => {
     expect(readNativeBridge({})).toBeNull();
     expect(readNativeBridge({ Capacitor: { isNativePlatform: () => false, getPlatform: () => "web" } })).toBeNull();
     const noPlugin = readNativeBridge({ Capacitor: { isNativePlatform: () => true, getPlatform: () => "android", Plugins: {} } });
-    expect(noPlugin).toEqual({ platform: "android", push: null, app: null });
+    // ASSERTED KEY BY KEY, not as a whole object. This broke twice for a
+    // non-reason — once when the bridge gained `app` for the home-screen
+    // shortcut and again when it gained `tell` for native speech — and neither
+    // time was anything about PUSH wrong. A test that fails when an unrelated
+    // capability is added is a test that trains people to edit it without
+    // reading it.
+    expect(noPlugin?.platform).toBe("android");
+    expect(noPlugin?.push).toBeNull();
   });
 
   it("finds the plugin when the shell carries it", () => {

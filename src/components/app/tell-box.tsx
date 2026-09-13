@@ -27,7 +27,11 @@ import {
   TELL_MAX_CHARS,
   type TellCard,
 } from "@/lib/tell-sources/shape";
-import type { TellField, TellValue } from "@/lib/tell-sources/types";
+import type {
+  TellCandidate,
+  TellField,
+  TellValue,
+} from "@/lib/tell-sources/types";
 import { cn } from "@/lib/utils";
 
 const NONE = "__none__";
@@ -36,7 +40,7 @@ interface ActionView {
   slug: string;
   title: string;
   label: string;
-  fields: TellField[];
+  fields: Array<TellField & { searched?: boolean }>;
   unattended: boolean;
 }
 
@@ -306,54 +310,45 @@ export function TellBox({
                               {f.label}
                               {f.required && <span aria-hidden> *</span>}
                             </Label>
-                            <Cell
-                              id={`tell-${i}-${f.key}`}
-                              field={f}
-                              value={card.values[f.key] ?? null}
-                              onChange={(v) => setValue(i, f.key, v)}
-                            />
-                            {card.options?.[f.key]?.length ? (
+                            {f.searched ? (
                               /*
-                               * A SHORTLIST IS A QUESTION, not a warning.
+                               * SEARCHED FIELDS DRAW WHAT WAS FOUND, never a
+                               * dropdown. A `choice` input with no list renders
+                               * EMPTY - which is what the founder was shown,
+                               * with no way out of it - and a field that HAD
+                               * been worked out correctly looked exactly the
+                               * same, because its id matched no entry either.
                                *
-                               * It knows what you meant well enough to find
-                               * two or three real things; the only thing left
-                               * is which. Each one says what it IS — "Cattle ·
-                               * 12 head" — because two names are not a choice
-                               * and two things are.
+                               * So the candidates are always drawn, with the
+                               * chosen one filled in. It shows its working, and
+                               * changing its mind is one tap rather than saying
+                               * the whole sentence again.
                                */
-                              <div className="space-y-1.5">
-                                <p className="text-xs text-muted-foreground">
-                                  You said &ldquo;{card.hints[f.key]}&rdquo;. Which one?
-                                </p>
-                                <div className="flex flex-wrap gap-1.5">
-                                  {card.options[f.key].map((option) => (
-                                    <Button
-                                      key={option.value}
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-auto flex-col items-start gap-0 py-1.5"
-                                      onClick={() => setValue(i, f.key, option.value)}
-                                    >
-                                      <span className="text-xs font-medium">
-                                        {option.label}
-                                      </span>
-                                      {option.detail && (
-                                        <span className="text-[11px] font-normal text-muted-foreground">
-                                          {option.detail}
-                                        </span>
-                                      )}
-                                    </Button>
-                                  ))}
-                                </div>
-                              </div>
-                            ) : card.hints[f.key] ? (
+                              <ShortlistInput
+                                said={card.hints[f.key]}
+                                value={
+                                  typeof card.values[f.key] === "string"
+                                    ? (card.values[f.key] as string)
+                                    : null
+                                }
+                                options={card.options?.[f.key] ?? []}
+                                onChange={(v) => setValue(i, f.key, v)}
+                              />
+                            ) : (
+                              <Cell
+                                id={`tell-${i}-${f.key}`}
+                                field={f}
+                                value={card.values[f.key] ?? null}
+                                onChange={(v) => setValue(i, f.key, v)}
+                              />
+                            )}
+                            {card.hints[f.key] && !card.options?.[f.key]?.length && (
                               <p className="text-xs text-amber-600">
-                                It heard &ldquo;{card.hints[f.key]}&rdquo; — pick or type
-                                the right one.
+                                {f.searched
+                                  ? `Could not find “${card.hints[f.key]}”. Say it again with the name as it is in Yosher.`
+                                  : `It heard “${card.hints[f.key]}” — pick or type the right one.`}
                               </p>
-                            ) : null}
+                            )}
                           </div>
                         ))}
                       </div>
@@ -388,6 +383,56 @@ export function TellBox({
 }
 
 /** One field, drawn from its kind. Full width: this is used on a phone. */
+/**
+ * What the search found, with the chosen one filled in.
+ *
+ * Each option says what it IS - "Cattle * 12 head" - because two NAMES are not
+ * a choice and two THINGS are. When there is only one it reads as a statement
+ * of what was understood, which is the readback doing its job.
+ */
+function ShortlistInput({
+  said,
+  value,
+  options,
+  onChange,
+}: {
+  said?: string;
+  value: string | null;
+  options: TellCandidate[];
+  onChange: (value: TellValue) => void;
+}) {
+  if (options.length === 0) return null;
+  const chosen = options.some((o) => o.value === value);
+  return (
+    <div className="space-y-1.5">
+      {!chosen && said && (
+        <p className="text-xs text-muted-foreground">
+          You said &ldquo;{said}&rdquo;. Which one?
+        </p>
+      )}
+      <div className="flex flex-wrap gap-1.5">
+        {options.map((option) => (
+          <Button
+            key={option.value}
+            type="button"
+            variant={option.value === value ? "default" : "outline"}
+            size="sm"
+            className="h-auto flex-col items-start gap-0 py-1.5"
+            onClick={() => onChange(option.value === value ? null : option.value)}
+          >
+            <span className="text-xs font-medium">{option.label}</span>
+            {option.detail && (
+              <span className="text-[11px] font-normal opacity-70">
+                {option.detail}
+              </span>
+            )}
+          </Button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Cell({
   id,
   field,

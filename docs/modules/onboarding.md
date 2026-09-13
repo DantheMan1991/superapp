@@ -120,6 +120,47 @@ the farm's asset list until they say so.
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-13 — It shows its working, and a good note is still a note (`claude/tell-shows-its-work`)
+
+Two reports off the running app, both right, and both about the same screen.
+
+**"I did this prompt and it didn't find the animal."** The screenshot showed an
+EMPTY DROPDOWN and "Which animals is not one of the choices". Three separate
+faults behind one symptom:
+
+- The build under test predated [ADR 0052](../decisions/0052-the-model-says-the-words-and-the-pack-goes-looking.md).
+- A searched field was still being drawn as a `choice` dropdown, and a
+  dropdown with no list renders EMPTY — with no way out of it. Worse, a field
+  that had been resolved CORRECTLY looked identical, because its id matched no
+  entry either.
+- `checkEntry` runs on both sides of the server/client boundary and they see
+  different objects: the server's field carries `find`, a function; the box's
+  carries `searched`, a boolean, because a function cannot cross into a client
+  component. The check only understood the server's spelling, so a field that
+  had been found correctly was still rejected — with the answer sitting on the
+  card in front of him.
+
+Searched fields now draw their SHORTLIST, always, with the chosen one filled
+in. `resolveFound` keeps the candidates even once it has decided, so the box can
+show what it worked out and changing its mind is one tap rather than saying the
+sentence again. A field with nothing found says so in words instead of offering
+an empty list.
+
+**"Shouldn't it also fill out the what you saw field?"** It should, and it could
+not: `livestock.check` derived its status from whether there were notes, so
+"she is doing well" could not be written down without flagging her as needing
+attention. The model was told to drop it instead — which is why the field came
+back blank.
+
+**A note is a note; whether it needs somebody is a different fact.** `state`
+("All fine" / "Something's up") is now its own field, and `notes` takes what was
+seen whether good or bad. Driven on dev, side by side:
+
+    Bluebell   normal      "doing well"
+    Rosie      attention   "wound on her left foreleg"
+
+The first of those was impossible before.
+
 ### 2026-09-13 — "The cows" finds the cattle (`claude/tell-search-seam`)
 
 [ADR 0052](../decisions/0052-the-model-says-the-words-and-the-pack-goes-looking.md),

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decide, MAX_OPTIONS } from "../src/lib/tell-sources/find";
+import { checkEntry } from "../src/lib/tell-sources/shape";
 import type { TellCandidate } from "../src/lib/tell-sources/types";
 
 /**
@@ -68,5 +69,87 @@ describe("the shortlist stays a question", () => {
   it("is capped, because a list of thirty is a menu again", () => {
     expect(MAX_OPTIONS).toBeLessThanOrEqual(6);
     expect(MAX_OPTIONS).toBeGreaterThan(1);
+  });
+});
+
+describe("both sides agree a field is searched", () => {
+  /*
+   * THE SERVER AND THE BOX SEE DIFFERENT OBJECTS. The server's field carries
+   * `find`, a function; the box's carries `searched`, a boolean, because a
+   * function cannot cross into a client component. `checkEntry` runs on BOTH,
+   * and the first version only understood the server's spelling — so a field
+   * that had been found correctly was still rejected, with the answer sitting
+   * on the card in front of you.
+   */
+  const value = "a-real-id-from-the-pack";
+
+  it("accepts a found value on the server, where the field has `find`", () => {
+    const action = {
+      fields: [
+        {
+          key: "lot",
+          label: "Which animals",
+          kind: "choice" as const,
+          required: true,
+          hint: "",
+          find: async () => [],
+        },
+      ],
+    };
+    expect(checkEntry({ lot: value }, action)).toBeNull();
+  });
+
+  it("accepts it in the box too, where the field only has `searched`", () => {
+    const action = {
+      fields: [
+        {
+          key: "lot",
+          label: "Which animals",
+          kind: "choice" as const,
+          required: true,
+          hint: "",
+          searched: true,
+        },
+      ],
+    };
+    expect(checkEntry({ lot: value }, action as never)).toBeNull();
+  });
+
+  it("still refuses a value that is not on a REAL list", () => {
+    // An enumerated field keeps its guard. Only a searched one is trusted to
+    // its own pack's verb.
+    const action = {
+      fields: [
+        {
+          key: "reason",
+          label: "What happened",
+          kind: "choice" as const,
+          required: true,
+          hint: "",
+          choices: [{ value: "death", label: "Died" }],
+        },
+      ],
+    };
+    expect(checkEntry({ reason: "death" }, action)).toBeNull();
+    expect(checkEntry({ reason: "invented" }, action)).toBe(
+      "What happened is not one of the choices.",
+    );
+  });
+
+  it("still refuses an empty one, searched or not", () => {
+    const action = {
+      fields: [
+        {
+          key: "lot",
+          label: "Which animals",
+          kind: "choice" as const,
+          required: true,
+          hint: "",
+          find: async () => [],
+        },
+      ],
+    };
+    expect(checkEntry({ lot: "" }, action)).toBe("Which animals is missing.");
+    expect(checkEntry({ lot: null }, action)).toBe("Which animals is missing.");
   });
 });

@@ -286,7 +286,7 @@ export const livestockTellSource: TellSource = {
         slug: "livestock.check",
         title: "Looked at them",
         about:
-          "Somebody walked the pen and nothing left it — either all was well, or something worth writing down was seen. Example: “checked the broilers, water was frozen”. Use this rather than a loss when no animal died.",
+          "Somebody walked the pen and nothing left it — either all was well, or something worth writing down was seen. Examples: “checked the broilers, water was frozen”, “checked on Bluebell and she is doing well”. Use this rather than a loss when no animal died.",
         fields: [
           lotField,
           dayField,
@@ -294,23 +294,49 @@ export const livestockTellSource: TellSource = {
             key: "notes",
             label: "What you saw",
             kind: "text",
-            hint: "What was seen, in the sentence's own words. Leave out when the sentence only says they were fine.",
+            hint: "What was seen, in the sentence's own words — GOOD OR BAD. “Water trough was frozen” and “doing well” both belong here. Only leave it out when the sentence says nothing about them at all.",
+          },
+          {
+            /*
+             * WHETHER SOMETHING IS WRONG, SAID SEPARATELY FROM WHAT WAS SEEN.
+             *
+             * It used to be derived: notes present meant `attention`. So
+             * "she is doing well" could not be written down without flagging
+             * her as a problem, and the model was told to drop it instead. The
+             * founder asked the obvious question — *"shouldn't it also fill out
+             * the what you saw field?"* — and the honest answer was that a good
+             * observation had nowhere to go.
+             *
+             * A note is a note. Whether it needs somebody is a different fact,
+             * and now it is a different field.
+             */
+            key: "state",
+            label: "Anything wrong?",
+            kind: "choice",
+            required: true,
+            hint: "“All fine” unless the sentence says something is wrong, hurt, broken, empty, escaped or unwell. “Doing well”, “looking good” and “all quiet” are all fine.",
+            choices: [
+              { value: "normal", label: "All fine" },
+              { value: "attention", label: "Something’s up" },
+            ],
           },
         ],
         async record(tx, ctx, values) {
           const notes = text(values.notes);
+          const wrong = text(values.state) === "attention";
           try {
             await recordDailyCheck(tx, ctx, {
               livestockLotId: text(values.lot)!,
               loggedOn: text(values.on)!,
-              status: notes ? "attention" : "normal",
+              status: wrong ? "attention" : "normal",
               notes: notes ?? undefined,
             });
           } catch (err) {
             throw refusal(err);
           }
           const label = lots.find((l) => l.value === values.lot)?.label ?? "the lot";
-          return { summary: notes ? `${label} — noted` : `${label} — looked at, all normal` };
+          if (wrong) return { summary: `${label} — ${notes ?? "something's up"}` };
+          return { summary: notes ? `${label} — ${notes}` : `${label} — looked at, all normal` };
         },
       },
     ];

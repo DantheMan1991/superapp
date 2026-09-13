@@ -266,6 +266,14 @@ export function resolveEntries(
  * shape `proposeTold` hands back instead of needing a `record` it will never
  * call. A `TellAction` still satisfies it.
  */
+/** A field whose value comes from a lookup, whichever side is asking. */
+function isSearched(field: Pick<TellAction, "fields">["fields"][number]): boolean {
+  return (
+    field.find !== undefined ||
+    (field as { searched?: boolean }).searched === true
+  );
+}
+
 export function checkEntry(
   values: TellValues,
   action: Pick<TellAction, "fields">,
@@ -305,7 +313,16 @@ export function checkEntry(
          * same verb the pack's screens call. A second opinion here would be
          * the weaker one, and it is the one that would drift.
          */
-        if (!f.find && !(f.choices ?? []).some((c) => c.value === v)) {
+        /*
+         * EITHER SPELLING OF "THIS ONE IS SEARCHED", because the two sides see
+         * different objects. The server has `find`, a function; the box gets
+         * `searched`, a boolean, because a function cannot cross into a client
+         * component. This same check ran on both and passed on one — so a
+         * field that HAD been found correctly was still rejected with "is not
+         * one of the choices", which is what the founder saw with Bluebell
+         * sitting right there on the card.
+         */
+        if (!isSearched(f) && !(f.choices ?? []).some((c) => c.value === v)) {
           return `${f.label} is not one of the choices.`;
         }
         break;

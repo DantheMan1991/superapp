@@ -132,7 +132,7 @@ appear when they have something to work with.
 | `Job added` | Writes down something that needs doing, exactly as adding it in Work does | What the job is. Add a date if you said one |
 | `Job finished` | Ticks a job off the list | A job already on the list. Only offered when there is one |
 | `Animals lost` | Head that died, were culled or were sold live | Which animals, how many, and what happened |
-| `Looked at them` | That you walked the pen, with a note if you saw something | Which animals |
+| `Looked at them` | That you walked the pen, what you saw, and whether anything is wrong | Which animals, and whether anything is wrong. Say how they were — good or bad — and it writes that down either way |
 | `Moved somewhere` | Animals moved onto a paddock | Which animals, and where to. Only when you keep Land |
 | `Fed them` | Feed or other stock given to animals, taken out of stock | Which animals, what, and how much **in the unit that item is counted in**, shown beside its name. Only when you keep Inventory |
 

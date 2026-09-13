@@ -5,6 +5,7 @@ import { schema, withSystem, withTenant, type Tx } from "../src/db";
 import { resetTellCooldown, type TellModel } from "../src/lib/tell-sources/model";
 import {
   friendlyTellError,
+  previewTold,
   proposeTold,
   recordTold,
 } from "../src/lib/tell-sources/resolve";
@@ -313,5 +314,78 @@ d("telling it what happened", () => {
       },
     ]);
     expect(done.summaries).toEqual(["Bluebell — all quiet"]);
+  });
+
+  /**
+   * **THE CARD SAYS “3” AND “PEN 2”, AND NEVER SAID “LEAVES 22”** (ADR 0054 §2).
+   *
+   * Which is the number somebody wants before pressing the button, and the one
+   * that catches the commonest mistake: the right count against the wrong pen.
+   * A misread pen is invisible in the fields and obvious in the arithmetic.
+   */
+  it("says what a card will do before it does it", async () => {
+    const head = await headNow();
+    expect(head).toBeGreaterThan(5);
+
+    const preview = await previewTold(ctx(), "livestock.loss", {
+      lot: lotId,
+      head: 5,
+      reason: "death",
+      on: TODAY,
+      notes: null,
+    });
+
+    expect(preview).not.toBeNull();
+    expect(preview!.lines).toEqual([
+      { label: "Pen 2 now", value: `${head} head` },
+      { label: "died", value: "−5" },
+      { label: "Pen 2 after this", value: `${head - 5} head` },
+    ]);
+    // Nothing wrong with it, so nothing said about it.
+    expect(preview!.warning).toBeUndefined();
+  });
+
+  /**
+   * A WARNING, NOT A REFUSAL. Inventory lets a lot go negative on purpose —
+   * head counted wrong last week is a real thing and the ledger is what makes
+   * it visible — so the preview says what will happen and lets somebody who
+   * means it carry on.
+   */
+  it("warns when it would take a pen past what it has, and still allows it", async () => {
+    const head = await headNow();
+    const preview = await previewTold(ctx(), "livestock.loss", {
+      lot: lotId,
+      head: head + 3,
+      reason: "cull",
+      on: TODAY,
+      notes: null,
+    });
+
+    expect(preview!.lines.at(-1)).toEqual({ label: "Pen 2 after this", value: "−3 head" });
+    expect(preview!.warning).toBe("That is 3 more than Pen 2 is counted as having.");
+  });
+
+  it("says nothing rather than guessing at a card it cannot work out", async () => {
+    // No lot picked: there is no arithmetic to do, and inventing one would be
+    // the opposite of the point.
+    expect(
+      await previewTold(ctx(), "livestock.loss", {
+        lot: null,
+        head: 3,
+        reason: "death",
+        on: TODAY,
+        notes: null,
+      }),
+    ).toBeNull();
+
+    // An action that declares no preview is not a failure either.
+    expect(
+      await previewTold(ctx(), "livestock.check", {
+        lot: lotId,
+        on: TODAY,
+        state: "normal",
+        notes: null,
+      }),
+    ).toBeNull();
   });
 });

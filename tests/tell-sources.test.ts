@@ -3,6 +3,7 @@ import {
   checkEntry,
   matchChoice,
   normalizeLabel,
+  previewKey,
   resolveEntries,
   TELL_MAX_ENTRIES,
   tellToolFor,
@@ -196,5 +197,38 @@ describe("checkEntry", () => {
     expect(checkEntry({ lot: "nope", head: 3, on: TODAY }, LOSS)).toBe(
       "Which animals is not one of the choices.",
     );
+  });
+});
+
+/**
+ * **A STALE PREVIEW IS WORSE THAN NONE** (ADR 0054 §2).
+ *
+ * The arithmetic above the button exists so somebody can trust it INSTEAD of
+ * re-reading the fields. One that survived the edit which invalidated it would
+ * be the most convincing wrong thing on the screen, so every preview is stamped
+ * with the values it describes and shown only while the stamp matches.
+ */
+describe("previewKey", () => {
+  it("changes the moment any value does", () => {
+    const before = previewKey({ lot: "pen-2", head: 3, reason: "death" });
+    expect(previewKey({ lot: "pen-2", head: 3, reason: "death" })).toBe(before);
+    expect(previewKey({ lot: "pen-2", head: 4, reason: "death" })).not.toBe(before);
+    expect(previewKey({ lot: "pen-3", head: 3, reason: "death" })).not.toBe(before);
+  });
+
+  it("does not change when only the key order does", () => {
+    // Two spellings of one state would refetch each other forever.
+    expect(previewKey({ a: 1, b: 2 })).toBe(previewKey({ b: 2, a: 1 }));
+  });
+
+  it("tells a missing value from a null one, because the card does not", () => {
+    // An unanswered field and one answered with nothing are the same card as
+    // far as any action is concerned, and refetching between them would be a
+    // request per render.
+    expect(previewKey({ a: 1, b: null })).toBe(previewKey({ a: 1, b: null }));
+  });
+
+  it("survives a value that is not a plain scalar", () => {
+    expect(() => previewKey({ a: null, b: "", c: 0 })).not.toThrow();
   });
 });

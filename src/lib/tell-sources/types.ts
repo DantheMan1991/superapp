@@ -222,8 +222,59 @@ export interface TellAction {
    * and waits, always.
    */
   unattended?: boolean;
+  /**
+   * **WHAT THIS CARD WILL DO, BEFORE IT DOES IT** ([ADR 0054](../../../docs/decisions/0054-tell-may-draft-never-send.md) §2).
+   *
+   * A card shows the FIELDS the model parsed, and for anything consequential
+   * that is the wrong thing to check. `Feed store · $240 · today` looks exactly
+   * as correct whether it is about to hit `5010 Feed` or `6200 Supplies`, and
+   * the wrong account is the commonest error in the whole of bookkeeping. The
+   * existing `summary` composes AFTER the write, which makes it a receipt.
+   *
+   * So: the consequence, in the pack's own arithmetic, above the button.
+   *
+   * **REQUIRED IN PRACTICE FOR ANYTHING THAT POSTS**, and the contract cannot
+   * enforce that — whether an action touches the ledger is a fact about what
+   * the verb does, which only the module knows, exactly as ADR 0050 found for
+   * safety. The rule is written in 0054 and checked by a scan test.
+   *
+   * Runs on demand, never once at proposal time: a person EDITS a card, and a
+   * preview computed before the edit is a confident lie about a number that
+   * has changed. Return `null` when there is nothing worth showing — an
+   * incomplete card, a value that does not resolve.
+   *
+   * It must not write. It is called with the same transaction shape `record`
+   * gets so it can read freely, and a preview that changed something would be
+   * the confirm step recording the thing it exists to ask about.
+   */
+  preview?(tx: Tx, ctx: TellCtx, values: TellValues): Promise<TellPreview | null>;
   /** Do it, through the pack's own verb. Throw `TellRefusal` to refuse. */
   record(tx: Tx, ctx: TellCtx, values: TellValues): Promise<TellRecorded>;
+}
+
+/**
+ * One line of "here is what this will do".
+ *
+ * A label and an optional figure, because that is the shape a posting wants
+ * (`Dr 5010 Feed expense` / `$240.00`) and a head count wants
+ * (`Pen 2 after this` / `22 head`). Deliberately not a table: a preview that
+ * needs columns is a report, and a report above a button nobody reads.
+ */
+export interface TellPreviewLine {
+  label: string;
+  /** Right-aligned beside the label. Money carries its cents, always. */
+  value?: string;
+}
+
+export interface TellPreview {
+  lines: TellPreviewLine[];
+  /**
+   * Something true and unwelcome that the lines do not say on their own — a
+   * count going negative, a period already closed. Not a refusal: the pack's
+   * verb owns those, and a warning somebody may proceed past is a different
+   * thing from a no.
+   */
+  warning?: string;
 }
 
 /**

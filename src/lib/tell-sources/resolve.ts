@@ -18,6 +18,7 @@ import {
   type TellAction,
   type TellCtx,
   type TellField,
+  type TellPreview,
   type TellSource,
   type TellValues,
 } from "./types";
@@ -148,6 +149,8 @@ export interface TellProposal {
     fields: ReturnType<typeof forTheBox>[];
     /** ADR 0050 — the box records a complete card of this one without asking. */
     unattended: boolean;
+    /** ADR 0054 §2 — the box asks what this card will do before recording it. */
+    hasPreview: boolean;
   }>;
 }
 
@@ -199,8 +202,51 @@ export async function proposeTold(
       label: l.source.label,
       fields: l.action.fields.map(forTheBox),
       unattended: l.action.unattended === true,
+      hasPreview: typeof l.action.preview === "function",
     })),
   };
+}
+
+/* -- What a card will do, asked again every time it changes ---------------- */
+
+/**
+ * The consequence of ONE card, as its own action works it out.
+ *
+ * Its own call rather than part of the proposal, because a person edits a card
+ * and a preview computed before the edit is a confident statement about a
+ * number that has since changed. The box asks again whenever the values move
+ * and shows nothing at all in the gap — **a stale preview is worse than none**,
+ * since the whole point is to be the thing somebody trusts instead of reading
+ * the fields.
+ *
+ * A preview that throws is not an error worth interrupting anybody with: the
+ * card is still correct, the button still works, and the pack's own verb is
+ * still the thing that refuses. It comes back as `null` and the box says it
+ * could not work it out.
+ */
+export async function previewTold(
+  ctx: TellCtx,
+  actionSlug: string,
+  values: TellValues,
+): Promise<TellPreview | null> {
+  const enabled = await enabledModules(ctx.tenantId);
+  return withTenant(
+    ctx.tenantId,
+    async (tx) => {
+      const loaded = await loadActions(tx, ctx, enabled);
+      const found = loaded.find((l) => l.action.slug === actionSlug);
+      if (!found?.action.preview) return null;
+
+      // Only the action's own declared fields, the way `recordTold` does it —
+      // so a preview cannot be handed a key the action never asked for.
+      const only: TellValues = {};
+      for (const f of found.action.fields) only[f.key] = values[f.key] ?? null;
+      if (checkEntry(only, found.action)) return null;
+
+      return found.action.preview(tx, ctx, only);
+    },
+    { role: ctx.role, userId: ctx.userId },
+  );
 }
 
 /* -- Record what was confirmed -------------------------------------------- */

@@ -72,7 +72,7 @@ measurable comes before the breadth that will strain it.**
 | # | Slice | State |
 | --- | --- | --- |
 | **A1** | **The selection harness.** A golden set of real sentences, each with the action it must select, run against the live model by a script and reported as an accuracy figure. Plus the free half — what the model is GIVEN, checked on every push, inside a budget. | **shipped 2026-09-13** ([#542](https://github.com/DantheMan1991/superapp/pull/542)) · baseline **66/66** |
-| **A2** | **`preview()` on the contract.** The card reads back the CONSEQUENCE above **Record**, not the words the model parsed ([0054](../decisions/0054-tell-may-draft-never-send.md) §2). Blocks all of Phase C. | |
+| **A2** | **`preview()` on the contract.** The card reads back the CONSEQUENCE above **Record**, not the words the model parsed ([0054](../decisions/0054-tell-may-draft-never-send.md) §2). Blocks all of Phase C. | **shipped 2026-09-13** · `livestock.loss` is its first consumer |
 | **A3** | **`find` wherever a list can grow.** `work.done` enumerates every open job into the model's prompt, which [0052](../decisions/0052-the-model-says-the-words-and-the-pack-goes-looking.md) says a list that can pass a few dozen must not do. Cheap now, a rewrite at two hundred jobs. | |
 | **A4** | **The forbidden-verb scan.** `tests/tell-forbidden-verbs.test.ts` reads every `**/tell/source.ts` and fails on an import from a denied seam ([0054](../decisions/0054-tell-may-draft-never-send.md) §1). A rule that lives only in an ADR lasts as long as somebody's memory of it. | |
 
@@ -130,6 +130,62 @@ screen.
 | **D10** | **Say both rather than guess.** When the model was torn between two ACTIONS, show both and let one tap settle it | Rule 2 already does this for choices within an action. It does not yet do it for the action itself |
 
 ## Build log
+
+### 2026-09-13 — Slice A2: the card says what it will do (`claude/the-card-says-what-it-will-do`)
+
+**The gate on everything financial** ([ADR 0054](../decisions/0054-tell-may-draft-never-send.md) §2),
+and useful on its own the day it ships.
+
+A card shows the FIELDS the model parsed, and for anything consequential that is
+the wrong thing to check. `Feed store · $240 · today` looks exactly as correct
+whether it is about to hit `5010 Feed` or `6200 Supplies`, and the wrong account
+is the commonest error in bookkeeping. `summary` already existed and composes
+AFTER the write, which makes it a receipt rather than a verification.
+
+`TellAction.preview(tx, ctx, values)` returns lines — a label and an optional
+figure — plus an optional `warning`. Not a table: a preview needing columns is a
+report, and a report above a button is a report nobody reads.
+
+**IT IS ASKED AGAIN EVERY TIME THE CARD CHANGES, AND THAT IS THE WHOLE DESIGN.**
+Computing it once at proposal time would have been cheaper and wrong: a person
+EDITS a card, and a preview worked out before the edit is a confident statement
+about a number that has since moved. **A stale preview is worse than none**,
+because the point is to be the thing somebody trusts INSTEAD of re-reading the
+fields — so every preview is stamped with `previewKey(values)` and shown only
+while the stamp matches, with a 350 ms pause so typing does not send one per
+keystroke.
+
+**Three states that must look different**, and the third is the one that would
+have been got wrong: not worked out yet, worked out, and *could not be worked
+out*. A blank space says "nothing will happen", which for a card that moves a
+quantity is the opposite of the truth — so it says so in words and notes that the
+card will still record.
+
+**`livestock.loss` is the first consumer, and it earns its keep today.** The
+card says *3* and *Pen 2* and never said *leaves 22*, which is the number
+somebody actually wants and the one that catches the commonest mistake here: the
+right count against the wrong pen. A misread pen is invisible in the fields and
+obvious in the arithmetic. The figures are live — `previewTold` reloads the
+source's actions, which refolds the head ledger — not remembered from proposal
+time.
+
+**A warning, never a refusal.** `inventory` lets a lot go negative on purpose,
+because head counted wrong last week is a real thing and the ledger is what makes
+it visible. So the preview says *"that is 3 more than Pen 2 is counted as
+having"* and lets somebody who means it carry on. The pack's own verb is still
+the only thing that says no.
+
+**The test caught a typography bug nobody would have reported.** A pen going
+negative read `−5` on one line and `-3 head` on the next — a real minus against
+the ASCII hyphen JavaScript gives a stringified number, in the same four-line
+table.
+
+**`previewTellAction` writes nothing and never raises.** A preview that throws
+comes back as `null`: the card is still correct, the button still works, and the
+pack's verb is still what refuses. Interrupting somebody because the arithmetic
+above the button could not be done would be the tail wagging the dog.
+
+Next for Phase C: nothing may post without one of these.
 
 ### 2026-09-13 — Slice D2: say it with no signal (`claude/say-it-with-no-signal`)
 
@@ -273,10 +329,15 @@ nothing lost, because every word spoken is also on the screen.
 **`volume-2` and `volume-x` had to be registered in `guide-icons.ts`** — the
 guide test refuses an icon nobody registered, and it caught this.
 
-**NOBODY HAS HEARD IT.** The shaping is tested and the build is green; the sound
-needs a real device with a microphone and a signed-in session, which the machine
-it was written on cannot provide. Stated here rather than implied, because a
-feature whose whole point is audible is not verified by a passing test.
+**HEARD, AND IT WORKS.** The founder drove it on a real device on 2026-09-13:
+*“I took it for a test drive and the voice feedback worked.”* Recorded here
+because this entry said the opposite when it was written — the shaping was
+tested and the build was green, and neither of those is a feature whose whole
+point is audible actually making a sound. It took a phone, and a person.
+
+**Still unheard: the failures.** What was driven is a confirmation. Nobody has
+yet had a refusal read out to them, which is the half this slice argued was the
+more important one.
 
 ### 2026-09-13 — Slice A1: the box gets a score, and it is 66/66 (`claude/tell-selection-harness`)
 

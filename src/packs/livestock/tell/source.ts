@@ -299,6 +299,51 @@ export const livestockTellSource: TellSource = {
             hint: "What was seen, in the sentence's own words, when it says more than the count.",
           },
         ],
+        /**
+         * **THE CARD SAYS "3" AND "PEN 2". IT NEVER SAID "LEAVES 22"** (ADR 0054 §2).
+         *
+         * Which is the number somebody actually wants to see before pressing
+         * the button, and the one that catches the commonest mistake here:
+         * the right count against the wrong pen. A misread pen is invisible
+         * in the fields and obvious in the arithmetic.
+         *
+         * `lots` is recomputed on every preview call — `previewTold` reloads
+         * the source's actions, which refolds the head ledger — so this is a
+         * live figure rather than one remembered from proposal time.
+         */
+        async preview(_tx, _ctx, values) {
+          const lotId = text(values.lot);
+          const head = Math.round(Number(values.head));
+          if (!lotId || !Number.isFinite(head)) return null;
+          const lot = lots.find((l) => l.value === lotId);
+          if (!lot) return null;
+
+          const word =
+            LOSS_REASONS.find((r) => r.value === values.reason)?.label.toLowerCase() ?? "leaving";
+          const after = lot.head - head;
+          // ONE MINUS SIGN, NOT TWO. A number stringified by JavaScript wears an
+          // ASCII hyphen and the line above wears a real minus, so a pen going
+          // negative read “−5” then “-3 head” in the same little table. Caught by
+          // the test rather than by anybody looking at it.
+          const headLine = (n: number) => `${n < 0 ? `−${Math.abs(n)}` : n} head`;
+          return {
+            lines: [
+              { label: `${lot.label} now`, value: headLine(lot.head) },
+              { label: word, value: `−${head}` },
+              { label: `${lot.label} after this`, value: headLine(after) },
+            ],
+            /*
+             * A WARNING, NOT A REFUSAL. Inventory allows a lot to go negative
+             * on purpose — head counted wrong last week is a real thing and
+             * the ledger is what makes it visible. So this says what will
+             * happen and lets somebody who means it carry on.
+             */
+            warning:
+              after < 0
+                ? `That is ${Math.abs(after)} more than ${lot.label} is counted as having.`
+                : undefined,
+          };
+        },
         async record(tx, ctx, values) {
           const head = Math.round(values.head as number);
           try {

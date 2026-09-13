@@ -248,7 +248,12 @@ it in, so the review is a card per event rather than a table of rows. The
 same three rules hold — the model never writes, choices resolve by label and
 never nearest, and the pack's refusals are the refusals — plus one of its
 own: all the cards or none, because two things said in one sentence happened
-together ([ADR 0039](decisions/0039-a-pack-declares-what-it-can-be-told-in-one-sentence.md)).
+together ([ADR 0039](decisions/0039-a-pack-declares-what-it-can-be-told-in-one-sentence.md)),
+and one more since: a tell action may record money and may never move it or
+reach a third party ([ADR 0054](decisions/0054-tell-may-draft-never-send.md)).
+**The slot has its own dossier — [modules/tell.md](modules/tell.md)** — which
+gathers all five rules in one place and holds the plan for filling the rest of
+the sixteen possible sources.
 
 What is **not** sanctioned: adding a column to a core table for one industry,
 branching on `tenant.industry` inside core, or a pack reading another pack's

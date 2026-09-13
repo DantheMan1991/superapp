@@ -72,6 +72,8 @@ import {
   Undo2,
   Unlink,
   Upload,
+  Volume2,
+  VolumeX,
   UserRound,
   Wallet,
   X,
@@ -170,6 +172,10 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   unlink: Unlink,
   upload: Upload,
   "user-round": UserRound,
+  // The tell box says its answer back when it was spoken to, and this pair is
+  // the switch that turns that off (tell.md, slice D1).
+  "volume-2": Volume2,
+  "volume-x": VolumeX,
   // A personal register's card (ADR 0034) wears this instead of the bank mark.
   wallet: Wallet,
   x: X,

@@ -118,7 +118,7 @@ screen.
 
 | # | Idea | Why it might be the best one here |
 | --- | --- | --- |
-| **D1** | **Say it back.** The confirmation is SPOKEN, not shown — press, speak, hear `Clocked in at 7:42`. Never look at the phone | In a barn holding a bucket this is the entire win — it turns a two-look interaction into a no-look one. Nothing needs installing (`speechSynthesis` is a browser API and both native shells are WebViews) and nothing is built either: **there is no text-to-speech anywhere in this repo today**, and whether it works inside the app's WebView is the first thing to check rather than the first thing to assume |
+| **D1** ✅ | **Say it back — shipped 2026-09-13** ([#543](https://github.com/DantheMan1991/superapp/pull/543)). The confirmation is SPOKEN, not shown — press, speak, hear `Clocked in at 7:42`. Never look at the phone | In a barn holding a bucket this is the entire win — it turns a two-look interaction into a no-look one. Nothing needs installing (`speechSynthesis` is a browser API and both native shells are WebViews) and nothing is built either: **there is no text-to-speech anywhere in this repo today**, and whether it works inside the app's WebView is the first thing to check rather than the first thing to assume |
 | **D2** | **Say it with no signal.** A field has no bars. Queue the sentence and record it when there is signal, with the phone saying so | [0049](../decisions/0049-speech-is-a-fork-in-the-road-not-a-provider.md) makes this tractable: inside the app the TRANSCRIPT is produced on the handset, so what has to be queued is a short string, not audio. **Without this the feature fails exactly where it is needed most** |
 | **D3** | **Correct it by voice.** *"No, pen three"* amends the card instead of starting the sentence again | The card is two feet away and your hands are full |
 | **D4** | **The business's own words.** *"The girls"* means the laying flock on this farm and nothing on the next one. Learn it from corrections, per tenant | `speciesWords` already proves the shape, from the industry profile. This is the tenant-level version, and it is what makes it feel like it knows the place |
@@ -130,6 +130,59 @@ screen.
 | **D10** | **Say both rather than guess.** When the model was torn between two ACTIONS, show both and let one tap settle it | Rule 2 already does this for choices within an action. It does not yet do it for the action itself |
 
 ## Build log
+
+### 2026-09-13 — Slice D1: it says the answer back (`claude/tell-says-it-back`)
+
+[ADR 0050](../decisions/0050-a-safe-verb-records-itself.md) got a clock-in down
+to one tap and then put the ANSWER on a screen somebody still has to take out
+and look at. **A confirmation you have to look at is a second interaction
+wearing a toast's clothes**, and the justification for this whole feature is a
+person outdoors with their hands full.
+
+- **It only speaks when it was spoken to.** Somebody who TYPED is looking at the
+  screen, and talking at them is the noise that gets a feature switched off. The
+  box tracks how the words arrived — a ref, since nothing renders from it — set
+  by the dictate button and by the `said` prop (the shell launcher, `yosher://tell`
+  and the home-screen shortcut are all microphones), cleared on the first
+  keystroke.
+- **It speaks the FAILURES**, and that is the half worth defending. Somebody not
+  looking can afford to miss a success and cannot afford to miss a refusal. A
+  silent failure to a person already walking away is the one outcome this must
+  never produce.
+- **A line written for the eye is punctuated for the ear.** Every summary here is
+  built for a toast, where `3 head — died — from Pen 2` reads cleanly; an engine
+  makes that a run-on, or pauses wrong, or says the character aloud. `forSpeech`
+  turns a SPACED dash or middle dot into a comma and does nothing else —
+  punctuation, never rewriting, because a second voice paraphrasing the pack's
+  words is how a confirmation stops being one. `South-West` and `2026-09-20`
+  survive, which is exactly why the rule wants spaces on both sides.
+- **It says ALL of a handful.** The toast counts past one because a stack of them
+  is unreadable; a voice has no such problem, and *"pen one fine, pen two fine,
+  pen three the water was frozen"* deserves three answers. Past three it is a
+  monologue at somebody holding a bucket, and a count is kinder.
+
+**THE GESTURE TRICK, AND IT IS NOT OPTIONAL ON iOS.** Mobile Safari starts speech
+only inside a user gesture, and everything here is said AFTER an await — the
+model call, the server action. By then the gesture is gone and `speak()` is
+**silently ignored**: nothing throws, the phone simply never talks, on the
+platform where not looking at it matters most. A silent utterance on the press
+that starts listening unlocks the engine for the rest of the page.
+
+**Both browser facts are read with `useSyncExternalStore`, not an effect.**
+Neither has a server answer, and the effect version is two paints plus a
+`react-hooks/set-state-in-effect` error. A `storage` listener keeps two tabs
+agreeing about the mute.
+
+**Everything degrades to silence.** No `speechSynthesis` means no button and
+nothing lost, because every word spoken is also on the screen.
+
+**`volume-2` and `volume-x` had to be registered in `guide-icons.ts`** — the
+guide test refuses an icon nobody registered, and it caught this.
+
+**NOBODY HAS HEARD IT.** The shaping is tested and the build is green; the sound
+needs a real device with a microphone and a signed-in session, which the machine
+it was written on cannot provide. Stated here rather than implied, because a
+feature whose whole point is audible is not verified by a passing test.
 
 ### 2026-09-13 — Slice A1: the box gets a score, and it is 66/66 (`claude/tell-selection-harness`)
 

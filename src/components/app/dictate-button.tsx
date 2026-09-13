@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Loader2, Mic, Square } from "lucide-react";
+import { warmUpSpeech } from "@/lib/speech/say";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { isNativeAppUserAgent } from "@/lib/native-app-core";
@@ -369,6 +370,20 @@ export function DictateButton({
   }
 
   function toggle() {
+    /*
+     * **THE ONE GUARANTEED TAP, AND iOS NEEDS IT** (tell.md, slice D1).
+     *
+     * Mobile Safari starts speech only inside a user gesture, and everything
+     * the box says back comes after an await — the model call, the server
+     * action — by which point the gesture is gone and `speak()` is silently
+     * ignored. Nothing throws; the phone just never talks, on the platform
+     * where not looking at it matters most. A silent utterance here unlocks
+     * the engine for the rest of the page.
+     *
+     * Harmless everywhere else, and on a device that hushed itself the
+     * warm-up is silent by definition.
+     */
+    warmUpSpeech();
     if (listening) {
       if (recorder.current && recorder.current.state !== "inactive") {
         recorder.current.stop();

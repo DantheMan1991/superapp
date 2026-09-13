@@ -51,7 +51,12 @@ describe("where a report came from", () => {
     expect(screenLabel("/dashboard")).toBe("Overview");
     expect(screenLabel("/dashboard/today")).toBe("What needs you");
     expect(screenLabel("/dashboard/settings/enterprises")).toBe("Settings");
-    expect(screenLabel("/dashboard/m/land/paddocks")).toBe("land");
+    // Prettied, not raw: the sheet says this word back to the CLIENT, and
+    // "You are on land" is our spelling of the module rather than theirs.
+    expect(screenLabel("/dashboard/m/land/paddocks")).toBe("Land");
+    expect(screenLabel("/dashboard/m/professional-services")).toBe(
+      "Professional services",
+    );
     // A trailing slash is the same screen.
     expect(screenLabel("/dashboard/team/")).toBe("Team");
   });

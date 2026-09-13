@@ -61,7 +61,24 @@ export function screenLabel(pathname: string): string {
     if (path === prefix || path.startsWith(`${prefix}/`)) return label;
   }
   if (path === "/dashboard") return "Overview";
-  return featureFromRoute(path) || path;
+  const slug = featureFromRoute(path);
+  return slug ? titleCaseSlug(slug) : path;
+}
+
+/**
+ * `accounting` → "Accounting", `professional-services` → "Professional
+ * services". Sentence case, not Title Case, because that is how the rail
+ * writes a two-word module ("Taking payments", "Email setup").
+ *
+ * The module's REAL display name lives in the feature registry, which this
+ * file may not import — it would drag `src/modules/**` into a browser bundle.
+ * A prettied slug is the honest approximation, and it matters because the
+ * sheet says this word back to the CLIENT: "You are on accounting" is our
+ * spelling of it, not theirs.
+ */
+function titleCaseSlug(slug: string): string {
+  const words = slug.replace(/-/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 /**

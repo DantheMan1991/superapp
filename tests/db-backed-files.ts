@@ -65,6 +65,7 @@ export const DB_BACKED_TESTS = [
   "tests/inventory-posting.test.ts",
   "tests/inventory-attention-db.test.ts",
   "tests/documents-attachments.test.ts",
+  "tests/feedback-db.test.ts",
   "tests/livestock-attention.test.ts",
   "tests/livestock-ops.test.ts",
   "tests/production-ops.test.ts",

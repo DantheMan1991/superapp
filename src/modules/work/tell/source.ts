@@ -1,8 +1,9 @@
 import type { Tx } from "@/db";
+import { saidWords } from "@/lib/tell-sources/shape";
 import {
   TellRefusal,
   type TellAction,
-  type TellChoice,
+  type TellCandidate,
   type TellCtx,
   type TellSource,
   type TellValues,
@@ -46,6 +47,55 @@ import {
 
 const text = (v: TellValues[string]): string | null =>
   typeof v === "string" && v.trim() !== "" ? v.trim() : null;
+
+/** "due 2026-09-20", or nothing to say. What tells two jobs apart. */
+function describeJob(row: { dueOn: string | null }): string | undefined {
+  return row.dueOn ? `due ${row.dueOn}` : undefined;
+}
+
+/**
+ * WHICH JOB THOSE WORDS MEAN — three passes, loosest last.
+ *
+ *  1. **The title**, whole or contained either way. *"the top gate is fixed"*
+ *     holds *"fix the top gate"* loosely and nothing else will.
+ *  2. **A word in common.** A sentence is almost never the title: somebody says
+ *     *"sorted the gate"* about *"Fix the top gate"*. Whole words only —
+ *     **never edit distance**, which is how "Pen 3" gets picked for "Pen 2"
+ *     and the wrong job gets ticked.
+ *  3. **Everything open**, because a shortlist is a question and an empty
+ *     result is the dead end 0052 exists to end.
+ *
+ * Ticking the wrong job is the failure that matters here: it LEAVES the open
+ * list, so the mistake becomes harder to see rather than easier, and somebody
+ * believes a gate is shut when it is open. Which is also why `work.done` is
+ * not `unattended` and never will be.
+ */
+function findJobs(
+  jobs: Array<{ id: string; title: string; dueOn: string | null }>,
+  said: string,
+): TellCandidate[] {
+  const toCandidate = (row: (typeof jobs)[number]): TellCandidate => ({
+    value: row.id,
+    label: row.title,
+    detail: describeJob(row),
+  });
+
+  const asked = saidWords(said);
+  if (asked.length === 0) return jobs.map(toCandidate);
+  const phrase = asked.join(" ");
+
+  const named = jobs.filter((row) => {
+    const title = saidWords(row.title).join(" ");
+    return title !== "" && (title === phrase || phrase.includes(title) || title.includes(phrase));
+  });
+  if (named.length > 0) return named.map(toCandidate);
+
+  const spoken = new Set(asked);
+  const overlapping = jobs.filter((row) => saidWords(row.title).some((w) => spoken.has(w)));
+  if (overlapping.length > 0) return overlapping.map(toCandidate);
+
+  return jobs.map(toCandidate);
+}
 
 /** Work's own refusals, in its own words — ADR 0039's third rule. */
 function refusal(err: unknown): unknown {
@@ -124,11 +174,9 @@ export const workTellSource: TellSource = {
      */
     const open = await listOpenWork(tx, workCtx);
     if (open.length > 0) {
-      const choices: TellChoice[] = open
-        .filter((row) => row.title.trim() !== "")
-        .map((row) => ({ value: row.id, label: row.title }));
+      const jobs = open.filter((row) => row.title.trim() !== "");
 
-      if (choices.length > 0) {
+      if (jobs.length > 0) {
         actions.push({
           slug: "work.done",
           title: "Job finished",
@@ -143,8 +191,20 @@ export const workTellSource: TellSource = {
               label: "Which job",
               kind: "choice",
               required: true,
-              hint: "The job the sentence says is finished.",
-              choices,
+              hint: "The job the sentence says is finished, in its own words.",
+              /*
+               * **SEARCHED, NOT LISTED** ([ADR 0052](../../../../docs/decisions/0052-the-model-says-the-words-and-the-pack-goes-looking.md)).
+               *
+               * Every open job used to be written into the model's prompt. That
+               * is the shape 0052 forbids for a list that can pass a few dozen,
+               * and a to-do list is the list in this product most certain to:
+               * a job is added by anybody, closed by anybody, and never
+               * archived for being numerous.
+               *
+               * It also made the catalogue's size a function of how busy the
+               * business is, which is the ceiling 0052 removed everywhere else.
+               */
+              find: async (_tx: Tx, _ctx: TellCtx, said: string) => findJobs(jobs, said),
             },
           ],
           async record(tx, ctx, values) {
@@ -160,8 +220,7 @@ export const workTellSource: TellSource = {
             } catch (err) {
               throw refusal(err);
             }
-            const label =
-              choices.find((c) => c.value === itemId)?.label ?? "that job";
+            const label = jobs.find((j) => j.id === itemId)?.title ?? "that job";
             return { summary: `${label} — done` };
           },
         });

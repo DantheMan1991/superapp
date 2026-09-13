@@ -286,6 +286,21 @@ function isSearched(field: Pick<TellAction, "fields">["fields"][number]): boolea
  * it only while that stamp still matches. Keys are sorted, so the same card
  * cannot produce two spellings of the same state and refetch forever.
  */
+/**
+ * The words of a phrase, for matching — lowercase, punctuation gone.
+ *
+ * Shared rather than copied. Two sources each carrying their own idea of what
+ * a word is, is how "Pen 2" and "pen-2" come to match in one pack and not the
+ * other, and neither author ever learns it.
+ */
+export function saidWords(value: string): string[] {
+  return value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter((w) => w !== "");
+}
+
 export function previewKey(values: TellValues): string {
   return JSON.stringify(
     Object.keys(values)

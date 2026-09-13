@@ -115,13 +115,34 @@ d("telling work what needs doing", () => {
     );
   });
 
-  it("offers finishing once something is on the list, with the real titles", async () => {
+  /**
+   * **THE JOBS ARE SEARCHED, NOT LISTED** (tell.md, slice A3).
+   *
+   * This asserted the opposite until the menu was removed: every open job used
+   * to be written into the model's prompt, which ADR 0052 forbids for a list
+   * that can pass a few dozen — and a to-do list is the list in this product
+   * most certain to. So there is deliberately no list here to assert, and what
+   * is checked instead is that the words somebody would actually SAY reach the
+   * job they mean.
+   */
+  it("offers finishing once something is on the list, and finds it by its words", async () => {
     const list = await actions();
     expect(list.map((a) => a.slug)).toEqual(["work.add", "work.done"]);
 
     const done = list.find((a) => a.slug === "work.done")!;
-    const choices = done.fields[0].choices ?? [];
-    expect(choices.map((c) => c.label)).toContain("Fix the top gate");
+    const which = done.fields[0];
+    expect(which.choices).toBeUndefined();
+    expect(typeof which.find).toBe("function");
+
+    const found = async (said: string) =>
+      (await scoped((tx) => which.find!(tx, ctx(), said))).map((c) => c.label);
+
+    // The title, contained in a sentence that is not the title.
+    expect(await found("the top gate is fixed")).toContain("Fix the top gate");
+    // A word in common, which is how people actually refer to a job.
+    expect(await found("sorted the gate")).toContain("Fix the top gate");
+    // Nothing matched is a question, never a dead end (ADR 0052).
+    expect((await found("something else entirely")).length).toBeGreaterThan(0);
   });
 
   /** The first time ADR 0050's rule discriminates INSIDE one source. */

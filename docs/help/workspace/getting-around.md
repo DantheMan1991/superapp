@@ -118,6 +118,33 @@ and it reads all three back; more than three and it just says how many.
 - Some browsers cannot speak at all. There is no button when that is the case,
   and everything else works the same.
 
+## When there is no signal
+
+Say it anyway. If your phone cannot reach Yosher, the sentence is **kept**, and
+you see `No signal. Saved — it will be read when you are back.` It is read out
+to you as well, so you can put the phone away.
+
+A panel appears above the buttons with {icon:cloud-off} and what is waiting:
+
+- **Each one shows what you said** and how long ago, such as `said 3 h ago`.
+- **{button:Send now|ghost}** reads it and shows you the cards, exactly as if
+  you had just said it. It happens on its own as soon as your phone finds
+  signal, so most of the time you will not need the button.
+- **{icon:x}** forgets that one.
+
+**It keeps the time you SAID it, not the time it was sent.** Clock in at seven
+in a field with no bars and it is recorded at seven, not when you get back to
+the yard. When something is recorded later than it was said, the message says
+so: `Clocked in at 7:42 AM · said 3 h ago`.
+
+- **After two days it is too old.** The line reads `Too long ago to record at
+  the time you said it.` and the button becomes {button:Put it back|ghost},
+  which puts the words back in the box so you can read it now — recorded
+  today, knowingly, rather than dated wrongly.
+- **Cards on screen are not kept.** If you have already checked the cards and
+  the signal goes while you press {button:Record|primary}, the cards stay where
+  they are and you press it again when you are back. Nothing is recorded twice.
+
 - **It knows when you have finished** by listening for you to stop. It works
   out how loud the room is first, so a running tractor does not fool it. If it
   cannot tell, press {button:Listening…|primary} to finish.

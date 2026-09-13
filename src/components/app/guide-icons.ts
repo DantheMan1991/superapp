@@ -12,6 +12,7 @@ import {
   Camera,
   Check,
   ChevronDown,
+  CloudOff,
   ChevronLeft,
   ChevronRight,
   CircleQuestionMark,
@@ -95,6 +96,8 @@ import { ICONS } from "./icon-registry";
 export const CONTROL_ICONS: Record<string, LucideIcon> = {
   archive: Archive,
   "archive-restore": ArchiveRestore,
+  // A sentence waiting for signal (tell.md, slice D2).
+  "cloud-off": CloudOff,
   "arrow-down": ArrowDown,
   "arrow-left": ArrowLeft,
   "arrow-up": ArrowUp,

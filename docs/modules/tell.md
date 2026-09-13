@@ -119,7 +119,7 @@ screen.
 | # | Idea | Why it might be the best one here |
 | --- | --- | --- |
 | **D1** ✅ | **Say it back — shipped 2026-09-13** ([#543](https://github.com/DantheMan1991/superapp/pull/543)). The confirmation is SPOKEN, not shown — press, speak, hear `Clocked in at 7:42`. Never look at the phone | In a barn holding a bucket this is the entire win — it turns a two-look interaction into a no-look one. Nothing needs installing (`speechSynthesis` is a browser API and both native shells are WebViews) and nothing is built either: **there is no text-to-speech anywhere in this repo today**, and whether it works inside the app's WebView is the first thing to check rather than the first thing to assume |
-| **D2** | **Say it with no signal.** A field has no bars. Queue the sentence and record it when there is signal, with the phone saying so. **Its prerequisite shipped 2026-09-13** — [ADR 0055](../decisions/0055-a-queued-sentence-is-old-not-wrong.md), without which every queued sentence would be stamped at the moment it uploaded | [0049](../decisions/0049-speech-is-a-fork-in-the-road-not-a-provider.md) makes this tractable: inside the app the TRANSCRIPT is produced on the handset, so what has to be queued is a short string, not audio. **Without this the feature fails exactly where it is needed most** |
+| **D2** ✅ | **Say it with no signal — shipped 2026-09-13.** A field has no bars. The sentence is kept and read again when there is signal, with the time it was SAID. **Its prerequisite shipped the same day** — [ADR 0055](../decisions/0055-a-queued-sentence-is-old-not-wrong.md), without which every queued sentence would be stamped at the moment it uploaded | [0049](../decisions/0049-speech-is-a-fork-in-the-road-not-a-provider.md) makes this tractable: inside the app the TRANSCRIPT is produced on the handset, so what has to be queued is a short string, not audio. **Without this the feature fails exactly where it is needed most** |
 | **D3** | **Correct it by voice.** *"No, pen three"* amends the card instead of starting the sentence again | The card is two feet away and your hands are full |
 | **D4** | **The business's own words.** *"The girls"* means the laying flock on this farm and nothing on the next one. Learn it from corrections, per tenant | `speciesWords` already proves the shape, from the industry profile. This is the tenant-level version, and it is what makes it feel like it knows the place |
 | **D5** | **"What can I say?"** A short, discoverable list per tool | The founder's own first attempt hit `Nothing to record from that` with no way to tell "you said it wrong" from "this is not set up for you". Half-fixed; finish it |
@@ -130,6 +130,61 @@ screen.
 | **D10** | **Say both rather than guess.** When the model was torn between two ACTIONS, show both and let one tap settle it | Rule 2 already does this for choices within an action. It does not yet do it for the action itself |
 
 ## Build log
+
+### 2026-09-13 — Slice D2: say it with no signal (`claude/say-it-with-no-signal`)
+
+**The feature failed exactly where its whole justification lives.** A field has
+no bars, the server action's fetch rejected, nothing caught it, and the words
+somebody said into a phone with cold hands were gone — no toast, no queue, no
+trace. The box had no offline story at all, and neither did anything else in the
+repo: `navigator.onLine` appears nowhere before this.
+
+- **What is kept is the SENTENCE, never a record.**
+  [ADR 0039](../decisions/0039-a-pack-declares-what-it-can-be-told-in-one-sentence.md)'s
+  first rule is that the model never writes, and nothing here bends it. A queued
+  item replays down the same path a fresh one takes — propose, cards, confirm —
+  and an `unattended` verb still records itself only because
+  `readyToRecordUnasked` said so about the proposal it got back.
+- **And the time it was said travels with it.** `spokenAt` now reaches both
+  server actions and is clamped by the rule
+  [ADR 0055](../decisions/0055-a-queued-sentence-is-old-not-wrong.md) settled
+  this morning. `today` follows the EFFECTIVE time rather than the request's,
+  which matters more than it sounds: a sentence said at dusk and sent the next
+  morning would otherwise default its date field to the wrong day.
+- **Only a request that never ARRIVED is kept.** A server action that reached
+  the server answers `{ error }` — a refusal, a sentence too long, a pack saying
+  no — and replaying one of those repeats a sentence destined to fail
+  identically forever. A rejected promise is the other case. The judgement
+  cannot be exact (`TypeError` in Chrome, "Load failed" in Safari,
+  "NetworkError" in Firefox), so it errs toward keeping: a false positive
+  replays once and is dropped with the real error shown, a false negative loses
+  the sentence.
+- **Past the point where sending it would be a lie, it stops.** The server
+  believes a claim for 48 hours and silently uses its own clock beyond that, so
+  an older sentence would still record — dated now, which is the wrong answer
+  said confidently. Those read *"too long ago to record at the time you said
+  it"* and offer **Put it back**, which returns the words to the box so somebody
+  can record them today on purpose.
+
+**WHAT IS DELIBERATELY NOT QUEUED: THE CARDS.** They are a confirmed decision,
+and a queue of decisions waiting to fire is a second way to write to the herd
+with no idempotency to stop it firing twice — the device endpoint has an
+idempotency key for exactly this and the box has none. So a record that fails
+for want of signal leaves the cards on screen, where the person who confirmed
+them is, and says to press Record again. Named as an open item rather than left
+to be discovered.
+
+**A LINT RULE CAUGHT A REAL HAZARD, NOT A STYLE.** `read` is reached from a
+button, from the online listener AND during render (the `said` prop), so the
+refs D1 introduced were being written during render. Everything that must
+survive the async gap now travels as an ARGUMENT — whether to speak, and which
+queued item is in flight — because the state those callbacks would have read was
+captured before the render-phase update that set it. The functions also had to
+be declared in dependency order; they hoist, so it worked either way, but
+reading top to bottom did not.
+
+**No migration.** `tests/tell-queue.test.ts` covers the decisions; the sound and
+the signal loss both still need a real phone.
 
 ### 2026-09-13 — A queued sentence is old, not wrong ([ADR 0055](../decisions/0055-a-queued-sentence-is-old-not-wrong.md)) (`claude/a-queued-sentence-is-old-not-wrong`)
 

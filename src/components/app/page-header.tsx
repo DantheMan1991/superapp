@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { HelpButton } from "@/components/app/help-button";
+import { ReportButton } from "@/components/app/report-button";
 
 interface PageHeaderProps {
   title: string;
@@ -83,6 +84,12 @@ export function PageHeader({
           that line instead of leaving the viewport. */}
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <HelpButton />
+        {/* Beside the "?" deliberately: "I do not understand this" and "this
+            is broken" are the same reflex two seconds apart, and this is the
+            row that is already on every screen. It gates itself the same way —
+            nothing renders without the dashboard layout's provider, so an
+            admin page and the public share page are untouched. ADR 0053. */}
+        <ReportButton />
         {actions}
       </div>
     </div>

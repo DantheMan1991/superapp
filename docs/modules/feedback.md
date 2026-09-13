@@ -1,0 +1,162 @@
+# Feedback — what a client says is wrong, and the conversation that answers it
+
+> A button beside the "?" on every screen in the product. A client presses it,
+> says what is broken or what is missing, and the report arrives carrying the
+> screen, the module, the viewport and the shell it was filed from — none of
+> which anybody had to type. The superadmin answers it from `/admin/feedback`,
+> asks questions, moves it through a status the client can read, and closes it
+> by saying so. The decision under it is
+> [ADR 0053](../decisions/0053-a-report-is-filed-from-the-screen-it-is-about-and-its-thread-is-the-reporters-own.md).
+> Status: `available` · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
+
+## Build log
+
+Newest first. One entry per session/PR that touched this area. Every PR that
+changes it MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-13 — Slice 0: the loop exists end to end (`claude/feedback-the-report-button`)
+
+**The whole conversation, plain.** Two tables, a button on every screen, the
+client's own list and thread, and the console that answers them. No
+attachments, no outbound email, no work item yet — those are slices 1–3 below,
+and none of them is worth building against a loop that does not close.
+
+- **`feedback_reports` + `feedback_messages`** (migrations `0321`, RLS in
+  `0322`), applied and `verify-rls` green on dev and prod before the PR. The
+  generated migration was **hand-reordered**: drizzle-kit emitted the composite
+  FK `(tenant_id, report_id)` ahead of the unique index on
+  `feedback_reports (tenant_id, id)` that it references, which cannot apply on
+  a fresh database. Same trap production's `0295` hit.
+- **The posture is `push_devices`', not an ordinary tenant table's** —
+  `app_current_tenant()` AND `app_current_user()`, so an OWNER cannot read
+  their staff's report. ADR 0053 argues it: the box says "tell us what is
+  wrong", and people answer that honestly only when their employer is not
+  reading it. It also makes read state one timestamp per side rather than a
+  table, because there is exactly one client reader.
+- **The button is beside the "?" in `PageHeader`**, which is on 107 of the 116
+  dashboard pages (the nine without it are redirects or delegate to a module
+  renderer that has one). Not a second floating button: ADR 0051 put the
+  microphone bottom right because that is where a thumb is, and two round
+  buttons in one corner makes the important one a target to miss.
+- **Everything the user did not type is captured**: route, query, module slug,
+  viewport from the browser; shell and app version from the USER AGENT, server
+  side, because a value the client supplies is a value the client can get
+  wrong.
+- **Twenty-two isolation cases**, including the one that matters most: an
+  operator's internal note lives in the same table as the conversation, and the
+  test writes one and asserts the reporter cannot see it — directly, or by
+  asking for its id.
+- Two guides. Not driven in a browser: the pane has been signed out since
+  2026-09-09.
+
+## The slice order
+
+| # | Slice | State |
+| --- | --- | --- |
+| 0 | The loop exists end to end — tables, button, client thread, console | **Built** |
+| 1 | It reaches you — Resend to `SUPER_ADMIN_EMAILS` on a new report, and to the client on a reply | Next |
+| 2 | Attachments — a screenshot from the phone's camera roll, own blob prefix and RLS | Planned |
+| 3 | Raise as work — a console button that opens a work item in the operator tenant, linked back | Planned |
+
+Slice 1 is first because slice 0 ships a loop that only closes when somebody
+opens the product: the client learns of a reply from a dot, and the operator
+from a count on a nav row.
+
+## Data model
+
+| Table | Purpose | Notes (RLS, invariants, FKs) |
+| --- | --- | --- |
+| `feedback_reports` | One report: title, kind, status, where it was filed from, read state per side | Own rows in own tenant (`tenant_id` AND `clerk_user_id`). SELECT/INSERT/UPDATE only — **no DELETE policy**, because withdrawing a report is `declined`, said out loud. `closed_at` moves with `status` and never alone, so "closed" is one indexable predicate. FK to `tenants` ON DELETE CASCADE. |
+| `feedback_messages` | One turn, including the FIRST — the opening description is a message, so the thread is homogeneous | Composite FK `(tenant_id, report_id)`, so a message cannot attach to a report in another tenant. Client SELECT requires `internal = false` AND an EXISTS on a report that is theirs; client INSERT additionally pins `side = 'client'`. **No UPDATE and no DELETE policy at all** — a conversation is not a thing either side may rewrite (`audit_log`'s posture). |
+
+`kind`, `status`, `side` and `surface` are **text + CHECK, never `pgEnum`**: a
+new enum value needs its own migration file, alone (documents.md paid for that
+twice), and `status` is the column most likely to grow a seventh value. The
+allowed values live in `src/lib/feedback/vocabulary.ts` — no imports, no
+directive — and `tests/isolation/feedback.test.ts` reads every CHECK back out
+of `pg_constraint` and compares, because the two cannot be generated from one
+another.
+
+## Key files & seams
+
+- `src/lib/feedback/vocabulary.ts` — the words the columns may hold. Imports
+  nothing, so the schema, the browser and the migration's CHECK can all agree.
+- `src/lib/feedback/core.ts` — pure. Route → module, screen labels, the two
+  vocabularies (client and operator), `needsOperator` / `hasUnreadReply`,
+  `isSameOriginPath`, `formatWhen`.
+- `src/lib/feedback/read.ts` — both sides. The client's reads run in the
+  reporter's own transaction; **every console function says `withSystem` on its
+  own comment** rather than relying on the reader knowing which half of the file
+  they are in.
+- `src/lib/feedback/actions.ts` — the CLIENT's writes. File, reply, mark read.
+- `src/app/admin/feedback/actions.ts` — the OPERATOR's writes. Reply, note,
+  triage, mark seen. **Separate file on purpose**: one file that could write
+  both sides is one bug away from letting a client mark their own report `done`.
+- `src/components/app/report-button.tsx` — the button, the sheet, and the
+  `FeedbackProvider` the dashboard layout wraps its children in.
+- `src/components/app/feedback-chips.tsx` — the two chips, shared by both
+  surfaces so the words can only differ by audience.
+- `/dashboard/feedback`, `/dashboard/feedback/[id]` — the client's copy.
+- `/admin/feedback`, `/admin/feedback/[id]` — the console.
+
+## Decisions & gotchas
+
+- **The thread lives in the CLIENT's workspace, not the operator's.** ADR 0041
+  put a client in the operator tenant's CRM and the obvious reading is that a
+  support conversation belongs there too. It does not: the person who filed it
+  has to be able to read the answer, and they have no account over there.
+- **`internal` is the one dangerous column in the schema.** An operator's
+  private note sits in a table the client reads, separated by one policy clause.
+  Guarded three ways — the policy, a CHECK that refuses an internal message on
+  the client's side, and the isolation case. The schema comment says in as many
+  words that deleting that test makes the column a leak.
+- **`status` is NOT protected by RLS, and cannot be.** A row-level policy
+  cannot see which column changed, and the client needs an UPDATE to mark a
+  thread read. So a client's transaction *can* write `status` — the refusal
+  lives in the server action, which never takes one from the client, and the
+  isolation suite asserts the update succeeds so nobody mistakes the database
+  for the guard. Same arrangement as `tenants.labels`.
+- **A status change writes nothing into the conversation.** The first version
+  appended "status changed to planned" and it was wrong: between two people
+  talking, that is noise wearing the clothes of an answer. The client sees the
+  status as a chip on their own copy. If it is worth telling them, it is worth
+  typing — which is what the status picker beside the reply box is for.
+- **A closed report still takes a reply.** "It is still happening" is the most
+  valuable sentence this box ever receives, and `needsOperator` puts that reply
+  back at the top of the queue whatever the status says. A human decides what
+  to do about the status; the code does not guess.
+- **The console's list is relative time, the thread is absolute — in the
+  CLIENT's timezone.** Every row in the list is a different business in a
+  different zone, and a column of absolute times in mixed zones is unscannable.
+  On the thread, "I did this at 8am" only lines up if both people read the clock
+  of the person who was standing there.
+- **The route is untrusted.** It is a string a browser handed us through a
+  form. Rendered as a link only after `isSameOriginPath` agrees — a
+  protocol-relative `//somewhere` would otherwise navigate off-site from a
+  field the user filled in themselves.
+- **A support view files nothing.** `requireTenant()` refuses a non-GET while a
+  support session is live, and a server action is a POST, so nothing here
+  checks for it — but the dashboard layout still passes `enabled={!ctx.support}`
+  so a superadmin never sees a button that cannot work.
+- **The dot costs one indexed count in the dashboard layout**, held to the bar
+  `getMailBadge` set: one SELECT over rows the person already owns, on every
+  page in the product.
+
+## Open items
+
+- **Nothing pushes** (slice 1). A reply reaches the client as a dot; a report
+  reaches the operator as a count. Both need somebody to open the product.
+  Whether a reply also becomes an `AttentionSource` line on *What needs you* was
+  considered and deliberately left out of slice 0 — the founder's call; the
+  outbound email is the cheaper half of the same problem and comes first.
+- **An owner cannot see what their staff reported.** ADR 0053 records why and
+  what the fix looks like if it is ever wanted: a workspace-visible flag chosen
+  by the person filing, not a loosened policy for everybody.
+- **`operator_read_at` is shared between superadmins.** Intended today — what
+  the console needs to know is whether ANYBODY has looked. It becomes a race
+  the day there are two of them.
+- **No de-duplication.** Five people reporting the same bug is five threads.
+  The console can say so in a note; nothing links them.
+- **Never driven in a browser.** The isolation suite and the build are green,
+  and nobody has pressed the button — the browser pane has been signed out
+  since 2026-09-09 and only the founder can sign it back in.

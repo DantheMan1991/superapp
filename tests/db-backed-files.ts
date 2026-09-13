@@ -83,6 +83,7 @@ export const DB_BACKED_TESTS = [
   "tests/isolation/documents-dms.test.ts",
   "tests/isolation/device-grants.test.ts",
   "tests/isolation/documents.test.ts",
+  "tests/isolation/feedback.test.ts",
   "tests/isolation/interview.test.ts",
   "tests/isolation/enterprises.test.ts",
   "tests/isolation/inventory.test.ts",

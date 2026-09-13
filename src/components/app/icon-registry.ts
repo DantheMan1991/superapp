@@ -14,6 +14,7 @@ import {
   LayoutDashboard,
   ListChecks,
   Mail,
+  MessageSquarePlus,
   // Aliased on purpose: a bare `Map` import shadows the global `Map`
   // constructor for the whole module, which is a trap for whoever next reaches
   // for a lookup in here. lucide exports `Map as LucideMap` too; the name below
@@ -87,6 +88,8 @@ export const ICONS: Record<string, LucideIcon> = {
   factory: Factory,
   folder: FolderOpen,
   mail: Mail,
+  // The feedback console, and the button on every client screen (ADR 0053).
+  message: MessageSquarePlus,
   map: MapIcon,
   megaphone: Megaphone,
   settings: Settings,

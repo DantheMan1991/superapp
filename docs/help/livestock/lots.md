@@ -14,7 +14,7 @@ Open **Livestock** in the sidebar. The heading reads `A {{livestockLot|lower}} i
 - **The search box.** Finds by name, by species, or by any tag an animal wears or has worn. Type and press Enter, or click {button:Find|outline}. {button:Clear|ghost} appears beside it while a search is on.
 - **The species pills.** `All`, then one pill per species on the farm, such as `Cattle`, `Poultry` and `Swine`. Click one to see only that species. They only appear when the farm has more than one species.
 - **{button:Show closed|outline}.** Brings finished groups back into the list. It then reads {button:Hiding nothing|primary}.
-- **The list.** On a wide screen, a table with the columns `{{livestockLot}}`, `Species`, `Where`, `Age`, `Lost`, `Withdrawal` and `Head`. On a phone, one card per group or animal carrying the same facts, so nothing sits off the edge of the screen.
+- **The list.** On a wide screen, a table with the columns `Name`, `Species`, `Where`, `Age`, `Lost`, `Withdrawal` and `Head`. On a phone, one card per group or animal carrying the same facts, so nothing sits off the edge of the screen.
 
 A search, a species pill and {button:Show closed|outline} all work together. Picking a species keeps your search, and searching keeps the species.
 
@@ -22,7 +22,7 @@ Only the first hundred rows are shown. When there are more you see `Showing 100 
 
 ## The columns, and the card
 
-- **`{{livestockLot}}`.** A photo if there is one, the name, then badges. {badge:animal|outline} means one named animal. {badge:split|outline} means it was cut off another. {badge:breeding stock|outline} means it is on the books as a capital asset. Underneath, the breed you entered, such as `½ Angus · ¼ Hereford · ¼ unknown`. Breeding worked out from parents rather than entered does not show here.
+- **`Name`.** A photo if there is one, the name, then badges. {badge:animal|outline} means one named animal. {badge:split|outline} means it was cut off another. {badge:breeding stock|outline} means it is on the books as a capital asset. Underneath, the breed you entered, such as `½ Angus · ¼ Hereford · ¼ unknown`. Breeding worked out from parents rather than entered does not show here.
 - **`Where`.** The paddock, and the pen or barn after it. A dash means they are on no paddock. On a phone it reads `No paddock` instead.
 - **`Age`.** Reads in the largest sensible unit: `9 days`, `6 weeks`, `4 months`, `2 years`. `not yet` means the birth date is in the future. A card leaves it out when the birth date is not recorded.
 - **`Lost`.** The share of everything placed that has died, to one decimal. A dash means nothing has arrived yet. A card reads `4.8% lost`, and leaves it out when nothing has arrived.

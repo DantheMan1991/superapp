@@ -1,7 +1,9 @@
 # Livestock
 
 > **A LOT IS A GROUP OF ANIMALS AND AN ANIMAL IS AN ANIMAL** — settled
-> 2026-08-27, and the code has not caught up. Read
+> 2026-08-27 and shipped 2026-08-28 in slices 8a–8g. The screens say *animal*,
+> `livestock_lots.record_kind` says which kind a record is, and the word
+> survives only under them, on purpose. Read
 > [The model, settled](#the-model-settled-2026-08-27) before anything else here:
 > entries below this line say *"an individual is a lot of one"*, and that
 > sentence is retired.
@@ -132,6 +134,76 @@ alternative — the bar `docs/decisions/` exists for. Recorded here so the next
 session raises one rather than discovering the reversal in a build log.
 
 ## Build log
+
+### 2026-09-13 — The sentence that hid behind the placeholder (`claude/an-individual-is-not-a-lot`)
+
+**The founder asked whether this app calls an animal a lot.** On the screens it
+does not, and has not since slices 8a–8g shipped on 2026-08-28. Underneath, it
+still did in SIXTEEN places across twelve files — including the first six lines
+of this dossier, the spine table's own comment, and one sentence a CLIENT reads.
+A retired sentence still printed as current doctrine is worse than no doctrine,
+because the next session believes it and builds on it.
+
+**AND THE FIRST SWEEP MISSED THE WORST ONE.** `grep -rni "lot of one"` produced a
+tidy list of six, and `docs/help/livestock/overview.md` was not on it: a guide
+writes a pack's words through the vocabulary placeholder, so the sentence on the
+page is *"An animal is a {{livestockLot|lower}} of one"* and the phrase the grep
+was hunting does not exist in the file. Sixteen days, a client-facing guide, and
+the search meant to find it could not see it. **`tests/guides.test.ts` now
+applies the labels and THEN scans**, so the next one cannot hide the same way.
+
+#### What was corrected
+
+- **This dossier's banner said *"and the code has not caught up"*.** True the day
+  it was written and false the next morning — and it is the first thing anyone
+  opening this file reads.
+- **`inventory.ts` gave the retired sentence as the REASON for the spine.** The
+  engineering claim under it is sound and stays: one shape means one target for
+  feed, cost, movement and mortality instead of a polymorphic one. What is added
+  is the fence — the row beneath a named cow exists for her cost, her stock
+  valuation and her capitalisation to breeding stock, `record_kind` says which
+  kind of record it is, and nothing built on this table may call her a lot on a
+  screen.
+- **`livestock.ts` twice.** The weights table justified one row shape with *"an
+  individual is a lot of one"* — it is now *"the observation is about the record,
+  group or animal alike"*, which is the same argument without the retired noun.
+  Pedigree's *"a parent need not be a lot of one"* now says what it means: a
+  parent need not be a single animal.
+- **`ops.ts` twice, plus `actions.ts`, `individual-controls.tsx`,
+  `setup/source.ts` and `production.ts`** — each asserted it as live reasoning,
+  and `production` cited it as a decision `livestock` had made. The founder's
+  2026-08-27 question is kept wherever it appears: the history of why naming an
+  animal was undiscoverable is worth more than the slogan ever was.
+- **`homestead-farm.md` three times**, once as a standing decision and twice
+  inside dated entries. The dated ones keep what they said and carry a supersede
+  line, because a build log records what was believed at the time; the decision
+  is rewritten, because a decisions list is read as what is true now.
+- **`onboarding.md`'s checklist table** explained the Livestock step with *"(a
+  named animal is a lot of one)"*. It now says what `record_kind` is for.
+- **One test comment**, which is not doctrine but gets read as it.
+
+#### And one place the word still reached a screen
+
+On a wide screen the list's first column was headed with the tenant's word for a
+lot, and named animals sit in that column — a cow under a header reading **Lot**,
+with an `animal` badge in the cell arguing with the header above it. It now reads
+**Name**, which is what the column has always held and what
+[the settled model](#the-model-settled-2026-08-27) calls the field: *a lot has a
+name, not a code*. The phone cards carry no header, so they never had the
+problem. Three guides move with it — `lots.md` renames the column, `lot.md` is
+retitled *"One lot or one animal"* since it is the animal page's guide too and
+had been saying so in its own second line, and `overview.md` stops telling the
+client she is a lot of one.
+
+**LEFT ALONE ON PURPOSE.** `src/packs/livestock/tell/source.ts` hands the model a
+candidate list where a named animal is described as `"Cattle · 1 head"` with
+nothing marking her as an individual, and falls back to the string `"the lot"` in
+a confirmation. It is the right next fix and it is deliberately not in this PR: a
+parallel session is working in `tell-sources`, and this sweep is not worth a
+conflict there.
+
+**No migration and no behaviour change** — one table header, ten comments, three
+dossiers, three guides and a scan test.
 
 ### 2026-09-13 — It shows its working, and a good note is still a note (`claude/tell-shows-its-work`)
 

@@ -6,7 +6,7 @@ import type { SetupCtx, SetupSource, SetupStep } from "@/lib/setup-sources/types
 /**
  * What Livestock is waiting for: animals.
  *
- * One step, on the lot table — a named animal is a lot of one, so one table
+ * One step, on the lot table — a group and a named animal share it, so one table
  * answers for both. The stock line an animal is counted in can be created from
  * the same dialog (`newItemName` in `createLivestockLot`), so inventory's step
  * is not a prerequisite of this one.

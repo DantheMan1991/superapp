@@ -785,7 +785,7 @@ first sale"; nothing that failed it is on the card.
 | Assets | Add your equipment and buildings | no `assets` row |
 | Inventory | Add what you hold | no `inventory_items` row |
 | Inventory | Add somewhere to keep it | an asset exists and none has `is_storage_location` — waits for the first asset so it never stands beside the assets step asking about the same page |
-| Livestock | Add your animals | no `livestock_lots` row (a named animal is a lot of one) |
+| Livestock | Add your animals | no `livestock_lots` row — the table backs a group and a named animal alike, and `record_kind` says which |
 | Land | Add your ground | no `land_parcels` row |
 | Retail | Add where you sell | no `retail_channels` row |
 | Retail | Set your prices | a channel exists and no `retail_prices` row — points at the one channel's page, or at Retail |

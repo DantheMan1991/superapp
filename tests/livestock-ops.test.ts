@@ -2996,7 +2996,7 @@ d("livestock ops", () => {
     );
     expect(made).toHaveLength(3);
 
-    // Each is a lot of ONE...
+    // Each holds ONE head...
     for (const child of made) {
       const movements = await asOwner((tx) =>
         movementKindsForLots(tx, tenantId, [child.inventoryLotId]),

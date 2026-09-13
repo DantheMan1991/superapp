@@ -586,7 +586,15 @@ export async function LivestockModule({
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>{lotWord}</TableHead>
+                    {/* **NAME, NOT THE LOT WORD.** This column holds pens and
+                        named animals alike, so heading it "Lot" put a named cow
+                        under a word the 2026-08-27 ruling forbids for her — the
+                        `animal` badge in the cell was arguing with the header
+                        above it. "Name" is what the column has always held, and
+                        what the settled model calls the field: a lot has a name,
+                        not a code. The phone cards carry no header and never had
+                        the problem. */}
+                    <TableHead>Name</TableHead>
                     <TableHead>Species</TableHead>
                     <TableHead>Where</TableHead>
                     <TableHead className="text-right">Age</TableHead>

@@ -582,7 +582,9 @@ beside measured figures that are folded and never stored.
 - **`livestock` is unblocked.** It declares `inventory` in `requires` for the lot
   spine, and the spine now exists: quantity-bearing lots with event-sourced
   balances and lineage, where an individual is a lot of one, and split and merge
-  are the only operations that change cardinality.
+  are the only operations that change cardinality. **Superseded 2026-08-27** —
+  the spine is unchanged and the words are not: a lot is a group of animals and
+  an animal is an animal, per [livestock.md](livestock.md), "The model, settled".
 - **A split BALANCES**, certified rather than asserted — 210 chicks split 70 into
   a pen leaves 140 and 70, with an item total still reading 210. That property is
   what makes a head count reconcile with its own history instead of being
@@ -800,6 +802,9 @@ beside measured figures that are folded and never stored.
   boxed cuts) and promoted traceability to a hard requirement.
 - Settled the livestock shape: **every animal record is a lot, an individual is
   a lot of one**, with the pen as the cost object and lineage on every lot.
+  **Superseded 2026-08-27** — the schema half held, the sentence did not. A lot
+  is a group; an animal named out of one keeps her own page
+  ([livestock.md](livestock.md), "The model, settled").
 - Founder set the design target at **this farm and one 10× its size**, which
   promoted **cost allocation** to a first-class concern and produced the
   governing rule *schema at 10×, UI at 1×*.
@@ -926,7 +931,11 @@ design calls and the ones most likely to be got wrong twice:
   year's pasture, and the history is what makes rotation reporting possible.
 - **Parcel tenure matters.** Owned, rented, leased, handshake — profit per acre
   is a different conversation on ground rented at $80/acre.
-- **Every animal record is a lot; an individual is a lot of one.** The pilot
+- **Every animal record sits on one lot row — but a lot is a GROUP, and an
+  animal is never called one.** *"An individual is a lot of one"* was this
+  decision's original wording and was **retired 2026-08-27**: the mechanism
+  below is what survived, the word is not
+  ([livestock.md](livestock.md), "The model, settled"). The pilot
   numbers force both shapes at once (10 named cows, 6 pigs as a group, 50
   layers as a flock, 1,000 broilers as ~14 pens). Modelling them as two entities
   means every downstream table — feed, cost, movement, mortality, dimension sync

@@ -491,8 +491,8 @@ export const productionRunOutputs = pgTable(
  * **A LINE IS NOT ALWAYS ONE ANIMAL.** `head_count` is 1 for a beef — where the
  * sheet really is per animal, with a tag on it — and 70 for a pen of broilers,
  * where no plant on earth weighs birds individually. Both shapes are the same
- * row, which is the same call `livestock` made when it decided an individual is
- * a lot of one.
+ * row, which is the same call `livestock` made when it put a group and a single
+ * animal on one row shape.
  *
  * **TWO LIVE WEIGHTS ARE ALLOWED TO DISAGREE, AND THEY ARE NEVER SUMMED.** The
  * input row's `weight_lb` is what left the farm; `live_lb` here is what the

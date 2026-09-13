@@ -474,6 +474,27 @@ describe("docs/help on disk", () => {
     }
   });
 
+  /**
+   * **THE SENTENCE THAT HID BEHIND THE PLACEHOLDER.** *"An individual is a lot
+   * of one"* was retired on 2026-08-27 and left the screens on 2026-08-28, and
+   * sixteen days later it was still in a client's guide — written as
+   * `{{livestockLot|lower}} of one`, which is why a grep for the phrase never
+   * found it. The labels are applied BEFORE the scan for exactly that reason:
+   * check what the reader gets, not what the author typed.
+   */
+  it("no guide tells a client an animal is a lot of one", () => {
+    const vocabulary = buildVocabulary(guideDefinitions(), {});
+    const retired = /\b(?:lot|group) of one\b/i;
+    for (const file of files()) {
+      const text = applyLabels(readFileSync(file, "utf8"), vocabulary);
+      expect(
+        retired.test(text),
+        `${file} says an animal is a lot of one. A lot is a GROUP of animals and ` +
+          `an animal is an animal — see docs/modules/livestock.md, "The model, settled".`,
+      ).toBe(false);
+    }
+  });
+
   it("every control marker names a known kind, variant and icon", () => {
     const icons = controlIconNames();
     // Placeholders resolve before the renderer sees a marker, so a label like

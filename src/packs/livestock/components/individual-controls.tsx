@@ -38,8 +38,8 @@ function parseNames(text: string): string[] {
  * **RECORD SOME OF A LOT AS INDIVIDUALS.**
  *
  * The founder's question on 2026-08-27 was *"I don't see how you track each
- * individual animal in the lot"*, and the answer — an individual is a lot of one
- * — was true, supported, and completely undiscoverable: ten named cows meant ten
+ * individual animal in the lot"*, and the answer — that the tables already
+ * backed one — was true, supported, and completely undiscoverable: ten named cows meant ten
  * trips through the Split dialog, inventing a code each time. This is that, once.
  *
  * **A TEXTAREA RATHER THAN N FIELDS**, because a list of animals arrives as a

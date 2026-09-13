@@ -29,9 +29,10 @@ import {
  * calls, so what the box adds is not a new way to write to the herd — it is
  * not having to find the screen.
  *
- * ONLY LOTS WITH ANIMALS IN THEM are offered. A finished group is not
- * something anybody is standing in front of, and a hundred dead pens in the
- * picker is how the right one gets picked wrongly.
+ * ONLY RECORDS WITH ANIMALS STILL IN THEM are offered, groups and named
+ * animals alike. A finished group is not something anybody is standing in
+ * front of, and a hundred dead pens in the picker is how the right one gets
+ * picked wrongly.
  *
  * NO TREATMENTS, DELIBERATELY. A treatment sets a withdrawal clock that
  * decides whether meat may be sold, and its route and dose change that clock
@@ -72,15 +73,26 @@ function refusal(err: unknown): unknown {
     : err;
 }
 
-/** A lot with animals standing in it, and what tells it from its neighbours. */
+/**
+ * One thing that can be told about — a group of animals, or a named animal —
+ * and what tells it from its neighbours.
+ *
+ * **`isAnimal` IS WHY THIS IS NOT SIMPLY A LOT.** The list holds Bluebell
+ * beside a pen of ninety-six, and both are rows in `livestock_lots`; without
+ * this the detail line described her as "Cattle · 1 head", which is the pen's
+ * vocabulary applied to a cow and no help to anybody choosing between them. A
+ * lot is a GROUP of animals (`docs/modules/livestock.md`, "The model,
+ * settled").
+ */
 interface LiveLot {
   value: string;
   label: string;
   species: string;
   head: number;
+  isAnimal: boolean;
 }
 
-/** The lots with animals standing in them. */
+/** Everything with animals still in it — groups and named animals alike. */
 async function liveLots(tx: Tx, tenantId: string): Promise<LiveLot[]> {
   const lots = await listLivestockLots(tx, tenantId);
   if (lots.length === 0) return [];
@@ -99,17 +111,44 @@ async function liveLots(tx: Tx, tenantId: string): Promise<LiveLot[]> {
       label: byId.get(lot.inventoryLotId)?.code ?? "",
       species: lot.species,
       head: summariseHead(movements.get(lot.inventoryLotId) ?? []).balance,
+      // Said once, on the record, since slice 8c — never re-derived from a
+      // head count, which turns a pen that lost all but one into an animal.
+      isAnimal: lot.recordKind === "animal",
     }))
     .filter((c) => c.label !== "" && c.head > 0);
 }
 
-/** "Meadow — Cattle · 12 head". What lets a person, or a model, choose. */
+/**
+ * "Meadow — Cattle · 12 head", "Bluebell — Cattle · one animal". What lets a
+ * person, or a model, choose.
+ *
+ * **A NAMED ANIMAL IS NOT DESCRIBED BY A HEAD COUNT.** "1 head" is true of her
+ * and tells nobody what she is; between a cow with a name and a pen of twenty
+ * the useful fact is which of the two this is.
+ *
+ * The count is still printed when a record calls itself an animal and holds
+ * some other number of head — that should not happen, and if it ever does the
+ * count is the surprising fact, so hiding it would be the lie.
+ */
 function describe(lot: LiveLot): string {
   const species = lot.species
     ? lot.species.charAt(0).toUpperCase() + lot.species.slice(1)
     : "";
-  const head = `${lot.head} head`;
-  return species ? `${species} · ${head}` : head;
+  const shape = lot.isAnimal && lot.head === 1 ? "one animal" : `${lot.head} head`;
+  return species ? `${species} · ${shape}` : shape;
+}
+
+/**
+ * What to call the record in the line somebody reads back afterwards.
+ *
+ * **NEVER "THE LOT".** Every summary below fell back to that string, and what
+ * it names is as often a cow with a name as it is a pen. The fallback is only
+ * reached if the id stopped matching between the proposal and the record, so
+ * it has to be a word that is honest about either — and it is reached from
+ * four places, which is three more than should have been writing it by hand.
+ */
+function nameOf(lots: LiveLot[], value: TellValues[string]): string {
+  return lots.find((l) => l.value === value)?.label ?? "the animals";
 }
 
 function words(value: string): string[] {
@@ -277,7 +316,7 @@ export const livestockTellSource: TellSource = {
           } catch (err) {
             throw refusal(err);
           }
-          const label = lots.find((l) => l.value === values.lot)?.label ?? "the lot";
+          const label = nameOf(lots, values.lot);
           const word = LOSS_REASONS.find((r) => r.value === values.reason)?.label ?? "left";
           return { summary: `${head} head — ${word.toLowerCase()} — from ${label}` };
         },
@@ -334,7 +373,7 @@ export const livestockTellSource: TellSource = {
           } catch (err) {
             throw refusal(err);
           }
-          const label = lots.find((l) => l.value === values.lot)?.label ?? "the lot";
+          const label = nameOf(lots, values.lot);
           if (wrong) return { summary: `${label} — ${notes ?? "something's up"}` };
           return { summary: notes ? `${label} — ${notes}` : `${label} — looked at, all normal` };
         },
@@ -369,7 +408,7 @@ export const livestockTellSource: TellSource = {
           } catch (err) {
             throw refusal(err);
           }
-          const label = lots.find((l) => l.value === values.lot)?.label ?? "the lot";
+          const label = nameOf(lots, values.lot);
           const zone = zones.find((z) => z.id === values.zone)?.name ?? "the paddock";
           return { summary: `${label} moved to ${zone}` };
         },
@@ -422,7 +461,7 @@ export const livestockTellSource: TellSource = {
           } catch (err) {
             throw refusal(err);
           }
-          const label = lots.find((l) => l.value === values.lot)?.label ?? "the lot";
+          const label = nameOf(lots, values.lot);
           const item = feeds.find((i) => i.id === values.item);
           return {
             summary: `${values.quantity} ${item?.stockingUnit ?? ""} of ${item?.name ?? "feed"} to ${label}`,

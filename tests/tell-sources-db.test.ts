@@ -12,7 +12,11 @@ import type { TellCtx } from "../src/lib/tell-sources/types";
 import { createItem, movementKindsForLots } from "../src/packs/inventory/ops";
 import { createParcel, createZone } from "../src/packs/land/ops";
 import { summariseHead } from "../src/packs/livestock/core/herd";
-import { createLivestockLot, listLivestockLots } from "../src/packs/livestock/ops";
+import {
+  createLivestockLot,
+  listLivestockLots,
+  startIndividual,
+} from "../src/packs/livestock/ops";
 
 /**
  * Telling it what happened (ADR 0039), as a member through real RLS with the
@@ -266,5 +270,48 @@ d("telling it what happened", () => {
     expect(await headNow()).toBe(head);
     const lots = await asOwner((tx) => listLivestockLots(tx, tenantId));
     expect(lots).toHaveLength(1);
+  });
+
+  /**
+   * **A LOT IS A GROUP, AND THE SHORTLIST HAS TO SAY SO.** Bluebell read
+   * "Cattle · 1 head" — the pen's own vocabulary applied to a cow, and no help
+   * at all to the person or the model choosing between her and a pen of
+   * twenty. Both are rows in `livestock_lots`, which is why nobody had
+   * noticed. Runs LAST on purpose: it adds a second record, and the assertion
+   * above counts them.
+   */
+  it("tells a named animal from a group, and never calls her a lot", async () => {
+    const bluebell = await asOwner((tx) =>
+      startIndividual(tx, ctx(), {
+        newItemName: "Beef cattle",
+        species: "cattle",
+        name: "Bluebell",
+        occurredOn: "2026-08-01",
+      }),
+    );
+
+    // Neither a name nor a species word, so the search falls through to its
+    // last pass and offers everything alive — which is the only way to see
+    // both shapes described side by side.
+    const proposal = await propose("checked the back pen, all quiet", [
+      {
+        action: "livestock.check",
+        fields: { lot: "the back pen", state: "All fine", notes: "all quiet" },
+      },
+    ]);
+    const offered = new Map(
+      (proposal.cards[0].options?.lot ?? []).map((o) => [o.label, o.detail]),
+    );
+    expect(offered.get("Bluebell")).toBe("Cattle · one animal");
+    expect(offered.get("Pen 2")).toBe(`Poultry · ${await headNow()} head`);
+
+    // And the line read back afterwards is her name, never a word for a pen.
+    const done = await recordTold(ctx(), [
+      {
+        actionSlug: "livestock.check",
+        values: { ...proposal.cards[0].values, lot: bluebell.lot.id },
+      },
+    ]);
+    expect(done.summaries).toEqual(["Bluebell — all quiet"]);
   });
 });

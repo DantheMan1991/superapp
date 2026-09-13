@@ -82,7 +82,9 @@ somewhere first in order to record something.
    you do not want.
 4. Anything it could not place is left empty with an amber line under it:
    `It heard "the back pen" — pick or type the right one.` Pick from the list.
-   **It never guesses the nearest one.**
+   Each row names the thing and then what it is, so you can tell two similar
+   names apart: `Meadow` reads `Cattle · 12 head` and a cow you have named
+   reads `Cattle · one animal`. **It never guesses the nearest one.**
 5. A card that is not ready says so: `Which animals is missing.` The button
    stays gray until every card is complete.
 6. Click {button:Record 2 things|primary}. You see what was recorded, such as

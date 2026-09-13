@@ -135,6 +135,46 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-09-13 — The shortlist knows a cow from a pen (`claude/the-tell-list-knows-an-animal`)
+
+**The follow-up [#537](https://github.com/DantheMan1991/superapp/pull/537)
+named and deliberately did not do.** That PR stopped the app calling an animal a
+lot everywhere a person reads; this is the one place a MODEL reads, and it was
+still doing both.
+
+- **Bluebell was described as `"Cattle · 1 head"`.** True, useless, and the
+  pen's own vocabulary applied to a cow — `LiveLot` carried no idea which kind
+  of record it held, so `describe()` had only a head count to print. It now
+  carries `isAnimal` (from `record_kind`, said once on the record since slice
+  8c and never re-derived from a balance) and prints **`Cattle · one animal`**.
+  `detail` is the field `TellCandidate` exists for: it is shown to the person
+  AND given to the model, and it is the only thing either has to choose on. A
+  named cow and a pen of twenty were indistinguishable on it.
+- **Four summaries fell back to the string `"the lot"`.** One `nameOf()` now
+  answers for all four, and its fallback is *"the animals"* — a word that is
+  honest whether the id that stopped matching was a pen's or a cow's. Four
+  hand-written copies of the same expression is three more than should have
+  existed, which is why all four said the same wrong thing.
+
+**The count is still printed when a record calls itself an animal and holds some
+other number of head.** That should not happen; if it ever does, the count is the
+surprising fact and hiding it behind *"one animal"* would be the lie.
+
+**PROVEN, NOT ASSERTED.** `tests/tell-sources-db.test.ts` gains a case that
+starts a named animal beside the existing pen, says something that is neither a
+name nor a species word so the search falls through to its last pass and offers
+both, and asserts the two detail lines side by side —
+`Bluebell → "Cattle · one animal"`, `Pen 2 → "Poultry · 22 head"` — then records
+a check on her and asserts the line read back is `Bluebell — all quiet`. It runs
+LAST in the file on purpose: it adds a second record, and the case above it
+counts them.
+
+`docs/help/workspace/getting-around.md` now says what a row in that picker
+shows, which it never did.
+
+**No migration and no behaviour change beyond the words** — one field on an
+internal interface, one string, and four call sites folded into one.
+
 ### 2026-09-13 — The sentence that hid behind the placeholder (`claude/an-individual-is-not-a-lot`)
 
 **The founder asked whether this app calls an animal a lot.** On the screens it

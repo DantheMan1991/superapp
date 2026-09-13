@@ -58,7 +58,7 @@ We never send what is on the page — no names, no numbers, no records. Only whe
 ## What happens next
 
 1. Your report lands in front of us with `New` on it.
-2. We read it, and answer on [Your reports](your-reports.md). A red dot appears on the {icon:message} button until you read it.
+2. We read it, and answer on [Your reports](your-reports.md). A red dot appears on the {icon:message} button until you read it, and we email you at the address on your Yosher account.
 3. If we need more from you, your report moves to `Needs your answer`. Reply in the same place.
 4. When we start on it, it moves to `Being worked on`, and to `Done` when it ships. If we are not going to do it, we say so and it moves to `Not planned` — you always get an answer either way.
 
@@ -72,7 +72,7 @@ We never send what is on the page — no names, no numbers, no records. Only whe
 
 ## Not on this page
 
-You cannot attach a photo or a screenshot yet. If a picture would help, say so in the box and we will ask for it. You also cannot see what anybody else at your business has reported — a report is yours alone.
+You cannot attach a photo or a screenshot yet. If a picture would help, say so in the box and we will ask for it. You also cannot see what anybody else at your business has reported — a report is yours alone. You cannot reply to our email either: answer on [Your reports](your-reports.md) so the whole conversation stays in one place.
 
 ## Who can do what
 

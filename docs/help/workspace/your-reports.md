@@ -33,6 +33,8 @@ Only you can see this page. Nobody else at your business sees what you sent, not
 
 Opening a report marks it read. The red dot on the {icon:message} button clears a moment later.
 
+We also email you when we answer. It goes to the address on your Yosher account, it says what we wrote, and it links straight back to this page. You get one for a real answer and nothing else: no email when the status changes on its own, and none for the notes we write to ourselves.
+
 ## How to answer a question we asked
 
 1. Open the report. Its status is `Needs your answer` and our question is the last message.
@@ -64,7 +66,7 @@ Replying does not change the status. Only we can move it, and we say why when we
 
 ## Not on this page
 
-You cannot delete a report or edit something you have already sent — a conversation stays as it was said, on both sides. You cannot see reports from anybody else at your business. There is no email when we answer: the red dot on the {icon:message} button is how you find out, so it is worth a glance.
+You cannot delete a report or edit something you have already sent — a conversation stays as it was said, on both sides. You cannot see reports from anybody else at your business. You cannot turn the email off, because we only send one when a person has written you an answer.
 
 ## Who can do what
 

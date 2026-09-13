@@ -44,7 +44,20 @@ export default async function FeedbackThreadPage({
   const closed = isClosedStatus(report.status);
 
   return (
-    <div className="space-y-6">
+    /*
+      `pb-24` CLEARS THE FLOATING MICROPHONE, and it is not cosmetic: the reply
+      box is the LAST thing on this page and its Send button is right-aligned,
+      so scrolling to the bottom used to park Send directly under the mic
+      (ADR 0051 fixes that button bottom-right at z-40). The mic won every tap
+      — found by trying to answer a thread while driving slice 1, where the
+      click opened the tell sheet instead of sending the reply.
+
+      Padding rather than moving the button: the mic is fixed to the VIEWPORT,
+      so the only way a bottom-of-page control stays reachable is for the page
+      to end above it. Any future screen whose primary action sits bottom-right
+      and last needs the same.
+    */
+    <div className="space-y-6 pb-24">
       <MarkRead reportId={report.id} />
 
       <Link

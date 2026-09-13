@@ -8,6 +8,7 @@ import { schema, withTenant, type Tx } from "@/db";
 import { requireTenant, type TenantContext } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { nativeAppInfo } from "@/lib/native-app-core";
+import { notifyFeedback } from "./notify";
 import { featureFromRoute } from "./core";
 import {
   FEEDBACK_BODY_MAX,
@@ -135,7 +136,7 @@ export async function fileReportAction(
   const { kind, title, body, route, routeQuery, viewport } = parsed.data;
   const shell = await shellFacts();
 
-  const id = await asReporter(ctx, async (tx) => {
+  const filed = await asReporter(ctx, async (tx) => {
     const who = await reporterIdentity(tx, ctx);
     const [report] = await tx
       .insert(schema.feedbackReports)
@@ -158,16 +159,20 @@ export async function fileReportAction(
         clientReadAt: new Date(),
       })
       .returning({ id: schema.feedbackReports.id });
-    await tx.insert(schema.feedbackMessages).values({
-      tenantId: ctx.tenant.id,
-      reportId: report.id,
-      side: "client",
-      clerkUserId: ctx.userId,
-      authorName: who.name,
-      body,
-    });
-    return report.id;
+    const [first] = await tx
+      .insert(schema.feedbackMessages)
+      .values({
+        tenantId: ctx.tenant.id,
+        reportId: report.id,
+        side: "client",
+        clerkUserId: ctx.userId,
+        authorName: who.name,
+        body,
+      })
+      .returning({ id: schema.feedbackMessages.id });
+    return { id: report.id, messageId: first.id };
   });
+  const id = filed.id;
 
   // Identifiers and coarse metadata only — never the text of the report,
   // which is the user's own words and belongs in its own table (AGENTS.md).
@@ -178,6 +183,18 @@ export async function fileReportAction(
     targetType: "feedback_report",
     targetId: id,
     meta: { kind, route, surface: shell.surface },
+  });
+
+  /*
+    TELL US. After the commit and awaited, never inside the transaction: a mail
+    provider has no business holding a database transaction open, and a send
+    that fails must leave a filed report behind rather than rolling one back.
+    `notifyFeedback` swallows everything — see its header.
+  */
+  await notifyFeedback(id, {
+    kind: "filed",
+    messageId: filed.messageId,
+    body,
   });
 
   revalidatePath("/dashboard/feedback");
@@ -197,7 +214,7 @@ export async function replyToReportAction(
   const ctx = await requireTenant();
   const { reportId, body } = parsed.data;
 
-  const ok = await asReporter(ctx, async (tx) => {
+  const messageId = await asReporter(ctx, async (tx) => {
     // RLS would refuse the insert anyway; asking first turns a database error
     // into a sentence the person can read.
     const [report] = await tx
@@ -210,23 +227,28 @@ export async function replyToReportAction(
         ),
       )
       .limit(1);
-    if (!report) return false;
+    if (!report) return null;
     const who = await reporterIdentity(tx, ctx);
-    await tx.insert(schema.feedbackMessages).values({
-      tenantId: ctx.tenant.id,
-      reportId,
-      side: "client",
-      clerkUserId: ctx.userId,
-      authorName: who.name,
-      body,
-    });
+    const [written] = await tx
+      .insert(schema.feedbackMessages)
+      .values({
+        tenantId: ctx.tenant.id,
+        reportId,
+        side: "client",
+        clerkUserId: ctx.userId,
+        authorName: who.name,
+        body,
+      })
+      .returning({ id: schema.feedbackMessages.id });
     await tx
       .update(schema.feedbackReports)
       .set({ updatedAt: new Date(), clientReadAt: new Date() })
       .where(eq(schema.feedbackReports.id, reportId));
-    return true;
+    return written.id;
   });
-  if (!ok) return { ok: false, error: "That report is not yours to answer." };
+  if (!messageId) {
+    return { ok: false, error: "That report is not yours to answer." };
+  }
 
   await logAudit({
     action: "feedback.client_replied",
@@ -234,6 +256,14 @@ export async function replyToReportAction(
     actorClerkUserId: ctx.userId,
     targetType: "feedback_report",
     targetId: reportId,
+  });
+
+  // Their answer is the thing most likely to unblock a report we asked about,
+  // so it reaches us the same way their first message did.
+  await notifyFeedback(reportId, {
+    kind: "client_replied",
+    messageId,
+    body,
   });
 
   revalidatePath("/dashboard/feedback");

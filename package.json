@@ -32,6 +32,7 @@
     "mail:probe-templates": "tsx scripts/jmap-templates-probe.ts",
     "mail:probe-autofile": "tsx scripts/jmap-autofile-probe.ts",
     "mail:probe-grant": "tsx scripts/jmap-grant-probe.ts",
+    "tell:eval": "tsx --tsconfig scripts/tsconfig.eval.json scripts/tell-eval.ts",
     "docs:extract-text": "tsx --conditions react-server scripts/extract-document-text.ts",
     "test": "vitest run",
     "test:isolation": "vitest run tests/isolation",

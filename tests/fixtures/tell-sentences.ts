@@ -157,17 +157,55 @@ export const TELL_CASES: readonly TellCase[] = [
   {
     said: "fed the broilers two bags",
     expect: ["livestock.feed"],
-    why: "'Bags' is not a unit this pack knows. The amount must be LEFT BLANK, never converted.",
-    needs: ["livestock"],
+    why: "Two traps in one. 'Bags' is not a unit this pack knows, so the amount must be LEFT BLANK rather than converted — and since inventory can be told, this must still reach the PEN, because stock leaving without reaching a lot loses the feed cost the pack exists to carry.",
+    needs: ["livestock", "inventory"],
   },
 
+  /* ── inventory ────────────────────────────────────────────────────────── */
+  {
+    said: "took twenty pounds of crumble out of the store",
+    expect: ["inventory.used"],
+    why: "Stock consumed on purpose, in a real unit, with no animal anywhere in the sentence.",
+    needs: ["inventory"],
+  },
+  {
+    said: "twenty pounds of crumble went off",
+    expect: ["inventory.adjusted"],
+    why: "Lost rather than used, and the reason has to become Went off rather than the sentence being forced into Stock used.",
+    needs: ["inventory"],
+  },
+  {
+    said: "found half a bag of crumble behind the shed",
+    expect: ["inventory.adjusted"],
+    why: "The only reason that ADDS stock. If this reads as a loss the sign is inverted and nobody sees it.",
+    needs: ["inventory"],
+  },
+  {
+    said: "I make it three hundred pounds of crumble",
+    expect: ["inventory.counted"],
+    why: "A TOTAL, not a change — the number said is what is there, and the books move by the difference. No count word in the sentence at all.",
+    needs: ["inventory"],
+  },
+  {
+    said: "there are only nine bags of crumble left",
+    expect: ["inventory.counted"],
+    why: "A total phrased as a complaint. The trap is reading \u201conly nine\u201d as nine having gone.",
+    needs: ["inventory"],
+  },
   /* ── across modules, which is where it will actually break ────────────── */
   {
     said: "the water trough in pen two is broken",
-    expect: ["livestock.check"],
-    tolerate: [["work.add"]],
-    why: "GENUINELY AMBIGUOUS and recorded as such: an observation about a pen, or a job for somebody. Both are defensible; neither is a bug.",
+    expect: ["livestock.check", "work.add"],
+    tolerate: [["livestock.check"], ["work.add"]],
+    why: "THE HARNESS CORRECTED ITS AUTHOR. This was written expecting ONE answer — an observation about a pen, or a job for somebody — and the model returned BOTH, three times out of three. Which is right: the trough is a thing seen AND a thing to fix, and a person would write down both. Either alone is still defensible, so both singles are tolerated; the pair is what is wanted.",
     needs: ["livestock", "work"],
+  },
+  {
+    said: "the broilers went through two bags of crumble",
+    expect: ["livestock.feed"],
+    tolerate: [["inventory.used"]],
+    why: "GENUINELY AMBIGUOUS once stock can be told: feeding animals is also using stock. Feeding is the better answer because it reaches the pen; using it is not wrong.",
+    needs: ["livestock", "inventory"],
   },
   {
     said: "order more feed bags before Friday",

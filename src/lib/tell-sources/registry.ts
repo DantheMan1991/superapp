@@ -1,5 +1,6 @@
 import "server-only";
 import { timeTellSource } from "@/modules/time/tell/source";
+import { inventoryTellSource } from "@/packs/inventory/tell/source";
 import { workTellSource } from "@/modules/work/tell/source";
 import { livestockTellSource } from "@/packs/livestock/tell/source";
 import type { TellSource } from "./types";
@@ -17,9 +18,18 @@ import type { TellSource } from "./types";
  * of things that need doing, which every business alive has. It is the source
  * that shows the slot is not a farm feature wearing a general coat.
  *
- * The ones that would come next, each a file and a line here: `inventory`
- * (stock used or counted), `land` (a paddock rested or topped), `production`
- * (a run's yield), `crm` (a call logged against a name).
+ * `inventory` joined them in Phase B and is the one that changes the shape of
+ * the problem: stock is said by every business, every day, and feeding animals
+ * is ALSO using stock — the first pair of actions in this product that a
+ * sentence can honestly belong to either of. `tests/fixtures/tell-sentences.ts`
+ * holds that pair, and `npm run tell:eval` is how it stays settled.
+ *
+ * The ones that would come next, each a file and a line here: `crm` (a call
+ * logged against a name), `land` (a paddock rested or topped), `production`
+ * (a run's yield).
+ *
+ * ORDER IS MOST-SAID FIRST: the clock is said by the most people, then the jobs
+ * everybody has, then stock, then the herd.
  *
  * ORDER MATTERS A LITTLE. Every action a tenant has goes into ONE tool
  * description (`tellToolFor`), so this list is the order the model reads them
@@ -29,5 +39,6 @@ import type { TellSource } from "./types";
 export const tellSources: readonly TellSource[] = [
   timeTellSource,
   workTellSource,
+  inventoryTellSource,
   livestockTellSource,
 ];

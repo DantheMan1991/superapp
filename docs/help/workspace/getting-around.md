@@ -90,6 +90,12 @@ somewhere first in order to record something.
    - An amber line means something true you should know before recording, such
      as `That is 3 more than Pen 2 is counted as having.` It is a warning, not
      a refusal: you can still record it if you mean to.
+   - **`Counted what is there` is the one where the two numbers differ.** You
+     say the total you counted; the books move by the difference. The card
+     shows all three — `Grower crumble on the books` `80 pounds`, `counted`
+     `88 pounds`, `adding` `+8` — so you can see what is about to be written
+     as well as what you said. If your count matches the books it says
+     `That is what the books already say — there is nothing to correct.`
 4. Anything it could not place is left empty with an amber line under it:
    `It heard "the back pen" — pick or type the right one.` Pick from the list.
    Each row names the thing and then what it is, so you can tell two similar
@@ -193,6 +199,9 @@ appear when they have something to work with.
 | `Looked at them` | That you walked the pen, what you saw, and whether anything is wrong | Which animals, and whether anything is wrong. Say how they were — good or bad — and it writes that down either way |
 | `Moved somewhere` | Animals moved onto a paddock | Which animals, and where to. Only when you keep Land |
 | `Fed them` | Feed or other stock given to animals, taken out of stock | Which animals, what, and how much **in the unit that item is counted in**, shown beside its name. Only when you keep Inventory |
+| `Stock used` | Something taken out of stock and used up | What, and how much in the unit it is counted in. Only when you keep Inventory |
+| `Stock lost or found` | Stock gone for a reason nobody chose, or turned up unexpectedly | What, how much, and what happened — `Went off`, `Thrown away`, `Damaged`, `Shrinkage`, `Missing`, `Taken for the house` or `Found`. Only `Found` adds stock; the rest take it away |
+| `Counted what is there` | The TOTAL you counted, with Yosher working out the correction | What, and how many there are. **Say the total, not the difference** — the card shows you both before you record it |
 
 ## What records itself, and what waits for you
 

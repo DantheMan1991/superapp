@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { LAUNCH_COOKIE } from "@/lib/launch";
-import { readNativeBridge, urlWantsToTell } from "@/lib/native-bridge";
+import { readNativeBridge, toldFrom, urlWantsToTell } from "@/lib/native-bridge";
 
 /**
  * The launch animation, played once per app launch (src/lib/launch.ts):
@@ -59,19 +59,35 @@ export function LaunchOverlay() {
      * milliseconds.
      */
     const bridge = readNativeBridge(window);
-    if (bridge?.app) {
+    const tell = bridge?.tell;
+    const app = bridge?.app;
+    if (tell || app) {
       void (async () => {
+        const skip = () => {
+          window.clearTimeout(out);
+          window.clearTimeout(end);
+          remember();
+          setDone(true);
+        };
         try {
-          const launch = await bridge.app!.getLaunchUrl();
-          if (urlWantsToTell(launch?.url)) {
-            window.clearTimeout(out);
-            window.clearTimeout(end);
-            remember();
-            setDone(true);
-          }
+          /*
+           * THE SHELL'S OWN ANSWER FIRST, and it is the one that is trusted.
+           *
+           * `TellPlugin.wasTold()` is a boolean this app sets in Java and
+           * reads here, with nothing in between. The two cleverer versions
+           * both failed silently on a real phone — a cookie set before any
+           * WebView exists, and Capacitor's `getLaunchUrl()`, which depends on
+           * how Capacitor chooses to record an intent it did not define. Both
+           * were guesses about somebody else's code, and the founder counted
+           * the same second and a half three times.
+           */
+          if (tell && toldFrom(await tell.wasTold())) return skip();
+          // An older build has `App` but no `wasTold`. Still worth asking:
+          // being wrong here only means the animation plays.
+          if (app && urlWantsToTell((await app.getLaunchUrl())?.url)) skip();
         } catch {
-          // No answer: the ordinary animation plays, which is the old
-          // behaviour and never wrong, only slow.
+          // No answer: the ordinary animation plays, which is never wrong,
+          // only slow.
         }
       })();
     }

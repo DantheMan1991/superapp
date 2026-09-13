@@ -1,6 +1,6 @@
 {
   "name": "yosher-mobile",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "private": true,
   "description": "The Yosher mobile app: a native shell around yosherapp.com. See docs/modules/mobile-app.md.",
   "scripts": {

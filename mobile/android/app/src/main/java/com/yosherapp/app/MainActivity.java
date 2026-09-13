@@ -74,6 +74,24 @@ public class MainActivity extends BridgeActivity {
     /** True between "the microphone opened" and "it stopped". Read by the page. */
     static volatile boolean listening = false;
 
+    /**
+     * Was THIS launch a long-press on "Say it"?
+     *
+     * Set here, in Java, and read by the page through `TellPlugin.wasTold()`.
+     *
+     * IT EXISTS BECAUSE THE TWO CLEVERER ANSWERS BOTH FAILED SILENTLY. First a
+     * cookie set before the page loads, so the server would skip the launch
+     * animation — `CookieManager` before any WebView exists does nothing on
+     * some Android versions and says nothing about it. Then the page asking
+     * Capacitor's `getLaunchUrl()`, which depends on how Capacitor chooses to
+     * record an intent it did not define. Both were guesses about somebody
+     * else's code, and the founder counted the same second and a half three
+     * times.
+     *
+     * This is a boolean this class sets and this app reads. Nothing between.
+     */
+    static volatile boolean launchedToTell = false;
+
     private SpeechRecognizer recognizer = null;
 
     @Override
@@ -82,6 +100,7 @@ public class MainActivity extends BridgeActivity {
         // bridge and starts the page loading. Both of these have to happen
         // first or they happen too late.
         boolean tell = isTellLaunch(getIntent());
+        launchedToTell = tell;
         if (tell) skipTheLaunchAnimation();
         registerPlugin(TellPlugin.class);
 
@@ -99,7 +118,12 @@ public class MainActivity extends BridgeActivity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        if (isTellLaunch(intent)) listenNow();
+        if (isTellLaunch(intent)) {
+            // A warm long-press. The page is already up and has no animation
+            // to skip, but the flag is kept honest either way.
+            launchedToTell = true;
+            listenNow();
+        }
     }
 
     private boolean isTellLaunch(Intent intent) {

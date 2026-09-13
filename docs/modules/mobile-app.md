@@ -13,6 +13,47 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-13 — The logo, on the third attempt (`claude/logo-really-gone`)
+
+The founder, with a screen recording: *"Still shows the logo with a long
+pause."* Third time counting the same second and a half.
+
+**Both previous attempts were guesses about somebody else's code, and both
+failed silently.**
+
+1. A cookie set before the page loads, so the SERVER would skip the animation.
+   `CookieManager` before any WebView exists does nothing on some Android
+   versions and says nothing about it — and the `catch` around it called that
+   "a slower launch, not a broken one", which is what made it invisible.
+2. The page asking Capacitor's `getLaunchUrl()`. That depends on how Capacitor
+   chooses to record an intent it did not define, which is not a thing to bet
+   a user-visible promise on.
+
+`TellPlugin.wasTold()` is a boolean this app sets in Java and reads in the
+overlay, with nothing in between. No cookie store, no framework's idea of what
+a launch url is. **When a mechanism fails silently twice, the answer is to stop
+using mechanisms nobody here owns.**
+
+`readNativeBridge` now REQUIRES `wasTold` before it will call a shell's hatch
+usable, so a 1.0.5 build falls back to the ordinary animation rather than
+calling a method that is not there — the one path whose entire job is not
+failing silently.
+
+Both older routes are kept behind it. They cost nothing when they work and the
+overlay no longer depends on either.
+
+#### What is still not known
+
+The web overlay is a mark zooming in on a blue gradient; **Android 12's own
+splash screen shows the app ICON on the window background** and stays until the
+app draws its first frame, which here means until the page loads. Both would be
+described as "the logo", and this change only removes the first. If the next
+recording still shows one, that is the answer and the fix is a theme change
+rather than anything in this file.
+
+Version 1.0.6, `versionCode` 7. **The web half and the native half must ship
+together**: the overlay calls a method that only exists from this build.
+
 ### 2026-09-12 — The phone listens before the web exists (`claude/native-speech`)
 
 The shortcut worked and was too slow. The founder: *"it takes way too long to

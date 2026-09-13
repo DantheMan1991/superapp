@@ -50,6 +50,12 @@ export interface AppPlugin {
  */
 export interface TellPlugin {
   /**
+   * Was this launch a long-press on "Say it"? NON-DESTRUCTIVE — the launch
+   * animation asks this too, and must not swallow the sentence on its way off
+   * screen.
+   */
+  wasTold(): Promise<{ tell?: boolean } | null | undefined>;
+  /**
    * Whatever was said before the page loaded, cleared as it is handed over —
    * and whether the microphone is STILL open, which is the other half of the
    * same question on a cold start.
@@ -108,13 +114,27 @@ export function readNativeBridge(w: unknown): NativeBridge | null {
   const tellUsable =
     tell !== null &&
     typeof tell.takePending === "function" &&
-    typeof tell.addListener === "function";
+    typeof tell.addListener === "function" &&
+    // A 1.0.5 build has the hatch but not this. Requiring it means an older
+    // app falls back to the ordinary animation rather than calling a method
+    // that is not there.
+    typeof tell.wasTold === "function";
   return {
     platform,
     push: usable ? (push as unknown as PushPlugin) : null,
     app: appUsable ? (appPlugin as unknown as AppPlugin) : null,
     tell: tellUsable ? (tell as unknown as TellPlugin) : null,
   };
+}
+
+/**
+ * Did the shell say this launch was a long-press on "Say it"?
+ *
+ * Absent means NO. A build that never sends the flag is one that never listens
+ * on its own, and the ordinary animation is right for it.
+ */
+export function toldFrom(payload: unknown): boolean {
+  return isRecord(payload) && payload.tell === true;
 }
 
 /**

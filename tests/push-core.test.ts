@@ -177,7 +177,7 @@ describe("the shell's bridge, as the page sees it", () => {
     expect(readNativeBridge({})).toBeNull();
     expect(readNativeBridge({ Capacitor: { isNativePlatform: () => false, getPlatform: () => "web" } })).toBeNull();
     const noPlugin = readNativeBridge({ Capacitor: { isNativePlatform: () => true, getPlatform: () => "android", Plugins: {} } });
-    expect(noPlugin).toEqual({ platform: "android", push: null });
+    expect(noPlugin).toEqual({ platform: "android", push: null, app: null });
   });
 
   it("finds the plugin when the shell carries it", () => {

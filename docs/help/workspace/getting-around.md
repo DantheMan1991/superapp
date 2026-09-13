@@ -63,7 +63,11 @@ A row clears however the thing arrives. Typing a new customer's name on an invoi
 Instead of finding the right screen and the right dialog, say it.
 
 **The round blue microphone button in the bottom right corner is on every
-page.** Press it and start talking. It is there while you are looking at an
+page.** Press it and start talking.
+
+**On a phone, you do not even have to open Yosher first.** Press and hold the
+Yosher icon on your home screen and pick **Say it** — the app opens already
+listening. Drag that onto your home screen and it becomes a button of its own. It is there while you are looking at an
 invoice, walking the daily round, or anywhere else — you never have to go
 somewhere first in order to record something.
 

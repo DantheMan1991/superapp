@@ -18,6 +18,19 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!--
+                Long-press the icon to open already listening (res/xml/shortcuts.xml).
+
+                The shortcut's intent names this activity EXPLICITLY, so there is
+                deliberately no `<data android:scheme="yosher" />` filter here: an
+                explicit intent needs none, and adding one would publish a
+                `yosher://` door any app or web page could knock on, to gain
+                nothing this shortcut does not already have.
+            -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <provider

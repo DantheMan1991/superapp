@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Mic } from "lucide-react";
 import {
   Sheet,
@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/sheet";
 import { TellBox } from "@/components/app/tell-box";
 import { cn } from "@/lib/utils";
+import { readNativeBridge, urlWantsToTell } from "@/lib/native-bridge";
 
 /**
  * SAY IT FROM ANYWHERE. The floating control, on every page of the dashboard.
@@ -51,6 +52,107 @@ export function TellLauncher({
 }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
+  const router = useRouter();
+  const params = useSearchParams();
+  const opened = useRef(false);
+
+  /*
+   * ONE TAP FROM THE HOME SCREEN.
+   *
+   * Long-pressing the app icon fires `yosher://tell`, which Capacitor hands
+   * to the page — on a cold start through `getLaunchUrl`, on a warm one
+   * through `appUrlOpen` — and the WEB is what decides it means "open already
+   * listening" (ADR 0032). Not a line of Java: the shortcut is declarative in
+   * the manifest and every decision about it is here.
+   *
+   * `?tell=1` on any dashboard url does the same, because a second door is
+   * coming (a Siri intent handing over to the site) and it should not need a
+   * second mechanism.
+   *
+   * `opened` guards it so a re-render, or an `appUrlOpen` arriving while the
+   * sheet is already up, cannot restart a recording over the top of one.
+   */
+  /*
+   * `?tell=1` IS ANSWERED DURING RENDER, not in an effect.
+   *
+   * React's documented way to react to a changed prop, and the pattern
+   * `app-shell.tsx` already uses to close its drawer on navigation: comparing
+   * against the previous value during render resolves in the SAME pass, where
+   * an effect would paint a closed sheet and then open it.
+   * `react-hooks/set-state-in-effect` refuses the effect form, and is right to.
+   */
+  const askedByUrl = params.get("tell") === "1";
+  const [answeredUrl, setAnsweredUrl] = useState(false);
+  if (askedByUrl && !answeredUrl) {
+    setAnsweredUrl(true);
+    setOpen(true);
+    // NOT `opened.current = true` — a ref may not be written during render,
+    // and it would be redundant anyway: `answeredUrl` is this path's own
+    // guard, and the ref below guards a different thing entirely (the
+    // cold-start url being read twice). The two doors do not need to know
+    // about each other; opening an open sheet is a no-op.
+  }
+
+  // Taking it back out of the url is a navigation, not state, so it belongs
+  // here: a refresh or a back button must not open the microphone again.
+  // `replace` rather than `push` — this was never a place in the history.
+  useEffect(() => {
+    if (answeredUrl && askedByUrl) router.replace(pathname);
+  }, [answeredUrl, askedByUrl, pathname, router]);
+
+  /*
+   * ONE TAP FROM THE HOME SCREEN.
+   *
+   * Long-pressing the app icon fires `yosher://tell`, which Capacitor hands to
+   * the page — on a cold start through `getLaunchUrl`, on a warm one through
+   * `appUrlOpen` — and the WEB decides it means "open already listening"
+   * (ADR 0032). Not a line of Java: the shell declares the door, every
+   * decision about it is here, and changing what a long-press DOES is a web
+   * deploy rather than a store release.
+   *
+   * Setting state from inside the async callback is fine and the lint rule
+   * agrees: it is not synchronous in the effect body, and it genuinely is a
+   * response to something that arrived from outside React.
+   */
+  useEffect(() => {
+    const bridge = readNativeBridge(window);
+    const app = bridge?.app;
+    if (!app) return;
+
+    let handle: { remove(): void | Promise<void> } | null = null;
+    let dropped = false;
+
+    void (async () => {
+      try {
+        const launch = await app.getLaunchUrl();
+        if (!dropped && !opened.current && urlWantsToTell(launch?.url)) {
+          opened.current = true;
+          setOpen(true);
+        }
+        const listener = await app.addListener("appUrlOpen", (payload) => {
+          const url =
+            typeof payload === "object" && payload !== null
+              ? (payload as { url?: unknown }).url
+              : null;
+          // A warm open can arrive at any time. Not guarded by `opened`,
+          // because a SECOND long-press after a recording finished should
+          // work — that guard is only about the cold-start url being read
+          // twice.
+          if (urlWantsToTell(url)) setOpen(true);
+        });
+        if (dropped) void listener.remove();
+        else handle = listener;
+      } catch {
+        // A shell without the plugin, or a phone that refuses. The floating
+        // button is untouched; only the shortcut is missing.
+      }
+    })();
+
+    return () => {
+      dropped = true;
+      void handle?.remove();
+    };
+  }, []);
 
   // NOT on the guides shelf or a guide page. Those are the one place somebody
   // is reading rather than doing, and a button that covers the last line of a

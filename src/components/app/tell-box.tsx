@@ -1,14 +1,28 @@
 "use client";
 
-import { useRef, useState, useSyncExternalStore, useTransition } from "react";
+import { useEffect, useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Sparkles, Volume2, VolumeX, X } from "lucide-react";
+import { CloudOff, Loader2, Sparkles, Volume2, VolumeX, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Panel } from "@/components/app/panel";
 import { DictateButton } from "@/components/app/dictate-button";
+import { describeAgo } from "@/lib/last-seen";
+import {
+  looksLikeNoSignal,
+  newQueueId,
+  queueOnTheServer,
+  queueWith,
+  queueWithout,
+  readQueue,
+  splitByAge,
+  subscribeQueue,
+  writeQueue,
+  type QueuedSentence,
+} from "@/lib/tell-sources/queue";
+import { WORTH_MENTIONING_MS } from "@/lib/tell-sources/spoken-at";
 import {
   canSpeak,
   isHushed,
@@ -120,17 +134,21 @@ export function TellBox({
   /*
    * ── SAYING IT BACK (tell.md, slice D1) ───────────────────────────────────
    *
-   * **IT ONLY SPEAKS WHEN IT WAS SPOKEN TO.** A ref rather than state because
-   * nothing renders from it and a re-render on every keystroke to track how
-   * the words arrived would be paying for a fact only two callbacks read.
+   * **IT ONLY SPEAKS WHEN IT WAS SPOKEN TO.** Somebody who typed is looking at
+   * the screen, and talking at them is the noise that gets a feature switched
+   * off. Set where words arrive by voice, cleared the moment somebody types.
    *
-   * Set where words arrive by voice, cleared the moment somebody types —
-   * because somebody typing is somebody looking, and talking at them is the
-   * noise that gets a feature switched off.
+   * **STATE, AND ALSO AN ARGUMENT, AND BOTH ARE NEEDED.** It was a ref until
+   * `read` started being called during render (the `said` prop below), because
+   * writing a ref during render is a real hazard rather than a lint opinion.
+   * State cannot be read back inside the async callback `read` starts either —
+   * that closure captured the value from BEFORE the render-phase update — so
+   * whether to speak travels as a parameter, and the state exists only for the
+   * buttons somebody presses later.
    */
-  const spoken = useRef(false);
-  const speak = (text: string) => {
-    if (spoken.current) sayIt(text);
+  const [aloud, setAloud] = useState(false);
+  const speakIf = (wasSpoken: boolean, text: string) => {
+    if (wasSpoken) sayIt(text);
   };
 
   // Both are browser facts with no server answer, so they are read as a
@@ -139,6 +157,25 @@ export function TellBox({
   // reports, so the first paint is the same either way.
   const canHear = useSyncExternalStore(subscribeNever, canSpeak, noVoiceOnTheServer);
   const hushed = useSyncExternalStore(subscribeHush, isHushed, noVoiceOnTheServer);
+
+  /*
+   * ── SENTENCES WAITING FOR SIGNAL (tell.md, slice D2) ─────────────────────
+   *
+   * A field has no bars, and until now the box simply LOST the sentence: the
+   * server action's fetch rejected, nothing caught it, and the words somebody
+   * said with cold hands were gone. The feature failed exactly where its whole
+   * justification lives.
+   *
+   * `replaying` is which queued sentence is on screen, so the record call can
+   * send the time it was SAID rather than the time it was sent. A ref, because
+   * nothing renders from it.
+   */
+  const queued = useSyncExternalStore(subscribeQueue, readQueue, queueOnTheServer);
+  // Set only from things a person did — `replay` and the online listener —
+  // never from `read`, which is also reached during render.
+  const [replaying, setReplaying] = useState<QueuedSentence | null>(null);
+  const now = new Date();
+  const { ready: sendable, stale } = splitByAge(queued, now);
 
   /*
    * WORDS THAT ARRIVED FROM OUTSIDE are read once, during render, for the
@@ -153,9 +190,10 @@ export function TellBox({
     // Everything that reaches this prop came through a microphone — the
     // shell's launcher, the app's `yosher://tell`, the home-screen shortcut.
     // Somebody who spoke into their pocket is the person who most needs to be
-    // answered out loud.
-    spoken.current = true;
-    read(said);
+    // answered out loud, so `aloud` is passed rather than read: this render's
+    // state is still false and the callback below would capture that.
+    setAloud(true);
+    read(said, { aloud: true });
   }
 
   const actionOf = (slug: string) => actions.find((a) => a.slug === slug);
@@ -171,14 +209,144 @@ export function TellBox({
     setActions([]);
   }
 
-  function read(said = sentence) {
+  /**
+   * Keep it, if there was nothing to send it down.
+   *
+   * Only a request that never ARRIVED is worth keeping: a server action that
+   * reached the server answers `{ error }`, and replaying one of those would
+   * repeat a sentence destined to fail identically forever. A rejected promise
+   * is the other case, and `looksLikeNoSignal` is the judgement about which.
+   */
+  function keepForSignal(
+    words: string,
+    err: unknown,
+    from: QueuedSentence | null,
+    wasSpoken: boolean,
+  ) {
+    const online = typeof navigator === "undefined" || navigator.onLine;
+    if (!looksLikeNoSignal(err, online)) {
+      const message = err instanceof Error ? err.message : "Something went wrong.";
+      toast.error(message);
+      speakIf(wasSpoken, message);
+      return;
+    }
+    // A replay that failed again is already in the queue; `queueWith` replaces
+    // by id, so saying it twice costs nothing.
+    const item: QueuedSentence =
+      from ?? { id: newQueueId(), said: words, spokenAt: new Date().toISOString() };
+    writeQueue(queueWith(readQueue(), item));
+    const message = "No signal. Saved — it will be read when you are back.";
+    toast.info(message);
+    speakIf(wasSpoken, message);
+    if (!from) reset();
+  }
+
+  function save(
+    what: TellCard[] | null = cards,
+    opts: { from?: QueuedSentence | null; aloud?: boolean } = {},
+  ) {
+    if (!what || what.length === 0) return;
+    const from = opts.from ?? replaying;
+    const wasSpoken = opts.aloud ?? aloud;
+    startSaving(async () => {
+      let result: Awaited<ReturnType<typeof recordTellAction>>;
+      try {
+        result = await recordTellAction({
+          entries: what.map((c) => ({ actionSlug: c.actionSlug, values: c.values })),
+          spokenAt: from?.spokenAt,
+        });
+      } catch (err) {
+        /*
+         * **THE CARDS ARE NOT QUEUED, AND THAT IS DELIBERATE.**
+         *
+         * They are a confirmed decision, and [ADR 0039](../../../docs/decisions/0039-a-pack-declares-what-it-can-be-told-in-one-sentence.md)'s
+         * first rule is that only a person's confirmation reaches the verb —
+         * a queue of decisions waiting to fire is a second way to write to the
+         * herd, with no idempotency to stop it firing twice. So they stay on
+         * screen, where the person who confirmed them is.
+         */
+        const online = typeof navigator === "undefined" || navigator.onLine;
+        const message = looksLikeNoSignal(err, online)
+          ? "No signal. Your cards are still here — press Record when you are back."
+          : err instanceof Error
+            ? err.message
+            : "Something went wrong.";
+        toast.error(message);
+        speakIf(wasSpoken, message);
+        return;
+      }
+      if ("error" in result) {
+        toast.error(result.error);
+        speakIf(wasSpoken, result.error);
+        // A real answer, not a lost connection. Replaying it would fail the
+        // same way tomorrow, so it stops waiting.
+        if (from) {
+          writeQueue(queueWithout(readQueue(), from.id));
+          setReplaying(null);
+        }
+        return;
+      }
+      if (from) {
+        writeQueue(queueWithout(readQueue(), from.id));
+        setReplaying(null);
+      }
+      /*
+       * **WHEN IT WAS SAID, IF THAT IS NOT NOW** ([ADR 0055](../../../docs/decisions/0055-a-queued-sentence-is-old-not-wrong.md)).
+       *
+       * A three-hour-old clock-in recorded silently looks exactly like a fresh
+       * one, and half of why the generous past bound is defensible at all is
+       * that this can be SAID. `clamped` is read as carefully as the delay:
+       * claiming a sentence was dated back when the server refused to would be
+       * the same lie pointing the other way.
+       */
+      const when = new Date();
+      const late =
+        !result.data.clamped && result.data.delayedMs >= WORTH_MENTIONING_MS
+          ? ` · said ${describeAgo(new Date(when.getTime() - result.data.delayedMs), when)}`
+          : "";
+      if (result.data.clamped && from) {
+        toast.warning("Recorded now — that was too long ago to date it back.");
+      }
+      const n = result.data.summaries.length;
+      toast.success(
+        (n === 1 ? result.data.summaries[0] : `Recorded ${n} things`) + late,
+      );
+      // NOT the toast's own words. The toast counts past one because a stack
+      // of them is unreadable; a voice has no such problem, and hearing all
+      // three answers to "pen one fine, pen two fine, pen three the water was
+      // frozen" is the whole reason somebody said it in one breath.
+      speakIf(wasSpoken, spokenConfirmation(result.data.summaries) + late);
+      reset();
+      router.refresh();
+      onRecorded?.();
+    });
+  }
+
+  /**
+   * Everything that must survive the async gap travels as an argument.
+   *
+   * `read` is reached from a button, from the online listener, AND during
+   * render — so it reads no ref and trusts no state it did not receive.
+   */
+  function read(
+    said = sentence,
+    opts: { from?: QueuedSentence | null; aloud?: boolean } = {},
+  ) {
+    const from = opts.from ?? null;
+    const wasSpoken = opts.aloud ?? aloud;
     if (said.trim() === "") return;
     startReading(async () => {
-      const result = await proposeTellAction({ sentence: said });
+      let result: Awaited<ReturnType<typeof proposeTellAction>>;
+      try {
+        result = await proposeTellAction({ sentence: said, spokenAt: from?.spokenAt });
+      } catch (err) {
+        keepForSignal(said, err, from, wasSpoken);
+        return;
+      }
       if ("error" in result) {
         toast.error(result.error);
         // A refusal is the one thing somebody walking away must not miss.
-        speak(result.error);
+        speakIf(wasSpoken, result.error);
         return;
       }
       const view = result.data.actions as ActionView[];
@@ -188,43 +356,46 @@ export function TellBox({
         // An explicit message, not an empty panel: "nothing found" and "it
         // broke" must not look the same.
         toast.info("Nothing to record from that.");
-        speak("Nothing to record from that.");
+        speakIf(wasSpoken, "Nothing to record from that.");
         return;
       }
       // ADR 0050 — straight through when every card is a complete one of an
       // action that declared itself safe to record unasked. Four taps to start
       // a clock is worse than the screen it replaces.
       if (readyToRecordUnasked(result.data.cards, view)) {
-        save(result.data.cards);
+        save(result.data.cards, { from, aloud: wasSpoken });
       }
     });
   }
 
-  function save(what: TellCard[] | null = cards) {
-    if (!what || what.length === 0) return;
-    startSaving(async () => {
-      const result = await recordTellAction({
-        entries: what.map((c) => ({ actionSlug: c.actionSlug, values: c.values })),
-      });
-      if ("error" in result) {
-        toast.error(result.error);
-        speak(result.error);
-        return;
-      }
-      const n = result.data.summaries.length;
-      toast.success(
-        n === 1 ? result.data.summaries[0] : `Recorded ${n} things`,
-      );
-      // NOT the toast's own words. The toast counts past one because a stack
-      // of them is unreadable; a voice has no such problem, and hearing all
-      // three answers to "pen one fine, pen two fine, pen three the water was
-      // frozen" is the whole reason somebody said it in one breath.
-      speak(spokenConfirmation(result.data.summaries));
-      reset();
-      router.refresh();
-      onRecorded?.();
-    });
+  /** A queued sentence goes back through the SAME path a fresh one takes. */
+  function replay(item: QueuedSentence) {
+    setSentence(item.said);
+    setReplaying(item);
+    // It arrived by voice in the first place, and whoever queued it in a field
+    // is the person who most needs telling out loud that it landed.
+    setAloud(true);
+    read(item.said, { from: item, aloud: true });
   }
+
+  /*
+   * BACK IN SIGNAL: send the oldest one. Registering a listener is all this
+   * effect does — the state it eventually touches happens on the event, not in
+   * the body, which is the difference between a subscription and the thing the
+   * lint rule is there to stop.
+   *
+   * No dependency array on purpose, so the handler closes over this render's
+   * state rather than the first one's. Re-registering a listener is cheaper
+   * than a stale queue.
+   */
+  useEffect(() => {
+    const backInSignal = () => {
+      const next = sendable[0];
+      if (next && !reading && !saving && cards === null) replay(next);
+    };
+    window.addEventListener("online", backInSignal);
+    return () => window.removeEventListener("online", backInSignal);
+  });
 
   function setValue(i: number, key: string, value: TellValue) {
     if (!cards) return;
@@ -256,13 +427,78 @@ export function TellBox({
             onChange={(e) => {
               setSentence(e.target.value);
               // Typing is looking. From here on the screen is the answer.
-              spoken.current = false;
+              setAloud(false);
             }}
             rows={2}
             maxLength={TELL_MAX_CHARS}
             placeholder={placeholder ?? "Three chicks dead in pen two"}
           />
         </div>
+
+        {/*
+          ── WAITING FOR SIGNAL (tell.md, slice D2) ───────────────────────────
+          Shown ABOVE the controls rather than tucked under them: a sentence
+          somebody said into a dead phone is the most important thing on this
+          screen until it lands, and a person who cannot see it has no reason to
+          believe it survived.
+        */}
+        {queued.length > 0 && (
+          <div className="space-y-2 rounded-md border border-dashed p-3">
+            <p className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+              <CloudOff className="size-4 shrink-0" />
+              {queued.length === 1
+                ? "1 thing waiting for signal"
+                : `${queued.length} things waiting for signal`}
+            </p>
+            <ul className="space-y-2">
+              {queued.map((item) => {
+                const old = stale.some((s) => s.id === item.id);
+                return (
+                  <li key={item.id} className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm">{item.said}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {old
+                          ? "Too long ago to record at the time you said it."
+                          : `said ${describeAgo(new Date(item.spokenAt), now)}`}
+                      </p>
+                    </div>
+                    {/*
+                      A STALE ONE IS NOT A DEAD END. The server would still
+                      record it, dated now, which is the wrong answer said
+                      confidently — so instead the words go back in the box and
+                      the person decides, knowing it will be dated today.
+                    */}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={reading || saving}
+                      onClick={() => {
+                        if (old) {
+                          setSentence(item.said);
+                          writeQueue(queueWithout(readQueue(), item.id));
+                        } else {
+                          replay(item);
+                        }
+                      }}
+                    >
+                      {old ? "Put it back" : "Send now"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      title="Forget it"
+                      onClick={() => writeQueue(queueWithout(readQueue(), item.id))}
+                    >
+                      <X className="size-4" />
+                      <span className="sr-only">Forget this one</span>
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
 
         {phoneListening ? (
           // No buttons at all. The recording belongs to the shell, and a Stop
@@ -308,14 +544,14 @@ export function TellBox({
               disabled={reading}
               onText={(said) => {
                 // Spoken, so it will be answered out loud.
-                spoken.current = true;
+                setAloud(true);
                 // STRAIGHT INTO THE READING. Somebody who has just spoken a
                 // sentence has already committed to it; making them press a
                 // second button to have it read is a tap that asks nothing.
                 const combined =
                   sentence.trim() === "" ? said : `${sentence.trim()} ${said}`;
                 setSentence(combined);
-                read(combined);
+                read(combined, { aloud: true });
               }}
             />
             <Button onClick={() => read()} disabled={reading || sentence.trim() === ""} size="sm">

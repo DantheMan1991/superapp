@@ -44,6 +44,9 @@ export * from "./sites";
 // websites — which is what a brand is since ADR 0045 — or to the business
 // itself, and is not the same thing as a mark in the site's footer (ADR 0047).
 export * from "./social";
+// What a client says is broken or missing, and the conversation that answers
+// it. A tenant table read by one console across every tenant — ADR 0053.
+export * from "./feedback";
 // Layer 2a — pack-owned tables. Same rules as any domain above; the separation
 // that matters is in `src/packs/`, where the code lives.
 export * from "./assets";

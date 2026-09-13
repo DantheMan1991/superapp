@@ -4,7 +4,7 @@
 > **Route:** /dashboard
 > **Order:** 0
 
-Yosher opens on the **Overview** page. The sidebar on the left takes you to every other page, and the search box under your business name jumps straight to one. Every page has a {icon:circle-question-mark} button beside its title that opens the guide for that page.
+Yosher opens on the **Overview** page. The sidebar on the left takes you to every other page, and the search box under your business name jumps straight to one. Every page has a {icon:circle-question-mark} button beside its title that opens the guide for that page, and a {icon:message} button next to it for telling us something is wrong.
 
 ## What you see
 
@@ -217,6 +217,15 @@ The same menu offers a way to manage the business. It opens the same panel you f
 3. Anything in the guide that names a control, such as {button:New bill|primary} or the `Overview` row, is live in the panel. Click it and the real one on the page is ringed for a moment, so you can see where it is. If it is not on the page right now, the panel tells you.
 4. Click {button:Open full guide|outline} at the bottom of the panel to read the guide on its own page, or `All guides` for the list of every guide. The panel closes when you go to another page.
 
+## How to tell us something is wrong
+
+1. Stay on the page where it went wrong. Click {icon:message} beside the {icon:circle-question-mark}.
+2. Pick `Something's broken`, `An idea` or `A question`.
+3. Fill in `In a few words` and `What happened?`, then click {button:Send|primary}. You see `Sent. We will answer you in Your reports.`
+4. A red dot on the {icon:message} button means we have answered. Click it, then the row at the top of the panel, to read it.
+
+[Telling us something is wrong](reporting-a-problem.md) covers what we send with your message. [Your reports](your-reports.md) is where the conversation lives.
+
 ## On a phone
 
 1. Tap {icon:menu} at the top left. The drawer opens with the search box and the full sidebar.
@@ -241,4 +250,4 @@ Print any page with your browser's print command. The sidebar, the top bar and t
 
 ## Who can do what
 
-Everyone sees the Overview, the sidebar, the search box and the help panel. Owners also see the `Subscription` card, the `Getting set up` section and the `Settings` group. Accountants see no `Mail` row. Yosher's own staff see a link back to the platform's admin area under the sidebar rows.
+Everyone sees the Overview, the sidebar, the search box, the help panel and the {icon:message} button. Owners also see the `Subscription` card, the `Getting set up` section and the `Settings` group. Accountants see no `Mail` row. Yosher's own staff see a link back to the platform's admin area under the sidebar rows.

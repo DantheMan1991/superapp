@@ -4,6 +4,7 @@ import { AppShell } from "@/components/app-shell";
 import { AfterHydration } from "@/components/app/after-hydration";
 import { requireSuperAdmin } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { countReportsNeedingOperator } from "@/lib/feedback/read";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,15 @@ export default async function AdminLayout({
   children: ReactNode;
 }) {
   const { userId } = await requireSuperAdmin();
+
+  /*
+    The number on the Feedback row. ONE count across every workspace, the
+    console's twin of the dot on the client's report button (ADR 0053) — and
+    the reason it is in the layout rather than on the page is that a report
+    waiting three days must be visible from the Clients list, not only from the
+    page that lists it.
+  */
+  const waitingFeedback = await countReportsNeedingOperator();
 
   // The god view is powerful — its use is logged.
   await logAudit({
@@ -30,6 +40,14 @@ export default async function AdminLayout({
           items: [
             { href: "/admin", label: "Clients", icon: "users", exact: true },
             { href: "/admin/retainers", label: "Retainers", icon: "clock" },
+            {
+              href: "/admin/feedback",
+              label: "Feedback",
+              icon: "message",
+              // The count, not an alert dot: unlike a mailbox that needs
+              // reconnecting, we know exactly how many are waiting.
+              badge: waitingFeedback,
+            },
           ],
         },
         {

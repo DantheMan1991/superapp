@@ -21,6 +21,8 @@ import {
 import { AfterHydration } from "@/components/app/after-hydration";
 import { PushRegistration } from "@/components/app/push-registration";
 import { TellLauncher } from "@/components/app/tell-launcher";
+import { FeedbackProvider } from "@/components/app/report-button";
+import { countUnreadReplies } from "@/lib/feedback/read";
 import { isServerSpeechConfigured } from "@/lib/speech/providers";
 import { SupportBanner } from "./support-banner";
 
@@ -48,15 +50,24 @@ export default async function DashboardLayout({
     enterpriseWord === ENTERPRISE_FALLBACK
       ? ENTERPRISE_FALLBACK_PLURAL
       : `${enterpriseWord}s`;
-  const [active, admin, mail, inApp, showLaunch] = await Promise.all([
-    getActiveModules(ctx.tenant.id),
-    isSuperAdmin(),
-    // One indexed SELECT against a number sync already wrote. Never a JMAP
-    // call — this layout renders on every dashboard page in the product.
-    getMailBadge(ctx.tenant.id, ctx.userId, ctx.role),
-    isNativeApp(),
-    launchPending(),
-  ]);
+  const [active, admin, mail, inApp, showLaunch, unreadFeedback] =
+    await Promise.all([
+      getActiveModules(ctx.tenant.id),
+      isSuperAdmin(),
+      // One indexed SELECT against a number sync already wrote. Never a JMAP
+      // call — this layout renders on every dashboard page in the product.
+      getMailBadge(ctx.tenant.id, ctx.userId, ctx.role),
+      isNativeApp(),
+      launchPending(),
+      /*
+        The dot on the report button (ADR 0053). Held to the same bar as the
+        mail badge next to it: ONE indexed count over rows this person already
+        owns, never a list. A SUPPORT VIEW COUNTS NOTHING — a superadmin
+        looking at a client's workspace is not the client, and a dot counting
+        somebody else's replies would be wrong in both directions.
+      */
+      ctx.support ? Promise.resolve(0) : countUnreadReplies(ctx),
+    ]);
 
   // Only features that are both switched on AND renderable appear in nav. A
   // capability pack can be declared, installed by a profile and switched on
@@ -244,7 +255,14 @@ export default async function DashboardLayout({
           expiresAt={ctx.support.expiresAt.toISOString()}
         />
       )}
-      {children}
+      {/* SAY THIS SCREEN IS WRONG, FROM THIS SCREEN. The provider rather than
+          the button, because the button is rendered by `PageHeader` deep
+          inside `children` and this layout is the only thing that knows the
+          count. Outside it — /admin, the public share page — there is no
+          provider and `ReportButton` draws nothing. */}
+      <FeedbackProvider unread={unreadFeedback} enabled={!ctx.support}>
+        {children}
+      </FeedbackProvider>
     </AppShell>
     </>
   );

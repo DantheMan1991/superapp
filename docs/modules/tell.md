@@ -71,7 +71,7 @@ measurable comes before the breadth that will strain it.**
 
 | # | Slice | State |
 | --- | --- | --- |
-| **A1** | **The selection harness.** A golden set of real sentences, each with the action it must select, run against the live model by a script and reported as an accuracy figure. Plus a pure test that no two `about` texts can be told apart by a person reading them cold. | |
+| **A1** | **The selection harness.** A golden set of real sentences, each with the action it must select, run against the live model by a script and reported as an accuracy figure. Plus the free half — what the model is GIVEN, checked on every push, inside a budget. | **shipped 2026-09-13** ([#542](https://github.com/DantheMan1991/superapp/pull/542)) · baseline **66/66** |
 | **A2** | **`preview()` on the contract.** The card reads back the CONSEQUENCE above **Record**, not the words the model parsed ([0054](../decisions/0054-tell-may-draft-never-send.md) §2). Blocks all of Phase C. | |
 | **A3** | **`find` wherever a list can grow.** `work.done` enumerates every open job into the model's prompt, which [0052](../decisions/0052-the-model-says-the-words-and-the-pack-goes-looking.md) says a list that can pass a few dozen must not do. Cheap now, a rewrite at two hundred jobs. | |
 | **A4** | **The forbidden-verb scan.** `tests/tell-forbidden-verbs.test.ts` reads every `**/tell/source.ts` and fails on an import from a denied seam ([0054](../decisions/0054-tell-may-draft-never-send.md) §1). A rule that lives only in an ADR lasts as long as somebody's memory of it. | |
@@ -118,7 +118,7 @@ screen.
 
 | # | Idea | Why it might be the best one here |
 | --- | --- | --- |
-| **D1** | **Say it back.** The confirmation is SPOKEN, not shown — press, speak, hear `Clocked in at 7:42`. Never look at the phone | In a barn holding a bucket this is the entire win. The app already has a native TTS route, and it turns a two-look interaction into a no-look one |
+| **D1** | **Say it back.** The confirmation is SPOKEN, not shown — press, speak, hear `Clocked in at 7:42`. Never look at the phone | In a barn holding a bucket this is the entire win — it turns a two-look interaction into a no-look one. Nothing needs installing (`speechSynthesis` is a browser API and both native shells are WebViews) and nothing is built either: **there is no text-to-speech anywhere in this repo today**, and whether it works inside the app's WebView is the first thing to check rather than the first thing to assume |
 | **D2** | **Say it with no signal.** A field has no bars. Queue the sentence and record it when there is signal, with the phone saying so | [0049](../decisions/0049-speech-is-a-fork-in-the-road-not-a-provider.md) makes this tractable: inside the app the TRANSCRIPT is produced on the handset, so what has to be queued is a short string, not audio. **Without this the feature fails exactly where it is needed most** |
 | **D3** | **Correct it by voice.** *"No, pen three"* amends the card instead of starting the sentence again | The card is two feet away and your hands are full |
 | **D4** | **The business's own words.** *"The girls"* means the laying flock on this farm and nothing on the next one. Learn it from corrections, per tenant | `speciesWords` already proves the shape, from the industry profile. This is the tenant-level version, and it is what makes it feel like it knows the place |
@@ -130,6 +130,56 @@ screen.
 | **D10** | **Say both rather than guess.** When the model was torn between two ACTIONS, show both and let one tap settle it | Rule 2 already does this for choices within an action. It does not yet do it for the action itself |
 
 ## Build log
+
+### 2026-09-13 — Slice A1: the box gets a score, and it is 66/66 (`claude/tell-selection-harness`)
+
+**Written up here rather than where it happened.** [#542](https://github.com/DantheMan1991/superapp/pull/542)
+merged before this dossier existed, so its entry lands in the file it belongs to
+rather than in a file it would have to be moved out of.
+
+**The failure this measures cannot be caught any other way.** Every action a
+tenant has goes into ONE tool description; eight today, sixty-plus if the plan
+fills sixteen sources, many of them near-synonyms across module boundaries. The
+model picking the wrong MODULE throws nothing, refuses nothing, and draws a
+perfectly convincing card against the wrong verb.
+
+```
+  Hilltop Farm · dev branch · 22 sentences × 3
+  ████████████████████████  66/66 runs picked the right verb
+  catalogue: 8 actions, 5889 characters in every sentence's prompt
+```
+
+- **`tests/fixtures/tell-sentences.ts`** — 22 sentences, each with the verb it
+  must become and one line saying why it is HARD. A sentence already written into
+  an action's `about` earns no place: those are the answers printed on the back
+  of the paper. Two cases expect NOTHING, because a box that reaches for the
+  nearest verb when nothing happened is worse than one that shrugs. One is marked
+  genuinely ambiguous and tolerates either answer — ambiguity is a fact about
+  English, and scoring it as failure would push the catalogue towards fixing the
+  model instead of fixing the words.
+- **`npm run tell:eval`** — the live run. Reports accuracy, what it picked
+  INSTEAD, and which PAIRS were confused for one another: a pair appearing twice
+  is two `about` texts that do not separate, which is a writing job with an
+  address. `--repeat` matters more than it looks; a case that passes two runs in
+  three is unsettled, which is invisible at 1. Read-only — `recordTold` is never
+  called.
+- **`tests/tell-catalogue-db.test.ts`** — the free half, on every push: unique
+  slugs, an action living in the source its slug names, every `about` carrying a
+  quoted example, every field fillable, and **a budget** per action and in total.
+
+**IT CAUGHT ITS OWN AUTHOR ON THE FIRST RUN.** The score read 18/18 — by silently
+skipping four of twenty-two, whose `needs` named `land` and `inventory`: real
+modules, but not tell SOURCES. A skipped case is neither pass nor fail, so
+dropping the hardest ones made the number go UP. That is the exact failure the
+fixture's own header warns about, committed inside the fixture. Both halves now
+guard it, and 22/22 is the honest figure.
+
+**A trap for the next script.** `npm run tell:eval` cannot run under
+`tsx --conditions react-server`, which is what every other model-touching script
+uses: the chain reaches `@/packs/index`, which imports every pack's React
+Component, and React's server build has no `createContext`. It runs through
+`scripts/tsconfig.eval.json` instead, which maps `server-only` to the stub the
+tests already use.
 
 Newest first. **From 2026-09-13 the platform's own entries live here**; a
 module's or pack's `tell/source.ts` is that area's own work and its entry stays
@@ -219,5 +269,7 @@ No code changed.
 - **The device endpoint does not adopt `unattended`.** A clock-in through
   `/api/device/tell` still takes two calls, deliberately — the endpoint has its
   own idempotency to think about ([0050](../decisions/0050-a-safe-verb-records-itself.md)).
-- **Nobody has measured selection accuracy**, because there is nothing to
-  measure it with. Slice A1.
+- **Selection accuracy is measured but not watched.** `npm run tell:eval` is
+  run by hand, against one tenant, whenever somebody remembers. It should be run
+  before and after every source added in Phase B, and the figure recorded in the
+  build log; nothing enforces that but this sentence.

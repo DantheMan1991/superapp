@@ -11,6 +11,11 @@ import {
   replyToReportAction,
 } from "@/lib/feedback/actions";
 import { FEEDBACK_BODY_MAX } from "@/lib/feedback/vocabulary";
+import {
+  AttachmentPicker,
+  type PickedFile,
+} from "@/components/app/attachment-picker";
+import { useFeedbackTenantId } from "@/components/app/report-button";
 
 /**
  * The client's half of a thread: marking it read, and answering.
@@ -41,17 +46,24 @@ export function MarkRead({ reportId }: { reportId: string }) {
 
 export function ReplyBox({ reportId }: { reportId: string }) {
   const router = useRouter();
+  const tenantId = useFeedbackTenantId();
   const [body, setBody] = useState("");
+  const [files, setFiles] = useState<PickedFile[]>([]);
   const [pending, start] = useTransition();
 
   const send = () => {
     start(async () => {
-      const result = await replyToReportAction({ reportId, body });
+      const result = await replyToReportAction({
+        reportId,
+        body,
+        attachments: files.map((f) => f.pathname),
+      });
       if (!result.ok) {
         toast.error(result.error);
         return;
       }
       setBody("");
+      setFiles([]);
       router.refresh();
     });
   };
@@ -71,6 +83,13 @@ export function ReplyBox({ reportId }: { reportId: string }) {
         onChange={(event) => setBody(event.target.value)}
         placeholder="Add anything else that would help — or answer the question above."
         aria-label="Your reply"
+      />
+      {/* A second screenshot is often the thing that explains the first. */}
+      <AttachmentPicker
+        tenantId={tenantId}
+        files={files}
+        onChange={setFiles}
+        disabled={pending}
       />
       <div className="flex justify-end">
         <Button type="submit" disabled={pending || body.trim().length === 0}>

@@ -28,7 +28,9 @@ Only you can see this page. Nobody else at your business sees what you sent, not
 - **`Your reports`.** The link at the top left goes back to the list.
 - **The title, with its kind and status beside it.** Under them: when you sent it and from which page. The page name is a link — click it to go back to the screen the report is about.
 - **The conversation.** Every message in order, oldest first. Yours are under your name, ours are under `Yosher`. Each one carries the date and time in your business's own time zone.
+- **Pictures you sent.** Any screenshot sits under the message it came with. Click one to open it full size in a new tab. A PDF shows as a link with its size instead.
 - **The reply box.** Always there, whatever the status. Type and click {button:Send|primary}.
+- **{button:Add a screenshot|outline}.** Under the reply box. A second picture is often the thing that explains the first. Up to three per message, pictures or a PDF, 10MB each.
 - **A line above the box on a finished report.** `We marked this done. If that is not right, say so — we will pick it back up.` Or `not planned` instead of `done`.
 
 Opening a report marks it read. The red dot on the {icon:message} button clears a moment later.
@@ -66,7 +68,7 @@ Replying does not change the status. Only we can move it, and we say why when we
 
 ## Not on this page
 
-You cannot delete a report or edit something you have already sent — a conversation stays as it was said, on both sides. You cannot see reports from anybody else at your business. You cannot turn the email off, because we only send one when a person has written you an answer.
+You cannot delete a report, edit something you have already sent, or take a picture back off a message you have sent — a conversation stays as it was said, on both sides. You cannot see reports from anybody else at your business. You cannot turn the email off, because we only send one when a person has written you an answer.
 
 ## Who can do what
 

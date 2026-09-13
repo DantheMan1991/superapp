@@ -7,6 +7,7 @@ import {
   FeedbackKindChip,
   FeedbackStatusChip,
 } from "@/components/app/feedback-chips";
+import { AttachmentList } from "@/components/app/attachment-list";
 import { requireSuperAdmin } from "@/lib/auth";
 import { getReportForConsole } from "@/lib/feedback/read";
 import {
@@ -177,6 +178,7 @@ export default async function AdminFeedbackThreadPage({
                 {formatWhen(message.createdAt, zone)}
               </p>
               <p className="mt-1 whitespace-pre-wrap text-sm">{message.body}</p>
+              <AttachmentList attachments={message.attachments} />
             </div>
           );
         })}

@@ -14,6 +14,42 @@
 Newest first. One entry per session/PR that touched this area. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-13 — Slice 2: show me what you saw (`claude/feedback-2-attachments`)
+
+**Migrations 0323 (table) and 0324 (RLS)**, applied and verify-rls green on dev
+and prod before the PR. The client attaches up to three pictures or a PDF to a
+report or a reply; both surfaces render them.
+
+- **`0323` was HAND-REORDERED, and this one would have failed on PRODUCTION
+  too.** `feedback_attachments` carries a composite FK to
+  `feedback_messages (tenant_id, id)`, and that table had no unique index on
+  the pair — it is added in the same migration, and drizzle-kit emitted it
+  AFTER the constraint that needs it. 0321 hit the same trap confined to a
+  fresh database; this one would not have been.
+- **Its own allowlist, narrower than the DMS's**: `image/jpeg|png|webp|gif` and
+  `application/pdf`, 10MB, three per message. **SVG is refused**, which is the
+  only entry on that list worth arguing about — served inline from our origin
+  it is script in the session, and it passes any naive `image/*` test.
+- **The browser is believed about nothing.** It sends PATHNAMES; the type, the
+  size and the name are read back off the stored blob with `head()` and
+  re-checked (`attach.ts`), the arrangement `documents/ingest.ts` set.
+- **Upload on pick, not on submit** — the wait happens while somebody is still
+  typing, and a refused file is refused beside the picker instead of taking the
+  whole report down. The cost is an orphaned blob when a sheet is abandoned;
+  see Open items.
+- **One serving route for both audiences** (`/api/feedback/attachments/[id]`),
+  branching explicitly: superadmin under `withSystem`, everybody else under
+  their own tenant and user. A second route would be a four-line copy, and a
+  copy is how two readers stop agreeing about what may be seen.
+- **Driven end to end** on Hilltop Farm: a real PNG through the token door, the
+  row written with a random-suffixed pathname, the image served back `200
+  image/png` `inline` with a sanitized filename, a bogus id `404`, and the
+  console rendering the same file through the `withSystem` branch.
+- **`eslint --fix` rewrote a control-character regex into literal control
+  bytes** while tidying an unused disable comment. `sanitizeFileName` now
+  filters by character code instead — see Decisions.
+- Both guides updated; they said a picture could not be attached.
+
 ### 2026-09-13 — Slice 1: it reaches you (`claude/feedback-1-it-reaches-you`)
 
 **No migration.** Three emails, through `src/lib/email/send.ts` like everything
@@ -92,7 +128,7 @@ and none of them is worth building against a loop that does not close.
 | --- | --- | --- |
 | 0 | The loop exists end to end — tables, button, client thread, console | **Built** |
 | 1 | It reaches you — email both ways on a report and on a real reply | **Built** |
-| 2 | Attachments — a screenshot from the phone's camera roll, own blob prefix and RLS | Planned |
+| 2 | Attachments — a screenshot from the phone's camera roll, own blob prefix and RLS | **Built** |
 | 3 | Raise as work — a console button that opens a work item in the operator tenant, linked back | Planned |
 
 Slice 1 came first because slice 0 shipped a loop that only closed when
@@ -104,6 +140,7 @@ operator from a count on a nav row. Both now also arrive by email.
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
 | `feedback_reports` | One report: title, kind, status, where it was filed from, read state per side | Own rows in own tenant (`tenant_id` AND `clerk_user_id`). SELECT/INSERT/UPDATE only — **no DELETE policy**, because withdrawing a report is `declined`, said out loud. `closed_at` moves with `status` and never alone, so "closed" is one indexable predicate. FK to `tenants` ON DELETE CASCADE. |
+| `feedback_attachments` | A picture on one message: blob pathname, name, type, size | Hangs off a MESSAGE, not a report — a screenshot arrives WITH the sentence that explains it. Composite FKs to both the report and the message, so neither can be crossed. SELECT proves the report is yours AND the message is not internal; INSERT adds `clerk_user_id = app_current_user()`. **No UPDATE and no DELETE policy.** `blob_pathname` unique platform-wide, so two rows can never point at one blob. |
 | `feedback_messages` | One turn, including the FIRST — the opening description is a message, so the thread is homogeneous | Composite FK `(tenant_id, report_id)`, so a message cannot attach to a report in another tenant. Client SELECT requires `internal = false` AND an EXISTS on a report that is theirs; client INSERT additionally pins `side = 'client'`. **No UPDATE and no DELETE policy at all** — a conversation is not a thing either side may rewrite (`audit_log`'s posture). |
 
 `kind`, `status`, `side` and `surface` are **text + CHECK, never `pgEnum`**: a
@@ -179,6 +216,39 @@ another.
   `getMailBadge` set: one SELECT over rows the person already owns, on every
   page in the product.
 
+### Slice 2's own decisions
+
+- **The allowlist is narrower than the DMS's, and SVG is the entry that
+  matters.** `image/svg+xml` passes any `startsWith("image/")` test and is
+  script when served inline from our own origin — stored XSS against the whole
+  dashboard session. It is refused at UPLOAD, not merely served as an
+  attachment, so it can never sit in the store waiting to be mis-served. Office
+  files, archives and `message/rfc822` are out for a duller reason: a bug
+  report is not a filing cabinet, and every type not on the list is one fewer
+  thing to reason about in a store strangers' staff write into from a phone.
+- **A picture is SHOWN, a PDF is LINKED.** The point of a screenshot is that
+  whoever reads the thread sees it without deciding to; a download that starts
+  on its own is a worse surprise than a click.
+- **Upload on pick, not on submit.** Puts the wait beside the typing rather
+  than after the button, and lets a refused file be refused on its own instead
+  of failing the report. It buys an orphan when somebody abandons a sheet —
+  the trade is in Open items.
+- **One serving route, two readers, branching explicitly.**
+  `/api/documents/blob/upload` argues against one route serving two gates and is
+  right about two MODULES; this is one resource with the two audiences it was
+  built for, and the pages are already shaped that way. A second route would
+  differ in four lines, and a copy is how two readers quietly stop agreeing.
+- **`head()` runs inside the caller's transaction**, which the house rule
+  normally forbids. Validating first and inserting after leaves a window where
+  the message commits and its files do not, rendering a sentence that points at
+  pictures that are not there. Bounded at three network calls by
+  `MAX_ATTACHMENTS_PER_MESSAGE`, on a path a person waits on once.
+- **`sanitizeFileName` filters by character code rather than by regex**, and
+  that is not style. The escaped form trips `no-control-regex`; running
+  `eslint --fix` over the disable comment REWROTE ` -` as literal
+  control bytes in the source — a regex that still worked and was unreadable
+  and unreviewable. Do not put that construct back.
+
 ### Slice 1's own decisions
 
 - **`senderIdentity: "platform"` on every feedback email.** `sendEmail` picks
@@ -240,6 +310,20 @@ another.
 
 ## Open items
 
+- **An abandoned upload leaves an orphaned blob.** A file chosen and then
+  dropped — sheet closed, tab shut — is in the store with no row pointing at
+  it, and nothing collects it. Deliberate: the alternative puts the whole wait
+  after the Send button and makes a failed upload fail the report. At a handful
+  of screenshots a week it is cheaper than that; if the store ever gets big, a
+  sweep over `feedback/` for pathnames absent from `feedback_attachments` is
+  the fix, and it is safe because the unique index makes the row the only
+  claim on a path.
+- **The operator cannot attach anything.** Slice 2 gives the picker to the
+  reporter only, so "here is what it should look like" has to be a sentence.
+  The shape already allows it — a row hangs off a message, and a message has a
+  side — so it is a picker and a policy clause rather than a migration. The
+  SELECT policy already refuses an attachment on an internal note, which is the
+  leak that would otherwise open the day it is added.
 - **No real delivery has been observed.** `EMAIL_FROM_DOMAIN` lives in Vercel,
   not in the local env, so driving slice 1 proved the path runs and fails
   gracefully (`not_configured`) — not that a message arrives. The first report

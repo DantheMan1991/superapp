@@ -9,6 +9,8 @@ import { requireTenant, type TenantContext } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { nativeAppInfo } from "@/lib/native-app-core";
 import { notifyFeedback } from "./notify";
+import { attachToMessage, FeedbackAttachError } from "./attach";
+import { MAX_ATTACHMENTS_PER_MESSAGE } from "./attachments";
 import { featureFromRoute } from "./core";
 import {
   FEEDBACK_BODY_MAX,
@@ -56,15 +58,27 @@ const Context = z.object({
     .default(""),
 });
 
+/**
+ * PATHNAMES ONLY. Not the type, not the size, not the display name — every one
+ * of those is read back off the stored blob by `attachToMessage`, so a forged
+ * field here buys nothing. See its header.
+ */
+const Attachments = z
+  .array(z.string().min(1).max(500))
+  .max(MAX_ATTACHMENTS_PER_MESSAGE)
+  .default([]);
+
 const FileInput = Context.extend({
   kind: z.enum(FEEDBACK_KINDS),
   title: z.string().trim().min(3).max(FEEDBACK_TITLE_MAX),
   body: z.string().trim().min(1).max(FEEDBACK_BODY_MAX),
+  attachments: Attachments,
 });
 
 const ReplyInput = z.object({
   reportId: z.string().uuid(),
   body: z.string().trim().min(1).max(FEEDBACK_BODY_MAX),
+  attachments: Attachments,
 });
 
 /** Run as the signed-in person — `app_current_user()` is half the policy. */
@@ -133,45 +147,70 @@ export async function fileReportAction(
     };
   }
   const ctx = await requireTenant();
-  const { kind, title, body, route, routeQuery, viewport } = parsed.data;
+  const { kind, title, body, route, routeQuery, viewport, attachments } =
+    parsed.data;
   const shell = await shellFacts();
 
-  const filed = await asReporter(ctx, async (tx) => {
-    const who = await reporterIdentity(tx, ctx);
-    const [report] = await tx
-      .insert(schema.feedbackReports)
-      .values({
-        tenantId: ctx.tenant.id,
-        clerkUserId: ctx.userId,
-        reporterName: who.name,
-        reporterEmail: who.email,
-        kind,
-        title,
-        route,
-        routeQuery,
-        featureSlug: featureFromRoute(route),
-        surface: shell.surface,
-        appVersion: shell.appVersion,
-        viewport,
-        userAgent: shell.userAgent,
-        // Their own words are read by definition. Without this the dot on
-        // their own button would light up for the thing they just sent.
-        clientReadAt: new Date(),
-      })
-      .returning({ id: schema.feedbackReports.id });
-    const [first] = await tx
-      .insert(schema.feedbackMessages)
-      .values({
+  /*
+    A REFUSED FILE MUST NOT LOOK LIKE A CRASH. `attachToMessage` throws, and it
+    throws INSIDE the transaction on purpose so the whole message rolls back
+    with it — but what the person sees has to be a sentence, not a red box
+    about an unhandled error. Only our own error is caught: anything else is a
+    real fault and belongs in the logs uncaught.
+  */
+  let filed: { id: string; messageId: string };
+  try {
+    filed = await asReporter(ctx, async (tx) => {
+      const who = await reporterIdentity(tx, ctx);
+      const [report] = await tx
+        .insert(schema.feedbackReports)
+        .values({
+          tenantId: ctx.tenant.id,
+          clerkUserId: ctx.userId,
+          reporterName: who.name,
+          reporterEmail: who.email,
+          kind,
+          title,
+          route,
+          routeQuery,
+          featureSlug: featureFromRoute(route),
+          surface: shell.surface,
+          appVersion: shell.appVersion,
+          viewport,
+          userAgent: shell.userAgent,
+          // Their own words are read by definition. Without this the dot on
+          // their own button would light up for the thing they just sent.
+          clientReadAt: new Date(),
+        })
+        .returning({ id: schema.feedbackReports.id });
+      const [first] = await tx
+        .insert(schema.feedbackMessages)
+        .values({
+          tenantId: ctx.tenant.id,
+          reportId: report.id,
+          side: "client",
+          clerkUserId: ctx.userId,
+          authorName: who.name,
+          body,
+        })
+        .returning({ id: schema.feedbackMessages.id });
+      // In the SAME transaction as the message: a sentence pointing at pictures
+      // that are not there is worse than a refusal.
+      await attachToMessage(tx, {
         tenantId: ctx.tenant.id,
         reportId: report.id,
-        side: "client",
+        messageId: first.id,
         clerkUserId: ctx.userId,
-        authorName: who.name,
-        body,
-      })
-      .returning({ id: schema.feedbackMessages.id });
-    return { id: report.id, messageId: first.id };
-  });
+        pathnames: attachments,
+      });
+      return { id: report.id, messageId: first.id };
+    });
+  } catch (err) {
+    if (err instanceof FeedbackAttachError) {
+      return { ok: false, error: err.message };
+    }
+    throw err;
+  }
   const id = filed.id;
 
   // Identifiers and coarse metadata only — never the text of the report,
@@ -212,40 +251,55 @@ export async function replyToReportAction(
   const parsed = ReplyInput.safeParse(input);
   if (!parsed.success) return { ok: false, error: "That message is empty." };
   const ctx = await requireTenant();
-  const { reportId, body } = parsed.data;
+  const { reportId, body, attachments } = parsed.data;
 
-  const messageId = await asReporter(ctx, async (tx) => {
-    // RLS would refuse the insert anyway; asking first turns a database error
-    // into a sentence the person can read.
-    const [report] = await tx
-      .select({ id: schema.feedbackReports.id })
-      .from(schema.feedbackReports)
-      .where(
-        and(
-          eq(schema.feedbackReports.id, reportId),
-          eq(schema.feedbackReports.clerkUserId, ctx.userId),
-        ),
-      )
-      .limit(1);
-    if (!report) return null;
-    const who = await reporterIdentity(tx, ctx);
-    const [written] = await tx
-      .insert(schema.feedbackMessages)
-      .values({
+  let messageId: string | null;
+  try {
+    messageId = await asReporter(ctx, async (tx) => {
+      // RLS would refuse the insert anyway; asking first turns a database error
+      // into a sentence the person can read.
+      const [report] = await tx
+        .select({ id: schema.feedbackReports.id })
+        .from(schema.feedbackReports)
+        .where(
+          and(
+            eq(schema.feedbackReports.id, reportId),
+            eq(schema.feedbackReports.clerkUserId, ctx.userId),
+          ),
+        )
+        .limit(1);
+      if (!report) return null;
+      const who = await reporterIdentity(tx, ctx);
+      const [written] = await tx
+        .insert(schema.feedbackMessages)
+        .values({
+          tenantId: ctx.tenant.id,
+          reportId,
+          side: "client",
+          clerkUserId: ctx.userId,
+          authorName: who.name,
+          body,
+        })
+        .returning({ id: schema.feedbackMessages.id });
+      await attachToMessage(tx, {
         tenantId: ctx.tenant.id,
         reportId,
-        side: "client",
+        messageId: written.id,
         clerkUserId: ctx.userId,
-        authorName: who.name,
-        body,
-      })
-      .returning({ id: schema.feedbackMessages.id });
-    await tx
-      .update(schema.feedbackReports)
-      .set({ updatedAt: new Date(), clientReadAt: new Date() })
-      .where(eq(schema.feedbackReports.id, reportId));
-    return written.id;
-  });
+        pathnames: attachments,
+      });
+      await tx
+        .update(schema.feedbackReports)
+        .set({ updatedAt: new Date(), clientReadAt: new Date() })
+        .where(eq(schema.feedbackReports.id, reportId));
+      return written.id;
+    });
+  } catch (err) {
+    if (err instanceof FeedbackAttachError) {
+      return { ok: false, error: err.message };
+    }
+    throw err;
+  }
   if (!messageId) {
     return { ok: false, error: "That report is not yours to answer." };
   }

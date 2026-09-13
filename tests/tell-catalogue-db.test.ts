@@ -252,6 +252,49 @@ d("the catalogue every tenant's model is given", () => {
     }
   });
 
+  /**
+   * **THE CEILING, AND WHETHER IT IS ACTUALLY GONE** (tell.md, slice A3).
+   *
+   * `work.done` used to write every open job into the model's prompt, which is
+   * the shape ADR 0052 forbids for a list that can pass a few dozen — and a
+   * to-do list is the list in this product most certain to. It made the
+   * catalogue's size a function of how busy the business is.
+   *
+   * Measuring that on the pilot farm proved nothing: it has two open jobs, so
+   * enumerating them was cheap and the change read as 105 characters WORSE.
+   * The win is not a saving, it is a slope — so the slope is what is asserted.
+   */
+  it("does not grow with the number of open jobs", async () => {
+    const before = tellToolFor(actions).description.length;
+
+    await asOwner(async (tx) => {
+      for (let i = 0; i < 60; i++) {
+        await createUnlinkedWork(
+          tx,
+          { tenantId, userId: SIGNED_IN },
+          {
+            title: `Check the water in paddock ${i}`,
+            notes: "",
+            dueOn: null,
+          },
+        );
+      }
+    });
+
+    const after = await asOwner(async (tx) => {
+      const out: TellAction[] = [];
+      for (const source of tellSources) out.push(...(await source.actions(tx, ctx())));
+      return tellToolFor(out).description.length;
+    });
+
+    // Sixty jobs at ~30 characters each is ~1,800 the old shape would have
+    // added. Nothing is allowed to scale with them now — a little slack for
+    // an action appearing at all, and none for its contents.
+    expect(
+      after - before,
+      `the catalogue grew ${after - before} characters for 60 more jobs — something is enumerating again`,
+    ).toBeLessThan(50);
+  });
   it("the golden set names actions that exist", () => {
     const have = new Set(actions.map((a) => a.slug));
     const reachable = TELL_CASES.filter((c) =>

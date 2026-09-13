@@ -73,8 +73,8 @@ measurable comes before the breadth that will strain it.**
 | --- | --- | --- |
 | **A1** | **The selection harness.** A golden set of real sentences, each with the action it must select, run against the live model by a script and reported as an accuracy figure. Plus the free half — what the model is GIVEN, checked on every push, inside a budget. | **shipped 2026-09-13** ([#542](https://github.com/DantheMan1991/superapp/pull/542)) · baseline **66/66** |
 | **A2** | **`preview()` on the contract.** The card reads back the CONSEQUENCE above **Record**, not the words the model parsed ([0054](../decisions/0054-tell-may-draft-never-send.md) §2). Blocks all of Phase C. | **shipped 2026-09-13** · `livestock.loss` is its first consumer |
-| **A3** | **`find` wherever a list can grow.** `work.done` enumerates every open job into the model's prompt, which [0052](../decisions/0052-the-model-says-the-words-and-the-pack-goes-looking.md) says a list that can pass a few dozen must not do. Cheap now, a rewrite at two hundred jobs. | |
-| **A4** | **The forbidden-verb scan.** `tests/tell-forbidden-verbs.test.ts` reads every `**/tell/source.ts` and fails on an import from a denied seam ([0054](../decisions/0054-tell-may-draft-never-send.md) §1). A rule that lives only in an ADR lasts as long as somebody's memory of it. | |
+| **A3** | **`find` wherever a list can grow.** `work.done` enumerated every open job into the model's prompt, which [0052](../decisions/0052-the-model-says-the-words-and-the-pack-goes-looking.md) forbids for a list that can pass a few dozen. | **shipped 2026-09-13** · no saving today, a ceiling removed |
+| **A4** | **The forbidden-verb scan.** `tests/tell-forbidden-verbs.test.ts` reads every `**/tell/source.ts` and fails on an import from a denied seam ([0054](../decisions/0054-tell-may-draft-never-send.md) §1). | **shipped 2026-09-13** · **Phase A is closed** |
 
 **Why A1 is first and not last.** Every action a tenant has goes into ONE tool
 description (`tellToolFor`). Eight actions today; all sixteen sources filled is
@@ -130,6 +130,68 @@ screen.
 | **D10** | **Say both rather than guess.** When the model was torn between two ACTIONS, show both and let one tap settle it | Rule 2 already does this for choices within an action. It does not yet do it for the action itself |
 
 ## Build log
+
+### 2026-09-13 — Slices A3 and A4: Phase A closes (`claude/phase-a-closes`)
+
+Both are housekeeping, and both exist so that Phase B can add ten sources
+without anybody having to remember anything.
+
+#### A3 — `work.done` stops enumerating
+
+Every open job was written into the model's prompt. That is the shape
+[ADR 0052](../decisions/0052-the-model-says-the-words-and-the-pack-goes-looking.md)
+forbids for a list that can pass a few dozen, and **a to-do list is the list in
+this product most certain to**: a job is added by anybody, closed by anybody, and
+never archived for being numerous. It made the catalogue's size a function of how
+busy the business is.
+
+**AND MEASURING IT ON THE PILOT FARM PROVED NOTHING.** Hilltop Farm has two open
+jobs, so enumerating them was cheap and the change read as **105 characters
+worse** — the new hint is longer than the two choices it replaced. Selection
+accuracy was unmoved at 66/66. The win is not a saving, it is a slope.
+
+So the slope is what is asserted: `tell-catalogue-db.test.ts` adds sixty jobs and
+requires the catalogue to grow by under fifty characters. The old shape would
+have added roughly eighteen hundred.
+
+The search is three passes, loosest last, the way livestock's is — the title
+whole or contained, then a word in common (*"sorted the gate"* is not the title
+*"Fix the top gate"*, and a sentence almost never is), then everything open,
+because a shortlist is a question and an empty result is the dead end 0052 ended.
+**Whole words only, never edit distance**: ticking the wrong job is the failure
+that matters, because it LEAVES the open list and somebody believes a gate is
+shut when it is open.
+
+**One normaliser now, not two.** `saidWords` moved to `shape.ts` and livestock
+uses it. Two sources each carrying their own idea of what a word is, is how
+"Pen 2" and "pen-2" come to match in one pack and not the other, and neither
+author ever finds out.
+
+#### A4 — the line is enforced, not remembered
+
+[ADR 0054](../decisions/0054-tell-may-draft-never-send.md) §1 says a tell action
+may record money and may never move it or reach a third party. **A rule that
+lives only in an ADR lasts exactly as long as the next person's recollection of
+it**, and the sources it guards are meant to go from three to sixteen.
+
+`tests/tell-forbidden-verbs.test.ts` reads every `**/tell/source.ts` and fails on
+an import from a denied seam — by PATH (`/payments/`, `/stripe`, `email/compose`,
+`invoicing/send-invoice`) and by NAME (`/^send[A-Z]/`, `/^issue(Invoice|AndSend|CreditMemo)/`,
+`/^(charge|refund|capture|payout)[A-Z]/`). The name patterns are the half that
+catches the verb nobody has written yet. It also enforces §2: a source importing
+a ledger seam must declare `preview`.
+
+**PROVEN BY POISONING IT.** A `sendInvoiceEmail` import was added to `work`'s
+source and both halves fired with the messages they were written with — the send
+denial and the missing preview — then it was taken out again. A scan test that
+has never failed is a scan test nobody has checked.
+
+**Its honest limit, stated in the file:** it reads the FILE, not the module
+graph. A source reaching a denied verb through three helpers is not caught.
+This stops the obvious thing, done the obvious way, by somebody who had not read
+the ADR — which is the case that will actually happen.
+
+**Phase A is closed.** Nothing in Phase B has to be trusted to remember a rule.
 
 ### 2026-09-13 — Slice A2: the card says what it will do (`claude/the-card-says-what-it-will-do`)
 

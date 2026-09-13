@@ -11,6 +11,7 @@ import {
 import { listItems, listLots, movementKindsForLots } from "@/packs/inventory/ops";
 import { listZones } from "@/packs/land/ops";
 import { packContext } from "@/lib/packs/tenant-context";
+import { saidWords } from "@/lib/tell-sources/shape";
 import { summariseHead } from "../core/herd";
 import {
   LivestockError,
@@ -151,14 +152,6 @@ function nameOf(lots: LiveLot[], value: TellValues[string]): string {
   return lots.find((l) => l.value === value)?.label ?? "the animals";
 }
 
-function words(value: string): string[] {
-  return value
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .split(/\s+/)
-    .filter((w) => w !== "");
-}
-
 /**
  * WHAT THESE WORDS COULD MEAN — the search behind `lotField`.
  *
@@ -180,13 +173,13 @@ function words(value: string): string[] {
  */
 function findLots(lots: LiveLot[], speciesWords: Record<string, string[]>) {
   return (said: string): TellCandidate[] => {
-    const asked = words(said);
+    const asked = saidWords(said);
     if (asked.length === 0) return [];
     const spoken = new Set(asked);
     const phrase = asked.join(" ");
 
     const named = lots.filter((lot) => {
-      const label = words(lot.label).join(" ");
+      const label = saidWords(lot.label).join(" ");
       return label !== "" && (label === phrase || phrase.includes(label));
     });
     if (named.length > 0) return named.map(toCandidate);

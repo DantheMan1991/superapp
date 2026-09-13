@@ -8,6 +8,7 @@ import { schema, withSystem } from "@/db";
 import { requireSuperAdmin } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { isClosedStatus } from "@/lib/feedback/core";
+import { notifyFeedback } from "@/lib/feedback/notify";
 import {
   FEEDBACK_BODY_MAX,
   FEEDBACK_KINDS,
@@ -81,15 +82,18 @@ export async function replyFromConsoleAction(
       .limit(1);
     if (!report) return null;
 
-    await tx.insert(schema.feedbackMessages).values({
-      tenantId: report.tenantId,
-      reportId,
-      side: "operator",
-      clerkUserId: userId,
-      authorName: internal ? author : "Yosher",
-      body,
-      internal,
-    });
+    const [written] = await tx
+      .insert(schema.feedbackMessages)
+      .values({
+        tenantId: report.tenantId,
+        reportId,
+        side: "operator",
+        clerkUserId: userId,
+        authorName: internal ? author : "Yosher",
+        body,
+        internal,
+      })
+      .returning({ id: schema.feedbackMessages.id });
 
     const nextStatus = status ?? report.status;
     await tx
@@ -106,7 +110,7 @@ export async function replyFromConsoleAction(
           : null,
       })
       .where(eq(schema.feedbackReports.id, reportId));
-    return report;
+    return { ...report, messageId: written.id, nextStatus };
   });
   if (!ok) return { ok: false, error: "That report is gone." };
 
@@ -118,6 +122,22 @@ export async function replyFromConsoleAction(
     targetType: "feedback_report",
     targetId: reportId,
     meta: status ? { status } : {},
+  });
+
+  /*
+    TELL THEM. An INTERNAL note tells nobody, and `notifyFeedback` returns
+    before it reads anything for one — the check is restated in `notify-core`
+    and pinned by `tests/feedback-notify.test.ts`, because this is the one
+    mistake in the module that cannot be taken back.
+
+    Sent after the commit and after the status has moved, so the mail can
+    quote the status the client will see when they open it.
+  */
+  await notifyFeedback(reportId, {
+    kind: "operator_replied",
+    messageId: ok.messageId,
+    body,
+    internal,
   });
 
   revalidatePath("/admin/feedback");

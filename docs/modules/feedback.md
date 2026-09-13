@@ -14,6 +14,37 @@
 Newest first. One entry per session/PR that touched this area. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-13 — Slice 1: it reaches you (`claude/feedback-1-it-reaches-you`)
+
+**No migration.** Three emails, through `src/lib/email/send.ts` like everything
+else, so the dev guard, the caps, the idempotency claim and the send log all
+apply unchanged.
+
+- **A new report and a client's reply reach US**; **our reply reaches THEM.**
+  A status change on its own emails nobody — if it is worth telling them, it is
+  worth typing, which is what the status picker beside the reply box is for.
+- **An internal note emails nobody**, and the check is made twice: `notifyFeedback`
+  returns before it reads anything, and `feedbackEmails` returns `[]` for one.
+  Driven both ways in the running app — `internal: true` produced no send
+  attempt at all in the server log, `internal: false` produced exactly one.
+- **`sendEmail` gained `senderIdentity`** (`"tenant"` by default, so no existing
+  caller changed). Feedback forces `"platform"`: answering a bug report for a
+  farm whose own domain is verified would otherwise arrive from
+  `notifications@thefarm.com` signed by us. The one-line decision is
+  `senderChoice`, pure and tested in `tests/email.test.ts`.
+- **Who at Yosher hears it**: the operator tenant's owners first (data, the
+  route `notifyPlan` set for a health-check lead), `SUPER_ADMIN_EMAILS` as a
+  fallback — because a database with no operator flagged would otherwise tell
+  nobody that the product is broken, and that is the worst channel to let fail
+  quietly.
+- **Nothing may throw.** The record is committed before any of this runs; a
+  provider that is down must not turn "your report was filed" into a red toast
+  about a report that is filed. Proven locally, where `EMAIL_FROM_DOMAIN` is
+  unset: every action returned 200 with `feedback email not sent
+  (not_configured)` in the log, reason only, no address and no subject (S9).
+- **Also fixed, found by driving**: the reply box's Send button sat under the
+  floating microphone. Both guides corrected — they said there was no email.
+
 ### 2026-09-13 — Slice 0: the loop exists end to end (`claude/feedback-the-report-button`)
 
 **The whole conversation, plain.** Two tables, a button on every screen, the
@@ -60,13 +91,13 @@ and none of them is worth building against a loop that does not close.
 | # | Slice | State |
 | --- | --- | --- |
 | 0 | The loop exists end to end — tables, button, client thread, console | **Built** |
-| 1 | It reaches you — Resend to `SUPER_ADMIN_EMAILS` on a new report, and to the client on a reply | Next |
+| 1 | It reaches you — email both ways on a report and on a real reply | **Built** |
 | 2 | Attachments — a screenshot from the phone's camera roll, own blob prefix and RLS | Planned |
 | 3 | Raise as work — a console button that opens a work item in the operator tenant, linked back | Planned |
 
-Slice 1 is first because slice 0 ships a loop that only closes when somebody
-opens the product: the client learns of a reply from a dot, and the operator
-from a count on a nav row.
+Slice 1 came first because slice 0 shipped a loop that only closed when
+somebody opened the product: the client learned of a reply from a dot, and the
+operator from a count on a nav row. Both now also arrive by email.
 
 ## Data model
 
@@ -148,6 +179,35 @@ another.
   `getMailBadge` set: one SELECT over rows the person already owns, on every
   page in the product.
 
+### Slice 1's own decisions
+
+- **`senderIdentity: "platform"` on every feedback email.** `sendEmail` picks
+  the tenant's own verified domain when there is one, which is right for an
+  invoice and wrong for us. Answering a bug report for a farm whose domain is
+  verified would have arrived from `notifications@thefarm.com`, reading as the
+  farm emailing itself about a bug in somebody else's software. The flag
+  changes only the SENDER; caps, log and dev guard stay keyed on `tenantId`,
+  because who pays for a send and who signs it are different questions.
+- **A status change emails nobody.** Same reasoning as the thread: a machine
+  line is not an answer. The status *is* quoted in the mail we send when a
+  person actually writes, so "now marked Needs your answer" arrives attached to
+  the question that caused it.
+- **The client's copy is written for a person outside the building**: plain
+  short sentences, no dashes standing in for a pause. `tests/feedback-notify.test.ts`
+  asserts it — no em dash, and no line over 21 words — because this is the only
+  mail in the module a client reads and it goes out under the founder's name.
+- **The recipient is never taken from a form.** Ours come from `profiles` or
+  from `SUPER_ADMIN_EMAILS`; theirs from `feedback_reports.reporter_email`,
+  which was itself copied from `profiles` at filing time. Nothing typed into
+  the box can redirect an email.
+- **The mic covered the Send button.** ADR 0051 fixes the tell control
+  bottom-right at z-40; the reply box is the last thing on the client's thread
+  page and its Send is right-aligned, so scrolling to the bottom parked the
+  button underneath it and every tap opened the tell sheet. `pb-24` on that
+  page ends the content above the mic. **Any future screen whose primary action
+  is both bottom-right and last needs the same** — there is no app-wide
+  clearance, and this is the first page to need one.
+
 ### Found by driving it, 2026-09-13
 
 - **A raw `sql` fragment carries no column type, and `sql<Date>` is a lie
@@ -180,11 +240,14 @@ another.
 
 ## Open items
 
-- **Nothing pushes** (slice 1). A reply reaches the client as a dot; a report
-  reaches the operator as a count. Both need somebody to open the product.
-  Whether a reply also becomes an `AttentionSource` line on *What needs you* was
-  considered and deliberately left out of slice 0 — the founder's call; the
-  outbound email is the cheaper half of the same problem and comes first.
+- **No real delivery has been observed.** `EMAIL_FROM_DOMAIN` lives in Vercel,
+  not in the local env, so driving slice 1 proved the path runs and fails
+  gracefully (`not_configured`) — not that a message arrives. The first report
+  filed on production after the merge is the check, and the send log at
+  `outbound_emails` (kind `feedback`) is where to look.
+- **A reply still does not reach *What needs you*.** Deliberately out of slice 0
+  on the founder's call, and the email covers the same ground more cheaply.
+  Worth revisiting only if people start missing answers.
 - **An owner cannot see what their staff reported.** ADR 0053 records why and
   what the fix looks like if it is ever wanted: a workspace-visible flag chosen
   by the person filing, not a loosened policy for everybody.

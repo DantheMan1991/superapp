@@ -56,7 +56,15 @@ export type EmailKind =
    */
   | "enquiry"
   /** A health-check lead landing in the operator tenant (ADR 0041, slice 2). */
-  | "health_check";
+  | "health_check"
+  /**
+   * A feedback report or a reply to one (ADR 0053). Sent BOTH ways — to us
+   * when a client reports something or answers a question, and to the client
+   * when we answer. Always `senderIdentity: "platform"`: this is Yosher
+   * writing, and a farm whose own domain is verified must not receive "we
+   * answered your bug report" from itself.
+   */
+  | "feedback";
 
 /** Per tenant, per hour. A valve, not accounting. */
 export const TENANT_HOURLY_CAP = 100;
@@ -77,6 +85,23 @@ export interface SendEmailInput {
    */
   idempotencyKey: string;
   replyTo?: string | null;
+  /**
+   * WHOSE NAME IS ON IT. Defaults to `"tenant"`, which is the behaviour every
+   * existing caller had: a tenant with a verified domain sends as itself, and
+   * everyone else sends from the platform domain under the tenant's display
+   * name.
+   *
+   * `"platform"` forces ours even when the tenant has a verified domain, and
+   * exists for mail that is FROM YOSHER rather than from the business — a
+   * feedback reply being the first. Without it, answering a bug report for a
+   * farm whose domain is verified would arrive from `notifications@thefarm.com`
+   * signed by us, which reads as the farm emailing itself about a bug in
+   * somebody else's software.
+   *
+   * It changes only the SENDER. The caps, the log and the dev guard are keyed
+   * on `tenantId` exactly as before.
+   */
+  senderIdentity?: "tenant" | "platform";
   /**
    * Files to attach. For a document the recipient is expecting — an invoice —
    * not a way to ship data around: the total is capped below, and the cap is
@@ -142,6 +167,42 @@ export function applyDevGuard(
     };
   }
   return { to: redirect, subject: `[dev -> ${to}] ${subject}` };
+}
+
+/**
+ * WHOSE NAME GOES ON IT — the one decision `senderIdentity` makes, pulled out
+ * so it can be tested without a provider, a database or a network.
+ *
+ * Everything else about a send is unchanged by the flag: the caps, the
+ * idempotency claim, the log row and the dev guard are all keyed on
+ * `tenantId`, because who PAYS for a send and who SIGNS it are different
+ * questions.
+ */
+export function senderChoice(input: {
+  senderIdentity?: "tenant" | "platform";
+  tenantName: string | null;
+  verifiedDomain: {
+    domain: string;
+    fromLocalPart: string;
+    fromName: string;
+  } | null;
+}): {
+  tenantName: string;
+  verifiedDomain: {
+    domain: string;
+    fromLocalPart: string;
+    fromName: string;
+  } | null;
+} {
+  if (input.senderIdentity === "platform") {
+    // Our name AND our domain. "Hilltop Farm <notifications@yosher…>" telling
+    // a farmhand we answered their bug report names the wrong author.
+    return { tenantName: "Yosher", verifiedDomain: null };
+  }
+  return {
+    tenantName: input.tenantName ?? "Yosher",
+    verifiedDomain: input.verifiedDomain,
+  };
 }
 
 function hoursAgo(now: Date, n: number): Date {
@@ -239,14 +300,17 @@ export async function sendEmail(input: SendEmailInput): Promise<SendResult> {
     });
 
     const sender = resolveSender({
-      tenantName: tenant?.name ?? "Yosher",
-      verifiedDomain: verified
-        ? {
-            domain: verified.domain,
-            fromLocalPart: verified.fromLocalPart,
-            fromName: verified.fromName,
-          }
-        : null,
+      ...senderChoice({
+        senderIdentity: input.senderIdentity,
+        tenantName: tenant?.name ?? null,
+        verifiedDomain: verified
+          ? {
+              domain: verified.domain,
+              fromLocalPart: verified.fromLocalPart,
+              fromName: verified.fromName,
+            }
+          : null,
+      }),
       tenantReplyTo: input.replyTo ?? null,
       platformDomain: domain,
     });

@@ -11,7 +11,11 @@ import {
   resolveSender,
   sanitizeDisplayName,
 } from "@/lib/email/identity";
-import { applyDevGuard, isLiveSendEnvironment } from "@/lib/email/send";
+import {
+  applyDevGuard,
+  isLiveSendEnvironment,
+  senderChoice,
+} from "@/lib/email/send";
 
 /**
  * The email spine. The pure block is the important one: resolveSender decides
@@ -23,6 +27,52 @@ import { applyDevGuard, isLiveSendEnvironment } from "@/lib/email/send";
 const RUN = !!process.env.DATABASE_URL;
 const d = RUN ? describe : describe.skip;
 const STAMP = `email-${process.pid}`;
+
+describe("who signs it (senderChoice)", () => {
+  const verified = {
+    domain: "mail.hilltopfarm.com",
+    fromLocalPart: "notifications",
+    fromName: "Hilltop Farm",
+  };
+
+  it("uses the tenant's own identity by default, as every caller had before", () => {
+    expect(
+      senderChoice({ tenantName: "Hilltop Farm", verifiedDomain: verified }),
+    ).toEqual({ tenantName: "Hilltop Farm", verifiedDomain: verified });
+  });
+
+  it("forces OURS when the mail is from Yosher, even with a verified domain", () => {
+    // The case it exists for: answering a bug report for a farm whose own
+    // domain is verified must not arrive from notifications@thefarm.com. That
+    // reads as the farm emailing itself about a bug in somebody else's
+    // software. ADR 0053, slice 1.
+    expect(
+      senderChoice({
+        senderIdentity: "platform",
+        tenantName: "Hilltop Farm",
+        verifiedDomain: verified,
+      }),
+    ).toEqual({ tenantName: "Yosher", verifiedDomain: null });
+  });
+
+  it("names us even when the tenant has no verified domain", () => {
+    // Otherwise the fallback would send from our domain under THEIR name,
+    // which is right for an invoice and wrong for a reply we wrote.
+    expect(
+      senderChoice({
+        senderIdentity: "platform",
+        tenantName: "Hilltop Farm",
+        verifiedDomain: null,
+      }).tenantName,
+    ).toBe("Yosher");
+  });
+
+  it("falls back to our name for a tenant that has none", () => {
+    expect(
+      senderChoice({ tenantName: null, verifiedDomain: null }).tenantName,
+    ).toBe("Yosher");
+  });
+});
 
 describe("sender identity", () => {
   const platform = { platformDomain: "mail.yosherapp.com" };

@@ -74,6 +74,20 @@ public class TellPlugin extends Plugin {
     }
 
     /**
+     * Was this launch a long-press on "Say it"?
+     *
+     * NON-DESTRUCTIVE, which is the whole reason it is separate from
+     * `takePending()`: the launch animation asks this too, and an overlay that
+     * consumed the sentence on its way off screen would be a spectacular bug.
+     */
+    @PluginMethod
+    public void wasTold(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("tell", MainActivity.launchedToTell);
+        call.resolve(result);
+    }
+
+    /**
      * Hand over whatever is waiting, and forget it.
      *
      * Returns `{ utterance: null }` when there is nothing, which is the

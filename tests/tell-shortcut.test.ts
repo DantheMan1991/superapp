@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   listeningFrom,
   readNativeBridge,
+  toldFrom,
   TELL_URL,
   urlWantsToTell,
   utteranceFrom,
@@ -165,9 +166,17 @@ describe("the shell's own ears", () => {
   });
 
   it("is found when the build carries a usable hatch", () => {
+    // All three methods. `wasTold` joined the set when the launch animation
+    // started asking too — see the block at the end of this file.
     expect(
       readNativeBridge(
-        nativeWindow({ Tell: { takePending: () => {}, addListener: () => {} } }),
+        nativeWindow({
+          Tell: {
+            takePending: () => {},
+            addListener: () => {},
+            wasTold: () => {},
+          },
+        }),
       )?.tell,
     ).not.toBeNull();
   });
@@ -204,5 +213,58 @@ describe("whether the phone is recording right now", () => {
     expect(listeningFrom({ listening: "true" })).toBe(false);
     expect(listeningFrom({ listening: 1 })).toBe(false);
     expect(listeningFrom({ listening: false })).toBe(false);
+  });
+});
+
+describe("whether this launch was a long-press", () => {
+  it("is true only when the shell says so in as many words", () => {
+    expect(toldFrom({ tell: true })).toBe(true);
+  });
+
+  it("is false for absent, which is every ordinary app open", () => {
+    expect(toldFrom({ tell: false })).toBe(false);
+    expect(toldFrom({})).toBe(false);
+    expect(toldFrom(null)).toBe(false);
+    expect(toldFrom(undefined)).toBe(false);
+  });
+
+  it("is strict, because a false positive eats the launch animation", () => {
+    expect(toldFrom({ tell: "true" })).toBe(false);
+    expect(toldFrom({ tell: 1 })).toBe(false);
+  });
+});
+
+describe("a shell without the newer hatch is not used as one", () => {
+  const nativeWindow = (plugins: Record<string, unknown>) => ({
+    Capacitor: {
+      isNativePlatform: () => true,
+      getPlatform: () => "android",
+      Plugins: plugins,
+    },
+  });
+
+  it("refuses a Tell plugin that cannot answer wasTold", () => {
+    // A 1.0.5 build has takePending and addListener but no wasTold. Treating
+    // it as usable would mean calling a method that is not there, on the one
+    // path whose whole job is to not fail silently.
+    expect(
+      readNativeBridge(
+        nativeWindow({ Tell: { takePending: () => {}, addListener: () => {} } }),
+      )?.tell,
+    ).toBeNull();
+  });
+
+  it("accepts one that can", () => {
+    expect(
+      readNativeBridge(
+        nativeWindow({
+          Tell: {
+            takePending: () => {},
+            addListener: () => {},
+            wasTold: () => {},
+          },
+        }),
+      )?.tell,
+    ).not.toBeNull();
   });
 });

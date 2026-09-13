@@ -128,6 +128,13 @@ function forTheBox(field: TellField) {
     hint: field.hint,
     choices: field.choices,
     defaultToday: field.defaultToday,
+    /**
+     * This one is SEARCHED, so it has no list and must not be drawn as a
+     * dropdown — an empty one is what the founder was shown, with no way out
+     * of it. A boolean rather than the function itself: functions cannot cross
+     * into a client component (see the header).
+     */
+    searched: field.find !== undefined,
   };
 }
 

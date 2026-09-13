@@ -89,17 +89,27 @@ export async function resolveFound(
       const shortlist = candidates.slice(0, MAX_OPTIONS);
       if (shortlist.length === 0) continue;
 
+      /*
+       * THE SHORTLIST IS KEPT EITHER WAY, and that is not tidiness.
+       *
+       * A resolved field used to carry an id and nothing else, which the box
+       * could not draw: a `choice` input with no matching entry renders
+       * EMPTY, so a field that had been worked out correctly looked exactly
+       * like one that had failed. Keeping the candidates means the box can
+       * show what was decided AND let somebody change it to one of the others
+       * without starting the sentence again.
+       */
+      options[field.key] = shortlist;
+
       const decided = decide(shortlist, said);
       if (decided) {
         values[field.key] = decided.value;
         delete hints[field.key];
-        delete options[field.key];
         continue;
       }
 
       // MORE THAN ONE, AND NOTHING TO CHOOSE BETWEEN THEM. That is a question,
       // not a failure: the words stay visible and the candidates come with it.
-      options[field.key] = shortlist;
     }
 
     out.push({

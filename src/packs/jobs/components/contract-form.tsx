@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { createContractAction } from "../actions";
+import { createContractAction, updateContractAction } from "../actions";
 import {
   BILLING_METHODS,
   BILLING_METHOD_LABELS,
@@ -48,35 +48,66 @@ const NONE = "__none__";
  * all mean the same thing; the action turns it into cents at the boundary, and
  * nothing below ever sees a decimal.
  */
+export interface EditableContract {
+  id: string;
+  version: number;
+  kind: string;
+  name: string;
+  counterpartyPartyId: string | null;
+  role: string;
+  billingMethod: string;
+  valueCents: number | null;
+  status: string;
+  signedOn: string | null;
+  notes: string;
+}
+
 export function ContractForm({
   projectId,
   parties,
   contractKinds,
   clientWord,
+  existing,
+  trigger,
 }: {
   projectId: string;
   parties: Array<{ id: string; name: string }>;
   contractKinds: string[];
   clientWord: string;
+  /** When set, edits this contract instead of creating one. */
+  existing?: EditableContract;
+  trigger?: ReactNode;
 }) {
+  const editing = existing !== undefined;
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [kind, setKind] = useState("");
-  const [name, setName] = useState("");
-  const [counterparty, setCounterparty] = useState(NONE);
-  const [role, setRole] = useState<string>("prime");
-  const [billingMethod, setBillingMethod] = useState<string>("fixed_price");
-  const [value, setValue] = useState("");
-  const [status, setStatus] = useState<string>("proposed");
-  const [signedOn, setSignedOn] = useState("");
-  const [notes, setNotes] = useState("");
+  const [kind, setKind] = useState(existing?.kind ?? "");
+  const [name, setName] = useState(existing?.name ?? "");
+  const [counterparty, setCounterparty] = useState(
+    existing?.counterpartyPartyId ?? NONE,
+  );
+  const [role, setRole] = useState<string>(existing?.role ?? "prime");
+  const [billingMethod, setBillingMethod] = useState<string>(
+    existing?.billingMethod ?? "fixed_price",
+  );
+  /**
+   * Cents back into something a person edits. `1250000` reads as `12500.00`, and
+   * the action parses whatever comes back — so a value that is never touched
+   * survives a round trip unchanged, which is the property that matters.
+   */
+  const [value, setValue] = useState(
+    existing?.valueCents != null ? (existing.valueCents / 100).toFixed(2) : "",
+  );
+  const [status, setStatus] = useState<string>(existing?.status ?? "proposed");
+  const [signedOn, setSignedOn] = useState(existing?.signedOn ?? "");
+  const [notes, setNotes] = useState(existing?.notes ?? "");
 
   const ready = kind.trim() !== "";
 
   function submit() {
     startTransition(async () => {
-      const result = await createContractAction({
+      const fields = {
         projectId,
         kind: kind.trim(),
         name: name.trim(),
@@ -87,13 +118,25 @@ export function ContractForm({
         status,
         signedOn,
         notes: notes.trim(),
-      });
+      };
+      // The version goes with the edit; see ProjectForm for why.
+      const result = editing
+        ? await updateContractAction({
+            ...fields,
+            id: existing.id,
+            version: existing.version,
+          })
+        : await createContractAction(fields);
       if ("error" in result) {
         toast.error(result.error);
         return;
       }
-      toast.success("Contract added");
+      toast.success(editing ? "Contract saved" : "Contract added");
       setOpen(false);
+      if (editing) {
+        router.refresh();
+        return;
+      }
       setKind("");
       setName("");
       setCounterparty(NONE);
@@ -118,13 +161,17 @@ export function ContractForm({
 
   return (
     <>
-      <Button size="sm" onClick={() => setOpen(true)}>
-        <Plus className="mr-1.5 size-4" /> Add contract
-      </Button>
+      {trigger ? (
+        <span onClick={() => setOpen(true)}>{trigger}</span>
+      ) : (
+        <Button size="sm" onClick={() => setOpen(true)}>
+          <Plus className="mr-1.5 size-4" /> Add contract
+        </Button>
+      )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>New contract</DialogTitle>
+            <DialogTitle>{editing ? "Edit" : "New"} contract</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">
@@ -274,7 +321,13 @@ export function ContractForm({
           </div>
           <DialogFooter>
             <Button onClick={submit} disabled={pending || !ready}>
-              {pending ? "Adding…" : "Add contract"}
+              {pending
+                ? editing
+                  ? "Saving…"
+                  : "Adding…"
+                : editing
+                  ? "Save"
+                  : "Add contract"}
             </Button>
           </DialogFooter>
         </DialogContent>

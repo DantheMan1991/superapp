@@ -19,6 +19,8 @@ import {
 import { listCostCodeSets, listCostCodes } from "@/packs/jobs/ops";
 import { PACK } from "@/packs/jobs/vocabulary";
 import {
+  EditCodeButton,
+  EditSetButton,
   MakeDefaultButton,
   NewCodeButton,
   NewSetButton,
@@ -91,6 +93,13 @@ export default async function CostCodesPage() {
                   {set.name}
                 </h2>
                 {set.isDefault && <Badge variant="secondary">Default</Badge>}
+                {isOwner && (
+                  <EditSetButton
+                    setId={set.id}
+                    name={set.name}
+                    version={set.version}
+                  />
+                )}
               </div>
               {isOwner && (
                 <div className="flex items-center gap-1">
@@ -110,13 +119,24 @@ export default async function CostCodesPage() {
                     <TableRow>
                       <TableHead className="w-40">Code</TableHead>
                       <TableHead>Name</TableHead>
+                      <TableHead className="w-10" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {codes.map((c) => (
-                      <TableRow key={c.id}>
+                      <TableRow key={c.id} className={c.isActive ? "" : "opacity-55"}>
                         <TableCell className="font-mono text-xs">{c.code}</TableCell>
-                        <TableCell>{c.name}</TableCell>
+                        <TableCell>
+                          {c.name}
+                          {!c.isActive && (
+                            <Badge variant="secondary" className="ml-2">
+                              Retired
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="w-10 text-right">
+                          {isOwner && <EditCodeButton code={c} />}
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

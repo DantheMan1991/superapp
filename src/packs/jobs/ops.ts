@@ -739,3 +739,102 @@ export async function updateContract(
     .returning();
   return rows[0];
 }
+
+/**
+ * Rename a cost code list.
+ *
+ * Only the name and the notes. **Which list a project is budgeted against is not
+ * editable here and must not become so**: a project resolves its set once at
+ * creation precisely so a later change cannot silently re-chart a job already
+ * underway, and re-pointing a whole list would do that to every project at once.
+ */
+export async function updateCostCodeSet(
+  tx: Tx,
+  ctx: JobsCtx,
+  id: string,
+  input: { name?: string; notes?: string; version?: number },
+): Promise<JobCostCodeSet> {
+  requireWrite(ctx, "owner");
+  const existing = await tx
+    .select()
+    .from(schema.jobCostCodeSets)
+    .where(
+      and(
+        eq(schema.jobCostCodeSets.tenantId, ctx.tenantId),
+        eq(schema.jobCostCodeSets.id, id),
+      ),
+    )
+    .limit(1);
+  if (existing.length === 0) throw new JobsError("NOT_FOUND", `set ${id} not found`);
+  if (input.version !== undefined && input.version !== existing[0].version) {
+    throw new JobsError("STALE_VERSION", "list changed since loaded");
+  }
+
+  const patch: Record<string, unknown> = {
+    updatedAt: new Date(),
+    version: existing[0].version + 1,
+  };
+  if (input.name !== undefined) patch.name = input.name.trim();
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+
+  const rows = await tx
+    .update(schema.jobCostCodeSets)
+    .set(patch)
+    .where(
+      and(
+        eq(schema.jobCostCodeSets.tenantId, ctx.tenantId),
+        eq(schema.jobCostCodeSets.id, id),
+      ),
+    )
+    .returning();
+  return rows[0];
+}
+
+/**
+ * Change one line of the chart of cost: its code, its name, its place in the
+ * order, or whether it is still offered.
+ *
+ * **RETIRED, NEVER DELETED.** `is_active = false` takes a code off the list a
+ * person picks from and leaves every cost already charged to it exactly where it
+ * is — the same rule `archiveDimensionMember` applies to a cost object, and for
+ * the same reason: a code that vanished would take a year of job history with
+ * it. The row has no delete verb at all, which is deliberate.
+ *
+ * **A code may be RENUMBERED**, and that is not the same as retiring it: a
+ * business that moves from its own scheme to CSI renumbers in place and keeps
+ * its history. The unique index on `(tenant_id, set_id, code)` is what stops two
+ * lines colliding, and the action translates that collision into a sentence.
+ */
+export async function updateCostCode(
+  tx: Tx,
+  ctx: JobsCtx,
+  id: string,
+  input: {
+    code?: string;
+    name?: string;
+    sortOrder?: number;
+    isActive?: boolean;
+    notes?: string;
+  },
+): Promise<JobCostCode> {
+  requireWrite(ctx, "owner");
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.code !== undefined) patch.code = input.code.trim();
+  if (input.name !== undefined) patch.name = input.name.trim();
+  if (input.sortOrder !== undefined) patch.sortOrder = input.sortOrder;
+  if (input.isActive !== undefined) patch.isActive = input.isActive;
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+
+  const rows = await tx
+    .update(schema.jobCostCodes)
+    .set(patch)
+    .where(
+      and(
+        eq(schema.jobCostCodes.tenantId, ctx.tenantId),
+        eq(schema.jobCostCodes.id, id),
+      ),
+    )
+    .returning();
+  if (rows.length === 0) throw new JobsError("NOT_FOUND", `code ${id} not found`);
+  return rows[0];
+}

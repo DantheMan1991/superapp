@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Pencil } from "lucide-react";
 import { and, eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
@@ -22,6 +22,9 @@ import { getProject, listContracts, listCostCodes } from "@/packs/jobs/ops";
 import { allowsWrite } from "@/lib/packs/authorize";
 import { formatMoney } from "@/lib/money";
 import { ContractForm } from "@/packs/jobs/components/contract-form";
+import { ProjectForm } from "@/packs/jobs/components/project-form";
+import { Button } from "@/components/ui/button";
+import { listCostCodeSets } from "@/packs/jobs/ops";
 import {
   BILLING_METHOD_LABELS,
   CONTRACT_STATUS_LABELS,
@@ -34,7 +37,10 @@ import {
   isProjectStatus,
   slugLabel,
 } from "@/packs/jobs/vocabulary";
-import { contractKindsFrom } from "@/packs/jobs/vocabulary";
+import {
+  contractKindsFrom,
+  deliveryMethodsFrom,
+} from "@/packs/jobs/vocabulary";
 
 /**
  * One project: its three coordinates, its cost code list, and proof that it is
@@ -60,8 +66,20 @@ export default async function ProjectPage({
     async (tx) => {
       const project = await getProject(tx, ctx.tenant.id, id);
       if (!project) return null;
-      const [entity, party, enterprise, set, codes, contracts, parties, member, pack] =
-        await Promise.all([
+      const [
+        entity,
+        party,
+        enterprise,
+        set,
+        codes,
+        contracts,
+        allEntities,
+        allEnterprises,
+        allSets,
+        parties,
+        member,
+        pack,
+      ] = await Promise.all([
         tx
           .select({ name: schema.entities.name })
           .from(schema.entities)
@@ -113,6 +131,20 @@ export default async function ProjectPage({
           : Promise.resolve([]),
         listContracts(tx, ctx.tenant.id, project.id),
         tx
+          .select({ id: schema.entities.id, name: schema.entities.name })
+          .from(schema.entities)
+          .where(
+            and(
+              eq(schema.entities.tenantId, ctx.tenant.id),
+              eq(schema.entities.isActive, true),
+            ),
+          ),
+        tx
+          .select({ id: schema.enterprises.id, name: schema.enterprises.name })
+          .from(schema.enterprises)
+          .where(eq(schema.enterprises.tenantId, ctx.tenant.id)),
+        listCostCodeSets(tx, ctx.tenant.id),
+        tx
           .select({ id: schema.parties.id, name: schema.parties.displayName })
           .from(schema.parties)
           .where(eq(schema.parties.tenantId, ctx.tenant.id))
@@ -141,6 +173,9 @@ export default async function ProjectPage({
         setName: set[0]?.name ?? null,
         codes,
         contracts,
+        allEntities,
+        allEnterprises,
+        allSets,
         parties,
         member: member[0] ?? null,
         labels: pack.labels,
@@ -166,9 +201,44 @@ export default async function ProjectPage({
   const signedValue = valued.reduce((sum, c) => sum + (c.valueCents ?? 0), 0);
   const signedCount = valued.length;
   const proposedCount = contracts.filter((c) => c.status === "proposed").length;
-  const partyName = new Map(data.parties.map((p) => [p.id, p.name]));
   const projectWord = labelFor(data.labels, "project", "Project");
   const clientWord = labelFor(data.labels, "customer", "Customer");
+  const partyName = new Map(data.parties.map((p) => [p.id, p.name]));
+  const editProject = isOwner ? (
+    <ProjectForm
+      entities={data.allEntities}
+      parties={data.parties}
+      enterprises={data.allEnterprises}
+      costCodeSets={data.allSets.map((x) => ({
+        id: x.id,
+        name: x.name,
+        isDefault: x.isDefault,
+      }))}
+      deliveryMethods={deliveryMethodsFrom(data.config)}
+      projectWord={projectWord}
+      clientWord={clientWord}
+      existing={{
+        id: project.id,
+        version: project.version,
+        number: project.number,
+        name: project.name,
+        status: project.status,
+        deliveryMethod: project.deliveryMethod,
+        partyId: project.partyId,
+        enterpriseId: project.enterpriseId,
+        costCodeSetId: project.costCodeSetId,
+        address: project.address,
+        startsOn: project.startsOn,
+        endsOn: project.endsOn,
+        notes: project.notes,
+      }}
+      trigger={
+        <Button variant="outline" size="sm">
+          <Pencil className="mr-1.5 size-4" /> Edit
+        </Button>
+      }
+    />
+  ) : null;
 
   return (
     <div className="space-y-4">
@@ -183,11 +253,14 @@ export default async function ProjectPage({
         title={project.name}
         description={`${project.number}${project.address ? ` · ${project.address}` : ""}`}
         actions={
-          <Badge variant={project.status === "active" ? "default" : "secondary"}>
+          <div className="flex flex-wrap items-center gap-2">
+            {editProject}
+            <Badge variant={project.status === "active" ? "default" : "secondary"}>
             {isProjectStatus(project.status)
               ? STATUS_LABELS[project.status]
               : project.status}
-          </Badge>
+            </Badge>
+          </div>
         }
       />
 
@@ -274,6 +347,7 @@ export default async function ProjectPage({
                   <TableHead>Billed by</TableHead>
                   <TableHead className="text-right">Value</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -316,6 +390,37 @@ export default async function ProjectPage({
                           ? CONTRACT_STATUS_LABELS[c.status]
                           : c.status}
                       </Badge>
+                    </TableCell>
+                    <TableCell className="w-10 text-right">
+                      {isOwner && (
+                        <ContractForm
+                          projectId={project.id}
+                          parties={data.parties}
+                          contractKinds={contractKindsFrom(data.config)}
+                          clientWord={clientWord}
+                          existing={{
+                            id: c.id,
+                            version: c.version,
+                            kind: c.kind,
+                            name: c.name,
+                            counterpartyPartyId: c.counterpartyPartyId,
+                            role: c.role,
+                            billingMethod: c.billingMethod,
+                            valueCents: c.valueCents,
+                            status: c.status,
+                            signedOn: c.signedOn,
+                            notes: c.notes,
+                          }}
+                          trigger={
+                            <Button variant="ghost" size="icon">
+                              <Pencil className="size-4" />
+                              <span className="sr-only">
+                                Edit {slugLabel(c.kind)}
+                              </span>
+                            </Button>
+                          }
+                        />
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

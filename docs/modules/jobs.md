@@ -13,6 +13,70 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-14 — Everything you can create, you can change (`claude/everything-you-can-create-you-can-change`)
+
+Edit surfaces for all three things the pack owns — a project, a contract, a cost
+code and its list — plus **the ops test file the first two slices did not have**.
+No new tables and no migration.
+
+**ONE DIALOG THAT EDITS WHEN GIVEN A ROW**, rather than a parallel set of edit
+components. `vendor-dialogs.tsx` set that pattern (`vendor?: VendorData` →
+"Edit vendor" : "New vendor"), and following it means the create and edit paths
+cannot drift apart in what they validate or which fields they offer.
+
+**THE VERSION GOES WITH THE EDIT.** `updateProject` and `updateContract` have
+taken an optional `version` and thrown `STALE_VERSION` since they were written;
+until now nothing passed one, so the check existed and never ran. Two people on
+one job is now a refusal with a sentence rather than the last save silently
+winning. `tests/jobs-ops.test.ts` pins it for projects, contracts and cost code
+lists.
+
+**RETIRED, NEVER DELETED.** A cost code gets `is_active = false`, which takes it
+off the list people pick from and leaves every cost already charged to it exactly
+where it is. There is no delete verb on the row at all, and the dialog says why
+rather than offering one. Same rule `archiveDimensionMember` applies to a cost
+object, for the same reason: a code that vanished would take a year of job
+history with it. A code may still be RENUMBERED in place, which is what a
+business moving from its own scheme to CSI actually does.
+
+**A COST CODE LIST CANNOT BE RE-POINTED**, only renamed. Which list a project is
+budgeted against is resolved once at creation precisely so a later change cannot
+silently re-chart a job already underway; letting a list be swapped wholesale
+would do that to every project at once.
+
+### The three behaviours that had never been tested, and now are
+
+`tests/isolation/jobs.test.ts` builds its fixtures under `withSystem` and never
+calls `ops.ts` — deliberately, because it certifies what the DATABASE enforces.
+That left the pack's own rules uncovered, and the three that matter are all
+**silent** when they break rather than throwing:
+
+- **the cost object follows a rename** — otherwise the job list says one thing,
+  every report says another, and nothing errors;
+- **cancelling archives it and completing does not** — because bills arrive for
+  months after a job finishes (retainage, the last subcontractor invoice) while a
+  job that never happened should not be offered on a bill line at all;
+- **a stale version is refused.**
+
+All three passed first time, which means the code was right and the tests are now
+the guard rather than the discovery.
+
+**A trap the classifier caught.** `tests/jobs-ops.test.ts` first imported its
+`d`/`RUN` gate from `./isolation/_shared`. That type-checks and runs — and
+`tests/db-backed-files.test.ts` classifies a suite as database-backed by looking
+for `process.env.DATABASE_URL` or a `d`/`RUN` import from a **sibling**
+`_shared`, so the suite would have landed in the PARALLEL project and raced the
+other database suites. That is the once-a-fortnight failure on a machine nobody
+is watching, and the enumeration test exists exactly to stop it. The gate is now
+declared inline, as `land-ops` and its neighbours do.
+
+**Driven on the dev branch:** a proposed change order edited to signed, and the
+project total moved from $1,854,500.00 to **$1,949,500.00 across 3 signed
+agreements** with the "still proposed" clause gone; the project renamed to
+"Oak Row residence — phase 2" and the cost object followed it in
+`dimension_members`, confirmed in the database as well as on the page; a cost
+code retired and shown greyed with a `Retired` badge.
+
 ### 2026-09-14 — Slice 1: a contract is a table (`claude/contracts-many-per-project`)
 
 `job_contracts`, many per project, plus the value roll-up and the form that
@@ -209,16 +273,19 @@ ordering only bites when two new tables reference each other in one file.
   collects actual cost, and nothing compares the two.
 - **Nothing bills.** `billing_method` is recorded on every contract and read by
   no code. Pay applications, retainage and the schedule of values are slice 4.
-- **A contract cannot be edited from the screen.** `updateContract` and
-  `updateContractAction` exist, are validated and are covered by the ops tests;
-  no UI calls them, so a contract that moves from proposed to signed has to be
-  re-thought rather than re-clicked. That is the most obviously missing thing in
-  the slice and the first candidate for the next one.
-- **Nothing edits a project yet.** `updateProject` and `updateProjectAction`
-  exist and are tested through the ops layer, but no screen calls them — the
-  detail page is read-only. The next slice that needs an edit form gets one.
-- **A cost code cannot be renamed, reordered or retired from the UI.** The rows
-  and the ops support it; the screen only adds.
+- ~~**A contract cannot be edited from the screen.**~~ — **closed 2026-09-14.**
+- **Nothing can be DELETED, and that is deliberate rather than missing.** A
+  contract that should not exist is `cancelled` or `declined`; a cost code is
+  retired; a project has no delete verb at all. The one real gap is a project
+  created entirely by mistake, which today can only be `cancelled` — acceptable
+  while a project is cheap to ignore, and worth revisiting if a business starts
+  accumulating typos.
+- **A contract's project cannot be changed.** Moving an agreement between jobs is
+  a different and riskier act than editing it, and nobody has asked.
+- ~~**Nothing edits a project yet.**~~ · ~~**A cost code cannot be renamed,
+  reordered or retired from the UI.**~~ — **both closed 2026-09-14.** Every
+  thing the pack creates can now be changed, and the version check that had
+  existed unused since slice 0 is finally passed by the forms.
 - **Nobody has clicked any of it.** Written, typechecked, built and certified
   against a real database — but the screens have not been driven by a person.
   The construction profile does not exist yet either, so `deliveryMethodsFrom`

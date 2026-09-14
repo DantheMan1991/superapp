@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
@@ -22,8 +22,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { createProjectAction } from "../actions";
-import { slugLabel } from "../vocabulary";
+import { createProjectAction, updateProjectAction } from "../actions";
+import {
+  PROJECT_STATUSES,
+  STATUS_LABELS,
+  slugLabel,
+} from "../vocabulary";
 
 interface Option {
   id: string;
@@ -46,6 +50,22 @@ const NONE = "__none__";
  * a tenant with no profile still gets a working field rather than an empty
  * dropdown it cannot get past.
  */
+export interface EditableProject {
+  id: string;
+  version: number;
+  number: string;
+  name: string;
+  status: string;
+  deliveryMethod: string | null;
+  partyId: string | null;
+  enterpriseId: string | null;
+  costCodeSetId: string | null;
+  address: string;
+  startsOn: string | null;
+  endsOn: string | null;
+  notes: string;
+}
+
 export function ProjectForm({
   entities,
   parties,
@@ -54,6 +74,8 @@ export function ProjectForm({
   deliveryMethods,
   projectWord,
   clientWord,
+  existing,
+  trigger,
 }: {
   entities: Option[];
   parties: Option[];
@@ -62,28 +84,34 @@ export function ProjectForm({
   deliveryMethods: string[];
   projectWord: string;
   clientWord: string;
+  /** When set, edits this project instead of creating one. */
+  existing?: EditableProject;
+  /** Replaces the default button, for a page that wants its own affordance. */
+  trigger?: ReactNode;
 }) {
+  const editing = existing !== undefined;
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [number, setNumber] = useState("");
-  const [name, setName] = useState("");
+  const [number, setNumber] = useState(existing?.number ?? "");
+  const [name, setName] = useState(existing?.name ?? "");
   const [entityId, setEntityId] = useState(entities[0]?.id ?? "");
-  const [partyId, setPartyId] = useState(NONE);
-  const [enterpriseId, setEnterpriseId] = useState(NONE);
-  const [costCodeSetId, setCostCodeSetId] = useState(NONE);
-  const [deliveryMethod, setDeliveryMethod] = useState("");
-  const [address, setAddress] = useState("");
-  const [startsOn, setStartsOn] = useState("");
-  const [notes, setNotes] = useState("");
+  const [partyId, setPartyId] = useState(existing?.partyId ?? NONE);
+  const [enterpriseId, setEnterpriseId] = useState(existing?.enterpriseId ?? NONE);
+  const [costCodeSetId, setCostCodeSetId] = useState(existing?.costCodeSetId ?? NONE);
+  const [deliveryMethod, setDeliveryMethod] = useState(existing?.deliveryMethod ?? "");
+  const [address, setAddress] = useState(existing?.address ?? "");
+  const [startsOn, setStartsOn] = useState(existing?.startsOn ?? "");
+  const [endsOn, setEndsOn] = useState(existing?.endsOn ?? "");
+  const [status, setStatus] = useState(existing?.status ?? "planned");
+  const [notes, setNotes] = useState(existing?.notes ?? "");
 
   const ready = number.trim() !== "" && name.trim() !== "" && entityId !== "";
   const defaultSet = costCodeSets.find((s) => s.isDefault);
 
   function submit() {
     startTransition(async () => {
-      const result = await createProjectAction({
-        entityId,
+      const fields = {
         number: number.trim(),
         name: name.trim(),
         partyId: partyId === NONE ? "" : partyId,
@@ -92,36 +120,63 @@ export function ProjectForm({
         deliveryMethod: deliveryMethod.trim(),
         address: address.trim(),
         startsOn,
+        endsOn,
+        status,
         notes: notes.trim(),
-      });
+      };
+      /**
+       * **THE VERSION GOES WITH THE EDIT.** It is what makes two people on one
+       * job a refusal rather than a silent overwrite: the row carries the
+       * version it was read at, and `updateProject` refuses if the stored one
+       * has moved. Without it the last save wins and the first person's change
+       * disappears with nothing said.
+       */
+      const result = editing
+        ? await updateProjectAction({
+            ...fields,
+            id: existing.id,
+            version: existing.version,
+            entityId,
+          })
+        : await createProjectAction({ ...fields, entityId });
       if ("error" in result) {
         toast.error(result.error);
         return;
       }
-      toast.success(`${projectWord} added`);
+      toast.success(editing ? `${projectWord} saved` : `${projectWord} added`);
       setOpen(false);
-      setNumber("");
-      setName("");
-      setPartyId(NONE);
-      setEnterpriseId(NONE);
-      setCostCodeSetId(NONE);
-      setDeliveryMethod("");
-      setAddress("");
-      setStartsOn("");
-      setNotes("");
+      if (!editing) {
+        setNumber("");
+        setName("");
+        setPartyId(NONE);
+        setEnterpriseId(NONE);
+        setCostCodeSetId(NONE);
+        setDeliveryMethod("");
+        setAddress("");
+        setStartsOn("");
+        setEndsOn("");
+        setStatus("planned");
+        setNotes("");
+      }
       router.refresh();
     });
   }
 
   return (
     <>
-      <Button size="sm" onClick={() => setOpen(true)}>
-        <Plus className="mr-1.5 size-4" /> New {projectWord.toLowerCase()}
-      </Button>
+      {trigger ? (
+        <span onClick={() => setOpen(true)}>{trigger}</span>
+      ) : (
+        <Button size="sm" onClick={() => setOpen(true)}>
+          <Plus className="mr-1.5 size-4" /> New {projectWord.toLowerCase()}
+        </Button>
+      )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>New {projectWord.toLowerCase()}</DialogTitle>
+            <DialogTitle>
+              {editing ? "Edit" : "New"} {projectWord.toLowerCase()}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2">
@@ -142,6 +197,45 @@ export function ProjectForm({
                   type="date"
                   value={startsOn}
                   onChange={(e) => setStartsOn(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="project-status">Status</Label>
+                <Select value={status} onValueChange={setStatus}>
+                  <SelectTrigger className="w-full" id="project-status">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PROJECT_STATUSES.map((v) => (
+                      <SelectItem key={v} value={v}>
+                        {STATUS_LABELS[v]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {status === "cancelled" && (
+                  /*
+                   * SAID BEFORE IT HAPPENS, because the effect is invisible
+                   * afterwards: cancelling takes the job off every list a bill
+                   * or an hour can be charged to. Completing does NOT — bills
+                   * arrive for months after a job finishes.
+                   */
+                  <p className="text-xs text-muted-foreground">
+                    Nothing new can be charged to a cancelled{" "}
+                    {projectWord.toLowerCase()}. What is already on it stays.
+                  </p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="project-end">Ends</Label>
+                <Input
+                  id="project-end"
+                  type="date"
+                  value={endsOn}
+                  onChange={(e) => setEndsOn(e.target.value)}
                 />
               </div>
             </div>
@@ -292,7 +386,13 @@ export function ProjectForm({
           </div>
           <DialogFooter>
             <Button onClick={submit} disabled={pending || !ready}>
-              {pending ? "Adding…" : `Add ${projectWord.toLowerCase()}`}
+              {pending
+                ? editing
+                  ? "Saving…"
+                  : "Adding…"
+                : editing
+                  ? "Save"
+                  : `Add ${projectWord.toLowerCase()}`}
             </Button>
           </DialogFooter>
         </DialogContent>

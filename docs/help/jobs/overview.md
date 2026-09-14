@@ -286,6 +286,37 @@ A draft is written but not sent, so nobody is owed anything. `Closed` still coun
 
 The pencil at the end of its row. **Changing the lines replaces all of them**, so what you see in the dialog is what you get. Changing only the status leaves the money alone.
 
+## On site — the daily log, photos and the punch list
+
+Anyone on the team, not only owners: the field is a chore, and the person with the phone on the site is rarely the owner.
+
+### The daily log
+
+One report per {{project|lower}} per day. On the {{project|lower}}'s page, under **On site**, {button:Log today|primary}; or {button:All days|outline} for the full record, where every day has its own panel.
+
+1. **`Day`** — today unless you change it. **Logging a day that already has a report edits that report** rather than making a second one, so two people logging the same day end up with one.
+2. **`Weather`** — free text: `Clear, 78°`, `Rain after two`.
+3. **`What happened`** — the report itself, as many lines as you like.
+4. **Who was on site** — one row per trade or subcontractor: the `Trade` (`Framing`, `Electrical`, `Own crew`), the `Subcontractor` from your books if it was one, how many `People`, and `Hours each`. {button:Add crew|ghost} for another row. A row with no trade and no subcontractor is ignored; a row with one and `Hours` that is not a number is refused with `Hours must be a number, like 8 or 6.5.` **This is a headcount** — who was on the site, including other companies' crews. Your own people's timecards are in Time and this does not touch them.
+
+{button:Log it|primary}; on a day that already exists the button reads {button:Save day|primary} and there is a {button:Remove day|ghost} beside it. Removing a day takes its crew lines with it; **its photos stay in Documents**.
+
+The **On site** panel shows the last five days — the date, how many were on site, the photo count, the weather, and the first lines of the report. The **Daily log** page shows every day with the crews as a table and the day's man-hours.
+
+### Photos
+
+On the **Daily log** page, each day has a photo strip: {button:Add photos|outline} or the camera on a phone. A photo attaches to the day, is filed in Documents' Photos folder, and can be made the day's main picture or removed from the day (the file stays in Documents). Photos need Documents switched on; without it the panel says so instead of offering a button that would fail.
+
+### The punch list
+
+Under **Punch list** on the {{project|lower}}'s page: what still needs fixing or finishing. Type the item, optionally a date, {button:Add|primary}. Tick the box when it is done; untick to reopen.
+
+**A punch item is a work item.** It is the same row that appears in Work with everything else that needs doing, where it can be assigned, dated and chased in the daily digest. This panel is the job's view of it — add and tick — and Work is where the rest happens.
+
+### Saying it instead
+
+The tell box knows the site. *"Poured the garage slab at Oak Row, four guys, six hours"* becomes a line on today's report for 24-108 with a crew of four at six hours each; *"punch item at Oak Row: touch up the paint in the master bath"* becomes a punch item on that job. The job is found by its number, its name or its street — say whichever you would say on the phone. A log entry is read back for you to confirm; a punch item records itself, because it lands on a list you can see and remove from in one press.
+
 ## Changing something
 
 Owners only. Everything you can add, you can change.
@@ -327,6 +358,7 @@ New codes are added to the end of the list, not the top, so a list you arranged 
 Worth knowing so you are not looking for it:
 
 - **A change order cannot be moved to another contract.** Raise it again on the right one and set the wrong one to `Void`.
+- **The daily log is not a timecard.** Who was on site is a headcount for the record; your own people's hours for wages are in Time, and the two are not joined.
 - **Only fixed-price billing.** A schedule of values and pay applications cover fixed price, progress draws, AIA applications and draw schedules — everything billed as a share of a fixed sum. Cost-plus, unit price and time-and-materials are recorded on the contract and not yet billed.
 - **Retainage you hold from subcontractors** is not tracked yet; only what clients hold from you.
 - **No printed application.** The certificate is on screen and its invoice is in Accounting; an AIA-style printout is coming.
@@ -342,5 +374,7 @@ Worth knowing so you are not looking for it:
 | Add or change cost code lists | ● | | |
 | Add, approve or change a change order | ● | | |
 | Set a schedule of values, or issue a pay application | ● | | |
+| Log a day on site, or add and tick a punch item | ● | ● | ● |
+| Add photos to a day | ● | ● | |
 
 Starting a job is a decision, and it creates the thing your books group costs by — which is why it is kept to owners. Reading the list is ordinary work for anybody who has to go and stand on the site.

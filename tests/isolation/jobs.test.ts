@@ -46,6 +46,7 @@ d("jobs tables (RLS)", () => {
   let changeOrderA = "";
   let sovA = "";
   let payAppA = "";
+  let logA = "";
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantA, fn, { role: "staff", userId: MATE });
@@ -220,6 +221,19 @@ d("jobs tables (RLS)", () => {
         sovLineId: sovA,
         scheduledCents: 18250000,
         thisPeriodCents: 1_000_00,
+      });
+
+      const logs = await tx
+        .insert(schema.jobDailyLogs)
+        .values({ tenantId: tenantA, projectId: projectA, logDate: "2026-09-14", notes: "Poured the slab" })
+        .returning();
+      logA = logs[0].id;
+      await tx.insert(schema.jobDailyLogCrews).values({
+        tenantId: tenantA,
+        logId: logA,
+        trade: "Concrete",
+        workers: 4,
+        hoursTenths: 60,
       });
     });
   });
@@ -921,5 +935,86 @@ d("jobs tables (RLS)", () => {
     }));
     expect(left.sov).toEqual([]);
     expect(left.apps).toEqual([]);
+  });
+
+  it("cannot read or change another tenant's DAILY LOG or its crews", async () => {
+    const seen = await asOtherTenant(async (tx) => ({
+      logs: await tx.select().from(schema.jobDailyLogs).where(eq(schema.jobDailyLogs.id, logA)),
+      crews: await tx.select().from(schema.jobDailyLogCrews).where(eq(schema.jobDailyLogCrews.logId, logA)),
+      changed: await tx
+        .update(schema.jobDailyLogs)
+        .set({ notes: "tampered" })
+        .where(eq(schema.jobDailyLogs.id, logA))
+        .returning(),
+    }));
+    expect(seen.logs).toEqual([]);
+    expect(seen.crews).toEqual([]);
+    expect(seen.changed).toEqual([]);
+  });
+
+  it("a day cannot hang off another tenant's PROJECT, and a crew cannot name another tenant's SUBCONTRACTOR", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobDailyLogs).values({ tenantId: tenantA, projectId: projectB, logDate: "2026-09-14" }),
+      ),
+    ).rejects.toThrow();
+    const otherParty = await withSystem(async (tx) => {
+      const rows = await tx
+        .select({ id: schema.parties.id })
+        .from(schema.parties)
+        .where(eq(schema.parties.tenantId, tenantB))
+        .limit(1);
+      return rows[0]?.id ?? null;
+    });
+    if (otherParty) {
+      await expect(
+        withSystem((tx) =>
+          tx.insert(schema.jobDailyLogCrews).values({
+            tenantId: tenantA,
+            logId: logA,
+            partyId: otherParty,
+            workers: 1,
+          }),
+        ),
+      ).rejects.toThrow();
+    }
+  });
+
+  it("one report per job per day, enforced by the database", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobDailyLogs).values({ tenantId: tenantA, projectId: projectA, logDate: "2026-09-14" }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a crew line that names nobody is unrepresentable", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobDailyLogCrews).values({ tenantId: tenantA, logId: logA, workers: 2 }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("deleting a project takes its days and their crews", async () => {
+    const scratch = await withSystem(async (tx) => {
+      const p = await tx
+        .insert(schema.jobProjects)
+        .values({ tenantId: tenantA, entityId: entityA, number: "casc-3", name: "c3" })
+        .returning();
+      const l = await tx
+        .insert(schema.jobDailyLogs)
+        .values({ tenantId: tenantA, projectId: p[0].id, logDate: "2026-09-14" })
+        .returning();
+      await tx.insert(schema.jobDailyLogCrews).values({ tenantId: tenantA, logId: l[0].id, trade: "x", workers: 1 });
+      return { projectId: p[0].id, logId: l[0].id };
+    });
+    await withSystem((tx) => tx.delete(schema.jobProjects).where(eq(schema.jobProjects.id, scratch.projectId)));
+    const left = await asOwner(async (tx) => ({
+      logs: await tx.select().from(schema.jobDailyLogs).where(eq(schema.jobDailyLogs.id, scratch.logId)),
+      crews: await tx.select().from(schema.jobDailyLogCrews).where(eq(schema.jobDailyLogCrews.logId, scratch.logId)),
+    }));
+    expect(left.logs).toEqual([]);
+    expect(left.crews).toEqual([]);
   });
 });

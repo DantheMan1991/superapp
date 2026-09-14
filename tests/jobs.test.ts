@@ -16,7 +16,11 @@ import {
   CONTRACT_ROLES,
   CONTRACT_STATUSES,
   CONTRACT_STATUS_LABELS,
+  DAILY_LOG_ENTITY,
   DELIVERY_METHOD_FORMAT,
+  PROJECT_ENTITY,
+  hoursToTenths,
+  tenthsToHours,
   PACK,
   PAY_APPLICATION_STATUSES,
   PAY_APPLICATION_STATUS_LABELS,
@@ -46,6 +50,7 @@ import {
   retainageCents,
 } from "../src/packs/jobs/billing-math";
 import { packRegistry } from "../src/packs";
+import { describeProject, findProjects, type OpenProject } from "../src/packs/jobs/tell/find";
 
 /**
  * The `jobs` pack's pure half: the words, and the two places they must agree
@@ -485,6 +490,81 @@ describe("progress billing", () => {
       expect(ppmToPercentString(100_000)).toBe("10");
       expect(ppmToPercentString(75_000)).toBe("7.5");
       expect(ppmToPercentString(0)).toBe("0");
+    });
+  });
+});
+
+/**
+ * The field. Two CHECKs a form could quietly disagree with, one unique index
+ * that is the whole design (one report per day), and the search behind
+ * "which job" — pure, because choosing the wrong house is the failure that
+ * matters and it should be pinned without a database.
+ */
+const FIELD_SQL = readFileSync("drizzle/0337_job_field.sql", "utf8");
+
+describe("the field", () => {
+  it("keeps ONE report per job per day, in the database", () => {
+    expect(FIELD_SQL).toMatch(/job_daily_logs_project_date_idx[^;]*\("tenant_id","project_id","log_date"\)/);
+  });
+
+  it("refuses a crew line that names neither a trade nor a subcontractor, and negative counts", () => {
+    expect(FIELD_SQL).toMatch(/job_daily_log_crews_named/);
+    expect(FIELD_SQL).toMatch(/job_daily_log_crews_workers_nonnegative/);
+    expect(FIELD_SQL).toMatch(/job_daily_log_crews_hours_nonnegative/);
+  });
+
+  it("holds a subcontractor named on a day by RESTRICT, and takes the day with the job", () => {
+    expect(FIELD_SQL).toMatch(/job_daily_log_crews_party_fk[^;]*ON DELETE no action/);
+    expect(FIELD_SQL).toMatch(/job_daily_logs_project_fk[^;]*ON DELETE cascade/);
+  });
+
+  it("names the two Layer 0 rows it hangs things on, and nothing else", () => {
+    expect(DAILY_LOG_ENTITY).toBe("job_daily_log");
+    expect(PROJECT_ENTITY).toBe("project");
+  });
+
+  it("turns hours into tenths and back without drift", () => {
+    expect(hoursToTenths("8")).toBe(80);
+    expect(hoursToTenths("6.5")).toBe(65);
+    expect(hoursToTenths("")).toBe(0);
+    expect(hoursToTenths("6h")).toBeNull();
+    expect(hoursToTenths("-1")).toBeNull();
+    expect(tenthsToHours(80)).toBe("8");
+    expect(tenthsToHours(65)).toBe("6.5");
+  });
+
+  describe("which job those words mean", () => {
+    const jobs: OpenProject[] = [
+      { value: "a", number: "24-108", name: "Oak Row residence", address: "118 Oak Row", deliveryMethod: "luxury_custom" },
+      { value: "b", number: "24-112", name: "Miller house", address: "4 Mill Lane", deliveryMethod: null },
+      { value: "c", number: "Lot 12", name: "Lot 12", address: "Meadowbrook phase 2", deliveryMethod: "production_residential" },
+      { value: "d", number: "Lot 13", name: "Lot 13", address: "Meadowbrook phase 2", deliveryMethod: "production_residential" },
+    ];
+    const ids = (said: string) => findProjects(jobs, said).map((c) => c.value);
+
+    it("finds a job by its number first", () => {
+      expect(ids("24-108")).toEqual(["a"]);
+      expect(ids("at 24-112 today")).toEqual(["b"]);
+    });
+
+    it("then by its name, then by its street", () => {
+      expect(ids("the Miller house")).toEqual(["b"]);
+      expect(ids("at Oak Row")).toEqual(["a"]);
+    });
+
+    it("never picks the nearest lot — Lot 12 is not Lot 13", () => {
+      expect(ids("lot 12")).toEqual(["c"]);
+      expect(ids("lot 13")).toEqual(["d"]);
+    });
+
+    it("offers everything rather than nothing when the words match no job", () => {
+      expect(ids("the place with the dog")).toEqual(["a", "b", "c", "d"]);
+      expect(ids("")).toEqual(["a", "b", "c", "d"]);
+    });
+
+    it("describes a job by the things that tell it from its neighbours", () => {
+      expect(describeProject(jobs[0])).toBe("24-108 · Luxury custom · 118 Oak Row");
+      expect(describeProject(jobs[1])).toBe("24-112 · 4 Mill Lane");
     });
   });
 });

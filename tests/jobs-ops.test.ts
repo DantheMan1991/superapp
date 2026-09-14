@@ -39,6 +39,15 @@ import {
 } from "../src/packs/jobs/vocabulary";
 import { listDimensionMembers } from "../src/modules/accounting/core";
 import { violatedUniqueIndex } from "../src/lib/db-errors";
+import {
+  addCrew,
+  addPunchItem,
+  deleteDailyLog,
+  listDailyLogs,
+  listPunchItems,
+  saveDailyLog,
+  setPunchDone,
+} from "../src/packs/jobs/field-ops";
 import { loadInvoice, loadInvoiceLines } from "../src/modules/accounting/invoicing/invoices";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import { CONSTRUCTION_COA } from "../src/industries/construction/accounts";
@@ -1674,5 +1683,109 @@ d("jobs ops", () => {
     await expect(
       run((tx) => saveSovLines(tx, staffCtx, contract.id, [{ description: "x", scheduledCents: 1 }])),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  // ------------------------------------------------------------------- field
+
+  it("a day's log is ONE row per job per day: saying it again edits it, appending a line", async () => {
+    const { days } = await run(async (tx) => {
+      const p = await createProject(tx, ctx, { entityId, number: "OPS-F1", name: "Field" });
+      const first = await saveDailyLog(tx, ctx, {
+        projectId: p.id,
+        logDate: "2026-09-14",
+        weather: "Clear",
+        notes: "Poured the slab",
+        crews: [{ trade: "Concrete", workers: 4, hoursTenths: 60 }],
+      });
+      const again = await saveDailyLog(tx, ctx, {
+        projectId: p.id,
+        logDate: "2026-09-14",
+        appendNotes: "Framers started",
+      });
+      expect(again.id).toBe(first.id);
+      // A second day is a second row.
+      await saveDailyLog(tx, ctx, { projectId: p.id, logDate: "2026-09-15", notes: "Rained out" });
+      return { days: await listDailyLogs(tx, tenantId, p.id) };
+    });
+    expect(days.map((d) => d.log.logDate)).toEqual(["2026-09-15", "2026-09-14"]); // newest first
+    expect(days[1].log.notes).toBe("Poured the slab\nFramers started");
+    expect(days[1].log.weather).toBe("Clear"); // left alone by the append
+    expect(days[1].crews.map((c) => [c.trade, c.workers, c.hoursTenths])).toEqual([["Concrete", 4, 60]]);
+    expect(days[1].manHoursTenths).toBe(240);
+    expect(days[1].photoCount).toBe(0);
+  });
+
+  it("crews REPLACE on save and ADD one at a time from a sentence; a line naming nobody is refused", async () => {
+    const { crews } = await run(async (tx) => {
+      const p = await createProject(tx, ctx, { entityId, number: "OPS-F2", name: "Crews" });
+      const sub = await seedVendor(tx, "Framing Co");
+      const log = await saveDailyLog(tx, ctx, {
+        projectId: p.id,
+        logDate: "2026-09-14",
+        crews: [
+          { trade: "Concrete", workers: 4, hoursTenths: 60 },
+          { partyId: sub, workers: 3, hoursTenths: 80 },
+        ],
+      });
+      await saveDailyLog(tx, ctx, {
+        projectId: p.id,
+        logDate: "2026-09-14",
+        crews: [{ partyId: sub, trade: "Framing", workers: 5, hoursTenths: 80 }],
+      });
+      await addCrew(tx, ctx, log.id, { trade: "Electrical", workers: 2, hoursTenths: 40 });
+      await expect(
+        addCrew(tx, ctx, log.id, { workers: 1, hoursTenths: 10 }),
+      ).rejects.toMatchObject({ code: "INVALID_VALUE" });
+      await expect(
+        addCrew(tx, ctx, log.id, { trade: "x", workers: -1, hoursTenths: 10 }),
+      ).rejects.toMatchObject({ code: "INVALID_VALUE" });
+      return { crews: (await listDailyLogs(tx, tenantId, p.id))[0].crews };
+    });
+    expect(crews.map((c) => [c.trade, c.partyName, c.workers])).toEqual([
+      ["Framing", expect.stringContaining("Framing Co"), 5],
+      ["Electrical", null, 2],
+    ]);
+  });
+
+  it("STAFF log the day — the field is a chore, not a decision", async () => {
+    const log = await run(async (tx) => {
+      const p = await createProject(tx, ctx, { entityId, number: "OPS-F3", name: "Staffed" });
+      return saveDailyLog(tx, staffCtx, { projectId: p.id, logDate: "2026-09-14", notes: "On it" });
+    });
+    expect(log.notes).toBe("On it");
+  });
+
+  it("removing a day takes its crews and refuses a day that is not there", async () => {
+    await run(async (tx) => {
+      const p = await createProject(tx, ctx, { entityId, number: "OPS-F4", name: "Removed" });
+      const log = await saveDailyLog(tx, ctx, {
+        projectId: p.id,
+        logDate: "2026-09-14",
+        crews: [{ trade: "Concrete", workers: 1, hoursTenths: 10 }],
+      });
+      await deleteDailyLog(tx, ctx, log.id);
+      expect(await listDailyLogs(tx, tenantId, p.id)).toEqual([]);
+      const crews = await tx
+        .select()
+        .from(schema.jobDailyLogCrews)
+        .where(eq(schema.jobDailyLogCrews.logId, log.id));
+      expect(crews).toEqual([]);
+      await expect(deleteDailyLog(tx, ctx, log.id)).rejects.toMatchObject({ code: "NOT_FOUND" });
+    });
+  });
+
+  it("a punch item is a WORK item linked to the job, listed from the job and ticked off", async () => {
+    const { before, after } = await run(async (tx) => {
+      const p = await createProject(tx, ctx, { entityId, number: "OPS-F5", name: "Punched" });
+      const id = await addPunchItem(tx, staffCtx, p.id, { title: "Touch up paint", dueOn: "2026-09-20" });
+      const before = await listPunchItems(tx, tenantId, p.id);
+      await setPunchDone(tx, staffCtx, id, true);
+      const after = await listPunchItems(tx, tenantId, p.id);
+      await expect(addPunchItem(tx, ctx, p.id, { title: "  " })).rejects.toMatchObject({ code: "INVALID_VALUE" });
+      return { before, after };
+    });
+    expect(before.map((i) => [i.title, i.dueOn, i.completedAt])).toEqual([["Touch up paint", "2026-09-20", null]]);
+    expect(before[0].links).toEqual([{ entityType: "project", entityId: expect.any(String) }]);
+    expect(after[0].completedAt).not.toBeNull();
   });
 });

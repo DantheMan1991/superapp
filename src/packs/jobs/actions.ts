@@ -7,7 +7,22 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
 import { violatedUniqueIndex } from "@/lib/db-errors";
+import { allowsWrite } from "@/lib/packs/authorize";
+import {
+  detachDocumentFromRecord,
+  registerAttachedPhoto,
+  setPrimaryAttachment,
+} from "@/modules/documents/attachments";
+import { roleMayWrite } from "@/modules/documents/core/errors";
 import { percentStringToPpm } from "./billing-math";
+import {
+  addPunchItem,
+  deleteDailyLog,
+  getDailyLog,
+  saveDailyLog,
+  setPunchDone,
+  type CrewInput,
+} from "./field-ops";
 import { LedgerError, friendlyMessage } from "@/modules/accounting/core";
 import {
   createChangeOrder,
@@ -42,8 +57,10 @@ import {
   COMMITMENT_STATUSES,
   CONTRACT_ROLES,
   CONTRACT_STATUSES,
+  DAILY_LOG_ENTITY,
   PACK,
   PROJECT_STATUSES,
+  hoursToTenths,
 } from "./vocabulary";
 
 /**
@@ -135,6 +152,16 @@ function toResult(err: unknown): { error: string } {
    */
   if (err instanceof LedgerError) {
     return { error: friendlyMessage(err) };
+  }
+  /**
+   * Photos are Documents' rows and punch items are Work's, so their refusals
+   * arrive here already written for a person — "Only a photo can be the
+   * picture", "this workspace has no work list yet" — and are handed on as
+   * they are. Matched by name rather than class, the way livestock's actions
+   * do, so a `catch` does not become a dependency on two modules' error classes.
+   */
+  if (err instanceof Error && (err.name === "DocsError" || err.name === "WorkError")) {
+    return { error: err.message };
   }
   /**
    * The unique indexes are the backstop for a duplicate number or list name,
@@ -1120,6 +1147,240 @@ export async function deletePayApplicationAction(input: unknown) {
     await withTenant(ctx.tenantId, (tx) => deletePayApplication(tx, ctx, id), { role: ctx.role });
     revalidatePath(`${BASE}/${projectId}/contracts/${contractId}`);
     revalidatePath(`${BASE}/${projectId}`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// --------------------------------------------------------------------- field
+
+/**
+ * The field's write surface — chores, not decisions. `gate()` still
+ * re-verifies the tenant and the module; the write level is the ops'
+ * (`member`), because whoever is on the site writes the day.
+ */
+const crewLineSchema = z.object({
+  partyId: optionalUuid,
+  trade: z.string().trim().max(120).optional(),
+  workers: z.number().int().min(0).max(10_000),
+  /** "6.5" — hours EACH, as typed; tenths at the boundary. */
+  hours: z.string().trim().max(10).optional(),
+  notes: z.string().trim().max(300).optional(),
+});
+
+const dailyLogSchema = z.object({
+  projectId: z.string().uuid(),
+  logDate: isoDate,
+  weather: z.string().trim().max(120).optional(),
+  notes: z.string().trim().max(4000).optional(),
+  crews: z.array(crewLineSchema).max(100).optional(),
+});
+
+/**
+ * A repeater's empty last row — no trade, no subcontractor — is dropped; a
+ * named row with hours that are not a number is refused, because "6h" typed
+ * into a box that wanted "6" must not become nothing on the report.
+ */
+function crewLines(
+  crews: z.infer<typeof crewLineSchema>[] | undefined,
+): { ok: true; crews: CrewInput[] | undefined } | { ok: false; error: string } {
+  if (crews === undefined) return { ok: true, crews: undefined };
+  const out: CrewInput[] = [];
+  for (const c of crews) {
+    if ((c.trade ?? "") === "" && !c.partyId) continue;
+    const tenths = hoursToTenths(c.hours ?? "");
+    if (tenths === null) return { ok: false, error: "Hours must be a number, like 8 or 6.5." };
+    out.push({ partyId: c.partyId, trade: c.trade, workers: c.workers, hoursTenths: tenths, notes: c.notes });
+  }
+  return { ok: true, crews: out };
+}
+
+export async function saveDailyLogAction(input: unknown) {
+  const parsed = dailyLogSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const crews = crewLines(parsed.data.crews);
+  if (!crews.ok) return { error: crews.error };
+  try {
+    const ctx = await gate();
+    const log = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const saved = await saveDailyLog(tx, ctx, { ...parsed.data, crews: crews.crews });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "daily_log.saved",
+          targetType: "daily_log",
+          targetId: saved.id,
+          meta: { projectId: saved.projectId, logDate: saved.logDate },
+        });
+        return saved;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${parsed.data.projectId}`);
+    revalidatePath(`${BASE}/${parsed.data.projectId}/log`);
+    return { ok: true as const, logId: log.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function deleteDailyLogAction(input: unknown) {
+  const parsed = z.object({ id: z.string().uuid(), projectId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+    await withTenant(ctx.tenantId, (tx) => deleteDailyLog(tx, ctx, parsed.data.id), { role: ctx.role });
+    revalidatePath(`${BASE}/${parsed.data.projectId}`);
+    revalidatePath(`${BASE}/${parsed.data.projectId}/log`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Photos of a day. The pattern the livestock pack set for a photo of an
+ * animal: the pack owns the ACTIONS and core owns the TABLE, so the code that
+ * names `job_daily_log` is here, where it is a fact rather than a string the
+ * browser sent — and because `document_attachments` has no foreign key,
+ * `assertLog` is the only thing that proves the day exists.
+ *
+ * Both gates: `jobs` because the day is this pack's, `documents` because the
+ * FILE is the DMS's; and both write rules, because the accountant clears the
+ * pack's `member` and not the DMS's `roleMayWrite`.
+ */
+const photoTarget = (logId: string) => ({
+  extensionSlug: PACK,
+  entityType: DAILY_LOG_ENTITY,
+  entityId: logId,
+});
+
+const photoInput = z.object({ entityId: z.string().uuid(), pathname: z.string().min(1).max(500) });
+const photoRef = z.object({ entityId: z.string().uuid(), documentId: z.string().uuid() });
+
+async function photoGate() {
+  const ctx = await gate();
+  await requireModuleEnabled(ctx.tenantId, "documents");
+  if (!allowsWrite(ctx.role, "member") || !roleMayWrite(ctx.role)) {
+    throw new JobsError("FORBIDDEN", "cannot add photos here");
+  }
+  return ctx;
+}
+
+async function assertLog(ctx: JobsCtx, logId: string): Promise<string> {
+  const log = await withTenant(ctx.tenantId, (tx) => getDailyLog(tx, ctx.tenantId, logId), {
+    role: ctx.role,
+  });
+  if (!log) throw new JobsError("NOT_FOUND", `log ${logId} not found`);
+  return log.projectId;
+}
+
+export async function attachLogPhotoAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoInput.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    const projectId = await assertLog(ctx, parsed.data.entityId);
+    const result = await registerAttachedPhoto(
+      { tenantId: ctx.tenantId, userId: ctx.userId, role: ctx.role },
+      { pathname: parsed.data.pathname, target: photoTarget(parsed.data.entityId) },
+    );
+    revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath(`${BASE}/${projectId}/log`);
+    return { ok: true as const, documentId: result.documentId };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function setLogPhotoPrimaryAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoRef.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    const projectId = await assertLog(ctx, parsed.data.entityId);
+    await withTenant(
+      ctx.tenantId,
+      (tx) =>
+        setPrimaryAttachment(
+          tx,
+          { tenantId: ctx.tenantId, userId: ctx.userId, role: ctx.role },
+          { documentId: parsed.data.documentId, target: photoTarget(parsed.data.entityId) },
+        ),
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}/log`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function detachLogPhotoAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoRef.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    const projectId = await assertLog(ctx, parsed.data.entityId);
+    await withTenant(
+      ctx.tenantId,
+      (tx) =>
+        detachDocumentFromRecord(
+          tx,
+          { tenantId: ctx.tenantId, userId: ctx.userId, role: ctx.role },
+          { documentId: parsed.data.documentId, target: photoTarget(parsed.data.entityId) },
+        ),
+      { role: ctx.role },
+    );
+    // The FILE stays in the cabinet: removing a photo from a day and deleting
+    // a photo are different acts.
+    revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath(`${BASE}/${projectId}/log`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function addPunchItemAction(input: unknown) {
+  const parsed = z
+    .object({
+      projectId: z.string().uuid(),
+      title: z.string().trim().min(1).max(300),
+      notes: z.string().trim().max(2000).optional(),
+      dueOn: optionalDate,
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Say what needs doing." };
+  const { projectId, ...item } = parsed.data;
+  try {
+    const ctx = await gate();
+    await withTenant(ctx.tenantId, (tx) => addPunchItem(tx, ctx, projectId, item), { role: ctx.role });
+    revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath("/dashboard/m/work");
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function setPunchDoneAction(input: unknown) {
+  const parsed = z
+    .object({ projectId: z.string().uuid(), itemId: z.string().uuid(), done: z.boolean() })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      (tx) => setPunchDone(tx, ctx, parsed.data.itemId, parsed.data.done),
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${parsed.data.projectId}`);
+    revalidatePath("/dashboard/m/work");
     return { ok: true as const };
   } catch (err) {
     return toResult(err);

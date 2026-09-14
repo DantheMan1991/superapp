@@ -124,12 +124,28 @@ seeds a mild third case, being additive and idempotent.
 **The designed answer is this ADR's own claim one level up: the industry belongs
 to the entity, not the tenant.** `entities.industry`, with label resolution
 reading the active entity and falling back to the tenant — the shape label
-resolution already has, one level deeper. **Deliberately not built**, because
-whether it is needed depends on whether Rainbow Restoration belongs in the
-platform at all, which is a question for the pilot and not a design problem. It
-does, however, promote
+resolution already has, one level deeper.
+
+**Deliberately not built, and now formally deferred.** The founder scoped the
+other two companies out on 2026-09-13 — different industries, *"not going to
+worry about right now"* — so construction's first customer is one entity with
+three divisions. The design is recorded with a **trigger rather than a date: the
+day Prefab or Restoration is put into the platform.** It does promote
 [packs-and-profiles.md](../modules/packs-and-profiles.md)'s
-two-profiles-on-one-tenant open item from hypothetical to observed.
+two-profiles-on-one-tenant open item from hypothetical to observed, which is
+worth more than building it early.
+
+**Consolidated financials needed nothing.** The group does prepare them, and
+[consolidation.ts](../../src/modules/accounting/core/consolidation.ts) is ADR 0010
+slice 3, live, with `combined` and `consolidated` report scopes and a deliberate
+refusal on anything filed per entity. One caveat came from reading its header
+rather than assuming: it is **explicitly not full GAAP consolidation**, assuming
+*"commonly owned LLCs rather than a parent holding subsidiaries"* — so whether the
+group is brother-sister (combined statements, exactly right) or a true holding
+company (needs eliminations it does not do) is an accounting question to settle
+before a second entity goes in. **Construction's design changes not at all for
+any of it**: `entity_id` on a project, one entity, a report above it that already
+exists. That is ADR 0010 doing its job.
 
 ## Alternatives rejected
 

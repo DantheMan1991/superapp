@@ -1125,4 +1125,96 @@ d("jobs tables (RLS)", () => {
     expect(left).toHaveLength(1);
     expect(left[0].projectId).toBe(projectA);
   });
+
+  // ---------------------------------------------------------- cost plus a fee
+
+  it("cannot read or change another tenant's COST LINES, and a line cannot hang off another tenant's APPLICATION or name its CODE", async () => {
+    const lineId = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobPayApplicationCosts)
+        .values({
+          tenantId: tenantA,
+          payApplicationId: payAppA,
+          costCodeId: codeA,
+          ledgerToDateCents: 40_000_00,
+          thisPeriodCents: 40_000_00,
+        })
+        .returning();
+      return rows[0].id;
+    });
+    const seen = await asOtherTenant(async (tx) => ({
+      lines: await tx
+        .select()
+        .from(schema.jobPayApplicationCosts)
+        .where(eq(schema.jobPayApplicationCosts.id, lineId)),
+      changed: await tx
+        .update(schema.jobPayApplicationCosts)
+        .set({ thisPeriodCents: 1 })
+        .where(eq(schema.jobPayApplicationCosts.id, lineId))
+        .returning(),
+    }));
+    expect(seen.lines).toEqual([]);
+    expect(seen.changed).toEqual([]);
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.jobPayApplicationCosts).where(eq(schema.jobPayApplicationCosts.id, lineId)),
+    );
+    expect(mine).toHaveLength(1);
+
+    // Tenant B's application, tenant A's row: unrepresentable.
+    const otherApp = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobPayApplications)
+        .values({ tenantId: tenantB, contractId: contractB, number: 7, periodTo: "2026-09-30" })
+        .returning();
+      return rows[0].id;
+    });
+    await expect(
+      withSystem((tx) =>
+        tx
+          .insert(schema.jobPayApplicationCosts)
+          .values({ tenantId: tenantA, payApplicationId: otherApp, costCodeId: codeA }),
+      ),
+    ).rejects.toThrow();
+    // One line per code per application.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .insert(schema.jobPayApplicationCosts)
+          .values({ tenantId: tenantA, payApplicationId: payAppA, costCodeId: codeA }),
+      ),
+    ).rejects.toThrow();
+    // A code that has been billed against cannot be deleted; the line goes with its application.
+    await expect(
+      withSystem((tx) => tx.delete(schema.jobCostCodes).where(eq(schema.jobCostCodes.id, codeA))),
+    ).rejects.toThrow();
+    await withSystem((tx) =>
+      tx.delete(schema.jobPayApplications).where(eq(schema.jobPayApplications.id, otherApp)),
+    );
+  });
+
+  it("a contract's cost-plus terms are nullable, floored at nothing, and a fee rate never passes 100%", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.update(schema.jobContracts).set({ feePpm: 1_000_001 }).where(eq(schema.jobContracts.id, contractA)),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.update(schema.jobContracts).set({ gmaxCents: -1 }).where(eq(schema.jobContracts.id, contractA)),
+      ),
+    ).rejects.toThrow();
+    await withSystem((tx) =>
+      tx.update(schema.jobContracts).set({ feePpm: 150_000, feeCents: null, gmaxCents: null }).where(eq(schema.jobContracts.id, contractA)),
+    );
+    const [c] = await asOwner((tx) =>
+      tx.select().from(schema.jobContracts).where(eq(schema.jobContracts.id, contractA)),
+    );
+    expect(c.feePpm).toBe(150_000);
+    // A WIP line's method is one of two words.
+    await expect(
+      withSystem((tx) =>
+        tx.update(schema.jobWipLines).set({ method: "guesswork" }).where(eq(schema.jobWipLines.periodId, periodA)),
+      ),
+    ).rejects.toThrow();
+  });
 });

@@ -12,6 +12,7 @@ import type {
   JobCostCode,
   JobCostCodeSet,
   JobPayApplication,
+  JobPayApplicationCost,
   JobPayApplicationLine,
   JobProject,
   JobSovLine,
@@ -27,8 +28,12 @@ import {
   ensureCustomerForParty,
 } from "@/modules/accounting/invoicing/customers";
 import {
+  costPlusTotals,
   payApplicationTotals,
   ppmToPercentString,
+  type CostLineFigures,
+  type CostPlusTerms,
+  type CostPlusTotals,
   type PayApplicationTotals,
   type PayLineFigures,
 } from "./billing-math";
@@ -56,6 +61,8 @@ import {
   isContractRole,
   isContractStatus,
   isProjectStatus,
+  FEE_PPM_MAX,
+  isCostPlusMethod,
 } from "./vocabulary";
 
 /**
@@ -111,7 +118,9 @@ export class JobsError extends Error {
       /** Billings equal earned revenue on every job: there is no entry to post. */
       | "NOTHING_TO_POST"
       /** Only the latest posted WIP period of a company can be unposted. */
-      | "NOT_LATEST_PERIOD",
+      | "NOT_LATEST_PERIOD"
+      /** A job's cost can be billed by one cost-plus contract; a second would bill it twice. */
+      | "ONE_COST_PLUS",
     message: string,
   ) {
     super(message);
@@ -619,9 +628,18 @@ export interface ContractInput {
   role?: string;
   billingMethod?: string;
   valueCents?: number | null;
+  /** Cost-plus terms (slice 5b): a fee rate in ppm, a fixed fee, a guaranteed maximum. Null for none. */
+  feePpm?: number | null;
+  feeCents?: number | null;
+  gmaxCents?: number | null;
   status?: string;
   signedOn?: string | null;
   notes?: string;
+}
+
+/** The cost-plus terms as the arithmetic wants them. */
+export function costPlusTerms(contract: Pick<JobContract, "feePpm" | "feeCents" | "gmaxCents">): CostPlusTerms {
+  return { feePpm: contract.feePpm, feeCents: contract.feeCents, gmaxCents: contract.gmaxCents };
 }
 
 export async function listContracts(
@@ -771,6 +789,9 @@ export async function createContract(
       role: input.role ?? "prime",
       billingMethod: input.billingMethod ?? "fixed_price",
       valueCents: input.valueCents ?? null,
+      feePpm: input.feePpm ?? null,
+      feeCents: input.feeCents ?? null,
+      gmaxCents: input.gmaxCents ?? null,
       status: input.status ?? "proposed",
       sequence,
       signedOn: input.signedOn ?? null,
@@ -787,7 +808,22 @@ function validateContractShape(input: {
   status?: string;
   billingMethod?: string;
   valueCents?: number | null;
+  feePpm?: number | null;
+  feeCents?: number | null;
+  gmaxCents?: number | null;
 }): void {
+  if (
+    input.feePpm != null &&
+    (!Number.isInteger(input.feePpm) || input.feePpm < 0 || input.feePpm > FEE_PPM_MAX)
+  ) {
+    throw new JobsError("INVALID_VALUE", "a fee must be between 0% and 100% of cost");
+  }
+  if (input.feeCents != null && (!Number.isInteger(input.feeCents) || input.feeCents < 0)) {
+    throw new JobsError("INVALID_VALUE", "a fixed fee cannot be negative");
+  }
+  if (input.gmaxCents != null && (!Number.isInteger(input.gmaxCents) || input.gmaxCents < 0)) {
+    throw new JobsError("INVALID_VALUE", "a guaranteed maximum cannot be negative");
+  }
   if (input.kind !== undefined && !DELIVERY_METHOD_FORMAT.test(input.kind.trim())) {
     throw new JobsError("INVALID_KIND", `invalid contract kind: ${input.kind}`);
   }
@@ -866,6 +902,9 @@ export async function updateContract(
   if (input.role !== undefined) patch.role = input.role;
   if (input.billingMethod !== undefined) patch.billingMethod = input.billingMethod;
   if (input.valueCents !== undefined) patch.valueCents = input.valueCents;
+  if (input.feePpm !== undefined) patch.feePpm = input.feePpm;
+  if (input.feeCents !== undefined) patch.feeCents = input.feeCents;
+  if (input.gmaxCents !== undefined) patch.gmaxCents = input.gmaxCents;
   if (input.status !== undefined) patch.status = input.status;
   if (input.signedOn !== undefined) patch.signedOn = input.signedOn;
   if (input.notes !== undefined) patch.notes = input.notes.trim();
@@ -1591,6 +1630,7 @@ async function actualByCode(
   tx: Tx,
   tenantId: string,
   project: JobProject | null,
+  asOf?: string,
 ): Promise<{ byCode: Map<string, number>; uncodedCents: number }> {
   const empty = { byCode: new Map<string, number>(), uncodedCents: 0 };
   if (!project) return empty;
@@ -1602,6 +1642,7 @@ async function actualByCode(
   if (accountIds.length === 0) return empty;
   const rows = await getBalances(tx, tenantId, {
     scope: { kind: "one", entityId: project.entityId },
+    asOf,
     accountIds,
     withinMemberId: member.id,
     groupByDimensionType: COST_CODE_DIMENSION,
@@ -2235,10 +2276,21 @@ export interface PayApplicationLineRow extends JobPayApplicationLine {
   sovScheduledCents: number;
 }
 
+/** A cost line with its code's label, or null labels for the no-code line. */
+export interface CostLineRow extends JobPayApplicationCost {
+  code: string | null;
+  name: string | null;
+}
+
 export interface PayApplicationRow {
   app: JobPayApplication;
+  /** The schedule lines of a fixed-price application; empty on a cost-plus one. */
   lines: PayApplicationLineRow[];
+  /** The cost lines of a cost-plus application; empty on a fixed-price one. */
+  costs: CostLineRow[];
   totals: PayApplicationTotals;
+  /** The cost-plus certificate's extra figures; null on a fixed-price application. */
+  costPlus: CostPlusTotals | null;
   /** The invoice an issued application became, in Accounting's own words. */
   invoice: { id: string; invoiceNumber: string; status: string; totalCents: number } | null;
 }
@@ -2322,6 +2374,153 @@ async function loadAppLines(
   return out;
 }
 
+async function loadCostLines(
+  tx: Tx,
+  tenantId: string,
+  appIds: string[],
+): Promise<Map<string, CostLineRow[]>> {
+  const out = new Map<string, CostLineRow[]>();
+  if (appIds.length === 0) return out;
+  const rows = await tx
+    .select({
+      line: schema.jobPayApplicationCosts,
+      code: schema.jobCostCodes.code,
+      name: schema.jobCostCodes.name,
+      sortOrder: schema.jobCostCodes.sortOrder,
+    })
+    .from(schema.jobPayApplicationCosts)
+    .leftJoin(
+      schema.jobCostCodes,
+      and(
+        eq(schema.jobCostCodes.tenantId, schema.jobPayApplicationCosts.tenantId),
+        eq(schema.jobCostCodes.id, schema.jobPayApplicationCosts.costCodeId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.jobPayApplicationCosts.tenantId, tenantId),
+        inArray(schema.jobPayApplicationCosts.payApplicationId, appIds),
+      ),
+    );
+  // The chart's order, the no-code line last.
+  rows.sort(
+    (a, b) =>
+      (a.sortOrder ?? Number.MAX_SAFE_INTEGER) - (b.sortOrder ?? Number.MAX_SAFE_INTEGER) ||
+      (a.code ?? "\uffff").localeCompare(b.code ?? "\uffff"),
+  );
+  for (const r of rows) {
+    const list = out.get(r.line.payApplicationId) ?? [];
+    list.push({ ...r.line, code: r.code, name: r.name });
+    out.set(r.line.payApplicationId, list);
+  }
+  return out;
+}
+
+function costFigures(lines: ReadonlyArray<JobPayApplicationCost>): CostLineFigures[] {
+  return lines.map((l) => ({
+    costCodeId: l.costCodeId,
+    ledgerToDateCents: l.ledgerToDateCents,
+    previousCents: l.previousCents,
+    thisPeriodCents: l.thisPeriodCents,
+  }));
+}
+
+/**
+ * Give a cost-plus draft a line for every cost code the ledger has charged to
+ * the job as of the period end (and one for money with no code), carrying
+ * what earlier issued applications billed on each. The ledger figure is
+ * refreshed every sync; a line's `this period` is refreshed too UNLESS the
+ * person typed something other than the default — a disputed bill left out
+ * stays left out when the draft is saved again.
+ *
+ * TO DATE, NEVER BY WINDOW (ADR 0060): a bill dated inside an earlier period
+ * and posted late shows up as ledger-to-date greater than previous, and is
+ * billed by the next application rather than lost between two windows.
+ */
+async function syncCostLines(
+  tx: Tx,
+  tenantId: string,
+  app: JobPayApplication,
+  contract: JobContract,
+): Promise<void> {
+  const project = await getProject(tx, tenantId, contract.projectId);
+  const [ledger, previousApp, have] = await Promise.all([
+    actualByCode(tx, tenantId, project, app.periodTo),
+    lastIssuedBefore(tx, tenantId, app.contractId, app.number),
+    loadCostLines(tx, tenantId, [app.id]),
+  ]);
+  const previous = new Map<string | null, number>();
+  if (previousApp) {
+    for (const l of (await loadCostLines(tx, tenantId, [previousApp.id])).get(previousApp.id) ?? []) {
+      previous.set(l.costCodeId, l.previousCents + l.thisPeriodCents);
+    }
+  }
+  const existing = new Map((have.get(app.id) ?? []).map((l) => [l.costCodeId, l]));
+  const codes = new Set<string | null>([
+    ...ledger.byCode.keys(),
+    ...(ledger.uncodedCents !== 0 ? [null] : []),
+    ...previous.keys(),
+    ...existing.keys(),
+  ]);
+  for (const codeId of codes) {
+    const ledgerCents = codeId === null ? ledger.uncodedCents : (ledger.byCode.get(codeId) ?? 0);
+    const previousCents = previous.get(codeId) ?? 0;
+    const line = existing.get(codeId);
+    if (line) {
+      const untouched = line.thisPeriodCents === line.ledgerToDateCents - line.previousCents;
+      await tx
+        .update(schema.jobPayApplicationCosts)
+        .set({
+          ledgerToDateCents: ledgerCents,
+          previousCents,
+          thisPeriodCents: untouched ? ledgerCents - previousCents : line.thisPeriodCents,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.jobPayApplicationCosts.id, line.id));
+    } else {
+      await tx.insert(schema.jobPayApplicationCosts).values({
+        tenantId,
+        payApplicationId: app.id,
+        costCodeId: codeId,
+        ledgerToDateCents: ledgerCents,
+        previousCents,
+        thisPeriodCents: ledgerCents - previousCents,
+      });
+    }
+  }
+}
+
+/**
+ * A JOB'S COST IS BILLED BY ONE COST-PLUS CONTRACT. Cost belongs to the
+ * project, so two cost-plus contracts on it would each bill the same dollar;
+ * refused the moment the second one starts an application.
+ */
+async function assertOnlyCostPlusBiller(tx: Tx, tenantId: string, contract: JobContract): Promise<void> {
+  const rivals = await tx
+    .select({ id: schema.jobContracts.id })
+    .from(schema.jobContracts)
+    .innerJoin(
+      schema.jobPayApplications,
+      and(
+        eq(schema.jobPayApplications.tenantId, schema.jobContracts.tenantId),
+        eq(schema.jobPayApplications.contractId, schema.jobContracts.id),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.jobContracts.tenantId, tenantId),
+        eq(schema.jobContracts.projectId, contract.projectId),
+        ne(schema.jobContracts.id, contract.id),
+        eq(schema.jobContracts.billingMethod, "cost_plus_fee"),
+        ne(schema.jobPayApplications.status, "void"),
+      ),
+    )
+    .limit(1);
+  if (rivals.length > 0) {
+    throw new JobsError("ONE_COST_PLUS", "another cost-plus contract on this job is already billing its cost");
+  }
+}
+
 /**
  * Every application on a contract, oldest first, each with its lines and its
  * certificate. A DRAFT's figures are computed live from its lines and the
@@ -2334,6 +2533,8 @@ export async function listPayApplications(
   tenantId: string,
   contractId: string,
 ): Promise<PayApplicationRow[]> {
+  const contract = await loadContract(tx, tenantId, contractId);
+  const costPlus = isCostPlusMethod(contract.billingMethod);
   const apps = await tx
     .select()
     .from(schema.jobPayApplications)
@@ -2344,19 +2545,41 @@ export async function listPayApplications(
       ),
     )
     .orderBy(asc(schema.jobPayApplications.number));
-  const linesByApp = await loadAppLines(
-    tx,
-    tenantId,
-    apps.map((a) => a.id),
-  );
+  const ids = apps.map((a) => a.id);
+  const [linesByApp, costsByApp] = await Promise.all([
+    loadAppLines(tx, tenantId, ids),
+    loadCostLines(tx, tenantId, ids),
+  ]);
+  // A cost-plus DRAFT shows the books as they are NOW, the way a fixed-price
+  // draft shows the schedule as it is now; what it bills is what was saved.
+  const project = costPlus ? await getProject(tx, tenantId, contract.projectId) : null;
 
   const out: PayApplicationRow[] = [];
   for (const app of apps) {
     const lines = linesByApp.get(app.id) ?? [];
+    let costs = costsByApp.get(app.id) ?? [];
     let totals: PayApplicationTotals;
+    let cp: CostPlusTotals | null = null;
     if (app.status === "draft") {
       const previous = await lastIssuedBefore(tx, tenantId, contractId, app.number);
-      totals = payApplicationTotals(figuresOf(lines, true), app.retainagePpm, certifiedCents(previous));
+      if (costPlus) {
+        const ledger = await actualByCode(tx, tenantId, project, app.periodTo);
+        costs = costs.map((c) => ({
+          ...c,
+          ledgerToDateCents:
+            c.costCodeId === null ? ledger.uncodedCents : (ledger.byCode.get(c.costCodeId) ?? 0),
+        }));
+        cp = costPlusTotals(
+          costFigures(costs),
+          costPlusTerms(contract),
+          app.feeToDateCents,
+          app.retainagePpm,
+          certifiedCents(previous),
+        );
+        totals = cp;
+      } else {
+        totals = payApplicationTotals(figuresOf(lines, true), app.retainagePpm, certifiedCents(previous));
+      }
     } else {
       totals = {
         scheduledCents: app.scheduledCents,
@@ -2367,6 +2590,14 @@ export async function listPayApplications(
         dueCents: app.dueCents,
         balanceToFinishCents: app.scheduledCents - app.completedToDateCents,
       };
+      if (costPlus) {
+        cp = {
+          ...totals,
+          costToDateCents: app.costToDateCents,
+          feeToDateCents: app.feeToDateCents,
+          capped: app.completedToDateCents < app.costToDateCents + app.feeToDateCents,
+        };
+      }
     }
     let invoice: PayApplicationRow["invoice"] = null;
     if (app.invoiceId) {
@@ -2378,7 +2609,7 @@ export async function listPayApplications(
         totalCents: inv.totalCents,
       };
     }
-    out.push({ app, lines, totals, invoice });
+    out.push({ app, lines, costs, totals, costPlus: cp, invoice });
   }
   return out;
 }
@@ -2464,10 +2695,15 @@ export async function createPayApplication(
   input: PayApplicationInput,
 ): Promise<JobPayApplication> {
   requireWrite(ctx, "owner");
-  await loadContract(tx, ctx.tenantId, input.contractId);
-  const sov = await listSovLines(tx, ctx.tenantId, input.contractId);
-  if (sov.length === 0) {
-    throw new JobsError("NO_LINES", "the contract needs a schedule of values first");
+  const contract = await loadContract(tx, ctx.tenantId, input.contractId);
+  const costPlus = isCostPlusMethod(contract.billingMethod);
+  if (costPlus) {
+    await assertOnlyCostPlusBiller(tx, ctx.tenantId, contract);
+  } else {
+    const sov = await listSovLines(tx, ctx.tenantId, input.contractId);
+    if (sov.length === 0) {
+      throw new JobsError("NO_LINES", "the contract needs a schedule of values first");
+    }
   }
   const existing = await tx
     .select({
@@ -2504,7 +2740,8 @@ export async function createPayApplication(
       createdByClerkUserId: ctx.userId,
     })
     .returning();
-  await syncDraftLines(tx, ctx.tenantId, rows[0]);
+  if (costPlus) await syncCostLines(tx, ctx.tenantId, rows[0], contract);
+  else await syncDraftLines(tx, ctx.tenantId, rows[0]);
   return rows[0];
 }
 
@@ -2530,6 +2767,12 @@ export interface PayApplicationLineInput {
   storedCents: number;
 }
 
+/** What a cost-plus draft bills on one code this period. Null code = the no-code line. */
+export interface CostLineInput {
+  costCodeId: string | null;
+  thisPeriodCents: number;
+}
+
 /**
  * Change a draft: the period, the rate, the notes, and what each line
  * completed this period and has stored. `this period` may be NEGATIVE — an
@@ -2547,6 +2790,10 @@ export async function updatePayApplication(
     retainagePpm?: number;
     notes?: string;
     lines?: PayApplicationLineInput[];
+    /** Cost-plus only: what each code bills this period. */
+    costLines?: CostLineInput[];
+    /** Cost-plus only, on a contract with a fixed fee: the fee billed to date. */
+    feeToDateCents?: number;
     version?: number;
   },
 ): Promise<JobPayApplication> {
@@ -2559,7 +2806,38 @@ export async function updatePayApplication(
     throw new JobsError("STALE_VERSION", "application changed since loaded");
   }
   if (input.retainagePpm !== undefined) validateRetainage(input.retainagePpm);
-  await syncDraftLines(tx, ctx.tenantId, app);
+  const contract = await loadContract(tx, ctx.tenantId, app.contractId);
+  const costPlus = isCostPlusMethod(contract.billingMethod);
+  // The period may move; the ledger is read as of the NEW period end.
+  const synced = input.periodTo !== undefined ? { ...app, periodTo: input.periodTo } : app;
+  if (costPlus) await syncCostLines(tx, ctx.tenantId, synced, contract);
+  else await syncDraftLines(tx, ctx.tenantId, app);
+
+  if (costPlus && input.costLines) {
+    const current = (await loadCostLines(tx, ctx.tenantId, [app.id])).get(app.id) ?? [];
+    const byCode = new Map(current.map((l) => [l.costCodeId, l]));
+    for (const line of input.costLines) {
+      const row = byCode.get(line.costCodeId);
+      if (!row) {
+        throw new JobsError("NOT_FOUND", `cost code ${line.costCodeId ?? "(none)"} is not on this application`);
+      }
+      if (!Number.isInteger(line.thisPeriodCents)) {
+        throw new JobsError("INVALID_VALUE", "amounts must be whole cents");
+      }
+      await tx
+        .update(schema.jobPayApplicationCosts)
+        .set({ thisPeriodCents: line.thisPeriodCents, updatedAt: new Date() })
+        .where(eq(schema.jobPayApplicationCosts.id, row.id));
+    }
+  }
+  if (input.feeToDateCents !== undefined) {
+    if (!Number.isInteger(input.feeToDateCents) || input.feeToDateCents < 0) {
+      throw new JobsError("INVALID_VALUE", "the fee billed to date cannot be negative");
+    }
+    if (contract.feeCents !== null && input.feeToDateCents > contract.feeCents) {
+      throw new JobsError("INVALID_VALUE", "the fee billed to date cannot exceed the fixed fee");
+    }
+  }
 
   if (input.lines) {
     const current = await tx
@@ -2605,6 +2883,7 @@ export async function updatePayApplication(
   if (input.periodTo !== undefined) patch.periodTo = input.periodTo;
   if (input.retainagePpm !== undefined) patch.retainagePpm = input.retainagePpm;
   if (input.notes !== undefined) patch.notes = input.notes.trim();
+  if (costPlus && input.feeToDateCents !== undefined) patch.feeToDateCents = input.feeToDateCents;
   const rows = await tx
     .update(schema.jobPayApplications)
     .set(patch)
@@ -2676,20 +2955,79 @@ export async function issuePayApplication(
   if (input.version !== undefined && input.version !== app.version) {
     throw new JobsError("STALE_VERSION", "application changed since loaded");
   }
-  await syncDraftLines(tx, ctx.tenantId, app);
-  const lines = (await loadAppLines(tx, ctx.tenantId, [app.id])).get(app.id) ?? [];
-  if (lines.length === 0) {
-    throw new JobsError("NO_LINES", "the contract needs a schedule of values first");
-  }
+  const contract = await loadContract(tx, ctx.tenantId, app.contractId);
+  const costPlus = isCostPlusMethod(contract.billingMethod);
   const previous = await lastIssuedBefore(tx, ctx.tenantId, app.contractId, app.number);
-  const totals = payApplicationTotals(figuresOf(lines, true), app.retainagePpm, certifiedCents(previous));
+
+  /**
+   * THE CERTIFICATE, either way: five totals and the gross lines the invoice
+   * carries before retainage. A fixed-price application earns a share of its
+   * schedule; a cost-plus one earns what the job cost plus the fee (ADR 0060).
+   */
+  let totals: PayApplicationTotals;
+  let cp: CostPlusTotals | null = null;
+  let lines: PayApplicationLineRow[] = [];
+  const gross: Array<{ description: string; cents: number }> = [];
+  if (costPlus) {
+    await syncCostLines(tx, ctx.tenantId, app, contract);
+    const costs = (await loadCostLines(tx, ctx.tenantId, [app.id])).get(app.id) ?? [];
+    if (costs.length === 0) {
+      throw new JobsError("NO_LINES", "the books carry no cost on this job yet");
+    }
+    cp = costPlusTotals(
+      costFigures(costs),
+      costPlusTerms(contract),
+      app.feeToDateCents,
+      app.retainagePpm,
+      certifiedCents(previous),
+    );
+    totals = cp;
+    const costThisPeriod = cp.costToDateCents - (previous?.costToDateCents ?? 0);
+    const feeThisPeriod = cp.feeToDateCents - (previous?.feeToDateCents ?? 0);
+    const grossThisPeriod = cp.completedToDateCents - (previous?.completedToDateCents ?? 0);
+    if (grossThisPeriod !== costThisPeriod + feeThisPeriod) {
+      // The guaranteed maximum held the figure down; one line says so rather
+      // than two lines that do not add up to it.
+      gross.push({
+        description: `Application ${app.number} — cost plus fee through ${app.periodTo}, at the guaranteed maximum`,
+        cents: grossThisPeriod,
+      });
+    } else {
+      if (costThisPeriod !== 0) {
+        gross.push({
+          description: `Application ${app.number} — cost incurred through ${app.periodTo}`,
+          cents: costThisPeriod,
+        });
+      }
+      if (feeThisPeriod !== 0) {
+        gross.push({
+          description: contract.feePpm
+            ? `Fee (${ppmToPercentString(contract.feePpm)}% of cost)${contract.feeCents ? " and fixed fee" : ""}`
+            : "Fee",
+          cents: feeThisPeriod,
+        });
+      }
+    }
+  } else {
+    await syncDraftLines(tx, ctx.tenantId, app);
+    lines = (await loadAppLines(tx, ctx.tenantId, [app.id])).get(app.id) ?? [];
+    if (lines.length === 0) {
+      throw new JobsError("NO_LINES", "the contract needs a schedule of values first");
+    }
+    totals = payApplicationTotals(figuresOf(lines, true), app.retainagePpm, certifiedCents(previous));
+    const grossThisPeriod = totals.completedToDateCents - (previous?.completedToDateCents ?? 0);
+    if (grossThisPeriod !== 0) {
+      gross.push({
+        description: `Application ${app.number} — work completed and stored through ${app.periodTo}`,
+        cents: grossThisPeriod,
+      });
+    }
+  }
   if (totals.dueCents <= 0) {
     throw new JobsError("NOTHING_DUE", "nothing is due on this application");
   }
-  const grossThisPeriod = totals.completedToDateCents - (previous?.completedToDateCents ?? 0);
   const retainageThisPeriod = totals.retainageCents - (previous?.retainageCents ?? 0);
 
-  const contract = await loadContract(tx, ctx.tenantId, app.contractId);
   if (!contract.counterpartyPartyId) {
     throw new JobsError("COUNTERPARTY_REQUIRED", "the contract needs somebody to bill");
   }
@@ -2733,17 +3071,13 @@ export async function issuePayApplication(
     dueDate,
     memo: `Pay application ${app.number} · ${project.number} · ${kind}`,
     lines: [
-      ...(grossThisPeriod !== 0
-        ? [
-            {
-              description: `Application ${app.number} — work completed and stored through ${app.periodTo}`,
-              quantity: "1",
-              unitPriceCents: grossThisPeriod,
-              incomeAccountId: revenueAccountId,
-              dimensionMemberIds: dims,
-            },
-          ]
-        : []),
+      ...gross.map((g) => ({
+        description: g.description,
+        quantity: "1",
+        unitPriceCents: g.cents,
+        incomeAccountId: revenueAccountId,
+        dimensionMemberIds: dims,
+      })),
       ...(retainageThisPeriod !== 0 && retainageAccountId
         ? [
             {
@@ -2780,6 +3114,8 @@ export async function issuePayApplication(
       retainageCents: totals.retainageCents,
       previousCertificatesCents: totals.previousCertificatesCents,
       dueCents: totals.dueCents,
+      costToDateCents: cp?.costToDateCents ?? 0,
+      feeToDateCents: cp?.feeToDateCents ?? 0,
       version: app.version + 1,
       updatedAt: new Date(),
     })

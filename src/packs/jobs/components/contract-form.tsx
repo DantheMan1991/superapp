@@ -32,7 +32,10 @@ import {
   ROLE_LABELS,
   VALUED_CONTRACT_STATUSES,
   slugLabel,
+  isCostPlusMethod,
+  isFixedValueMethod,
 } from "../vocabulary";
+import { ppmToPercentString } from "../billing-math";
 
 const NONE = "__none__";
 
@@ -58,6 +61,9 @@ export interface EditableContract {
   role: string;
   billingMethod: string;
   valueCents: number | null;
+  feePpm?: number | null;
+  feeCents?: number | null;
+  gmaxCents?: number | null;
   status: string;
   signedOn: string | null;
   notes: string;
@@ -100,6 +106,15 @@ export function ContractForm({
   const [value, setValue] = useState(
     existing?.valueCents != null ? (existing.valueCents / 100).toFixed(2) : "",
   );
+  const [feePercent, setFeePercent] = useState(
+    existing?.feePpm != null ? ppmToPercentString(existing.feePpm) : "",
+  );
+  const [feeFixed, setFeeFixed] = useState(
+    existing?.feeCents != null ? (existing.feeCents / 100).toFixed(2) : "",
+  );
+  const [gmax, setGmax] = useState(
+    existing?.gmaxCents != null ? (existing.gmaxCents / 100).toFixed(2) : "",
+  );
   const [status, setStatus] = useState<string>(existing?.status ?? "proposed");
   const [signedOn, setSignedOn] = useState(existing?.signedOn ?? "");
   const [notes, setNotes] = useState(existing?.notes ?? "");
@@ -127,6 +142,9 @@ export function ContractForm({
         role,
         billingMethod,
         valueCents: value,
+        feePpm: feePercent,
+        feeCents: feeFixed,
+        gmaxCents: gmax,
         status,
         signedOn,
         notes: notes.trim(),
@@ -302,9 +320,55 @@ export function ContractForm({
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Recorded now, used when billing is built.
+                {isCostPlusMethod(billingMethod)
+                  ? "Billed as what the job has cost, plus the fee below."
+                  : isFixedValueMethod(billingMethod)
+                    ? "Billed against a schedule of values on the contract's page."
+                    : "Recorded now; this method is not billed here yet."}
               </p>
             </div>
+
+            {isCostPlusMethod(billingMethod) && (
+              /*
+                THE TERMS OF A COST-PLUS AGREEMENT. A fee as a share of cost, a
+                fixed fee, or both; and a guaranteed maximum that cost plus fee
+                never passes. Shown only when the method asks for them, because
+                a box that means nothing on a fixed-price contract is a box
+                somebody fills in.
+              */
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="contract-fee-percent">Fee % of cost</Label>
+                  <Input
+                    id="contract-fee-percent"
+                    value={feePercent}
+                    onChange={(e) => setFeePercent(e.target.value)}
+                    placeholder="15"
+                    inputMode="decimal"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="contract-fee-fixed">Fixed fee</Label>
+                  <Input
+                    id="contract-fee-fixed"
+                    value={feeFixed}
+                    onChange={(e) => setFeeFixed(e.target.value)}
+                    placeholder="none"
+                    inputMode="decimal"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="contract-gmax">Guaranteed maximum</Label>
+                  <Input
+                    id="contract-gmax"
+                    value={gmax}
+                    onChange={(e) => setGmax(e.target.value)}
+                    placeholder="none"
+                    inputMode="decimal"
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <Label htmlFor="contract-status">Status</Label>

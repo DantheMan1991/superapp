@@ -151,6 +151,19 @@ export const jobPayApplications = pgTable(
       .default(0),
     /** Current payment due — what the invoice was issued for. */
     dueCents: bigint("due_cents", { mode: "number" }).notNull().default(0),
+    /**
+     * ── A COST-PLUS APPLICATION'S TWO HALVES (slice 5b) ────────────────────
+     *
+     * On a cost-plus contract "completed to date" is cost to date plus fee to
+     * date, capped at the GMAX, and a certificate has to show the two apart.
+     * `cost_to_date_cents` is Σ of the cost lines (previous + this period) and
+     * is frozen at issue like every other total. `fee_to_date_cents` is the
+     * one figure a person may TYPE on a draft — the fixed fee billed so far —
+     * and is computed at issue when the fee is a percentage. Zero on every
+     * fixed-price application.
+     */
+    costToDateCents: bigint("cost_to_date_cents", { mode: "number" }).notNull().default(0),
+    feeToDateCents: bigint("fee_to_date_cents", { mode: "number" }).notNull().default(0),
     /** The Accounting invoice this application became at issue. */
     invoiceId: uuid("invoice_id"),
     issuedOn: date("issued_on", { mode: "string" }),
@@ -259,6 +272,74 @@ export const jobPayApplicationLines = pgTable(
   ],
 );
 
+/**
+ * One cost line of a COST-PLUS application: what the ledger says this job
+ * has cost on one cost code (or on no code at all), what earlier applications
+ * already billed of it, and what this one bills.
+ *
+ * ── THE LEDGER IS THE SCHEDULE OF VALUES (ADR 0060) ─────────────────────────
+ *
+ * A fixed-price application bills a share of a schedule; a cost-plus one
+ * bills the cost the books already carry against the job — every bill,
+ * timecard and journal line tagged with it, read through `getBalances`
+ * sliced to the job and split by cost code. `ledger_to_date_cents` is that
+ * figure as of the period end, live on a draft and frozen at issue;
+ * `previous_cents` is what earlier issued applications billed on the code
+ * (carried, never typed); `this_period_cents` is what this application
+ * bills, defaulting to the difference and editable — a disputed bill is left
+ * out by typing less, a credit is passed on by typing less than nothing.
+ * Billing TO DATE rather than by window is what catches a bill dated inside
+ * an earlier period and posted late.
+ *
+ * `cost_code_id` is NULL for money on the job with no code on the line —
+ * a real cost that is billed like any other, shown as "no cost code".
+ */
+export const jobPayApplicationCosts = pgTable(
+  "job_pay_application_costs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    payApplicationId: uuid("pay_application_id").notNull(),
+    costCodeId: uuid("cost_code_id"),
+    /** The books' figure for this code on this job as of the period end. Frozen at issue. */
+    ledgerToDateCents: bigint("ledger_to_date_cents", { mode: "number" }).notNull().default(0),
+    /** Billed on earlier issued applications. Carried, never typed. */
+    previousCents: bigint("previous_cents", { mode: "number" }).notNull().default(0),
+    /** Billed by this application. Defaults to ledger − previous; may be less, or negative for a credit. */
+    thisPeriodCents: bigint("this_period_cents", { mode: "number" }).notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("job_pay_application_costs_tenant_id_id_idx").on(t.tenantId, t.id),
+    /** One line per code per application (the no-code line is kept single by the sync). */
+    uniqueIndex("job_pay_application_costs_app_code_idx").on(
+      t.tenantId,
+      t.payApplicationId,
+      t.costCodeId,
+    ),
+    index("job_pay_application_costs_tenant_app_idx").on(t.tenantId, t.payApplicationId),
+    foreignKey({
+      name: "job_pay_application_costs_app_fk",
+      columns: [t.tenantId, t.payApplicationId],
+      foreignColumns: [jobPayApplications.tenantId, jobPayApplications.id],
+    }).onDelete("cascade"),
+    /** RESTRICT: a code that has been billed against is retired, never deleted. */
+    foreignKey({
+      name: "job_pay_application_costs_code_fk",
+      columns: [t.tenantId, t.costCodeId],
+      foreignColumns: [jobCostCodes.tenantId, jobCostCodes.id],
+    }),
+  ],
+);
+
 export type JobSovLine = typeof jobSovLines.$inferSelect;
+export type JobPayApplicationCost = typeof jobPayApplicationCosts.$inferSelect;
 export type JobPayApplication = typeof jobPayApplications.$inferSelect;
 export type JobPayApplicationLine = typeof jobPayApplicationLines.$inferSelect;

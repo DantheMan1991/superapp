@@ -66,6 +66,118 @@ uncoded remainder. Not driven: a cash-basis tenant (the farm is accrual), and
 a bill through the Purchases screen rather than the journal — the tags are
 the same rows either way.
 
+### 2026-09-14 — Slice 5b: cost plus a fee (`claude/cost-plus-a-fee`, ADR 0060)
+
+The second way the market bills a job, parked by slice 5 as "a different
+sum". Three nullable terms on the contract (`fee_ppm`, `fee_cents`,
+`gmax_cents`), two frozen figures on the application (`cost_to_date_cents`,
+`fee_to_date_cents`), one new table (`job_pay_application_costs`), a
+`method` on a WIP line — and no new document, no new invoice path and no
+schedule to set up.
+
+**THE LEDGER IS THE SCHEDULE OF VALUES.** A cost-plus application's lines
+are the books' cost tagged to the job as of the period end, by cost code —
+`actualByCode` with an `asOf`, the same read the `Spent` column makes — with
+what earlier issued applications billed on each code carried forward and
+`this period` defaulting to the difference. Nothing to type but what to
+leave out: less on a line leaves a disputed bill out, less than nothing
+passes a credit on; the books' figure stays beside it. `syncCostLines` runs
+on create, on every save and at issue, refreshing the books' figure and the
+default while keeping anything typed (it compares the stored figure to the
+old default to tell). The no-code line is a NULL `cost_code_id` and is billed
+like any other; the pack does not decide a line is unbillable because nobody
+coded it.
+
+**TO DATE, NEVER BY WINDOW.** A bill dated inside September and posted after
+September's application issued shows up as books-to-date greater than
+previous, and October's application bills it. The ops test posts exactly
+that bill and reads it on the next draft. Billing by window would have
+dropped it between two closed periods, which every contractor has met.
+
+**THE FEE, ROUNDED ONCE.** A share of cost to date (`feeCents`, the retainage
+rule: on the total, half up), plus a fixed fee billed to date by hand
+(`fee_to_date_cents` on the draft, refused above the fee itself), and the sum
+capped at the guaranteed maximum. When the cap binds the invoice carries ONE
+line saying so, because two lines that do not add up to the total is a
+certificate a client questions. Otherwise the invoice reads cost, fee,
+retainage — three lines a client can read without the application.
+
+**THE SAME ROW, INVOICE AND VOID PATH.** `createPayApplication` skips the
+schedule on a cost-plus contract; `updatePayApplication` takes `costLines`
+and `feeToDateCents`; `issuePayApplication` computes either certificate and
+posts the same invoice with the same retainage line; `listPayApplications`
+returns `costs` and a `costPlus` figure set beside `lines` and `totals`, a
+cost-plus draft reading the books as they are now the way a fixed-price draft
+reads the schedule as it is now. `contractBilling`, `voidPayApplication` and
+the WIP schedule's billings read are untouched.
+
+**ONE COST-PLUS CONTRACT BILLS A JOB.** Cost belongs to the project, so a
+second cost-plus contract on it would bill the same dollar twice;
+`ONE_COST_PLUS` refuses the moment it starts an application. A fixed-price
+contract beside a cost-plus one is fine — the pilot's design agreement before
+a build.
+
+**WORK IN PROGRESS, SECOND METHOD.** A job whose only counted contract is
+cost-plus earns cost to date plus the fee on it, capped, with no estimate
+asked for; `method` is frozen on the line with the rest so the schedule a
+bank was shown says how. A job mixing methods falls through to cost-to-cost
+and is left out with `no_value` — its cost cannot be split between the two.
+
+**THE CONTRACT PAGE READS THE BILLING METHOD**, which closes the slice-5 open
+item that said nothing did: a schedule of values for the four fixed-value
+methods, a *Cost plus a fee* panel (the terms, and the books' cost on the job
+by code) for cost-plus, and a plain note for unit price and time-and-
+materials. The contract form shows the three term boxes only when the method
+asks for them. The project page's edit dialog passes the terms through, so an
+edit cannot blank them — the failure the form's shape would otherwise have
+produced silently.
+
+Migrations `0341_cost_plus.sql` (as generated: the new table references
+existing tables only, so nothing to reorder) and `0342_cost_plus_rls.sql`,
+applied to dev and prod before the merge; `db:verify-rls` reports **209
+tables** on both, `db:verify-modules` 19/19. Tests: eleven more pure (the
+terms and their floors, the two halves, the cost lines' table, the WIP
+method, every billing method in exactly one group, the certificate line by
+line including the once-rounded fee, the fixed fee beside a percentage, the
+cap, the next application against the last, WIP on a cost-plus job), five
+more ops (the draft from the books and the three-line invoice with its
+entry; the late bill and a line kept short across two applications; the
+fixed fee, the cap's one line and the second cost-plus contract refused;
+the refusals and a fixed-price contract untouched; WIP cost plus fee capped
+and the mixed job falling through), two more isolation.
+
+**DRIVEN ON THE DEV BRANCH, on a new job, 24-109 Miller barn conversion**
+(seeded by script with three tagged costs: $28,400 and $11,250 on `06 10
+00 · Rough carpentry`, $850 on the job alone). *Add contract* → kind
+`cost_plus_build`, with Tractor Supply Co, *Billed by* **Cost plus a fee**
+— and the three boxes appeared under it — *Fee % of cost* `15`, *Guaranteed
+maximum* `60000`, *Signed* → the project's contracts table read **Cost plus
+build · Barn conversion · Cost plus a fee · — · Signed**, worth $0.00. The
+contract's page: **Fee 15% of cost · Cost to date $40,500.00 · Billed
+$0.00 · Retainage $0.00 · Guaranteed maximum $60,000.00, $60,000.00 left
+to bill**, a *Cost plus a fee* panel with **06 10 00 · Rough carpentry
+$39,650.00 / No cost code $850.00**, and *New application* enabled with no
+schedule. *New application* → period to 2026-09-30, retainage 10 → the row
+read **$46,575.00 · $40,500.00 cost + $6,075.00 fee · 10% held · $4,657.50 ·
+$41,917.50 · Draft**. *Open* → two rows with *This period* pre-filled from
+the books; the no-code line typed to `0` → *$850.00 left unbilled* under it,
+the certificate live: **Cost to date $39,650.00 · Fee (15%) $5,947.50 ·
+Cost plus fee $45,597.50 · Retainage −$4,559.75 · Current payment due
+$41,037.75 · Balance to the guaranteed maximum $14,402.50**. *Issue as
+invoice* → **Issued · INV-0007 · Open**, tiles **Billed to date $41,037.75
+· Retainage held $4,559.75 · $14,402.50 left to bill**. In Accounting,
+INV-0007 to Tractor Supply Co, memo *Pay application 1 · 24-109 ·
+cost_plus_build · Barn conversion*, three lines: *Application 1 — cost
+incurred through 2026-09-30* 39,650.00 and *Fee (15% of cost)* 5,947.50 to
+**4000 · Sales** (the farm chart has no 4030), *Retainage withheld (10%)*
+(4,559.75) to **1230 · Retainage Receivable**, total 41,037.75. The WIP
+schedule as of 2026-10-31 then listed 24-109 as **Contract — · % — ·
+Earned $46,575.00 · Billed $45,597.50 · Under-billed $977.50 · Profit to
+date $6,075.00** — cost plus fee, the dumpster's $850 and its fee still to
+bill, measured with no estimate and no blocker. Not driven: a fixed fee
+typed to date, the cap binding, a second application after a late bill,
+and the ONE_COST_PLUS refusal — all four are in the ops tests.
+
 ### 2026-09-14 — The first letter of every panel (`claude/jobs-panels-padding`)
 
 **Found by the founder on production, on the Test tenant's first job.** Every
@@ -967,17 +1079,18 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | --- | --- | --- |
 | `job_cost_code_sets` | A named list of cost codes. One or several per tenant. | FORCE RLS, member-wide. `job_cost_code_sets_one_default_idx` is a PARTIAL unique index, so **two defaults fail at the database** rather than depending on the action having cleared the first. |
 | `job_cost_codes` | One line of the chart of cost. | Composite FK to `(tenant_id, set_id)`, **cascade** — deleting a list deletes its codes. `code` is free text, never a number: CSI writes `03 30 00`, NAHB writes `1000`, a builder writes `CONC-SLAB`. `sort_order` is what orders the list, so a code never has to be sortable to be right. |
-| `job_contracts` | **Many per project.** Kind, value, billing method, counterparty, role, status, and a `sequence` that keeps the ladder in agreed order. | Composite FK to the project, **cascade** — a project's agreements are part of it, proved in the isolation suite rather than assumed, because a dangling contract would still be summed by `projectValues`. `kind` is an open taxonomy (format check only); `role`, `status` and `billing_method` are CHECK lists. **No `direction` column** — see the build log. |
+| `job_contracts` | **Many per project.** Kind, value, billing method, counterparty, role, status, a `sequence` that keeps the ladder in agreed order — and, since slice 5b, the cost-plus terms `fee_ppm` / `fee_cents` / `gmax_cents`, nullable, read only when the method is cost plus a fee. | Composite FK to the project, **cascade** — a project's agreements are part of it, proved in the isolation suite rather than assumed, because a dangling contract would still be summed by `projectValues`. `kind` is an open taxonomy (format check only); `role`, `status` and `billing_method` are CHECK lists. **No `direction` column** — see the build log. |
 | `job_budget_lines` | What each cost code was PLANNED to cost. | One line per code per project, enforced by a unique index rather than by the action remembering — two would make every variance ambiguous. `cost_code_id` is NOT NULL, unlike a commitment line's: a budget without a code is a single number for the whole job, which is what this table exists to stop being the answer. `original_cents` is the ORIGINAL; revised is original plus approved change-order lines, computed by `jobCostRows` and never stored. RESTRICT to the code, so a budgeted code is retired and never deleted. |
 | `job_change_orders` | A change to ONE contract: its price to the client (`value_cents`), its status, and when it was approved. | Composite FK to the CONTRACT, **cascade** — never to the project, which is reachable through the contract and deliberately not duplicated. Number unique per `(tenant, contract)`. `value_cents` **may be negative** — the one money column in the pack without a floor; a deduction is a negative number, not a credit concept. `job_change_orders_approved_has_date` makes `(status = 'approved') = (approved_on is not null)` a database fact, both ways. |
 | `job_change_order_lines` | What the change costs, one cost code at a time — the budget side. | Cascade from the change order; **RESTRICT to the cost code**, the same rule as a commitment line and a budget line. `amount_cents` may be negative. Zero lines is legitimate: a pure price change. |
 | `job_sov_lines` | A contract's schedule of values: how the sum breaks down, by trade, phase or milestone. | Cascade from the contract. Optional cost code (RESTRICT) and the approved change order that added the line (cascade). `scheduled_cents` ≥ 0. Should sum to the revised contract value; the page says when it does not, a CHECK does not — a schedule is built before it is complete. |
-| `job_pay_applications` | One draw against a contract: the G702. | Numbered per contract, void ones included. `status` draft/issued/void — **no `paid`**, that is the invoice's word. `retainage_ppm` 0–1,000,000. Five totals FROZEN at issue. `invoice_id` RESTRICT to Accounting's `invoices`; CHECK `(status = 'draft') = (invoice_id is null)`, both ways. |
+| `job_pay_applications` | One draw against a contract: the G702 — or, on a cost-plus contract, the cost-plus certificate, with `cost_to_date_cents` and `fee_to_date_cents` frozen at issue beside the five totals (zero on a fixed-price application). | Numbered per contract, void ones included. `status` draft/issued/void — **no `paid`**, that is the invoice's word. `retainage_ppm` 0–1,000,000. Five totals FROZEN at issue. `invoice_id` RESTRICT to Accounting's `invoices`; CHECK `(status = 'draft') = (invoice_id is null)`, both ways. |
 | `job_daily_logs` | One report per project per day: weather, what happened. | Unique `(tenant, project, log_date)` — the whole design; `saveDailyLog` upserts and `appendNotes` adds a line. Cascade from the project. Photos hang on it through Documents' `document_attachments` (`entity_type = 'job_daily_log'`), detached when the day goes. |
 | `job_daily_log_crews` | Who was on site that day: a trade or a subcontractor, how many, hours each (tenths). | Cascade from the day; `party_id` RESTRICT to `parties`. CHECK `workers >= 0`, `hours_tenths >= 0`, and that a line names a trade OR a party. A HEADCOUNT, not a time entry — the two are not joined. |
 | *(punch list)* | What still needs fixing: Work's `work_items`, linked to the project. | No table of this pack's. `work_item_links` with `extension_slug = 'jobs'`, `entity_type = 'project'`, through `createWorkForEntity` — never a second task engine. |
 | `job_wip_periods` | One work-in-progress schedule per COMPANY per period end: its status, and the adjustment and reversal it posted. | Unique `(tenant, entity, period_end)`. RESTRICT to the company and to both entries. CHECK `(status = 'posted') = (entry_id is not null)`, both ways, and a reversal needs its adjustment. `status` draft/posted. |
-| `job_wip_lines` | One job on a schedule: the re-estimate typed for the period (`estimate_cents`, null = the budget) and six figures FROZEN at posting, zero while a draft. | Cascade from the period and from the project. `percent_complete_ppm` 0–1,000,000; `reason` is `''`, `no_value` or `no_estimate` — why the job was left out of the entry. Over/under is not stored: it is earned − billed. |
+| `job_wip_lines` | One job on a schedule: the re-estimate typed for the period (`estimate_cents`, null = the budget), six figures FROZEN at posting (zero while a draft), and the `method` that measured them: `cost_to_cost` or `cost_plus`. | Cascade from the period and from the project. `percent_complete_ppm` 0–1,000,000; `reason` is `''`, `no_value` or `no_estimate` — why the job was left out of the entry. Over/under is not stored: it is earned − billed. |
+| `job_pay_application_costs` | One line of a COST-PLUS application per cost code (NULL = no code): the books' figure to date, what earlier applications billed, what this one bills. | Cascade from the application; **RESTRICT to the code**. Unique per `(application, code)`; the no-code line is kept single by the sync. `this_period_cents` may be less than the difference (a bill left out) or negative (a credit passed on). See ADR 0060. |
 | `job_pay_application_lines` | One line of the G703 per schedule line. | Cascade from the application; **RESTRICT to the schedule line** — billed lines are never removed. `previous` and `stored` ≥ 0; `this_period` may be NEGATIVE (a correction); CHECK that the three sum to ≥ 0. `scheduled_cents` frozen at issue. |
 | `job_commitments` | What the business has ORDERED: a purchase order or a subcontract. | `party_id` is NOT NULL — a commitment with nobody to pay is a budget line, not a commitment. `kind` is a CHECK list of two because the two diverge in behaviour later. Number unique per tenant: a vendor quotes it back on the invoice. Cascade from the project. |
 | `job_commitment_lines` | The money, one cost code at a time. | Cascade from the commitment; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative — a credit is a change order. |
@@ -995,9 +1108,10 @@ hand-reordered like 0329) and `0335_job_billing.sql` / `0336_job_billing_rls.sql
 `0338_job_field_rls.sql` (slice 7, likewise) and `0339_job_wip.sql` /
 `0340_job_wip_rls.sql` (slice 6, built after 7; likewise, and 0339 first adds
 `wip_adjustment` to `journal_entry_source`, which nothing in the file uses)
-follow the same rule —
+and `0341_cost_plus.sql` / `0342_cost_plus_rls.sql` (slice 5b; as generated,
+since the new table references existing ones only) follow the same rule —
 and from slice 3 the pair is `db:verify-rls` **and `db:verify-modules`**, after
-the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **208 tables**, all enabled, forced and with
+the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **209 tables**, all enabled, forced and with
 policies, on both.
 
 **0327 needed no hand-reordering, which confirms the diagnosis in 0325.** Both
@@ -1052,6 +1166,10 @@ ordering only bites when two new tables reference each other in one file.
   the server compute the same certificate from it.
 - `src/packs/jobs/components/sov-editor.tsx` + `pay-application-editor.tsx` —
   the schedule and the G703 grid, with the totals live.
+- `src/packs/jobs/components/cost-plus-editor.tsx` — a cost-plus draft: the
+  books' cost by code, what to bill of it, the fee, the cap, the certificate
+  live. `billing-math.ts`'s `costPlusTotals` is the arithmetic both it and
+  the issue share.
 - `src/app/dashboard/m/jobs/[id]/contracts/[contractId]/page.tsx` — one
   contract's billing: schedule above, applications below, five tiles on top.
 - `src/lib/db-errors.ts` — `violatedUniqueIndex`, the constraint name from
@@ -1121,6 +1239,15 @@ ordering only bites when two new tables reference each other in one file.
 - **A job that cannot be measured stops the whole period.** No budget and no
   estimate, or billings with no fixed value, refuses by job number rather than
   posting the rest. A schedule missing a job is what a bank would not accept.
+- **A cost-plus application bills the ledger's cost to date, not the bills** —
+  [ADR 0060](../decisions/0060-a-cost-plus-application-bills-the-ledger-not-the-bills.md).
+  The books' tagged cost by code is the schedule of values; to date, never by
+  window, so a late bill is billed next time; the fee on the total, rounded
+  once, capped at the GMAX; the same row, invoice and void path as a
+  fixed-price application; one cost-plus contract per job.
+- **The contract page reads the billing method, and only the method.** Four
+  fixed-value methods get a schedule; cost plus a fee gets the books' cost;
+  the two unbilled methods get a note. Never the kind.
 - **A pay application is an ordinary invoice, and retainage is a negative
   line to a receivable** —
   [ADR 0058](../decisions/0058-a-pay-application-is-an-ordinary-invoice.md).
@@ -1149,12 +1276,20 @@ ordering only bites when two new tables reference each other in one file.
   source that says *"$3,000 on 24-108 has no cost code"* is the honest next
   step, and it is Accounting's screen it would speak from.
 - ~~**Nothing bills.**~~ — **closed 2026-09-14** for fixed-price work: a
-  schedule of values and pay applications, issued as invoices. Still open
-  from it: **cost-plus, unit price and T&M** are recorded on the contract and
-  billed by nothing (different sums, each its own slice); **retainage held
-  FROM subcontractors** (the payables side; `2120` is seeded and nothing posts
-  to it); **the AIA-style printout** of a certificate; and `billing_method` is
-  still read by no code — the schedule does not yet shape itself to it.
+  schedule of values and pay applications, issued as invoices. ~~Cost-plus~~
+  **closed 2026-09-14 (slice 5b, ADR 0060)**. Still open from it: **unit
+  price and T&M** are recorded on the contract and billed by nothing (T&M is
+  cost-plus with a rate card in place of cost and would reuse 5b's shape);
+  **retainage held FROM subcontractors** (the payables side; `2120` is seeded
+  and nothing posts to it); **the AIA-style printout** of a certificate.
+  ~~`billing_method` is still read by no code~~ — the contract page and the
+  application verbs read it since 5b.
+- **A fee rate per cost code** (labor 20%, materials 10%, subcontractors 5%)
+  is a real arrangement and not built: one rate on the total ships first.
+  It would be a rate per line on the contract, not a different model.
+- **The guaranteed maximum is not locked when the contract is signed**, unlike
+  the value: nothing reports *original + changes = revised* for it yet. The
+  day a change order can move a GMAX, lock it the way the value is locked.
 - ~~**A contract cannot be edited from the screen.**~~ — **closed 2026-09-14.**
 - **Nothing can be DELETED, and that is deliberate rather than missing.** A
   contract that should not exist is `cancelled` or `declined`; a cost code is

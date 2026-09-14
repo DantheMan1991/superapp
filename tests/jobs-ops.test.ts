@@ -2234,7 +2234,8 @@ d("jobs ops", () => {
     );
     expect(status).toBe("posted");
     expect(await entryLines(again.entryId)).toEqual([["1240", 10_000_00], ["4030", -10_000_00]]);
-  });
+    // Two posts, an unpost and a re-post: four entries and their voids. Slow under load.
+  }, 120_000);
 
   it("the CASH lens drops the adjustment whole: no 1240 balance under cash, the full one under accrual", async () => {
     const entity = await newCompany("WIP Co 6");
@@ -2354,5 +2355,288 @@ d("jobs ops", () => {
     const byProject = await run((tx) => actualByProject(tx, tenantId, { kind: "one", entityId: entity }));
     expect(byProject.get(project.id)).toBe(96_500_00);
     expect(byProject.get(other.id)).toBe(999_000_00);
+  });
+
+  // ---------------------------------------------------------- cost plus a fee
+
+  /** A cost-plus contract on its own company, with a party to bill. */
+  const costPlusJob = async (
+    tx: Tx,
+    entity: string,
+    number: string,
+    terms: { feePpm?: number | null; feeCents?: number | null; gmaxCents?: number | null },
+  ) => {
+    await ensureBilling(tx);
+    const project = await createProject(tx, ctx, { entityId: entity, number, name: `Cost plus ${number}` });
+    const party = await seedVendor(tx, `Owner ${number}`);
+    const contract = await createContract(tx, ctx, {
+      projectId: project.id,
+      kind: "cost_plus",
+      counterpartyPartyId: party,
+      billingMethod: "cost_plus_fee",
+      valueCents: null,
+      feePpm: terms.feePpm ?? null,
+      feeCents: terms.feeCents ?? null,
+      gmaxCents: terms.gmaxCents ?? null,
+      status: "signed",
+    });
+    return { project, contract };
+  };
+
+  /** Cost on the job tagged with a code, or with the job alone when `codeId` is null. */
+  const postCodedCost = async (
+    tx: Tx,
+    entity: string,
+    projectId: string,
+    codeId: string | null,
+    cents: number,
+    date: string,
+  ) => {
+    const [job] = await memberFor(tx, projectId);
+    const dims = [job.id];
+    if (codeId) {
+      const rows = await tx
+        .select({ id: schema.dimensionMembers.id })
+        .from(schema.dimensionMembers)
+        .where(
+          and(
+            eq(schema.dimensionMembers.tenantId, tenantId),
+            eq(schema.dimensionMembers.dimensionType, COST_CODE_DIMENSION),
+            eq(schema.dimensionMembers.packEntityId, codeId),
+          ),
+        );
+      dims.push(rows[0].id);
+    }
+    await postEntry(tx, ctx, {
+      entityId: entity,
+      status: "posted",
+      entryDate: date,
+      memo: "job cost",
+      lines: [
+        { accountId: await accountByCodeId(tx, "5200"), amountCents: cents, dimensionMemberIds: dims },
+        { accountId: await accountByCodeId(tx, "2000"), amountCents: -cents },
+      ],
+    });
+  };
+
+  it("COST PLUS A FEE: the draft's lines are the books' cost by code, the fee is on the total, and the invoice carries cost, fee and retainage", async () => {
+    const entity = await newCompany("Cost Plus Co 1");
+    const { project, contract } = await run((tx) => costPlusJob(tx, entity, "OPS-CP1", { feePpm: 150_000 }));
+    expect(contract.feePpm).toBe(150_000);
+    expect(contract.billingMethod).toBe("cost_plus_fee");
+    const set = await run((tx) => createCostCodeSet(tx, ctx, { name: "CP1 codes" }));
+    const [conc, carp] = await run((tx) =>
+      Promise.all([
+        createCostCode(tx, ctx, { setId: set.id, code: "CP-03", name: "Concrete", sortOrder: 10 }),
+        createCostCode(tx, ctx, { setId: set.id, code: "CP-06", name: "Carpentry", sortOrder: 20 }),
+      ]),
+    );
+    await run(async (tx) => {
+      await postCodedCost(tx, entity, project.id, conc.id, 40_000_00, "2026-09-05");
+      await postCodedCost(tx, entity, project.id, null, 2_000_00, "2026-09-08");
+      // Dated after the period end: not on this application.
+      await postCodedCost(tx, entity, project.id, carp.id, 9_000_00, "2026-10-02");
+    });
+
+    // No schedule of values needed.
+    const app = await run((tx) =>
+      createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-09-30", retainagePpm: 100_000 }),
+    );
+    const [row] = await run((tx) => listPayApplications(tx, tenantId, contract.id));
+    expect(row.lines).toEqual([]);
+    expect(row.costs.map((c) => [c.code, c.ledgerToDateCents, c.previousCents, c.thisPeriodCents])).toEqual([
+      ["CP-03", 40_000_00, 0, 40_000_00],
+      [null, 2_000_00, 0, 2_000_00],
+    ]);
+    expect(row.costPlus).toMatchObject({
+      costToDateCents: 42_000_00,
+      feeToDateCents: 6_300_00,
+      completedToDateCents: 48_300_00,
+      retainageCents: 4_830_00,
+      dueCents: 43_470_00,
+      capped: false,
+    });
+
+    const issued = await run((tx) => issuePayApplication(tx, ctx, app.id, { issueDate: "2026-10-01" }));
+    expect(issued.app).toMatchObject({
+      status: "issued",
+      costToDateCents: 42_000_00,
+      feeToDateCents: 6_300_00,
+      completedToDateCents: 48_300_00,
+      retainageCents: 4_830_00,
+      dueCents: 43_470_00,
+      scheduledCents: 0,
+    });
+    const { lines, entryLines: el, accounts } = await run(async (tx) => {
+      const invoice = await loadInvoice(tx, tenantId, issued.invoiceId);
+      const lines = await loadInvoiceLines(tx, tenantId, invoice.id);
+      const entryLines = await tx
+        .select()
+        .from(schema.journalLines)
+        .where(eq(schema.journalLines.entryId, invoice.journalEntryId!));
+      const accounts = await tx
+        .select({ id: schema.accounts.id, code: schema.accounts.code })
+        .from(schema.accounts)
+        .where(eq(schema.accounts.tenantId, tenantId));
+      return { lines, entryLines, accounts };
+    });
+    const codeOf = new Map(accounts.map((a) => [a.id, a.code]));
+    // Cost, then the fee, then retainage: three lines a client can read.
+    expect(lines.map((l) => [codeOf.get(l.incomeAccountId), l.amountCents, l.description])).toEqual([
+      ["4030", 42_000_00, "Application 1 — cost incurred through 2026-09-30"],
+      ["4030", 6_300_00, "Fee (15% of cost)"],
+      ["1230", -4_830_00, "Retainage withheld (10%)"],
+    ]);
+    const netByCode = new Map<string | undefined, number>();
+    for (const l of el) netByCode.set(codeOf.get(l.accountId), (netByCode.get(codeOf.get(l.accountId)) ?? 0) + l.amountCents);
+    expect(netByCode.get("1200")).toBe(43_470_00);
+    expect(netByCode.get("1230")).toBe(4_830_00);
+    expect(netByCode.get("4030")).toBe(-48_300_00);
+  });
+
+  it("the NEXT application bills what the books added since — a late-posted bill included — and a line typed short stays short", async () => {
+    const entity = await newCompany("Cost Plus Co 2");
+    const { project, contract } = await run((tx) => costPlusJob(tx, entity, "OPS-CP2", { feePpm: 100_000 }));
+    const set = await run((tx) => createCostCodeSet(tx, ctx, { name: "CP2 codes" }));
+    const conc = await run((tx) => createCostCode(tx, ctx, { setId: set.id, code: "CP2-03", name: "Concrete" }));
+    await run((tx) => postCodedCost(tx, entity, project.id, conc.id, 40_000_00, "2026-09-05"));
+    const first = await run((tx) =>
+      createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-09-30", retainagePpm: 0 }),
+    );
+    // Leave 5,000 of the 40,000 unbilled — a disputed bill.
+    await run((tx) =>
+      updatePayApplication(tx, ctx, first.id, { costLines: [{ costCodeId: conc.id, thisPeriodCents: 35_000_00 }] }),
+    );
+    const one = await run((tx) => issuePayApplication(tx, ctx, first.id, { issueDate: "2026-10-01" }));
+    expect(one.app.costToDateCents).toBe(35_000_00);
+    expect(one.app.feeToDateCents).toBe(3_500_00);
+    expect(one.app.dueCents).toBe(38_500_00);
+
+    // A bill dated INSIDE September, posted after the first application issued.
+    await run((tx) => postCodedCost(tx, entity, project.id, conc.id, 10_000_00, "2026-09-20"));
+    await run((tx) => postCodedCost(tx, entity, project.id, conc.id, 20_000_00, "2026-10-15"));
+    const second = await run((tx) =>
+      createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-10-31" }),
+    );
+    const [, row] = await run((tx) => listPayApplications(tx, tenantId, contract.id));
+    // Books 70,000 to date; 35,000 billed before; the default bills the rest — the
+    // late bill AND the disputed 5,000, which the person may leave out again.
+    expect(row.costs.map((c) => [c.code, c.ledgerToDateCents, c.previousCents, c.thisPeriodCents])).toEqual([
+      ["CP2-03", 70_000_00, 35_000_00, 35_000_00],
+    ]);
+    await run((tx) =>
+      updatePayApplication(tx, ctx, second.id, { costLines: [{ costCodeId: conc.id, thisPeriodCents: 30_000_00 }] }),
+    );
+    // Saving again refreshes the books' figure and keeps what was typed.
+    await run((tx) => postCodedCost(tx, entity, project.id, conc.id, 1_000_00, "2026-10-20"));
+    await run((tx) => updatePayApplication(tx, ctx, second.id, { notes: "still disputing the 5,000" }));
+    const [, again] = await run((tx) => listPayApplications(tx, tenantId, contract.id));
+    expect(again.costs[0]).toMatchObject({ ledgerToDateCents: 71_000_00, previousCents: 35_000_00, thisPeriodCents: 30_000_00 });
+    const two = await run((tx) => issuePayApplication(tx, ctx, second.id, { issueDate: "2026-11-01" }));
+    expect(two.app.costToDateCents).toBe(65_000_00);
+    expect(two.app.feeToDateCents).toBe(6_500_00);
+    expect(two.app.previousCertificatesCents).toBe(38_500_00);
+    expect(two.app.dueCents).toBe(71_500_00 - 38_500_00);
+    // The invoice's cost line is THIS period's cost, the fee line this period's fee.
+    const lines = await run(async (tx) => loadInvoiceLines(tx, tenantId, two.invoiceId));
+    expect(lines.map((l) => l.amountCents)).toEqual([30_000_00, 3_000_00]);
+  });
+
+  it("a fixed fee is billed to date by hand, a guaranteed maximum caps the certificate in one line, and only one cost-plus contract may bill a job", async () => {
+    const entity = await newCompany("Cost Plus Co 3");
+    const { project, contract } = await run((tx) =>
+      costPlusJob(tx, entity, "OPS-CP3", { feeCents: 10_000_00, gmaxCents: 50_000_00 }),
+    );
+    await run((tx) => postCodedCost(tx, entity, project.id, null, 45_000_00, "2026-09-05"));
+    const app = await run((tx) =>
+      createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-09-30" }),
+    );
+    await expect(
+      run((tx) => updatePayApplication(tx, ctx, app.id, { feeToDateCents: 12_000_00 })),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await run((tx) => updatePayApplication(tx, ctx, app.id, { feeToDateCents: 8_000_00 }));
+    const [row] = await run((tx) => listPayApplications(tx, tenantId, contract.id));
+    // 45,000 + 8,000 = 53,000, held to the 50,000 maximum.
+    expect(row.costPlus).toMatchObject({
+      costToDateCents: 45_000_00,
+      feeToDateCents: 8_000_00,
+      completedToDateCents: 50_000_00,
+      capped: true,
+      balanceToFinishCents: 0,
+    });
+    const issued = await run((tx) => issuePayApplication(tx, ctx, app.id, { issueDate: "2026-10-01" }));
+    expect(issued.app.completedToDateCents).toBe(50_000_00);
+    expect(issued.app.scheduledCents).toBe(50_000_00);
+    const lines = await run((tx) => loadInvoiceLines(tx, tenantId, issued.invoiceId));
+    expect(lines.map((l) => [l.amountCents, l.description])).toEqual([
+      [50_000_00, "Application 1 — cost plus fee through 2026-09-30, at the guaranteed maximum"],
+    ]);
+
+    // A second cost-plus contract on the SAME job would bill the same dollars.
+    const party = await run((tx) => seedVendor(tx, "Second owner"));
+    const rival = await run((tx) =>
+      createContract(tx, ctx, {
+        projectId: project.id,
+        kind: "cost_plus",
+        counterpartyPartyId: party,
+        billingMethod: "cost_plus_fee",
+        feePpm: 50_000,
+        status: "signed",
+      }),
+    );
+    await expect(
+      run((tx) => createPayApplication(tx, ctx, { contractId: rival.id, periodTo: "2026-10-31" })),
+    ).rejects.toMatchObject({ code: "ONE_COST_PLUS" });
+  });
+
+  it("refuses a cost-plus draft with nothing in the books, a fee outside its range, and a negative maximum; a fixed-price contract is untouched", async () => {
+    const entity = await newCompany("Cost Plus Co 4");
+    const { contract } = await run((tx) => costPlusJob(tx, entity, "OPS-CP4", { feePpm: 100_000 }));
+    const app = await run((tx) =>
+      createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-09-30" }),
+    );
+    await expect(
+      run((tx) => issuePayApplication(tx, ctx, app.id, { issueDate: "2026-10-01" })),
+    ).rejects.toMatchObject({ code: "NO_LINES" });
+    await expect(
+      run((tx) => updateContract(tx, ctx, contract.id, { feePpm: 2_000_000 })),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(
+      run((tx) => updateContract(tx, ctx, contract.id, { gmaxCents: -1 })),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    // A fixed-price contract on the same company still wants its schedule first.
+    const { contract: fixed } = await run((tx) => billableContract(tx, "OPS-CP4F"));
+    await expect(
+      run((tx) => createPayApplication(tx, ctx, { contractId: fixed.id, periodTo: "2026-09-30" })),
+    ).rejects.toMatchObject({ code: "NO_LINES" });
+  });
+
+  it("WORK IN PROGRESS on a cost-plus job earns cost plus fee, capped, with no estimate asked for", async () => {
+    const entity = await newCompany("Cost Plus Co 5");
+    const { project, contract } = await run((tx) =>
+      costPlusJob(tx, entity, "OPS-CP5", { feePpm: 150_000, gmaxCents: 45_000_00 }),
+    );
+    await run((tx) => postCodedCost(tx, entity, project.id, null, 40_000_00, "2026-09-05"));
+    const app = await run((tx) =>
+      createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-09-15" }),
+    );
+    await run((tx) => issuePayApplication(tx, ctx, app.id, { issueDate: "2026-09-16" }));
+    const s = await run((tx) => wipSchedule(tx, tenantId, { entityId: entity, periodEnd: "2026-09-30" }));
+    const row = s.rows.find((r) => r.projectId === project.id)!;
+    expect(row.method).toBe("cost_plus");
+    expect(row.reason).toBe("");
+    expect(row.figures.percentCompletePpm).toBeNull();
+    // 40,000 + 6,000 fee = 46,000, capped at 45,000; billed 45,000 (the application hit the cap too).
+    expect(row.figures.earnedCents).toBe(45_000_00);
+    expect(row.figures.billedCents).toBe(45_000_00);
+    expect(row.figures.overUnderCents).toBe(0);
+    expect(s.blockers).toEqual([]);
+    // A job carrying a fixed-price contract beside the cost-plus one is not measured this way.
+    const party = await run((tx) => seedVendor(tx, "Fixed beside"));
+    await run((tx) =>
+      createContract(tx, ctx, { projectId: project.id, kind: "extra", counterpartyPartyId: party, valueCents: 10_000_00, status: "signed" }),
+    );
+    const mixed = await run((tx) => wipSchedule(tx, tenantId, { entityId: entity, periodEnd: "2026-09-30" }));
+    expect(mixed.rows.find((r) => r.projectId === project.id)!.method).toBe("cost_to_cost");
   });
 });

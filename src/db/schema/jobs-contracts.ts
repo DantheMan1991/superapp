@@ -124,6 +124,24 @@ export const jobContracts = pgTable(
      */
     status: text("status").notNull().default("proposed"),
     /**
+     * ── THE TERMS OF A COST-PLUS AGREEMENT (slice 5b) ──────────────────────
+     *
+     * Read only when `billing_method` is `cost_plus_fee`; null on every other
+     * contract. A fee is a share of billable cost (`fee_ppm`, 15% = 150,000)
+     * OR a fixed sum (`fee_cents`) billed to date by hand on each application
+     * — a contract may carry both, which is a fixed fee plus a percentage on
+     * cost, an arrangement that exists. `gmax_cents` is the guaranteed
+     * maximum: cost plus fee billed to date never passes it. Null means no
+     * cap, which is the plain cost-plus case.
+     *
+     * Not locked when signed, unlike `value_cents`: a GMAX moves by change
+     * order in principle, but nothing reports *original + changes = revised*
+     * on it yet, so a lock would protect a line nobody reads.
+     */
+    feePpm: integer("fee_ppm"),
+    feeCents: bigint("fee_cents", { mode: "number" }),
+    gmaxCents: bigint("gmax_cents", { mode: "number" }),
+    /**
      * WHERE IT SITS IN THE LADDER. A project's contracts read in the order they
      * were agreed, not the order their dates fall in — a drawings contract
      * signed late is still the second step.
@@ -175,6 +193,13 @@ export const jobContracts = pgTable(
       sql`${t.valueCents} is null or ${t.valueCents} >= 0`,
     ),
     check("job_contracts_sequence_nonnegative", sql`${t.sequence} >= 0`),
+    /** A fee rate between nothing and everything; a fixed fee and a cap that are not negative. */
+    check(
+      "job_contracts_fee_ppm_range",
+      sql`${t.feePpm} is null or (${t.feePpm} >= 0 and ${t.feePpm} <= 1000000)`,
+    ),
+    check("job_contracts_fee_nonnegative", sql`${t.feeCents} is null or ${t.feeCents} >= 0`),
+    check("job_contracts_gmax_nonnegative", sql`${t.gmaxCents} is null or ${t.gmaxCents} >= 0`),
   ],
 );
 

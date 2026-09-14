@@ -6,6 +6,7 @@ import { LivestockModule } from "./livestock/LivestockModule";
 import { ProductionModule } from "./production/ProductionModule";
 import { RetailModule } from "./retail/RetailModule";
 import { ProfessionalServicesModule } from "./professional-services/ProfessionalServicesModule";
+import { JobsModule } from "./jobs/JobsModule";
 
 /**
  * Layer 2a registry: slug → how the pack behaves.
@@ -284,6 +285,40 @@ export const packRegistry: Record<string, PackDefinition> = {
       },
     ],
     Component: ProfessionalServicesModule,
+  },
+
+  /**
+   * **THE PROJECT SPINE.** Projects, the cost codes they are budgeted against,
+   * and — the part that makes it worth anything on day one — the
+   * `dimension_members` sync that turns a project into a cost object, so every
+   * bill line and every timecard can be charged to it and the accounting
+   * reports that already exist group by it.
+   *
+   * Requires NOTHING. It is the bottom of the construction family the way
+   * `inventory`'s lot is the bottom of the farm one, and everything the
+   * contractor packs add later hangs off a project.
+   *
+   * The word "construction" appears nowhere in it, deliberately: a project has a
+   * number, a client, a company, a division and a kind of work, and a fit-out, a
+   * software engagement and a house are the same row. The KINDS of work come
+   * from the installed profile's `packConfig.jobs.deliveryMethods` — a list in
+   * the pack would make it know its industry (ADR 0004, ADR 0056).
+   */
+  jobs: {
+    slug: "jobs",
+    name: "Jobs",
+    icon: "hard-hat",
+    requires: [],
+    labels: [
+      {
+        key: "project",
+        fallback: "Project",
+        plural: "Projects",
+        describes:
+          "One piece of work with a number, costed on its own — a house, a fit-out, a site. A builder says job, an architect says project, a shop says order.",
+      },
+    ],
+    Component: JobsModule,
   },
 };
 

@@ -654,6 +654,15 @@ Pack-owned tables follow the ordinary rules: `tenant_id`, FORCE RLS, a
   profile (back-office slice 7a); see the build log. What remains of it: the
   homestead profile carries no seed, and a farm chart of accounts is its
   accountant's question.
+- **`PackDefinition` has no `dimensionTypes` or `entityTypes` field**, though
+  "The shapes" above still shows both. Found 2026-09-14 while registering `jobs`,
+  which syncs a `project` dimension: every pack that syncs one — `assets`,
+  `land`, `inventory`, `livestock` — does so without declaring it, and nothing
+  anywhere reads such a field. Not added on discovery, because a field nothing
+  reads is worse than an honest absence; the shapes block is kept as written
+  because it is the contract a new pack is read against, and this is the note
+  saying which half of it is real.
+
 - **P5 extension points** (#7 above) — the primitive ADR 0004 named and nobody
   has built. Nothing has forced it yet because no pack renders; the first pack
   that ships will.

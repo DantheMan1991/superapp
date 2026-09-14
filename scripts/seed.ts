@@ -264,6 +264,18 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
     sortOrder: 260,
   },
   {
+    id: "jobs",
+    name: "Jobs",
+    description:
+      "Projects with a number and a cost code list, each one a cost object every bill and hour can be charged to.",
+    category: "pack",
+    // `available` from construction slice 0 (2026-09-14): projects, cost code
+    // sets and the dimension sync. Contracts, commitments and the budget follow
+    // in slices 1 and 2 — see docs/modules/jobs.md.
+    status: "available",
+    sortOrder: 280,
+  },
+  {
     id: "professional-services",
     name: "Professional services",
     description:

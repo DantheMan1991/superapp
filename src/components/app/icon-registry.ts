@@ -11,6 +11,7 @@ import {
   CreditCard,
   Factory,
   FolderOpen,
+  HardHat,
   LayoutDashboard,
   ListChecks,
   Mail,
@@ -87,6 +88,9 @@ export const ICONS: Record<string, LucideIcon> = {
   dashboard: LayoutDashboard,
   factory: Factory,
   folder: FolderOpen,
+  // Jobs. Added WITH the pack, per the header above: five packs once shipped
+  // showing a generic box because their key was never added here.
+  "hard-hat": HardHat,
   mail: Mail,
   // The feedback console, and the button on every client screen (ADR 0053).
   message: MessageSquarePlus,

@@ -393,7 +393,7 @@ export function CostPlusApplicationEditor({
                             {l.name}
                             {l.rateCents === 0 && (
                               <span className="block text-xs text-destructive">
-                                No bill rate — set a charged-out rate in Time, or one rate on the contract
+                                No bill rate — see the note below
                               </span>
                             )}
                             {unbilled !== 0 && (

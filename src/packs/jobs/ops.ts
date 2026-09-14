@@ -3215,10 +3215,13 @@ export async function updatePayApplication(
     const current = (await loadLaborLines(tx, ctx.tenantId, [app.id])).get(app.id) ?? [];
     const byKey = new Map(current.map((l) => [laborKey(l), l]));
     for (const line of input.laborLines) {
-      const row = byKey.get(laborKey(line));
-      if (!row) {
-        throw new JobsError("NOT_FOUND", `no labour line at that rate for ${line.workerId} on this application`);
-      }
+      // A rate set in Time between opening the draft and saving it re-keys
+      // the person's line at the new rate — the very thing the no-rate note
+      // tells the person to do. What was typed follows them to their one
+      // line; a person with two lines now keeps the refreshed defaults.
+      const theirs = current.filter((l) => l.workerId === line.workerId);
+      const row = byKey.get(laborKey(line)) ?? (theirs.length === 1 ? theirs[0] : undefined);
+      if (!row) continue;
       if (!Number.isInteger(line.thisPeriodMinutes)) {
         throw new JobsError("INVALID_VALUE", "hours must be whole minutes");
       }

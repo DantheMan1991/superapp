@@ -2807,22 +2807,28 @@ d("jobs ops", () => {
       run((tx) => issuePayApplication(tx, ctx, app.id, { issueDate: "2026-10-01" })),
     ).rejects.toMatchObject({ code: "NO_BILL_RATE", message: "Bob Labourer" });
     await run((tx) => billRate(tx, bob.id, 40_00, "2026-01-01"));
-    await run((tx) => updatePayApplication(tx, ctx, app.id, {}));
+    // The draft was opened before the rate existed, so what it types back
+    // names Bob at a rate of nothing; the hours follow him to his priced line.
+    await run((tx) =>
+      updatePayApplication(tx, ctx, app.id, {
+        laborLines: [{ workerId: bob.id, rateCents: 0, thisPeriodMinutes: 150 }],
+      }),
+    );
     [row] = await run((tx) => listPayApplications(tx, tenantId, contract.id));
     expect(row.labor.map((l) => [l.name, l.rateCents, l.thisPeriodMinutes, l.thisPeriodCents])).toEqual([
       ["Alice Carpenter", 65_00, 600, 650_00],
-      ["Bob Labourer", 40_00, 180, 120_00],
+      ["Bob Labourer", 40_00, 150, 100_00],
     ]);
 
     const issued = await run((tx) => issuePayApplication(tx, ctx, app.id, { issueDate: "2026-10-01" }));
     expect(issued.app).toMatchObject({
       status: "issued",
-      laborToDateCents: 770_00,
+      laborToDateCents: 750_00,
       costToDateCents: 2_000_00,
       feeToDateCents: 200_00,
-      completedToDateCents: 2_970_00,
-      retainageCents: 297_00,
-      dueCents: 2_673_00,
+      completedToDateCents: 2_950_00,
+      retainageCents: 295_00,
+      dueCents: 2_655_00,
     });
     const { lines, accounts } = await run(async (tx) => {
       const invoice = await loadInvoice(tx, tenantId, issued.invoiceId);
@@ -2838,10 +2844,10 @@ d("jobs ops", () => {
     // A line per person the client can read against the timesheet, then cost, then markup, then retainage.
     expect(lines.map((l) => [codeOf.get(l.incomeAccountId), l.amountCents, l.description])).toEqual([
       ["4030", 650_00, "Application 1 — Alice Carpenter, 10 h at 65.00/h through 2026-09-30"],
-      ["4030", 120_00, "Application 1 — Bob Labourer, 3 h at 40.00/h through 2026-09-30"],
+      ["4030", 100_00, "Application 1 — Bob Labourer, 2.5 h at 40.00/h through 2026-09-30"],
       ["4030", 2_000_00, "Application 1 — cost incurred through 2026-09-30"],
       ["4030", 200_00, "Markup (10% of cost)"],
-      ["1230", -297_00, "Retainage withheld (10%)"],
+      ["1230", -295_00, "Retainage withheld (10%)"],
     ]);
     // The wages sit in the books on the job all the same: the Spent column sees them, the application does not.
     const spent = await run((tx) => jobCostReport(tx, tenantId, project.id));

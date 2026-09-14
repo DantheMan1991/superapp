@@ -102,8 +102,9 @@ certificate with labour and the markup on cost alone, WIP with the wages
 not marked up, the accounts told apart by subtype) and the method-group test
 now counting four groups; three more ops (the draft from three people's
 hours — one untagged, one on leave, one after the period, one awaiting
-approval, one with no rate — the refusal by name, the rate set and the
-five-line invoice, the Spent column still carrying the wages; the flat rate
+approval, one with no rate — the refusal by name, the rate set and the hours typed against the stale
+key following the person to the re-priced line, the five-line invoice, the
+Spent column still carrying the wages; the flat rate
 and its lock, the dated rate's two lines, the next application carrying hours
 forward, hours typed short, one biller per job; WIP earning hours plus
 marked-up cost with the wages once, and the `no_rate` blocker), one more
@@ -111,33 +112,74 @@ isolation. The ops run found one thing: `minutesToHoursString(30)` came out
 as *0.* — a regex that lost its backslash on the way through the edit script
 — and was rewritten without one, with `0.5` pinned in the pure test.
 
-**SEEDED ON THE DEV BRANCH, NOT DRIVEN.** The browser pane came up signed
-out after the dev server was restarted (a leftover `next dev` at 9.3 GB held
-port 3000 and was killed), and only the founder can sign back in — so the
-screens were not clicked this time. What was done instead, through the
-product's own verbs from a script on Hilltop Farm: a job **24-110 Kitchen
-remodel** (active) on a signed `service_work` contract billed **Time and
-materials**, 10% markup on cost, no rate for everybody; Marta Quinn's Time
-rate given a *Charged out at* of $65.00 from 2026-09-01; 8 h on 2026-09-13
-and 4 h on 2026-09-14 logged for her and tagged with the job, her sheet for
-2026-09-13..19 submitted and approved; 2 h on 2026-09-14 for the founder's
-own worker, tagged, on a sheet submitted and NOT approved; $1,240.00 of
-cabinet hardware posted to `6400` tagged with the job; and a draft
-application to 2026-09-30 at 0% retainage. `listPayApplications` read the
-draft as **Marta Quinn · $65.00/h · 12 h to date · 12 h this period ·
-$780.00**, *2 h awaiting approval*, one cost line **No cost code
-$1,240.00**, and the certificate **Labour $780.00 · Cost $1,240.00 · Markup
-$124.00 · $2,144.00 to date · due $2,144.00**, uncapped. The WIP schedule as
-of 2026-10-31 (September's is posted and frozen, which is why a new job is
-not on it) listed the farm's three jobs on three methods — **24-108
-cost-to-cost · 24-109 cost plus · 24-110 time and materials** — the new one
-at **earned $2,144.00 · cost $1,240.00 · under-billed $2,144.00 · profit
-$904.00**, no blockers. The draft is left open on the contract's page for
-whoever signs in next: *Open* shows the labour table, and *Issue as invoice*
-posts the five-line invoice the ops test pins. Not seen on a screen: the
-contract page's tiles and panel, the editor's labour table, the form's four
-boxes — type-checked and lint-clean, and the same components render the
-cost-plus path that was driven in 5b.
+**DRIVEN ON THE DEV BRANCH, on 24-110 Kitchen remodel** (seeded by script
+through the product's own verbs while the pane was signed out: a signed
+`service_work` contract billed *Time and materials* at 10% markup, Marta
+Quinn charged out at $65.00, 12 h of hers approved and tagged with the job,
+2 h of the founder's own on a sheet not yet approved, $1,240.00 of cabinet
+hardware on `6400` tagged with the job, a draft to 2026-09-30). The
+contract's page: **Service work · Kitchen remodel · with Tractor Supply Co ·
+Time and materials**, tiles **Labour: Per person, from Time · plus 10%
+markup on cost / Cost to date $1,240.00 · in the books, wages aside / Billed
+$0.00 / Retainage $0.00 / Not to exceed None** (the first render wrapped the
+labour tile over three lines; its value was shortened), the *Time and
+materials* panel with **Approved hours on the job 12 h · 2 h more await
+approval in Time**, **In the books, wages aside $1,240.00**, one row *No
+cost code $1,240.00*, and the applications table **$2,144.00 · $780.00
+labour + $1,240.00 cost + $124.00 markup · 0% held · Draft**. *Open* →
+*Application 1 — draft, time and materials*: **Marta Quinn · $65.00/h · 12 h
+· 0 h · 12 · $780.00 · $780.00**, the line *2 h more on the job are on
+timesheets not yet approved, and are not on this application*, the cost
+row, and the certificate **Labour to date $780.00 · Cost to date, wages
+aside $1,240.00 · Markup to date (10% on cost) $124.00 · Labour, cost and
+markup to date $2,144.00 · Current payment due $2,144.00**. *This period (h)*
+typed `10` → **2 h left unbilled · $650.00 · due $2,014.00** live; *Save
+draft* → *Application saved* and the row **$2,014.00**.
+
+**Two things driving found, both fixed here.** (1) *Open* again showed the
+rows from BEFORE the save: the editor initialises its rows once, on mount,
+and the component outlives `router.refresh()` — the same latent fault in
+the cost-plus and fixed-price editors since slices 5 and 5b, never seen
+because nobody re-opened a saved draft. All three editors are now keyed on
+`${app.id}:${app.version}`; every save bumps the version, so what is opened
+is what was saved. (2) In Time's *Pay period* (Sep 13–19: *Where the hours
+went: 24-110 · Kitchen remodel 14h*), *Approve* on the founder's 2 h; back
+on the draft, *Save draft* added the row **danr.houser91 · No bill rate · —
+· 2 h · 2 · $0.00**, *Issue as invoice* greyed, and under the buttons the
+sentence naming the person and the three ways out. Then *People → Set a
+rate* — *Who* danr.houser91, *Hourly pay* 30, *Charged out at* 50 → *Rate
+saved* — and *Save draft* was refused with **That project no longer
+exists**: the sync had re-keyed the person's line at $50 and the hours typed
+against the rate-of-nothing key matched nothing (`NOT_FOUND`, through the
+generic sentence). The very flow the note recommends. Now the typed hours
+follow the person to their one re-priced line, pinned in the ops test (Bob
+typed against a stale key → *2.5 h at 40.00/h* on the invoice). Saved again:
+**$2,114.00 · $750.00 labour**; *Open* → **danr.houser91 · $50.00/h · 2 h · 2
+· $100.00**, Marta's `12` typed back → **Labour to date $880.00 · due
+$2,244.00** → *Issue as invoice* → *Application 1 issued as an invoice*, the
+row **Issued 2026-09-14 · $2,244.00 · $880.00 labour + $1,240.00 cost +
+$124.00 markup · INV-0008**, tiles **Billed to date $2,244.00 · 1 issued**.
+The red *no bill rate* note wrapped the header row and was shortened.
+
+In Accounting, **INV-0008** to Tractor Supply Co, issued 2026-09-14, due
+2026-10-14, memo *Pay application 1 · 24-110 · service_work · Kitchen
+remodel*, four lines to **4000 · Sales** (the farm chart has no 4030):
+*Application 1 — danr.houser91, 2 h at 50.00/h through 2026-09-30* 100.00,
+*Application 1 — Marta Quinn, 12 h at 65.00/h through 2026-09-30* 780.00,
+*Application 1 — cost incurred through 2026-09-30* 1,240.00, *Markup (10%
+of cost)* 124.00, total **2,244.00**; no retainage line at 0%. The WIP
+schedule as of 2026-10-31 (September's is posted and frozen, so a new job
+is not on it) listed the farm's three jobs on three methods, 24-110 at
+**Cost to date $1,240.00 · % done — · Earned $2,244.00 · Billed $2,244.00 ·
+Under — · Over — · Profit to date $1,004.00**, *3 jobs measured*, no
+blockers. The project page's contracts row read **Service work · Kitchen
+remodel · Tractor Supply Co · Time and materials · — · $2,244.00 · Signed**,
+and its *Edit* dialog showed the four boxes under *Billed by*, **Labour
+rate, everybody** greyed with *Fixed once an application has issued*. Not
+driven: retainage on a T&M application, the not-to-exceed binding, a second
+application carrying hours forward, the void, and a flat contract rate —
+all in the ops tests. Next's dev overlay reported one stale-chunk issue
+after a hot edit, cleared by a reload; not the product.
 
 ### 2026-09-14 — The column that was deliberately absent (`claude/spent-per-code`)
 
@@ -1506,6 +1548,12 @@ ordering only bites when two new tables reference each other in one file.
 - **Frozen at issue, live while a draft.** An issued application's totals and
   line values are written down; a draft computes from the schedule as it is
   now and picks up lines added since. Same rule as an invoice's tax.
+- **A dialog's rows are initialised once, and the component outlives
+  `router.refresh()`.** A draft editor that seeds its state from props on
+  mount shows the pre-save rows when re-opened after a save, however fresh
+  the page. Key it on the row's version, which every save bumps, so it
+  remounts with what was saved. Found on the T&M editor in 5d; the cost-plus
+  and fixed-price editors had it since 5 and 5b.
 - **Read the constraint from `err.cause`, never `err.message`.** Under drizzle's
   wrapper the message is the SQL. `violatedUniqueIndex` in `src/lib/db-errors.ts`;
   four translations in this pack were dead for three slices before a test noticed.

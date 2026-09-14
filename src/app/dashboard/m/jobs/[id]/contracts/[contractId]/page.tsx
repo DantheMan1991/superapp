@@ -211,6 +211,11 @@ export default async function ContractPage({
     contract.laborRateCents === null
       ? "each person's charged-out rate from Time"
       : `${formatMoney(contract.laborRateCents, symbol)}/h for everybody`;
+  // The tile has room for four words; the panel's sentence has room for the rest.
+  const laborTile =
+    contract.laborRateCents === null
+      ? "Per person, from Time"
+      : `${formatMoney(contract.laborRateCents, symbol)}/h, everybody`;
   const latestCostPlus = latestIssued?.costPlus ?? null;
   const codeLabel = new Map(data.codes.map((c) => [c.id, `${c.code} · ${c.name}`]));
   const changeLabel = new Map(
@@ -260,7 +265,7 @@ export default async function ContractPage({
       <dl className="grid gap-3 sm:grid-cols-5">
         {(tm
           ? ([
-              ["Labour", laborWords, feeWords ? `plus ${feeWords}` : "no markup on cost"],
+              ["Labour", laborTile, feeWords ? `plus ${feeWords}` : "no markup on cost"],
               ["Cost to date", formatMoney(costToDate, symbol), "in the books, wages aside"],
               ["Billed to date", formatMoney(billedCents, symbol), `${issued.length} issued`],
               ["Retainage held", formatMoney(retainageHeld, symbol), null],
@@ -650,6 +655,7 @@ export default async function ContractPage({
                       <TableCell className="text-right">
                         {isOwner && row.app.status === "draft" && ledgerBilled && (
                           <CostPlusApplicationEditor
+                            key={`${row.app.id}:${row.app.version}`}
                             projectId={project.id}
                             contractId={contract.id}
                             symbol={symbol}
@@ -692,6 +698,7 @@ export default async function ContractPage({
                         )}
                         {isOwner && row.app.status === "draft" && !ledgerBilled && (
                           <PayApplicationEditor
+                            key={`${row.app.id}:${row.app.version}`}
                             projectId={project.id}
                             contractId={contract.id}
                             symbol={symbol}

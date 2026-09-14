@@ -47,6 +47,17 @@ export interface WipInputs {
   billedCents: number;
   /** A finished job is 100% complete whatever its cost says. */
   complete?: boolean;
+  /**
+   * COST PLUS A FEE (slice 5b): the job earns what it has cost plus the fee
+   * on it, capped at the guaranteed maximum, and needs no estimate to say
+   * so. Present only for a job on a single cost-plus contract.
+   */
+  costPlus?: {
+    feePpm: number | null;
+    /** The fixed fee, taken as fully earned once any cost exists — the billing side spreads it. */
+    feeCents: number | null;
+    gmaxCents: number | null;
+  };
 }
 
 export interface WipFigures extends WipInputs {
@@ -88,13 +99,30 @@ export function earnedCents(contractCents: number, ppm: number | null): number {
   return Number((BigInt(contractCents) * BigInt(ppm) + BigInt(WIP_PPM / 2)) / BigInt(WIP_PPM));
 }
 
+/** cost × rate ÷ 1,000,000, rounded half up. The fee on cost to date. */
+export function costPlusFeeCents(costToDateCents: number, feePpm: number | null): number {
+  if (!feePpm || feePpm <= 0 || costToDateCents <= 0) return 0;
+  return Math.floor((costToDateCents * feePpm + 500_000) / 1_000_000);
+}
+
 export function wipFigures(input: WipInputs): WipFigures {
   const ppm = percentCompletePpm(
     input.costToDateCents,
     input.estimatedCostCents,
     input.complete ?? false,
   );
-  const earned = earnedCents(input.contractCents, ppm);
+  let earned: number;
+  if (input.costPlus) {
+    const cost = Math.max(input.costToDateCents, 0);
+    const uncapped =
+      cost +
+      costPlusFeeCents(cost, input.costPlus.feePpm) +
+      (cost > 0 ? (input.costPlus.feeCents ?? 0) : 0);
+    earned =
+      input.costPlus.gmaxCents !== null ? Math.min(uncapped, input.costPlus.gmaxCents) : uncapped;
+  } else {
+    earned = earnedCents(input.contractCents, ppm);
+  }
   const overUnder = earned - input.billedCents;
   return {
     ...input,

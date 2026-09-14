@@ -48,6 +48,14 @@ import {
   WIP_STATUSES,
   WIP_STATUS_LABELS,
   isWipStatus,
+  COST_PLUS_METHODS,
+  FEE_PPM_MAX,
+  FIXED_VALUE_METHODS,
+  UNBILLED_METHODS,
+  WIP_METHODS,
+  WIP_METHOD_LABELS,
+  isCostPlusMethod,
+  isFixedValueMethod,
 } from "../src/packs/jobs/vocabulary";
 import {
   WIP_PPM,
@@ -56,6 +64,7 @@ import {
   wipFigures,
   wipPercentLabel,
   wipTotals,
+  costPlusFeeCents,
 } from "../src/packs/jobs/wip-math";
 import { CONSTRUCTION_COA } from "../src/industries/construction/accounts";
 import {
@@ -65,6 +74,9 @@ import {
   percentStringToPpm,
   ppmToPercentString,
   retainageCents,
+  costLineToDateCents,
+  costPlusTotals,
+  feeCents,
 } from "../src/packs/jobs/billing-math";
 import { packRegistry } from "../src/packs";
 import { describeProject, findProjects, type OpenProject } from "../src/packs/jobs/tell/find";
@@ -742,6 +754,149 @@ describe("work in progress", () => {
       expect(wipPercentLabel(WIP_PPM)).toBe("100");
       expect(wipPercentLabel(0)).toBe("0");
       expect(wipPercentLabel(null)).toBe("—");
+    });
+  });
+});
+
+/*
+ * ── cost plus a fee (slice 5b, ADR 0060) ───────────────────────────────────
+ *
+ * The contract's terms and the application's two halves as CHECKs and
+ * columns, the cost lines' table, and the certificate arithmetic pinned line
+ * by line — a fee rounded twice is a certificate the owner's bookkeeper sends
+ * back, same as retainage.
+ */
+const COST_PLUS_SQL = readFileSync("drizzle/0341_cost_plus.sql", "utf8");
+
+describe("cost plus a fee", () => {
+  it("adds the three terms to the contract, nullable, with their floors", () => {
+    expect(COST_PLUS_SQL).toMatch(/ALTER TABLE "job_contracts" ADD COLUMN "fee_ppm" integer;/);
+    expect(COST_PLUS_SQL).toMatch(/ALTER TABLE "job_contracts" ADD COLUMN "fee_cents" bigint;/);
+    expect(COST_PLUS_SQL).toMatch(/ALTER TABLE "job_contracts" ADD COLUMN "gmax_cents" bigint;/);
+    expect(COST_PLUS_SQL).toMatch(/job_contracts_fee_ppm_range[^;]*<= 1000000/);
+    expect(COST_PLUS_SQL).toMatch(/job_contracts_fee_nonnegative/);
+    expect(COST_PLUS_SQL).toMatch(/job_contracts_gmax_nonnegative/);
+    expect(FEE_PPM_MAX).toBe(1_000_000);
+  });
+
+  it("gives an application its two halves, zero on every fixed-price one", () => {
+    expect(COST_PLUS_SQL).toMatch(/"job_pay_applications" ADD COLUMN "cost_to_date_cents" bigint DEFAULT 0 NOT NULL/);
+    expect(COST_PLUS_SQL).toMatch(/"job_pay_applications" ADD COLUMN "fee_to_date_cents" bigint DEFAULT 0 NOT NULL/);
+  });
+
+  it("keeps ONE cost line per code per application, takes them with the application, and holds a billed code", () => {
+    expect(COST_PLUS_SQL).toMatch(
+      /job_pay_application_costs_app_code_idx[^;]*\("tenant_id","pay_application_id","cost_code_id"\)/,
+    );
+    expect(COST_PLUS_SQL).toMatch(/job_pay_application_costs_app_fk[^;]*ON DELETE cascade/);
+    expect(COST_PLUS_SQL).toMatch(/job_pay_application_costs_code_fk[^;]*ON DELETE no action/);
+    // The no-code line is a NULL code, so the column is nullable.
+    expect(COST_PLUS_SQL).toMatch(/"cost_code_id" uuid,/);
+  });
+
+  it("records HOW a WIP line was measured, and only in the two ways there are", () => {
+    expect(COST_PLUS_SQL).toContain(
+      `CHECK ("job_wip_lines"."method" in (${WIP_METHODS.map((m) => `'${m}'`).join(", ")}))`,
+    );
+    for (const m of WIP_METHODS) expect(WIP_METHOD_LABELS[m].length).toBeGreaterThan(0);
+  });
+
+  it("sorts every billing method into exactly one group", () => {
+    const all = [...FIXED_VALUE_METHODS, ...COST_PLUS_METHODS, ...UNBILLED_METHODS].sort();
+    expect(all).toEqual([...BILLING_METHODS].sort());
+    expect(isCostPlusMethod("cost_plus_fee")).toBe(true);
+    expect(isCostPlusMethod("fixed_price")).toBe(false);
+    expect(isFixedValueMethod("draw_schedule")).toBe(true);
+    expect(isFixedValueMethod("unit_price")).toBe(false);
+  });
+
+  describe("the certificate arithmetic", () => {
+    const lines = [
+      { costCodeId: "a", ledgerToDateCents: 40_000_00, previousCents: 0, thisPeriodCents: 40_000_00 },
+      { costCodeId: null, ledgerToDateCents: 2_000_00, previousCents: 0, thisPeriodCents: 2_000_00 },
+    ];
+
+    it("puts the fee on the TOTAL cost, rounded once", () => {
+      expect(feeCents(42_000_00, 150_000)).toBe(6_300_00);
+      expect(feeCents(1, 150_000)).toBe(0); // 0.15 of a cent rounds to nothing
+      expect(feeCents(3, 150_000)).toBe(0); // 0.45
+      expect(feeCents(4, 150_000)).toBe(1); // 0.60 rounds up
+      expect(feeCents(42_000_00, null)).toBe(0);
+      expect(feeCents(-5_00, 150_000)).toBe(0); // a net credit earns no fee
+    });
+
+    it("cost plus a percentage fee, less retainage, less previous, is what is due", () => {
+      const t = costPlusTotals(lines, { feePpm: 150_000, feeCents: null, gmaxCents: null }, 0, 100_000, 0);
+      expect(t.costToDateCents).toBe(42_000_00);
+      expect(t.feeToDateCents).toBe(6_300_00);
+      expect(t.completedToDateCents).toBe(48_300_00);
+      expect(t.retainageCents).toBe(4_830_00);
+      expect(t.earnedLessRetainageCents).toBe(43_470_00);
+      expect(t.dueCents).toBe(43_470_00);
+      expect(t.capped).toBe(false);
+      expect(t.scheduledCents).toBe(0);
+      expect(t.balanceToFinishCents).toBe(0);
+    });
+
+    it("a fixed fee is what was typed, never more than the fee itself, and may sit beside a percentage", () => {
+      const fixed = costPlusTotals(lines, { feePpm: null, feeCents: 10_000_00, gmaxCents: null }, 2_500_00, 0, 0);
+      expect(fixed.feeToDateCents).toBe(2_500_00);
+      const over = costPlusTotals(lines, { feePpm: null, feeCents: 10_000_00, gmaxCents: null }, 99_000_00, 0, 0);
+      expect(over.feeToDateCents).toBe(10_000_00);
+      const both = costPlusTotals(lines, { feePpm: 100_000, feeCents: 10_000_00, gmaxCents: null }, 2_500_00, 0, 0);
+      expect(both.feeToDateCents).toBe(4_200_00 + 2_500_00);
+      // A contract with no fixed fee ignores a typed one.
+      const none = costPlusTotals(lines, { feePpm: 100_000, feeCents: null, gmaxCents: null }, 2_500_00, 0, 0);
+      expect(none.feeToDateCents).toBe(4_200_00);
+    });
+
+    it("the guaranteed maximum caps cost plus fee, and says so", () => {
+      const t = costPlusTotals(lines, { feePpm: 150_000, feeCents: null, gmaxCents: 45_000_00 }, 0, 0, 0);
+      expect(t.completedToDateCents).toBe(45_000_00);
+      expect(t.capped).toBe(true);
+      expect(t.scheduledCents).toBe(45_000_00);
+      expect(t.balanceToFinishCents).toBe(0);
+      const under = costPlusTotals(lines, { feePpm: 150_000, feeCents: null, gmaxCents: 100_000_00 }, 0, 0, 0);
+      expect(under.capped).toBe(false);
+      expect(under.balanceToFinishCents).toBe(51_700_00);
+    });
+
+    it("the next application certifies against the last, and a line billed short stays short", () => {
+      const next = [
+        { costCodeId: "a", ledgerToDateCents: 70_000_00, previousCents: 40_000_00, thisPeriodCents: 25_000_00 },
+        { costCodeId: null, ledgerToDateCents: 2_000_00, previousCents: 2_000_00, thisPeriodCents: 0 },
+      ];
+      const t = costPlusTotals(next, { feePpm: 150_000, feeCents: null, gmaxCents: null }, 0, 100_000, 43_470_00);
+      expect(t.costToDateCents).toBe(67_000_00); // 5,000 of the books' 70,000 left unbilled
+      expect(t.feeToDateCents).toBe(10_050_00);
+      expect(t.completedToDateCents).toBe(77_050_00);
+      expect(t.retainageCents).toBe(7_705_00);
+      expect(t.dueCents).toBe(77_050_00 - 7_705_00 - 43_470_00);
+      expect(costLineToDateCents(next[0])).toBe(65_000_00);
+    });
+  });
+
+  describe("work in progress on a cost-plus job", () => {
+    it("earns cost plus the fee, capped at the maximum, and needs no estimate", () => {
+      const f = wipFigures({
+        contractCents: 0,
+        estimatedCostCents: 0,
+        costToDateCents: 40_000_00,
+        billedCents: 30_000_00,
+        costPlus: { feePpm: 150_000, feeCents: null, gmaxCents: null },
+      });
+      expect(f.percentCompletePpm).toBeNull();
+      expect(f.earnedCents).toBe(46_000_00);
+      expect(f.underBilledCents).toBe(16_000_00);
+      const capped = wipFigures({
+        contractCents: 0,
+        estimatedCostCents: 0,
+        costToDateCents: 40_000_00,
+        billedCents: 30_000_00,
+        costPlus: { feePpm: 150_000, feeCents: 5_000_00, gmaxCents: 45_000_00 },
+      });
+      expect(capped.earnedCents).toBe(45_000_00);
+      expect(costPlusFeeCents(40_000_00, 150_000)).toBe(6_000_00);
     });
   });
 });

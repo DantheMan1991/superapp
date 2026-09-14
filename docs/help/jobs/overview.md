@@ -152,6 +152,8 @@ The pencil at the end of its row. Everything except which contract it is against
 
 Owners only. Click a contract's kind in the **Contracts** table on the {{project|lower}}'s page to open the contract's own page: its **schedule of values** and the **pay applications** drawn against it.
 
+What the page shows depends on the contract's **Billed by** setting. A fixed-price contract is billed in draws against a schedule of values; a **cost plus a fee** contract is billed as what the job has cost plus the fee, with nothing to set up (see *Cost plus a fee* below); unit price and time-and-materials are recorded and not billed here yet, and the page says so.
+
 A fixed-price contract is billed in draws. The schedule breaks the contract sum into lines — by trade, by phase, or as milestones — and each application says how much of each line is complete to date. What is due is that, less the retainage held back, less what earlier applications already certified. **Issuing an application makes it an ordinary invoice** in Accounting, so it ages, gets chased and gets paid like any other.
 
 Five figures sit at the top of the page:
@@ -204,6 +206,29 @@ What can stop an issue, in its own words: `Nothing is due on this application, s
 ### Releasing retainage
 
 There is no separate step. A later application at a **lower rate** — the final one at `0` — computes less retainage to date than the last certificate held, and the difference is due: the invoice carries a `Retainage released` line. Set the rate to zero on the last application and everything held comes back.
+
+### Cost plus a fee
+
+Choose `Cost plus a fee` as the contract's **Billed by** and three boxes appear on the contract: **Fee % of cost**, **Fixed fee**, and **Guaranteed maximum**. Fill in the rate, the sum, or both; leave the maximum blank when there is none. A signed cost-plus contract has no value of its own — its worth is what the work costs.
+
+The contract's page then shows **Cost plus a fee** in place of the schedule of values: the terms in a sentence, and **In the books to date** — every bill, timecard and journal line tagged to the {{project|lower}}, by cost code, with a `No cost code` line for money tagged to the job alone. There is nothing to set up: **the coding on the bills is the schedule.** The five figures at the top become **Fee**, **Cost to date**, **Billed to date**, **Retainage held** and **Guaranteed maximum** (with what is left to bill under it).
+
+{button:New application|primary} works as for a fixed-price contract, without needing a schedule first. {button:Open|outline} on the draft shows one row per cost code:
+
+| Column | What it is |
+| --- | --- |
+| `In the books to date` | What the books carry on this code for this job, dated on or before the period end. Refreshed every time you save. |
+| `Billed before` | What earlier applications billed on the code. Carried, not typed. |
+| `This period` | What this application bills. It starts at the difference. Type less to leave a disputed bill out — the row then says `$… left unbilled` — or less than nothing to pass a credit on. |
+| `Billed to date` | Billed before plus this period. |
+
+A bill dated inside an earlier period and posted late simply shows as more in the books than billed, and the next application picks it up: **each application bills to date, never by window.**
+
+Under the rows: *Cost to date*, *Fee to date* (the rate on the whole cost to date, plus the fixed fee), *Cost plus fee to date* — or *Cost plus fee, at the guaranteed maximum* when the cap holds it down — then *Retainage*, *Earned less retainage*, *Less previous certificates* and **Current payment due**, and *Balance to the guaranteed maximum* when there is one. On a contract with a fixed fee the box **Fixed fee billed to date** is yours to type; it cannot exceed the fee, and it starts where the last application left it.
+
+{button:Issue as invoice|primary} posts an invoice with a line for the cost this period, a line for the fee this period, and the retainage line — or, when the maximum holds, one line that says *at the guaranteed maximum*. Everything else — retainage, release, voiding, one draft at a time — works exactly as for a fixed-price contract.
+
+One job's cost is billed by **one** cost-plus contract. Starting an application on a second cost-plus contract on the same {{project|lower}} says *Another cost-plus contract on this job is already billing its cost.* A fixed-price contract beside a cost-plus one is fine.
 
 ### Voiding
 
@@ -446,9 +471,9 @@ Worth knowing so you are not looking for it:
 
 - **A change order cannot be moved to another contract.** Raise it again on the right one and set the wrong one to `Void`.
 - **The daily log is not a timecard.** Who was on site is a headcount for the record; your own people's hours for wages are in Time, and the two are not joined.
-- **Only fixed-price billing.** A schedule of values and pay applications cover fixed price, progress draws, AIA applications and draw schedules — everything billed as a share of a fixed sum. Cost-plus, unit price and time-and-materials are recorded on the contract and not yet billed.
+- **Unit price and time-and-materials are not billed here yet.** Fixed price, progress draws, AIA applications and draw schedules bill against a schedule of values; cost plus a fee bills the books' cost. The other two are recorded on the contract and the contract's page says so.
 - **Retainage you hold from subcontractors** is not tracked yet; only what clients hold from you.
-- **Cost-plus, unit-price and time-and-materials jobs are not measured on the work in progress schedule.** They have no fixed value to earn against, so they are shown and left out — and a period with billings on one cannot post until that job has a value.
+- **A cost-plus job on the work in progress schedule earns what it has cost plus its fee**, capped at its maximum, with no estimate asked for — when it is the job's only signed contract. A job mixing a cost-plus contract with a fixed-price one, and any unit-price or time-and-materials job, is shown and left out, and a period with billings on one cannot post until it has a value.
 - **No printed application.** The certificate is on screen and its invoice is in Accounting; an AIA-style printout is coming.
 - **Nothing codes a bill for you.** Cost codes appear in Accounting wherever you tag a line, beside the job itself, and the `Spent` column reads what the bills carry. A line with the job and no code shows up as the uncoded note under the job cost table, not on a row.
 - **Nothing is ever deleted.** A contract you should not have added is set to `Cancelled` or `Declined`; a cost code is retired; a {{project|lower}} is cancelled. That is on purpose — a job's history is the point of keeping it.

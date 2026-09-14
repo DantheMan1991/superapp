@@ -165,6 +165,11 @@ function toResult(err: unknown): { error: string } {
         return {
           error: `Only the latest posted period can be unposted, and that is ${err.message}.`,
         };
+      case "ONE_COST_PLUS":
+        return {
+          error:
+            "Another cost-plus contract on this job is already billing its cost. A job's cost is billed once.",
+        };
     }
   }
   /**
@@ -418,6 +423,20 @@ const moneyToCents = z
     return Math.round(n * 100);
   });
 
+/** "15" → 150_000 ppm; blank → null (no percentage fee); anything else refuses. */
+const feePercent = z
+  .union([z.string(), z.literal("")])
+  .optional()
+  .transform((v, ctx) => {
+    if (v === undefined || v === null || v.trim() === "") return null;
+    const ppm = percentStringToPpm(v);
+    if (ppm === null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "a fee must be a percent" });
+      return z.NEVER;
+    }
+    return ppm;
+  });
+
 const contractSchema = z.object({
   projectId: z.string().uuid(),
   /** Format only, never a list: the kinds come from the installed profile. */
@@ -427,6 +446,10 @@ const contractSchema = z.object({
   role: z.enum(CONTRACT_ROLES).optional(),
   billingMethod: z.enum(BILLING_METHODS).optional(),
   valueCents: moneyToCents,
+  /** Cost-plus terms: a fee percent, a fixed fee, a guaranteed maximum. Blank is none. */
+  feePpm: feePercent,
+  feeCents: moneyToCents,
+  gmaxCents: moneyToCents,
   status: z.enum(CONTRACT_STATUSES).optional(),
   signedOn: optionalDate,
   notes: z.string().trim().max(2000).optional(),
@@ -1045,11 +1068,22 @@ export async function updatePayApplicationAction(input: unknown) {
     retainagePercent,
     notes: z.string().trim().max(2000).optional(),
     lines: z.array(payApplicationLineSchema).max(500).optional(),
+    costLines: z
+      .array(
+        z.object({
+          costCodeId: z.union([z.string().uuid(), z.null()]),
+          thisPeriodCents: moneyToCents,
+        }),
+      )
+      .max(500)
+      .optional(),
+    feeToDateCents: moneyToCents,
     version: z.number().int().positive().optional(),
   });
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { error: "Check the form and try again." };
-  const { id, projectId, contractId, retainagePercent: retainagePpm, lines, ...patch } = parsed.data;
+  const { id, projectId, contractId, retainagePercent: retainagePpm, lines, costLines, feeToDateCents, ...patch } =
+    parsed.data;
   try {
     const ctx = await gate();
     await withTenant(
@@ -1064,6 +1098,12 @@ export async function updatePayApplicationAction(input: unknown) {
             thisPeriodCents: l.thisPeriodCents ?? 0,
             storedCents: l.storedCents ?? 0,
           })),
+          // A blank box on a cost line bills nothing this period.
+          costLines: costLines?.map((l) => ({
+            costCodeId: l.costCodeId,
+            thisPeriodCents: l.thisPeriodCents ?? 0,
+          })),
+          feeToDateCents: feeToDateCents ?? undefined,
         }),
       { role: ctx.role },
     );

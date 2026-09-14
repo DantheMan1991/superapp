@@ -154,6 +154,14 @@ export const jobWipLines = pgTable(
      * cost against). Empty when the job posted. Frozen with the rest.
      */
     reason: text("reason").notNull().default(""),
+    /**
+     * HOW EARNED WAS MEASURED (slice 5b). `cost_to_cost`: the contract value at
+     * the percent complete. `cost_plus`: cost to date plus the fee on it,
+     * capped at the GMAX — a job on a single cost-plus contract earns what it
+     * has spent plus its fee, and needs no estimate to say so. Frozen with the
+     * rest, because the schedule a bank was shown must say which.
+     */
+    method: text("method").notNull().default("cost_to_cost"),
     // Frozen at posting, zero while a draft — see the file header.
     contractCents: bigint("contract_cents", { mode: "number" }).notNull().default(0),
     estimatedCostCents: bigint("estimated_cost_cents", { mode: "number" }).notNull().default(0),
@@ -203,6 +211,7 @@ export const jobWipLines = pgTable(
       "job_wip_lines_reason_valid",
       sql`${t.reason} in ('', 'no_value', 'no_estimate')`,
     ),
+    check("job_wip_lines_method_valid", sql`${t.method} in ('cost_to_cost', 'cost_plus')`),
   ],
 );
 

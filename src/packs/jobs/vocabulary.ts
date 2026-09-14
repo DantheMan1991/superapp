@@ -412,3 +412,40 @@ export const OVERBILLING_ACCOUNT_CODE = "2420";
  * only the pack's own unpost does.
  */
 export const WIP_ENTRY_SOURCE = "wip_adjustment" as const;
+
+
+// ------------------------------------------------------------ cost plus a fee
+
+/**
+ * WHICH BILLING METHODS ARE WHICH SUM (slice 5b). Four bill a share of a
+ * FIXED value against a schedule of values; one bills the ledger's COST plus
+ * a fee; two are recorded and billed by nothing yet. The contract page and
+ * the application verbs branch on these groups, never on a contract's kind.
+ */
+export const FIXED_VALUE_METHODS: readonly BillingMethod[] = [
+  "fixed_price",
+  "progress_draw",
+  "schedule_of_values",
+  "draw_schedule",
+];
+export const COST_PLUS_METHODS: readonly BillingMethod[] = ["cost_plus_fee"];
+export const UNBILLED_METHODS: readonly BillingMethod[] = ["unit_price", "time_and_materials"];
+
+export function isCostPlusMethod(v: string): boolean {
+  return (COST_PLUS_METHODS as readonly string[]).includes(v);
+}
+export function isFixedValueMethod(v: string): boolean {
+  return (FIXED_VALUE_METHODS as readonly string[]).includes(v);
+}
+
+/** A fee rate between nothing and everything, in parts per million. Mirrors `job_contracts_fee_ppm_range`. */
+export const FEE_PPM_MAX = 1_000_000;
+
+/** Mirrors `job_wip_lines_method_valid`: how a WIP line's earned figure was measured. */
+export const WIP_METHODS = ["cost_to_cost", "cost_plus"] as const;
+export type WipMethod = (typeof WIP_METHODS)[number];
+
+export const WIP_METHOD_LABELS: Record<WipMethod, string> = {
+  cost_to_cost: "Cost-to-cost",
+  cost_plus: "Cost plus fee",
+};

@@ -97,3 +97,89 @@ export function percentStringToPpm(input: string): number | null {
   if (ppm > 1_000_000) return null;
   return ppm;
 }
+
+/*
+ * ── COST PLUS A FEE (slice 5b, ADR 0060) ────────────────────────────────────
+ *
+ * A cost-plus application bills what the job has COST — the ledger's lines
+ * tagged with it, by cost code — plus a fee, and the certificate reads:
+ *
+ *   cost to date          = Σ (previous + this period) over the cost lines
+ *   fee to date           = cost to date × rate, rounded once, or the fixed fee
+ *                           billed so far (typed), or both
+ *   earned to date        = cost + fee, capped at the guaranteed maximum
+ *   retainage             = earned × rate, rounded once
+ *   earned less retainage
+ *   previous certificates = the last issued application's earned less retainage
+ *   CURRENT PAYMENT DUE   = earned less retainage − previous certificates
+ *
+ * The same five bottom lines as the G702, with "completed and stored to
+ * date" replaced by "cost plus fee to date", which is why an issued cost-plus
+ * application is the same row, the same invoice and the same void path as a
+ * fixed-price one. Percent complete has no meaning here and is not shown.
+ */
+export interface CostLineFigures {
+  /** Null for money on the job with no cost code on the line. */
+  costCodeId: string | null;
+  ledgerToDateCents: number;
+  previousCents: number;
+  thisPeriodCents: number;
+}
+
+export interface CostPlusTerms {
+  /** The fee as a share of cost, in parts per million; null or 0 for none. */
+  feePpm: number | null;
+  /** A fixed fee on the contract; null for none. Billed to date by hand. */
+  feeCents: number | null;
+  /** The guaranteed maximum; null for no cap. */
+  gmaxCents: number | null;
+}
+
+export interface CostPlusTotals extends PayApplicationTotals {
+  costToDateCents: number;
+  /** The percentage fee on cost to date plus the fixed fee billed to date. */
+  feeToDateCents: number;
+  /** True when the GMAX held cost plus fee down. */
+  capped: boolean;
+}
+
+/** rate × cost, rounded half up on the TOTAL, never per line. Zero for a negative total. */
+export function feeCents(costToDateCents: number, feePpm: number | null): number {
+  if (!feePpm || feePpm <= 0 || costToDateCents <= 0) return 0;
+  return Math.floor((costToDateCents * feePpm + 500_000) / 1_000_000);
+}
+
+/** What one cost line has billed to date: what earlier applications took plus what this one takes. */
+export function costLineToDateCents(line: { previousCents: number; thisPeriodCents: number }): number {
+  return line.previousCents + line.thisPeriodCents;
+}
+
+export function costPlusTotals(
+  lines: ReadonlyArray<CostLineFigures>,
+  terms: CostPlusTerms,
+  /** The fixed fee billed to date, as typed on the draft; ignored when the contract has no fixed fee. */
+  fixedFeeToDateCents: number,
+  retainagePpm: number,
+  previousCertificatesCents: number,
+): CostPlusTotals {
+  const costToDateCents = lines.reduce((sum, l) => sum + costLineToDateCents(l), 0);
+  const fixedPart = terms.feeCents ? Math.max(0, Math.min(fixedFeeToDateCents, terms.feeCents)) : 0;
+  const feeToDateCents = feeCents(costToDateCents, terms.feePpm) + fixedPart;
+  const uncapped = costToDateCents + feeToDateCents;
+  const capped = terms.gmaxCents !== null && terms.gmaxCents >= 0 && uncapped > terms.gmaxCents;
+  const completedToDateCents = capped ? (terms.gmaxCents as number) : uncapped;
+  const retainage = retainageCents(completedToDateCents, retainagePpm);
+  const earnedLessRetainageCents = completedToDateCents - retainage;
+  return {
+    scheduledCents: terms.gmaxCents ?? 0,
+    completedToDateCents,
+    retainageCents: retainage,
+    earnedLessRetainageCents,
+    previousCertificatesCents,
+    dueCents: earnedLessRetainageCents - previousCertificatesCents,
+    balanceToFinishCents: terms.gmaxCents === null ? 0 : terms.gmaxCents - completedToDateCents,
+    costToDateCents,
+    feeToDateCents,
+    capped,
+  };
+}

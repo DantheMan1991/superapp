@@ -23,8 +23,10 @@ import {
 } from "@/components/ui/table";
 import {
   contractBilling,
+  costPlusTerms,
   getContract,
   getProject,
+  jobCostReport,
   listChangeOrders,
   listCostCodes,
   listPayApplications,
@@ -39,9 +41,12 @@ import {
   PAY_APPLICATION_STATUS_LABELS,
   isBillingMethod,
   isContractStatus,
+  isCostPlusMethod,
+  isFixedValueMethod,
   isPayApplicationStatus,
   slugLabel,
 } from "@/packs/jobs/vocabulary";
+import { CostPlusApplicationEditor } from "@/packs/jobs/components/cost-plus-editor";
 import { SovEditor } from "@/packs/jobs/components/sov-editor";
 import {
   NewPayApplication,
@@ -90,7 +95,8 @@ export default async function ContractPage({
       if (!project) return null;
       const contract = await getContract(tx, ctx.tenant.id, contractId);
       if (!contract || contract.projectId !== project.id) return null;
-      const [sov, apps, changeOrders, codes, billing, party, pack] = await Promise.all([
+      const costPlus = isCostPlusMethod(contract.billingMethod);
+      const [sov, apps, changeOrders, codes, billing, party, pack, costReport] = await Promise.all([
         listSovLines(tx, ctx.tenant.id, contract.id),
         listPayApplications(tx, ctx.tenant.id, contract.id),
         listChangeOrders(tx, ctx.tenant.id, project.id),
@@ -111,12 +117,14 @@ export default async function ContractPage({
               .limit(1)
           : Promise.resolve([]),
         packContext(tx, ctx.tenant.id, ctx.tenant.industry, PACK),
+        costPlus ? jobCostReport(tx, ctx.tenant.id, project.id) : Promise.resolve(null),
       ]);
       return {
         project,
         contract,
         sov,
         apps,
+        costReport,
         changeOrders: changeOrders.filter((r) => r.contract.id === contract.id),
         codes,
         billing: billing.get(contract.id) ?? null,
@@ -149,16 +157,30 @@ export default async function ContractPage({
   const retainageHeld = data.billing?.retainageHeldCents ?? 0;
   const balanceToFinish = scheduledCents - (latestIssued?.totals.completedToDateCents ?? 0);
   const billedSov = new Set(apps.flatMap((a) => a.lines.map((l) => l.sovLineId)));
+  const costPlus = isCostPlusMethod(contract.billingMethod);
+  const fixedValue = isFixedValueMethod(contract.billingMethod);
+  const terms = costPlusTerms(contract);
+  const feeWords = [
+    terms.feePpm ? `${ppmToPercentString(terms.feePpm)}% of cost` : null,
+    terms.feeCents ? `a fixed ${formatMoney(terms.feeCents, symbol)}` : null,
+  ]
+    .filter(Boolean)
+    .join(" plus ");
+  const costToDate = data.costReport?.actualCents ?? 0;
+  const latestCostPlus = latestIssued?.costPlus ?? null;
   const codeLabel = new Map(data.codes.map((c) => [c.id, `${c.code} · ${c.name}`]));
   const changeLabel = new Map(
     data.changeOrders.map((r) => [r.changeOrder.id, `${r.changeOrder.number} · ${r.changeOrder.title}`]),
   );
-  const newDisabled =
-    sov.length === 0
-      ? "Set up the schedule of values first"
-      : draft
-        ? "Finish the open draft first"
-        : null;
+  const newDisabled = draft
+    ? "Finish the open draft first"
+    : costPlus
+      ? null
+      : fixedValue
+        ? sov.length === 0
+          ? "Set up the schedule of values first"
+          : null
+        : "This billing method is not billed here yet";
 
   return (
     <div className="space-y-4">
@@ -192,8 +214,21 @@ export default async function ContractPage({
         because value that is not on the schedule is value nobody can bill.
       */}
       <dl className="grid gap-3 sm:grid-cols-5">
-        {(
-          [
+        {(costPlus
+          ? ([
+              ["Fee", feeWords || "None — cost only", null],
+              ["Cost to date", formatMoney(costToDate, symbol), "in the books, tagged to the job"],
+              ["Billed to date", formatMoney(billedCents, symbol), `${issued.length} issued`],
+              ["Retainage held", formatMoney(retainageHeld, symbol), null],
+              [
+                "Guaranteed maximum",
+                terms.gmaxCents === null ? "None" : formatMoney(terms.gmaxCents, symbol),
+                terms.gmaxCents === null
+                  ? null
+                  : `${formatMoneySign(terms.gmaxCents - (latestCostPlus?.completedToDateCents ?? 0), symbol)} left to bill`,
+              ],
+            ] as const)
+          : ([
             ["Contract value", revisedCents === null ? "—" : formatMoneySign(revisedCents, symbol), changesCents !== 0 ? `incl. ${formatMoneySign(changesCents, symbol)} in changes` : null],
             [
               "Scheduled",
@@ -207,7 +242,7 @@ export default async function ContractPage({
             ["Billed to date", formatMoney(billedCents, symbol), `${issued.length} issued`],
             ["Retainage held", formatMoney(retainageHeld, symbol), null],
             ["Balance to finish", formatMoneySign(balanceToFinish, symbol), null],
-          ] as const
+          ] as const)
         ).map(([label, value, note]) => (
           <div key={label} className="rounded-lg bg-muted/40 px-3 py-2">
             <dt className="text-xs text-muted-foreground">{label}</dt>
@@ -226,6 +261,83 @@ export default async function ContractPage({
         ))}
       </dl>
 
+      {costPlus && (
+        <Panel className="p-5">
+          <h2 className="mb-1 font-heading text-sm font-medium tracking-heading">
+            Cost plus a fee
+          </h2>
+          <p className="mb-3 text-sm text-muted-foreground">
+            {/*
+              THE LEDGER IS THE SCHEDULE OF VALUES (ADR 0060). Nothing to set up:
+              every bill, timecard and journal line tagged with the job is what
+              the next application bills, by cost code, plus the fee.
+            */}
+            This contract bills what the job has cost — every line in the books
+            tagged with it, by cost code — plus {feeWords || "no fee"}
+            {terms.gmaxCents !== null
+              ? `, never more than ${formatMoney(terms.gmaxCents, symbol)} in all`
+              : ""}
+            . The terms are edited on the contract itself, from the {projectWord.toLowerCase()}&apos;s page.
+          </p>
+          {data.costReport && data.costReport.rows.length + (data.costReport.uncodedActualCents !== 0 ? 1 : 0) > 0 ? (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Cost code</TableHead>
+                    <TableHead className="text-right">In the books to date</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.costReport.rows
+                    .filter((r) => r.actualCents !== 0)
+                    .map((r) => (
+                      <TableRow key={r.costCodeId}>
+                        <TableCell>
+                          <span className="font-mono text-xs">{r.code}</span> · {r.name}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatMoneySign(r.actualCents, symbol)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  {data.costReport.uncodedActualCents !== 0 && (
+                    <TableRow>
+                      <TableCell className="text-muted-foreground">No cost code</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatMoneySign(data.costReport.uncodedActualCents, symbol)}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Nothing in the books is tagged to this {projectWord.toLowerCase()} yet. Code a bill to it
+              in Accounting and it appears here and on the next application.
+            </p>
+          )}
+        </Panel>
+      )}
+
+      {!costPlus && !fixedValue && (
+        <Panel className="p-5">
+          <h2 className="mb-1 font-heading text-sm font-medium tracking-heading">
+            {isBillingMethod(contract.billingMethod)
+              ? BILLING_METHOD_LABELS[contract.billingMethod]
+              : contract.billingMethod}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Recorded on the contract and not billed here yet. Unit-price and
+            time-and-materials billing are different sums and are still to come;
+            a schedule of values or cost plus a fee can be chosen on the contract
+            meanwhile.
+          </p>
+        </Panel>
+      )}
+
+      {fixedValue && (
       <Panel className="p-5">
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-heading text-sm font-medium tracking-heading">
@@ -306,6 +418,7 @@ export default async function ContractPage({
           </div>
         )}
       </Panel>
+      )}
 
       <Panel className="p-5">
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
@@ -328,7 +441,9 @@ export default async function ContractPage({
             certified, is what is due — and issuing it makes it an invoice.
           */}
           {apps.length === 0
-            ? "Each application says how much of each schedule line is complete to date; what is due is that, less retainage, less what earlier applications already certified. Issuing one posts it as an invoice."
+            ? costPlus
+              ? "Each application bills what the books carry on the job to date, less what earlier applications billed, plus the fee; what is due is that, less retainage, less what was already certified. Issuing one posts it as an invoice."
+              : "Each application says how much of each schedule line is complete to date; what is due is that, less retainage, less what earlier applications already certified. Issuing one posts it as an invoice."
             : `${issued.length} issued for ${formatMoney(billedCents, symbol)}${draft ? ", with a draft open" : ""}.`}
         </p>
         {apps.length > 0 && (
@@ -338,7 +453,9 @@ export default async function ContractPage({
                 <TableRow>
                   <TableHead className="w-8">#</TableHead>
                   <TableHead>Period to</TableHead>
-                  <TableHead className="text-right">Completed to date</TableHead>
+                  <TableHead className="text-right">
+                    {costPlus ? "Cost plus fee to date" : "Completed to date"}
+                  </TableHead>
                   <TableHead className="text-right">Retainage</TableHead>
                   <TableHead className="text-right">Payment due</TableHead>
                   <TableHead>Status</TableHead>
@@ -362,6 +479,9 @@ export default async function ContractPage({
                       <TableCell className="text-right tabular-nums">
                         {formatMoneySign(row.totals.completedToDateCents, symbol)}
                         <span className="block text-xs text-muted-foreground">
+                          {row.costPlus
+                            ? `${formatMoney(row.costPlus.costToDateCents, symbol)} cost + ${formatMoney(row.costPlus.feeToDateCents, symbol)} fee${row.costPlus.capped ? ", capped" : ""} · `
+                            : ""}
                           {ppmToPercentString(row.app.retainagePpm)}% held
                         </span>
                       </TableCell>
@@ -390,7 +510,37 @@ export default async function ContractPage({
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        {isOwner && row.app.status === "draft" && (
+                        {isOwner && row.app.status === "draft" && costPlus && (
+                          <CostPlusApplicationEditor
+                            projectId={project.id}
+                            contractId={contract.id}
+                            symbol={symbol}
+                            terms={terms}
+                            app={{
+                              id: row.app.id,
+                              version: row.app.version,
+                              number: row.app.number,
+                              periodTo: row.app.periodTo,
+                              retainagePpm: row.app.retainagePpm,
+                              notes: row.app.notes,
+                              feeToDateCents: row.app.feeToDateCents,
+                              previousCertificatesCents: row.totals.previousCertificatesCents,
+                              costs: row.costs.map((c) => ({
+                                costCodeId: c.costCodeId,
+                                label: c.code ? `${c.code} · ${c.name}` : "No cost code",
+                                ledgerToDateCents: c.ledgerToDateCents,
+                                previousCents: c.previousCents,
+                                thisPeriodCents: c.thisPeriodCents,
+                              })),
+                            }}
+                            trigger={
+                              <Button variant="outline" size="sm">
+                                <Pencil className="mr-1.5 size-4" /> Open
+                              </Button>
+                            }
+                          />
+                        )}
+                        {isOwner && row.app.status === "draft" && !costPlus && (
                           <PayApplicationEditor
                             projectId={project.id}
                             contractId={contract.id}
@@ -437,7 +587,10 @@ export default async function ContractPage({
           </div>
         )}
         <p className="mt-3 text-xs text-muted-foreground">
-          Retainage is held on everything completed to date and released when a
+          {costPlus
+            ? "A bill dated inside an earlier period and posted late is billed by the next application — each one bills to date, never by window. "
+            : ""}
+          Retainage is held on everything {costPlus ? "billed" : "completed"} to date and released when a
           later application lowers the rate — the final application at 0% releases
           it all. Only the latest issued application can be voided.
         </p>

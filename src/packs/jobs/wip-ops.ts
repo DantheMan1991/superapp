@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { JobWipLine, JobWipPeriod } from "@/db/schema";
 import { isValidIsoDate } from "@/lib/money";
@@ -28,7 +28,10 @@ import {
   PROJECT_DIMENSION,
   REVENUE_ACCOUNT_CODES,
   UNDERBILLING_ACCOUNT_CODE,
+  VALUED_CONTRACT_STATUSES,
   WIP_ENTRY_SOURCE,
+  isCostPlusMethod,
+  type WipMethod,
   type WipReason,
 } from "./vocabulary";
 import { wipFigures, wipTotals, type WipFigures, type WipTotals } from "./wip-math";
@@ -77,6 +80,8 @@ export interface WipRow {
   notes: string;
   /** Why the job was, or would be, left out of the entry. Empty when it posts. */
   reason: WipReason;
+  /** How earned was measured: the contract at its percent, or cost plus fee. */
+  method: WipMethod;
   figures: WipFigures;
 }
 
@@ -191,10 +196,51 @@ function frozenFigures(line: JobWipLine): WipFigures {
   };
 }
 
-function reasonFor(contractCents: number, figures: WipFigures): WipReason {
+function reasonFor(contractCents: number, figures: WipFigures, method: WipMethod): WipReason {
+  // A cost-plus job earns what it has spent plus its fee: no value to compare
+  // against and no estimate needed.
+  if (method === "cost_plus") return "";
   if (contractCents <= 0) return "no_value";
   if (figures.percentCompletePpm === null) return "no_estimate";
   return "";
+}
+
+/**
+ * THE COST-PLUS TERMS OF A JOB, when it has exactly ONE counted contract and
+ * that contract bills cost plus a fee. Cost belongs to the project, so a job
+ * mixing methods or carrying two cost-plus agreements cannot be measured this
+ * way and falls through to the fixed-value rule — which leaves it out with
+ * `no_value` and says so.
+ */
+async function costPlusTermsByProject(
+  tx: Tx,
+  tenantId: string,
+): Promise<Map<string, { feePpm: number | null; feeCents: number | null; gmaxCents: number | null }>> {
+  const rows = await tx
+    .select({
+      projectId: schema.jobContracts.projectId,
+      billingMethod: schema.jobContracts.billingMethod,
+      feePpm: schema.jobContracts.feePpm,
+      feeCents: schema.jobContracts.feeCents,
+      gmaxCents: schema.jobContracts.gmaxCents,
+    })
+    .from(schema.jobContracts)
+    .where(
+      and(
+        eq(schema.jobContracts.tenantId, tenantId),
+        inArray(schema.jobContracts.status, [...VALUED_CONTRACT_STATUSES]),
+      ),
+    );
+  const byProject = new Map<string, typeof rows>();
+  for (const r of rows) byProject.set(r.projectId, [...(byProject.get(r.projectId) ?? []), r]);
+  const out = new Map<string, { feePpm: number | null; feeCents: number | null; gmaxCents: number | null }>();
+  for (const [projectId, contracts] of byProject) {
+    if (contracts.length === 1 && isCostPlusMethod(contracts[0].billingMethod)) {
+      const c = contracts[0];
+      out.set(projectId, { feePpm: c.feePpm, feeCents: c.feeCents, gmaxCents: c.gmaxCents });
+    }
+  }
+  return out;
 }
 
 function blockersOf(rows: WipRow[]): string[] {
@@ -263,6 +309,7 @@ export async function wipSchedule(
         estimateCents: line.estimateCents,
         notes: line.notes,
         reason: line.reason as WipReason,
+        method: line.method as WipMethod,
         figures: frozenFigures(line),
       });
     }
@@ -279,11 +326,12 @@ export async function wipSchedule(
   }
 
   const scope = { kind: "one", entityId } as const;
-  const [values, budgets, actual, billed] = await Promise.all([
+  const [values, budgets, actual, billed, costPlusTerms] = await Promise.all([
     projectValues(tx, tenantId),
     budgetByProject(tx, tenantId),
     actualByProject(tx, tenantId, scope, periodEnd),
     billedByProject(tx, tenantId, scope, periodEnd),
+    costPlusTermsByProject(tx, tenantId),
   ]);
   const overrides = period ? await loadLines(tx, tenantId, period.id) : [];
   const overrideOf = new Map(overrides.map((l) => [l.projectId, l]));
@@ -298,12 +346,15 @@ export async function wipSchedule(
     const override = overrideOf.get(p.id);
     const budgetCents = budgets.get(p.id) ?? 0;
     const estimateCents = override?.estimateCents ?? null;
+    const terms = costPlusTerms.get(p.id);
+    const method: WipMethod = terms ? "cost_plus" : "cost_to_cost";
     const figures = wipFigures({
       contractCents,
       estimatedCostCents: estimateCents ?? budgetCents,
       costToDateCents,
       billedCents,
       complete: p.status === "complete",
+      costPlus: terms,
     });
     if (p.status === "complete" && figures.overUnderCents === 0) continue;
     rows.push({
@@ -314,7 +365,8 @@ export async function wipSchedule(
       budgetCents,
       estimateCents,
       notes: override?.notes ?? "",
-      reason: reasonFor(contractCents, figures),
+      reason: reasonFor(contractCents, figures, method),
+      method,
       figures,
     });
   }
@@ -564,6 +616,7 @@ export async function postWip(
   for (const row of schedule.rows) {
     const frozen = {
       reason: row.reason,
+      method: row.method,
       contractCents: row.figures.contractCents,
       estimatedCostCents: row.figures.estimatedCostCents,
       costToDateCents: row.figures.costToDateCents,
@@ -645,6 +698,7 @@ export async function unpostWip(
     .update(schema.jobWipLines)
     .set({
       reason: "",
+      method: "cost_to_cost",
       contractCents: 0,
       estimatedCostCents: 0,
       costToDateCents: 0,

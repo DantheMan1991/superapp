@@ -108,7 +108,7 @@ export default async function DailyLogPage({
       />
 
       {days.length === 0 && (
-        <Panel>
+        <Panel className="p-5">
           <p className="text-sm text-muted-foreground">
             No days logged yet. A day&apos;s report is the weather, what
             happened, who was on site and the photos — one per day, and
@@ -118,7 +118,7 @@ export default async function DailyLogPage({
       )}
 
       {days.map((day) => (
-        <Panel key={day.log.id}>
+        <Panel key={day.log.id} className="p-5">
           <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
             <div>
               <h2 className="font-heading text-sm font-medium tracking-heading">

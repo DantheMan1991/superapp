@@ -86,7 +86,7 @@ export default async function CostCodesPage() {
         />
       ) : (
         sets.map(({ set, codes }) => (
-          <Panel key={set.id}>
+          <Panel key={set.id} className="p-5">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <h2 className="font-heading text-sm font-medium tracking-heading">

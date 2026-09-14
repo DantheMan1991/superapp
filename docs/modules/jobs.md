@@ -66,6 +66,24 @@ uncoded remainder. Not driven: a cash-basis tenant (the farm is accrual), and
 a bill through the Purchases screen rather than the journal — the tags are
 the same rows either way.
 
+### 2026-09-14 — The first letter of every panel (`claude/jobs-panels-padding`)
+
+**Found by the founder on production, on the Test tenant's first job.** Every
+panel on every page of this pack — the project, its daily log, a contract,
+the cost code lists — was a bare `<Panel>` with its content flush against the
+edge, and `Panel` is `overflow-hidden rounded-2xl` with no padding of its own
+(it is the surface a `DataTable` sits on edge to edge). So the first glyph of
+any line inside the rounded corners was clipped: *etails*, *ontracts*, *ob
+cost*, *unch list*, *othing ordered yet*. Seven slices were driven by reading
+the page's TEXT, which does not know what a corner hid — the one thing a
+screenshot would have shown on day one. Every jobs panel now carries `p-5`,
+the convention the livestock and asset pages already had; the WIP page's
+inner `p-4` wrappers moved onto the panel to match. No behaviour changed.
+
+**The lesson, recorded so the next pack does not repeat it:** a pack's first
+page should be looked at, not only read, and a `Panel` needs padding unless
+what it holds is a full-bleed table.
+
 ### 2026-09-14 — Slice 6: what the work is worth, not what was billed for it (`claude/work-in-progress`, ADR 0059)
 
 `job_wip_periods` and `job_wip_lines`, one page (`/dashboard/m/jobs/wip`),

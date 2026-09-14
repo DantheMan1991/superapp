@@ -226,7 +226,7 @@ export default async function ContractPage({
         ))}
       </dl>
 
-      <Panel>
+      <Panel className="p-5">
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-heading text-sm font-medium tracking-heading">
             Schedule of values
@@ -307,7 +307,7 @@ export default async function ContractPage({
         )}
       </Panel>
 
-      <Panel>
+      <Panel className="p-5">
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-heading text-sm font-medium tracking-heading">
             Pay applications

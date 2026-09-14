@@ -88,8 +88,8 @@ export default async function WipPage({
     return (
       <div className="space-y-4">
         <PageHeader title="Work in progress" />
-        <Panel>
-          <p className="p-4 text-sm text-muted-foreground">
+        <Panel className="p-5">
+          <p className="text-sm text-muted-foreground">
             This workspace has no company to keep books for yet.
           </p>
         </Panel>
@@ -139,8 +139,8 @@ export default async function WipPage({
         description="Earned revenue against billings, per job, as of a period end — the schedule a bank or a surety asks for, and the entry that trues revenue up to the work."
       />
 
-      <Panel>
-        <div className="space-y-3 p-4">
+      <Panel className="p-5">
+        <div className="space-y-3">
           <WipPeriodPicker entities={entities} entityId={entityId} periodEnd={through} />
           <p className="text-sm text-muted-foreground">
             {posted && schedule.period ? (
@@ -187,8 +187,8 @@ export default async function WipPage({
         </div>
       </Panel>
 
-      <Panel>
-        <div className="p-4">
+      <Panel className="p-5">
+        <div>
           <h2 className="font-heading text-sm font-medium tracking-heading">
             {entity.name} · through {through}
           </h2>
@@ -363,8 +363,8 @@ export default async function WipPage({
       </Panel>
 
       {!posted && schedule.rows.length > 0 && (
-        <Panel>
-          <div className="space-y-3 p-4">
+        <Panel className="p-5">
+          <div className="space-y-3">
             <h2 className="font-heading text-sm font-medium tracking-heading">
               The entry
             </h2>
@@ -433,8 +433,8 @@ export default async function WipPage({
         </Panel>
       )}
 
-      <Panel>
-        <div className="p-4">
+      <Panel className="p-5">
+        <div>
           <h2 className="mb-2 font-heading text-sm font-medium tracking-heading">
             Periods
           </h2>

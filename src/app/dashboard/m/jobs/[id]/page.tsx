@@ -367,7 +367,7 @@ export default async function ProjectPage({
         }
       />
 
-      <Panel>
+      <Panel className="p-5">
         <h2 className="mb-3 font-heading text-sm font-medium tracking-heading">
           Details
         </h2>
@@ -413,7 +413,7 @@ export default async function ProjectPage({
         )}
       </Panel>
 
-      <Panel>
+      <Panel className="p-5">
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-heading text-sm font-medium tracking-heading">
             Contracts
@@ -579,7 +579,7 @@ export default async function ProjectPage({
         )}
       </Panel>
 
-      <Panel>
+      <Panel className="p-5">
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-heading text-sm font-medium tracking-heading">
             Change orders
@@ -737,7 +737,7 @@ export default async function ProjectPage({
         )}
       </Panel>
 
-      <Panel>
+      <Panel className="p-5">
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-heading text-sm font-medium tracking-heading">
             Job cost
@@ -886,7 +886,7 @@ export default async function ProjectPage({
         </p>
       </Panel>
 
-      <Panel>
+      <Panel className="p-5">
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-heading text-sm font-medium tracking-heading">
             Ordered
@@ -1033,7 +1033,7 @@ export default async function ProjectPage({
         )}
       </Panel>
 
-      <Panel>
+      <Panel className="p-5">
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-heading text-sm font-medium tracking-heading">
             On site
@@ -1086,7 +1086,7 @@ export default async function ProjectPage({
         )}
       </Panel>
 
-      <Panel>
+      <Panel className="p-5">
         <h2 className="mb-1 font-heading text-sm font-medium tracking-heading">
           Punch list
         </h2>
@@ -1112,7 +1112,7 @@ export default async function ProjectPage({
         />
       </Panel>
 
-      <Panel>
+      <Panel className="p-5">
         <h2 className="font-heading text-sm font-medium tracking-heading">
           Cost codes
         </h2>

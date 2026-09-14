@@ -9,6 +9,8 @@ import { createItem } from "../src/packs/inventory/ops";
 import { createParcel, createZone } from "../src/packs/land/ops";
 import { createLivestockLot } from "../src/packs/livestock/ops";
 import { createUnlinkedWork } from "../src/lib/work/entity-work";
+import { provisionAccounting } from "../src/modules/accounting/templates/apply";
+import { createBankAccount } from "../src/modules/accounting/banking/accounts";
 import { TELL_CASES } from "./fixtures/tell-sentences";
 
 /**
@@ -89,7 +91,7 @@ d("the catalogue every tenant's model is given", () => {
       await tx
         .insert(schema.tenantModules)
         .values(
-          ["livestock", "inventory", "land", "work", "time"].map((moduleId) => ({
+          ["livestock", "inventory", "land", "work", "time", "accounting"].map((moduleId) => ({
             tenantId,
             moduleId,
             enabled: true,
@@ -125,6 +127,27 @@ d("the catalogue every tenant's model is given", () => {
         { tenantId, userId: SIGNED_IN },
         { title: "Fix the top gate", notes: "", dueOn: null },
       );
+    });
+
+    /*
+     * **AND THE BOOKS, because the money source is the one worth measuring.**
+     *
+     * `accounting` offers nothing until a business has a register to pay from
+     * and somewhere to code it to, so a fixture without both would leave the
+     * budget assertion covering everything EXCEPT the largest and most
+     * consequential source. It contributed nothing and the suite went red the
+     * moment C1 was registered, which is the guard above doing its job.
+     */
+    await withTenant(tenantId, (tx) => provisionAccounting(tx, tenantId));
+    await asOwner(async (tx) => {
+      await createBankAccount(tx, ctx(), {
+        name: "Farm Checking",
+        kind: "checking",
+        institution: "Test Bank",
+        last4: "4321",
+        openingBalanceCents: 500_00,
+        openingBalanceDate: "2026-01-01",
+      });
     });
 
     // Each source asked directly. `proposeTold` would do this too, behind a

@@ -80,6 +80,20 @@ const DENIED_PATHS = [
  */
 const LEDGER_PATHS = ["/accounting/", "/ledger", "/postings", "/journal"];
 
+/**
+ * **AND A SOURCE THAT LIVES IN ONE OF THOSE MODULES COUNTS TOO.**
+ *
+ * Found the moment the rule had a real subject. `accounting/tell/source.ts`
+ * reaches the ledger through `../core` and `../banking/quick-add` — RELATIVE,
+ * because a module's own tell source always is — so an import-specifier check
+ * saw nothing and the preview requirement would never have fired for the one
+ * source it was written for. The scan was green and empty.
+ *
+ * A source's own location is the fact that does not depend on how it spells its
+ * imports.
+ */
+const LEDGER_HOMES = ["/modules/accounting/"];
+
 describe("what a tell source may import", () => {
   const sources = tellSources();
 
@@ -119,9 +133,10 @@ describe("what a tell source may import", () => {
     for (const file of sources) {
       const text = readFileSync(file, "utf8");
       const where = file.replace(/\\/g, "/").split("/src/")[1];
-      const touchesLedger = imports(text).some((line) =>
-        LEDGER_PATHS.some((p) => line.from.includes(p)),
-      );
+      const where2 = file.replace(/\\/g, "/");
+      const touchesLedger =
+        LEDGER_HOMES.some((home) => where2.includes(home)) ||
+        imports(text).some((line) => LEDGER_PATHS.some((p) => line.from.includes(p)));
       if (!touchesLedger) continue;
       expect(
         /\bpreview\s*[(:]/.test(text),

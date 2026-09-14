@@ -192,6 +192,32 @@ export const TELL_CASES: readonly TellCase[] = [
     why: "A total phrased as a complaint. The trap is reading \u201conly nine\u201d as nine having gone.",
     needs: ["inventory"],
   },
+  /* ── the books ────────────────────────────────────────────────────────── */
+  {
+    said: "paid the feed store two hundred forty cash",
+    expect: ["accounting.paid"],
+    why: "The sentence the whole of Phase C was planned around. Money already gone, with a payee and an amount said as words.",
+    needs: ["accounting"],
+  },
+  {
+    said: "forty dollars of diesel on the farm card",
+    expect: ["accounting.paid"],
+    why: "No verb at all — no \u201cpaid\u201d, no \u201cspent\u201d. The account is named and the payment is implied by the card.",
+    needs: ["accounting"],
+  },
+  {
+    said: "we owe the feed store two forty",
+    expect: [],
+    tolerate: [["work.add"]],
+    why: "OWING IS NOT PAYING, and what must never happen is a PAYMENT — money is still in the account. The model wrote it down as a job to pay them instead, three times out of three, which is a defensible reading of a liability somebody mentioned out loud and touches no books. Nothing is the cleaner answer; a reminder is not a failure.",
+    needs: ["accounting", "work"],
+  },
+  {
+    said: "paid two hundred forty for feed",
+    expect: ["accounting.paid"],
+    why: "THE PAIR THAT MATTERS NOW. Paying FOR feed is money out; using feed is stock out. Nothing was consumed here, so inventory.used would be wrong twice \u2014 a movement that never happened and a payment that never landed.",
+    needs: ["accounting", "inventory"],
+  },
   /* ── across modules, which is where it will actually break ────────────── */
   {
     said: "the water trough in pen two is broken",

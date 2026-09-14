@@ -90,6 +90,12 @@ somewhere first in order to record something.
    - An amber line means something true you should know before recording, such
      as `That is 3 more than Pen 2 is counted as having.` It is a warning, not
      a refusal: you can still record it if you mean to.
+   - **Anything that touches your books shows you the posting**, in the
+     accounts it is about to hit: `Dr 5010 Feed expense` `240.00`,
+     `Cr 1010 Farm Checking` `240.00`. That is the thing worth checking — an
+     amount is easy to read back, and the wrong account is not.
+   - **If you are not an owner it says so**: `This will wait as a draft until
+     an owner posts it.` The entry is written either way; an owner posts it.
    - **`Counted what is there` is the one where the two numbers differ.** You
      say the total you counted; the books move by the difference. The card
      shows all three — `Grower crumble on the books` `80 pounds`, `counted`
@@ -202,6 +208,7 @@ appear when they have something to work with.
 | `Stock used` | Something taken out of stock and used up | What, and how much in the unit it is counted in. Only when you keep Inventory |
 | `Stock lost or found` | Stock gone for a reason nobody chose, or turned up unexpectedly | What, how much, and what happened — `Went off`, `Thrown away`, `Damaged`, `Shrinkage`, `Missing`, `Taken for the house` or `Found`. Only `Found` adds stock; the rest take it away |
 | `Counted what is there` | The TOTAL you counted, with Yosher working out the correction | What, and how many there are. **Say the total, not the difference** — the card shows you both before you record it |
+| `Money paid out` | Money that has already LEFT one of your accounts | Which account, how much, and what it was for. The card shows **the posting** — which accounts it will hit — before you record it. Only for money already gone: not a bill you have not paid, and not money coming in |
 
 ## What records itself, and what waits for you
 

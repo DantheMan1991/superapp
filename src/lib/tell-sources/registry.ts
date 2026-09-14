@@ -1,4 +1,5 @@
 import "server-only";
+import { accountingTellSource } from "@/modules/accounting/tell/source";
 import { timeTellSource } from "@/modules/time/tell/source";
 import { inventoryTellSource } from "@/packs/inventory/tell/source";
 import { workTellSource } from "@/modules/work/tell/source";
@@ -40,5 +41,6 @@ export const tellSources: readonly TellSource[] = [
   timeTellSource,
   workTellSource,
   inventoryTellSource,
+  accountingTellSource,
   livestockTellSource,
 ];

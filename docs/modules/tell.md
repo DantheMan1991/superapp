@@ -106,7 +106,7 @@ Gated on A2 and A4. Never `unattended`. Every action previews its posting.
 
 | # | Slice |
 | --- | --- |
-| **C1** | **An expense paid** — *"paid the feed store two hundred forty cash"*. The simplest money verb, and the one that proves the preview. **Its prerequisite shipped 2026-09-13**: the quick add's rule moved out of the server action into `banking/quick-add.ts`, so a sentence can call the module's own verb rather than keeping a second copy of the posting ([accounting.md](accounting.md)) |
+| **C1** ✅ | **An expense paid — shipped 2026-09-13.** *"paid the feed store two hundred forty cash"*. The simplest money verb, and the one that proved the preview. **Its prerequisite shipped the same day**: the quick add's rule moved out of the server action into `banking/quick-add.ts`, so a sentence can call the module's own verb rather than keeping a second copy of the posting ([accounting.md](accounting.md)) |
 | **C2** | **A bill that arrived** — *"got a bill from the vet for three eighty, due the fifteenth"* |
 | **C3** | **A draft invoice** — *"invoice Acme for twelve hours"*. Creates a draft, says so, and stops |
 
@@ -130,6 +130,92 @@ screen.
 | **D10** | **Say both rather than guess.** When the model was torn between two ACTIONS, show both and let one tap settle it | Rule 2 already does this for choices within an action. It does not yet do it for the action itself |
 
 ## Build log
+
+### 2026-09-13 — Slice C1: the books can be told (`claude/paid-the-feed-store`)
+
+**The first source that touches money**, and the one every rule in
+[ADR 0054](../decisions/0054-tell-may-draft-never-send.md) was written for. It
+records money that has already LEFT — a claim about the past, corrected the way
+every wrong entry is. It does not send, pay or issue: those reach a third party,
+and `tests/tell-forbidden-verbs.test.ts` refuses the imports rather than trusting
+anyone to remember.
+
+```
+  Dr 5010 Feed expense       240.00
+  Cr 1010 Farm Checking      240.00
+```
+
+**Built by `quickAddPosting` from the same input the write takes**, so the two
+cannot drift — and a card reading `Feed store · $240 · today` looks exactly as
+correct whether it is about to hit `5010` or `6200`.
+
+- **A DRAFT IS NOT A RECORDING, AND IT SAYS SO.** A non-owner's entry waits for
+  an owner to post it. The preview warns before the button and the summary says
+  it after — *"draft, for an owner to post"* — because somebody walking away
+  believing their books are up to date has been misled by a confirmation that
+  was technically true. That matters more when the confirmation is SPOKEN.
+- **A line can never be coded where the module's own pickers refuse it.**
+  `isCodableAccount` keeps it off the registers, off owner funds and opening
+  balances, and off GRNI and Inventory — where coding by hand capitalises a
+  delivery twice ([ADR 0012](../decisions/0012-what-capitalises-stock.md)). A
+  second opinion here would be a second opinion about somebody's books.
+- **The outside accountant is offered nothing**, rather than offered something
+  that refuses.
+
+#### Money, done the module's way rather than the obvious way
+
+Three assumptions were wrong and the tests caught all three:
+
+- **`toSafeCents` is not a converter.** It ASSERTS a value is already a safe
+  integer of cents. Dollars reach cents through `parseMoneyToCents`, which
+  refuses what multiplying would quietly accept: more than two decimals, past
+  `MAX_AMOUNT_CENTS`, and the floating-point debris a spoken number arrives as —
+  `String(0.1 + 0.2)` is `"0.30000000000000004"`, which `Math.round(x * 100)`
+  would turn into 30 cents with a straight face. **A refused amount previews as
+  nothing rather than as a rounded guess.**
+- **`formatCents` is symbol-free ON PURPOSE**, for debit and credit columns
+  whose header carries the currency. The preview uses it; the summary is a
+  sentence, so it uses `formatMoney` with the tenant's own symbol. The test
+  fixture sets a symbol so both halves of that rule are asserted in one file.
+- **`formatCents` is also sign-blind** — a negative renders as its own opposite.
+  Nothing here can hit that: the sign is spent choosing `Dr` or `Cr`, and only a
+  positive figure is ever printed.
+
+#### The guards all fired, and one of them was wrong
+
+- **The budget guard caught `accounting.paid` at 1,641 characters** against a
+  1,600 cap — the first action big enough to trip it. A1's own note says the
+  answer is to tighten the action, not raise the cap, so the `about` and four
+  hints were cut back. The prompt is better for it.
+- **The catalogue fixture went red** the moment the source was registered,
+  because it enabled no accounting and the source offers nothing without a
+  register to pay from. It now provisions the books — so the budget assertion
+  covers the largest and most consequential source instead of everything except
+  it.
+- **A4 HAD A HOLE, AND C1 IS WHAT FOUND IT.** The preview requirement matched on
+  IMPORT SPECIFIERS containing `/accounting/` — and a module's own tell source
+  imports relatively (`../core`, `../banking/quick-add`). It saw nothing. The
+  scan was green and empty for the one source it was written for. It now also
+  matches a source's own LOCATION, which does not depend on how it spells its
+  imports, and renaming `preview` away was used to prove it fires.
+
+#### Measured
+
+```
+  ████████████████████████  96/96 runs picked the right verb
+  catalogue: 12 actions, 10533 characters (was 11 and 9185)
+```
+
+Four new cases, and the pair worth having is *"paid two hundred forty for feed"*
+→ `accounting.paid`, because paying FOR feed is money out while using feed is
+stock out, and `inventory.used` would be wrong twice: a movement that never
+happened and a payment that never landed.
+
+**And the harness corrected its author again.** *"We owe the feed store two
+forty"* expected NOTHING; the model wrote a job to pay them, three times out of
+three. What must never happen is a PAYMENT — money is still in the account — and
+a reminder touches no books and is a fair reading of a liability said out loud.
+The case now tolerates it and says exactly what is forbidden.
 
 ### 2026-09-13 — The phone listens on one tap, and gets a voice of its own (`claude/the-phone-listens-on-one-tap`)
 

@@ -724,7 +724,7 @@ cost-plus-fee dropped out of slice 4 because the pilot bills fixed price monthly
 | # | Slice | Why here |
 | --- | --- | --- |
 | **0a** | **Core declares vocabulary** — `customer`, `invoice`, `vendor`, `estimate` as `LabelDefinition`s, with `labelFor` at every render site | **Not construction, and ahead of it.** Without this the pilot's invoice says "Customer" and no profile can change it. Worth more to every future industry than any pack below, and `tests/vocabulary.test.ts` makes it a one-way ratchet. |
-| 0 | `jobs` — project, cost code sets, budget, `delivery_method`, seeded templates, **dimension sync**, plus `entity_id` and the division | The spine. The dimension sync alone makes labor and every bill sliceable by job. Three coordinates, none of them the delivery method. |
+| 0 | ~~`jobs` — project, cost code sets, `delivery_method`, **dimension sync**, `entity_id` and the division~~ **SHIPPED 2026-09-14** ([jobs.md](jobs.md)) | The spine. The dimension sync alone makes labor and every bill sliceable by job. Three coordinates, none of them the delivery method. **The budget and the seeded templates came OUT of this slice** — a project that collects actual cost is already the thing a spreadsheet does worst, and they belong with contracts. |
 | 1 | `contracts` — many per project, the ladder, counterparty, role, direction | A project has no value without one. Carries the sub case and the pre-con phases from the start rather than retrofitting both. |
 | 2 | `commitments` — POs and subcontracts issued, committed vs actual | Committed cost is the number a budget is useless without. |
 | 3 | `change-orders` — PCO → CO → approved, against a contract | The original contract value must stop being editable before anything trusts it. |

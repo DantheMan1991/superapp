@@ -13,6 +13,49 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-14 — A module nobody could switch on (`claude/a-module-nobody-can-switch-on`)
+
+**THE PACK WAS INVISIBLE ON PRODUCTION, AND HAD BEEN ALL WEEK.** The founder
+asked why he could not see any of it. All six `job_*` tables were there, RLS
+enabled and forced, `db:verify-rls` reporting 198 tables clean, four merged PRs —
+and **no row in `modules`**, so the pack did not exist as far as the catalogue,
+the superadmin registry or any tenant's nav was concerned.
+
+**The cause is structural, not careless, which is why the fix is a check and not
+a note.** [ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md)
+makes applying a migration a conscious pre-merge ritual with its own verification
+step. The SEED has neither. So a new pack's schema reaches production reliably
+and its catalogue row does not — `db:seed -- --dev` had been run, because the dev
+branch is where the feature was driven, and the production equivalent never was.
+
+Three things now close it:
+
+- **`npm run db:verify-modules`** — `verify-rls`'s sibling. Same invocation, same
+  `--dev` flag, same exit code so it can gate a deploy. It reports what the code
+  defines that the database lacks, and names the command that fixes it. **Proved
+  to go red before it was trusted**: a fake module added to the catalogue and not
+  to either database produced `✗ 1 module(s) MISSING from the database — nobody
+  can switch these on` and exit 1.
+- **`scripts/seed-catalogue.ts`** — the `MODULES` array extracted out of
+  `scripts/seed.ts`, which calls `main()` at module load and so could never be
+  imported by a test. `packs-and-profiles.md` had named this exact fix as the
+  open item's remedy since Layer 2 shipped.
+- **`tests/module-catalogue.test.ts`** — every registered pack and core module
+  has a row; no pack is miscategorised (which would silently refuse an
+  accountant's writes); no pack is `available` without a `Component`.
+
+**The two halves are different failures and both were real.** The test proves the
+code agrees with itself. The script proves a database agrees with the code. Only
+the second would have caught this one.
+
+AGENTS.md now carries the seed in the same before-the-merge list as the
+migration, and "Adding a module" step 1 says **both** databases out loud.
+
+**Still a human decision, deliberately:** which TENANT has a pack switched on.
+The catalogue row makes it possible; `tenant_modules` makes it real, and that is
+a sale, not a deploy step. `verify-modules` checks the first and says nothing
+about the second, or it would nag forever about every pack nobody has sold.
+
 ### 2026-09-14 — Slice 2: committed cost, and a cost code becomes a cost object (`claude/committed-cost`)
 
 `job_commitments` + `job_commitment_lines` — what the business has ordered — and

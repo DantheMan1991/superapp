@@ -666,12 +666,26 @@ Pack-owned tables follow the ordinary rules: `tenant_id`, FORCE RLS, a
 - **P5 extension points** (#7 above) — the primitive ADR 0004 named and nobody
   has built. Nothing has forced it yet because no pack renders; the first pack
   that ships will.
-- **Nothing asserts a pack in code has a seed row in `scripts/seed.ts`.** That
-  file calls `main()` at module load, so a test cannot import its catalogue
-  without opening a database connection. The backstop is the
-  `tenant_modules.module_id` foreign key, which fails loudly at install rather
-  than silently — acceptable, but it fails at the worst moment. The fix, when it
-  is worth doing, is extracting the `MODULES` array into an importable module.
+- ~~**Nothing asserts a pack in code has a seed row in `scripts/seed.ts`.**~~ —
+  **closed 2026-09-14**, by exactly the fix this entry named: the array now lives
+  in `scripts/seed-catalogue.ts`, which imports the schema for TYPES only and so
+  can be read without opening a database connection.
+  `tests/module-catalogue.test.ts` fails if a registered pack or core module has
+  no row, if a pack is miscategorised (which would silently refuse an
+  accountant's writes, per `authorize.ts`), or if a pack is `available` with no
+  `Component` — a dead row in a client's nav.
+
+- **A CATALOGUE ROW IN CODE IS NOT A CATALOGUE ROW IN A DATABASE**, and the gap
+  between those two is how `jobs` shipped invisible. Every table migrated, RLS
+  verified on 198 tables, four merged PRs — and no row in production's `modules`,
+  so nobody could switch it on. [ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md)
+  makes applying a migration a conscious pre-merge ritual with its own
+  verification, and the seed had neither, so the schema landed reliably and the
+  catalogue row did not. **`npm run db:verify-modules`** is the missing half —
+  `verify-rls`'s sibling, same `--dev` flag, same exit code — and AGENTS.md's
+  Commands section now carries the seed in the same before-the-merge list as the
+  migration. The test above proves the code agrees with itself; the script proves
+  a database agrees with the code.
 - ~~`resolveLabels` has no caller~~ · ~~no UI for a per-tenant override~~ ·
   ~~no UI for `installProfile`~~ — **all closed 2026-08-15.** Both surfaces are
   on the admin tenant page, and the words they offer come from the registry.

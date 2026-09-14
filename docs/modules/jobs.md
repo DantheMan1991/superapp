@@ -13,6 +13,27 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-14 — The profile arrives, and the pack takes its first seed (`claude/the-construction-profile`)
+
+No screen changed. What changed is that every seam this pack left open now
+has something on the other side of it: the `construction` profile
+([construction.md](construction.md)) supplies `packConfig.jobs.deliveryMethods`
+and `.contractKinds`, so the project and contract forms show a picker instead
+of a free-text box for the first time outside a test; `customer` renders as
+*Client*; and two starter cost code lists arrive with the profile.
+
+**THE PACK OWNS ITS SEED.** `src/packs/jobs/seed-shape.ts` is the shape
+(`CostCodeSetSeed`, parsed as tolerantly as `deliveryMethodsFrom` parses its
+config) and `src/packs/jobs/seed.ts` the applier, registered in
+`src/packs/seeds.ts` under this pack's slug
+([ADR 0057](../decisions/0057-a-pack-registers-a-seed-applier-and-the-profile-carries-the-data.md)).
+It writes through `createCostCodeSet` / `createCostCode`, so every seeded code
+is a cost object; the first list a tenant ever gets becomes its default by the
+pack's own rule; a list the tenant already has by that name is skipped WHOLE —
+a business that pruned a starter list must not find the pruned codes back
+after a re-install. Nothing about the profile is known here: the pack does not
+import it, and a second industry's lists would arrive the same way.
+
 ### 2026-09-14 — Slice 4: original + approved changes = revised (`claude/original-plus-approved-changes`)
 
 `job_change_orders` and `job_change_order_lines`, and the line every owner and
@@ -579,6 +600,9 @@ ordering only bites when two new tables reference each other in one file.
   would, and the alternative is discovering it from a report quietly missing a
   column.
 - `src/app/dashboard/m/jobs/cost-codes/page.tsx` — the chart of cost.
+- `src/packs/jobs/seed-shape.ts` + `seed.ts` — what a profile may seed into
+  this pack (starter cost code lists) and the applier that writes it through
+  the pack's own ops, registered in `src/packs/seeds.ts` (ADR 0057).
 - `src/packs/jobs/components/change-order-form.tsx` — price and cost typed
   separately, negative allowed, `Approved` fills the date box.
 - `src/lib/db-errors.ts` — `violatedUniqueIndex`, the constraint name from
@@ -662,6 +686,12 @@ ordering only bites when two new tables reference each other in one file.
   in the browser on the dev branch by the builder, which is not the same thing.
   The construction profile does not exist yet either, so `deliveryMethodsFrom`
   has never returned a non-empty list outside a test.
+- **A suggested kind that is an acronym renders wrong.** `slugLabel("aia")` is
+  *Aia*, and the construction profile's contract kinds carry `aia` because that
+  is what every GC calls the form. The pack cannot know an acronym without
+  knowing the industry; the fix is a per-kind label map in `packConfig`
+  (`contractKindLabels`, read beside `contractKindsFrom`) the day a profile
+  wants to spell one. Seen the first time a profile fed the picker, 2026-09-14.
 - **`job_projects.number` is not generated.** Every business numbers its jobs its
   own way and the pilot's scheme is unknown, so the field is free text and the
   form suggests nothing. A generator is worth building only once a real scheme is

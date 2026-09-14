@@ -1,9 +1,12 @@
 import "dotenv/config";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import { withSystem, withTenant, schema } from "../src/db";
 import { applyProfileSeed, seedSummary } from "../src/app/admin/profile-seed";
-import { getIndustryProfile } from "../src/industries";
+import { getIndustryProfile, industryRegistry } from "../src/industries";
+import { packSeedAppliers } from "../src/packs/seeds";
+import { CONSTRUCTION_COST_CODE_SETS } from "../src/industries/construction/cost-codes";
+import { COST_CODE_DIMENSION } from "../src/packs/jobs/vocabulary";
 import { AGENCY_COA } from "../src/industries/agency/accounts";
 import { GENERAL_COA } from "../src/modules/accounting/templates/general";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
@@ -43,14 +46,16 @@ d("profile seed", () => {
     expect(seedSummary(agency)).toEqual({
       accounts: AGENCY_COA.accounts.length,
       folders: 2,
+      packs: [],
     });
   });
 
   it("waits for a module that is off, and loses nothing", async () => {
-    const report = await applyProfileSeed(tenantId, agency, []);
+    const report = await applyProfileSeed(tenantId, agency, [], STAMP);
     expect(report).toEqual({
       accountsCreated: 0,
       foldersCreated: 0,
+      packs: [],
       waitingOn: ["accounting", "documents"],
     });
     const accounts = await withSystem((tx) =>
@@ -63,7 +68,7 @@ d("profile seed", () => {
     // What switching Accounting on does first: the general chart.
     await withTenant(tenantId, (tx) => provisionAccounting(tx, tenantId));
 
-    const first = await applyProfileSeed(tenantId, agency, ["accounting"]);
+    const first = await applyProfileSeed(tenantId, agency, ["accounting"], STAMP);
     expect(first.accountsCreated).toBe(AGENCY_COA.accounts.length);
     expect(first.waitingOn).toEqual(["documents"]);
 
@@ -92,7 +97,7 @@ d("profile seed", () => {
     expect(byCode.get("1220")?.parentId).toBeNull();
 
     // Re-run: nothing to add.
-    const again = await applyProfileSeed(tenantId, agency, ["accounting"]);
+    const again = await applyProfileSeed(tenantId, agency, ["accounting"], STAMP);
     expect(again.accountsCreated).toBe(0);
   });
 
@@ -110,7 +115,7 @@ d("profile seed", () => {
         subtype: "operating_expense",
       });
     });
-    const report = await applyProfileSeed(tenantId, agency, ["accounting"]);
+    const report = await applyProfileSeed(tenantId, agency, ["accounting"], STAMP);
     expect(report.accountsCreated).toBe(0);
     const kept = await withSystem((tx) =>
       tx.query.accounts.findFirst({
@@ -123,7 +128,7 @@ d("profile seed", () => {
 
   it("adds its folders beside the platform's starter cabinet, once", async () => {
     await withSystem((tx) => provisionDocuments(tx, tenantId));
-    const first = await applyProfileSeed(tenantId, agency, ["accounting", "documents"]);
+    const first = await applyProfileSeed(tenantId, agency, ["accounting", "documents"], STAMP);
     expect(first.foldersCreated).toBe(2);
     expect(first.waitingOn).toEqual([]);
 
@@ -138,7 +143,136 @@ d("profile seed", () => {
     expect(names).toContain("Proposals");
     expect(names).toContain("Contracts");
 
-    const again = await applyProfileSeed(tenantId, agency, ["documents"]);
+    const again = await applyProfileSeed(tenantId, agency, ["documents"], STAMP);
     expect(again.foldersCreated).toBe(0);
+  });
+});
+
+/**
+ * The construction profile's seed into a PACK's tables (ADR 0057): two starter
+ * cost code lists land through the applier the `jobs` pack registers, every
+ * code a cost object, the first list the default — and a re-run adds nothing,
+ * and a list the tenant already has by that name is left exactly as it is.
+ */
+d("a pack seed (construction → jobs)", () => {
+  const construction = getIndustryProfile("construction")!;
+  const CO_STAMP = `profile-seed-co-${process.pid}`;
+  let coTenant = "";
+
+  beforeAll(async () => {
+    coTenant = await withSystem(async (tx) => {
+      const [row] = await tx
+        .insert(schema.tenants)
+        .values({ clerkOrgId: CO_STAMP, name: `${CO_STAMP} Builders`, slug: CO_STAMP })
+        .returning({ id: schema.tenants.id });
+      return row.id;
+    });
+  });
+
+  afterAll(async () => {
+    await withSystem((tx) =>
+      tx.delete(schema.tenants).where(eq(schema.tenants.id, coTenant)),
+    );
+  });
+
+  it("every pack a profile seeds has registered an applier", () => {
+    // A key with no applier is silently nothing to do at install, so the
+    // configuration error has to be caught here instead.
+    for (const profile of Object.values(industryRegistry)) {
+      for (const slug of Object.keys(profile.seed?.packs ?? {})) {
+        expect(packSeedAppliers[slug], `${profile.slug} seeds ${slug}`).toBeDefined();
+      }
+    }
+  });
+
+  it("says what the pack seed would bring, in the pack's words", () => {
+    expect(seedSummary(construction).packs).toEqual([
+      `2 cost code lists (${CONSTRUCTION_COST_CODE_SETS.reduce((n, s) => n + s.codes.length, 0)} codes)`,
+    ]);
+  });
+
+  it("waits for the pack when it is off", async () => {
+    const report = await applyProfileSeed(coTenant, construction, [], CO_STAMP);
+    expect(report.packs).toEqual([]);
+    expect(report.waitingOn).toContain("jobs");
+    const sets = await withSystem((tx) =>
+      tx.select({ id: schema.jobCostCodeSets.id }).from(schema.jobCostCodeSets).where(eq(schema.jobCostCodeSets.tenantId, coTenant)),
+    );
+    expect(sets).toHaveLength(0);
+  });
+
+  it("lands both lists, every code a cost object, the first one the default — once", async () => {
+    const first = await applyProfileSeed(coTenant, construction, ["jobs"], CO_STAMP);
+    expect(first.packs).toEqual([
+      {
+        slug: "jobs",
+        created: 2,
+        description: `2 cost code lists with ${CONSTRUCTION_COST_CODE_SETS.reduce((n, s) => n + s.codes.length, 0)} codes`,
+      },
+    ]);
+    expect(first.waitingOn).not.toContain("jobs");
+
+    const { sets, codes, members } = await withSystem(async (tx) => ({
+      sets: await tx
+        .select()
+        .from(schema.jobCostCodeSets)
+        .where(eq(schema.jobCostCodeSets.tenantId, coTenant)),
+      codes: await tx
+        .select({ id: schema.jobCostCodes.id, setId: schema.jobCostCodes.setId, sortOrder: schema.jobCostCodes.sortOrder })
+        .from(schema.jobCostCodes)
+        .where(eq(schema.jobCostCodes.tenantId, coTenant)),
+      members: await tx
+        .select({ packEntityId: schema.dimensionMembers.packEntityId })
+        .from(schema.dimensionMembers)
+        .where(
+          and(
+            eq(schema.dimensionMembers.tenantId, coTenant),
+            eq(schema.dimensionMembers.dimensionType, COST_CODE_DIMENSION),
+          ),
+        ),
+    }));
+    expect(sets.map((s) => s.name).sort()).toEqual(
+      CONSTRUCTION_COST_CODE_SETS.map((s) => s.name).sort(),
+    );
+    // Residential first in the manifest, so it is the default; one default only.
+    expect(sets.filter((s) => s.isDefault).map((s) => s.name)).toEqual(["Residential phases"]);
+    expect(codes).toHaveLength(CONSTRUCTION_COST_CODE_SETS.reduce((n, s) => n + s.codes.length, 0));
+    // THE POINT OF GOING THROUGH THE PACK: every seeded code is chargeable.
+    expect(new Set(members.map((m) => m.packEntityId))).toEqual(new Set(codes.map((c) => c.id)));
+    // In manifest order, not insertion luck.
+    const residential = sets.find((s) => s.name === "Residential phases")!;
+    const orders = codes.filter((c) => c.setId === residential.id).map((c) => c.sortOrder);
+    expect(orders).toEqual([...orders].sort((a, b) => a - b));
+
+    const again = await applyProfileSeed(coTenant, construction, ["jobs"], CO_STAMP);
+    expect(again.packs).toEqual([]);
+  });
+
+  it("leaves a list the tenant already has by that name exactly as it is", async () => {
+    // Prune the CSI list to one code, re-run: the other twenty-two must not come back.
+    const csi = await withSystem(async (tx) => {
+      const [set] = await tx
+        .select({ id: schema.jobCostCodeSets.id })
+        .from(schema.jobCostCodeSets)
+        .where(and(eq(schema.jobCostCodeSets.tenantId, coTenant), eq(schema.jobCostCodeSets.name, "CSI divisions")));
+      const kept = await tx
+        .select({ id: schema.jobCostCodes.id })
+        .from(schema.jobCostCodes)
+        .where(and(eq(schema.jobCostCodes.tenantId, coTenant), eq(schema.jobCostCodes.setId, set.id)))
+        .limit(1);
+      await tx
+        .delete(schema.dimensionMembers)
+        .where(and(eq(schema.dimensionMembers.tenantId, coTenant), eq(schema.dimensionMembers.dimensionType, COST_CODE_DIMENSION)));
+      await tx
+        .delete(schema.jobCostCodes)
+        .where(and(eq(schema.jobCostCodes.setId, set.id), ne(schema.jobCostCodes.id, kept[0].id)));
+      return set.id;
+    });
+    const report = await applyProfileSeed(coTenant, construction, ["jobs"], CO_STAMP);
+    expect(report.packs).toEqual([]);
+    const left = await withSystem((tx) =>
+      tx.select({ id: schema.jobCostCodes.id }).from(schema.jobCostCodes).where(eq(schema.jobCostCodes.setId, csi)),
+    );
+    expect(left).toHaveLength(1);
   });
 });

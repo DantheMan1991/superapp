@@ -38,6 +38,83 @@ not improvise — the same status
 
 ## Build log
 
+### 2026-09-14 — The profile exists (`claude/the-construction-profile`)
+
+`src/industries/construction/` — the manifest this dossier had been designing
+for since the first pass, and the first time any of the seams the `jobs` pack
+left open has returned a non-empty answer outside a test.
+
+**ONE PROFILE, FOUR FLAVOURS, AS DECIDED.** `packs: ["assets", "inventory",
+"jobs"]` — the three of the family's packs that exist, each wanted by every
+delivery method. `production` is NOT listed although this dossier says a
+cabinet shop's orders are a production run: the pack's words (kill sheet, cut
+sheet, processor) are a meat plant's, and nobody has driven a shop order
+through it to say which relabels are right. `land` is not listed for the
+reason the open item gives. A tenant switches either on; listing them would
+install words nobody has checked.
+
+**THE WORDS.** `customer → Client` (the pilot's word and the custom-home norm;
+a commercial GC says owner, a production builder says buyer, and a company has
+ONE, which is why this is tenant-wide), `item → Material`, `enterprise →
+Division`. Not `project`: the pack's own fallback is already the GC's word, and
+the pilot's "job" is what §8 flags as the trade-specific one. Not `asset →
+Equipment`, which was wanted and was wrong: a profile label is a bare string
+and the shared plural rule would have rendered "Equipments" on the list page.
+**An uncountable noun cannot be a profile label** until `LabelDefinition`'s
+plural can be overridden — logged under packs-and-profiles.
+
+**THE SUGGESTIONS.** `packConfig.jobs.deliveryMethods` carries ADR 0056's four
+plus the shapes the market has — remodel, tenant improvement, multifamily,
+sitework — and `contractKinds` carries the pilot's ladder beside a production
+builder's purchase agreement, a design-build firm's single contract and the
+subcontract a company receives when it is the sub. A profile that shipped only
+the pilot's five kinds would have made the pack know one business's process,
+which is the narrowing the three-column table exists to refuse.
+`enterprises.kinds` lists the pilot's three divisions and three more.
+
+**THE SEED, AND THE THIRD KIND.** Contractor accounts on top of the general
+chart (retainage both ways, over- and under-billings, deposits, contract
+revenue, five job-cost accounts — the lines a bank and a surety read first,
+existing now so progress billing and WIP can be posting rules rather than chart
+changes); five folders the platform's cabinet lacks; and **two starter cost
+code lists into the `jobs` pack's own tables** — the first seed to land in a
+pack table, through the applier the pack registers
+([ADR 0057](../decisions/0057-a-pack-registers-a-seed-applier-and-the-profile-carries-the-data.md)).
+Two lists because the industry has two conventions and the pilot follows
+neither: *Residential phases* (build order, four-digit, the NAHB shape, the
+default) and *CSI divisions* (division level only, in the pilot's own `NN 00
+00` spelling so its `03 30 00` sorts beside them). Every seeded code is a cost
+object because the applier writes through `createCostCode`; a list the tenant
+already has by that name is skipped whole, never merged into.
+
+**WHAT §8 OF THE EXTENSION MODEL SAID THIS PROFILE SHOULD CARRY, AND WHAT IT
+DOES.** The client form's default is already `general` (fixed earlier). `5100
+Subcontractor Expense` STAYS in the general chart: the agency profile leans on
+it for freelancers, so it is neutral after all. The trade-shaped folder list in
+`documents/templates/defaults.ts` is still core's — trimming it takes Jobs,
+Safety, Equipment and Suppliers away from every other new tenant, which is the
+founder's call and not this PR's — so the profile seeds only the folders that
+list lacks, because naming one it has would make a second folder beside it. The
+bill-coding prompt's lumber-yard example and the templates page's lien-waiver
+copy remain, noted in §8.
+
+**DRIVEN ON THE DEV BRANCH, both halves.** On a residue tenant with nothing
+switched on, the console's installer read *"Switches on: assets, inventory,
+jobs. Adds 11 accounts to the chart and 5 folders and 2 cost code lists (61
+codes), when those modules are on"* before the button; after it, *Installed:
+construction*, Jobs on, and the vocabulary panel showing *Material* with
+*"Construction calls this Material; the built-in word is Item"*. A support view
+of that tenant's Cost codes page listed **Residential phases (Default)** with
+all 38 codes and **CSI divisions** with 23, in manifest order. Then, with the
+farm fixture's `tenants.industry` flipped to `construction` for ten minutes
+and flipped back, the jobs list's column read **Client**, the new-project
+dialog's *Kind of work* was a picker of the eight delivery methods, and the
+new-contract dialog's *Kind* a picker of the nine contract kinds — the first
+time either has been anything but a text box. One wart seen there: `aia`
+renders as *Aia*, because `slugLabel` cannot know an acronym; logged in
+[jobs.md](jobs.md).
+
+
 ### 2026-09-13 (fifth pass) — Brother-sister, so the group needs nothing (`claude/construction-industry-design`)
 
 **The last blocking question is closed: Shrock Family of Companies is
@@ -557,7 +634,7 @@ coverage ([security.md §4](../security.md)).
 | `projects` | The spine. Every other pack hangs off it, the way every pack hangs off `inventory`'s lot. | `delivery_method` text, **format check only, no value constraint** (P1) — the shape [`ps_engagements.kind`](../../src/db/schema/professional-services.ts:104) already has, and **nullable**, because a project may start as a design engagement before anyone knows what gets built. **Carries three coordinates that are not the delivery method**: `entity_id` (whose books), the enterprise/division it runs under, and the cost code set it is budgeted against. Syncs into `dimension_members` itself. |
 | `job_contracts` **(SHIPPED 2026-09-14)** | **Many per project.** Kind, value, billing method, counterparty, role, status, and a `sequence` that keeps the ladder in agreed order. | `kind` is an open taxonomy with a format check; `role`, `status` and `billing_method` are CHECK lists, because a billing method is a SUM the pack must implement rather than a word. **THERE IS NO `direction` COLUMN** — this row used to claim one, contradicting the prose above that says `commitments` is what the business issues outward and `contracts` is what it bills against. Every row here is billed BY the business; `role` (prime or subcontract) is the axis that actually varies. Retainage is not here: it is the billing slice's. See [jobs.md](jobs.md). |
 | `project_templates` | The seeded flavours, then whatever the company adds. | Tenant-owned after install. First seed kind whose target is a pack table rather than a core one. |
-| `cost_code_sets` / `cost_codes` | The real spine of a construction business. | **Tenant-level, one or several.** Profile seeds a CSI-shaped set, an NAHB-shaped set and an empty one; the company picks, edits or pastes its own. Sync as a second dimension type. |
+| `cost_code_sets` / `cost_codes` **(SHIPPED as `job_cost_code_sets` / `job_cost_codes`; seeded by the profile 2026-09-14)** | The real spine of a construction business. | **Tenant-level, one or several.** The profile seeds *Residential phases* and *CSI divisions* through the applier the pack registers (ADR 0057) — no empty one, because a new list is one button; the company picks, edits, renumbers or pastes its own. Synced as a second dimension type since slice 2. |
 | `project_budgets` / `budget_lines` | Original, revised, committed, actual, projected — by cost code. | The five columns every construction report is made of. |
 | `commitments` / `commitment_lines` | What the company issues **outward**: POs and subcontracts. | Billing against a commitment is what `payables` matching already does for a bill. Contrast `contracts`, which is what it bills against. |
 | `change_orders` / `change_order_lines` | PCO → CO → approved, with its budget effect. | Belongs to a **contract**, not a project — a change order changes one agreement. An approved CO revises the budget; it does not edit the original. |
@@ -571,6 +648,7 @@ for them rather than inventing a sixth primitive.
 
 | Seam | Where | What construction does with it |
 | --- | --- | --- |
+| `src/industries/construction/` | [index.ts](../../src/industries/construction/index.ts) · [accounts.ts](../../src/industries/construction/accounts.ts) · [cost-codes.ts](../../src/industries/construction/cost-codes.ts) | **The profile.** Packs, words, the delivery-method and contract-kind suggestions, and the seed — contractor accounts, five folders, and the two starter cost code lists that reach the `jobs` pack through `src/packs/seeds.ts` (ADR 0057). |
 | `entities` | [ledger.ts:286](../../src/db/schema/ledger.ts:286) | **The cabinet shop and the excavation division, if they are their own LLCs.** ADR 0010, already live, intercompany pair included. Construction must never invent a second notion of company. |
 | `dimension_members` | [ledger.ts:501](../../src/db/schema/ledger.ts:501) | **The costing seam and the reason any of this is worth building.** A project is a cost object; every existing accounting report slices by job with no accounting change. |
 | `time_entry_dimensions` | [time.ts:699](../../src/db/schema/time.ts:699) | Labor to a job and a cost code, **already built**. Needs a `jobs` sync, nothing more. |
@@ -641,6 +719,12 @@ for them rather than inventing a sixth primitive.
   and the client form defaulting to `"construction"`. Each one is content this
   profile should ship and core should not. **Fixing them is part of this work,
   not a side quest** — they are the reason the profile has anything to seed.
+  **Where that stood when the profile shipped (2026-09-14):** the client form
+  already defaulted to `general`; `5100` stays in the general chart because the
+  agency profile relies on it for freelancers; the folder list is the founder's
+  call, since trimming it takes Jobs, Safety, Equipment and Suppliers from every
+  other industry's new tenants, and the profile seeds around it; the prompt
+  example and the templates-page copy remain.
 
 ## Open items
 
@@ -686,11 +770,18 @@ table). These are what the answers opened, in priority order:
   pilot's three divisions are for. That roadmap is a dependency of this one
   ([enterprises.md](enterprises.md)).
 
-- **`IndustryProfile.seed` must grow a third kind** (`projectTemplates`), and it
-  is the first seed kind whose target is a pack table. Decide whether
+- ~~**`IndustryProfile.seed` must grow a third kind** (`projectTemplates`), and
+  it is the first seed kind whose target is a pack table. Decide whether
   [profile-seed.ts](../../src/app/admin/profile-seed.ts) learns about pack tables
-  or whether packs register a seed applier. The cost code starter sets make it a
-  fourth.
+  or whether packs register a seed applier.~~ — **decided 2026-09-14,
+  [ADR 0057](../decisions/0057-a-pack-registers-a-seed-applier-and-the-profile-carries-the-data.md):
+  packs register a seed applier.** The cost code starter lists shipped through
+  it with the profile; `projectTemplates` is an entry in the same map the day the
+  template table exists.
+- **The profile lists three packs and the design names eighteen.** `production`
+  for the cabinet shop and `land` for a subdivision's lots are the two that
+  exist and are not listed — each wants an hour of driving before its words are
+  installed on a builder. The other thirteen are unbuilt.
 - **Re-apply and drift**, inherited from ADR 0009 and now with more surface: a
   starter template or cost code set we later get wrong is wrong on every tenant
   that already installed. No re-apply action exists.

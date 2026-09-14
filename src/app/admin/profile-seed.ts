@@ -3,6 +3,7 @@ import { withSystem, withTenant } from "@/db";
 import type { IndustryProfile } from "@/industries/types";
 import { provisionAccounting } from "@/modules/accounting/templates/apply";
 import { provisionDocuments } from "@/modules/documents/templates/apply";
+import { packSeedAppliers } from "@/packs/seeds";
 
 /**
  * A profile's seed data reaches the tenant (back-office slice 7a).
@@ -27,10 +28,19 @@ import { provisionDocuments } from "@/modules/documents/templates/apply";
  *      so a re-run creates nothing and renames nothing. A profile's chart is
  *      written as ADDITIONS to the general one (`src/industries/agency/
  *      accounts.ts` says why), never a replacement.
+ *
+ * THE THIRD SEED KIND IS A PACK'S, AND THIS FILE DOES NOT KNOW WHICH PACK
+ * (ADR 0057). `seed.packs` is walked slug by slug and each entry handed to the
+ * applier that pack registered in `src/packs/seeds.ts`; the rules above hold
+ * because the applier keeps them. The construction profile's starter cost
+ * code lists were the first, and the rejected alternative — a `costCodeSets`
+ * branch here — would have grown a branch per pack table from then on.
  */
 export interface SeedReport {
   accountsCreated: number;
   foldersCreated: number;
+  /** One entry per pack that took a seed and created something. */
+  packs: { slug: string; created: number; description: string }[];
   /**
    * Modules the profile carries a seed for that were not on — the seed
    * applies when they are switched on. Named so the console can say so.
@@ -41,6 +51,7 @@ export interface SeedReport {
 export const EMPTY_SEED_REPORT: SeedReport = {
   accountsCreated: 0,
   foldersCreated: 0,
+  packs: [],
   waitingOn: [],
 };
 
@@ -48,10 +59,18 @@ export const EMPTY_SEED_REPORT: SeedReport = {
 export function seedSummary(profile: IndustryProfile): {
   accounts: number;
   folders: number;
+  /** One line per pack seed, in the pack's own words. */
+  packs: string[];
 } {
+  const packs: string[] = [];
+  for (const [slug, packSeed] of Object.entries(profile.seed?.packs ?? {})) {
+    const line = packSeedAppliers[slug]?.summarize(packSeed);
+    if (line) packs.push(line);
+  }
   return {
     accounts: profile.seed?.accounts?.accounts.length ?? 0,
     folders: profile.seed?.folders?.length ?? 0,
+    packs,
   };
 }
 
@@ -59,9 +78,11 @@ export async function applyProfileSeed(
   tenantId: string,
   profile: IndustryProfile,
   enabled: Iterable<string>,
+  /** The superadmin pressing the button: a seeded row is created by somebody. */
+  actorUserId: string,
 ): Promise<SeedReport> {
   const on = new Set(enabled);
-  const report: SeedReport = { ...EMPTY_SEED_REPORT, waitingOn: [] };
+  const report: SeedReport = { ...EMPTY_SEED_REPORT, packs: [], waitingOn: [] };
   const seed = profile.seed;
   if (!seed) return report;
 
@@ -95,6 +116,29 @@ export async function applyProfileSeed(
       report.foldersCreated = foldersCreated;
     } else {
       report.waitingOn.push("documents");
+    }
+  }
+
+  for (const [slug, packSeed] of Object.entries(seed.packs ?? {})) {
+    const applier = packSeedAppliers[slug];
+    // A profile naming a pack that registered no applier is a configuration
+    // error `tests/packs.test.ts` catches before it ships; here it is simply
+    // nothing to do rather than a thrown install.
+    if (!applier) continue;
+    if (!on.has(slug)) {
+      report.waitingOn.push(slug);
+      continue;
+    }
+    // As the tenant, as its owner: the pack's own write rules apply (a seeded
+    // cost code is a cost object, and `upsertDimensionMember` insists on an
+    // owner), attributed to the person who pressed the button.
+    const result = await withTenant(
+      tenantId,
+      (tx) => applier.apply(tx, { tenantId, userId: actorUserId, role: "owner" }, packSeed),
+      { role: "owner" },
+    );
+    if (result.created > 0) {
+      report.packs.push({ slug, created: result.created, description: result.description });
     }
   }
 

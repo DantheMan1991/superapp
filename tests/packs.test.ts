@@ -11,7 +11,10 @@ import {
 } from "@/lib/packs/resolve";
 import { packRegistry } from "@/packs";
 import { industryRegistry, getIndustryProfile, NO_PROFILE } from "@/industries";
-import { GENERAL_COA } from "@/modules/accounting/templates/general";
+import { GENERAL_COA, type CoaTemplate } from "@/modules/accounting/templates/general";
+import { contractKindsFrom, deliveryMethodsFrom } from "@/packs/jobs/vocabulary";
+import { costCodeSetsFrom, summarizeJobsSeed } from "@/packs/jobs/seed-shape";
+import { CONSTRUCTION_COST_CODE_SETS } from "@/industries/construction/cost-codes";
 
 /**
  * Layer 2 dependency and vocabulary rules.
@@ -292,6 +295,48 @@ describe("the real industry registry", () => {
   });
 });
 
+/**
+ * What every profile's chart must satisfy to land on top of the general one —
+ * the agency profile's three rules, now shared with construction's.
+ */
+function chartAdditionsHold(template: CoaTemplate) {
+  const generalCodes = new Set(GENERAL_COA.accounts.map((a) => a.code));
+
+  it("uses no code the general chart uses, and no code twice", () => {
+    const codes = template.accounts.map((a) => a.code);
+    expect(codes.filter((c) => generalCodes.has(c))).toEqual([]);
+    expect(new Set(codes).size).toBe(codes.length);
+  });
+
+  it("names only parents the tenant will have — general accounts, or its own earlier ones", () => {
+    const seen = new Set<string>();
+    for (const account of template.accounts) {
+      if (account.parentCode) {
+        expect(
+          generalCodes.has(account.parentCode) || seen.has(account.parentCode),
+          `${account.code} names parent ${account.parentCode}`,
+        ).toBe(true);
+      }
+      seen.add(account.code);
+    }
+  });
+
+  it("keeps a parent's type", () => {
+    // A child under 4000 Sales is income; the applier does not check, so the
+    // manifest has to be right.
+    const typeByCode = new Map(GENERAL_COA.accounts.map((a) => [a.code, a.type]));
+    for (const account of template.accounts) {
+      typeByCode.set(account.code, account.type);
+      if (account.parentCode) {
+        expect(account.type, account.code).toBe(typeByCode.get(account.parentCode));
+      }
+    }
+  });
+}
+
+const graphOf = (registry: typeof packRegistry): DependencyGraph =>
+  Object.fromEntries(Object.entries(registry).map(([slug, p]) => [slug, p.requires]));
+
 describe("the agency profile", () => {
   const profile = getIndustryProfile("agency");
 
@@ -307,39 +352,7 @@ describe("the agency profile", () => {
   });
 
   describe("its chart of accounts, written as additions over the general one", () => {
-    const template = profile!.seed!.accounts!;
-    const generalCodes = new Set(GENERAL_COA.accounts.map((a) => a.code));
-
-    it("uses no code the general chart uses, and no code twice", () => {
-      const codes = template.accounts.map((a) => a.code);
-      expect(codes.filter((c) => generalCodes.has(c))).toEqual([]);
-      expect(new Set(codes).size).toBe(codes.length);
-    });
-
-    it("names only parents the tenant will have — general accounts, or its own earlier ones", () => {
-      const seen = new Set<string>();
-      for (const account of template.accounts) {
-        if (account.parentCode) {
-          expect(
-            generalCodes.has(account.parentCode) || seen.has(account.parentCode),
-            `${account.code} names parent ${account.parentCode}`,
-          ).toBe(true);
-        }
-        seen.add(account.code);
-      }
-    });
-
-    it("keeps a parent's type", () => {
-      // A child under 4000 Sales is income; the applier does not check, so the
-      // manifest has to be right.
-      const typeByCode = new Map(GENERAL_COA.accounts.map((a) => [a.code, a.type]));
-      for (const account of template.accounts) {
-        typeByCode.set(account.code, account.type);
-        if (account.parentCode) {
-          expect(account.type, account.code).toBe(typeByCode.get(account.parentCode));
-        }
-      }
-    });
+    chartAdditionsHold(profile!.seed!.accounts!);
   });
 });
 
@@ -358,5 +371,92 @@ describe("the homestead-farm profile", () => {
     expect(order.indexOf("inventory")).toBeLessThan(order.indexOf("livestock"));
     expect(order.indexOf("land")).toBeLessThan(order.indexOf("livestock"));
     expect(order.indexOf("inventory")).toBeLessThan(order.indexOf("production"));
+  });
+});
+
+/**
+ * The construction profile: one manifest for four flavours (ADR 0056), and
+ * nothing in it that only the pilot fits.
+ */
+describe("the construction profile", () => {
+  const profile = getIndustryProfile("construction");
+
+  it("is registered and lists the three packs that exist for it, with their requirements", () => {
+    expect(profile).not.toBeNull();
+    expect([...profile!.packs].sort()).toEqual(["assets", "inventory", "jobs"]);
+    // `inventory` needs `assets`; the installer refuses a profile that forgets.
+    expect(unlistedRequirements(profile!.packs, graphOf(packRegistry))).toEqual([]);
+  });
+
+  it("names no business — the pilot is an instance, never the shape", () => {
+    const text = JSON.stringify(profile);
+    expect(/shrock|yosher/i.test(text)).toBe(false);
+  });
+
+  it("renames only words the core gets wrong for a builder, all of them declared or Layer 0", () => {
+    expect(profile!.labels.customer).toBe("Client");
+    // `project` stays the pack's own word: a GC says project, and the
+    // fallback already is one.
+    expect(profile!.labels.project).toBeUndefined();
+  });
+
+  it("offers delivery methods and contract kinds the pack's format accepts, and more than the pilot's", () => {
+    const jobs = (profile!.packConfig as { jobs: unknown }).jobs;
+    const methods = deliveryMethodsFrom(jobs);
+    const kinds = contractKindsFrom(jobs);
+    // Every suggestion survives the format filter — a rejected one would
+    // silently vanish from the picker.
+    expect(methods).toHaveLength((jobs as { deliveryMethods: string[] }).deliveryMethods.length);
+    expect(kinds).toHaveLength((jobs as { contractKinds: string[] }).contractKinds.length);
+    // ADR 0056's four are there…
+    for (const m of ["production_residential", "semi_custom", "luxury_custom", "commercial"]) {
+      expect(methods).toContain(m);
+    }
+    // …and so is the pilot's ladder, beside kinds the pilot never uses.
+    for (const k of ["concept_design", "construction_drawings", "new_home"]) {
+      expect(kinds).toContain(k);
+    }
+    expect(kinds).toContain("purchase_agreement");
+    expect(kinds).toContain("subcontract");
+    expect(methods).toContain("remodel");
+  });
+
+  describe("its starter cost code lists", () => {
+    const sets = costCodeSetsFrom((profile!.seed!.packs as { jobs: unknown }).jobs);
+
+    it("are two — one per convention, because the pilot follows neither", () => {
+      expect(sets.map((s) => s.name)).toEqual(["Residential phases", "CSI divisions"]);
+      expect(sets).toEqual(CONSTRUCTION_COST_CODE_SETS);
+    });
+
+    it("carry no duplicate code within a list, and nothing blank", () => {
+      for (const set of sets) {
+        const codes = set.codes.map((c) => c.code);
+        expect(new Set(codes).size, set.name).toBe(codes.length);
+        expect(set.codes.length, set.name).toBeGreaterThan(10);
+        for (const c of set.codes) {
+          expect(c.code.trim(), set.name).toBe(c.code);
+          expect(c.name.trim().length, c.code).toBeGreaterThan(0);
+        }
+      }
+    });
+
+    it("keep the CSI list at division level, in the pilot's own `NN 00 00` spelling", () => {
+      const csi = sets.find((s) => s.name === "CSI divisions")!;
+      for (const c of csi.codes) expect(c.code).toMatch(/^\d{2} 00 00$/);
+    });
+
+    it("parse tolerantly — nonsense is no lists, never a throw", () => {
+      expect(costCodeSetsFrom(undefined)).toEqual([]);
+      expect(costCodeSetsFrom({ costCodeSets: "nope" })).toEqual([]);
+      expect(costCodeSetsFrom({ costCodeSets: [{ name: "", codes: [] }, { name: "ok", codes: [{ code: "1", name: "" }, 7] }] })).toEqual([
+        { name: "ok", notes: undefined, codes: [] },
+      ]);
+      expect(summarizeJobsSeed({})).toBeNull();
+    });
+  });
+
+  describe("its chart of accounts, written as additions over the general one", () => {
+    chartAdditionsHold(profile!.seed!.accounts!);
   });
 });

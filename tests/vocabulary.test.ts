@@ -8,7 +8,7 @@ import {
 } from "../src/lib/packs/resolve";
 import { packRegistry } from "../src/packs";
 import { moduleRegistry } from "../src/modules";
-import { getIndustryProfile } from "../src/industries";
+import { getIndustryProfile, industryRegistry } from "../src/industries";
 import { PARTY_LABEL_KEYS } from "../src/lib/parties/vocabulary";
 
 const homesteadFarm = getIndustryProfile("homestead-farm");
@@ -230,5 +230,32 @@ describe("labelRows", () => {
     const zoneRow = rows.find((r) => r.key === "zone");
     expect(zoneRow?.inherited).toBe("Paddock");
     expect(zoneRow?.inheritedFrom).toBe(homesteadFarm?.name);
+  });
+});
+
+/**
+ * A profile may only rename a word somebody declared. A label for a key
+ * nothing renders is a rename nobody will ever see — and the day the key IS
+ * rendered under a different spelling, the profile's word is silently lost.
+ */
+describe("every profile's labels", () => {
+  /**
+   * The one Layer 0 word with no home yet: `enterprises` is not a module and
+   * not a pack, so nothing declares its label, and both the farm and the
+   * construction profile set it anyway. Named here so the exception is one
+   * line to delete when the subsystem declares it.
+   */
+  const LAYER_0_UNDECLARED = new Set(["enterprise"]);
+
+  it("name only declared keys, or the Layer 0 word nobody has declared yet", () => {
+    const declared = new Set(declarations.labels.map((l) => l.key));
+    for (const profile of Object.values(industryRegistry)) {
+      for (const key of Object.keys(profile.labels)) {
+        expect(
+          declared.has(key) || LAYER_0_UNDECLARED.has(key),
+          `${profile.slug} renames "${key}", which nothing declares`,
+        ).toBe(true);
+      }
+    }
   });
 });

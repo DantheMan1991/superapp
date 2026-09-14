@@ -438,6 +438,15 @@ rather than rediscovered. Nothing here is a security issue.
 | [ai/bill-prompt.ts:33](../src/modules/accounting/ai/bill-prompt.ts:33) | Coding prompt infers "from the vendor's **trade**", examples are lumber yards | Prompt vocabulary should come from profile config. |
 | [new-client-form.tsx:28](../src/app/admin/clients/new/new-client-form.tsx:28) | Industry selector **defaults** to `"construction"` | Default to `general`. A defaulted industry is an assumption. |
 
+**Where the table stood when the construction profile shipped (2026-09-14):**
+the client form already defaults to `general`. `5100 Subcontractor Expense`
+STAYS in the general chart — the agency profile leans on it for freelancers, so
+it is neutral after all, and the construction profile's chart says so. The
+folder list is still core's: trimming it takes Jobs, Safety, Equipment and
+Suppliers away from every other industry's new tenants, which is the founder's
+call, and the profile seeds only the folders that list lacks. The templates-page
+copy and the prompt's lumber-yard example remain.
+
 **Vocabulary leakage — comments and UI copy that train the next agent toward
 construction** (mild individually, corrosive together): subcontractor framing in
 [documents/inbound.ts:15](../src/modules/documents/inbound.ts:15),

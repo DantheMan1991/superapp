@@ -9,6 +9,38 @@
 
 ## Build log
 
+### 2026-09-14 — A pack registers a seed applier, and the third profile arrives (`claude/the-construction-profile`)
+
+The `construction` profile ([construction.md](construction.md)) is the first
+one whose seed has to land in a PACK's tables — starter cost code lists into
+`job_cost_code_sets` / `job_cost_codes`, every code synced as a cost object —
+and [ADR 0057](../decisions/0057-a-pack-registers-a-seed-applier-and-the-profile-carries-the-data.md)
+is how: `IndustryProfile.seed.packs` is a map from pack slug to an `unknown`
+value; the pack owns the shape (`src/packs/jobs/seed-shape.ts`, no server
+imports) and the applier (`src/packs/jobs/seed.ts`, through the pack's own
+ops); `src/packs/seeds.ts` is the registry, kept apart from `src/packs/index.ts`
+because an applier imports `server-only` code and the registry is data the
+shell reads. `applyProfileSeed` walks the map, hands each entry to its applier
+as the tenant's owner attributed to the superadmin who pressed the button, and
+reports in the pack's own words — the console's install button now says *"2
+cost code lists (61 codes)"* before it is pressed and *"…with 61 codes added"*
+after. `toggleModule` asks the applier for ANY module switched on, not only
+Accounting and Documents.
+
+**The console learned nothing about cost codes**, which was the point of the
+fork the construction dossier had named: the rejected alternative was a
+`costCodeSets` branch in `profile-seed.ts`, a branch per pack table from then
+on.
+
+**A profile label cannot be an uncountable noun.** The construction profile
+wanted `asset → Equipment` and would have rendered "Equipments" on the assets
+list: a profile label is a bare string and `pluralOf` appends an "s" to a
+tenant's own word. Left as the pack's word, and logged below.
+
+**A ratchet the profiles lacked:** `tests/vocabulary.test.ts` now refuses a
+profile label for a key nothing declares — a rename nobody will ever see — with
+one named exception, `enterprise`, the Layer 0 word with no home yet.
+
 ### 2026-09-13 — Core declares its first words, and a provider carries them to the client (`claude/core-declares-its-party-words`)
 
 **The oldest open item in this file is closed.** It read *"Core modules declare
@@ -580,6 +612,7 @@ export interface IndustryProfile {
     accounts?: CoaSeedRow[];
     folders?: DefaultFolder[];
     docKinds?: string[];
+    packs?: Record<string, unknown>;  // slug → the pack's own seed shape (ADR 0057)
   };
   packConfig: Record<string, unknown>;  // packs read their own key, never the slug
 }
@@ -654,6 +687,12 @@ Pack-owned tables follow the ordinary rules: `tenant_id`, FORCE RLS, a
   profile (back-office slice 7a); see the build log. What remains of it: the
   homestead profile carries no seed, and a farm chart of accounts is its
   accountant's question.
+- **A profile label cannot be an uncountable noun.** `LabelDefinition` declares
+  a `plural` for its fallback, but a profile's override is a bare string and
+  `pluralOf` appends an "s" to it — so `asset → Equipment` would read
+  "Equipments" on a list page, and the construction profile had to leave the
+  pack's word. The fix is a `{ singular, plural }` form for an override, read by
+  `resolveLabels` and `pluralOf`; nobody has needed it badly enough yet.
 - **`PackDefinition` has no `dimensionTypes` or `entityTypes` field**, though
   "The shapes" above still shows both. Found 2026-09-14 while registering `jobs`,
   which syncs a `project` dimension: every pack that syncs one — `assets`,

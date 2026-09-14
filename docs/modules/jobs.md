@@ -13,6 +13,104 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-14 — Slice 7: the first slice somebody on a site touches (`claude/the-first-slice-on-a-site`)
+
+`job_daily_logs` and `job_daily_log_crews`, a daily-log page per project
+(`/dashboard/m/jobs/[id]/log`), two panels on the project page — **On site**
+and **Punch list** — and the pack's first tell source. Everything the design
+calls "field" and is not those two tables is a seam this pack already had:
+
+- **A daily log is one row per project per day.** A superintendent keeps ONE
+  report per job, and "poured the slab" said at nine and "framers started"
+  said at two are two lines of the same day, not two days — so the unique
+  index is `(project, date)` and `saveDailyLog` UPSERTS. `appendNotes` adds a
+  line; `notes` replaces; `crews` replaces the lines the way a document's do;
+  anything omitted is left alone. Removing a day takes its crews by cascade
+  and DETACHES its photos, because the pictures may be the evidence.
+- **Manpower is a headcount, not payroll.** A crew line is a trade or a
+  subcontractor on file, how many, and hours each in tenths. It is who was on
+  the site — the framer's crew as much as the company's own — and it is what
+  an owner's representative reads and a delay claim is argued from. It is NOT
+  a time entry: the `time` module records the company's own people to the
+  minute for wages, and a subcontractor's crew never appears there. The two
+  answer different questions and the guide says so.
+- **Photos are Documents' rows**, hung on the DAY through
+  `document_attachments` (`extension_slug = 'jobs'`, `entity_type =
+  'job_daily_log'`) — the livestock pack's slice 4b pattern, exactly: the
+  pack owns the actions (`attachLogPhotoAction` and its two siblings) and core
+  owns the table; both gates (`jobs` and `documents`) and both write rules
+  (`allowsWrite(member)` and the DMS's `roleMayWrite`), because the accountant
+  clears the first and not the second; and `assertLog` is the compensating
+  control for a polymorphic reference no foreign key polices. The gallery is
+  the shared `RecordPhotos`.
+- **The punch list is Work's rows**, linked to the PROJECT through
+  `work_item_links` (`entity_type = 'project'`) via `createWorkForEntity` —
+  never a second task engine (extension-model.md §4b). The panel adds and
+  ticks; assigning, dating and chasing are the Work module's. `addPunchItem`
+  and `setPunchDone` name the entity type, which is the one thing only the
+  owning pack may do.
+- **Everything here is a chore — `member`, not `owner`.** The person with the
+  phone on the site is rarely the owner, and a daily log only an owner could
+  write would be written by nobody. Same split livestock drew for a photo.
+
+**THE TELL SOURCE.** `src/packs/jobs/tell/source.ts`, registered third in
+`tell-sources/registry.ts` (a day on a site is said by everyone on it, every
+day; a farm has `jobs` off and never sees it). Two actions, and they are not
+the same kind of safe:
+
+- `jobs.log` — *"poured the garage slab at Oak Row, four guys, six hours"* —
+  appends a line to the day and, when the sentence carries a headcount or
+  hours, a crew line (`"Crew"` when no trade is said: four guys with no other
+  word is the company's own). READ BACK AND CONFIRMED (ADR 0050's default): a
+  line on the wrong job is visible only to somebody who opens that other job,
+  which fails the first of the three tests.
+- `jobs.punch` — *"punch item at 24-108: garage door doesn't close"* — raises a
+  work item linked to the project and RECORDS ITSELF, the way `work.add` does:
+  on a list, one press to remove, moves nothing.
+
+**Which job is SEARCHED, never listed** (ADR 0052): `tell/find.ts` is pure —
+number first ("24-108" is the one thing a builder says exactly), then name,
+then street, then a word in common, then everything open. Never edit distance:
+"Lot 12" is one character from "Lot 13", and choosing on distance is how a day
+gets logged on the wrong house. Only open projects are offered; a finished
+job is not something anybody is standing on. Three sentences joined the
+golden set, each with its `why`: a headcount that sounds like a timecard, a
+punch item that sounds like `work.add`, and a delay that is a non-event.
+
+Migrations `0337_job_field.sql` (hand-reordered like the four before it) and
+`0338_job_field_rls.sql`, applied to dev and prod before the merge;
+`db:verify-rls` reports **206 tables** on both. Tests: ten more pure (the
+one-per-day index, the crew CHECKs, RESTRICT and cascade, the entity types,
+hours to tenths, and the finder pinned case by case — Lot 12 is not Lot 13),
+five more ops (upsert and append, crews replaced and added and refused, staff
+allowed, delete, the punch item as a linked work item), five more isolation,
+and a new db suite `tests/jobs-tell-source.test.ts` (nothing offered without
+a job; the finished job not offered; two sentences land on one day with the
+crew; the punch item in Work's own table). Every tell db suite re-run,
+because adding a source changes what every tenant is offered.
+
+**DRIVEN ON THE DEV BRANCH, on 24-108.** *Log today* → weather `Clear, 78°`,
+two lines of report, one crew row *Concrete · 4 · 6.5* → *Log it*. The
+**Daily log** page read **2026-09-14 · Clear, 78° · 4 on site · 26 man-hours**,
+the two lines, the crew table *Concrete 4 6.5*, and the photo strip with
+*Add a photo* and *No photos yet* — the shared gallery, on a day, with this
+pack's gates. Back on the project page, *Touch up paint in the master bath* →
+*Add* → **1 open** with the item and its checkbox; ticked → **Nothing open.**
+The Work module's list no longer shows it, because it is done — the ops test
+is what proves it was Work's row all along. The upload itself was not driven:
+the browser pane cannot hand a page a file (open item).
+
+**And the sentence.** The tell box on the project page, typed (the pane
+blocks the microphone): *poured the garage slab at Oak Row, four guys, six
+hours* → *Read it* → one card, **Logged on site · Jobs**, with *Which job* =
+**Oak Row residence — phase 2 · 24-108 · Luxury custom · 118 Oak Row** (found
+by the street), *What happened* = `Poured the garage slab.`, *How many* 4,
+*Hours each* 6, *Which day* today — read back, not recorded. *Record 1 thing*
+→ toast *Oak Row residence — phase 2: Poured the garage slab. — crew 4 × 6h*,
+and the Daily log page read **Clear, 78° · 8 on site · 50 man-hours**, the
+day's notes with the third line appended, and a second crew row *Crew 4 6*.
+One sentence, the same day, no second report.
+
 ### 2026-09-14 — Slice 5: the schedule of values, and the draw against it (`claude/pay-applications`)
 
 `job_sov_lines`, `job_pay_applications`, `job_pay_application_lines`, and the
@@ -671,6 +769,9 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_change_order_lines` | What the change costs, one cost code at a time — the budget side. | Cascade from the change order; **RESTRICT to the cost code**, the same rule as a commitment line and a budget line. `amount_cents` may be negative. Zero lines is legitimate: a pure price change. |
 | `job_sov_lines` | A contract's schedule of values: how the sum breaks down, by trade, phase or milestone. | Cascade from the contract. Optional cost code (RESTRICT) and the approved change order that added the line (cascade). `scheduled_cents` ≥ 0. Should sum to the revised contract value; the page says when it does not, a CHECK does not — a schedule is built before it is complete. |
 | `job_pay_applications` | One draw against a contract: the G702. | Numbered per contract, void ones included. `status` draft/issued/void — **no `paid`**, that is the invoice's word. `retainage_ppm` 0–1,000,000. Five totals FROZEN at issue. `invoice_id` RESTRICT to Accounting's `invoices`; CHECK `(status = 'draft') = (invoice_id is null)`, both ways. |
+| `job_daily_logs` | One report per project per day: weather, what happened. | Unique `(tenant, project, log_date)` — the whole design; `saveDailyLog` upserts and `appendNotes` adds a line. Cascade from the project. Photos hang on it through Documents' `document_attachments` (`entity_type = 'job_daily_log'`), detached when the day goes. |
+| `job_daily_log_crews` | Who was on site that day: a trade or a subcontractor, how many, hours each (tenths). | Cascade from the day; `party_id` RESTRICT to `parties`. CHECK `workers >= 0`, `hours_tenths >= 0`, and that a line names a trade OR a party. A HEADCOUNT, not a time entry — the two are not joined. |
+| *(punch list)* | What still needs fixing: Work's `work_items`, linked to the project. | No table of this pack's. `work_item_links` with `extension_slug = 'jobs'`, `entity_type = 'project'`, through `createWorkForEntity` — never a second task engine. |
 | `job_pay_application_lines` | One line of the G703 per schedule line. | Cascade from the application; **RESTRICT to the schedule line** — billed lines are never removed. `previous` and `stored` ≥ 0; `this_period` may be NEGATIVE (a correction); CHECK that the three sum to ≥ 0. `scheduled_cents` frozen at issue. |
 | `job_commitments` | What the business has ORDERED: a purchase order or a subcontract. | `party_id` is NOT NULL — a commitment with nobody to pay is a budget line, not a commitment. `kind` is a CHECK list of two because the two diverge in behaviour later. Number unique per tenant: a vendor quotes it back on the invoice. Cascade from the project. |
 | `job_commitment_lines` | The money, one cost code at a time. | Cascade from the commitment; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative — a credit is a change order. |
@@ -684,9 +785,10 @@ to dev and prod before its merge, per
 `0331_job_budget.sql` / `0332_job_budget_rls.sql` (slice 3) and
 `0333_job_change_orders.sql` / `0334_job_change_orders_rls.sql` (slice 4,
 hand-reordered like 0329) and `0335_job_billing.sql` / `0336_job_billing_rls.sql`
-(slice 5, hand-reordered the same way) follow the same rule —
+(slice 5, hand-reordered the same way) and `0337_job_field.sql` /
+`0338_job_field_rls.sql` (slice 7, likewise) follow the same rule —
 and from slice 3 the pair is `db:verify-rls` **and `db:verify-modules`**, after
-the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **204 tables**, all enabled, forced and with
+the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **206 tables**, all enabled, forced and with
 policies, on both.
 
 **0327 needed no hand-reordering, which confirms the diagnosis in 0325.** Both
@@ -717,6 +819,14 @@ ordering only bites when two new tables reference each other in one file.
   the pack's own ops, registered in `src/packs/seeds.ts` (ADR 0057).
 - `src/packs/jobs/components/change-order-form.tsx` — price and cost typed
   separately, negative allowed, `Approved` fills the date box.
+- `src/packs/jobs/field-ops.ts` — the daily log, its crews, and the punch list
+  as Work items; the one place that names `job_daily_log` and `project` as
+  the entity types Layer 0 rows hang on.
+- `src/packs/jobs/tell/source.ts` + `tell/find.ts` — what a site can say in
+  one sentence (`jobs.log`, `jobs.punch`), and the pure search for which job.
+- `src/packs/jobs/components/daily-log-form.tsx` + `punch-list.tsx`, and
+  `src/app/dashboard/m/jobs/[id]/log/page.tsx` — the day, the crews, the
+  photos (Documents' `RecordPhotos`) and the list.
 - `src/packs/jobs/billing-math.ts` — the G702 arithmetic, pure: the form and
   the server compute the same certificate from it.
 - `src/packs/jobs/components/sov-editor.tsx` + `pay-application-editor.tsx` —
@@ -765,6 +875,15 @@ ordering only bites when two new tables reference each other in one file.
 - **A change order is the only money here that may be negative**, so every
   figure it touches renders through `formatMoneySign`. `formatMoney` drops the
   sign and would print a deduction as its own opposite.
+- **The field is a chore, and its two other halves are not this pack's rows.**
+  Daily logs and crews are `member`-level; photos are Documents' attachments
+  hung on the day and punch items are Work's items linked to the project, each
+  through the Layer 0 seam every pack uses. A daily log's manpower is a
+  headcount, never a time entry — the `time` module is wages, this is who was
+  on the site.
+- **`jobs.log` is read back; `jobs.punch` records itself.** ADR 0050's three
+  tests, applied inside one source: a line on the wrong job is not visible on
+  a screen this person already looks at; a punch item on a list is.
 - **A pay application is an ordinary invoice, and retainage is a negative
   line to a receivable** —
   [ADR 0058](../decisions/0058-a-pay-application-is-an-ordinary-invoice.md).
@@ -818,6 +937,15 @@ ordering only bites when two new tables reference each other in one file.
   in the browser on the dev branch by the builder, which is not the same thing.
   The construction profile does not exist yet either, so `deliveryMethodsFrom`
   has never returned a non-empty list outside a test.
+- **The tell box's `jobs.log` is confirmed, not unattended — for now.** A line
+  landing on the wrong job fails ADR 0050's first test today because nothing
+  on a screen the person already looks at would show it. The day the
+  project page (or the phone's home) shows "today on your jobs", the test
+  passes and the four taps go.
+- **Photos have been driven by no one.** The gallery is the shared component
+  livestock and assets already use, wired with this pack's actions and gates;
+  the upload itself needs a real file from a phone or a picker, which the
+  browser pane cannot supply.
 - **A suggested kind that is an acronym renders wrong.** `slugLabel("aia")` is
   *Aia*, and the construction profile's contract kinds carry `aia` because that
   is what every GC calls the form. The pack cannot know an acronym without

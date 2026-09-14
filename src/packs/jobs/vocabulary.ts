@@ -342,3 +342,29 @@ export const RETAINAGE_PPM_MAX = 1_000_000;
  */
 export const REVENUE_ACCOUNT_CODES = ["4030", "4000"] as const;
 export const RETAINAGE_RECEIVABLE_CODE = "1230";
+
+// --------------------------------------------------------------------- field
+
+/**
+ * The entity types this pack hangs Layer 0 rows on — the ONE thing only the
+ * owning pack may name. A photo attaches to a DAY (`document_attachments`);
+ * a punch item links to the PROJECT (`work_item_links`). Both tables are
+ * polymorphic and police nothing, so the pack's own actions are what prove
+ * the row exists before anything is hung on it.
+ */
+export const DAILY_LOG_ENTITY = "job_daily_log";
+export const PROJECT_ENTITY = "project";
+
+/** "6.5" → 65 tenths of an hour; null for anything that is not a non-negative number of hours. */
+export function hoursToTenths(input: string): number | null {
+  const s = input.trim();
+  if (s === "") return 0;
+  if (!/^\d{1,4}(\.\d{1,2})?$/.test(s)) return null;
+  return Math.round(Number(s) * 10);
+}
+
+/** 65 → "6.5"; 80 → "8". */
+export function tenthsToHours(tenths: number): string {
+  const h = tenths / 10;
+  return Number.isInteger(h) ? String(h) : h.toFixed(1);
+}

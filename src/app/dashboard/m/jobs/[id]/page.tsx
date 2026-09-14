@@ -34,6 +34,9 @@ import { formatMoney, formatMoneySign } from "@/lib/money";
 import { ContractForm } from "@/packs/jobs/components/contract-form";
 import { CommitmentForm } from "@/packs/jobs/components/commitment-form";
 import { ChangeOrderForm } from "@/packs/jobs/components/change-order-form";
+import { DailyLogForm } from "@/packs/jobs/components/daily-log-form";
+import { PunchList } from "@/packs/jobs/components/punch-list";
+import { listDailyLogs, listPunchItems } from "@/packs/jobs/field-ops";
 import { BudgetEditor } from "@/packs/jobs/components/budget-editor";
 import { ProjectForm } from "@/packs/jobs/components/project-form";
 import { Button } from "@/components/ui/button";
@@ -105,6 +108,8 @@ export default async function ProjectPage({
         parties,
         member,
         pack,
+        days,
+        punch,
       ] = await Promise.all([
         tx
           .select({ name: schema.entities.name })
@@ -202,6 +207,9 @@ export default async function ProjectPage({
           )
           .limit(1),
         packContext(tx, ctx.tenant.id, ctx.tenant.industry, PACK),
+        // The field: the last few days, and what is open on the walk-through.
+        listDailyLogs(tx, ctx.tenant.id, project.id, { limit: 5 }),
+        listPunchItems(tx, ctx.tenant.id, project.id),
       ]);
       return {
         project,
@@ -224,6 +232,8 @@ export default async function ProjectPage({
         member: member[0] ?? null,
         labels: pack.labels,
         config: pack.config,
+        days,
+        punch,
       };
     },
     { role: ctx.role },
@@ -243,6 +253,8 @@ export default async function ProjectPage({
     .filter((r) => r.hasBudget)
     .reduce((sum, r) => sum + r.committedCents, 0);
   const isOwner = allowsWrite(ctx.role, "owner");
+  /** The field is a chore: whoever is on the site logs the day and ticks the list. */
+  const canLog = allowsWrite(ctx.role, "member");
   const symbol = ctx.tenant.currencySymbol;
   /**
    * Only signed and complete agreements count. See `VALUED_CONTRACT_STATUSES` —
@@ -993,6 +1005,85 @@ export default async function ProjectPage({
             </Table>
           </div>
         )}
+      </Panel>
+
+      <Panel>
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-heading text-sm font-medium tracking-heading">
+            On site
+          </h2>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/dashboard/m/jobs/${project.id}/log`}>All days</Link>
+            </Button>
+            {canLog && <DailyLogForm projectId={project.id} parties={data.parties} />}
+          </div>
+        </div>
+        <p className="mb-3 text-sm text-muted-foreground">
+          {/*
+            THE DAILY REPORT, said in its own terms: one per day, who was
+            there, what happened. The tell box writes the same rows —
+            "poured the garage slab at Oak Row, four guys, six hours".
+          */}
+          {data.days.length === 0
+            ? "No days logged yet. One report per day: the weather, what happened, who was on site, the photos."
+            : `${data.days.length} ${data.days.length === 1 ? "day" : "days"} logged, latest ${data.days[0].log.logDate}.`}
+        </p>
+        {data.days.length > 0 && (
+          <ul className="divide-y divide-border/50">
+            {data.days.map((day) => (
+              <li key={day.log.id} className="py-2 text-sm">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span className="font-medium">{day.log.logDate}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {[
+                      day.crews.length > 0
+                        ? `${day.crews.reduce((n, c) => n + c.workers, 0)} on site`
+                        : null,
+                      day.photoCount > 0
+                        ? `${day.photoCount} ${day.photoCount === 1 ? "photo" : "photos"}`
+                        : null,
+                      day.log.weather || null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </div>
+                {day.log.notes && (
+                  <p className="line-clamp-2 whitespace-pre-wrap text-muted-foreground">
+                    {day.log.notes}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Panel>
+
+      <Panel>
+        <h2 className="mb-1 font-heading text-sm font-medium tracking-heading">
+          Punch list
+        </h2>
+        <p className="mb-3 text-sm text-muted-foreground">
+          {/*
+            WORK ITEMS, linked to this job — never a second task engine. What
+            is open here is open in Work too, with whoever it is on.
+          */}
+          {data.punch.filter((p) => p.completedAt === null).length === 0
+            ? "Nothing open."
+            : `${data.punch.filter((p) => p.completedAt === null).length} open.`}
+        </p>
+        <PunchList
+          projectId={project.id}
+          canEdit={canLog}
+          items={data.punch.map((p) => ({
+            id: p.id,
+            title: p.title,
+            notes: p.notes,
+            dueOn: p.dueOn,
+            done: p.completedAt !== null,
+          }))}
+        />
       </Panel>
 
       <Panel>

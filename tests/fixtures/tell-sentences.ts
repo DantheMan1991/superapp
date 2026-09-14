@@ -245,6 +245,28 @@ export const TELL_CASES: readonly TellCase[] = [
     why: "Nothing happened. An empty proposal is the right answer and the model must not reach for the nearest verb.",
     needs: [],
   },
+
+  /* ── jobs (construction slice 7) ────────────────────────────────────── */
+  {
+    said: "poured the garage slab at Oak Row, four guys, six hours",
+    expect: ["jobs.log"],
+    tolerate: [["jobs.log", "time.clock_in"]],
+    why: "Hours and a headcount sound like a timecard; they are a site headcount on a daily report, and the job named is what settles it.",
+    needs: ["jobs", "time"],
+  },
+  {
+    said: "punch item at 24-108: garage door doesn't close",
+    expect: ["jobs.punch"],
+    tolerate: [["work.add"]],
+    why: "A job that needs doing is work.add everywhere else in the product; naming the site makes it the job's punch list.",
+    needs: ["jobs", "work"],
+  },
+  {
+    said: "framers didn't show at the Miller house, rained out by noon",
+    expect: ["jobs.log"],
+    why: "No work done and nothing to do later — a delay is still a line of the day's report, and nothing else in the catalogue records a non-event.",
+    needs: ["jobs"],
+  },
 ];
 
 /** Cases this tenant can actually be asked, given which sources it has. */

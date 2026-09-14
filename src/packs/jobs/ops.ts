@@ -123,7 +123,7 @@ export interface JobsCtx {
  * could not sync its cost object. Reading the job list stays ordinary work for
  * anybody who has to go and stand on the site.
  */
-function requireWrite(ctx: JobsCtx, level: WriteLevel): void {
+export function requireWrite(ctx: JobsCtx, level: WriteLevel): void {
   if (!allowsWrite(ctx.role, level)) {
     throw new JobsError("FORBIDDEN", `role ${ctx.role} may not perform this write`);
   }

@@ -131,6 +131,24 @@ screen.
 
 ## Build log
 
+### 2026-09-14 — A fifth source: the job site (`claude/the-first-slice-on-a-site`)
+
+`src/packs/jobs/tell/source.ts` joined the registry, third — after the clock
+and the jobs everybody has, before stock and the herd — because a day on a
+site is said by everyone on it, every day, and a farm has `jobs` switched off
+and never sees it. Two actions: `jobs.log` (*"poured the garage slab at Oak
+Row, four guys, six hours"*, read back and confirmed) and `jobs.punch`
+(*"punch item at 24-108: garage door doesn't close"*, records itself, the
+same three tests `work.add` passes). Which job is searched, never listed
+(`tell/find.ts`, pure and pinned: Lot 12 is not Lot 13). Three sentences
+joined the golden set — a headcount that sounds like a timecard, a punch
+item that sounds like `work.add`, and a delay that is a non-event — and
+`tests/tell-catalogue-db.test.ts` gained an open project so the fifth source
+contributes in the fixture. **The budget bit first:** `jobs.log` wrote 1,721
+characters into every prompt against a 1,600 ceiling and was tightened, which
+is the tripwire doing its job. The rule that adding a source means re-running
+every tell db suite held, and caught the empty fixture before the budget did.
+
 ### 2026-09-13 — The phone listens on one tap, and gets a voice of its own (`claude/the-phone-listens-on-one-tap`)
 
 **Two reports, two different causes, and a screenshot settled both.** The

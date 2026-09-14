@@ -9,6 +9,7 @@ import { createItem } from "../src/packs/inventory/ops";
 import { createParcel, createZone } from "../src/packs/land/ops";
 import { createLivestockLot } from "../src/packs/livestock/ops";
 import { createUnlinkedWork } from "../src/lib/work/entity-work";
+import { createProject } from "../src/packs/jobs/ops";
 import { TELL_CASES } from "./fixtures/tell-sentences";
 
 /**
@@ -47,6 +48,7 @@ d("the catalogue every tenant's model is given", () => {
   const SIGNED_IN = `${STAMP}-owner`;
 
   let tenantId: string;
+  let entityId = "";
   let actions: TellAction[] = [];
   let contributing: string[] = [];
 
@@ -85,11 +87,18 @@ d("the catalogue every tenant's model is given", () => {
       await tx
         .insert(schema.timeWorkers)
         .values({ tenantId, partyId: person.id, clerkUserId: SIGNED_IN });
+      // A company to put a job under — the jobs source offers nothing until
+      // there is an open project to log against.
+      const [entity] = await tx
+        .insert(schema.entities)
+        .values({ tenantId, name: "Catalogue Builders LLC", isDefault: true })
+        .returning({ id: schema.entities.id });
+      entityId = entity.id;
 
       await tx
         .insert(schema.tenantModules)
         .values(
-          ["livestock", "inventory", "land", "work", "time"].map((moduleId) => ({
+          ["livestock", "inventory", "land", "work", "time", "jobs"].map((moduleId) => ({
             tenantId,
             moduleId,
             enabled: true,
@@ -124,6 +133,11 @@ d("the catalogue every tenant's model is given", () => {
         tx,
         { tenantId, userId: SIGNED_IN },
         { title: "Fix the top gate", notes: "", dueOn: null },
+      );
+      await createProject(
+        tx,
+        { tenantId, userId: SIGNED_IN, role: "owner" },
+        { entityId, number: "24-108", name: "Oak Row residence", status: "active" },
       );
     });
 

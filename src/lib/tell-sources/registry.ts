@@ -3,6 +3,7 @@ import { timeTellSource } from "@/modules/time/tell/source";
 import { inventoryTellSource } from "@/packs/inventory/tell/source";
 import { workTellSource } from "@/modules/work/tell/source";
 import { livestockTellSource } from "@/packs/livestock/tell/source";
+import { jobsTellSource } from "@/packs/jobs/tell/source";
 import type { TellSource } from "./types";
 
 /**
@@ -39,6 +40,9 @@ import type { TellSource } from "./types";
 export const tellSources: readonly TellSource[] = [
   timeTellSource,
   workTellSource,
+  // A day on a site is said by everyone on it, every day; a farm has `jobs`
+  // switched off and never sees these two.
+  jobsTellSource,
   inventoryTellSource,
   livestockTellSource,
 ];

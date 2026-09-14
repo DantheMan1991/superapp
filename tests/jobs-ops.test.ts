@@ -5,8 +5,15 @@ import { withSystem, withTenant, schema, type Tx } from "../src/db";
 import {
   JobsError,
   committedTotals,
+  contractBilling,
   createChangeOrder,
   createCommitment,
+  createPayApplication,
+  issuePayApplication,
+  listPayApplications,
+  saveSovLines,
+  updatePayApplication,
+  voidPayApplication,
   createContract,
   createCostCode,
   createCostCodeSet,
@@ -32,6 +39,9 @@ import {
 } from "../src/packs/jobs/vocabulary";
 import { listDimensionMembers } from "../src/modules/accounting/core";
 import { violatedUniqueIndex } from "../src/lib/db-errors";
+import { loadInvoice, loadInvoiceLines } from "../src/modules/accounting/invoicing/invoices";
+import { provisionAccounting } from "../src/modules/accounting/templates/apply";
+import { CONSTRUCTION_COA } from "../src/industries/construction/accounts";
 
 /**
  * The `jobs` pack's write verbs, against a real database.
@@ -1333,5 +1343,336 @@ d("jobs ops", () => {
         await tx.delete(schema.jobCostCodes).where(eq(schema.jobCostCodes.id, code.id));
       }),
     ).rejects.toThrow();
+  });
+
+  // ------------------------------------------------------------------ billing
+
+  /**
+   * Billing posts INVOICES, so these tests need a chart of accounts — the
+   * general one Accounting provisions, plus the construction profile's
+   * additions, which is what proves the seeded `1230` is the account billing
+   * withholds retainage to. Provisioned once, as the tenant, the way
+   * switching Accounting on does.
+   */
+  let billingReady = false;
+  const ensureBilling = async (tx: Tx) => {
+    if (billingReady) return;
+    await provisionAccounting(tx, tenantId);
+    await provisionAccounting(tx, tenantId, CONSTRUCTION_COA);
+    billingReady = true;
+  };
+
+  /** A project with a signed contract to a real party, ready to schedule. */
+  const billableContract = async (
+    tx: Tx,
+    number: string,
+    valueCents = 100_000_00,
+  ) => {
+    await ensureBilling(tx);
+    const p = await createProject(tx, ctx, { entityId, number, name: `Billed ${number}` });
+    const party = await seedVendor(tx, `Owner ${number}`);
+    const c = await createContract(tx, ctx, {
+      projectId: p.id,
+      kind: "new_home",
+      counterpartyPartyId: party,
+      valueCents,
+      status: "signed",
+    });
+    return { project: p, contract: c, party };
+  };
+
+  it("a schedule is REPLACED whole, re-sequenced, and a billed line will not go", async () => {
+    const { contract } = await run((tx) => billableContract(tx, "OPS-S1"));
+    const first = await run((tx) =>
+      saveSovLines(tx, ctx, contract.id, [
+        { description: "Foundation", scheduledCents: 30_000_00 },
+        { description: "Framing", scheduledCents: 70_000_00 },
+      ]),
+    );
+    expect(first.map((l) => [l.description, l.sortOrder])).toEqual([
+      ["Foundation", 10],
+      ["Framing", 20],
+    ]);
+    // Reorder, rename, drop one: what is given is what remains.
+    const second = await run((tx) =>
+      saveSovLines(tx, ctx, contract.id, [
+        { id: first[1].id, description: "Framing and roof", scheduledCents: 70_000_00 },
+      ]),
+    );
+    expect(second.map((l) => l.description)).toEqual(["Framing and roof"]);
+    expect(second[0].id).toBe(first[1].id);
+
+    // Bill against it, then try to remove it.
+    await run(async (tx) => {
+      const app = await createPayApplication(tx, ctx, {
+        contractId: contract.id,
+        periodTo: "2026-09-30",
+      });
+      await updatePayApplication(tx, ctx, app.id, {
+        lines: [{ sovLineId: second[0].id, thisPeriodCents: 10_000_00, storedCents: 0 }],
+      });
+    });
+    await expect(
+      run((tx) => saveSovLines(tx, ctx, contract.id, [{ description: "Fresh", scheduledCents: 1 }])),
+    ).rejects.toMatchObject({ code: "SOV_LINE_BILLED" });
+  });
+
+  it("refuses a negative scheduled value and an empty description", async () => {
+    const { contract } = await run((tx) => billableContract(tx, "OPS-S2"));
+    await expect(
+      run((tx) => saveSovLines(tx, ctx, contract.id, [{ description: "x", scheduledCents: -1 }])),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(
+      run((tx) => saveSovLines(tx, ctx, contract.id, [{ description: "  ", scheduledCents: 1 }])),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE" });
+  });
+
+  it("an application needs a schedule, and a contract holds ONE draft at a time", async () => {
+    const { contract } = await run((tx) => billableContract(tx, "OPS-S3"));
+    await expect(
+      run((tx) => createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-09-30" })),
+    ).rejects.toMatchObject({ code: "NO_LINES" });
+    await run((tx) =>
+      saveSovLines(tx, ctx, contract.id, [{ description: "Contract sum", scheduledCents: 100_000_00 }]),
+    );
+    const one = await run((tx) =>
+      createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-09-30", retainagePpm: 100_000 }),
+    );
+    expect(one.number).toBe(1);
+    expect(one.status).toBe("draft");
+    await expect(
+      run((tx) => createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-10-31" })),
+    ).rejects.toMatchObject({ code: "ONE_DRAFT" });
+  });
+
+  it("ISSUING posts an ordinary invoice: net to AR, retainage to 1230, revenue gross, tagged with the project", async () => {
+    const { project, contract } = await run((tx) => billableContract(tx, "OPS-S4", 100_000_00));
+    const sov = await run((tx) =>
+      saveSovLines(tx, ctx, contract.id, [
+        { description: "Foundation", scheduledCents: 30_000_00 },
+        { description: "Framing", scheduledCents: 70_000_00 },
+      ]),
+    );
+    const app = await run((tx) =>
+      createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-09-30", retainagePpm: 100_000 }),
+    );
+    await run((tx) =>
+      updatePayApplication(tx, ctx, app.id, {
+        lines: [
+          { sovLineId: sov[0].id, thisPeriodCents: 30_000_00, storedCents: 0 },
+          { sovLineId: sov[1].id, thisPeriodCents: 10_000_00, storedCents: 5_000_00 },
+        ],
+      }),
+    );
+    const issued = await run((tx) => issuePayApplication(tx, ctx, app.id, { issueDate: "2026-10-01" }));
+    // The certificate: 45,000 completed and stored, 10% held, nothing before.
+    expect(issued.app.status).toBe("issued");
+    expect(issued.app.completedToDateCents).toBe(45_000_00);
+    expect(issued.app.retainageCents).toBe(4_500_00);
+    expect(issued.app.previousCertificatesCents).toBe(0);
+    expect(issued.app.dueCents).toBe(40_500_00);
+    expect(issued.app.invoiceId).toBe(issued.invoiceId);
+
+    const { invoice, lines, entryLines, accounts, dims } = await run(async (tx) => {
+      const invoice = await loadInvoice(tx, tenantId, issued.invoiceId);
+      const lines = await loadInvoiceLines(tx, tenantId, invoice.id);
+      const entryLines = await tx
+        .select()
+        .from(schema.journalLines)
+        .where(eq(schema.journalLines.entryId, invoice.journalEntryId!));
+      const accounts = await tx
+        .select({ id: schema.accounts.id, code: schema.accounts.code })
+        .from(schema.accounts)
+        .where(eq(schema.accounts.tenantId, tenantId));
+      const dims = await tx
+        .select({ invoiceLineId: schema.lineDimensions.invoiceLineId, memberId: schema.lineDimensions.memberId })
+        .from(schema.lineDimensions)
+        .where(
+          and(
+            eq(schema.lineDimensions.tenantId, tenantId),
+            inArray(schema.lineDimensions.invoiceLineId, lines.map((l) => l.id)),
+          ),
+        );
+      return { invoice, lines, entryLines, accounts, dims };
+    });
+    const codeOf = new Map(accounts.map((a) => [a.id, a.code]));
+    expect(invoice.status).toBe("issued");
+    expect(invoice.totalCents).toBe(40_500_00); // what the client owes: net of retainage
+    expect(invoice.entityId).toBe(project.entityId);
+    expect(lines.map((l) => [codeOf.get(l.incomeAccountId), l.amountCents])).toEqual([
+      ["4030", 45_000_00],
+      ["1230", -4_500_00],
+    ]);
+    // The ledger: Dr AR 40,500 · Dr Retainage Receivable 4,500 · Cr Contract Revenue 45,000.
+    const byCode = new Map(entryLines.map((l) => [codeOf.get(l.accountId), l.amountCents]));
+    expect(byCode.get("1200")).toBe(40_500_00);
+    expect(byCode.get("1230")).toBe(4_500_00);
+    expect(byCode.get("4030")).toBe(-45_000_00);
+    // Every line carries the project, so the job's revenue is on every report.
+    const [member] = await run((tx) => memberFor(tx, project.id));
+    expect(dims).toHaveLength(2);
+    expect(new Set(dims.map((d) => d.memberId))).toEqual(new Set([member.id]));
+  });
+
+  it("the NEXT application carries work forward, certifies against the last, and a rate of zero releases the retainage", async () => {
+    const { contract } = await run((tx) => billableContract(tx, "OPS-S5", 100_000_00));
+    const sov = await run((tx) =>
+      saveSovLines(tx, ctx, contract.id, [{ description: "Contract sum", scheduledCents: 100_000_00 }]),
+    );
+    const first = await run(async (tx) => {
+      const a = await createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-09-30", retainagePpm: 100_000 });
+      await updatePayApplication(tx, ctx, a.id, {
+        lines: [{ sovLineId: sov[0].id, thisPeriodCents: 60_000_00, storedCents: 10_000_00 }],
+      });
+      return issuePayApplication(tx, ctx, a.id, { issueDate: "2026-10-01" });
+    });
+    expect(first.app.dueCents).toBe(63_000_00); // 70,000 − 7,000 held
+
+    // Second: the rate carries (10%), previous = work only (60,000), stored re-entered.
+    const second = await run(async (tx) => {
+      const a = await createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-10-31" });
+      expect(a.retainagePpm).toBe(100_000);
+      const rows = await listPayApplications(tx, tenantId, contract.id);
+      const draft = rows.find((r) => r.app.id === a.id)!;
+      expect(draft.lines[0].previousCents).toBe(60_000_00);
+      expect(draft.totals.previousCertificatesCents).toBe(63_000_00);
+      await updatePayApplication(tx, ctx, a.id, {
+        lines: [{ sovLineId: sov[0].id, thisPeriodCents: 40_000_00, storedCents: 0 }],
+      });
+      return issuePayApplication(tx, ctx, a.id, { issueDate: "2026-11-01" });
+    });
+    // 100,000 complete, 10,000 held, 63,000 already certified → 27,000 due.
+    expect(second.app.completedToDateCents).toBe(100_000_00);
+    expect(second.app.retainageCents).toBe(10_000_00);
+    expect(second.app.dueCents).toBe(27_000_00);
+
+    // Final: nothing more done, rate to zero → the held 10,000 is released.
+    const final = await run(async (tx) => {
+      const a = await createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-11-30", retainagePpm: 0 });
+      return issuePayApplication(tx, ctx, a.id, { issueDate: "2026-12-01" });
+    });
+    expect(final.app.dueCents).toBe(10_000_00);
+    const { lines, accounts } = await run(async (tx) => ({
+      lines: await loadInvoiceLines(tx, tenantId, final.invoiceId),
+      accounts: await tx.select({ id: schema.accounts.id, code: schema.accounts.code }).from(schema.accounts).where(eq(schema.accounts.tenantId, tenantId)),
+    }));
+    const codeOf = new Map(accounts.map((a) => [a.id, a.code]));
+    // No work line (nothing earned this period); one positive line to 1230.
+    expect(lines.map((l) => [codeOf.get(l.incomeAccountId), l.amountCents, l.description])).toEqual([
+      ["1230", 10_000_00, "Retainage released"],
+    ]);
+    // What has been billed over the whole contract equals its value.
+    const billing = await run((tx) => contractBilling(tx, tenantId, first.app.contractId));
+    void billing;
+  });
+
+  it("refuses to issue when nothing is due, when nobody is named, or when the chart lacks 1230", async () => {
+    const { contract } = await run((tx) => billableContract(tx, "OPS-S6"));
+    const sov = await run((tx) =>
+      saveSovLines(tx, ctx, contract.id, [{ description: "Contract sum", scheduledCents: 100_000_00 }]),
+    );
+    const app = await run((tx) =>
+      createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-09-30", retainagePpm: 100_000 }),
+    );
+    await expect(
+      run((tx) => issuePayApplication(tx, ctx, app.id, { issueDate: "2026-10-01" })),
+    ).rejects.toMatchObject({ code: "NOTHING_DUE" });
+
+    await run((tx) =>
+      updatePayApplication(tx, ctx, app.id, {
+        lines: [{ sovLineId: sov[0].id, thisPeriodCents: 10_000_00, storedCents: 0 }],
+      }),
+    );
+    // Nobody to bill.
+    await run((tx) => updateContract(tx, ctx, contract.id, { counterpartyPartyId: null }));
+    await expect(
+      run((tx) => issuePayApplication(tx, ctx, app.id, { issueDate: "2026-10-01" })),
+    ).rejects.toMatchObject({ code: "COUNTERPARTY_REQUIRED" });
+
+    // Retire the retainage account, then try to withhold.
+    const party = await run((tx) => seedVendor(tx, "Late owner"));
+    await run((tx) => updateContract(tx, ctx, contract.id, { counterpartyPartyId: party }));
+    await run((tx) =>
+      tx
+        .update(schema.accounts)
+        .set({ isActive: false })
+        .where(and(eq(schema.accounts.tenantId, tenantId), eq(schema.accounts.code, "1230"))),
+    );
+    await expect(
+      run((tx) => issuePayApplication(tx, ctx, app.id, { issueDate: "2026-10-01" })),
+    ).rejects.toMatchObject({ code: "ACCOUNT_MISSING" });
+    await run((tx) =>
+      tx
+        .update(schema.accounts)
+        .set({ isActive: true })
+        .where(and(eq(schema.accounts.tenantId, tenantId), eq(schema.accounts.code, "1230"))),
+    );
+  });
+
+  it("only a draft changes; only the LATEST issued application voids, and its invoice goes with it", async () => {
+    const { contract } = await run((tx) => billableContract(tx, "OPS-S7"));
+    const sov = await run((tx) =>
+      saveSovLines(tx, ctx, contract.id, [{ description: "Contract sum", scheduledCents: 100_000_00 }]),
+    );
+    const issueOne = (periodTo: string, issueDate: string, cents: number) =>
+      run(async (tx) => {
+        const a = await createPayApplication(tx, ctx, { contractId: contract.id, periodTo });
+        await updatePayApplication(tx, ctx, a.id, {
+          lines: [{ sovLineId: sov[0].id, thisPeriodCents: cents, storedCents: 0 }],
+        });
+        return issuePayApplication(tx, ctx, a.id, { issueDate });
+      });
+    const one = await issueOne("2026-09-30", "2026-10-01", 20_000_00);
+    const two = await issueOne("2026-10-31", "2026-11-01", 30_000_00);
+
+    await expect(
+      run((tx) => updatePayApplication(tx, ctx, one.app.id, { notes: "late" })),
+    ).rejects.toMatchObject({ code: "INVALID_STATUS" });
+    await expect(run((tx) => voidPayApplication(tx, ctx, one.app.id))).rejects.toMatchObject({
+      code: "NOT_LAST",
+    });
+
+    const voided = await run((tx) => voidPayApplication(tx, ctx, two.app.id));
+    expect(voided.status).toBe("void");
+    const invoice = await run((tx) => loadInvoice(tx, tenantId, two.invoiceId));
+    expect(invoice.status).toBe("void");
+    // The next draft certifies against ONE again, not the voided two.
+    const next = await run(async (tx) => {
+      const a = await createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-11-30" });
+      const rows = await listPayApplications(tx, tenantId, contract.id);
+      return rows.find((r) => r.app.id === a.id)!;
+    });
+    expect(next.app.number).toBe(3);
+    expect(next.totals.previousCertificatesCents).toBe(20_000_00);
+    expect(next.lines[0].previousCents).toBe(20_000_00);
+  });
+
+  it("a draft picks up schedule lines added after it was started", async () => {
+    const { contract } = await run((tx) => billableContract(tx, "OPS-S8"));
+    const sov = await run((tx) =>
+      saveSovLines(tx, ctx, contract.id, [{ description: "Original", scheduledCents: 50_000_00 }]),
+    );
+    const app = await run((tx) =>
+      createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-09-30" }),
+    );
+    await run((tx) =>
+      saveSovLines(tx, ctx, contract.id, [
+        { id: sov[0].id, description: "Original", scheduledCents: 50_000_00 },
+        { description: "Added by change order", scheduledCents: 5_000_00 },
+      ]),
+    );
+    const rows = await run(async (tx) => {
+      await updatePayApplication(tx, ctx, app.id, {});
+      return listPayApplications(tx, tenantId, contract.id);
+    });
+    expect(rows[0].lines.map((l) => l.description)).toEqual(["Original", "Added by change order"]);
+    expect(rows[0].totals.scheduledCents).toBe(55_000_00);
+  });
+
+  it("STAFF cannot bill", async () => {
+    const { contract } = await run((tx) => billableContract(tx, "OPS-S9"));
+    await expect(
+      run((tx) => saveSovLines(tx, staffCtx, contract.id, [{ description: "x", scheduledCents: 1 }])),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });

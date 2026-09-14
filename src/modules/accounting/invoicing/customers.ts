@@ -4,6 +4,7 @@ import { schema, type Tx } from "@/db";
 import type { Customer } from "@/db/schema";
 import { createPartyForRole, syncPartyName } from "@/lib/parties/role-sync";
 import { setPreferredContactValue } from "@/lib/parties/contacts";
+import { loadParty } from "@/lib/parties";
 import { LedgerError, type LedgerCtx } from "../core";
 import { assertActiveTerm, listPaymentTerms } from "./catalogue";
 import { dueDateFromTerms, resolveTerm } from "./terms";
@@ -196,4 +197,32 @@ export async function dueDateFromCustomerTerms(
     terms.find((t) => t.isDefault)?.id ?? null,
   );
   return term ? dueDateFromTerms(issueDate, term.dueInDays) : null;
+}
+
+/**
+ * The customer role on a party that already exists, made if it is missing.
+ *
+ * A party is who somebody is (CRM slice 0); a customer is the role "a party
+ * we invoice". A pack that bills a project's client has the party — the
+ * contract names it — and needs the role to hand `createInvoiceDraft`, and
+ * `createCustomer` cannot serve it because that mints a NEW party. This is
+ * the same find-or-insert `src/lib/platform-revenue.ts` does by hand for the
+ * operator's clients, made a verb so nothing outside this module touches
+ * `customers` directly.
+ */
+export async function ensureCustomerForParty(
+  tx: Tx,
+  ctx: LedgerCtx,
+  partyId: string,
+): Promise<Customer> {
+  const existing = await tx.query.customers.findFirst({
+    where: and(eq(schema.customers.tenantId, ctx.tenantId), eq(schema.customers.partyId, partyId)),
+  });
+  if (existing) return existing;
+  const party = await loadParty(tx, ctx.tenantId, partyId);
+  const [row] = await tx
+    .insert(schema.customers)
+    .values({ tenantId: ctx.tenantId, partyId: party.id, name: party.displayName })
+    .returning();
+  return row;
 }

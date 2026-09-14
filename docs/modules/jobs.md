@@ -13,6 +13,114 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-14 — Slice 5: the schedule of values, and the draw against it (`claude/pay-applications`)
+
+`job_sov_lines`, `job_pay_applications`, `job_pay_application_lines`, and the
+first page in this pack that BILLS: one per contract
+(`/dashboard/m/jobs/[id]/contracts/[contractId]`), with the schedule of
+values above and the pay applications drawn against it below. The four
+numbers the earlier slices built — worth, planned, ordered, spent — now have
+the fifth that pays for them: **billed**.
+
+**ONE MODEL FOR THE PILOT'S THREE BILLING METHODS.** Fixed price billed
+monthly on progress, an AIA pay application, and a home's draw schedule are all
+percent-or-milestone against a fixed sum: a schedule of values breaks the
+contract into lines (one line for a monthly draw, a G703 for the AIA form,
+milestones for the draw schedule) and each application says how much of each
+line is complete to date. The G702 falls out — completed and stored to date,
+less retainage, less previous certificates, is the **current payment due** —
+in `billing-math.ts`, pure, so the form shows the same numbers the server
+writes and `tests/jobs.test.ts` pins every one. Cost-plus, unit price and T&M
+are different sums and are not here; the contract records them and nothing
+bills them yet.
+
+**AN ISSUED APPLICATION IS AN ORDINARY INVOICE
+([ADR 0058](../decisions/0058-a-pay-application-is-an-ordinary-invoice.md)).**
+`issuePayApplication` freezes the certificate and posts it through
+Accounting's own verbs — `createInvoiceDraft` → `issueInvoice`, the path the
+platform's own revenue takes — with two lines: the work earned this period to
+contract revenue (`4030`, else `4000`), tagged with the project's cost object
+so the job's revenue is on every report; and the retainage withheld this
+period as a NEGATIVE line to `1230 Retainage Receivable`, the account the
+construction profile seeded for exactly this. The entry is Dr AR (net) · Dr
+Retainage Receivable (held) · Cr Revenue (gross). AR, aging, reminders,
+payments and the cash lens see it with no second ledger, and the pack never
+reads Accounting's tables to follow the link — `loadInvoice`, `voidInvoice`
+and a new Accounting verb, `ensureCustomerForParty`, are the whole seam.
+
+**RELEASING RETAINAGE IS NOT A SECOND FEATURE.** A later application at a
+lower rate — the final one at 0% — computes less retainage to date than the
+last certificate held, so the "withheld this period" is negative, the line to
+`1230` is positive, and the invoice collects what was held. The ops test walks
+a contract through three applications and the third releases the ten
+thousand held by the first two with no code path of its own.
+
+**WHAT IS FROZEN AND WHAT IS LIVE.** A draft's figures are computed from its
+lines and the schedule as it is NOW, and a draft picks up schedule lines added
+after it was started (an approved change order's). An issued application's
+five totals and each line's scheduled value are written down at issue, so the
+certificate a client signed reads the same whatever the schedule becomes —
+the same rule an invoice's tax and a change order's price follow.
+
+**THE RULES THAT REFUSE.** One draft per contract at a time (`ONE_DRAFT`) —
+each carries the previous one's figures forward, and two open at once would
+each claim to be next. Nothing due, nothing issued (`NOTHING_DUE`). Nobody on
+the other side, nobody billed (`COUNTERPARTY_REQUIRED`). A chart with no
+`1230` cannot withhold (`ACCOUNT_MISSING` names the code — a pack must not
+create accounts in a business's chart). A schedule line an application has
+billed against cannot be removed (`SOV_LINE_BILLED`; the RESTRICT is the
+backstop) but its value can change, because every certificate froze the value
+it saw. Only the LATEST issued application can be voided (`NOT_LAST`), and
+Accounting refuses to void an invoice with payments on it — the pack hands
+Accounting's refusals on in Accounting's own words, through `friendlyMessage`.
+
+**`this period` MAY BE NEGATIVE.** An over-billing on an earlier application
+is corrected on the next one, which is how the G703 has always worked; a line's
+total to date may not go below zero, and that is a CHECK.
+
+**THE PACK'S STATUS HAS NO `paid`.** Whether the client has paid is the
+invoice's business, read from it when shown; a second copy would be the drift
+every derived status in accounting exists to prevent.
+
+Migrations `0335_job_billing.sql` (hand-reordered like 0329 and 0333) and
+`0336_job_billing_rls.sql`, applied to dev and prod before the merge;
+`db:verify-rls` reports **204 tables** on both. Tests: twelve more pure (the
+CHECKs mirrored, the G702 arithmetic line by line, retainage rounded once, the
+release, the negative period, percent boxes to ppm and back), nine more ops
+(the schedule replaced whole and the billed line held, one draft at a time,
+the invoice's lines, accounts, entry and dimensions, the carry-forward and the
+release across three applications, the three refusals, void of the latest
+only and the invoice with it, a draft picking up new lines, staff refused),
+seven more isolation (read, write, cross-tenant contract, the issued-has-
+invoice CHECK, RESTRICT on a billed line, per-contract numbering, cascade).
+
+**DRIVEN ON THE DEV BRANCH, on 24-108's New Home contract.** *Set up the
+schedule* → *One line for the whole contract* → the tiles read **Scheduled
+$1,854,500.00** with the red *not on the schedule* note gone. *New
+application* at 10% → *Open* → `370,900` this period → the G702 under the grid
+read **$370,900.00 · −$37,090.00 · $333,810.00 · $0.00 · Current payment due
+$333,810.00**, balance to finish $1,483,600.00. *Issue as invoice* was
+refused twice, each time in the words designed for it: *Say who the contract
+is with before billing it* (the contract had no counterparty — fixed from the
+project page's edit dialog), then *The chart of accounts is missing something:
+the chart has no 1230 Retainage Receivable account* — the farm fixture has
+the general chart, not the construction profile's, so `1230` was added through
+Accounting's own *Add account*. Third time: **Application 1 issued as an
+invoice**; the row read *Issued · INV-0006 · Open* with a *Void* button, the
+tiles **Billed to date $333,810.00 · Retainage held $37,090.00 · Balance to
+finish $1,483,600.00**, the schedule line **20%**, and the project page's
+contracts table *$333,810.00 / $37,090.00 held*. In Accounting, INV-0006 to
+Tractor Supply Co, due in thirty days by the customer's terms, memo *Pay
+application 1 · 24-108 · new_home*, two lines: *Application 1 — work
+completed and stored through 2026-09-14* $370,900.00 to **4000 · Sales** (the
+farm chart has no 4030, so the fallback was the one that posted) and
+*Retainage withheld (10%)* (37,090.00) to **1230 · Retainage Receivable**,
+total 333,810.00.
+
+**One thing driving showed that the tests could not:** a refused issue leaves
+the draft saved (the editor saves first, then issues), so the second attempt
+starts from what was typed rather than from an empty grid. Worth keeping.
+
 ### 2026-09-14 — The profile arrives, and the pack takes its first seed (`claude/the-construction-profile`)
 
 No screen changed. What changed is that every seam this pack left open now
@@ -561,6 +669,9 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_budget_lines` | What each cost code was PLANNED to cost. | One line per code per project, enforced by a unique index rather than by the action remembering — two would make every variance ambiguous. `cost_code_id` is NOT NULL, unlike a commitment line's: a budget without a code is a single number for the whole job, which is what this table exists to stop being the answer. `original_cents` is the ORIGINAL; revised is original plus approved change-order lines, computed by `jobCostRows` and never stored. RESTRICT to the code, so a budgeted code is retired and never deleted. |
 | `job_change_orders` | A change to ONE contract: its price to the client (`value_cents`), its status, and when it was approved. | Composite FK to the CONTRACT, **cascade** — never to the project, which is reachable through the contract and deliberately not duplicated. Number unique per `(tenant, contract)`. `value_cents` **may be negative** — the one money column in the pack without a floor; a deduction is a negative number, not a credit concept. `job_change_orders_approved_has_date` makes `(status = 'approved') = (approved_on is not null)` a database fact, both ways. |
 | `job_change_order_lines` | What the change costs, one cost code at a time — the budget side. | Cascade from the change order; **RESTRICT to the cost code**, the same rule as a commitment line and a budget line. `amount_cents` may be negative. Zero lines is legitimate: a pure price change. |
+| `job_sov_lines` | A contract's schedule of values: how the sum breaks down, by trade, phase or milestone. | Cascade from the contract. Optional cost code (RESTRICT) and the approved change order that added the line (cascade). `scheduled_cents` ≥ 0. Should sum to the revised contract value; the page says when it does not, a CHECK does not — a schedule is built before it is complete. |
+| `job_pay_applications` | One draw against a contract: the G702. | Numbered per contract, void ones included. `status` draft/issued/void — **no `paid`**, that is the invoice's word. `retainage_ppm` 0–1,000,000. Five totals FROZEN at issue. `invoice_id` RESTRICT to Accounting's `invoices`; CHECK `(status = 'draft') = (invoice_id is null)`, both ways. |
+| `job_pay_application_lines` | One line of the G703 per schedule line. | Cascade from the application; **RESTRICT to the schedule line** — billed lines are never removed. `previous` and `stored` ≥ 0; `this_period` may be NEGATIVE (a correction); CHECK that the three sum to ≥ 0. `scheduled_cents` frozen at issue. |
 | `job_commitments` | What the business has ORDERED: a purchase order or a subcontract. | `party_id` is NOT NULL — a commitment with nobody to pay is a budget line, not a commitment. `kind` is a CHECK list of two because the two diverge in behaviour later. Number unique per tenant: a vendor quotes it back on the invoice. Cascade from the project. |
 | `job_commitment_lines` | The money, one cost code at a time. | Cascade from the commitment; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative — a credit is a change order. |
 | `job_projects` | The spine. | FOUR composite FKs, each certified in `tests/isolation/jobs.test.ts`: company, division, client, cost code list. `delivery_method` is an open taxonomy (P1) with a **format check and no value check**, and is nullable. `metadata` is the P2 extension bag. |
@@ -572,9 +683,10 @@ to dev and prod before its merge, per
 `0329_job_commitments.sql` / `0330_job_commitments_rls.sql` (slice 2) and
 `0331_job_budget.sql` / `0332_job_budget_rls.sql` (slice 3) and
 `0333_job_change_orders.sql` / `0334_job_change_orders_rls.sql` (slice 4,
-hand-reordered like 0329) follow the same rule —
+hand-reordered like 0329) and `0335_job_billing.sql` / `0336_job_billing_rls.sql`
+(slice 5, hand-reordered the same way) follow the same rule —
 and from slice 3 the pair is `db:verify-rls` **and `db:verify-modules`**, after
-the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **201 tables**, all enabled, forced and with
+the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **204 tables**, all enabled, forced and with
 policies, on both.
 
 **0327 needed no hand-reordering, which confirms the diagnosis in 0325.** Both
@@ -605,6 +717,12 @@ ordering only bites when two new tables reference each other in one file.
   the pack's own ops, registered in `src/packs/seeds.ts` (ADR 0057).
 - `src/packs/jobs/components/change-order-form.tsx` — price and cost typed
   separately, negative allowed, `Approved` fills the date box.
+- `src/packs/jobs/billing-math.ts` — the G702 arithmetic, pure: the form and
+  the server compute the same certificate from it.
+- `src/packs/jobs/components/sov-editor.tsx` + `pay-application-editor.tsx` —
+  the schedule and the G703 grid, with the totals live.
+- `src/app/dashboard/m/jobs/[id]/contracts/[contractId]/page.tsx` — one
+  contract's billing: schedule above, applications below, five tiles on top.
 - `src/lib/db-errors.ts` — `violatedUniqueIndex`, the constraint name from
   `err.cause`. Every unique-index sentence in `actions.ts` goes through it,
   because matching on `err.message` never fired (slice 4 build log).
@@ -647,6 +765,15 @@ ordering only bites when two new tables reference each other in one file.
 - **A change order is the only money here that may be negative**, so every
   figure it touches renders through `formatMoneySign`. `formatMoney` drops the
   sign and would print a deduction as its own opposite.
+- **A pay application is an ordinary invoice, and retainage is a negative
+  line to a receivable** —
+  [ADR 0058](../decisions/0058-a-pay-application-is-an-ordinary-invoice.md).
+  The pack calls Accounting's document verbs and never its tables; lowering the
+  rate releases retainage through the same line. The pack's status has no
+  `paid`.
+- **Frozen at issue, live while a draft.** An issued application's totals and
+  line values are written down; a draft computes from the schedule as it is
+  now and picks up lines added since. Same rule as an invoice's tax.
 - **Read the constraint from `err.cause`, never `err.message`.** Under drizzle's
   wrapper the message is the SQL. `violatedUniqueIndex` in `src/lib/db-errors.ts`;
   four translations in this pack were dead for three slices before a test noticed.
@@ -665,8 +792,13 @@ ordering only bites when two new tables reference each other in one file.
   page. Closing it needs a second group-by in `getBalances`, which is
   **accounting's call**: this pack must not read its tables, and faking it would
   report another job's spend in this job's column.
-- **Nothing bills.** `billing_method` is recorded on every contract and read by
-  no code. Pay applications, retainage and the schedule of values are slice 5.
+- ~~**Nothing bills.**~~ — **closed 2026-09-14** for fixed-price work: a
+  schedule of values and pay applications, issued as invoices. Still open
+  from it: **cost-plus, unit price and T&M** are recorded on the contract and
+  billed by nothing (different sums, each its own slice); **retainage held
+  FROM subcontractors** (the payables side; `2120` is seeded and nothing posts
+  to it); **the AIA-style printout** of a certificate; and `billing_method` is
+  still read by no code — the schedule does not yet shape itself to it.
 - ~~**A contract cannot be edited from the screen.**~~ — **closed 2026-09-14.**
 - **Nothing can be DELETED, and that is deliberate rather than missing.** A
   contract that should not exist is `cancelled` or `declined`; a cost code is

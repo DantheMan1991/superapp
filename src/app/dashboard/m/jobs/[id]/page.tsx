@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   actualByProject,
   committedTotals,
+  contractBilling,
   jobCostRows,
   getProject,
   listChangeOrders,
@@ -94,6 +95,7 @@ export default async function ProjectPage({
         contracts,
         commitments,
         changeOrders,
+        billing,
         committed,
         costRows,
         actual,
@@ -156,6 +158,7 @@ export default async function ProjectPage({
         listContracts(tx, ctx.tenant.id, project.id),
         listCommitments(tx, ctx.tenant.id, project.id),
         listChangeOrders(tx, ctx.tenant.id, project.id),
+        contractBilling(tx, ctx.tenant.id, project.id),
         committedTotals(tx, ctx.tenant.id),
         jobCostRows(tx, ctx.tenant.id, project.id),
         /*
@@ -210,6 +213,7 @@ export default async function ProjectPage({
         contracts,
         commitments,
         changeOrders,
+        billing,
         committed,
         costRows,
         actual,
@@ -433,6 +437,7 @@ export default async function ProjectPage({
                   <TableHead>With</TableHead>
                   <TableHead>Billed by</TableHead>
                   <TableHead className="text-right">Value</TableHead>
+                  <TableHead className="text-right">Billed</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="w-10" />
                 </TableRow>
@@ -444,7 +449,13 @@ export default async function ProjectPage({
                       {i + 1}
                     </TableCell>
                     <TableCell className="font-medium">
-                      {slugLabel(c.kind)}
+                      {/* The kind is the way in to the contract's own page: its schedule and its draws. */}
+                      <Link
+                        href={`/dashboard/m/jobs/${project.id}/contracts/${c.id}`}
+                        className="underline-offset-2 hover:underline"
+                      >
+                        {slugLabel(c.kind)}
+                      </Link>
                       {c.name && (
                         <span className="block text-xs text-muted-foreground">
                           {c.name}
@@ -481,6 +492,28 @@ export default async function ProjectPage({
                           {c.valueCents === null ? "—" : formatMoney(c.valueCents, symbol)}
                         </span>
                       )}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {/*
+                        What has been certified for payment so far, from the
+                        contract's own page. A dash until the first
+                        application is issued: nothing has been billed, which
+                        is not the same as zero owed.
+                      */}
+                      {(() => {
+                        const b = data.billing.get(c.id);
+                        if (!b || b.issuedCount === 0) return "—";
+                        return (
+                          <>
+                            {formatMoney(b.billedCents, symbol)}
+                            {b.retainageHeldCents > 0 && (
+                              <span className="block text-xs text-muted-foreground">
+                                {formatMoney(b.retainageHeldCents, symbol)} held
+                              </span>
+                            )}
+                          </>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell>
                       <Badge

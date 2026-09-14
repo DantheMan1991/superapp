@@ -44,6 +44,8 @@ d("jobs tables (RLS)", () => {
   let codeA = "";
   let contractB = "";
   let changeOrderA = "";
+  let sovA = "";
+  let payAppA = "";
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantA, fn, { role: "staff", userId: MATE });
@@ -188,6 +190,36 @@ d("jobs tables (RLS)", () => {
         changeOrderId: changeOrderA,
         costCodeId: codeA,
         amountCents: 5_000_00,
+      });
+
+      const sov = await tx
+        .insert(schema.jobSovLines)
+        .values({
+          tenantId: tenantA,
+          contractId: contractA,
+          description: "Contract sum",
+          scheduledCents: 18250000,
+          costCodeId: codeA,
+        })
+        .returning();
+      sovA = sov[0].id;
+      const apps = await tx
+        .insert(schema.jobPayApplications)
+        .values({
+          tenantId: tenantA,
+          contractId: contractA,
+          number: 1,
+          periodTo: "2026-09-30",
+          retainagePpm: 100_000,
+        })
+        .returning();
+      payAppA = apps[0].id;
+      await tx.insert(schema.jobPayApplicationLines).values({
+        tenantId: tenantA,
+        payApplicationId: payAppA,
+        sovLineId: sovA,
+        scheduledCents: 18250000,
+        thisPeriodCents: 1_000_00,
       });
     });
   });
@@ -770,5 +802,124 @@ d("jobs tables (RLS)", () => {
     }));
     expect(left.heads).toEqual([]);
     expect(left.lines).toEqual([]);
+  });
+
+  it("cannot read another tenant's SCHEDULE, APPLICATIONS or their lines", async () => {
+    const seen = await asOtherTenant(async (tx) => ({
+      sov: await tx.select().from(schema.jobSovLines).where(eq(schema.jobSovLines.id, sovA)),
+      apps: await tx
+        .select()
+        .from(schema.jobPayApplications)
+        .where(eq(schema.jobPayApplications.id, payAppA)),
+      lines: await tx
+        .select()
+        .from(schema.jobPayApplicationLines)
+        .where(eq(schema.jobPayApplicationLines.payApplicationId, payAppA)),
+    }));
+    expect(seen.sov).toEqual([]);
+    expect(seen.apps).toEqual([]);
+    expect(seen.lines).toEqual([]);
+  });
+
+  it("cannot change another tenant's application", async () => {
+    const rows = await asOtherTenant((tx) =>
+      tx
+        .update(schema.jobPayApplications)
+        .set({ retainagePpm: 1 })
+        .where(eq(schema.jobPayApplications.id, payAppA))
+        .returning(),
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it("a schedule line and an application cannot hang off another tenant's CONTRACT", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobSovLines).values({
+          tenantId: tenantA,
+          contractId: contractB,
+          description: "Across the wall",
+          scheduledCents: 1,
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobPayApplications).values({
+          tenantId: tenantA,
+          contractId: contractB,
+          number: 9,
+          periodTo: "2026-09-30",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("an issued application must be an invoice, and a draft must not — both ways", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobPayApplications).values({
+          tenantId: tenantA,
+          contractId: contractA,
+          number: 8,
+          periodTo: "2026-09-30",
+          status: "issued",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a billed schedule line cannot be deleted, and a voided application's line still holds it", async () => {
+    await expect(
+      withSystem((tx) => tx.delete(schema.jobSovLines).where(eq(schema.jobSovLines.id, sovA))),
+    ).rejects.toThrow();
+  });
+
+  it("numbers applications per contract, once each", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobPayApplications).values({
+          tenantId: tenantA,
+          contractId: contractA,
+          number: 1,
+          periodTo: "2026-10-31",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("deleting a contract takes its schedule, its applications and their lines", async () => {
+    const scratch = await withSystem(async (tx) => {
+      const c = await tx
+        .insert(schema.jobContracts)
+        .values({ tenantId: tenantA, projectId: projectA, kind: "aia", sequence: 7 })
+        .returning();
+      const s = await tx
+        .insert(schema.jobSovLines)
+        .values({ tenantId: tenantA, contractId: c[0].id, description: "s", scheduledCents: 100 })
+        .returning();
+      const a = await tx
+        .insert(schema.jobPayApplications)
+        .values({ tenantId: tenantA, contractId: c[0].id, number: 1, periodTo: "2026-09-30" })
+        .returning();
+      await tx.insert(schema.jobPayApplicationLines).values({
+        tenantId: tenantA,
+        payApplicationId: a[0].id,
+        sovLineId: s[0].id,
+      });
+      return { contractId: c[0].id, sovId: s[0].id, appId: a[0].id };
+    });
+    await withSystem((tx) =>
+      tx.delete(schema.jobContracts).where(eq(schema.jobContracts.id, scratch.contractId)),
+    );
+    const left = await asOwner(async (tx) => ({
+      sov: await tx.select().from(schema.jobSovLines).where(eq(schema.jobSovLines.id, scratch.sovId)),
+      apps: await tx
+        .select()
+        .from(schema.jobPayApplications)
+        .where(eq(schema.jobPayApplications.id, scratch.appId)),
+    }));
+    expect(left.sov).toEqual([]);
+    expect(left.apps).toEqual([]);
   });
 });

@@ -11,8 +11,27 @@ import type {
   JobContract,
   JobCostCode,
   JobCostCodeSet,
+  JobPayApplication,
+  JobPayApplicationLine,
   JobProject,
+  JobSovLine,
 } from "@/db/schema";
+import {
+  createInvoiceDraft,
+  issueInvoice,
+  loadInvoice,
+  voidInvoice,
+} from "@/modules/accounting/invoicing/invoices";
+import {
+  dueDateFromCustomerTerms,
+  ensureCustomerForParty,
+} from "@/modules/accounting/invoicing/customers";
+import {
+  payApplicationTotals,
+  ppmToPercentString,
+  type PayApplicationTotals,
+  type PayLineFigures,
+} from "./billing-math";
 import {
   archiveDimensionMember,
   getBalances,
@@ -26,6 +45,9 @@ import {
   COST_CODE_DIMENSION,
   DELIVERY_METHOD_FORMAT,
   PROJECT_DIMENSION,
+  RETAINAGE_PPM_MAX,
+  RETAINAGE_RECEIVABLE_CODE,
+  REVENUE_ACCOUNT_CODES,
   VALUED_CONTRACT_STATUSES,
   isBillingMethod,
   isChangeOrderStatus,
@@ -67,7 +89,19 @@ export class JobsError extends Error {
       /** A signed contract's value moves by change order, not by edit. */
       | "VALUE_LOCKED"
       /** An approved change order carries the date it was approved. */
-      | "APPROVAL_DATE_REQUIRED",
+      | "APPROVAL_DATE_REQUIRED"
+      /** A schedule line an application has billed against cannot be removed. */
+      | "SOV_LINE_BILLED"
+      /** One draft application per contract at a time. */
+      | "ONE_DRAFT"
+      /** The certificate comes to nothing or less; there is no invoice to issue. */
+      | "NOTHING_DUE"
+      /** A contract with nobody on the other side cannot be billed. */
+      | "COUNTERPARTY_REQUIRED"
+      /** The chart lacks an account billing needs; the message names it. */
+      | "ACCOUNT_MISSING"
+      /** Only the latest issued application on a contract can be voided. */
+      | "NOT_LAST",
     message: string,
   ) {
     super(message);
@@ -1875,4 +1909,816 @@ export async function listChangeOrders(
       costCents: own.reduce((sum, l) => sum + l.amountCents, 0),
     };
   });
+}
+// ------------------------------------------------------------------- billing
+
+export interface SovLineInput {
+  /** Present when editing a line that exists; absent for a new one. */
+  id?: string;
+  description: string;
+  scheduledCents: number;
+  costCodeId?: string | null;
+  changeOrderId?: string | null;
+}
+
+export async function listSovLines(
+  tx: Tx,
+  tenantId: string,
+  contractId: string,
+): Promise<JobSovLine[]> {
+  return tx
+    .select()
+    .from(schema.jobSovLines)
+    .where(
+      and(
+        eq(schema.jobSovLines.tenantId, tenantId),
+        eq(schema.jobSovLines.contractId, contractId),
+      ),
+    )
+    .orderBy(asc(schema.jobSovLines.sortOrder), asc(schema.jobSovLines.createdAt));
+}
+
+async function loadContract(tx: Tx, tenantId: string, contractId: string): Promise<JobContract> {
+  const rows = await tx
+    .select()
+    .from(schema.jobContracts)
+    .where(
+      and(eq(schema.jobContracts.tenantId, tenantId), eq(schema.jobContracts.id, contractId)),
+    )
+    .limit(1);
+  if (rows.length === 0) throw new JobsError("NOT_FOUND", `contract ${contractId} not found`);
+  return rows[0];
+}
+
+/**
+ * Write a contract's schedule of values: the lines given, in the order given.
+ *
+ * **REPLACE, WITH ONE THING IT WILL NOT REPLACE.** A schedule is one document
+ * somebody edits in front of them, so lines omitted are removed and the rest
+ * are re-sequenced — the commitment rule, not the budget's. Except a line an
+ * application has already billed against: removing it would make an issued
+ * certificate refer to a line that is not there, and the pre-check refuses with
+ * `SOV_LINE_BILLED` (the RESTRICT foreign key is the backstop). Its value can
+ * still change, because every issued application froze the value it saw.
+ */
+export async function saveSovLines(
+  tx: Tx,
+  ctx: JobsCtx,
+  contractId: string,
+  lines: SovLineInput[],
+): Promise<JobSovLine[]> {
+  requireWrite(ctx, "owner");
+  await loadContract(tx, ctx.tenantId, contractId);
+  for (const line of lines) {
+    if (line.description.trim() === "") {
+      throw new JobsError("INVALID_VALUE", "a schedule line needs a description");
+    }
+    if (!Number.isInteger(line.scheduledCents) || line.scheduledCents < 0) {
+      throw new JobsError("INVALID_VALUE", "a scheduled value cannot be negative");
+    }
+  }
+
+  const existing = await listSovLines(tx, ctx.tenantId, contractId);
+  const keep = new Set(lines.map((l) => l.id).filter((id): id is string => !!id));
+  for (const id of keep) {
+    if (!existing.some((e) => e.id === id)) {
+      throw new JobsError("NOT_FOUND", `schedule line ${id} is not on this contract`);
+    }
+  }
+  const removed = existing.filter((e) => !keep.has(e.id)).map((e) => e.id);
+  if (removed.length > 0) {
+    const billed = await tx
+      .select({ sovLineId: schema.jobPayApplicationLines.sovLineId })
+      .from(schema.jobPayApplicationLines)
+      .where(
+        and(
+          eq(schema.jobPayApplicationLines.tenantId, ctx.tenantId),
+          inArray(schema.jobPayApplicationLines.sovLineId, removed),
+        ),
+      )
+      .limit(1);
+    if (billed.length > 0) {
+      throw new JobsError(
+        "SOV_LINE_BILLED",
+        "a schedule line an application has billed against cannot be removed",
+      );
+    }
+    await tx
+      .delete(schema.jobSovLines)
+      .where(
+        and(
+          eq(schema.jobSovLines.tenantId, ctx.tenantId),
+          inArray(schema.jobSovLines.id, removed),
+        ),
+      );
+  }
+
+  for (const [i, line] of lines.entries()) {
+    const values = {
+      description: line.description.trim(),
+      scheduledCents: line.scheduledCents,
+      costCodeId: line.costCodeId ?? null,
+      changeOrderId: line.changeOrderId ?? null,
+      sortOrder: (i + 1) * 10,
+    };
+    if (line.id) {
+      await tx
+        .update(schema.jobSovLines)
+        .set({ ...values, updatedAt: new Date(), version: sql`${schema.jobSovLines.version} + 1` })
+        .where(
+          and(eq(schema.jobSovLines.tenantId, ctx.tenantId), eq(schema.jobSovLines.id, line.id)),
+        );
+    } else {
+      await tx.insert(schema.jobSovLines).values({
+        tenantId: ctx.tenantId,
+        contractId,
+        ...values,
+      });
+    }
+  }
+  return listSovLines(tx, ctx.tenantId, contractId);
+}
+
+export interface PayApplicationLineRow extends JobPayApplicationLine {
+  description: string;
+  /** The schedule line's value NOW; equals `scheduledCents` on an issued application. */
+  sovScheduledCents: number;
+}
+
+export interface PayApplicationRow {
+  app: JobPayApplication;
+  lines: PayApplicationLineRow[];
+  totals: PayApplicationTotals;
+  /** The invoice an issued application became, in Accounting's own words. */
+  invoice: { id: string; invoiceNumber: string; status: string; totalCents: number } | null;
+}
+
+/**
+ * The latest ISSUED application on a contract before a given number — the one
+ * whose figures the next application carries forward. A void application is
+ * skipped: its invoice was voided, so nothing it certified stands.
+ */
+async function lastIssuedBefore(
+  tx: Tx,
+  tenantId: string,
+  contractId: string,
+  beforeNumber: number | null,
+): Promise<JobPayApplication | null> {
+  const rows = await tx
+    .select()
+    .from(schema.jobPayApplications)
+    .where(
+      and(
+        eq(schema.jobPayApplications.tenantId, tenantId),
+        eq(schema.jobPayApplications.contractId, contractId),
+        eq(schema.jobPayApplications.status, "issued"),
+        ...(beforeNumber === null ? [] : [sql`${schema.jobPayApplications.number} < ${beforeNumber}`]),
+      ),
+    )
+    .orderBy(desc(schema.jobPayApplications.number))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** What an issued application certified: earned less retainage, from its frozen totals. */
+function certifiedCents(app: JobPayApplication | null): number {
+  return app ? app.completedToDateCents - app.retainageCents : 0;
+}
+
+function figuresOf(lines: PayApplicationLineRow[], live: boolean): PayLineFigures[] {
+  return lines.map((l) => ({
+    sovLineId: l.sovLineId,
+    scheduledCents: live ? l.sovScheduledCents : l.scheduledCents,
+    previousCents: l.previousCents,
+    thisPeriodCents: l.thisPeriodCents,
+    storedCents: l.storedCents,
+  }));
+}
+
+async function loadAppLines(
+  tx: Tx,
+  tenantId: string,
+  appIds: string[],
+): Promise<Map<string, PayApplicationLineRow[]>> {
+  const out = new Map<string, PayApplicationLineRow[]>();
+  if (appIds.length === 0) return out;
+  const rows = await tx
+    .select({
+      line: schema.jobPayApplicationLines,
+      description: schema.jobSovLines.description,
+      sovScheduledCents: schema.jobSovLines.scheduledCents,
+      sovSortOrder: schema.jobSovLines.sortOrder,
+    })
+    .from(schema.jobPayApplicationLines)
+    .innerJoin(
+      schema.jobSovLines,
+      and(
+        eq(schema.jobSovLines.tenantId, schema.jobPayApplicationLines.tenantId),
+        eq(schema.jobSovLines.id, schema.jobPayApplicationLines.sovLineId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.jobPayApplicationLines.tenantId, tenantId),
+        inArray(schema.jobPayApplicationLines.payApplicationId, appIds),
+      ),
+    )
+    .orderBy(asc(schema.jobSovLines.sortOrder), asc(schema.jobSovLines.createdAt));
+  for (const r of rows) {
+    const list = out.get(r.line.payApplicationId) ?? [];
+    list.push({ ...r.line, description: r.description, sovScheduledCents: r.sovScheduledCents });
+    out.set(r.line.payApplicationId, list);
+  }
+  return out;
+}
+
+/**
+ * Every application on a contract, oldest first, each with its lines and its
+ * certificate. A DRAFT's figures are computed live from its lines and the
+ * schedule as it is now; an ISSUED one's come from the totals frozen at issue,
+ * so the certificate a client signed reads the same whatever the schedule has
+ * become. The invoice is read through Accounting's own verb, never its table.
+ */
+export async function listPayApplications(
+  tx: Tx,
+  tenantId: string,
+  contractId: string,
+): Promise<PayApplicationRow[]> {
+  const apps = await tx
+    .select()
+    .from(schema.jobPayApplications)
+    .where(
+      and(
+        eq(schema.jobPayApplications.tenantId, tenantId),
+        eq(schema.jobPayApplications.contractId, contractId),
+      ),
+    )
+    .orderBy(asc(schema.jobPayApplications.number));
+  const linesByApp = await loadAppLines(
+    tx,
+    tenantId,
+    apps.map((a) => a.id),
+  );
+
+  const out: PayApplicationRow[] = [];
+  for (const app of apps) {
+    const lines = linesByApp.get(app.id) ?? [];
+    let totals: PayApplicationTotals;
+    if (app.status === "draft") {
+      const previous = await lastIssuedBefore(tx, tenantId, contractId, app.number);
+      totals = payApplicationTotals(figuresOf(lines, true), app.retainagePpm, certifiedCents(previous));
+    } else {
+      totals = {
+        scheduledCents: app.scheduledCents,
+        completedToDateCents: app.completedToDateCents,
+        retainageCents: app.retainageCents,
+        earnedLessRetainageCents: app.completedToDateCents - app.retainageCents,
+        previousCertificatesCents: app.previousCertificatesCents,
+        dueCents: app.dueCents,
+        balanceToFinishCents: app.scheduledCents - app.completedToDateCents,
+      };
+    }
+    let invoice: PayApplicationRow["invoice"] = null;
+    if (app.invoiceId) {
+      const inv = await loadInvoice(tx, tenantId, app.invoiceId);
+      invoice = {
+        id: inv.id,
+        invoiceNumber: inv.invoiceNumber,
+        status: inv.status,
+        totalCents: inv.totalCents,
+      };
+    }
+    out.push({ app, lines, totals, invoice });
+  }
+  return out;
+}
+
+export interface PayApplicationInput {
+  contractId: string;
+  periodTo: string;
+  retainagePpm?: number;
+  notes?: string;
+}
+
+function validateRetainage(ppm: number): void {
+  if (!Number.isInteger(ppm) || ppm < 0 || ppm > RETAINAGE_PPM_MAX) {
+    throw new JobsError("INVALID_VALUE", "retainage must be between 0% and 100%");
+  }
+}
+
+/**
+ * Give a draft a line for every schedule line it lacks, carrying forward what
+ * the last issued application completed on each — WORK only, never stored
+ * materials, which are entered fresh each period because they are what is on
+ * site now. Called when a draft is made and again whenever it is edited, so a
+ * schedule that grew after the draft did (an approved change order's lines)
+ * reaches it without the draft being remade.
+ */
+async function syncDraftLines(
+  tx: Tx,
+  tenantId: string,
+  app: JobPayApplication,
+): Promise<void> {
+  const [sov, have, previous] = await Promise.all([
+    listSovLines(tx, tenantId, app.contractId),
+    tx
+      .select({ sovLineId: schema.jobPayApplicationLines.sovLineId })
+      .from(schema.jobPayApplicationLines)
+      .where(
+        and(
+          eq(schema.jobPayApplicationLines.tenantId, tenantId),
+          eq(schema.jobPayApplicationLines.payApplicationId, app.id),
+        ),
+      ),
+    lastIssuedBefore(tx, tenantId, app.contractId, app.number),
+  ]);
+  const has = new Set(have.map((h) => h.sovLineId));
+  const missing = sov.filter((s) => !has.has(s.id));
+  if (missing.length === 0) return;
+
+  const carried = new Map<string, number>();
+  if (previous) {
+    const prior = await tx
+      .select()
+      .from(schema.jobPayApplicationLines)
+      .where(
+        and(
+          eq(schema.jobPayApplicationLines.tenantId, tenantId),
+          eq(schema.jobPayApplicationLines.payApplicationId, previous.id),
+        ),
+      );
+    for (const p of prior) carried.set(p.sovLineId, p.previousCents + p.thisPeriodCents);
+  }
+  await tx.insert(schema.jobPayApplicationLines).values(
+    missing.map((s) => ({
+      tenantId,
+      payApplicationId: app.id,
+      sovLineId: s.id,
+      scheduledCents: s.scheduledCents,
+      previousCents: carried.get(s.id) ?? 0,
+      thisPeriodCents: 0,
+      storedCents: 0,
+    })),
+  );
+}
+
+/**
+ * Start a draw. ONE DRAFT AT A TIME per contract: an application carries the
+ * previous one's figures forward, and two open at once would each claim to be
+ * next. Numbered after the last, void ones included — a certificate number is
+ * never reused.
+ */
+export async function createPayApplication(
+  tx: Tx,
+  ctx: JobsCtx,
+  input: PayApplicationInput,
+): Promise<JobPayApplication> {
+  requireWrite(ctx, "owner");
+  await loadContract(tx, ctx.tenantId, input.contractId);
+  const sov = await listSovLines(tx, ctx.tenantId, input.contractId);
+  if (sov.length === 0) {
+    throw new JobsError("NO_LINES", "the contract needs a schedule of values first");
+  }
+  const existing = await tx
+    .select({
+      max: sql<number>`coalesce(max(${schema.jobPayApplications.number}), 0)`.mapWith(Number),
+      drafts: sql<number>`count(*) filter (where ${schema.jobPayApplications.status} = 'draft')`.mapWith(
+        Number,
+      ),
+    })
+    .from(schema.jobPayApplications)
+    .where(
+      and(
+        eq(schema.jobPayApplications.tenantId, ctx.tenantId),
+        eq(schema.jobPayApplications.contractId, input.contractId),
+      ),
+    );
+  if (existing[0].drafts > 0) {
+    throw new JobsError("ONE_DRAFT", "this contract already has a draft application open");
+  }
+  // The rate carries forward from the last application unless told otherwise:
+  // retainage is agreed once, in the contract, not chosen each month.
+  const last = await lastIssuedBefore(tx, ctx.tenantId, input.contractId, null);
+  const retainagePpm = input.retainagePpm ?? last?.retainagePpm ?? 0;
+  validateRetainage(retainagePpm);
+
+  const rows = await tx
+    .insert(schema.jobPayApplications)
+    .values({
+      tenantId: ctx.tenantId,
+      contractId: input.contractId,
+      number: existing[0].max + 1,
+      periodTo: input.periodTo,
+      retainagePpm,
+      notes: input.notes?.trim() ?? "",
+      createdByClerkUserId: ctx.userId,
+    })
+    .returning();
+  await syncDraftLines(tx, ctx.tenantId, rows[0]);
+  return rows[0];
+}
+
+async function loadPayApplication(
+  tx: Tx,
+  tenantId: string,
+  id: string,
+): Promise<JobPayApplication> {
+  const rows = await tx
+    .select()
+    .from(schema.jobPayApplications)
+    .where(
+      and(eq(schema.jobPayApplications.tenantId, tenantId), eq(schema.jobPayApplications.id, id)),
+    )
+    .limit(1);
+  if (rows.length === 0) throw new JobsError("NOT_FOUND", `pay application ${id} not found`);
+  return rows[0];
+}
+
+export interface PayApplicationLineInput {
+  sovLineId: string;
+  thisPeriodCents: number;
+  storedCents: number;
+}
+
+/**
+ * Change a draft: the period, the rate, the notes, and what each line
+ * completed this period and has stored. `this period` may be NEGATIVE — an
+ * earlier over-billing is corrected on the next application, which is how the
+ * G703 has always worked — but a line's total to date may not go below zero.
+ * Lines not mentioned are left alone. Only a draft; an issued application is
+ * a certificate somebody has, and it is voided, never edited.
+ */
+export async function updatePayApplication(
+  tx: Tx,
+  ctx: JobsCtx,
+  id: string,
+  input: {
+    periodTo?: string;
+    retainagePpm?: number;
+    notes?: string;
+    lines?: PayApplicationLineInput[];
+    version?: number;
+  },
+): Promise<JobPayApplication> {
+  requireWrite(ctx, "owner");
+  const app = await loadPayApplication(tx, ctx.tenantId, id);
+  if (app.status !== "draft") {
+    throw new JobsError("INVALID_STATUS", "only a draft application can be changed");
+  }
+  if (input.version !== undefined && input.version !== app.version) {
+    throw new JobsError("STALE_VERSION", "application changed since loaded");
+  }
+  if (input.retainagePpm !== undefined) validateRetainage(input.retainagePpm);
+  await syncDraftLines(tx, ctx.tenantId, app);
+
+  if (input.lines) {
+    const current = await tx
+      .select()
+      .from(schema.jobPayApplicationLines)
+      .where(
+        and(
+          eq(schema.jobPayApplicationLines.tenantId, ctx.tenantId),
+          eq(schema.jobPayApplicationLines.payApplicationId, id),
+        ),
+      );
+    const bySov = new Map(current.map((l) => [l.sovLineId, l]));
+    for (const line of input.lines) {
+      const row = bySov.get(line.sovLineId);
+      if (!row) throw new JobsError("NOT_FOUND", `schedule line ${line.sovLineId} is not on this application`);
+      if (!Number.isInteger(line.thisPeriodCents) || !Number.isInteger(line.storedCents)) {
+        throw new JobsError("INVALID_VALUE", "amounts must be whole cents");
+      }
+      if (line.storedCents < 0) {
+        throw new JobsError("INVALID_VALUE", "stored materials cannot be negative");
+      }
+      if (row.previousCents + line.thisPeriodCents + line.storedCents < 0) {
+        throw new JobsError(
+          "INVALID_VALUE",
+          "a line cannot be completed to less than nothing",
+        );
+      }
+      await tx
+        .update(schema.jobPayApplicationLines)
+        .set({
+          thisPeriodCents: line.thisPeriodCents,
+          storedCents: line.storedCents,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.jobPayApplicationLines.id, row.id));
+    }
+  }
+
+  const patch: Record<string, unknown> = {
+    updatedAt: new Date(),
+    version: app.version + 1,
+  };
+  if (input.periodTo !== undefined) patch.periodTo = input.periodTo;
+  if (input.retainagePpm !== undefined) patch.retainagePpm = input.retainagePpm;
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+  const rows = await tx
+    .update(schema.jobPayApplications)
+    .set(patch)
+    .where(
+      and(eq(schema.jobPayApplications.tenantId, ctx.tenantId), eq(schema.jobPayApplications.id, id)),
+    )
+    .returning();
+  return rows[0];
+}
+
+export async function deletePayApplication(tx: Tx, ctx: JobsCtx, id: string): Promise<void> {
+  requireWrite(ctx, "owner");
+  const app = await loadPayApplication(tx, ctx.tenantId, id);
+  if (app.status !== "draft") {
+    throw new JobsError("INVALID_STATUS", "only a draft application can be deleted; an issued one is voided");
+  }
+  await tx
+    .delete(schema.jobPayApplications)
+    .where(
+      and(eq(schema.jobPayApplications.tenantId, ctx.tenantId), eq(schema.jobPayApplications.id, id)),
+    );
+}
+
+/** An active account by code, or null. The pack reads the chart; it never writes it. */
+async function accountByCode(tx: Tx, tenantId: string, codes: readonly string[]): Promise<string | null> {
+  for (const code of codes) {
+    const row = await tx.query.accounts.findFirst({
+      where: and(
+        eq(schema.accounts.tenantId, tenantId),
+        eq(schema.accounts.code, code),
+        eq(schema.accounts.isActive, true),
+      ),
+      columns: { id: true },
+    });
+    if (row) return row.id;
+  }
+  return null;
+}
+
+/**
+ * ISSUE A PAY APPLICATION: freeze its certificate and post it as an ordinary
+ * invoice (ADR 0058).
+ *
+ * The invoice is for the CURRENT PAYMENT DUE, made of two lines the ledger
+ * can read: the work earned this period, to contract revenue, tagged with the
+ * project so every report that groups by job sees it; and the retainage
+ * withheld this period as a NEGATIVE line to the retainage receivable —
+ * Dr AR (net), Dr Retainage Receivable (held), Cr Revenue (gross), which is
+ * the entry every contractor's accountant expects. When the rate is lowered
+ * or set to zero on a later application the same line runs the other way and
+ * RELEASES retainage: the final application releasing everything held is not
+ * a second feature, it is this one with the rate at zero.
+ *
+ * Nothing here is a second ledger. AR, aging, reminders, payments and the
+ * cash-basis lens all see the invoice, and the application remembers which
+ * one it became.
+ */
+export async function issuePayApplication(
+  tx: Tx,
+  ctx: JobsCtx,
+  id: string,
+  input: { issueDate: string; version?: number },
+): Promise<{ app: JobPayApplication; invoiceId: string }> {
+  requireWrite(ctx, "owner");
+  const app = await loadPayApplication(tx, ctx.tenantId, id);
+  if (app.status !== "draft") {
+    throw new JobsError("INVALID_STATUS", "only a draft application can be issued");
+  }
+  if (input.version !== undefined && input.version !== app.version) {
+    throw new JobsError("STALE_VERSION", "application changed since loaded");
+  }
+  await syncDraftLines(tx, ctx.tenantId, app);
+  const lines = (await loadAppLines(tx, ctx.tenantId, [app.id])).get(app.id) ?? [];
+  if (lines.length === 0) {
+    throw new JobsError("NO_LINES", "the contract needs a schedule of values first");
+  }
+  const previous = await lastIssuedBefore(tx, ctx.tenantId, app.contractId, app.number);
+  const totals = payApplicationTotals(figuresOf(lines, true), app.retainagePpm, certifiedCents(previous));
+  if (totals.dueCents <= 0) {
+    throw new JobsError("NOTHING_DUE", "nothing is due on this application");
+  }
+  const grossThisPeriod = totals.completedToDateCents - (previous?.completedToDateCents ?? 0);
+  const retainageThisPeriod = totals.retainageCents - (previous?.retainageCents ?? 0);
+
+  const contract = await loadContract(tx, ctx.tenantId, app.contractId);
+  if (!contract.counterpartyPartyId) {
+    throw new JobsError("COUNTERPARTY_REQUIRED", "the contract needs somebody to bill");
+  }
+  const project = await getProject(tx, ctx.tenantId, contract.projectId);
+  if (!project) throw new JobsError("NOT_FOUND", `project ${contract.projectId} not found`);
+
+  const revenueAccountId = await accountByCode(tx, ctx.tenantId, REVENUE_ACCOUNT_CODES);
+  if (!revenueAccountId) {
+    throw new JobsError(
+      "ACCOUNT_MISSING",
+      `the chart has no ${REVENUE_ACCOUNT_CODES.join(" or ")} account to bill to`,
+    );
+  }
+  let retainageAccountId: string | null = null;
+  if (retainageThisPeriod !== 0) {
+    retainageAccountId = await accountByCode(tx, ctx.tenantId, [RETAINAGE_RECEIVABLE_CODE]);
+    if (!retainageAccountId) {
+      throw new JobsError(
+        "ACCOUNT_MISSING",
+        `the chart has no ${RETAINAGE_RECEIVABLE_CODE} Retainage Receivable account`,
+      );
+    }
+  }
+  // The project's cost object, so the revenue lands on the job in every
+  // report. An archived member (a cancelled project) is simply not tagged —
+  // billing must not fail on a tag.
+  const member = (await listDimensionMembers(tx, ctx.tenantId, PROJECT_DIMENSION)).find(
+    (m) => m.packEntityId === project.id && m.isActive,
+  );
+  const dims = member ? [member.id] : undefined;
+
+  const customer = await ensureCustomerForParty(tx, ctx, contract.counterpartyPartyId);
+  const dueDate = await dueDateFromCustomerTerms(tx, ctx.tenantId, customer, input.issueDate);
+  const kind = contract.name ? `${contract.kind} · ${contract.name}` : contract.kind;
+  const ratePct = ppmToPercentString(app.retainagePpm);
+
+  const draft = await createInvoiceDraft(tx, ctx, {
+    entityId: project.entityId,
+    customerId: customer.id,
+    issueDate: input.issueDate,
+    dueDate,
+    memo: `Pay application ${app.number} · ${project.number} · ${kind}`,
+    lines: [
+      ...(grossThisPeriod !== 0
+        ? [
+            {
+              description: `Application ${app.number} — work completed and stored through ${app.periodTo}`,
+              quantity: "1",
+              unitPriceCents: grossThisPeriod,
+              incomeAccountId: revenueAccountId,
+              dimensionMemberIds: dims,
+            },
+          ]
+        : []),
+      ...(retainageThisPeriod !== 0 && retainageAccountId
+        ? [
+            {
+              description:
+                retainageThisPeriod > 0
+                  ? `Retainage withheld (${ratePct}%)`
+                  : "Retainage released",
+              quantity: "1",
+              unitPriceCents: -retainageThisPeriod,
+              incomeAccountId: retainageAccountId,
+              dimensionMemberIds: dims,
+            },
+          ]
+        : []),
+    ],
+  });
+  const issued = await issueInvoice(tx, ctx, { invoiceId: draft.id, expectedVersion: draft.version });
+
+  // Freeze what the certificate said, line by line and in total.
+  for (const line of lines) {
+    await tx
+      .update(schema.jobPayApplicationLines)
+      .set({ scheduledCents: line.sovScheduledCents, updatedAt: new Date() })
+      .where(eq(schema.jobPayApplicationLines.id, line.id));
+  }
+  const rows = await tx
+    .update(schema.jobPayApplications)
+    .set({
+      status: "issued",
+      invoiceId: issued.id,
+      issuedOn: input.issueDate,
+      scheduledCents: totals.scheduledCents,
+      completedToDateCents: totals.completedToDateCents,
+      retainageCents: totals.retainageCents,
+      previousCertificatesCents: totals.previousCertificatesCents,
+      dueCents: totals.dueCents,
+      version: app.version + 1,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(eq(schema.jobPayApplications.tenantId, ctx.tenantId), eq(schema.jobPayApplications.id, id)),
+    )
+    .returning();
+  return { app: rows[0], invoiceId: issued.id };
+}
+
+/**
+ * Void an issued application: its invoice is voided through Accounting (which
+ * refuses one that has payments) and the application stops counting. ONLY THE
+ * LATEST issued one on a contract can go, because every later certificate was
+ * computed from it — voiding an earlier one would leave the later ones
+ * certifying against a number that no longer stands.
+ */
+export async function voidPayApplication(
+  tx: Tx,
+  ctx: JobsCtx,
+  id: string,
+  input: { version?: number } = {},
+): Promise<JobPayApplication> {
+  requireWrite(ctx, "owner");
+  const app = await loadPayApplication(tx, ctx.tenantId, id);
+  if (app.status !== "issued") {
+    throw new JobsError("INVALID_STATUS", "only an issued application can be voided");
+  }
+  if (input.version !== undefined && input.version !== app.version) {
+    throw new JobsError("STALE_VERSION", "application changed since loaded");
+  }
+  const latest = await lastIssuedBefore(tx, ctx.tenantId, app.contractId, null);
+  if (!latest || latest.id !== app.id) {
+    throw new JobsError("NOT_LAST", "only the latest issued application can be voided");
+  }
+  if (app.invoiceId) {
+    const invoice = await loadInvoice(tx, ctx.tenantId, app.invoiceId);
+    if (invoice.status !== "void") {
+      await voidInvoice(tx, ctx, { invoiceId: invoice.id, expectedVersion: invoice.version });
+    }
+  }
+  const rows = await tx
+    .update(schema.jobPayApplications)
+    .set({ status: "void", version: app.version + 1, updatedAt: new Date() })
+    .where(
+      and(eq(schema.jobPayApplications.tenantId, ctx.tenantId), eq(schema.jobPayApplications.id, id)),
+    )
+    .returning();
+  return rows[0];
+}
+
+export interface ContractBilling {
+  contractId: string;
+  scheduledCents: number;
+  /** Σ current payment due over issued applications: what has been billed. */
+  billedCents: number;
+  /** What the latest issued application holds back. */
+  retainageHeldCents: number;
+  issuedCount: number;
+  hasDraft: boolean;
+}
+
+/** Per contract on a project: what the schedule says and what has been billed. */
+export async function contractBilling(
+  tx: Tx,
+  tenantId: string,
+  projectId: string,
+): Promise<Map<string, ContractBilling>> {
+  const contracts = await listContracts(tx, tenantId, projectId);
+  const ids = contracts.map((c) => c.id);
+  const out = new Map<string, ContractBilling>();
+  if (ids.length === 0) return out;
+  const [sov, apps] = await Promise.all([
+    tx
+      .select({
+        contractId: schema.jobSovLines.contractId,
+        scheduledCents: sql<number>`coalesce(sum(${schema.jobSovLines.scheduledCents}), 0)`.mapWith(
+          Number,
+        ),
+      })
+      .from(schema.jobSovLines)
+      .where(
+        and(eq(schema.jobSovLines.tenantId, tenantId), inArray(schema.jobSovLines.contractId, ids)),
+      )
+      .groupBy(schema.jobSovLines.contractId),
+    tx
+      .select()
+      .from(schema.jobPayApplications)
+      .where(
+        and(
+          eq(schema.jobPayApplications.tenantId, tenantId),
+          inArray(schema.jobPayApplications.contractId, ids),
+        ),
+      )
+      .orderBy(asc(schema.jobPayApplications.number)),
+  ]);
+  for (const c of contracts) {
+    out.set(c.id, {
+      contractId: c.id,
+      scheduledCents: sov.find((s) => s.contractId === c.id)?.scheduledCents ?? 0,
+      billedCents: 0,
+      retainageHeldCents: 0,
+      issuedCount: 0,
+      hasDraft: false,
+    });
+  }
+  for (const app of apps) {
+    const row = out.get(app.contractId)!;
+    if (app.status === "issued") {
+      row.billedCents += app.dueCents;
+      row.retainageHeldCents = app.retainageCents; // ascending by number: the latest wins
+      row.issuedCount += 1;
+    } else if (app.status === "draft") {
+      row.hasDraft = true;
+    }
+  }
+  return out;
+}
+
+/** One contract, or null. The page's loader; `loadContract` above throws for the verbs. */
+export async function getContract(
+  tx: Tx,
+  tenantId: string,
+  id: string,
+): Promise<JobContract | null> {
+  const rows = await tx
+    .select()
+    .from(schema.jobContracts)
+    .where(and(eq(schema.jobContracts.tenantId, tenantId), eq(schema.jobContracts.id, id)))
+    .limit(1);
+  return rows[0] ?? null;
 }

@@ -307,3 +307,38 @@ export const APPROVED_CHANGE_STATUSES: readonly ChangeOrderStatus[] = ["approved
 export function isChangeOrderStatus(v: string): v is ChangeOrderStatus {
   return (CHANGE_ORDER_STATUSES as readonly string[]).includes(v);
 }
+
+// ------------------------------------------------------------------- billing
+
+/** Mirrors `job_pay_applications_status_valid`. Kept in sync by tests/jobs.test.ts. */
+export const PAY_APPLICATION_STATUSES = ["draft", "issued", "void"] as const;
+export type PayApplicationStatus = (typeof PAY_APPLICATION_STATUSES)[number];
+
+/**
+ * There is no `paid` here on purpose: whether the client has paid is the
+ * INVOICE's business, and the page reads it from the invoice. A second copy
+ * of a payment status would be the drift every derived status exists to
+ * prevent.
+ */
+export const PAY_APPLICATION_STATUS_LABELS: Record<PayApplicationStatus, string> = {
+  draft: "Draft",
+  issued: "Issued",
+  void: "Void",
+};
+
+export function isPayApplicationStatus(v: string): v is PayApplicationStatus {
+  return (PAY_APPLICATION_STATUSES as readonly string[]).includes(v);
+}
+
+/** A rate in parts per million, so 100% is a million. Mirrors the CHECK. */
+export const RETAINAGE_PPM_MAX = 1_000_000;
+
+/**
+ * The account codes billing posts to, by the convention the profiles seed:
+ * contract revenue, else the general chart's Sales; and the retainage
+ * receivable the construction profile adds. A tenant whose chart lacks the
+ * second cannot withhold retainage until it adds it, and the refusal says so —
+ * a pack must not create accounts in a business's chart on its own.
+ */
+export const REVENUE_ACCOUNT_CODES = ["4030", "4000"] as const;
+export const RETAINAGE_RECEIVABLE_CODE = "1230";

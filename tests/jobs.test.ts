@@ -18,7 +18,10 @@ import {
   CONTRACT_STATUS_LABELS,
   DELIVERY_METHOD_FORMAT,
   PACK,
+  PAY_APPLICATION_STATUSES,
+  PAY_APPLICATION_STATUS_LABELS,
   PROJECT_STATUSES,
+  RETAINAGE_PPM_MAX,
   STATUS_LABELS,
   ROLE_LABELS,
   VALUED_CONTRACT_STATUSES,
@@ -30,9 +33,18 @@ import {
   isCommitmentStatus,
   isContractRole,
   isContractStatus,
+  isPayApplicationStatus,
   isProjectStatus,
   slugLabel,
 } from "../src/packs/jobs/vocabulary";
+import {
+  lineCompletedCents,
+  payApplicationTotals,
+  percentComplete,
+  percentStringToPpm,
+  ppmToPercentString,
+  retainageCents,
+} from "../src/packs/jobs/billing-math";
 import { packRegistry } from "../src/packs";
 
 /**
@@ -362,5 +374,117 @@ describe("change orders", () => {
     expect(isChangeOrderStatus("approved")).toBe(true);
     expect(isChangeOrderStatus("signed")).toBe(false);
     expect(isChangeOrderStatus("pco")).toBe(false);
+  });
+});
+
+/**
+ * Progress billing. The status list and the retainage range are CHECKs in
+ * both places, an issued application must be an invoice in both places, and
+ * the G702 arithmetic is pinned number by number — because a certificate that
+ * disagrees with its invoice by a cent is one the owner's bookkeeper sends
+ * back.
+ */
+const BILLING_SQL = readFileSync("drizzle/0335_job_billing.sql", "utf8");
+
+describe("progress billing", () => {
+  it("MIRRORS the status CHECK constraint", () => {
+    const m = BILLING_SQL.match(/job_pay_applications_status_valid[^(]*\(([^)]*)\)/);
+    expect(m, "constraint not found").not.toBeNull();
+    const inSql = [...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]);
+    expect(inSql.sort()).toEqual([...PAY_APPLICATION_STATUSES].sort());
+  });
+
+  it("keeps retainage between nothing and everything, in the database too", () => {
+    expect(BILLING_SQL).toMatch(/retainage_ppm" >= 0 and "job_pay_applications"."retainage_ppm" <= 1000000/);
+    expect(RETAINAGE_PPM_MAX).toBe(1_000_000);
+  });
+
+  it("makes an issued application an invoice and a draft not one, both ways", () => {
+    expect(BILLING_SQL).toMatch(/job_pay_applications_issued_has_invoice/);
+    expect(BILLING_SQL).toMatch(/= 'draft'\) = \("job_pay_applications"."invoice_id" is null\)/);
+  });
+
+  it("lets a period's work go negative but never a line's total to date", () => {
+    // An earlier over-billing is corrected on the next application; a line
+    // cannot be less than nothing complete.
+    expect(BILLING_SQL).not.toMatch(/this_period_cents" >= 0/);
+    expect(BILLING_SQL).toMatch(/job_pay_application_lines_completed_nonnegative/);
+  });
+
+  it("holds a billed schedule line and a voided invoice by RESTRICT", () => {
+    expect(BILLING_SQL).toMatch(/job_pay_application_lines_sov_fk[^;]*ON DELETE no action/);
+    expect(BILLING_SQL).toMatch(/job_pay_applications_invoice_fk[^;]*ON DELETE no action/);
+  });
+
+  it("gives every status a label and has no paid one — that is the invoice's word", () => {
+    for (const s of PAY_APPLICATION_STATUSES) expect(PAY_APPLICATION_STATUS_LABELS[s]).toBeTruthy();
+    expect(PAY_APPLICATION_STATUSES).not.toContain("paid");
+    expect(isPayApplicationStatus("issued")).toBe(true);
+    expect(isPayApplicationStatus("paid")).toBe(false);
+  });
+
+  describe("the G702 arithmetic", () => {
+    const lines = [
+      { sovLineId: "a", scheduledCents: 100_000_00, previousCents: 40_000_00, thisPeriodCents: 10_000_00, storedCents: 5_000_00 },
+      { sovLineId: "b", scheduledCents: 50_000_00, previousCents: 0, thisPeriodCents: 25_000_00, storedCents: 0 },
+    ];
+
+    it("adds the columns the way the form does", () => {
+      const t = payApplicationTotals(lines, 100_000, 36_000_00);
+      expect(t.scheduledCents).toBe(150_000_00);
+      expect(t.completedToDateCents).toBe(80_000_00);
+      expect(t.retainageCents).toBe(8_000_00);
+      expect(t.earnedLessRetainageCents).toBe(72_000_00);
+      expect(t.previousCertificatesCents).toBe(36_000_00);
+      expect(t.dueCents).toBe(36_000_00);
+      expect(t.balanceToFinishCents).toBe(70_000_00);
+    });
+
+    it("rounds retainage ONCE, on the total, half up", () => {
+      // 7.5% of $1,234.57 = $92.59275 → $92.59; on the total, not per line.
+      expect(retainageCents(123_457, 75_000)).toBe(9_259);
+      expect(retainageCents(1, 500_000)).toBe(1); // half a cent rounds up
+      expect(retainageCents(0, 100_000)).toBe(0);
+      expect(retainageCents(100, 0)).toBe(0);
+    });
+
+    it("releases retainage when the rate falls: due goes UP by what was held", () => {
+      const final = payApplicationTotals(
+        [{ sovLineId: "a", scheduledCents: 100_000_00, previousCents: 100_000_00, thisPeriodCents: 0, storedCents: 0 }],
+        0,
+        90_000_00, // the previous certificate held 10%
+      );
+      expect(final.retainageCents).toBe(0);
+      expect(final.dueCents).toBe(10_000_00);
+    });
+
+    it("lets a negative period correct an over-billing", () => {
+      const t = payApplicationTotals(
+        [{ sovLineId: "a", scheduledCents: 10_000_00, previousCents: 6_000_00, thisPeriodCents: -1_000_00, storedCents: 0 }],
+        0,
+        6_000_00,
+      );
+      expect(t.completedToDateCents).toBe(5_000_00);
+      expect(t.dueCents).toBe(-1_000_00); // nothing to invoice; the ops refuse it
+    });
+
+    it("reads percent complete to one decimal and says nothing for a worthless line", () => {
+      expect(percentComplete(55_000_00, 80_000_00)).toBe(68.8);
+      expect(percentComplete(0, 0)).toBeNull();
+      expect(lineCompletedCents({ previousCents: 1, thisPeriodCents: 2, storedCents: 3 })).toBe(6);
+    });
+
+    it("turns a percent box into parts per million and back without drift", () => {
+      expect(percentStringToPpm("10")).toBe(100_000);
+      expect(percentStringToPpm("7.5")).toBe(75_000);
+      expect(percentStringToPpm("7.5%")).toBe(75_000);
+      expect(percentStringToPpm("0")).toBe(0);
+      expect(percentStringToPpm("100")).toBe(1_000_000);
+      expect(percentStringToPpm("101")).toBeNull();
+      expect(percentStringToPpm("ten")).toBeNull();
+      expect(ppmToPercentString(100_000)).toBe("10");
+      expect(ppmToPercentString(75_000)).toBe("7.5");
+      expect(ppmToPercentString(0)).toBe("0");
+    });
   });
 });

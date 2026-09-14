@@ -82,6 +82,22 @@ export interface NativeBridge {
   app: AppPlugin | null;
   /** Null in a browser, and on any app build before native capture. */
   tell: TellPlugin | null;
+  /**
+   * Null in a browser, and on any app build before the shell could TALK.
+   *
+   * A WebView's `window.speechSynthesis` exists, accepts an utterance and makes
+   * no sound — which is why saying the answer back worked on a desktop and not
+   * in the app. Same fork as the microphone, for the same reason
+   * ([ADR 0049](../../docs/decisions/0049-speech-is-a-fork-in-the-road-not-a-provider.md)):
+   * the handset's own engine inside the app, the browser's outside it.
+   */
+  speak: SpeakPlugin | null;
+}
+
+/** What the shell offers for saying something out loud. */
+export interface SpeakPlugin {
+  speak(options: { text: string }): Promise<void>;
+  hush(): Promise<void>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -119,11 +135,18 @@ export function readNativeBridge(w: unknown): NativeBridge | null {
     // app falls back to the ordinary animation rather than calling a method
     // that is not there.
     typeof tell.wasTold === "function";
+  const voice = plugins && isRecord(plugins.Speak) ? plugins.Speak : null;
+  // Both methods, so a half-built shell falls back to the web's own engine
+  // rather than calling one that is not there.
+  const voiceUsable =
+    voice !== null && typeof voice.speak === "function" && typeof voice.hush === "function";
+
   return {
     platform,
     push: usable ? (push as unknown as PushPlugin) : null,
     app: appUsable ? (appPlugin as unknown as AppPlugin) : null,
     tell: tellUsable ? (tell as unknown as TellPlugin) : null,
+    speak: voiceUsable ? (voice as unknown as SpeakPlugin) : null,
   };
 }
 

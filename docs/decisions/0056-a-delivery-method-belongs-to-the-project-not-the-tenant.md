@@ -87,17 +87,72 @@ What survives untouched is this ADR's actual claim: the flavour is a property of
 the project, not the tenant. What moved is only what hangs off it, and the
 delivery method is **thinner** than the first draft thought.
 
-### Multi-company was already decided
+### Multi-company was already decided, at three levels
 
-The pilot has a cabinet shop and an excavation division that both work as subs,
-so one client relationship spans a GC, a design practice and two trade
-subcontractors. That is
-[ADR 0010](0010-entities-inside-a-tenant.md), live: `entities` owns the books
-inside a tenant, the schema's own test settles each case (*does the trial balance
-have to balance within it?*), and the hardest case — the company's own cabinet
-shop subcontracting to the company's own custom home — is the linked
-intercompany **pair** ADR 0010 exists for. **Construction must not invent a
-second notion of company.**
+The pilot's real structure is a **group** (Shrock Family of Companies) over three
+**legal entities** (Shrock Premier Custom Construction LLC, Rainbow Restoration,
+Shrock Prefab), one of which contains three **divisions** (Construction,
+Excavation, Cabinet Shop — the last two subbing out to other GCs).
+
+The platform already has exactly three levels and they map without invention:
+the **tenant** is the group ([ADR 0010](0010-entities-inside-a-tenant.md): the
+tenant is the client relationship, and billing is per tenant, so three companies
+is one subscription), **`entities`** are the companies, **`enterprises`** are the
+divisions. The schema's own test settles each case: *does the trial balance have
+to balance within it?* **Construction must not invent a second notion of company,
+or of division.**
+
+**A correction, recorded rather than patched.** An earlier draft of this ADR said
+the company's own cabinet shop subcontracting to its own custom home is ADR 0010's
+intercompany pair. It is not — both are divisions of one LLC, so the books balance
+within it and there is nothing to eliminate. It is an **allocation between
+dimension members**, following the house rounding rule in
+[cash-basis-allocate.ts](../../src/modules/accounting/core/cash-basis-allocate.ts),
+and the founder confirms the work is shared rather than invoiced today.
+Intercompany is still real, for a different pair: Shrock Prefab selling to Shrock
+Premier crosses two entities.
+
+### The consequence one level up: a group can span industries
+
+The pilot's group spans custom construction, restoration and prefab, and
+`tenants.industry` holds one slug — so the problem this ADR dissolves at the
+delivery-method level returns at the entity level. **It is narrower than it
+looks**: packs are per-tenant and switching on the union is fine, so *capability*
+survives and only *vocabulary* breaks (one word list for three industries) with
+seeds a mild third case, being additive and idempotent.
+
+**The designed answer is this ADR's own claim one level up: the industry belongs
+to the entity, not the tenant.** `entities.industry`, with label resolution
+reading the active entity and falling back to the tenant — the shape label
+resolution already has, one level deeper.
+
+**Deliberately not built, and now formally deferred.** The founder scoped the
+other two companies out on 2026-09-13 — different industries, *"not going to
+worry about right now"* — so construction's first customer is one entity with
+three divisions. The design is recorded with a **trigger rather than a date: the
+day Prefab or Restoration is put into the platform.** It does promote
+[packs-and-profiles.md](../modules/packs-and-profiles.md)'s
+two-profiles-on-one-tenant open item from hypothetical to observed, which is
+worth more than building it early.
+
+**Consolidated financials needed nothing.** The group does prepare them, and
+[consolidation.ts](../../src/modules/accounting/core/consolidation.ts) is ADR 0010
+slice 3, live, with `combined` and `consolidated` report scopes and a deliberate
+refusal on anything filed per entity. Its header states an explicit non-goal —
+**not full GAAP consolidation**, assuming *"commonly owned LLCs rather than a
+parent holding subsidiaries"* — and **the founder confirmed that assumption holds
+exactly: brother-sister, the family owning all three directly.** So its non-goals
+are non-goals here rather than gaps, and the group's reporting needs no work.
+**Construction's design changes not at all for any of it**: `entity_id` on a
+project, one entity, a report above it that already exists. That is ADR 0010 doing
+its job, and it is the strongest evidence in this ADR that the entity layer was
+designed at the right altitude.
+
+One thing came out of asking, and it belongs to accounting rather than here:
+statements for commonly owned entities are properly titled **combined**, which is
+the word the report control currently gives to the scope that does *not*
+eliminate. Recorded in [accounting.md](../modules/accounting.md) Open items —
+mechanism right, title in question, and an accountant settles it.
 
 ## Alternatives rejected
 
@@ -136,12 +191,18 @@ second notion of company.**
   `submittals` and `bonding` off. That is the empty-slot discipline working as
   intended, but it is a real objection a prospect may raise before the second
   profile exists.
-- **Vocabulary stays tenant-wide, so a company with two client words gets one.**
-  `tenants.labels` cannot say "Owner" on the commercial job and "Homeowner" on
-  the custom home in the same week. Construction is the first industry where
-  vocabulary might not be tenant-wide. Deliberately not solved here — most
-  companies have one internal vocabulary, and label-per-delivery-method is new
-  machinery nobody has yet proven they need.
+- **Vocabulary stays tenant-wide, and the pilot confirms that is enough.** It says
+  **client**, one word, commercial and custom alike, so the worry that a company
+  needs "Owner" on one job and "Homeowner" on another is closed and
+  label-per-delivery-method must not be built on speculation. **But the answer
+  exposed a real gap: no core module declares a single label key.** All fifteen in
+  the registry come from packs, and the only `client` belongs to
+  `professional-services`, so on install the pilot's invoice says "Customer" and
+  nothing can rename it. Core declaring `customer`, `invoice`, `vendor` and
+  `estimate` is a prerequisite of this profile, not a follow-up — it is slice 0a
+  in [construction.md](../modules/construction.md), and it is the gap
+  [packs-and-profiles.md](../modules/packs-and-profiles.md) already calls "the
+  bigger gap".
 - **`IndustryProfile.seed` grows a third kind.** It takes `accounts` and
   `folders` today. Project templates make it three, and the first seed kind that
   is a pack-owned table rather than a core one.

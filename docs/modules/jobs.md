@@ -13,6 +13,74 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-14 — Slice 3: what it was meant to cost (`claude/what-it-was-meant-to-cost`)
+
+`job_budget_lines` — one amount per cost code per project — and the **job cost
+report** that puts it beside what has been ordered. The fourth of the four
+numbers, and the one that makes the other three mean something.
+
+**THE SLICE ORDER WAS WRONG AND IS NOW CORRECTED.**
+[construction.md](construction.md) had change orders as slice 3 and never
+numbered the budget at all — it had been folded into slice 0, pulled out, then
+deferred through slices 1 and 2 by this dossier's own build log. Change orders
+lose that argument on the merits: **an approved change order revises both the
+contract value AND the budget**, so building them first means building the
+revenue half and retrofitting the cost half. Budget is 3; change orders are 4.
+
+**PER CODE, NEVER PER JOB.** "The job is $40k over" is a fact; "the framing is
+$40k over" is a decision, and only the second is worth a screen. The report is
+one row per cost code: budget, ordered, left — with `left` negative and red when
+a trade is over.
+
+**EVERY CODE WITH EITHER A BUDGET OR AN ORDER APPEARS.** A code somebody ordered
+against and never budgeted is the most interesting row on the page and the
+easiest to leave out of the query; it shows with a `Not budgeted` badge.
+
+**A BLANK BOX IS NOT ZERO**, and the form says so. Blank means "no plan for this
+code yet"; zero means "carried at nil, so anything spent against it is a
+variance". Writing one as the other would turn every untouched row into a fake
+overrun, so blanks are dropped at the action rather than saved.
+
+**A SAVE UPSERTS AND LEAVES OMITTED CODES ALONE** — the opposite of a
+commitment's lines, which are replaced. The reason is the shape of the work: a
+commitment's lines are one document somebody is editing in front of them, while a
+budget is built up over weeks by different people. Replacing it would make "I
+added the concrete number" quietly delete everything typed since the form was
+opened. Removing a code is `removeBudgetLine`, said out loud.
+
+**`original_cents` IS NAMED FOR SLICE 4.** A construction budget moves for one
+legitimate reason, and the line every owner and surety knows is *original +
+approved changes = revised*. Calling it `amount_cents` would have made the first
+change order a migration plus an argument about which number the old column held.
+There is no `revised_cents` yet because nothing would write it — the standard
+this pack set by refusing `PackDefinition.dimensionTypes` and deleting
+`projectValues.openCount` before it shipped.
+
+### The column that is deliberately absent
+
+**There is no per-code ACTUAL.** `getBalances` groups by ONE dimension type, so
+it can answer *what has this project cost* or *what has this code cost across
+every project* — not both. A per-code actual here would mean either reading
+accounting's tables directly, which this pack must not do, or quietly reporting
+another job's spend in this job's column. The project-level actual is on the page
+as its own figure and the panel says why the code rows stop at "ordered".
+
+Closing it needs `getBalances` to take a second group-by, which is accounting's
+call and not this pack's to force.
+
+**A hole found by driving it, the same shape as last slice's.** The budget editor
+offered RETIRED cost codes. A retired code is one the business has stopped using
+— `updateCostCode` already archives its cost object so it cannot be put on a
+bill — and offering it for a new budget is the same mistake one layer up. It now
+shows active codes plus any that already carry a budget, because retiring a code
+must not strand a figure nobody can reach.
+
+**Driven on the dev branch:** a $40,000 budget on `03 30 00`, then the existing
+subcontract's first line coded to it. The report reads **Budget $40,000.00 ·
+Ordered $62,000.00 · Left −$22,000.00** in red, while the job's Committed total
+stays $100,500.00 — because the order's second line is still uncoded, which is
+the honest difference between what a code has against it and what the job owes.
+
 ### 2026-09-14 — A module nobody could switch on (`claude/a-module-nobody-can-switch-on`)
 
 **THE PACK WAS INVISIBLE ON PRODUCTION, AND HAD BEEN ALL WEEK.** The founder
@@ -332,6 +400,7 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_cost_code_sets` | A named list of cost codes. One or several per tenant. | FORCE RLS, member-wide. `job_cost_code_sets_one_default_idx` is a PARTIAL unique index, so **two defaults fail at the database** rather than depending on the action having cleared the first. |
 | `job_cost_codes` | One line of the chart of cost. | Composite FK to `(tenant_id, set_id)`, **cascade** — deleting a list deletes its codes. `code` is free text, never a number: CSI writes `03 30 00`, NAHB writes `1000`, a builder writes `CONC-SLAB`. `sort_order` is what orders the list, so a code never has to be sortable to be right. |
 | `job_contracts` | **Many per project.** Kind, value, billing method, counterparty, role, status, and a `sequence` that keeps the ladder in agreed order. | Composite FK to the project, **cascade** — a project's agreements are part of it, proved in the isolation suite rather than assumed, because a dangling contract would still be summed by `projectValues`. `kind` is an open taxonomy (format check only); `role`, `status` and `billing_method` are CHECK lists. **No `direction` column** — see the build log. |
+| `job_budget_lines` | What each cost code was PLANNED to cost. | One line per code per project, enforced by a unique index rather than by the action remembering — two would make every variance ambiguous. `cost_code_id` is NOT NULL, unlike a commitment line's: a budget without a code is a single number for the whole job, which is what this table exists to stop being the answer. `original_cents` is named for the revision slice 4 will add beside it. RESTRICT to the code, so a budgeted code is retired and never deleted. |
 | `job_commitments` | What the business has ORDERED: a purchase order or a subcontract. | `party_id` is NOT NULL — a commitment with nobody to pay is a budget line, not a commitment. `kind` is a CHECK list of two because the two diverge in behaviour later. Number unique per tenant: a vendor quotes it back on the invoice. Cascade from the project. |
 | `job_commitment_lines` | The money, one cost code at a time. | Cascade from the commitment; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative — a credit is a change order. |
 | `job_projects` | The spine. | FOUR composite FKs, each certified in `tests/isolation/jobs.test.ts`: company, division, client, cost code list. `delivery_method` is an open taxonomy (P1) with a **format check and no value check**, and is nullable. `metadata` is the P2 extension bag. |
@@ -340,8 +409,10 @@ Migrations `0325_jobs.sql` / `0326_jobs_rls.sql` (slice 0) and
 `0327_job_contracts.sql` / `0328_job_contracts_rls.sql` (slice 1), each applied
 to dev and prod before its merge, per
 [ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md).
-`0329_job_commitments.sql` / `0330_job_commitments_rls.sql` (slice 2) follow the
-same rule. `db:verify-rls` reports **198 tables**, all enabled, forced and with
+`0329_job_commitments.sql` / `0330_job_commitments_rls.sql` (slice 2) and
+`0331_job_budget.sql` / `0332_job_budget_rls.sql` (slice 3) follow the same rule —
+and from slice 3 the pair is `db:verify-rls` **and `db:verify-modules`**, after
+the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **198 tables**, all enabled, forced and with
 policies, on both.
 
 **0327 needed no hand-reordering, which confirms the diagnosis in 0325.** Both
@@ -397,15 +468,19 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Open items
 
-- **No budget.** A project now has a contract value, a committed total and an
-  actual cost, and nothing holds it to a planned figure per cost code. That is
-  the next slice, and it is now the only one of the four numbers missing.
-- **ACTUAL COST IS PER PROJECT, NOT PER CODE.** `committedTotals` already returns
-  `byCostCode`; the ledger side does not, because a bill line has to be TAGGED
-  with a code before it can be grouped by one — and nothing has been yet. The
-  machinery is in place from this slice: codes are dimension members, so the bill
-  builder offers them. Per-code variance is a query away once real bills carry
-  codes, and is deliberately not built against zero data.
+- ~~**No budget.**~~ — **closed 2026-09-14.** All four numbers exist: worth,
+  planned, ordered, spent.
+- **Nothing revises a budget or a contract value.** An approved change order is
+  the one legitimate reason either moves, and it is slice 4. Today both are edited
+  in place, which loses the *original + approved changes = revised* line every
+  owner and surety reads.
+- **ACTUAL COST IS PER PROJECT, NOT PER CODE, and the blocker is now named.**
+  `getBalances` groups by ONE dimension type, so it can answer *what has this
+  project cost* or *what has this code cost across every project* — never both.
+  The job cost report therefore stops at "ordered" per code and says so on the
+  page. Closing it needs a second group-by in `getBalances`, which is
+  **accounting's call**: this pack must not read its tables, and faking it would
+  report another job's spend in this job's column.
 - **Nothing bills.** `billing_method` is recorded on every contract and read by
   no code. Pay applications, retainage and the schedule of values are slice 4.
 - ~~**A contract cannot be edited from the screen.**~~ — **closed 2026-09-14.**

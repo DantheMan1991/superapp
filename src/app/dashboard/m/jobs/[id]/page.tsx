@@ -21,15 +21,17 @@ import { Badge } from "@/components/ui/badge";
 import {
   actualByProject,
   committedTotals,
+  jobCostRows,
   getProject,
   listCommitments,
   listContracts,
   listCostCodes,
 } from "@/packs/jobs/ops";
 import { allowsWrite } from "@/lib/packs/authorize";
-import { formatMoney } from "@/lib/money";
+import { formatMoney, formatMoneySign } from "@/lib/money";
 import { ContractForm } from "@/packs/jobs/components/contract-form";
 import { CommitmentForm } from "@/packs/jobs/components/commitment-form";
+import { BudgetEditor } from "@/packs/jobs/components/budget-editor";
 import { ProjectForm } from "@/packs/jobs/components/project-form";
 import { Button } from "@/components/ui/button";
 import { listCostCodeSets } from "@/packs/jobs/ops";
@@ -87,6 +89,7 @@ export default async function ProjectPage({
         contracts,
         commitments,
         committed,
+        costRows,
         actual,
         allEntities,
         allEnterprises,
@@ -147,6 +150,7 @@ export default async function ProjectPage({
         listContracts(tx, ctx.tenant.id, project.id),
         listCommitments(tx, ctx.tenant.id, project.id),
         committedTotals(tx, ctx.tenant.id),
+        jobCostRows(tx, ctx.tenant.id, project.id),
         /*
          * ACTUAL COST COMES FROM THE LEDGER through a CORE export, never from a
          * query of accounting's tables. `getBalances` already applies the basis
@@ -199,6 +203,7 @@ export default async function ProjectPage({
         contracts,
         commitments,
         committed,
+        costRows,
         actual,
         allEntities,
         allEnterprises,
@@ -216,6 +221,15 @@ export default async function ProjectPage({
   const { project, codes, contracts, commitments, member } = data;
   const committedCents = data.committed.byProject.get(project.id) ?? 0;
   const actualCents = data.actual.get(project.id) ?? 0;
+  const budgetTotal = data.costRows.reduce((sum, r) => sum + r.budgetCents, 0);
+  /**
+   * Ordered against BUDGETED codes only, so the headline compares like with
+   * like. A code somebody ordered against and never budgeted still shows as its
+   * own row — flagged — rather than silently inflating the comparison.
+   */
+  const committedOfBudgeted = data.costRows
+    .filter((r) => r.hasBudget)
+    .reduce((sum, r) => sum + r.committedCents, 0);
   const isOwner = allowsWrite(ctx.role, "owner");
   const symbol = ctx.tenant.currencySymbol;
   /**
@@ -457,6 +471,117 @@ export default async function ProjectPage({
             </Table>
           </div>
         )}
+      </Panel>
+
+      <Panel>
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-heading text-sm font-medium tracking-heading">
+            Job cost
+          </h2>
+          {isOwner && (
+            <BudgetEditor
+              projectId={project.id}
+              /*
+                ACTIVE CODES, PLUS ANY THAT ALREADY CARRY A BUDGET. A retired
+                code is one the business has stopped using, so offering it for a
+                NEW budget is the same mistake as offering it on a bill — which
+                `updateCostCode` already prevents by archiving its cost object.
+                But a figure already set against one has to stay visible and
+                editable, or retiring a code would strand money nobody can reach.
+                Same shape as the cost-code-set picker rule above.
+              */
+              codes={data.codes
+                .filter(
+                  (c) =>
+                    c.isActive ||
+                    data.costRows.some(
+                      (r) => r.costCodeId === c.id && r.hasBudget,
+                    ),
+                )
+                .map((c) => ({ id: c.id, code: c.code, name: c.name }))}
+              existing={Object.fromEntries(
+                data.costRows
+                  .filter((r) => r.hasBudget)
+                  .map((r) => [r.costCodeId, r.budgetCents]),
+              )}
+            />
+          )}
+        </div>
+        <p className="mb-3 text-sm text-muted-foreground">
+          {/*
+            THE QUESTION THIS PANEL ANSWERS, said in words. "The job is $40k
+            over" is a fact; "the framing is $40k over" is a decision, and only
+            the per-code view gets you the second one.
+          */}
+          {data.costRows.length === 0
+            ? "No budget set. Until there is one, committed and actual say what has happened but not whether it was the plan."
+            : `Budget ${formatMoney(budgetTotal, symbol)} against ${formatMoney(
+                committedOfBudgeted,
+                symbol,
+              )} ordered.`}
+        </p>
+
+        {data.costRows.length > 0 && (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-28">Code</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead className="text-right">Budget</TableHead>
+                  <TableHead className="text-right">Ordered</TableHead>
+                  <TableHead className="text-right">Left</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.costRows.map((r) => (
+                  <TableRow key={r.costCodeId}>
+                    <TableCell className="font-mono text-xs">{r.code}</TableCell>
+                    <TableCell>
+                      {r.name}
+                      {!r.hasBudget && (
+                        /*
+                         * THE MOST INTERESTING ROW ON THE PAGE: something was
+                         * ordered against a code nobody budgeted. Easy to leave
+                         * out of the query and the one a builder most wants to
+                         * see.
+                         */
+                        <Badge variant="secondary" className="ml-2">
+                          Not budgeted
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {r.hasBudget ? formatMoney(r.budgetCents, symbol) : "—"}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatMoney(r.committedCents, symbol)}
+                    </TableCell>
+                    <TableCell
+                      className={
+                        "text-right tabular-nums " +
+                        (r.varianceCents < 0 ? "text-destructive font-medium" : "")
+                      }
+                    >
+                      {r.hasBudget ? formatMoneySign(r.varianceCents, symbol) : "—"}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+        <p className="mt-3 text-xs text-muted-foreground">
+          {/*
+            SAID RATHER THAN FAKED. `getBalances` groups by one dimension type,
+            so it can answer "what has this project cost" or "what has this code
+            cost across every project" — not both. Showing a per-code actual here
+            would mean borrowing another job's spend.
+          */}
+          Ordered is what has been committed on this job. Actual cost is shown
+          for the whole job above; per-code actuals arrive once bills carry cost
+          codes.
+        </p>
       </Panel>
 
       <Panel>

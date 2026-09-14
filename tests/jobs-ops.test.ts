@@ -13,7 +13,9 @@ import {
   getDefaultCostCodeSet,
   listContracts,
   projectValues,
+  jobCostRows,
   listCommitments,
+  setBudgetLines,
   updateCommitment,
   updateContract,
   updateCostCode,
@@ -598,5 +600,250 @@ d("jobs ops", () => {
         });
       }),
     ).rejects.toMatchObject({ code: "INVALID_VALUE" });
+  });
+
+  it("a budget is one line per code, and a second write is an EDIT", async () => {
+    // Two rows for one code would make every variance ambiguous and every total
+    // quietly wrong, so the unique index is the mechanism rather than a backstop.
+    const { first, second, count } = await run(async (tx) => {
+      const p = await createProject(tx, ctx, {
+        entityId,
+        number: "OPS-B1",
+        name: "Budgeted",
+      });
+      const set = await createCostCodeSet(tx, ctx, { name: "B1 codes" });
+      const code = await createCostCode(tx, ctx, {
+        setId: set.id,
+        code: "06 10 00",
+        name: "Carpentry",
+      });
+      const first = await setBudgetLines(tx, ctx, p.id, [
+        { costCodeId: code.id, originalCents: 50_000_00 },
+      ]);
+      const second = await setBudgetLines(tx, ctx, p.id, [
+        { costCodeId: code.id, originalCents: 55_000_00 },
+      ]);
+      const rows = await tx
+        .select()
+        .from(schema.jobBudgetLines)
+        .where(eq(schema.jobBudgetLines.projectId, p.id));
+      return { first: first[0], second: second[0], count: rows.length };
+    });
+    expect(first.originalCents).toBe(50_000_00);
+    expect(second.originalCents).toBe(55_000_00);
+    expect(second.id).toBe(first.id);
+    expect(count).toBe(1);
+  });
+
+  it("LEAVES A CODE ALONE when a save does not mention it", async () => {
+    /*
+     * The difference from a commitment's lines, which are replaced. A budget is
+     * built up over weeks by different people; replacing it would make "I added
+     * the concrete number" quietly delete everything typed since.
+     */
+    const rows = await run(async (tx) => {
+      const p = await createProject(tx, ctx, {
+        entityId,
+        number: "OPS-B2",
+        name: "Incremental",
+      });
+      const set = await createCostCodeSet(tx, ctx, { name: "B2 codes" });
+      const a = await createCostCode(tx, ctx, {
+        setId: set.id,
+        code: "03 30 00",
+        name: "Concrete",
+      });
+      const b = await createCostCode(tx, ctx, {
+        setId: set.id,
+        code: "06 10 00",
+        name: "Carpentry",
+      });
+      await setBudgetLines(tx, ctx, p.id, [
+        { costCodeId: a.id, originalCents: 10_000_00 },
+        { costCodeId: b.id, originalCents: 20_000_00 },
+      ]);
+      // A later save that only mentions one of them.
+      await setBudgetLines(tx, ctx, p.id, [
+        { costCodeId: a.id, originalCents: 11_000_00 },
+      ]);
+      return tx
+        .select()
+        .from(schema.jobBudgetLines)
+        .where(eq(schema.jobBudgetLines.projectId, p.id));
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows.find((r) => r.originalCents === 11_000_00)).toBeDefined();
+    // The untouched one survived.
+    expect(rows.find((r) => r.originalCents === 20_000_00)).toBeDefined();
+  });
+
+  it("refuses a negative budget", async () => {
+    await expect(
+      run(async (tx) => {
+        const p = await createProject(tx, ctx, {
+          entityId,
+          number: "OPS-B3",
+          name: "Negative",
+        });
+        const set = await createCostCodeSet(tx, ctx, { name: "B3 codes" });
+        const code = await createCostCode(tx, ctx, {
+          setId: set.id,
+          code: "01",
+          name: "X",
+        });
+        await setBudgetLines(tx, ctx, p.id, [
+          { costCodeId: code.id, originalCents: -1 },
+        ]);
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE" });
+  });
+
+  it("THE JOB COST REPORT shows budget against committed, per code", async () => {
+    const rows = await run(async (tx) => {
+      const p = await createProject(tx, ctx, {
+        entityId,
+        number: "OPS-B4",
+        name: "Report",
+      });
+      const set = await createCostCodeSet(tx, ctx, { name: "B4 codes" });
+      const conc = await createCostCode(tx, ctx, {
+        setId: set.id,
+        code: "03 30 00",
+        name: "Concrete",
+        sortOrder: 10,
+      });
+      const carp = await createCostCode(tx, ctx, {
+        setId: set.id,
+        code: "06 10 00",
+        name: "Carpentry",
+        sortOrder: 20,
+      });
+      const surprise = await createCostCode(tx, ctx, {
+        setId: set.id,
+        code: "09 90 00",
+        name: "Painting",
+        sortOrder: 30,
+      });
+      const party = await seedVendor(tx, "Report Supply");
+
+      await setBudgetLines(tx, ctx, p.id, [
+        { costCodeId: conc.id, originalCents: 40_000_00 },
+        { costCodeId: carp.id, originalCents: 60_000_00 },
+      ]);
+      await createCommitment(tx, ctx, {
+        projectId: p.id,
+        partyId: party,
+        number: "PO-B4-1",
+        status: "issued",
+        lines: [
+          { costCodeId: conc.id, amountCents: 35_000_00 },
+          // Over its budget.
+          { costCodeId: carp.id, amountCents: 72_000_00 },
+          // Never budgeted at all.
+          { costCodeId: surprise.id, amountCents: 5_000_00 },
+        ],
+      });
+      // A DRAFT on the same job must not reach the report.
+      await createCommitment(tx, ctx, {
+        projectId: p.id,
+        partyId: party,
+        number: "PO-B4-2",
+        status: "draft",
+        lines: [{ costCodeId: conc.id, amountCents: 99_999_00 }],
+      });
+      return jobCostRows(tx, tenantId, p.id);
+    });
+
+    // Sorted by the business's own chart order, not by id.
+    expect(rows.map((r) => r.code)).toEqual(["03 30 00", "06 10 00", "09 90 00"]);
+
+    const conc = rows[0];
+    expect(conc.budgetCents).toBe(40_000_00);
+    expect(conc.committedCents).toBe(35_000_00); // the draft is excluded
+    expect(conc.varianceCents).toBe(5_000_00);
+
+    const carp = rows[1];
+    expect(carp.varianceCents).toBe(-12_000_00); // negative means over
+
+    // THE MOST INTERESTING ROW: ordered against, never budgeted.
+    const paint = rows[2];
+    expect(paint.hasBudget).toBe(false);
+    expect(paint.budgetCents).toBe(0);
+    expect(paint.committedCents).toBe(5_000_00);
+  });
+
+  it("does NOT borrow another job's orders into this job's report", async () => {
+    /*
+     * `committedTotals` answers for the whole tenant; a job cost report must
+     * not. Two projects sharing a cost code is the ordinary case, and getting
+     * this wrong would show every job the sum of all of them.
+     */
+    const { mine, theirs } = await run(async (tx) => {
+      const set = await createCostCodeSet(tx, ctx, { name: "Shared codes" });
+      const code = await createCostCode(tx, ctx, {
+        setId: set.id,
+        code: "31 00 00",
+        name: "Earthwork",
+      });
+      const party = await seedVendor(tx, "Shared Supply");
+      const a = await createProject(tx, ctx, {
+        entityId,
+        number: "OPS-B5a",
+        name: "Mine",
+      });
+      const b = await createProject(tx, ctx, {
+        entityId,
+        number: "OPS-B5b",
+        name: "Theirs",
+      });
+      await setBudgetLines(tx, ctx, a.id, [
+        { costCodeId: code.id, originalCents: 10_000_00 },
+      ]);
+      await createCommitment(tx, ctx, {
+        projectId: a.id,
+        partyId: party,
+        number: "PO-B5a",
+        status: "issued",
+        lines: [{ costCodeId: code.id, amountCents: 3_000_00 }],
+      });
+      await createCommitment(tx, ctx, {
+        projectId: b.id,
+        partyId: party,
+        number: "PO-B5b",
+        status: "issued",
+        lines: [{ costCodeId: code.id, amountCents: 8_000_00 }],
+      });
+      return {
+        mine: await jobCostRows(tx, tenantId, a.id),
+        theirs: await jobCostRows(tx, tenantId, b.id),
+      };
+    });
+    expect(mine[0].committedCents).toBe(3_000_00);
+    expect(theirs[0].committedCents).toBe(8_000_00);
+  });
+
+  it("a cost code with a BUDGET against it cannot be deleted", async () => {
+    // Same backstop as a commitment line's: codes are retired, never deleted.
+    await expect(
+      run(async (tx) => {
+        const p = await createProject(tx, ctx, {
+          entityId,
+          number: "OPS-B6",
+          name: "Protected",
+        });
+        const set = await createCostCodeSet(tx, ctx, { name: "B6 codes" });
+        const code = await createCostCode(tx, ctx, {
+          setId: set.id,
+          code: "01",
+          name: "X",
+        });
+        await setBudgetLines(tx, ctx, p.id, [
+          { costCodeId: code.id, originalCents: 1_00 },
+        ]);
+        await tx
+          .delete(schema.jobCostCodes)
+          .where(eq(schema.jobCostCodes.id, code.id));
+      }),
+    ).rejects.toThrow();
   });
 });

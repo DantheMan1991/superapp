@@ -40,6 +40,7 @@ d("jobs tables (RLS)", () => {
   let projectB = "";
   let contractA = "";
   let commitmentA = "";
+  let budgetA = "";
   let codeA = "";
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
@@ -132,6 +133,17 @@ d("jobs tables (RLS)", () => {
         costCodeId: codeA,
         amountCents: 4_200_00,
       });
+
+      const budgets = await tx
+        .insert(schema.jobBudgetLines)
+        .values({
+          tenantId: tenantA,
+          projectId: projectA,
+          costCodeId: codeA,
+          originalCents: 5_000_00,
+        })
+        .returning();
+      budgetA = budgets[0].id;
 
       const contracts = await tx
         .insert(schema.jobContracts)
@@ -462,6 +474,69 @@ d("jobs tables (RLS)", () => {
     }));
     expect(left.heads).toEqual([]);
     expect(left.lines).toEqual([]);
+  });
+
+  it("cannot read another tenant's BUDGET", async () => {
+    // A budget by cost code is the closest thing in this pack to a margin.
+    const rows = await asOtherTenant((tx) =>
+      tx
+        .select()
+        .from(schema.jobBudgetLines)
+        .where(eq(schema.jobBudgetLines.id, budgetA)),
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it("cannot change another tenant's budget", async () => {
+    const rows = await asOtherTenant((tx) =>
+      tx
+        .update(schema.jobBudgetLines)
+        .set({ originalCents: 1 })
+        .where(eq(schema.jobBudgetLines.id, budgetA))
+        .returning(),
+    );
+    expect(rows).toEqual([]);
+    const still = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.jobBudgetLines)
+        .where(eq(schema.jobBudgetLines.id, budgetA)),
+    );
+    expect(still[0].originalCents).toBe(5_000_00);
+  });
+
+  it("a budget line cannot name another tenant's COST CODE", async () => {
+    const otherCode = await withSystem(async (tx) => {
+      const r = await tx
+        .select()
+        .from(schema.jobCostCodes)
+        .where(eq(schema.jobCostCodes.setId, setB));
+      return r[0].id;
+    });
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobBudgetLines).values({
+          tenantId: tenantA,
+          projectId: projectA,
+          costCodeId: otherCode,
+          originalCents: 1,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("one budget line per code per project, enforced by the database", async () => {
+    // Two would make every variance ambiguous and every total quietly wrong.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobBudgetLines).values({
+          tenantId: tenantA,
+          projectId: projectA,
+          costCodeId: codeA,
+          originalCents: 999,
+        }),
+      ),
+    ).rejects.toThrow();
   });
 
   it("keeps the two builders' identically-numbered codes apart", async () => {

@@ -4,6 +4,8 @@ import { and, eq, inArray } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../src/db";
 import {
   JobsError,
+  committedTotals,
+  createCommitment,
   createContract,
   createCostCode,
   createCostCodeSet,
@@ -11,13 +13,19 @@ import {
   getDefaultCostCodeSet,
   listContracts,
   projectValues,
+  listCommitments,
+  updateCommitment,
   updateContract,
   updateCostCode,
   updateCostCodeSet,
   updateProject,
   type JobsCtx,
 } from "../src/packs/jobs/ops";
-import { PROJECT_DIMENSION } from "../src/packs/jobs/vocabulary";
+import {
+  COST_CODE_DIMENSION,
+  PROJECT_DIMENSION,
+} from "../src/packs/jobs/vocabulary";
+import { listDimensionMembers } from "../src/modules/accounting/core";
 
 /**
  * The `jobs` pack's write verbs, against a real database.
@@ -85,6 +93,20 @@ d("jobs ops", () => {
       await tx.delete(schema.tenants).where(inArray(schema.tenants.id, [tenantId]));
     });
   });
+
+  /** A commitment needs somebody to pay — see the schema header. */
+  let vendorSeq = 0;
+  const seedVendor = async (tx: Tx, name: string): Promise<string> => {
+    const rows = await tx
+      .insert(schema.parties)
+      .values({
+        tenantId,
+        displayName: `${name} ${(vendorSeq += 1)}`,
+        kind: "organization",
+      })
+      .returning();
+    return rows[0].id;
+  };
 
   const memberFor = (tx: Tx, projectId: string) =>
     tx
@@ -346,5 +368,235 @@ d("jobs ops", () => {
         });
       }),
     ).rejects.toBeInstanceOf(JobsError);
+  });
+
+  it("a cost code becomes a cost object, and its retirement follows", async () => {
+    /*
+     * The reason this slice exists at all: once a code is a dimension member, a
+     * bill line can be charged to it and every accounting report can group by it
+     * — with no change in accounting, because the bill builder derives the types
+     * it offers from whatever members exist.
+     */
+    const { onCreate, onRename, onRetire, onRestore } = await run(async (tx) => {
+      const set = await createCostCodeSet(tx, ctx, { name: "Dim codes" });
+      const code = await createCostCode(tx, ctx, {
+        setId: set.id,
+        code: "06 10 00",
+        name: "Rough carpentry",
+      });
+      const memberOf = async () => {
+        const all = await listDimensionMembers(tx, tenantId, COST_CODE_DIMENSION);
+        return all.find((m) => m.packEntityId === code.id)!;
+      };
+      const onCreate = await memberOf();
+      await updateCostCode(tx, ctx, code.id, { code: "06 11 00" });
+      const onRename = await memberOf();
+      await updateCostCode(tx, ctx, code.id, { isActive: false });
+      const onRetire = await memberOf();
+      await updateCostCode(tx, ctx, code.id, { isActive: true });
+      const onRestore = await memberOf();
+      return { onCreate, onRename, onRetire, onRestore };
+    });
+    expect(onCreate.displayName).toBe("06 10 00 · Rough carpentry");
+    expect(onCreate.isActive).toBe(true);
+    // A renumbered code must not leave reports grouping by the old number.
+    expect(onRename.displayName).toBe("06 11 00 · Rough carpentry");
+    // A retired code stops being offered; what is charged to it keeps reporting.
+    expect(onRetire.isActive).toBe(false);
+    expect(onRestore.isActive).toBe(true);
+  });
+
+  it("ONLY ISSUED AND CLOSED ORDERS COUNT as committed", async () => {
+    // The same shape of rule as a proposed contract not being revenue: a draft
+    // order has not been sent, so nobody is owed anything.
+    const { byProject, byCostCode, codeId } = await run(async (tx) => {
+      const p = await createProject(tx, ctx, {
+        entityId,
+        number: "OPS-C1",
+        name: "Committed",
+      });
+      const set = await createCostCodeSet(tx, ctx, { name: "C1 codes" });
+      const code = await createCostCode(tx, ctx, {
+        setId: set.id,
+        code: "03 30 00",
+        name: "Concrete",
+      });
+      const party = await seedVendor(tx, "Valley Concrete");
+
+      await createCommitment(tx, ctx, {
+        projectId: p.id,
+        partyId: party,
+        number: "PO-1",
+        status: "issued",
+        lines: [{ costCodeId: code.id, amountCents: 4_000_00 }],
+      });
+      await createCommitment(tx, ctx, {
+        projectId: p.id,
+        partyId: party,
+        number: "PO-2",
+        status: "closed",
+        lines: [{ costCodeId: code.id, amountCents: 1_000_00 }],
+      });
+      await createCommitment(tx, ctx, {
+        projectId: p.id,
+        partyId: party,
+        number: "PO-3",
+        status: "draft",
+        lines: [{ costCodeId: code.id, amountCents: 9_999_00 }],
+      });
+      await createCommitment(tx, ctx, {
+        projectId: p.id,
+        partyId: party,
+        number: "PO-4",
+        status: "cancelled",
+        lines: [{ costCodeId: code.id, amountCents: 7_777_00 }],
+      });
+      const totals = await committedTotals(tx, tenantId);
+      return {
+        byProject: totals.byProject.get(p.id),
+        byCostCode: totals.byCostCode.get(code.id),
+        codeId: code.id,
+      };
+    });
+    expect(codeId).toBeTruthy();
+    // 4,000 + 1,000 only. The draft and the cancelled one are not money.
+    expect(byProject).toBe(5_000_00);
+    expect(byCostCode).toBe(5_000_00);
+  });
+
+  it("sums a multi-line subcontract across its cost codes", async () => {
+    const { total, labour, material } = await run(async (tx) => {
+      const p = await createProject(tx, ctx, {
+        entityId,
+        number: "OPS-C2",
+        name: "Framing",
+      });
+      const set = await createCostCodeSet(tx, ctx, { name: "C2 codes" });
+      const lab = await createCostCode(tx, ctx, {
+        setId: set.id,
+        code: "06 10 10",
+        name: "Framing labour",
+      });
+      const mat = await createCostCode(tx, ctx, {
+        setId: set.id,
+        code: "06 10 20",
+        name: "Framing material",
+      });
+      const party = await seedVendor(tx, "Hill Framing");
+      await createCommitment(tx, ctx, {
+        projectId: p.id,
+        partyId: party,
+        kind: "subcontract",
+        number: "SC-1",
+        status: "issued",
+        lines: [
+          { costCodeId: lab.id, amountCents: 62_000_00 },
+          { costCodeId: mat.id, amountCents: 38_500_00 },
+        ],
+      });
+      const totals = await committedTotals(tx, tenantId);
+      return {
+        total: totals.byProject.get(p.id),
+        labour: totals.byCostCode.get(lab.id),
+        material: totals.byCostCode.get(mat.id),
+      };
+    });
+    expect(total).toBe(100_500_00);
+    expect(labour).toBe(62_000_00);
+    expect(material).toBe(38_500_00);
+  });
+
+  it("REFUSES a commitment with no lines", async () => {
+    // It would sit on the project looking like an order and add nothing to what
+    // the job owes, which is worse than a refusal.
+    await expect(
+      run(async (tx) => {
+        const p = await createProject(tx, ctx, {
+          entityId,
+          number: "OPS-C3",
+          name: "Empty",
+        });
+        const party = await seedVendor(tx, "Nobody Supply");
+        await createCommitment(tx, ctx, {
+          projectId: p.id,
+          partyId: party,
+          number: "PO-EMPTY",
+          lines: [],
+        });
+      }),
+    ).rejects.toMatchObject({ code: "NO_LINES" });
+  });
+
+  it("REPLACES lines on edit rather than merging them", async () => {
+    const after = await run(async (tx) => {
+      const p = await createProject(tx, ctx, {
+        entityId,
+        number: "OPS-C4",
+        name: "Replaced",
+      });
+      const party = await seedVendor(tx, "Swap Supply");
+      const c = await createCommitment(tx, ctx, {
+        projectId: p.id,
+        partyId: party,
+        number: "PO-SWAP",
+        status: "issued",
+        lines: [{ amountCents: 1_00 }, { amountCents: 2_00 }, { amountCents: 3_00 }],
+      });
+      await updateCommitment(tx, ctx, c.id, {
+        lines: [{ amountCents: 10_00 }],
+        version: c.version,
+      });
+      const rows = await listCommitments(tx, tenantId, p.id);
+      return rows[0];
+    });
+    expect(after.lines).toHaveLength(1);
+    expect(after.totalCents).toBe(10_00);
+  });
+
+  it("leaves the lines alone when an edit does not mention them", async () => {
+    // A status change must not disturb the money.
+    const after = await run(async (tx) => {
+      const p = await createProject(tx, ctx, {
+        entityId,
+        number: "OPS-C5",
+        name: "Untouched",
+      });
+      const party = await seedVendor(tx, "Steady Supply");
+      const c = await createCommitment(tx, ctx, {
+        projectId: p.id,
+        partyId: party,
+        number: "PO-STEADY",
+        status: "draft",
+        lines: [{ amountCents: 55_00 }, { amountCents: 45_00 }],
+      });
+      await updateCommitment(tx, ctx, c.id, {
+        status: "issued",
+        version: c.version,
+      });
+      const rows = await listCommitments(tx, tenantId, p.id);
+      return rows[0];
+    });
+    expect(after.lines).toHaveLength(2);
+    expect(after.totalCents).toBe(100_00);
+    expect(after.commitment.status).toBe("issued");
+  });
+
+  it("refuses a negative committed amount", async () => {
+    await expect(
+      run(async (tx) => {
+        const p = await createProject(tx, ctx, {
+          entityId,
+          number: "OPS-C6",
+          name: "Negative",
+        });
+        const party = await seedVendor(tx, "Credit Supply");
+        await createCommitment(tx, ctx, {
+          projectId: p.id,
+          partyId: party,
+          number: "PO-NEG",
+          lines: [{ amountCents: -100 }],
+        });
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE" });
   });
 });

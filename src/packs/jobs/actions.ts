@@ -7,12 +7,14 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
 import {
+  createCommitment,
   createContract,
   createCostCode,
   createCostCodeSet,
   createProject,
   JobsError,
   setDefaultCostCodeSet,
+  updateCommitment,
   updateContract,
   updateCostCode,
   updateCostCodeSet,
@@ -21,6 +23,8 @@ import {
 } from "./ops";
 import {
   BILLING_METHODS,
+  COMMITMENT_KINDS,
+  COMMITMENT_STATUSES,
   CONTRACT_ROLES,
   CONTRACT_STATUSES,
   PACK,
@@ -79,6 +83,8 @@ function toResult(err: unknown): { error: string } {
         return { error: "That job number is already in use. Pick another." };
       case "NAME_TAKEN":
         return { error: "A list with that name already exists." };
+      case "NO_LINES":
+        return { error: "Give at least one line an amount." };
       case "SET_IN_USE":
         return { error: "Projects are budgeted against that list, so it cannot go." };
       case "STALE_VERSION":
@@ -103,6 +109,9 @@ function toResult(err: unknown): { error: string } {
   }
   if (message.includes("job_cost_codes_set_code_idx")) {
     return { error: "That code is already in this list." };
+  }
+  if (message.includes("job_commitments_tenant_number_idx")) {
+    return { error: "That order number is already in use. Pick another." };
   }
   console.error("jobs action failed", err);
   return { error: "Something went wrong. Try again." };
@@ -458,6 +467,123 @@ export async function updateCostCodeAction(input: unknown) {
       { role: ctx.role },
     );
     revalidatePath(`${BASE}/cost-codes`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const commitmentLineSchema = z.object({
+  costCodeId: optionalUuid,
+  description: z.string().trim().max(200).optional(),
+  /** Money as typed, cents at the boundary — see `moneyToCents`. */
+  amountCents: moneyToCents,
+});
+
+const commitmentSchema = z.object({
+  projectId: z.string().uuid(),
+  partyId: z.string().uuid(),
+  kind: z.enum(COMMITMENT_KINDS).optional(),
+  number: z.string().trim().min(1).max(40),
+  description: z.string().trim().max(300).optional(),
+  status: z.enum(COMMITMENT_STATUSES).optional(),
+  issuedOn: optionalDate,
+  notes: z.string().trim().max(2000).optional(),
+  lines: z.array(commitmentLineSchema).min(1),
+});
+
+/**
+ * `moneyToCents` yields null for a blank box, and a commitment line with no
+ * amount commits nothing. Dropped here rather than stored as zero, so a person
+ * who leaves the last empty row alone gets what they expect instead of a line
+ * that reads `0.00` on the order.
+ */
+function usableLines(lines: Array<{ costCodeId: string | null; description?: string; amountCents: number | null }>) {
+  return lines
+    .filter((l) => l.amountCents !== null)
+    .map((l) => ({
+      costCodeId: l.costCodeId,
+      description: l.description,
+      amountCents: l.amountCents as number,
+    }));
+}
+
+export async function createCommitmentAction(input: unknown) {
+  const parsed = commitmentSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const lines = usableLines(parsed.data.lines);
+  if (lines.length === 0) {
+    return { error: "Give at least one line an amount." };
+  }
+  try {
+    const ctx = await gate();
+    const commitment = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const created = await createCommitment(tx, ctx, { ...parsed.data, lines });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "commitment.created",
+          targetType: "commitment",
+          targetId: created.id,
+          /* Identifiers and shape only. The amount is not logged, for the
+             reason a contract's value is not: the console is read by people who
+             are not this business. */
+          meta: {
+            projectId: created.projectId,
+            kind: created.kind,
+            status: created.status,
+            lineCount: lines.length,
+          },
+        });
+        return created;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${parsed.data.projectId}`);
+    revalidatePath(BASE);
+    return { ok: true as const, commitmentId: commitment.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function updateCommitmentAction(input: unknown) {
+  const schema = commitmentSchema.partial().extend({
+    id: z.string().uuid(),
+    version: z.number().int().positive().optional(),
+  });
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { id, projectId, lines, ...patch } = parsed.data;
+  const usable = lines === undefined ? undefined : usableLines(lines);
+  if (usable !== undefined && usable.length === 0) {
+    return { error: "Give at least one line an amount." };
+  }
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const updated = await updateCommitment(tx, ctx, id, {
+          ...patch,
+          ...(usable === undefined ? {} : { lines: usable }),
+        });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "commitment.updated",
+          targetType: "commitment",
+          targetId: updated.id,
+          meta: { projectId: updated.projectId, status: updated.status },
+        });
+        return updated;
+      },
+      { role: ctx.role },
+    );
+    if (projectId) revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath(BASE);
     return { ok: true as const };
   } catch (err) {
     return toResult(err);

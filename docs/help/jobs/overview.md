@@ -85,6 +85,47 @@ They are listed on the {{project|lower}}'s own page, numbered in the order you a
 
 The `Value` column is the same total: signed and complete only. A job with nothing signed yet shows `—` rather than `0.00`, because zero would read as "worth nothing" when the truth is "not agreed yet".
 
+## What you have ordered
+
+Owners only to add. On the {{project|lower}}'s page, under **Ordered**.
+
+A purchase order or a subcontract is money the job **already owes**, whether or not the bill has arrived. That is the number a job cost report is missing when it looks fine and is not: you can be $400,000 into a $1.8m job and have already ordered $1.5m of it.
+
+Three figures sit at the top of the panel:
+
+- **Contract value** — what you are being paid, from signed agreements.
+- **Committed** — what you have ordered.
+- **Actual cost** — what has actually been billed to the job in the books.
+
+Actual cost reads `0.00` until bills are charged to the job. That is a real answer, not a missing one.
+
+### Adding an order
+
+{button:Order something|primary}.
+
+1. **`Kind`** — `Purchase order` or `Subcontract`. Pick honestly: they behave differently later, when retainage and lien waivers arrive.
+2. **`Number`** — required, and different from every other order. It is what a supplier quotes back on the invoice, so two the same is a matching problem. You see `That order number is already in use. Pick another.` if it clashes.
+3. **`Who is being paid`** — required. Unlike a contract, an order has to be to somebody who is already in your books; add them in Accounting first if they are not.
+4. **`What it is for`** — optional.
+5. **Lines** — the money. Each line takes a `Cost code`, an optional description and an `Amount`. {button:Add line|ghost} for more; a framing subcontract covering labour and materials is two lines. **A line with no amount is ignored**, so the empty last row costs you nothing.
+6. **`Status`** — see below.
+7. **`Issued`** and **`Notes`** — optional.
+
+### Status, and what counts as committed
+
+| Status | Counts as committed |
+| --- | :-: |
+| `Draft` | |
+| `Issued` | ● |
+| `Closed` | ● |
+| `Cancelled` | |
+
+A draft is written but not sent, so nobody is owed anything. `Closed` still counts — the work was ordered and done, and dropping it would make a finished job look cheaper than it was.
+
+### Editing an order
+
+The pencil at the end of its row. **Changing the lines replaces all of them**, so what you see in the dialog is what you get. Changing only the status leaves the money alone.
+
 ## Changing something
 
 Owners only. Everything you can add, you can change.
@@ -123,8 +164,9 @@ New codes are added to the end of the list, not the top, so a list you arranged 
 
 Worth knowing so you are not looking for it:
 
-- **No budget.** A job now has a value and collects what it cost; nothing yet compares the two.
+- **No budget.** A job now shows what it is worth, what you have ordered and what it has cost. Nothing yet holds those against a planned figure per cost code — that is next.
 - **No billing.** Every contract records how it should be billed, and nothing bills yet.
+- **Cost codes can now be put on a bill.** They appear in Accounting wherever you tag a line, beside the job itself — so a bill can say which job and which trade. Actual cost per code follows once bills carry them.
 - **Nothing is ever deleted.** A contract you should not have added is set to `Cancelled` or `Declined`; a cost code is retired; a {{project|lower}} is cancelled. That is on purpose — a job's history is the point of keeping it.
 
 ## Who can do what

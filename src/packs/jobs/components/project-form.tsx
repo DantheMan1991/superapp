@@ -349,8 +349,16 @@ export function ProjectForm({
               </div>
             )}
 
-            {/* Only at two: one list is the default and needs no question. */}
-            {costCodeSets.length > 1 && (
+            {/*
+              Only at two — one list is the default and needs no question.
+              EXCEPT when this row has no list at all and one exists, which is
+              the hole driving it found: a project created before the chart of
+              cost existed could never be attached to it, because the picker that
+              would do it was hidden by the same rule that makes one list
+              invisible.
+            */}
+            {(costCodeSets.length > 1 ||
+              (editing && !existing.costCodeSetId && costCodeSets.length > 0)) && (
               <div className="space-y-1.5">
                 <Label htmlFor="project-set">Cost codes</Label>
                 <Select value={costCodeSetId} onValueChange={setCostCodeSetId}>

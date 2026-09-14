@@ -2,6 +2,13 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   BILLING_METHODS,
+  COMMITMENT_KINDS,
+  COMMITMENT_KIND_LABELS,
+  COMMITMENT_STATUSES,
+  COMMITMENT_STATUS_LABELS,
+  COMMITTED_STATUSES,
+  COST_CODE_DIMENSION,
+  PROJECT_DIMENSION,
   BILLING_METHOD_LABELS,
   CONTRACT_ROLES,
   CONTRACT_STATUSES,
@@ -15,6 +22,8 @@ import {
   contractKindsFrom,
   deliveryMethodsFrom,
   isBillingMethod,
+  isCommitmentKind,
+  isCommitmentStatus,
   isContractRole,
   isContractStatus,
   isProjectStatus,
@@ -216,5 +225,60 @@ describe("contracts", () => {
     expect(isBillingMethod("whatever")).toBe(false);
     expect(isContractStatus("declined")).toBe(true);
     expect(isContractStatus("lost")).toBe(false);
+  });
+});
+
+/**
+ * Commitments. The mirror tests matter for the same reason they do on contracts:
+ * `kind` and `status` are CLOSED lists in both TypeScript and SQL, so a value
+ * offered on screen that the CHECK refuses is a form that looks fine and fails
+ * on save.
+ */
+const COMMITMENTS_SQL = readFileSync("drizzle/0329_job_commitments.sql", "utf8");
+
+describe("commitments", () => {
+  it("MIRRORS the kind CHECK constraint", () => {
+    const m = COMMITMENTS_SQL.match(/job_commitments_kind_valid[^(]*\(([^)]*)\)/);
+    expect(m, "constraint not found").not.toBeNull();
+    const inSql = [...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]);
+    expect(inSql.sort()).toEqual([...COMMITMENT_KINDS].sort());
+  });
+
+  it("MIRRORS the status CHECK constraint", () => {
+    const m = COMMITMENTS_SQL.match(/job_commitments_status_valid[^(]*\(([^)]*)\)/);
+    const inSql = [...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]);
+    expect(inSql.sort()).toEqual([...COMMITMENT_STATUSES].sort());
+  });
+
+  it("counts only ISSUED and CLOSED as committed money", () => {
+    // A draft is written but not sent; nobody is owed anything. Same shape of
+    // rule as a proposed contract not being revenue, and the same reason.
+    expect([...COMMITTED_STATUSES].sort()).toEqual(["closed", "issued"]);
+    for (const notMoney of ["draft", "cancelled"] as const) {
+      expect(COMMITTED_STATUSES).not.toContain(notMoney);
+    }
+  });
+
+  it("gives every kind and status a readable label", () => {
+    for (const k of COMMITMENT_KINDS) expect(COMMITMENT_KIND_LABELS[k]).toBeTruthy();
+    for (const s of COMMITMENT_STATUSES) expect(COMMITMENT_STATUS_LABELS[s]).toBeTruthy();
+  });
+
+  it("recognises its own values and nothing else", () => {
+    expect(isCommitmentKind("subcontract")).toBe(true);
+    expect(isCommitmentKind("work_order")).toBe(false);
+    expect(isCommitmentStatus("issued")).toBe(true);
+    expect(isCommitmentStatus("sent")).toBe(false);
+  });
+
+  it("keeps a committed amount non-negative in the database too", () => {
+    // A credit is a change order, not a negative purchase order.
+    expect(COMMITMENTS_SQL).toMatch(/job_commitment_lines_amount_nonnegative/);
+  });
+
+  it("names the two dimension types this pack syncs, and they differ", () => {
+    // A line may carry one of each: `loadDimensionMembers` refuses only two
+    // members of the SAME type, so a bill can say which job AND which trade.
+    expect(PROJECT_DIMENSION).not.toBe(COST_CODE_DIMENSION);
   });
 });

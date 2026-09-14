@@ -18,21 +18,33 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { getProject, listContracts, listCostCodes } from "@/packs/jobs/ops";
+import {
+  actualByProject,
+  committedTotals,
+  getProject,
+  listCommitments,
+  listContracts,
+  listCostCodes,
+} from "@/packs/jobs/ops";
 import { allowsWrite } from "@/lib/packs/authorize";
 import { formatMoney } from "@/lib/money";
 import { ContractForm } from "@/packs/jobs/components/contract-form";
+import { CommitmentForm } from "@/packs/jobs/components/commitment-form";
 import { ProjectForm } from "@/packs/jobs/components/project-form";
 import { Button } from "@/components/ui/button";
 import { listCostCodeSets } from "@/packs/jobs/ops";
 import {
   BILLING_METHOD_LABELS,
+  COMMITMENT_KIND_LABELS,
+  COMMITMENT_STATUS_LABELS,
   CONTRACT_STATUS_LABELS,
   PACK,
   PROJECT_DIMENSION,
   VALUED_CONTRACT_STATUSES,
   STATUS_LABELS,
   isBillingMethod,
+  isCommitmentKind,
+  isCommitmentStatus,
   isContractStatus,
   isProjectStatus,
   slugLabel,
@@ -73,6 +85,9 @@ export default async function ProjectPage({
         set,
         codes,
         contracts,
+        commitments,
+        committed,
+        actual,
         allEntities,
         allEnterprises,
         allSets,
@@ -130,6 +145,15 @@ export default async function ProjectPage({
           ? listCostCodes(tx, ctx.tenant.id, project.costCodeSetId)
           : Promise.resolve([]),
         listContracts(tx, ctx.tenant.id, project.id),
+        listCommitments(tx, ctx.tenant.id, project.id),
+        committedTotals(tx, ctx.tenant.id),
+        /*
+         * ACTUAL COST COMES FROM THE LEDGER through a CORE export, never from a
+         * query of accounting's tables. `getBalances` already applies the basis
+         * lens and the entity scope, so a job cost figure that disagreed with
+         * the P&L is not possible. Scoped to the project's own company.
+         */
+        actualByProject(tx, ctx.tenant.id, { kind: "one", entityId: project.entityId }),
         tx
           .select({ id: schema.entities.id, name: schema.entities.name })
           .from(schema.entities)
@@ -173,6 +197,9 @@ export default async function ProjectPage({
         setName: set[0]?.name ?? null,
         codes,
         contracts,
+        commitments,
+        committed,
+        actual,
         allEntities,
         allEnterprises,
         allSets,
@@ -186,7 +213,9 @@ export default async function ProjectPage({
   );
 
   if (!data) notFound();
-  const { project, codes, contracts, member } = data;
+  const { project, codes, contracts, commitments, member } = data;
+  const committedCents = data.committed.byProject.get(project.id) ?? 0;
+  const actualCents = data.actual.get(project.id) ?? 0;
   const isOwner = allowsWrite(ctx.role, "owner");
   const symbol = ctx.tenant.currencySymbol;
   /**
@@ -416,6 +445,146 @@ export default async function ProjectPage({
                               <Pencil className="size-4" />
                               <span className="sr-only">
                                 Edit {slugLabel(c.kind)}
+                              </span>
+                            </Button>
+                          }
+                        />
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </Panel>
+
+      <Panel>
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-heading text-sm font-medium tracking-heading">
+            Ordered
+          </h2>
+          {isOwner && (
+            <CommitmentForm
+              projectId={project.id}
+              parties={data.parties}
+              costCodes={data.codes.map((c) => ({
+                id: c.id,
+                label: `${c.code} · ${c.name}`,
+              }))}
+            />
+          )}
+        </div>
+        {/*
+          THE THREE NUMBERS A BUILDER ACTUALLY LOOKS AT, side by side. Committed
+          is what has been ordered whether or not the invoice has arrived; actual
+          is what the ledger has been billed. A job can look healthy on actual
+          alone right up until you notice what it has already promised, which is
+          the mistake this panel exists to make impossible.
+        */}
+        <dl className="mb-3 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-lg bg-muted/40 px-3 py-2">
+            <dt className="text-xs text-muted-foreground">Contract value</dt>
+            <dd className="text-base font-medium tabular-nums">
+              {formatMoney(signedValue, symbol)}
+            </dd>
+          </div>
+          <div className="rounded-lg bg-muted/40 px-3 py-2">
+            <dt className="text-xs text-muted-foreground">Committed</dt>
+            <dd className="text-base font-medium tabular-nums">
+              {formatMoney(committedCents, symbol)}
+            </dd>
+          </div>
+          <div className="rounded-lg bg-muted/40 px-3 py-2">
+            <dt className="text-xs text-muted-foreground">Actual cost</dt>
+            <dd className="text-base font-medium tabular-nums">
+              {formatMoney(actualCents, symbol)}
+            </dd>
+          </div>
+        </dl>
+
+        {commitments.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Nothing ordered yet. Purchase orders and subcontracts recorded here
+            are what the job already owes, before any bill arrives.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Number</TableHead>
+                  <TableHead>Who</TableHead>
+                  <TableHead>For</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="w-10" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {commitments.map((row) => (
+                  <TableRow key={row.commitment.id}>
+                    <TableCell className="font-mono text-xs">
+                      {row.commitment.number}
+                      <span className="block font-sans text-xs text-muted-foreground">
+                        {isCommitmentKind(row.commitment.kind)
+                          ? COMMITMENT_KIND_LABELS[row.commitment.kind]
+                          : row.commitment.kind}
+                      </span>
+                    </TableCell>
+                    <TableCell>{row.vendorName}</TableCell>
+                    <TableCell>
+                      {row.commitment.description || "—"}
+                      {row.lines.length > 1 && (
+                        <span className="block text-xs text-muted-foreground">
+                          {row.lines.length} lines
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatMoney(row.totalCents, symbol)}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={
+                          row.commitment.status === "issued" ? "default" : "secondary"
+                        }
+                      >
+                        {isCommitmentStatus(row.commitment.status)
+                          ? COMMITMENT_STATUS_LABELS[row.commitment.status]
+                          : row.commitment.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="w-10 text-right">
+                      {isOwner && (
+                        <CommitmentForm
+                          projectId={project.id}
+                          parties={data.parties}
+                          costCodes={data.codes.map((c) => ({
+                            id: c.id,
+                            label: `${c.code} · ${c.name}`,
+                          }))}
+                          existing={{
+                            id: row.commitment.id,
+                            version: row.commitment.version,
+                            partyId: row.commitment.partyId,
+                            kind: row.commitment.kind,
+                            number: row.commitment.number,
+                            description: row.commitment.description,
+                            status: row.commitment.status,
+                            issuedOn: row.commitment.issuedOn,
+                            notes: row.commitment.notes,
+                            lines: row.lines.map((l) => ({
+                              costCodeId: l.costCodeId,
+                              description: l.description,
+                              amountCents: l.amountCents,
+                            })),
+                          }}
+                          trigger={
+                            <Button variant="ghost" size="icon">
+                              <Pencil className="size-4" />
+                              <span className="sr-only">
+                                Edit {row.commitment.number}
                               </span>
                             </Button>
                           }

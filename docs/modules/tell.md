@@ -93,7 +93,7 @@ Each is a file and a line in the registry; the platform does not change.
 
 | # | Slice | Why it is where it is |
 | --- | --- | --- |
-| **B1** | **`inventory`** — stock used, stock counted, a delivery arrived, stock moved | Highest daily volume of any pack, and it is the spine every other pack hangs off |
+| **B1** ✅ | **`inventory` — shipped 2026-09-13.** Stock used, stock lost or found, and **counted**. A delivery and a move between places are deliberately left, with reasons in the source's header | Highest daily volume of any pack, and it is the spine every other pack hangs off |
 | **B2** | **`crm`** — a call or note logged against a name, a contact added, a deal moved on | The second proof the slot is not a farm feature; it is also where "log it while walking to the truck" is worth most |
 | **B3** | **`land`** — a paddock rested, topped, sprayed or shut up | Small, and it completes the farm's daily round |
 | **B4** | **`scheduling`** — book something in | Nobody has ever clicked this module; a voice door may be the thing that gets it used |
@@ -130,6 +130,79 @@ screen.
 | **D10** | **Say both rather than guess.** When the model was torn between two ACTIONS, show both and let one tap settle it | Rule 2 already does this for choices within an action. It does not yet do it for the action itself |
 
 ## Build log
+
+### 2026-09-13 — Slice B1: stock can be told (`claude/inventory-can-be-told`)
+
+**Phase B opens with the pack every other pack hangs off**, and the first source
+whose numbers have to be right: `time` records a moment, `work` records a
+sentence, `livestock` records head — this records the quantity all of them
+eventually cost money against.
+
+Three actions. `used` and `adjusted` are the obvious pair — stock left for a
+purpose, or stock left for a reason, with the SIGN coming from the reason rather
+than from the sentence, because nobody says *"minus twenty pounds went off"*.
+
+**`counted` is the one worth having, and it could not have existed before
+[slice A2](#).** It is the only action in this product where **what somebody says
+and what gets written are different numbers**: the sentence carries a TOTAL and
+the books move by the DIFFERENCE. A card showing `88` while writing `+8` would be
+the most convincing wrong thing on the screen, so the preview is not a nicety
+here — it is why the action is allowed to exist:
+
+```
+  Grower crumble on the books      80 pounds
+  counted                          88 pounds
+  adding                                  +8
+```
+
+A count that MATCHES is a successful count and not a correction, so the pack
+refuses it in its own words. The preview says so above the button —
+*"that is what the books already say"* — rather than explaining it afterwards.
+
+#### What it deliberately does not take, and why
+
+- **A delivery.** *"Twenty bags of crumble came in at nine pounds a bag"* is the
+  sentence everybody wants and three facts this cannot check: a quantity, a cost,
+  and a supplier who may not exist. It also POSTS — to GRNI, against a bill that
+  has not arrived — so [ADR 0054](../decisions/0054-tell-may-draft-never-send.md) §2
+  wants a preview of the POSTING, which is a different thing from the one built
+  here. Its own slice, with its own arithmetic.
+- **A move between places.** Two locations in one sentence, and the failure —
+  stock in the wrong shed — is invisible on every screen that totals by item.
+
+#### The harness earned its keep twice
+
+**Once by holding.** Eleven actions now, and the pair that had to survive is
+*"fed the broilers two bags"* → `livestock.feed`, because feeding animals is ALSO
+using stock and stock leaving without reaching a lot loses the feed cost the
+whole pack exists to carry. It held 3/3, as did every one of the five new cases.
+
+**Once by correcting its author.** *"The water trough in pen two is broken"* was
+written expecting ONE answer — an observation, or a job — and the model returned
+**both**, three times out of three. Which is right: the trough is a thing seen
+AND a thing to fix, and a person would write down both. The case now expects the
+pair and tolerates either single.
+
+```
+  ███████████████████████░  81/84 before that correction, 84/84 after
+  catalogue: 11 actions, 9185 characters (was 8 actions, 5994)
+```
+
+**And the duplicate guard caught a duplicate**, which was the whole point of
+writing it: *"fed the broilers two bags"* already existed, so the cross-module
+reason was folded into the case that was there rather than added beside it.
+
+#### Two traps paid for
+
+- **`createItem` is owner-only** while `issueStock` and `adjustStock` are
+  member-level. The fixture set stock up as staff, `beforeAll` threw, and vitest
+  reported the suite **SKIPPED rather than failed** — nine green-looking skips
+  that said nothing. The actions themselves run as staff on purpose: ADR 0039
+  puts no role check in the slot, and a farmhand saying these sentences IS the
+  use case.
+- **`formatQuantity` renders the unit's WORD, not its code** — "100 pounds", not
+  "100 lb". The assertions were written against the code and every figure in the
+  suite disagreed at once.
 
 ### 2026-09-13 — The phone would not speak (`claude/the-phone-would-not-speak`)
 
@@ -574,6 +647,19 @@ No code changed.
   `tests/tell-shortcut.test.ts`
 
 ## Decisions & gotchas
+
+- **ADDING A SOURCE BREAKS EVERY FIXTURE THAT ASSERTS AN ACTION LIST, AND THAT
+  IS WORKING AS INTENDED.** `tests/tell-sources-db.test.ts` enables `livestock`,
+  `inventory` and `land`, so slice B1's three new actions appeared in a list it
+  checks exactly — CI caught it, having run every suite rather than the five that
+  looked relevant. **Before pushing a new source, run every `*-tell-*` and
+  `tell-*` db suite, not the ones you touched.** The exact assertion is kept on
+  purpose: a source cannot be added without somebody acknowledging it changes
+  what every tenant is offered.
+- **Never index into `proposal.actions`.** The same slice moved `actions[0]`
+  from a livestock action to an inventory one, because the registry's order is a
+  product decision (most-said first) and not a fixture's to rely on. Find by
+  slug.
 
 - **Nothing in a proposal may be a function.** The box is a client component,
   and handing React a function across that boundary is a RUNTIME error that

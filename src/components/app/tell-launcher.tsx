@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Mic } from "lucide-react";
 import {
@@ -51,9 +51,6 @@ import {
  * It closes itself once something is recorded, so the whole interaction for
  * "clock me in" is: press, speak, done.
  */
-/** Nothing to subscribe to: which shell this is does not change while open. */
-const subscribeToNothing = () => () => {};
-
 export function TellLauncher({
   speechConfigured,
 }: {
@@ -80,29 +77,6 @@ export function TellLauncher({
    * microphone, which is worse than the slow version it replaced.
    */
   const [phoneListening, setPhoneListening] = useState(false);
-  /**
-   * The shell listened and came back with nothing, so this page has to.
-   *
-   * A LONG-PRESS MUST NEVER END IN AN EMPTY SCREEN. The first version only
-   * opened when the phone had words or was still recording — so a recogniser
-   * that died early (which happens: busy service, no speech, started before
-   * the activity was ready) left the sheet shut and the press wasted. That is
-   * worse than the slow version it replaced, because at least the slow one
-   * always got you somewhere.
-   */
-  const [webShouldListen, setWebShouldListen] = useState(false);
-  /**
-   * Does this build capture speech natively? A fact about the shell this page
-   * is running inside, not a piece of state — so it is read the way
-   * `dictate-button.tsx` reads its capabilities, with a null server snapshot,
-   * rather than probed in an effect and pushed into state. It returns a
-   * boolean, so React's identity check is a value check and it is stable.
-   */
-  const nativeEars = useSyncExternalStore(
-    subscribeToNothing,
-    () => readNativeBridge(window)?.tell != null,
-    () => false,
-  );
 
   /*
    * ONE TAP FROM THE HOME SCREEN.
@@ -205,22 +179,25 @@ export function TellLauncher({
             opened.current = true;
             setPhoneListening(true);
             setOpen(true);
-          } else if (told) {
-            // THE SHELL TRIED AND CAME BACK WITH NOTHING. Take over here: this
-            // is the path that used to dead-end, and the founder found it —
-            // "the microphone is turning on for a second but it doesn't load
-            // the tool". The web's own recorder is exactly what the shortcut
-            // used before native capture existed.
-            setWebShouldListen(true);
           }
+          /*
+           * THE SHELL TRIED AND CAME BACK WITH NOTHING has no branch any more,
+           * and that is the point rather than an omission.
+           *
+           * A LONG-PRESS MUST NEVER END IN AN EMPTY SCREEN — a recogniser that
+           * dies early (busy service, no speech, started before the activity was
+           * ready) used to leave the sheet shut and the press wasted, which the
+           * founder found. The sheet now opens on `told` WHATEVER the microphone
+           * did, a few lines above, and the box listens whenever the phone is
+           * neither recording nor holding words. Both halves fall out of the
+           * general rule, so the special case that used to carry them is gone.
+           */
           const whileListening = await tell.addListener("listening", (payload) => {
             const on = listeningFrom(payload);
             setPhoneListening(on);
-            // The phone taking over means this page must not also record.
-            if (on) {
-              setWebShouldListen(false);
-              setOpen(true);
-            }
+            // The phone taking over means this page must not also record —
+            // which `phoneListening` now says on its own.
+            if (on) setOpen(true);
           });
           if (dropped) void whileListening.remove();
           else handles.push(whileListening);
@@ -315,13 +292,29 @@ export function TellLauncher({
                 was left on screen last time. */}
             <TellBox
               key={heard ?? (open ? "open" : "closed")}
-              // The phone already listened, so the web must not. Otherwise the
-              // sheet opens and immediately asks for a microphone on top of a
-              // sentence it has already been given.
-              // The phone records when it can and this page when it cannot.
-              // Never both, and — since the founder found the hole — never
-              // neither.
-              autoListen={open && (!nativeEars || webShouldListen)}
+              /*
+               * **THE WEB LISTENS UNLESS THE PHONE IS HANDLING THIS ONE.**
+               *
+               * This used to ask whether the shell CAN listen (`nativeEars`)
+               * and treat that as whether it IS. Those differ in exactly one
+               * place, and it is the ordinary one: **tapping the floating
+               * button inside a running app.** Nothing ever told the shell to
+               * listen on that path, so the web did not either, and the founder
+               * had to press Say it a second time — *"it's the phone that i
+               * have to click the mike and then the say something button"*.
+               *
+               * The question that is actually being asked is whether this
+               * utterance is the phone's. Two facts answer it, and both are
+               * only ever set by the launch-url path: `phoneListening` while
+               * the shell records, `heard` once it has delivered words.
+               *
+               * That subsumes `webShouldListen`, which existed for the case
+               * where the shell tried and came back with nothing — with the
+               * phone neither listening nor having heard, this now says yes on
+               * its own. One rule, stated once, instead of a capability
+               * standing in for a state.
+               */
+              autoListen={open && !phoneListening && heard === null}
               said={heard ?? undefined}
               phoneListening={phoneListening}
               labelHidden
@@ -329,7 +322,6 @@ export function TellLauncher({
               onRecorded={() => {
                 setHeard(null);
                 setPhoneListening(false);
-                setWebShouldListen(false);
                 setOpen(false);
               }}
               placeholder="Clock me in, and three chicks dead in pen two"

@@ -117,6 +117,10 @@ public class MainActivity extends BridgeActivity {
         launchedToTell = tell;
         if (tell) skipTheLaunchAnimation();
         registerPlugin(TellPlugin.class);
+        // The other direction: the page hands back an answer and the phone says
+        // it, because a WebView's own `speechSynthesis` accepts the call and
+        // makes no sound. Same fork as the microphone (ADR 0049).
+        registerPlugin(SpeakPlugin.class);
 
         super.onCreate(savedInstanceState);
 

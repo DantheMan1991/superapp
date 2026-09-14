@@ -83,6 +83,25 @@ export function spokenConfirmation(summaries: readonly string[]): string {
 
 /* -- the half that touches the browser ------------------------------------- */
 
+import { readNativeBridge } from "@/lib/native-bridge";
+
+/**
+ * **THE SHELL'S OWN VOICE, WHEN THERE IS ONE.**
+ *
+ * A WebView's `window.speechSynthesis` exists, accepts an utterance and makes
+ * no sound. #548 fixed three real browser faults and the phone still said
+ * nothing, which is the answer: it is not a browser fault. Same fork the
+ * microphone took in [ADR 0049](../../../docs/decisions/0049-speech-is-a-fork-in-the-road-not-a-provider.md)
+ * — the handset's own engine inside the app, the browser's outside it.
+ *
+ * Null everywhere else, including in an app build from before the shell could
+ * talk, which is what keeps this safe to ship ahead of a rebuild.
+ */
+function nativeVoice() {
+  if (typeof window === "undefined") return null;
+  return readNativeBridge(window)?.speak ?? null;
+}
+
 /**
  * ── WHY THIS HALF IS LONGER THAN IT LOOKS LIKE IT SHOULD BE ──────────────────
  *
@@ -125,8 +144,11 @@ function changed(): void {
 
 /** There is an engine, and it has not yet proved itself useless. */
 export function canSpeak(): boolean {
-  if (typeof window === "undefined" || !("speechSynthesis" in window)) return false;
-  return !silent;
+  if (silent) return false;
+  // The shell's voice counts even where the WebView has none of its own, which
+  // is the whole point of it.
+  if (nativeVoice()) return true;
+  return typeof window !== "undefined" && "speechSynthesis" in window;
 }
 
 /**
@@ -232,8 +254,10 @@ export function warmUpSpeech(): void {
   }
 }
 
-/** Stop talking, now. */
+/** Stop talking, now — whichever of the two is doing the talking. */
 export function hush(): void {
+  const native = nativeVoice();
+  if (native) void native.hush().catch(() => {});
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
   try {
     window.speechSynthesis.cancel();
@@ -365,6 +389,18 @@ function utter(words: string): void {
 export function sayIt(text: string): void {
   const words = text.trim();
   if (words === "" || !canSpeak() || isHushed()) return;
+
+  /*
+   * THE SHELL FIRST, AND WITHOUT A RACE. Where the app can talk, the WebView's
+   * own engine must not also try: two voices saying the same sentence a beat
+   * apart is worse than one that works.
+   */
+  const native = nativeVoice();
+  if (native) {
+    void native.speak({ text: words }).catch(() => provedSilent());
+    return;
+  }
+
   try {
     whenVoicesReady(() => utter(words));
   } catch {

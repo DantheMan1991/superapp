@@ -10,6 +10,33 @@
 
 ## Build log
 
+### 2026-09-13 — The shell gets a voice (`claude/the-phone-listens-on-one-tap`)
+
+`SpeakPlugin` joins `TellPlugin`: the page hands it an answer and Android's
+`TextToSpeech` says it. Registered in `MainActivity.onCreate` beside `Tell`.
+
+**Why there is Java here at all**, which is the same question `TellPlugin`
+answered and the same answer: the web decides everything (ADR 0032), and this
+decides nothing — it is handed words and it says them. What it exists for is that
+a WebView's `window.speechSynthesis` **is not present**, so the box's spoken
+confirmation worked on a desktop and was silent in the app. Same fork as the
+microphone ([ADR 0049](../decisions/0049-speech-is-a-fork-in-the-road-not-a-provider.md)).
+
+- `speak({ text })` — flushes rather than queues, because two answers said
+  quickly must not stack up: the second is the one that is true.
+- `hush()` — for when an answer replaces another.
+- A sentence arriving before the engine has initialised is **held**, not dropped.
+  Init is asynchronous and a clock-in is recorded in well under a second, so on a
+  cold start the common case is a sentence with nowhere to go.
+
+**NEEDS A REBUILD, and is inert until then.** `readNativeBridge` returns null for
+the `Speak` plugin on every build that exists today, so nothing changes for an
+installed app until a new one is made. **Android only** — iOS has no custom
+plugin in this shell yet, and its WebView may not need one.
+
+**Not compiled from the machine that wrote it.** `docs/runbooks/mobile-app.md`
+is how a build reaches a phone.
+
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 

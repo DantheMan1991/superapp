@@ -131,6 +131,66 @@ screen.
 
 ## Build log
 
+### 2026-09-13 — The phone listens on one tap, and gets a voice of its own (`claude/the-phone-listens-on-one-tap`)
+
+**Two reports, two different causes, and a screenshot settled both.** The
+founder, having driven it: the computer opens already listening and shows the
+speaker button; the phone does neither.
+
+#### The second tap
+
+```
+  autoListen={open && (!nativeEars || webShouldListen)}
+```
+
+`nativeEars` means **the shell CAN listen**. It was being read as **the shell IS
+listening**. Those differ in exactly one place, and it is the ordinary one:
+**tapping the floating button inside a running app.** Nothing ever told the shell
+to listen on that path, so the web did not either, and nobody did — *"it's the
+phone that i have to click the mike and then the say something button"*.
+
+The question actually being asked is whether this utterance is the phone's, and
+two facts answer it, both set only by the launch-url path: `phoneListening` while
+the shell records, `heard` once it has delivered words. So:
+
+```
+  autoListen={open && !phoneListening && heard === null}
+```
+
+**That subsumed `webShouldListen` and `nativeEars` entirely**, and both are gone
+along with the branch that set the first. The case it existed for — the shell
+tried and came back with nothing — now falls out of the general rule: the sheet
+already opens on `told` whatever the microphone did, and with the phone neither
+recording nor holding words the box listens. Checked path by path rather than
+assumed, because removing a guard on reasoning is how a guard comes back.
+
+#### No speaker button, which is the whole diagnosis
+
+A control that renders only when `canSpeak()` was absent on the phone, so
+`window.speechSynthesis` is **not there at all** in that WebView. Which means
+[#548](https://github.com/DantheMan1991/superapp/pull/548) — waiting for voices,
+spacing `cancel` from `speak`, `resume()` — fixed three real browser faults that
+were never the problem. **It was never a browser fault.**
+
+Same shape as the microphone, so it gets the same answer.
+[ADR 0049](../decisions/0049-speech-is-a-fork-in-the-road-not-a-provider.md)
+decided speech-to-text forks by WHERE IT RUNS rather than by vendor — the
+handset's own engine inside the app, the browser's outside it — and nothing in
+that reasoning was specific to listening. A `Speak` plugin joins `Tell` in the
+shell, `native-bridge.ts` learns to look for it, and `sayIt` prefers it where it
+exists.
+
+**Safe to ship ahead of the rebuild it needs.** The bridge returns null for a
+build that has no such plugin, which is every build that exists today, so the web
+path is untouched until a new app is installed. **Android only** — the iOS side
+of the shell has no custom plugin yet.
+
+**NOT COMPILED, AND THAT IS WORTH SAYING.** The Java cannot be built from here.
+It is written to the shape `TellPlugin` already uses and deliberately avoids
+`setKeepAlive`, whose behaviour is version-specific: a sentence that arrives
+before the engine is ready is held and answered yes immediately, because the page
+does not wait on that promise to decide anything.
+
 ### 2026-09-13 — Slice B1: stock can be told (`claude/inventory-can-be-told`)
 
 **Phase B opens with the pack every other pack hangs off**, and the first source

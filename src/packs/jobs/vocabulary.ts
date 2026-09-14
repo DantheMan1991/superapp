@@ -449,3 +449,36 @@ export const WIP_METHOD_LABELS: Record<WipMethod, string> = {
   cost_to_cost: "Cost-to-cost",
   cost_plus: "Cost plus fee",
 };
+
+
+// ------------------------------------------------- subcontractor applications
+
+/** Mirrors `job_sub_applications_status_valid`. Kept in sync by tests/jobs.test.ts. */
+export const SUB_APPLICATION_STATUSES = ["draft", "billed", "void"] as const;
+export type SubApplicationStatus = (typeof SUB_APPLICATION_STATUSES)[number];
+
+/**
+ * `billed` where a pay application says `issued`: the business RECEIVED this
+ * one and made it a bill. Whether the subcontractor has been paid is the
+ * bill's word, read from it.
+ */
+export const SUB_APPLICATION_STATUS_LABELS: Record<SubApplicationStatus, string> = {
+  draft: "Draft",
+  billed: "Billed",
+  void: "Void",
+};
+
+export function isSubApplicationStatus(v: string): v is SubApplicationStatus {
+  return (SUB_APPLICATION_STATUSES as readonly string[]).includes(v);
+}
+
+/**
+ * The accounts a subcontractor's application posts to, by the convention the
+ * charts seed: the general chart's `5100 Subcontractor Expense` for the work
+ * (the account the agency profile leans on too, which is why it is general),
+ * and the construction profile's `2120 Retainage Payable` for what is held
+ * back. A tenant whose chart lacks the second cannot hold retainage until it
+ * adds the account, and the refusal says so — the receivable side's rule.
+ */
+export const SUBCONTRACT_EXPENSE_CODES = ["5100"] as const;
+export const RETAINAGE_PAYABLE_CODE = "2120";

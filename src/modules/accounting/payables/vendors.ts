@@ -4,6 +4,7 @@ import { schema, type Tx } from "@/db";
 import type { Vendor } from "@/db/schema";
 import { createPartyForRole, syncPartyName } from "@/lib/parties/role-sync";
 import { setPreferredContactValue } from "@/lib/parties/contacts";
+import { loadParty } from "@/lib/parties";
 import { LedgerError, type LedgerCtx } from "../core";
 import { addDaysIso } from "../lib/dates";
 import { assertActiveTerm } from "../invoicing/catalogue";
@@ -129,6 +130,31 @@ export async function createVendor(
       defaultExpenseAccountId: input.defaultExpenseAccountId ?? null,
       paymentTermsId: input.paymentTermsId ?? null,
     })
+    .returning();
+  return row;
+}
+
+/**
+ * THE VENDOR ROLE FOR A PARTY THAT ALREADY EXISTS — the AP mirror of
+ * `ensureCustomerForParty`. A subcontractor is a party in the CRM before it is
+ * a vendor in the books; the jobs pack bills its application as a bill, and a
+ * bill needs a vendor. Idempotent: one vendor per party
+ * (`vendors_tenant_party_idx`). No terms and no default account: those are the
+ * bookkeeper's to set, not the pack's to guess.
+ */
+export async function ensureVendorForParty(
+  tx: Tx,
+  ctx: LedgerCtx,
+  partyId: string,
+): Promise<Vendor> {
+  const existing = await tx.query.vendors.findFirst({
+    where: and(eq(schema.vendors.tenantId, ctx.tenantId), eq(schema.vendors.partyId, partyId)),
+  });
+  if (existing) return existing;
+  const party = await loadParty(tx, ctx.tenantId, partyId);
+  const [row] = await tx
+    .insert(schema.vendors)
+    .values({ tenantId: ctx.tenantId, partyId: party.id, name: party.displayName })
     .returning();
   return row;
 }

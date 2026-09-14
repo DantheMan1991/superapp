@@ -22,6 +22,17 @@ changes this module MUST add an entry here (rule in AGENTS.md).
 > at the start of every accounting session, so its length is a real cost — it was
 > 4,367 lines before the 2026-09-14 sweep, 94% of it build log.
 
+### 2026-09-14 — A vendor for a party (`claude/retainage-from-subs`)
+
+One verb: `ensureVendorForParty` in `payables/vendors.ts`, the AP twin of
+`ensureCustomerForParty` — the vendor role for a party that already exists,
+idempotent on `vendors_tenant_party_idx`, no terms and no default account because
+those are the bookkeeper's to set. The `jobs` pack calls it to bill a
+subcontractor's application as a bill (ADR 0061); the bill itself goes through
+`createBillDraft` → `approveBill` unchanged, with a negative line to the
+construction profile's `2120 Retainage Payable` for what is held back — the
+payable-side mirror of ADR 0058's negative line to `1230`. No table.
+
 ### 2026-09-14 — Balances within one member (`claude/spent-per-code`)
 
 `getBalances` gains `withinMemberId`: only the lines tagged with that dimension

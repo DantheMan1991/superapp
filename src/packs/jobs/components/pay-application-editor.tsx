@@ -16,12 +16,137 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  approveSubApplicationAction,
   createPayApplicationAction,
+  createSubApplicationAction,
   deletePayApplicationAction,
+  deleteSubApplicationAction,
   issuePayApplicationAction,
   updatePayApplicationAction,
+  updateSubApplicationAction,
   voidPayApplicationAction,
+  voidSubApplicationAction,
 } from "../actions";
+
+/**
+ * ONE FORM, BOTH SIDES OF THE TABLE (ADR 0061). A pay application the business
+ * sends its client and an application a subcontractor sends the business are
+ * the same certificate — a schedule, what each line completed, retainage,
+ * previous, due — so they share this editor. `mode` picks the actions and the
+ * three words that differ: what the parent is called, what issuing is called,
+ * and what the document becomes.
+ */
+export type ApplicationMode = "contract" | "commitment";
+
+type ActionResult = { ok: true } | { error: string };
+
+/** The five verbs, in whichever direction the mode points. */
+function verbs(mode: ApplicationMode, projectId: string, parentId: string) {
+  if (mode === "commitment") {
+    return {
+      parentWord: "subcontract",
+      docWord: "bill",
+      issueLabel: "Approve as bill",
+      issueDone: (n: number) => `Application ${n} approved as a bill`,
+      voidConfirm: (n: number) => `Void application ${n}? Its bill is voided too.`,
+      create: (input: {
+        periodTo: string;
+        retainagePercent: string;
+        notes: string;
+        reference?: string;
+      }): Promise<ActionResult> =>
+        createSubApplicationAction({ projectId, commitmentId: parentId, ...input }),
+      update: (input: {
+        id: string;
+        periodTo: string;
+        retainagePercent: string;
+        notes: string;
+        lines: Array<{ lineId: string; thisPeriodCents: string; storedCents: string }>;
+        version: number;
+      }): Promise<ActionResult> =>
+        updateSubApplicationAction({
+          id: input.id,
+          projectId,
+          commitmentId: parentId,
+          periodTo: input.periodTo,
+          retainagePercent: input.retainagePercent,
+          notes: input.notes,
+          lines: input.lines.map((l) => ({
+            commitmentLineId: l.lineId,
+            thisPeriodCents: l.thisPeriodCents,
+            storedCents: l.storedCents,
+          })),
+          version: input.version,
+        }),
+      issue: (input: { id: string; date: string; version: number }): Promise<ActionResult> =>
+        approveSubApplicationAction({
+          id: input.id,
+          projectId,
+          commitmentId: parentId,
+          billDate: input.date,
+          version: input.version,
+        }),
+      remove: (id: string): Promise<ActionResult> =>
+        deleteSubApplicationAction({ id, projectId, commitmentId: parentId }),
+      void: (input: { id: string; version: number }): Promise<ActionResult> =>
+        voidSubApplicationAction({ id: input.id, projectId, commitmentId: parentId, version: input.version }),
+    };
+  }
+  return {
+    parentWord: "contract",
+    docWord: "invoice",
+    issueLabel: "Issue as invoice",
+    issueDone: (n: number) => `Application ${n} issued as an invoice`,
+    voidConfirm: (n: number) => `Void application ${n}? Its invoice is voided too.`,
+    create: (input: {
+      periodTo: string;
+      retainagePercent: string;
+      notes: string;
+      reference?: string;
+    }): Promise<ActionResult> =>
+      createPayApplicationAction({
+        projectId,
+        contractId: parentId,
+        periodTo: input.periodTo,
+        retainagePercent: input.retainagePercent,
+        notes: input.notes,
+      }),
+    update: (input: {
+      id: string;
+      periodTo: string;
+      retainagePercent: string;
+      notes: string;
+      lines: Array<{ lineId: string; thisPeriodCents: string; storedCents: string }>;
+      version: number;
+    }): Promise<ActionResult> =>
+      updatePayApplicationAction({
+        id: input.id,
+        projectId,
+        contractId: parentId,
+        periodTo: input.periodTo,
+        retainagePercent: input.retainagePercent,
+        notes: input.notes,
+        lines: input.lines.map((l) => ({
+          sovLineId: l.lineId,
+          thisPeriodCents: l.thisPeriodCents,
+          storedCents: l.storedCents,
+        })),
+        version: input.version,
+      }),
+    issue: (input: { id: string; date: string; version: number }): Promise<ActionResult> =>
+      issuePayApplicationAction({
+        id: input.id,
+        projectId,
+        contractId: parentId,
+        issueDate: input.date,
+        version: input.version,
+      }),
+    remove: (id: string): Promise<ActionResult> =>
+      deletePayApplicationAction({ id, projectId, contractId: parentId }),
+    void: (input: { id: string; version: number }): Promise<ActionResult> =>
+      voidPayApplicationAction({ id: input.id, projectId, contractId: parentId, version: input.version }),
+  };
+}
 import {
   lineCompletedCents,
   payApplicationTotals,
@@ -58,15 +183,19 @@ function money(c: number, symbol: string | null): string {
 export function NewPayApplication({
   projectId,
   contractId,
+  mode = "contract",
   lastRetainagePpm,
   disabledReason,
 }: {
   projectId: string;
+  /** The contract's id — or, in commitment mode, the subcontract's. */
   contractId: string;
+  mode?: ApplicationMode;
   lastRetainagePpm: number | null;
   /** Why the button is greyed: no schedule yet, or a draft already open. */
   disabledReason: string | null;
 }) {
+  const api = verbs(mode, projectId, contractId);
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -75,15 +204,15 @@ export function NewPayApplication({
     lastRetainagePpm === null ? "" : ppmToPercentString(lastRetainagePpm),
   );
   const [notes, setNotes] = useState("");
+  const [reference, setReference] = useState("");
 
   function submit() {
     startTransition(async () => {
-      const result = await createPayApplicationAction({
-        projectId,
-        contractId,
+      const result = await api.create({
         periodTo,
         retainagePercent: retainage,
         notes,
+        ...(mode === "commitment" ? { reference: reference.trim() } : {}),
       });
       if ("error" in result) {
         toast.error(result.error);
@@ -108,7 +237,9 @@ export function NewPayApplication({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>New pay application</DialogTitle>
+            <DialogTitle>
+              {mode === "commitment" ? "New subcontractor application" : "New pay application"}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">
@@ -134,6 +265,19 @@ export function NewPayApplication({
                 later application lowers it. Blank is none.
               </p>
             </div>
+            {mode === "commitment" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="pa-reference">Their reference</Label>
+                <Input
+                  id="pa-reference"
+                  value={reference}
+                  onChange={(e) => setReference(e.target.value)}
+                  placeholder="The subcontractor's invoice number"
+                  maxLength={100}
+                />
+                <p className="text-xs text-muted-foreground">Becomes the bill&apos;s number in Accounting.</p>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="pa-notes">Notes</Label>
               <Textarea
@@ -165,6 +309,7 @@ export interface EditableApplication {
   notes: string;
   previousCertificatesCents: number;
   lines: Array<{
+    /** The schedule line's id — or, in commitment mode, the subcontract line's. */
     sovLineId: string;
     description: string;
     scheduledCents: number;
@@ -188,16 +333,20 @@ export interface EditableApplication {
 export function PayApplicationEditor({
   projectId,
   contractId,
+  mode = "contract",
   app,
   symbol,
   trigger,
 }: {
   projectId: string;
+  /** The contract's id — or, in commitment mode, the subcontract's. */
   contractId: string;
+  mode?: ApplicationMode;
   app: EditableApplication;
   symbol: string | null;
   trigger?: ReactNode;
 }) {
+  const api = verbs(mode, projectId, contractId);
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -236,13 +385,11 @@ export function PayApplicationEditor({
 
   const payload = () => ({
     id: app.id,
-    projectId,
-    contractId,
     periodTo,
     retainagePercent: retainage,
     notes: notes.trim(),
     lines: rows.map((r) => ({
-      sovLineId: r.sovLineId,
+      lineId: r.sovLineId,
       thisPeriodCents: r.thisPeriod,
       storedCents: r.stored,
     })),
@@ -251,7 +398,7 @@ export function PayApplicationEditor({
 
   function save() {
     startTransition(async () => {
-      const result = await updatePayApplicationAction(payload());
+      const result = await api.update(payload());
       if ("error" in result) {
         toast.error(result.error);
         return;
@@ -266,24 +413,18 @@ export function PayApplicationEditor({
     startTransition(async () => {
       // Save first, so the certificate is issued from what is on screen and
       // the version the issue carries is the one that save produced.
-      const saved = await updatePayApplicationAction(payload());
+      const saved = await api.update(payload());
       if ("error" in saved) {
         toast.error(saved.error);
         return;
       }
-      const result = await issuePayApplicationAction({
-        id: app.id,
-        projectId,
-        contractId,
-        issueDate,
-        version: app.version + 1,
-      });
+      const result = await api.issue({ id: app.id, date: issueDate, version: app.version + 1 });
       if ("error" in result) {
         toast.error(result.error);
         router.refresh();
         return;
       }
-      toast.success(`Application ${app.number} issued as an invoice`);
+      toast.success(api.issueDone(app.number));
       setOpen(false);
       router.refresh();
     });
@@ -291,7 +432,7 @@ export function PayApplicationEditor({
 
   function remove() {
     startTransition(async () => {
-      const result = await deletePayApplicationAction({ id: app.id, projectId, contractId });
+      const result = await api.remove(app.id);
       if ("error" in result) {
         toast.error(result.error);
         return;
@@ -338,7 +479,7 @@ export function PayApplicationEditor({
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="pae-issue">Issue on</Label>
+                <Label htmlFor="pae-issue">{mode === "commitment" ? "Bill dated" : "Issue on"}</Label>
                 <Input
                   id="pae-issue"
                   type="date"
@@ -466,7 +607,7 @@ export function PayApplicationEditor({
                 {pending ? "Saving…" : "Save draft"}
               </Button>
               <Button onClick={issue} disabled={pending || totals.dueCents <= 0}>
-                {pending ? "Working…" : "Issue as invoice"}
+                {pending ? "Working…" : api.issueLabel}
               </Button>
             </div>
           </DialogFooter>
@@ -480,16 +621,20 @@ export function PayApplicationEditor({
 export function VoidPayApplicationButton({
   projectId,
   contractId,
+  mode = "contract",
   id,
   number,
   version,
 }: {
   projectId: string;
+  /** The contract's id — or, in commitment mode, the subcontract's. */
   contractId: string;
+  mode?: ApplicationMode;
   id: string;
   number: number;
   version: number;
 }) {
+  const api = verbs(mode, projectId, contractId);
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   return (
@@ -498,9 +643,9 @@ export function VoidPayApplicationButton({
       size="sm"
       disabled={pending}
       onClick={() => {
-        if (!window.confirm(`Void application ${number}? Its invoice is voided too.`)) return;
+        if (!window.confirm(api.voidConfirm(number))) return;
         startTransition(async () => {
-          const result = await voidPayApplicationAction({ id, projectId, contractId, version });
+          const result = await api.void({ id, version });
           if ("error" in result) {
             toast.error(result.error);
             return;

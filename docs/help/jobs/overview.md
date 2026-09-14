@@ -308,7 +308,23 @@ A draft is written but not sent, so nobody is owed anything. `Closed` still coun
 
 ### Editing an order
 
-The pencil at the end of its row. **Changing the lines replaces all of them**, so what you see in the dialog is what you get. Changing only the status leaves the money alone.
+The pencil at the end of its row. **Changing the lines replaces all of them**, so what you see in the dialog is what you get. Changing only the status leaves the money alone. A subcontract that has been billed against refuses a change to its lines — the certificates point at them.
+
+### Billing a subcontractor, and holding retainage
+
+Click an order's number in the **Ordered** table to open its own page. A purchase order's page shows its lines and says that it is billed with an ordinary bill in Accounting. A **subcontract's** page adds **Subcontractor applications**: what the subcontractor bills you, recorded the same way you bill your client.
+
+Four figures sit at the top: **Subcontract value**, **Billed to date**, **Retainage held** (what you are holding back from them) and **Balance to finish**. The `Complete` column on the lines reads from the latest billed application.
+
+{button:New application|primary} — greyed while a draft is open, or when the subcontract has no lines — takes `Period to`, `Retainage %` (what you hold back; it carries over from the last application) and `Notes`. {button:Open|outline} on the draft is the same grid as a pay application, one row per subcontract line: `Scheduled`, `Previous` (carried), `This period`, `Stored`, `To date`, `%`, with the certificate live underneath — *Completed and stored to date*, *Retainage*, *Total earned less retainage*, *Less previous certificates* and **Current payment due**. `Bill dated` is the date the bill will carry.
+
+{button:Approve as bill|primary} posts an ordinary bill in Accounting to the subcontractor, on the {{project|lower}}'s company's books: a line for the work this period on each subcontract line, to Subcontractor Expense and **tagged with the job and the line's cost code** — so it lands on the job cost report's `Spent` column at once — and the retainage held this period as a negative line to `2120 Retainage Payable`. The ledger reads Dr expense (gross), Cr Retainage Payable (held), Cr Accounts Payable (net). The subcontractor's own invoice number, typed in `Their reference`, becomes the bill's number. The row shows `Billed`, the bill's number and whether it is `Open`, `Partly paid` or `Paid`; pay it from Accounting like any other bill.
+
+**Releasing retainage** is a later application at a lower rate — the final one at `0` — which carries a `Retainage released` line and pays out what was held. Nothing else to do.
+
+What can stop an approval, in its own words: `A purchase order is billed with an ordinary bill in Accounting. Applications are for subcontracts.` · `This contract already has a draft application. Finish that one first.` · `Nothing is due on this application, so there is nothing to invoice.` · `The chart of accounts is missing something: the chart has no 2120 Retainage Payable account` (the construction profile adds it) · Accounting's own refusals, such as a closed period. {button:Void|ghost} works on the latest billed application only and voids its bill too; Accounting refuses if the bill has been paid.
+
+On the {{project|lower}}'s page the Ordered table's `Billed` column reads what each subcontractor has billed and what is held from them.
 
 ## On site — the daily log, photos and the punch list
 
@@ -472,7 +488,6 @@ Worth knowing so you are not looking for it:
 - **A change order cannot be moved to another contract.** Raise it again on the right one and set the wrong one to `Void`.
 - **The daily log is not a timecard.** Who was on site is a headcount for the record; your own people's hours for wages are in Time, and the two are not joined.
 - **Unit price and time-and-materials are not billed here yet.** Fixed price, progress draws, AIA applications and draw schedules bill against a schedule of values; cost plus a fee bills the books' cost. The other two are recorded on the contract and the contract's page says so.
-- **Retainage you hold from subcontractors** is not tracked yet; only what clients hold from you.
 - **A cost-plus job on the work in progress schedule earns what it has cost plus its fee**, capped at its maximum, with no estimate asked for — when it is the job's only signed contract. A job mixing a cost-plus contract with a fixed-price one, and any unit-price or time-and-materials job, is shown and left out, and a period with billings on one cannot post until it has a value.
 - **No printed application.** The certificate is on screen and its invoice is in Accounting; an AIA-style printout is coming.
 - **Nothing codes a bill for you.** Cost codes appear in Accounting wherever you tag a line, beside the job itself, and the `Spent` column reads what the bills carry. A line with the job and no code shows up as the uncoded note under the job cost table, not on a row.
@@ -487,6 +502,7 @@ Worth knowing so you are not looking for it:
 | Add or change cost code lists | ● | | |
 | Add, approve or change a change order | ● | | |
 | Set a schedule of values, or issue a pay application | ● | | |
+| Record or approve a subcontractor's application | ● | | |
 | Log a day on site, or add and tick a punch item | ● | ● | ● |
 | Add photos to a day | ● | ● | |
 | See the work in progress schedule | ● | ● | ● |

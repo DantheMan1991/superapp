@@ -57,6 +57,15 @@ import {
   unpostWip,
   wipSchedule,
 } from "../src/packs/jobs/wip-ops";
+import {
+  approveSubApplication,
+  commitmentBilling,
+  createSubApplication,
+  listSubApplications,
+  updateSubApplication,
+  voidSubApplication,
+} from "../src/packs/jobs/sub-billing-ops";
+import { loadBill, loadBillLines } from "../src/modules/accounting/payables/bills";
 import { loadInvoice, loadInvoiceLines } from "../src/modules/accounting/invoicing/invoices";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import { CONSTRUCTION_COA } from "../src/industries/construction/accounts";
@@ -2639,4 +2648,228 @@ d("jobs ops", () => {
     const mixed = await run((tx) => wipSchedule(tx, tenantId, { entityId: entity, periodEnd: "2026-09-30" }));
     expect(mixed.rows.find((r) => r.projectId === project.id)!.method).toBe("cost_to_cost");
   });
+
+  // ------------------------------------------ subcontractor applications (5c)
+
+  /** A subcontract on its own company: a job, a party to pay, two coded lines. */
+  const subcontractJob = async (
+    tx: Tx,
+    entity: string,
+    number: string,
+    kind: "subcontract" | "purchase_order" = "subcontract",
+  ) => {
+    await ensureBilling(tx);
+    const project = await createProject(tx, ctx, { entityId: entity, number, name: `Sub ${number}` });
+    const set =
+      (await getDefaultCostCodeSet(tx, tenantId)) ??
+      (await createCostCodeSet(tx, ctx, { name: "Sub codes" }));
+    const framing = await createCostCode(tx, ctx, { setId: set.id, code: `S-${number}-06`, name: "Framing", sortOrder: 10 });
+    const finish = await createCostCode(tx, ctx, { setId: set.id, code: `S-${number}-09`, name: "Finish carpentry", sortOrder: 20 });
+    const party = await seedVendor(tx, `Framer ${number}`);
+    const commitment = await createCommitment(tx, ctx, {
+      projectId: project.id,
+      partyId: party,
+      number: `SC-${number}`,
+      kind,
+      status: "issued",
+      lines: [
+        { costCodeId: framing.id, description: "Framing labour", amountCents: 60_000_00 },
+        { costCodeId: finish.id, description: "Trim", amountCents: 20_000_00 },
+      ],
+    });
+    const lines = await tx
+      .select()
+      .from(schema.jobCommitmentLines)
+      .where(eq(schema.jobCommitmentLines.commitmentId, commitment.id))
+      .orderBy(schema.jobCommitmentLines.sortOrder);
+    return { project, commitment, lines, framing, finish, party };
+  };
+
+  it("A SUBCONTRACTOR'S APPLICATION bills against the subcontract's lines, holds retainage, and becomes an ordinary bill tagged with the job and each line's code", async () => {
+    const entity = await newCompany("Sub Co 1");
+    const { project, commitment, lines, framing, finish } = await run((tx) => subcontractJob(tx, entity, "OPS-SB1"));
+    const app = await run((tx) =>
+      createSubApplication(tx, ctx, { commitmentId: commitment.id, periodTo: "2026-09-30", retainagePpm: 100_000, reference: "FR-2041" }),
+    );
+    expect(app.number).toBe(1);
+    // A line per subcontract line, carried from the order.
+    const [row] = await run((tx) => listSubApplications(tx, tenantId, commitment.id));
+    expect(row.lines.map((l) => [l.description, l.commitmentAmountCents, l.previousCents])).toEqual([
+      ["Framing labour", 60_000_00, 0],
+      ["Trim", 20_000_00, 0],
+    ]);
+    await run((tx) =>
+      updateSubApplication(tx, ctx, app.id, {
+        lines: [
+          { commitmentLineId: lines[0].id, thisPeriodCents: 30_000_00, storedCents: 0 },
+          { commitmentLineId: lines[1].id, thisPeriodCents: 0, storedCents: 5_000_00 },
+        ],
+      }),
+    );
+    await expect(
+      run((tx) => approveSubApplication(tx, staffCtx, app.id, { billDate: "2026-10-01" })),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const approved = await run((tx) => approveSubApplication(tx, ctx, app.id, { billDate: "2026-10-01" }));
+    // The certificate: 35,000 completed and stored, 10% held, nothing before.
+    expect(approved.app).toMatchObject({
+      status: "billed",
+      scheduledCents: 80_000_00,
+      completedToDateCents: 35_000_00,
+      retainageCents: 3_500_00,
+      previousCertificatesCents: 0,
+      dueCents: 31_500_00,
+      billedOn: "2026-10-01",
+    });
+    expect(approved.app.billId).toBe(approved.billId);
+
+    const { bill, billLines, entryLines, accounts, dims, jobMember } = await run(async (tx) => {
+      const bill = await loadBill(tx, tenantId, approved.billId);
+      const billLines = await loadBillLines(tx, tenantId, bill.id);
+      const entryLines = await tx
+        .select()
+        .from(schema.journalLines)
+        .where(eq(schema.journalLines.entryId, bill.journalEntryId!));
+      const accounts = await tx
+        .select({ id: schema.accounts.id, code: schema.accounts.code })
+        .from(schema.accounts)
+        .where(eq(schema.accounts.tenantId, tenantId));
+      const dims = await tx
+        .select({ journalLineId: schema.lineDimensions.journalLineId, memberId: schema.lineDimensions.memberId, dimensionType: schema.lineDimensions.dimensionType })
+        .from(schema.lineDimensions)
+        .where(and(eq(schema.lineDimensions.tenantId, tenantId), inArray(schema.lineDimensions.journalLineId, entryLines.map((l) => l.id))));
+      const [jobMember] = await memberFor(tx, project.id);
+      return { bill, billLines, entryLines, accounts, dims, jobMember };
+    });
+    const codeOf = new Map(accounts.map((a) => [a.id, a.code]));
+    expect(bill.status).toBe("approved");
+    expect(bill.billNumber).toBe("FR-2041"); // the subcontractor's own reference
+    expect(bill.totalCents).toBe(31_500_00); // what is owed now: net of retainage
+    expect(bill.entityId).toBe(project.entityId);
+    // Three lines a bookkeeper can read: the work on each subcontract line, and what is held.
+    expect(billLines.map((l) => [codeOf.get(l.accountId!), l.amountCents])).toEqual([
+      ["5100", 30_000_00],
+      ["5100", 5_000_00],
+      ["2120", -3_500_00],
+    ]);
+    // The ledger: Dr Subcontractor Expense 35,000 (gross) · Cr Retainage Payable 3,500 · Cr AP 31,500.
+    const net = new Map<string | undefined, number>();
+    for (const l of entryLines) net.set(codeOf.get(l.accountId), (net.get(codeOf.get(l.accountId)) ?? 0) + l.amountCents);
+    expect(net.get("5100")).toBe(35_000_00);
+    expect(net.get("2120")).toBe(-3_500_00);
+    expect(net.get("2000")).toBe(-31_500_00);
+    // Every expense line carries the job AND its cost code, so the Spent column sees it.
+    const members = new Set(dims.map((d) => d.memberId));
+    expect(members.has(jobMember.id)).toBe(true);
+    const report = await run((tx) => jobCostReport(tx, tenantId, project.id));
+    expect(report.rows.find((r) => r.costCodeId === framing.id)?.actualCents).toBe(30_000_00);
+    expect(report.rows.find((r) => r.costCodeId === finish.id)?.actualCents).toBe(5_000_00);
+    expect(report.uncodedActualCents).toBe(0);
+    // ...and the commitment's billing summary says what was billed and what is held.
+    const summary = (await run((tx) => commitmentBilling(tx, tenantId, project.id))).get(commitment.id);
+    expect(summary).toMatchObject({ billedCents: 31_500_00, retainageHeldCents: 3_500_00, billedCount: 1, hasDraft: false });
+  });
+
+  it("the NEXT application carries the work forward and certifies against the last; a rate of zero RELEASES what was held through 2120", async () => {
+    const entity = await newCompany("Sub Co 2");
+    const { commitment, lines } = await run((tx) => subcontractJob(tx, entity, "OPS-SB2"));
+    const first = await run((tx) =>
+      createSubApplication(tx, ctx, { commitmentId: commitment.id, periodTo: "2026-09-30", retainagePpm: 100_000 }),
+    );
+    await run((tx) =>
+      updateSubApplication(tx, ctx, first.id, {
+        lines: [{ commitmentLineId: lines[0].id, thisPeriodCents: 60_000_00, storedCents: 0 }],
+      }),
+    );
+    await run((tx) => approveSubApplication(tx, ctx, first.id, { billDate: "2026-10-01" }));
+    // The rate carries forward; the previous figures are carried per line.
+    const second = await run((tx) => createSubApplication(tx, ctx, { commitmentId: commitment.id, periodTo: "2026-10-31" }));
+    expect(second.retainagePpm).toBe(100_000);
+    const [, draft] = await run((tx) => listSubApplications(tx, tenantId, commitment.id));
+    expect(draft.lines.map((l) => [l.description, l.previousCents])).toEqual([
+      ["Framing labour", 60_000_00],
+      ["Trim", 0],
+    ]);
+    // Finish the trim, final application at 0%: everything held comes back.
+    await run((tx) =>
+      updateSubApplication(tx, ctx, second.id, {
+        retainagePpm: 0,
+        lines: [{ commitmentLineId: lines[1].id, thisPeriodCents: 20_000_00, storedCents: 0 }],
+      }),
+    );
+    const final = await run((tx) => approveSubApplication(tx, ctx, second.id, { billDate: "2026-11-01" }));
+    expect(final.app).toMatchObject({
+      completedToDateCents: 80_000_00,
+      retainageCents: 0,
+      previousCertificatesCents: 54_000_00, // 60,000 less the 6,000 held
+      dueCents: 26_000_00, // 20,000 of trim plus the 6,000 released
+    });
+    const billLines = await run((tx) => loadBillLines(tx, tenantId, final.billId));
+    const accounts = await run((tx) => tx.select({ id: schema.accounts.id, code: schema.accounts.code }).from(schema.accounts).where(eq(schema.accounts.tenantId, tenantId)));
+    const codeOf = new Map(accounts.map((a) => [a.id, a.code]));
+    expect(billLines.map((l) => [codeOf.get(l.accountId!), l.amountCents, l.description])).toEqual([
+      ["5100", 20_000_00, "Application 2 — Trim through 2026-10-31"],
+      ["2120", 6_000_00, "Retainage released"],
+    ]);
+    const summary = (await run((tx) => commitmentBilling(tx, tenantId, commitment.projectId))).get(commitment.id);
+    expect(summary).toMatchObject({ billedCents: 80_000_00, retainageHeldCents: 0, billedCount: 2 });
+  });
+
+  it("refuses a purchase order, a second draft, nothing due, a chart without 2120, and holds a billed subcontract line; voids only the latest and its bill with it", async () => {
+    const entity = await newCompany("Sub Co 3");
+    const po = await run((tx) => subcontractJob(tx, entity, "OPS-SB3P", "purchase_order"));
+    await expect(
+      run((tx) => createSubApplication(tx, ctx, { commitmentId: po.commitment.id, periodTo: "2026-09-30" })),
+    ).rejects.toMatchObject({ code: "NOT_SUBCONTRACT" });
+
+    const { commitment, lines } = await run((tx) => subcontractJob(tx, entity, "OPS-SB3"));
+    const app = await run((tx) =>
+      createSubApplication(tx, ctx, { commitmentId: commitment.id, periodTo: "2026-09-30", retainagePpm: 50_000 }),
+    );
+    await expect(
+      run((tx) => createSubApplication(tx, ctx, { commitmentId: commitment.id, periodTo: "2026-10-31" })),
+    ).rejects.toMatchObject({ code: "ONE_DRAFT" });
+    await expect(
+      run((tx) => approveSubApplication(tx, ctx, app.id, { billDate: "2026-10-01" })),
+    ).rejects.toMatchObject({ code: "NOTHING_DUE" });
+    await run((tx) =>
+      updateSubApplication(tx, ctx, app.id, {
+        lines: [{ commitmentLineId: lines[0].id, thisPeriodCents: 10_000_00, storedCents: 0 }],
+      }),
+    );
+    await run((tx) =>
+      tx.update(schema.accounts).set({ isActive: false }).where(and(eq(schema.accounts.tenantId, tenantId), eq(schema.accounts.code, "2120"))),
+    );
+    await expect(
+      run((tx) => approveSubApplication(tx, ctx, app.id, { billDate: "2026-10-01" })),
+    ).rejects.toMatchObject({ code: "ACCOUNT_MISSING", message: expect.stringContaining("2120") });
+    await run((tx) =>
+      tx.update(schema.accounts).set({ isActive: true }).where(and(eq(schema.accounts.tenantId, tenantId), eq(schema.accounts.code, "2120"))),
+    );
+    const approved = await run((tx) => approveSubApplication(tx, ctx, app.id, { billDate: "2026-10-01" }));
+    // A billed subcontract line cannot be replaced out from under its certificate.
+    await expect(
+      run((tx) =>
+        updateCommitment(tx, ctx, commitment.id, {
+          lines: [{ costCodeId: lines[0].costCodeId, description: "Framing, rewritten", amountCents: 1 }],
+        }),
+      ),
+    ).rejects.toThrow();
+    // Void: the latest only, and the bill goes with it.
+    const second = await run((tx) => createSubApplication(tx, ctx, { commitmentId: commitment.id, periodTo: "2026-10-31" }));
+    await run((tx) =>
+      updateSubApplication(tx, ctx, second.id, {
+        lines: [{ commitmentLineId: lines[0].id, thisPeriodCents: 5_000_00, storedCents: 0 }],
+      }),
+    );
+    const later = await run((tx) => approveSubApplication(tx, ctx, second.id, { billDate: "2026-11-01" }));
+    await expect(run((tx) => voidSubApplication(tx, ctx, approved.app.id))).rejects.toMatchObject({ code: "NOT_LAST" });
+    const voided = await run((tx) => voidSubApplication(tx, ctx, later.app.id, { version: later.app.version }));
+    expect(voided.status).toBe("void");
+    const bill = await run((tx) => loadBill(tx, tenantId, later.billId));
+    expect(bill.status).toBe("void");
+    // The application before it is the latest again, and what it held stands.
+    const summary = (await run((tx) => commitmentBilling(tx, tenantId, commitment.projectId))).get(commitment.id);
+    expect(summary).toMatchObject({ billedCents: 9_500_00, retainageHeldCents: 500_00, billedCount: 1 });
+    // Two subcontracts, four applications, two bills and a void: slow under a full-suite run.
+  }, 120_000);
 });

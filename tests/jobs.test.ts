@@ -56,6 +56,11 @@ import {
   WIP_METHOD_LABELS,
   isCostPlusMethod,
   isFixedValueMethod,
+  RETAINAGE_PAYABLE_CODE,
+  SUBCONTRACT_EXPENSE_CODES,
+  SUB_APPLICATION_STATUSES,
+  SUB_APPLICATION_STATUS_LABELS,
+  isSubApplicationStatus,
 } from "../src/packs/jobs/vocabulary";
 import {
   WIP_PPM,
@@ -898,5 +903,53 @@ describe("cost plus a fee", () => {
       expect(capped.earnedCents).toBe(45_000_00);
       expect(costPlusFeeCents(40_000_00, 150_000)).toBe(6_000_00);
     });
+  });
+});
+
+/*
+ * ── subcontractor applications (slice 5c, ADR 0061) ────────────────────────
+ *
+ * The payable-side mirror: the same CHECKs as a pay application's, a bill
+ * where an invoice was, the subcontract line held by RESTRICT.
+ */
+const SUB_BILLING_SQL = readFileSync("drizzle/0343_sub_billing.sql", "utf8");
+
+describe("subcontractor applications", () => {
+  it("MIRRORS the status CHECK constraint, with billed where issued was", () => {
+    const m = SUB_BILLING_SQL.match(/job_sub_applications_status_valid[^(]*\(([^)]*)\)/);
+    expect(m, "constraint not found").not.toBeNull();
+    const inSql = [...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]);
+    expect(inSql.sort()).toEqual([...SUB_APPLICATION_STATUSES].sort());
+    for (const s of SUB_APPLICATION_STATUSES) expect(SUB_APPLICATION_STATUS_LABELS[s].length).toBeGreaterThan(0);
+    expect(isSubApplicationStatus("billed")).toBe(true);
+    expect(isSubApplicationStatus("issued")).toBe(false);
+  });
+
+  it("makes a billed application a bill and a draft not one, both ways", () => {
+    expect(SUB_BILLING_SQL).toMatch(/job_sub_applications_billed_has_bill/);
+    expect(SUB_BILLING_SQL).toMatch(/= 'draft'\) = \("job_sub_applications"."bill_id" is null\)/);
+    expect(SUB_BILLING_SQL).toMatch(/job_sub_applications_bill_fk[^;]*REFERENCES "public"."bills"[^;]*ON DELETE no action/);
+  });
+
+  it("keeps retainage between nothing and everything, numbers per subcontract, and floors a line's total", () => {
+    expect(SUB_BILLING_SQL).toMatch(/retainage_ppm" >= 0 and "job_sub_applications"."retainage_ppm" <= 1000000/);
+    expect(SUB_BILLING_SQL).toMatch(/job_sub_applications_commitment_number_idx[^;]*\("tenant_id","commitment_id","number"\)/);
+    expect(SUB_BILLING_SQL).toMatch(/job_sub_application_lines_completed_nonnegative/);
+    expect(SUB_BILLING_SQL).not.toMatch(/this_period_cents" >= 0/);
+  });
+
+  it("holds a billed subcontract line by RESTRICT and takes the lines with the application", () => {
+    expect(SUB_BILLING_SQL).toMatch(/job_sub_application_lines_commitment_line_fk[^;]*ON DELETE no action/);
+    expect(SUB_BILLING_SQL).toMatch(/job_sub_application_lines_app_fk[^;]*ON DELETE cascade/);
+    expect(SUB_BILLING_SQL).toMatch(/job_sub_applications_commitment_fk[^;]*ON DELETE cascade/);
+  });
+
+  it("posts to the general chart's subcontract expense and the profile's retainage payable", () => {
+    expect(SUBCONTRACT_EXPENSE_CODES).toEqual(["5100"]);
+    expect(RETAINAGE_PAYABLE_CODE).toBe("2120");
+    const seeded = CONSTRUCTION_COA.accounts.find((a) => a.code === RETAINAGE_PAYABLE_CODE);
+    expect(seeded?.type).toBe("liability");
+    // 5100 is deliberately NOT the construction profile's: the general chart has it.
+    expect(CONSTRUCTION_COA.accounts.some((a) => a.code === "5100")).toBe(false);
   });
 });

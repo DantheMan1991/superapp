@@ -120,7 +120,9 @@ export class JobsError extends Error {
       /** Only the latest posted WIP period of a company can be unposted. */
       | "NOT_LATEST_PERIOD"
       /** A job's cost can be billed by one cost-plus contract; a second would bill it twice. */
-      | "ONE_COST_PLUS",
+      | "ONE_COST_PLUS"
+      /** A subcontractor's application is against a SUBCONTRACT; a purchase order is billed with an ordinary bill. */
+      | "NOT_SUBCONTRACT",
     message: string,
   ) {
     super(message);

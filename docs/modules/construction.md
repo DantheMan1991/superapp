@@ -38,6 +38,40 @@ not improvise — the same status
 
 ## Build log
 
+### 2026-09-13 (fifth pass) — Brother-sister, so the group needs nothing (`claude/construction-industry-design`)
+
+**The last blocking question is closed: Shrock Family of Companies is
+brother-sister commonly owned, the family owning all three LLCs directly.** No
+parent holds equity in anything.
+
+That is precisely the shape
+[consolidation.ts](../../src/modules/accounting/core/consolidation.ts) says it
+assumes, so **its non-goals are non-goals here and not gaps** — no
+investment-in-subsidiary elimination is needed, no minority interest exists, and
+purchase accounting never happened. Combining the three and eliminating
+intercompany IS the whole job, exactly as the module's header claims. **The
+group's reporting needs no work at all**, and construction builds nothing for it.
+
+**One finding, and it is accounting's rather than construction's.** Asking the
+question exposed that the two group scopes may be labelled the wrong way round for
+this case. The report control offers "All companies (combined)" for a plain sum and
+"All companies (consolidated)" for a sum with intercompany eliminated
+([report-controls.tsx:192](../../src/modules/accounting/components/report-controls.tsx:192)).
+In accounting usage it is the other way round for entities under common ownership
+with no parent: **combined** statements are the ones prepared for brother-sister
+companies and they *do* eliminate intercompany; **consolidated** additionally
+eliminates a parent's investment in a subsidiary — the thing this module states it
+does not do. So the mechanism is right and the title is in question, which matters
+because the pilot's statements go to a bank and a surety and the word on the page
+is what they read. Recorded as an open item in [accounting.md](accounting.md)
+rather than acted on: it is accounting's user-facing copy, the scope values are
+effectively an API, and the module's own header is evidence the distinction was
+understood, so the intent should be asked about before any word changes.
+
+**Nothing in this pass changed a line of the construction design.** Recorded
+because "we asked and the answer cost nothing" is worth as much in a build log as
+a correction.
+
 ### 2026-09-13 (fourth pass) — Scope set to one entity, and consolidation was already built (`claude/construction-industry-design`)
 
 The founder settled the two questions the third pass opened, and both answers
@@ -60,10 +94,13 @@ reading it rather than assuming it:
 
 - Its header states an explicit non-goal: **not full GAAP consolidation**, because
   it assumes *"commonly owned LLCs rather than a parent holding subsidiaries"*.
-  **Whether Shrock Family of Companies is brother-sister commonly owned or a true
-  holding company is now the only question left in this file**, and it is an
-  accounting question, not a construction one. Brother-sister produces *combined*
-  statements and the built version is exactly right.
+  **The founder confirmed brother-sister, the family owning all three directly**,
+  so the assumption holds exactly and the non-goals are non-goals rather than gaps.
+  The group's reporting needs nothing. It did surface a wording question that
+  belongs to accounting — statements for commonly owned entities are properly
+  titled *combined*, which is the word the report control gives to the scope that
+  does **not** eliminate — now an open item in
+  [accounting.md](accounting.md).
 - **The consolidation requirement and the deferred industry problem arrive on the
   same day**, both triggered by a second entity going in. Until then there is
   nothing to consolidate and the group's statements are assembled outside the
@@ -363,11 +400,14 @@ Three things worth stating rather than assuming:
 - **It is explicitly NOT full GAAP consolidation** — its own header says so: no
   investment-in-subsidiary elimination, no minority interest, no purchase
   accounting, because it assumes *"commonly owned LLCs rather than a parent
-  holding subsidiaries"*. **Whether that assumption holds for Shrock Family of
-  Companies is the one question left** (see Open items). Brother-sister commonly
-  owned entities produce **combined** statements and the built version is exactly
-  right; a true holding company owning equity in the three would need eliminations
-  the module deliberately does not do.
+  holding subsidiaries"*. **That assumption holds exactly: the founder confirms
+  brother-sister, the family owning all three directly (2026-09-13).** So the
+  module's non-goals are non-goals here and not gaps, and the group's reporting
+  needs no work. What brother-sister ownership *does* raise is a wording question
+  — statements for commonly owned entities are properly titled **combined**, and
+  the report control uses that word for the scope that does *not* eliminate.
+  Recorded in [accounting.md](accounting.md) Open items, because it is accounting's
+  copy and an accountant should settle it.
 - **While only Shrock Premier is in the platform there is nothing to consolidate**,
   so the statements the bank and the surety see are assembled outside it. That is
   a fine phase-one position and should not be described as anything else. It also
@@ -610,16 +650,17 @@ fill it in.
 **Every question put to the pilot has been answered** (see the three-column
 table). These are what the answers opened, in priority order:
 
-- **Is Shrock Family of Companies brother-sister commonly owned, or a true holding
-  company owning equity in the three?** The only question left, and it is an
-  accounting question rather than a construction one.
-  [consolidation.ts](../../src/modules/accounting/core/consolidation.ts) assumes
-  the former in its own header and deliberately does no
-  investment-in-subsidiary elimination, no minority interest and no purchase
-  accounting. Brother-sister produces **combined** statements and the built
-  version is exactly right; a holding company would need eliminations the module
-  says would "mostly be wrong here". **Does not block construction** — it blocks
-  the day a second entity goes in.
+- ~~**Is Shrock Family of Companies brother-sister commonly owned, or a true
+  holding company?**~~ — **closed 2026-09-13: brother-sister, the family owns all
+  three directly.** So
+  [consolidation.ts](../../src/modules/accounting/core/consolidation.ts)'s stated
+  assumption — *"commonly owned LLCs rather than a parent holding subsidiaries"* —
+  holds exactly, and its non-goals (investment-in-subsidiary elimination, minority
+  interest, purchase accounting) are correctly non-goals rather than gaps. **The
+  group's reporting needs no work at all.** One wording question came out of it and
+  it belongs to accounting, not here: the two scope labels may be the wrong way
+  round for this case — see
+  [accounting.md](accounting.md) Open items.
 - ~~**Does Rainbow Restoration need to be in the platform?**~~ · ~~**Is Shrock
   Prefab a separate industry or a delivery method?**~~ — **both out of scope by
   the founder's decision, 2026-09-13.** Different industries, "not going to worry

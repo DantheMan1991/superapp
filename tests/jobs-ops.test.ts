@@ -2649,6 +2649,338 @@ d("jobs ops", () => {
     expect(mixed.rows.find((r) => r.projectId === project.id)!.method).toBe("cost_to_cost");
   });
 
+  // ------------------------------------------------ time and materials (5d)
+
+  /** A person in Time: a party and a worker row. */
+  const worker = async (tx: Tx, name: string): Promise<{ id: string; name: string }> => {
+    const [party] = await tx
+      .insert(schema.parties)
+      .values({ tenantId, displayName: name, kind: "person" })
+      .returning({ id: schema.parties.id });
+    const [w] = await tx
+      .insert(schema.timeWorkers)
+      .values({ tenantId, partyId: party.id })
+      .returning({ id: schema.timeWorkers.id });
+    return { id: w.id, name };
+  };
+
+  /** A charged-out rate from a day, on a wage nobody here reads. */
+  const billRate = (tx: Tx, workerId: string, billRateCents: number, effectiveOn: string) =>
+    tx.insert(schema.timeRates).values({ tenantId, workerId, payRateCents: 20_00, billRateCents, effectiveOn });
+
+  /** Time on a day: a worked entry tagged with the project's cost object, or with nothing when `projectId` is null. */
+  const hours = async (
+    tx: Tx,
+    workerId: string,
+    projectId: string | null,
+    workDate: string,
+    minutes: number,
+    payType: "worked" | "paid_leave" = "worked",
+  ) => {
+    const [e] = await tx
+      .insert(schema.timeEntries)
+      .values({ tenantId, workerId, minutes, workDate, payType, enteredByClerkUserId: `${STAMP}-owner` })
+      .returning({ id: schema.timeEntries.id });
+    if (projectId) {
+      const [member] = await memberFor(tx, projectId);
+      await tx
+        .insert(schema.timeEntryDimensions)
+        .values({ tenantId, entryId: e.id, dimensionType: PROJECT_DIMENSION, memberId: member.id });
+    }
+  };
+
+  /** A timesheet for the period, approved unless told otherwise — the gate the accrual and the application share. */
+  const sheet = (tx: Tx, workerId: string, start: string, end: string, approved = true) =>
+    tx.insert(schema.timeSheets).values({
+      tenantId,
+      workerId,
+      periodStartsOn: start,
+      periodEndsOn: end,
+      submittedByClerkUserId: `${STAMP}-owner`,
+      ...(approved
+        ? { approvedAt: new Date(), approvedByClerkUserId: `${STAMP}-owner`, workedMinutes: 0 }
+        : {}),
+    });
+
+  /** Wages in the books, tagged with the job: Dr 6450 Salaries & Wages / Cr 2300 Payroll Liabilities. */
+  const postWages = async (tx: Tx, entity: string, projectId: string, cents: number, date: string) => {
+    const [member] = await memberFor(tx, projectId);
+    await postEntry(tx, ctx, {
+      entityId: entity,
+      status: "posted",
+      entryDate: date,
+      memo: "wages",
+      lines: [
+        { accountId: await accountByCodeId(tx, "6450"), amountCents: cents, dimensionMemberIds: [member.id] },
+        { accountId: await accountByCodeId(tx, "2300"), amountCents: -cents },
+      ],
+    });
+  };
+
+  /** A job on a signed time-and-materials contract to a real party. */
+  const tmJob = async (
+    tx: Tx,
+    entity: string,
+    number: string,
+    terms: { feePpm?: number | null; gmaxCents?: number | null; laborRateCents?: number | null },
+  ) => {
+    await ensureBilling(tx);
+    const project = await createProject(tx, ctx, { entityId: entity, number, name: `T and M ${number}` });
+    const party = await seedVendor(tx, `Owner ${number}`);
+    const contract = await createContract(tx, ctx, {
+      projectId: project.id,
+      kind: "service",
+      counterpartyPartyId: party,
+      billingMethod: "time_and_materials",
+      valueCents: null,
+      feePpm: terms.feePpm ?? null,
+      gmaxCents: terms.gmaxCents ?? null,
+      laborRateCents: terms.laborRateCents ?? null,
+      status: "signed",
+    });
+    return { project, contract };
+  };
+
+  it("TIME AND MATERIALS: approved hours at each person's rate, the books' cost without the wages marked up, and the invoice line by line", async () => {
+    const entity = await newCompany("T and M Co 1");
+    const { project, contract } = await run((tx) => tmJob(tx, entity, "OPS-TM1", { feePpm: 100_000 }));
+    expect(contract.billingMethod).toBe("time_and_materials");
+    expect(contract.laborRateCents).toBeNull();
+    const set = await run((tx) => createCostCodeSet(tx, ctx, { name: "TM1 codes" }));
+    const code = await run((tx) =>
+      createCostCode(tx, ctx, { setId: set.id, code: "TM1-05", name: "Materials", sortOrder: 10 }),
+    );
+    const { alice, bob, carol } = await run(async (tx) => ({
+      alice: await worker(tx, "Alice Carpenter"),
+      bob: await worker(tx, "Bob Labourer"),
+      carol: await worker(tx, "Carol Pending"),
+    }));
+    await run(async (tx) => {
+      await billRate(tx, alice.id, 65_00, "2026-01-01");
+      // Alice: eight hours and two on the job; one untagged; four of paid
+      // leave tagged (a cost, never a charge); five after the period end.
+      await hours(tx, alice.id, project.id, "2026-09-01", 480);
+      await hours(tx, alice.id, project.id, "2026-09-02", 120);
+      await hours(tx, alice.id, null, "2026-09-03", 60);
+      await hours(tx, alice.id, project.id, "2026-09-04", 240, "paid_leave");
+      await hours(tx, alice.id, project.id, "2026-10-02", 300);
+      await sheet(tx, alice.id, "2026-08-31", "2026-09-13");
+      await sheet(tx, alice.id, "2026-09-28", "2026-10-11");
+      // Bob: three hours, approved, and no charged-out rate yet.
+      await hours(tx, bob.id, project.id, "2026-09-01", 180);
+      await sheet(tx, bob.id, "2026-08-31", "2026-09-13");
+      // Carol: ninety minutes on a sheet nobody has approved.
+      await hours(tx, carol.id, project.id, "2026-09-02", 90);
+      await sheet(tx, carol.id, "2026-08-31", "2026-09-13", false);
+      // Materials, marked up; wages in the books, not marked up — the hours cover them.
+      await postCodedCost(tx, entity, project.id, code.id, 2_000_00, "2026-09-05");
+      await postWages(tx, entity, project.id, 500_00, "2026-09-13");
+    });
+
+    const app = await run((tx) =>
+      createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-09-30", retainagePpm: 100_000 }),
+    );
+    let [row] = await run((tx) => listPayApplications(tx, tenantId, contract.id));
+    expect(
+      row.labor.map((l) => [l.name, l.rateCents, l.minutesToDate, l.previousMinutes, l.thisPeriodMinutes, l.thisPeriodCents]),
+    ).toEqual([
+      ["Alice Carpenter", 65_00, 600, 0, 600, 650_00],
+      ["Bob Labourer", 0, 180, 0, 180, 0],
+    ]);
+    expect(row.laborAwaitingMinutes).toBe(90);
+    // The wages line is not among the costs.
+    expect(row.costs.map((c) => [c.code, c.ledgerToDateCents, c.thisPeriodCents])).toEqual([
+      ["TM1-05", 2_000_00, 2_000_00],
+    ]);
+    expect(row.costPlus).toMatchObject({
+      laborToDateCents: 650_00,
+      costToDateCents: 2_000_00,
+      feeToDateCents: 200_00,
+      completedToDateCents: 2_850_00,
+      retainageCents: 285_00,
+      dueCents: 2_565_00,
+      capped: false,
+    });
+
+    // Bob's hours have no price: refused by name, never billed at nothing.
+    await expect(
+      run((tx) => issuePayApplication(tx, ctx, app.id, { issueDate: "2026-10-01" })),
+    ).rejects.toMatchObject({ code: "NO_BILL_RATE", message: "Bob Labourer" });
+    await run((tx) => billRate(tx, bob.id, 40_00, "2026-01-01"));
+    await run((tx) => updatePayApplication(tx, ctx, app.id, {}));
+    [row] = await run((tx) => listPayApplications(tx, tenantId, contract.id));
+    expect(row.labor.map((l) => [l.name, l.rateCents, l.thisPeriodMinutes, l.thisPeriodCents])).toEqual([
+      ["Alice Carpenter", 65_00, 600, 650_00],
+      ["Bob Labourer", 40_00, 180, 120_00],
+    ]);
+
+    const issued = await run((tx) => issuePayApplication(tx, ctx, app.id, { issueDate: "2026-10-01" }));
+    expect(issued.app).toMatchObject({
+      status: "issued",
+      laborToDateCents: 770_00,
+      costToDateCents: 2_000_00,
+      feeToDateCents: 200_00,
+      completedToDateCents: 2_970_00,
+      retainageCents: 297_00,
+      dueCents: 2_673_00,
+    });
+    const { lines, accounts } = await run(async (tx) => {
+      const invoice = await loadInvoice(tx, tenantId, issued.invoiceId);
+      return {
+        lines: await loadInvoiceLines(tx, tenantId, invoice.id),
+        accounts: await tx
+          .select({ id: schema.accounts.id, code: schema.accounts.code })
+          .from(schema.accounts)
+          .where(eq(schema.accounts.tenantId, tenantId)),
+      };
+    });
+    const codeOf = new Map(accounts.map((a) => [a.id, a.code]));
+    // A line per person the client can read against the timesheet, then cost, then markup, then retainage.
+    expect(lines.map((l) => [codeOf.get(l.incomeAccountId), l.amountCents, l.description])).toEqual([
+      ["4030", 650_00, "Application 1 — Alice Carpenter, 10 h at 65.00/h through 2026-09-30"],
+      ["4030", 120_00, "Application 1 — Bob Labourer, 3 h at 40.00/h through 2026-09-30"],
+      ["4030", 2_000_00, "Application 1 — cost incurred through 2026-09-30"],
+      ["4030", 200_00, "Markup (10% of cost)"],
+      ["1230", -297_00, "Retainage withheld (10%)"],
+    ]);
+    // The wages sit in the books on the job all the same: the Spent column sees them, the application does not.
+    const spent = await run((tx) => jobCostReport(tx, tenantId, project.id));
+    expect(spent.actualCents).toBe(2_500_00);
+  }, 120_000);
+
+  it("a flat rate bills everybody at it and is fixed once billed; a rate dated in Time starts a second line, the next application carries hours forward, hours typed short stay short, and one contract bills a job's books", async () => {
+    const entity = await newCompany("T and M Co 2");
+    // One rate for everybody, whatever Time says about Dan.
+    const { project: flatJob, contract: flat } = await run((tx) =>
+      tmJob(tx, entity, "OPS-TM2A", { laborRateCents: 80_00 }),
+    );
+    const dan = await run((tx) => worker(tx, "Dan Flat"));
+    await run(async (tx) => {
+      await billRate(tx, dan.id, 65_00, "2026-01-01");
+      await hours(tx, dan.id, flatJob.id, "2026-09-05", 300);
+      await sheet(tx, dan.id, "2026-08-31", "2026-09-13");
+    });
+    const flatApp = await run((tx) =>
+      createPayApplication(tx, ctx, { contractId: flat.id, periodTo: "2026-09-30" }),
+    );
+    const [flatRow] = await run((tx) => listPayApplications(tx, tenantId, flat.id));
+    expect(flatRow.labor.map((l) => [l.rateCents, l.thisPeriodMinutes, l.thisPeriodCents])).toEqual([
+      [80_00, 300, 400_00],
+    ]);
+    await run((tx) => issuePayApplication(tx, ctx, flatApp.id, { issueDate: "2026-10-01" }));
+    await expect(
+      run((tx) => updateContract(tx, ctx, flat.id, { laborRateCents: 90_00 })),
+    ).rejects.toMatchObject({ code: "RATE_LOCKED" });
+    // Saying the same rate again is not a change.
+    await run((tx) => updateContract(tx, ctx, flat.id, { laborRateCents: 80_00, notes: "same rate" }));
+
+    // Each person's own rate, dated: Erin's went up mid-September.
+    const { project, contract } = await run((tx) => tmJob(tx, entity, "OPS-TM2B", {}));
+    const erin = await run((tx) => worker(tx, "Erin Dated"));
+    await run(async (tx) => {
+      await billRate(tx, erin.id, 65_00, "2026-01-01");
+      await billRate(tx, erin.id, 70_00, "2026-09-16");
+      await hours(tx, erin.id, project.id, "2026-09-10", 240);
+      await hours(tx, erin.id, project.id, "2026-09-20", 120);
+      await sheet(tx, erin.id, "2026-08-31", "2026-09-13");
+      await sheet(tx, erin.id, "2026-09-14", "2026-09-27");
+    });
+    const first = await run((tx) =>
+      createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-09-30" }),
+    );
+    let rows = await run((tx) => listPayApplications(tx, tenantId, contract.id));
+    expect(rows[0].labor.map((l) => [l.rateCents, l.minutesToDate, l.thisPeriodCents])).toEqual([
+      [65_00, 240, 260_00],
+      [70_00, 120, 140_00],
+    ]);
+    const issuedFirst = await run((tx) => issuePayApplication(tx, ctx, first.id, { issueDate: "2026-10-01" }));
+    expect(issuedFirst.app.laborToDateCents).toBe(400_00);
+
+    // October: an hour more, on a sheet approved for it.
+    await run(async (tx) => {
+      await hours(tx, erin.id, project.id, "2026-10-05", 60);
+      await sheet(tx, erin.id, "2026-09-28", "2026-10-11");
+    });
+    const second = await run((tx) =>
+      createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-10-31" }),
+    );
+    rows = await run((tx) => listPayApplications(tx, tenantId, contract.id));
+    expect(
+      rows[1].labor.map((l) => [l.rateCents, l.minutesToDate, l.previousMinutes, l.thisPeriodMinutes, l.previousCents, l.thisPeriodCents]),
+    ).toEqual([
+      [65_00, 240, 240, 0, 260_00, 0],
+      [70_00, 180, 120, 60, 140_00, 70_00],
+    ]);
+    // Half of it left for next time.
+    await run((tx) =>
+      updatePayApplication(tx, ctx, second.id, {
+        laborLines: [{ workerId: erin.id, rateCents: 70_00, thisPeriodMinutes: 30 }],
+      }),
+    );
+    rows = await run((tx) => listPayApplications(tx, tenantId, contract.id));
+    expect(rows[1].labor[1]).toMatchObject({ thisPeriodMinutes: 30, thisPeriodCents: 35_00 });
+    expect(rows[1].costPlus).toMatchObject({ laborToDateCents: 435_00, dueCents: 35_00 });
+    const issuedSecond = await run((tx) => issuePayApplication(tx, ctx, second.id, { issueDate: "2026-11-01" }));
+    const lines = await run(async (tx) =>
+      loadInvoiceLines(tx, tenantId, (await loadInvoice(tx, tenantId, issuedSecond.invoiceId)).id),
+    );
+    expect(lines.map((l) => [l.amountCents, l.description])).toEqual([
+      [35_00, "Application 2 — Erin Dated, 0.5 h at 70.00/h through 2026-10-31"],
+    ]);
+
+    // A second contract billing the same job's books is refused the moment it starts an application.
+    const party = await run((tx) => seedVendor(tx, "Rival"));
+    const rival = await run((tx) =>
+      createContract(tx, ctx, {
+        projectId: project.id,
+        kind: "extra",
+        counterpartyPartyId: party,
+        billingMethod: "cost_plus_fee",
+        valueCents: null,
+        status: "signed",
+      }),
+    );
+    await expect(
+      run((tx) => createPayApplication(tx, ctx, { contractId: rival.id, periodTo: "2026-11-30" })),
+    ).rejects.toMatchObject({ code: "ONE_COST_PLUS" });
+  }, 120_000);
+
+  it("WORK IN PROGRESS on a time-and-materials job earns hours at their rates plus other cost marked up, never the wages twice; an hour with no rate blocks the period", async () => {
+    const entity = await newCompany("T and M Co 3");
+    const { project } = await run((tx) => tmJob(tx, entity, "OPS-TM3", { feePpm: 100_000 }));
+    const fay = await run((tx) => worker(tx, "Fay Rated"));
+    await run(async (tx) => {
+      await billRate(tx, fay.id, 65_00, "2026-01-01");
+      await hours(tx, fay.id, project.id, "2026-09-08", 600);
+      await sheet(tx, fay.id, "2026-08-31", "2026-09-13");
+      await postCodedCost(tx, entity, project.id, null, 2_000_00, "2026-09-05");
+      await postWages(tx, entity, project.id, 500_00, "2026-09-13");
+    });
+    const s = await run((tx) => wipSchedule(tx, tenantId, { entityId: entity, periodEnd: "2026-09-30" }));
+    const row = s.rows.find((r) => r.projectId === project.id)!;
+    expect(row.method).toBe("time_and_materials");
+    expect(row.reason).toBe("");
+    // 650 of hours + 2,000 of cost + 200 of markup; the 500 of wages is cost, not earned a second time.
+    expect(row.figures.costToDateCents).toBe(2_500_00);
+    expect(row.figures.earnedCents).toBe(2_850_00);
+    expect(row.figures.underBilledCents).toBe(2_850_00);
+    expect(row.figures.percentCompletePpm).toBeNull();
+    expect(s.blockers).toEqual([]);
+
+    // An hour nobody has priced cannot be earned, and the period says so instead of posting.
+    const gus = await run((tx) => worker(tx, "Gus Unpriced"));
+    await run(async (tx) => {
+      await hours(tx, gus.id, project.id, "2026-09-09", 60);
+      await sheet(tx, gus.id, "2026-08-31", "2026-09-13");
+    });
+    const blocked = await run((tx) => wipSchedule(tx, tenantId, { entityId: entity, periodEnd: "2026-09-30" }));
+    expect(blocked.rows.find((r) => r.projectId === project.id)!.reason).toBe("no_rate");
+    expect(blocked.blockers).toEqual(["OPS-TM3 has hours with no bill rate"]);
+    await expect(
+      run((tx) => postWip(tx, ctx, { entityId: entity, periodEnd: "2026-09-30" })),
+    ).rejects.toMatchObject({ code: "NO_BILL_RATE", message: "OPS-TM3" });
+  }, 120_000);
+
   // ------------------------------------------ subcontractor applications (5c)
 
   /** A subcontract on its own company: a job, a party to pay, two coded lines. */

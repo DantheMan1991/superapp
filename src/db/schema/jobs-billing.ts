@@ -56,6 +56,7 @@ import { invoices } from "./invoicing";
 import { jobCostCodes } from "./jobs";
 import { jobContracts } from "./jobs-contracts";
 import { jobChangeOrders } from "./jobs-change-orders";
+import { timeWorkers } from "./time";
 
 /**
  * One line of a contract's schedule of values.
@@ -164,6 +165,8 @@ export const jobPayApplications = pgTable(
      */
     costToDateCents: bigint("cost_to_date_cents", { mode: "number" }).notNull().default(0),
     feeToDateCents: bigint("fee_to_date_cents", { mode: "number" }).notNull().default(0),
+    /** Time and materials: approved hours at their rates, billed to date. Frozen at issue; zero otherwise. */
+    laborToDateCents: bigint("labor_to_date_cents", { mode: "number" }).notNull().default(0),
     /** The Accounting invoice this application became at issue. */
     invoiceId: uuid("invoice_id"),
     issuedOn: date("issued_on", { mode: "string" }),
@@ -339,7 +342,77 @@ export const jobPayApplicationCosts = pgTable(
   ],
 );
 
+/**
+ * ONE LINE OF A TIME-AND-MATERIALS APPLICATION PER PERSON AND RATE (slice 5d,
+ * ADR 0062): the approved worked minutes Time carries on the job at this rate
+ * as of the period end, what earlier applications billed of them, and what
+ * this one bills. THE RATE IS PART OF THE KEY. Time's rates are dated by the
+ * hour's day, so a person whose rate changed mid-job has two lines, each
+ * exact, and hours never move between them — which is also why a contract's
+ * flat rate is locked once billed. A `rate_cents` of 0 means no rate could be
+ * found; such a line may not be billed (`NO_BILL_RATE`).
+ *
+ * `worker_id` is Time's `time_workers` row, RESTRICT: a person with billed
+ * hours is deactivated in Time, never deleted — the same rule as a cost code
+ * with a bill against it. Minutes, not hours, like `time_entries`, so the
+ * arithmetic is in whole units; cents are minutes × rate ÷ 60, rounded half
+ * up per line, and STORED so an issued certificate stands whatever Time says
+ * later.
+ */
+export const jobPayApplicationLabor = pgTable(
+  "job_pay_application_labor",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    payApplicationId: uuid("pay_application_id").notNull(),
+    workerId: uuid("worker_id").notNull(),
+    /** Cents per hour. 0 = no rate found. */
+    rateCents: integer("rate_cents").notNull().default(0),
+    /** Approved worked minutes on the job at this rate as of the period end. Frozen at issue. */
+    minutesToDate: integer("minutes_to_date").notNull().default(0),
+    /** Billed on earlier issued applications. Carried, never typed. */
+    previousMinutes: integer("previous_minutes").notNull().default(0),
+    previousCents: bigint("previous_cents", { mode: "number" }).notNull().default(0),
+    /** Billed by this application. Defaults to to-date − previous; may be less, or negative for a credit. */
+    thisPeriodMinutes: integer("this_period_minutes").notNull().default(0),
+    thisPeriodCents: bigint("this_period_cents", { mode: "number" }).notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("job_pay_application_labor_tenant_id_id_idx").on(t.tenantId, t.id),
+    /** One line per person per rate per application. */
+    uniqueIndex("job_pay_application_labor_app_worker_rate_idx").on(
+      t.tenantId,
+      t.payApplicationId,
+      t.workerId,
+      t.rateCents,
+    ),
+    index("job_pay_application_labor_tenant_app_idx").on(t.tenantId, t.payApplicationId),
+    foreignKey({
+      name: "job_pay_application_labor_app_fk",
+      columns: [t.tenantId, t.payApplicationId],
+      foreignColumns: [jobPayApplications.tenantId, jobPayApplications.id],
+    }).onDelete("cascade"),
+    /** RESTRICT: a person with billed hours is deactivated in Time, never deleted. */
+    foreignKey({
+      name: "job_pay_application_labor_worker_fk",
+      columns: [t.tenantId, t.workerId],
+      foreignColumns: [timeWorkers.tenantId, timeWorkers.id],
+    }),
+    check("job_pay_application_labor_rate_nonnegative", sql`${t.rateCents} >= 0`),
+    check("job_pay_application_labor_to_date_nonnegative", sql`${t.minutesToDate} >= 0`),
+  ],
+);
+
 export type JobSovLine = typeof jobSovLines.$inferSelect;
+export type JobPayApplicationLabor = typeof jobPayApplicationLabor.$inferSelect;
 export type JobPayApplicationCost = typeof jobPayApplicationCosts.$inferSelect;
 export type JobPayApplication = typeof jobPayApplications.$inferSelect;
 export type JobPayApplicationLine = typeof jobPayApplicationLines.$inferSelect;

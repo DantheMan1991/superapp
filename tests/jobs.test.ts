@@ -56,6 +56,9 @@ import {
   WIP_METHOD_LABELS,
   isCostPlusMethod,
   isFixedValueMethod,
+  TIME_AND_MATERIALS_METHODS,
+  billsTheLedger,
+  isTimeAndMaterialsMethod,
   RETAINAGE_PAYABLE_CODE,
   SUBCONTRACT_EXPENSE_CODES,
   SUB_APPLICATION_STATUSES,
@@ -82,7 +85,11 @@ import {
   costLineToDateCents,
   costPlusTotals,
   feeCents,
+  hoursStringToMinutes,
+  laborLineCents,
+  minutesToHoursString,
 } from "../src/packs/jobs/billing-math";
+import { GENERAL_COA } from "../src/modules/accounting/templates/general";
 import { packRegistry } from "../src/packs";
 import { describeProject, findProjects, type OpenProject } from "../src/packs/jobs/tell/find";
 
@@ -635,7 +642,7 @@ describe("work in progress", () => {
       `CHECK ("job_wip_periods"."status" in (${WIP_STATUSES.map((s) => `'${s}'`).join(", ")}))`,
     );
     expect(WIP_SQL).toContain(
-      `CHECK ("job_wip_lines"."reason" in (${WIP_REASONS.map((s) => `'${s}'`).join(", ")}))`,
+      `CHECK ("job_wip_lines"."reason" in ('', 'no_value', 'no_estimate'))`,
     );
   });
 
@@ -772,6 +779,7 @@ describe("work in progress", () => {
  * back, same as retainage.
  */
 const COST_PLUS_SQL = readFileSync("drizzle/0341_cost_plus.sql", "utf8");
+const TM_SQL = readFileSync("drizzle/0345_time_and_materials.sql", "utf8");
 
 describe("cost plus a fee", () => {
   it("adds the three terms to the contract, nullable, with their floors", () => {
@@ -799,16 +807,27 @@ describe("cost plus a fee", () => {
     expect(COST_PLUS_SQL).toMatch(/"cost_code_id" uuid,/);
   });
 
-  it("records HOW a WIP line was measured, and only in the two ways there are", () => {
-    expect(COST_PLUS_SQL).toContain(
+  it("records HOW a WIP line was measured: two ways then, three since time and materials", () => {
+    expect(COST_PLUS_SQL).toContain(`CHECK ("job_wip_lines"."method" in ('cost_to_cost', 'cost_plus'))`);
+    expect(TM_SQL).toContain(
       `CHECK ("job_wip_lines"."method" in (${WIP_METHODS.map((m) => `'${m}'`).join(", ")}))`,
     );
     for (const m of WIP_METHODS) expect(WIP_METHOD_LABELS[m].length).toBeGreaterThan(0);
   });
 
   it("sorts every billing method into exactly one group", () => {
-    const all = [...FIXED_VALUE_METHODS, ...COST_PLUS_METHODS, ...UNBILLED_METHODS].sort();
+    const all = [
+      ...FIXED_VALUE_METHODS,
+      ...COST_PLUS_METHODS,
+      ...TIME_AND_MATERIALS_METHODS,
+      ...UNBILLED_METHODS,
+    ].sort();
     expect(all).toEqual([...BILLING_METHODS].sort());
+    expect(isTimeAndMaterialsMethod("time_and_materials")).toBe(true);
+    expect(billsTheLedger("time_and_materials")).toBe(true);
+    expect(billsTheLedger("cost_plus_fee")).toBe(true);
+    expect(billsTheLedger("unit_price")).toBe(false);
+    expect(UNBILLED_METHODS).toEqual(["unit_price"]);
     expect(isCostPlusMethod("cost_plus_fee")).toBe(true);
     expect(isCostPlusMethod("fixed_price")).toBe(false);
     expect(isFixedValueMethod("draw_schedule")).toBe(true);
@@ -951,5 +970,121 @@ describe("subcontractor applications", () => {
     expect(seeded?.type).toBe("liability");
     // 5100 is deliberately NOT the construction profile's: the general chart has it.
     expect(CONSTRUCTION_COA.accounts.some((a) => a.code === "5100")).toBe(false);
+  });
+});
+
+// ------------------------------------------------------ time and materials
+
+describe("time and materials", () => {
+  it("adds one rate for everybody to the contract, labour to date to the application, and a line table keyed by person and rate", () => {
+    expect(TM_SQL).toMatch(/ALTER TABLE "job_contracts" ADD COLUMN "labor_rate_cents" integer;/);
+    expect(TM_SQL).toMatch(/job_contracts_labor_rate_nonnegative/);
+    expect(TM_SQL).toMatch(/"job_pay_applications" ADD COLUMN "labor_to_date_cents" bigint DEFAULT 0 NOT NULL/);
+    expect(TM_SQL).toMatch(
+      /job_pay_application_labor_app_worker_rate_idx[^;]*\("tenant_id","pay_application_id","worker_id","rate_cents"\)/,
+    );
+    expect(TM_SQL).toMatch(/job_pay_application_labor_app_fk[^;]*ON DELETE cascade/);
+    // RESTRICT to Time's worker: a person with billed hours is deactivated, never deleted.
+    expect(TM_SQL).toMatch(
+      /job_pay_application_labor_worker_fk[^;]*REFERENCES "public"."time_workers"\("tenant_id","id"\) ON DELETE no action/,
+    );
+    expect(TM_SQL).toMatch(/job_pay_application_labor_rate_nonnegative/);
+    expect(TM_SQL).toMatch(/job_pay_application_labor_to_date_nonnegative/);
+    // No rate is a rate of nothing, so the key is never null.
+    expect(TM_SQL).toMatch(/"rate_cents" integer DEFAULT 0 NOT NULL/);
+  });
+
+  it("widens the WIP reasons to an hour with no rate", () => {
+    expect(TM_SQL).toContain(
+      `CHECK ("job_wip_lines"."reason" in (${WIP_REASONS.map((r) => `'${r}'`).join(", ")}))`,
+    );
+    expect(WIP_REASON_LABELS.no_rate.length).toBeGreaterThan(0);
+    expect(WIP_METHOD_LABELS.time_and_materials).toBe("Time and materials");
+  });
+
+  it("bills minutes at a rate, rounded once per line, and credits them back the same way", () => {
+    expect(laborLineCents(60, 65_00)).toBe(65_00);
+    expect(laborLineCents(600, 65_00)).toBe(650_00);
+    expect(laborLineCents(90, 65_00)).toBe(97_50);
+    expect(laborLineCents(1, 65_00)).toBe(108); // 108.33
+    expect(laborLineCents(1, 6_50)).toBe(11); // 10.83 rounds up
+    expect(laborLineCents(-30, 70_00)).toBe(-35_00);
+    expect(laborLineCents(600, 0)).toBe(0);
+    expect(laborLineCents(0, 65_00)).toBe(0);
+  });
+
+  it("reads hours the way a person types them, and writes them back the same", () => {
+    expect(hoursStringToMinutes("12.5")).toBe(750);
+    expect(hoursStringToMinutes(" 7 ")).toBe(420);
+    expect(hoursStringToMinutes("")).toBe(0);
+    expect(hoursStringToMinutes("0.33")).toBe(20);
+    expect(hoursStringToMinutes("ten")).toBeNull();
+    expect(minutesToHoursString(750)).toBe("12.5");
+    expect(minutesToHoursString(30)).toBe("0.5");
+    expect(minutesToHoursString(45)).toBe("0.75");
+    expect(minutesToHoursString(20)).toBe("0.33");
+    expect(minutesToHoursString(0)).toBe("0");
+    expect(minutesToHoursString(600)).toBe("10");
+  });
+
+  it("labour plus cost plus a markup on the cost alone, capped at the not-to-exceed, less retainage, less previous", () => {
+    const lines = [{ costCodeId: "a", ledgerToDateCents: 2_000_00, previousCents: 0, thisPeriodCents: 2_000_00 }];
+    const t = costPlusTotals(lines, { feePpm: 100_000, feeCents: null, gmaxCents: null }, 0, 100_000, 0, 770_00);
+    expect(t.laborToDateCents).toBe(770_00);
+    expect(t.costToDateCents).toBe(2_000_00);
+    expect(t.feeToDateCents).toBe(200_00); // on the cost, never on the hours
+    expect(t.completedToDateCents).toBe(2_970_00);
+    expect(t.retainageCents).toBe(297_00);
+    expect(t.dueCents).toBe(2_673_00);
+    // Without the argument the arithmetic is cost plus a fee, unchanged.
+    expect(costPlusTotals(lines, { feePpm: 100_000, feeCents: null, gmaxCents: null }, 0, 0, 0).laborToDateCents).toBe(0);
+    const capped = costPlusTotals(lines, { feePpm: 100_000, feeCents: null, gmaxCents: 2_500_00 }, 0, 0, 0, 770_00);
+    expect(capped.completedToDateCents).toBe(2_500_00);
+    expect(capped.capped).toBe(true);
+    expect(capped.balanceToFinishCents).toBe(0);
+  });
+
+  it("on the work in progress schedule, hours earn at their rates and the wages they cover are not marked up", () => {
+    const f = wipFigures({
+      contractCents: 0,
+      estimatedCostCents: 0,
+      costToDateCents: 2_500_00,
+      billedCents: 0,
+      costPlus: { feePpm: 100_000, feeCents: null, gmaxCents: null },
+      labor: { billableCents: 650_00, costCents: 500_00 },
+    });
+    expect(f.earnedCents).toBe(2_850_00);
+    expect(f.grossProfitToDateCents).toBe(350_00);
+    expect(f.percentCompletePpm).toBeNull();
+    // A not-to-exceed caps the lot.
+    const capped = wipFigures({
+      contractCents: 0,
+      estimatedCostCents: 0,
+      costToDateCents: 2_500_00,
+      billedCents: 0,
+      costPlus: { feePpm: 100_000, feeCents: null, gmaxCents: 2_600_00 },
+      labor: { billableCents: 650_00, costCents: 500_00 },
+    });
+    expect(capped.earnedCents).toBe(2_600_00);
+    // Wages beyond the cost to date (a lag in posting) never make the marked-up cost negative.
+    const lag = wipFigures({
+      contractCents: 0,
+      estimatedCostCents: 0,
+      costToDateCents: 300_00,
+      billedCents: 0,
+      costPlus: { feePpm: 100_000, feeCents: null, gmaxCents: null },
+      labor: { billableCents: 650_00, costCents: 500_00 },
+    });
+    expect(lag.earnedCents).toBe(650_00);
+  });
+
+  it("the wages accounts are the ones the accrual posts to, told apart by subtype", () => {
+    const source = readFileSync("src/lib/labor-posting.ts", "utf8");
+    expect(source).toMatch(/export const LABOR_EXPENSE_SUBTYPE = "payroll_expense"/);
+    for (const code of ["6450", "6500"]) {
+      expect(GENERAL_COA.accounts.find((a) => a.code === code)?.subtype).toBe("payroll_expense");
+    }
+    // The construction chart's job-cost accounts are NOT of it: they are marked up.
+    expect(CONSTRUCTION_COA.accounts.find((a) => a.code === "5200")?.subtype).not.toBe("payroll_expense");
   });
 });

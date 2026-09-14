@@ -19,10 +19,13 @@ import {
   actualByProject,
   billedByProject,
   budgetByProject,
+  laborCostByProject,
+  laborOnJob,
   projectValues,
   requireWrite,
   type JobsCtx,
 } from "./ops";
+import { laborLineCents } from "./billing-math";
 import {
   OVERBILLING_ACCOUNT_CODE,
   PROJECT_DIMENSION,
@@ -30,7 +33,8 @@ import {
   UNDERBILLING_ACCOUNT_CODE,
   VALUED_CONTRACT_STATUSES,
   WIP_ENTRY_SOURCE,
-  isCostPlusMethod,
+  billsTheLedger,
+  isTimeAndMaterialsMethod,
   type WipMethod,
   type WipReason,
 } from "./vocabulary";
@@ -199,23 +203,28 @@ function frozenFigures(line: JobWipLine): WipFigures {
 function reasonFor(contractCents: number, figures: WipFigures, method: WipMethod): WipReason {
   // A cost-plus job earns what it has spent plus its fee: no value to compare
   // against and no estimate needed.
-  if (method === "cost_plus") return "";
+  if (method !== "cost_to_cost") return "";
   if (contractCents <= 0) return "no_value";
   if (figures.percentCompletePpm === null) return "no_estimate";
   return "";
 }
 
+interface LedgerTerms {
+  method: "cost_plus" | "time_and_materials";
+  feePpm: number | null;
+  feeCents: number | null;
+  gmaxCents: number | null;
+  laborRateCents: number | null;
+}
+
 /**
- * THE COST-PLUS TERMS OF A JOB, when it has exactly ONE counted contract and
- * that contract bills cost plus a fee. Cost belongs to the project, so a job
- * mixing methods or carrying two cost-plus agreements cannot be measured this
- * way and falls through to the fixed-value rule — which leaves it out with
- * `no_value` and says so.
+ * THE TERMS OF A JOB THAT BILLS ITS BOOKS, when it has exactly ONE counted
+ * contract and that contract is cost plus a fee or time and materials. Cost
+ * belongs to the project, so a job mixing methods or carrying two such
+ * agreements cannot be measured this way and falls through to the
+ * fixed-value rule — which leaves it out with `no_value` and says so.
  */
-async function costPlusTermsByProject(
-  tx: Tx,
-  tenantId: string,
-): Promise<Map<string, { feePpm: number | null; feeCents: number | null; gmaxCents: number | null }>> {
+async function ledgerTermsByProject(tx: Tx, tenantId: string): Promise<Map<string, LedgerTerms>> {
   const rows = await tx
     .select({
       projectId: schema.jobContracts.projectId,
@@ -223,6 +232,7 @@ async function costPlusTermsByProject(
       feePpm: schema.jobContracts.feePpm,
       feeCents: schema.jobContracts.feeCents,
       gmaxCents: schema.jobContracts.gmaxCents,
+      laborRateCents: schema.jobContracts.laborRateCents,
     })
     .from(schema.jobContracts)
     .where(
@@ -233,11 +243,17 @@ async function costPlusTermsByProject(
     );
   const byProject = new Map<string, typeof rows>();
   for (const r of rows) byProject.set(r.projectId, [...(byProject.get(r.projectId) ?? []), r]);
-  const out = new Map<string, { feePpm: number | null; feeCents: number | null; gmaxCents: number | null }>();
+  const out = new Map<string, LedgerTerms>();
   for (const [projectId, contracts] of byProject) {
-    if (contracts.length === 1 && isCostPlusMethod(contracts[0].billingMethod)) {
+    if (contracts.length === 1 && billsTheLedger(contracts[0].billingMethod)) {
       const c = contracts[0];
-      out.set(projectId, { feePpm: c.feePpm, feeCents: c.feeCents, gmaxCents: c.gmaxCents });
+      out.set(projectId, {
+        method: isTimeAndMaterialsMethod(c.billingMethod) ? "time_and_materials" : "cost_plus",
+        feePpm: c.feePpm,
+        feeCents: c.feeCents,
+        gmaxCents: c.gmaxCents,
+        laborRateCents: c.laborRateCents,
+      });
     }
   }
   return out;
@@ -251,6 +267,9 @@ function blockersOf(rows: WipRow[]): string[] {
     ...rows
       .filter((r) => r.reason === "no_value" && r.figures.billedCents > 0)
       .map((r) => `${r.number} has billings but no fixed contract value`),
+    ...rows
+      .filter((r) => r.reason === "no_rate")
+      .map((r) => `${r.number} has hours with no bill rate`),
   ];
 }
 
@@ -326,12 +345,13 @@ export async function wipSchedule(
   }
 
   const scope = { kind: "one", entityId } as const;
-  const [values, budgets, actual, billed, costPlusTerms] = await Promise.all([
+  const [values, budgets, actual, billed, ledgerTerms, laborCost] = await Promise.all([
     projectValues(tx, tenantId),
     budgetByProject(tx, tenantId),
     actualByProject(tx, tenantId, scope, periodEnd),
     billedByProject(tx, tenantId, scope, periodEnd),
-    costPlusTermsByProject(tx, tenantId),
+    ledgerTermsByProject(tx, tenantId),
+    laborCostByProject(tx, tenantId, scope, periodEnd),
   ]);
   const overrides = period ? await loadLines(tx, tenantId, period.id) : [];
   const overrideOf = new Map(overrides.map((l) => [l.projectId, l]));
@@ -346,8 +366,22 @@ export async function wipSchedule(
     const override = overrideOf.get(p.id);
     const budgetCents = budgets.get(p.id) ?? 0;
     const estimateCents = override?.estimateCents ?? null;
-    const terms = costPlusTerms.get(p.id);
-    const method: WipMethod = terms ? "cost_plus" : "cost_to_cost";
+    const terms = ledgerTerms.get(p.id);
+    const method: WipMethod = terms?.method ?? "cost_to_cost";
+    // A time-and-materials job earns its approved hours at their rates and the
+    // rest of its cost marked up (ADR 0062); an hour with no rate cannot be
+    // earned, and the row says so instead of earning it at nothing.
+    let labor: { billableCents: number; costCents: number } | undefined;
+    let unrated = false;
+    if (terms?.method === "time_and_materials") {
+      const hours = await laborOnJob(tx, tenantId, p, periodEnd, terms.laborRateCents);
+      let billableCents = 0;
+      for (const byRate of hours.byWorker.values()) {
+        for (const [rateCents, minutes] of byRate) billableCents += laborLineCents(minutes, rateCents);
+      }
+      labor = { billableCents, costCents: laborCost.get(p.id) ?? 0 };
+      unrated = hours.unratedMinutes > 0;
+    }
     const figures = wipFigures({
       contractCents,
       estimatedCostCents: estimateCents ?? budgetCents,
@@ -355,6 +389,7 @@ export async function wipSchedule(
       billedCents,
       complete: p.status === "complete",
       costPlus: terms,
+      labor,
     });
     if (p.status === "complete" && figures.overUnderCents === 0) continue;
     rows.push({
@@ -365,7 +400,7 @@ export async function wipSchedule(
       budgetCents,
       estimateCents,
       notes: override?.notes ?? "",
-      reason: reasonFor(contractCents, figures, method),
+      reason: unrated ? "no_rate" : reasonFor(contractCents, figures, method),
       method,
       figures,
     });
@@ -521,6 +556,10 @@ export async function postWip(
   );
   if (billedNoValue.length > 0) {
     throw new JobsError("BILLED_NO_VALUE", billedNoValue.map((r) => r.number).join(", "));
+  }
+  const unrated = schedule.rows.filter((r) => r.reason === "no_rate");
+  if (unrated.length > 0) {
+    throw new JobsError("NO_BILL_RATE", unrated.map((r) => r.number).join(", "));
   }
   const posting = schedule.rows.filter((r) => r.reason === "" && r.figures.overUnderCents !== 0);
   if (posting.length === 0) {

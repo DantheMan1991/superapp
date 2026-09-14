@@ -73,7 +73,7 @@ There is no way to delete somebody, and that is deliberate. Their hours are a re
 2. Pick the person under `Who`.
 3. Put the hourly figure in `Hourly pay`, in dollars — `24.00`, or `22.50`.
 4. Set `From` to the first day this rate applies. This is the important field: see below.
-5. `Charged out at` is what a customer pays for the hour, if you bill for time. Leave it empty if you do not.
+5. `Charged out at` is what a customer pays for the hour, if you bill for time. Leave it empty if you do not. A time-and-materials contract in Jobs bills this person's approved hours at this rate, from the day it starts.
 6. `On-costs` is a percent added on top for your payroll taxes and insurance. It is what the hour **costs you**, and it is never added to what the person is paid.
 7. Click {button:Save|primary}. You see `Rate saved`.
 

@@ -563,6 +563,8 @@ export default async function ProjectPage({
                             feePpm: c.feePpm,
                             feeCents: c.feeCents,
                             gmaxCents: c.gmaxCents,
+                            laborRateCents: c.laborRateCents,
+                            rateLocked: (data.billing.get(c.id)?.issuedCount ?? 0) > 0,
                             status: c.status,
                             signedOn: c.signedOn,
                             notes: c.notes,

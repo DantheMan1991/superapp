@@ -13,6 +13,132 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-14 — Slice 5d: time and materials (`claude/time-and-materials`, ADR 0062)
+
+The third way the market bills a job, and the one ADR 0060 closed with:
+"cost-plus with billing rates in place of cost … with a rate card". One
+nullable term on the contract (`labor_rate_cents`), one frozen figure on the
+application (`labor_to_date_cents`), one new table
+(`job_pay_application_labor`), a third WIP `method` and a fourth WIP
+`reason` — and no new document, no new invoice path, no rate card of the
+pack's own, because Time already had one.
+
+**THE HOURS ARE TIME'S.** `laborOnJob` reads a WORKED entry tagged with the
+job's `project` dimension member — the same tag a bill line carries, through
+`time_entry_dimensions` — dated on or before the period end, on an APPROVED
+sheet: the gate `laborAccrualFor` uses, so the bill and the books carry the
+same hours. Paid leave tagged with the job is a cost and never a charge;
+hours on a sheet nobody has approved are counted (`awaitingMinutes`), said
+on the draft, and not billed. This is the first reader of Time's
+`bill_rate_cents`: the rate in force on the hour's day (`listRates`, newest
+first, the first row that had started by the day), or one flat rate on the
+contract for everybody.
+
+**LINES ARE KEYED BY PERSON AND RATE.** `syncLaborLines` is `syncCostLines`
+with hours for money: one line per (worker, rate), minutes to date, what
+earlier applications billed of them, this period defaulting to the
+difference and kept once typed; a line with nothing to date and nothing
+before it is dropped. The rate is part of the key because Time's rates are
+dated by the hour's day and hours never move between rates — a person whose
+rate rose mid-September has two exact lines, and October's application
+carries both forward. That is also why a contract's flat rate is LOCKED once
+an application has issued (`RATE_LOCKED`): it carries no date, and changing
+it would re-rate hours a certificate already carries. A rate of nothing is a
+line that cannot be billed — `NO_BILL_RATE`, by name — never an hour given
+away; the editor greys the button and says who.
+
+**THE COST SIDE LEAVES THE WAGES OUT.** `actualByCode` takes
+`{ withoutLabor }`, which drops expense accounts of the subtype the labour
+accrual posts to — `LABOR_EXPENSE_SUBTYPE`, exported from
+`src/lib/labor-posting.ts`, `payroll_expense` on the general chart's `6450`
+and `6500` — so an hour is billed once, by rate, and never again as
+marked-up cost. The fee is the markup on cost only; the guaranteed maximum
+is the not-to-exceed on the lot. `costPlusTotals` takes the labour sum as
+one more argument, zero on a cost-plus contract, so nothing about cost plus
+a fee moved.
+
+**THE SAME ROW, INVOICE AND VOID PATH.** `billsTheLedger` (cost plus OR time
+and materials) is what the four application verbs branch on; `tm` is what
+adds the labour. The invoice carries a line per person — *Alice Carpenter,
+10 h at 65.00/h through 2026-09-30*, readable against the timesheet — then
+cost, *Markup (10% of cost)*, retainage; or one line *at the not-to-exceed*
+when the cap holds. `ONE_COST_PLUS` now covers both methods, since cost
+belongs to the job whichever way it is billed. The editor is
+`cost-plus-editor.tsx` in `mode="time_and_materials"`: a labour table above
+the cost table, hours typed in hours and stored in minutes
+(`hoursStringToMinutes` / `minutesToHoursString`), each row priced live by
+`laborLineCents` — minutes × rate ÷ 60, rounded half up per line, because
+each line is an invoice line.
+
+**WORK IN PROGRESS, THIRD METHOD.** A job whose only counted contract is
+time and materials earns its approved hours at their rates plus the rest of
+its cost marked up, capped; `wipFigures` takes `labor: { billableCents,
+costCents }` and subtracts the wages from the cost it marks up
+(`laborCostByProject`, the same accounts). An hour with no rate is
+`no_rate`: shown, a blocker by job number, and `postWip` refuses with
+`NO_BILL_RATE`. **A member reading the live schedule sees every
+time-and-materials job with hours as `no_rate`**, because `time_rates` is
+owners-only and RLS hands them no rates — nothing can tell that from "no
+rate set". The posted schedule is frozen by an owner and the same for
+everyone. Recorded as a decision, not hidden.
+
+**THE CONTRACT PAGE AND FORM.** *Time and materials* is a fifth set of tiles
+(Labour · Cost to date, wages aside · Billed · Retainage · Not to exceed) and
+its own panel: the terms in a sentence, approved hours on the job with how
+many await approval, whether Time is switched on (`timeEnabled`), and the
+books' cost by code without the wages. The form shows four boxes when the
+method asks for them — the labour rate for everybody, greyed with *Fixed once
+an application has issued* when it is — and the project page passes the rate
+and the lock through, so an edit cannot blank the one or defeat the other.
+
+Migrations `0345_time_and_materials.sql` (as generated: the new table
+references existing ones only, and the two widened CHECKs are dropped and
+re-added by drizzle-kit itself) and `0346_time_and_materials_rls.sql`,
+applied to dev and prod before the merge; `db:verify-rls` reports **212
+tables** on both, `db:verify-modules` 19/19. Tests: seven more pure (the
+columns, the keyed table and its RESTRICT to Time's worker, the widened
+reasons, minutes at a rate rounded once, hours read and written back, the
+certificate with labour and the markup on cost alone, WIP with the wages
+not marked up, the accounts told apart by subtype) and the method-group test
+now counting four groups; three more ops (the draft from three people's
+hours — one untagged, one on leave, one after the period, one awaiting
+approval, one with no rate — the refusal by name, the rate set and the
+five-line invoice, the Spent column still carrying the wages; the flat rate
+and its lock, the dated rate's two lines, the next application carrying hours
+forward, hours typed short, one biller per job; WIP earning hours plus
+marked-up cost with the wages once, and the `no_rate` blocker), one more
+isolation. The ops run found one thing: `minutesToHoursString(30)` came out
+as *0.* — a regex that lost its backslash on the way through the edit script
+— and was rewritten without one, with `0.5` pinned in the pure test.
+
+**SEEDED ON THE DEV BRANCH, NOT DRIVEN.** The browser pane came up signed
+out after the dev server was restarted (a leftover `next dev` at 9.3 GB held
+port 3000 and was killed), and only the founder can sign back in — so the
+screens were not clicked this time. What was done instead, through the
+product's own verbs from a script on Hilltop Farm: a job **24-110 Kitchen
+remodel** (active) on a signed `service_work` contract billed **Time and
+materials**, 10% markup on cost, no rate for everybody; Marta Quinn's Time
+rate given a *Charged out at* of $65.00 from 2026-09-01; 8 h on 2026-09-13
+and 4 h on 2026-09-14 logged for her and tagged with the job, her sheet for
+2026-09-13..19 submitted and approved; 2 h on 2026-09-14 for the founder's
+own worker, tagged, on a sheet submitted and NOT approved; $1,240.00 of
+cabinet hardware posted to `6400` tagged with the job; and a draft
+application to 2026-09-30 at 0% retainage. `listPayApplications` read the
+draft as **Marta Quinn · $65.00/h · 12 h to date · 12 h this period ·
+$780.00**, *2 h awaiting approval*, one cost line **No cost code
+$1,240.00**, and the certificate **Labour $780.00 · Cost $1,240.00 · Markup
+$124.00 · $2,144.00 to date · due $2,144.00**, uncapped. The WIP schedule as
+of 2026-10-31 (September's is posted and frozen, which is why a new job is
+not on it) listed the farm's three jobs on three methods — **24-108
+cost-to-cost · 24-109 cost plus · 24-110 time and materials** — the new one
+at **earned $2,144.00 · cost $1,240.00 · under-billed $2,144.00 · profit
+$904.00**, no blockers. The draft is left open on the contract's page for
+whoever signs in next: *Open* shows the labour table, and *Issue as invoice*
+posts the five-line invoice the ops test pins. Not seen on a screen: the
+contract page's tiles and panel, the editor's labour table, the form's four
+boxes — type-checked and lint-clean, and the same components render the
+cost-plus path that was driven in 5b.
+
 ### 2026-09-14 — The column that was deliberately absent (`claude/spent-per-code`)
 
 **Actual cost per code, on this job only.** The job cost report's `Spent`
@@ -1168,18 +1294,19 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | --- | --- | --- |
 | `job_cost_code_sets` | A named list of cost codes. One or several per tenant. | FORCE RLS, member-wide. `job_cost_code_sets_one_default_idx` is a PARTIAL unique index, so **two defaults fail at the database** rather than depending on the action having cleared the first. |
 | `job_cost_codes` | One line of the chart of cost. | Composite FK to `(tenant_id, set_id)`, **cascade** — deleting a list deletes its codes. `code` is free text, never a number: CSI writes `03 30 00`, NAHB writes `1000`, a builder writes `CONC-SLAB`. `sort_order` is what orders the list, so a code never has to be sortable to be right. |
-| `job_contracts` | **Many per project.** Kind, value, billing method, counterparty, role, status, a `sequence` that keeps the ladder in agreed order — and, since slice 5b, the cost-plus terms `fee_ppm` / `fee_cents` / `gmax_cents`, nullable, read only when the method is cost plus a fee. | Composite FK to the project, **cascade** — a project's agreements are part of it, proved in the isolation suite rather than assumed, because a dangling contract would still be summed by `projectValues`. `kind` is an open taxonomy (format check only); `role`, `status` and `billing_method` are CHECK lists. **No `direction` column** — see the build log. |
+| `job_contracts` | **Many per project.** Kind, value, billing method, counterparty, role, status, a `sequence` that keeps the ladder in agreed order — and, since slice 5b, the cost-plus terms `fee_ppm` / `fee_cents` / `gmax_cents`, nullable, read only when the method is cost plus a fee; since 5d, `labor_rate_cents` — one rate for every hour on a time-and-materials contract, null for each person's rate from Time, locked once an application has issued. | Composite FK to the project, **cascade** — a project's agreements are part of it, proved in the isolation suite rather than assumed, because a dangling contract would still be summed by `projectValues`. `kind` is an open taxonomy (format check only); `role`, `status` and `billing_method` are CHECK lists. **No `direction` column** — see the build log. |
 | `job_budget_lines` | What each cost code was PLANNED to cost. | One line per code per project, enforced by a unique index rather than by the action remembering — two would make every variance ambiguous. `cost_code_id` is NOT NULL, unlike a commitment line's: a budget without a code is a single number for the whole job, which is what this table exists to stop being the answer. `original_cents` is the ORIGINAL; revised is original plus approved change-order lines, computed by `jobCostRows` and never stored. RESTRICT to the code, so a budgeted code is retired and never deleted. |
 | `job_change_orders` | A change to ONE contract: its price to the client (`value_cents`), its status, and when it was approved. | Composite FK to the CONTRACT, **cascade** — never to the project, which is reachable through the contract and deliberately not duplicated. Number unique per `(tenant, contract)`. `value_cents` **may be negative** — the one money column in the pack without a floor; a deduction is a negative number, not a credit concept. `job_change_orders_approved_has_date` makes `(status = 'approved') = (approved_on is not null)` a database fact, both ways. |
 | `job_change_order_lines` | What the change costs, one cost code at a time — the budget side. | Cascade from the change order; **RESTRICT to the cost code**, the same rule as a commitment line and a budget line. `amount_cents` may be negative. Zero lines is legitimate: a pure price change. |
 | `job_sov_lines` | A contract's schedule of values: how the sum breaks down, by trade, phase or milestone. | Cascade from the contract. Optional cost code (RESTRICT) and the approved change order that added the line (cascade). `scheduled_cents` ≥ 0. Should sum to the revised contract value; the page says when it does not, a CHECK does not — a schedule is built before it is complete. |
-| `job_pay_applications` | One draw against a contract: the G702 — or, on a cost-plus contract, the cost-plus certificate, with `cost_to_date_cents` and `fee_to_date_cents` frozen at issue beside the five totals (zero on a fixed-price application). | Numbered per contract, void ones included. `status` draft/issued/void — **no `paid`**, that is the invoice's word. `retainage_ppm` 0–1,000,000. Five totals FROZEN at issue. `invoice_id` RESTRICT to Accounting's `invoices`; CHECK `(status = 'draft') = (invoice_id is null)`, both ways. |
+| `job_pay_applications` | One draw against a contract: the G702 — or, on a cost-plus contract, the cost-plus certificate, with `cost_to_date_cents` and `fee_to_date_cents` frozen at issue beside the five totals (zero on a fixed-price application), and since 5d `labor_to_date_cents` (zero unless time and materials). | Numbered per contract, void ones included. `status` draft/issued/void — **no `paid`**, that is the invoice's word. `retainage_ppm` 0–1,000,000. Five totals FROZEN at issue. `invoice_id` RESTRICT to Accounting's `invoices`; CHECK `(status = 'draft') = (invoice_id is null)`, both ways. |
 | `job_daily_logs` | One report per project per day: weather, what happened. | Unique `(tenant, project, log_date)` — the whole design; `saveDailyLog` upserts and `appendNotes` adds a line. Cascade from the project. Photos hang on it through Documents' `document_attachments` (`entity_type = 'job_daily_log'`), detached when the day goes. |
 | `job_daily_log_crews` | Who was on site that day: a trade or a subcontractor, how many, hours each (tenths). | Cascade from the day; `party_id` RESTRICT to `parties`. CHECK `workers >= 0`, `hours_tenths >= 0`, and that a line names a trade OR a party. A HEADCOUNT, not a time entry — the two are not joined. |
 | *(punch list)* | What still needs fixing: Work's `work_items`, linked to the project. | No table of this pack's. `work_item_links` with `extension_slug = 'jobs'`, `entity_type = 'project'`, through `createWorkForEntity` — never a second task engine. |
 | `job_wip_periods` | One work-in-progress schedule per COMPANY per period end: its status, and the adjustment and reversal it posted. | Unique `(tenant, entity, period_end)`. RESTRICT to the company and to both entries. CHECK `(status = 'posted') = (entry_id is not null)`, both ways, and a reversal needs its adjustment. `status` draft/posted. |
-| `job_wip_lines` | One job on a schedule: the re-estimate typed for the period (`estimate_cents`, null = the budget), six figures FROZEN at posting (zero while a draft), and the `method` that measured them: `cost_to_cost` or `cost_plus`. | Cascade from the period and from the project. `percent_complete_ppm` 0–1,000,000; `reason` is `''`, `no_value` or `no_estimate` — why the job was left out of the entry. Over/under is not stored: it is earned − billed. |
+| `job_wip_lines` | One job on a schedule: the re-estimate typed for the period (`estimate_cents`, null = the budget), six figures FROZEN at posting (zero while a draft), and the `method` that measured them: `cost_to_cost`, `cost_plus` or `time_and_materials`. | Cascade from the period and from the project. `percent_complete_ppm` 0–1,000,000; `reason` is `''`, `no_value`, `no_estimate` or `no_rate` — why the job was left out of the entry. Over/under is not stored: it is earned − billed. |
 | `job_pay_application_costs` | One line of a COST-PLUS application per cost code (NULL = no code): the books' figure to date, what earlier applications billed, what this one bills. | Cascade from the application; **RESTRICT to the code**. Unique per `(application, code)`; the no-code line is kept single by the sync. `this_period_cents` may be less than the difference (a bill left out) or negative (a credit passed on). See ADR 0060. |
+| `job_pay_application_labor` | One line of a TIME-AND-MATERIALS application per person and rate: Time's approved worked minutes on the job at that rate as of the period end, what earlier applications billed of them, what this one bills, and the cents. | Cascade from the application; **RESTRICT to Time's `time_workers`** — a person with billed hours is deactivated, never deleted. Unique per `(application, worker, rate_cents)`; `rate_cents` NOT NULL with 0 meaning no rate found, so the key is never null. `minutes_to_date` ≥ 0; `this_period_minutes` may be negative (hours credited back). See ADR 0062. |
 | `job_pay_application_lines` | One line of the G703 per schedule line. | Cascade from the application; **RESTRICT to the schedule line** — billed lines are never removed. `previous` and `stored` ≥ 0; `this_period` may be NEGATIVE (a correction); CHECK that the three sum to ≥ 0. `scheduled_cents` frozen at issue. |
 | `job_commitments` | What the business has ORDERED: a purchase order or a subcontract. | `party_id` is NOT NULL — a commitment with nobody to pay is a budget line, not a commitment. `kind` is a CHECK list of two because the two diverge in behaviour later. Number unique per tenant: a vendor quotes it back on the invoice. Cascade from the project. |
 | `job_sub_applications` | A subcontractor's application against a SUBCONTRACT: the G702 read from the other side of the table. | Numbered per commitment, void ones included. `status` draft/billed/void. `retainage_ppm` 0–1,000,000. Five totals FROZEN at approval. `bill_id` RESTRICT to Accounting's `bills`; CHECK `(status = 'draft') = (bill_id is null)`, both ways. Cascade from the commitment. See ADR 0061. |
@@ -1201,9 +1328,9 @@ hand-reordered like 0329) and `0335_job_billing.sql` / `0336_job_billing_rls.sql
 `wip_adjustment` to `journal_entry_source`, which nothing in the file uses)
 and `0341_cost_plus.sql` / `0342_cost_plus_rls.sql` (slice 5b; as generated,
 since the new table references existing ones only) and `0343_sub_billing.sql`
-/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) follow the same rule —
+/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) follow the same rule —
 and from slice 3 the pair is `db:verify-rls` **and `db:verify-modules`**, after
-the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **211 tables**, all enabled, forced and with
+the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **212 tables**, all enabled, forced and with
 policies, on both.
 
 **0327 needed no hand-reordering, which confirms the diagnosis in 0325.** Both
@@ -1268,7 +1395,16 @@ ordering only bites when two new tables reference each other in one file.
 - `src/packs/jobs/components/cost-plus-editor.tsx` — a cost-plus draft: the
   books' cost by code, what to bill of it, the fee, the cap, the certificate
   live. `billing-math.ts`'s `costPlusTotals` is the arithmetic both it and
-  the issue share.
+  the issue share. In `mode="time_and_materials"` a labour table sits above
+  the cost table, hours typed and minutes stored.
+- `src/packs/jobs/ops.ts` — the *time and materials* section: `laborOnJob`
+  (Time's approved worked hours on a job, priced by the rate in force on the
+  day or the contract's flat rate), `syncLaborLines`, `timeEnabled`,
+  `laborCostByProject`; `actualByCode` with `{ withoutLabor }`. The pack's
+  one read of the `time` module is `listRates`; the tables it joins are
+  Time's, through `schema`.
+- `src/lib/labor-posting.ts` — `LABOR_EXPENSE_SUBTYPE`, how a pack tells
+  the wages accounts from the rest without knowing the accrual's codes.
 - `src/app/dashboard/m/jobs/[id]/contracts/[contractId]/page.tsx` — one
   contract's billing: schedule above, applications below, five tiles on top.
 - `src/lib/db-errors.ts` — `violatedUniqueIndex`, the constraint name from
@@ -1350,9 +1486,17 @@ ordering only bites when two new tables reference each other in one file.
   window, so a late bill is billed next time; the fee on the total, rounded
   once, capped at the GMAX; the same row, invoice and void path as a
   fixed-price application; one cost-plus contract per job.
+- **A time-and-materials application bills approved hours at a rate, and
+  the books' cost without them** — [ADR 0062](../decisions/0062-a-time-and-materials-application-bills-approved-hours-at-a-rate.md).
+  The hours are Time's, approved and tagged with the job, at the rate in
+  force on the day or one flat rate on the contract; lines keyed by person
+  and rate; the wages accounts left out of marked-up cost by subtype; a rate
+  of nothing refused by name; the flat rate locked once billed; the same
+  row, invoice and void path; WIP's third method, with `no_rate` a reason.
 - **The contract page reads the billing method, and only the method.** Four
   fixed-value methods get a schedule; cost plus a fee gets the books' cost;
-  the two unbilled methods get a note. Never the kind.
+  time and materials gets Time's hours and the books' cost without the
+  wages; unit price gets a note. Never the kind.
 - **A pay application is an ordinary invoice, and retainage is a negative
   line to a receivable** —
   [ADR 0058](../decisions/0058-a-pay-application-is-an-ordinary-invoice.md).
@@ -1383,8 +1527,9 @@ ordering only bites when two new tables reference each other in one file.
 - ~~**Nothing bills.**~~ — **closed 2026-09-14** for fixed-price work: a
   schedule of values and pay applications, issued as invoices. ~~Cost-plus~~
   **closed 2026-09-14 (slice 5b, ADR 0060)**. Still open from it: **unit
-  price and T&M** are recorded on the contract and billed by nothing (T&M is
-  cost-plus with a rate card in place of cost and would reuse 5b's shape);
+  price** is recorded on the contract and billed by nothing; ~~T&M~~
+  **closed 2026-09-14 (slice 5d, ADR 0062)**, cost-plus with Time's rate
+  card in place of labour cost;
   ~~**retainage held FROM subcontractors**~~ **closed 2026-09-14 (slice 5c,
   ADR 0061)**; **the AIA-style printout** of a certificate.
 - **A billed subcontract cannot be changed.** Its lines are held by RESTRICT
@@ -1397,6 +1542,24 @@ ordering only bites when two new tables reference each other in one file.
   tracked. Work raised where it lives (extension-model §4b) when it comes.
   ~~`billing_method` is still read by no code~~ — the contract page and the
   application verbs read it since 5b.
+- **Time and materials has no rate card of its own.** Each person's rate is
+  Time's, or one rate on the contract covers everybody. A rate per
+  classification (carpenter, labourer, foreman) or a rate negotiated for one
+  customer is a table of rates hanging off the contract, which the lines —
+  keyed by person and rate already — could carry unchanged; nobody has asked.
+- **Wages are told apart by account subtype, and only that.** A business
+  that books payroll by hand to an account of another subtype (the
+  construction chart's `5250 Job Labor` is `cogs`) would have its wages
+  marked up on a time-and-materials application AND billed as hours. Time's
+  own accrual posts to `6450`, so a business using it is right by
+  construction; the fix for the other is a per-tenant list of wages
+  accounts in the pack's config, and the day it is asked for. Behind it sits
+  Time's own item: the accrual books every business's labour to overhead,
+  not to a job-cost account.
+- **A member reading the live WIP schedule sees a time-and-materials job's
+  hours as unrated**, because Time's rates are owners-only. Honest, and
+  documented in ADR 0062; the alternatives — a rate the pack can read, or an
+  owners-only schedule — are both bigger questions than this pack.
 - **A fee rate per cost code** (labor 20%, materials 10%, subcontractors 5%)
   is a real arrangement and not built: one rate on the total ships first.
   It would be a rate per line on the contract, not a different model.
@@ -1441,11 +1604,11 @@ ordering only bites when two new tables reference each other in one file.
   own way and the pilot's scheme is unknown, so the field is free text and the
   form suggests nothing. A generator is worth building only once a real scheme is
   in front of us.
-- **The work in progress schedule measures fixed-value jobs only.** Cost-plus,
-  unit-price and T&M contracts have no value to earn against; a job on one is
-  shown with `No fixed contract value` and left out, and one with billings
-  blocks the period. When those billing methods are built, the schedule needs
-  a second method for them (revenue = cost + fee, or units × price).
+- ~~**The work in progress schedule measures fixed-value jobs only.**~~ —
+  cost plus (5b) and time and materials (5d) each brought their method. What
+  remains: a **unit-price** job has no value to earn against, is shown with
+  `No fixed contract value` and left out, and one with billings blocks the
+  period; units × price is its method, the day unit price bills.
 - **Percent complete cannot be typed.** Cost-to-cost is the only method. A
   business that measures by units delivered or an engineer's estimate would
   need a second nullable column on the line (ADR 0059 leaves the door open);

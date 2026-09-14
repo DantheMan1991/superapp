@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lte, ne, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
@@ -13,6 +13,7 @@ import type {
   JobCostCodeSet,
   JobPayApplication,
   JobPayApplicationCost,
+  JobPayApplicationLabor,
   JobPayApplicationLine,
   JobProject,
   JobSovLine,
@@ -27,8 +28,12 @@ import {
   dueDateFromCustomerTerms,
   ensureCustomerForParty,
 } from "@/modules/accounting/invoicing/customers";
+import { listRates } from "@/modules/time/rate-ops";
+import { LABOR_EXPENSE_SUBTYPE } from "@/lib/labor-posting";
 import {
   costPlusTotals,
+  laborLineCents,
+  minutesToHoursString,
   payApplicationTotals,
   ppmToPercentString,
   type CostLineFigures,
@@ -62,7 +67,10 @@ import {
   isContractStatus,
   isProjectStatus,
   FEE_PPM_MAX,
-  isCostPlusMethod,
+  COST_PLUS_METHODS,
+  TIME_AND_MATERIALS_METHODS,
+  billsTheLedger,
+  isTimeAndMaterialsMethod,
 } from "./vocabulary";
 
 /**
@@ -122,7 +130,11 @@ export class JobsError extends Error {
       /** A job's cost can be billed by one cost-plus contract; a second would bill it twice. */
       | "ONE_COST_PLUS"
       /** A subcontractor's application is against a SUBCONTRACT; a purchase order is billed with an ordinary bill. */
-      | "NOT_SUBCONTRACT",
+      | "NOT_SUBCONTRACT"
+      /** Hours this period on a line with no bill rate; the message names the person (on WIP, the jobs). */
+      | "NO_BILL_RATE"
+      /** A contract's flat labour rate is fixed once an application has issued. */
+      | "RATE_LOCKED",
     message: string,
   ) {
     super(message);
@@ -634,6 +646,8 @@ export interface ContractInput {
   feePpm?: number | null;
   feeCents?: number | null;
   gmaxCents?: number | null;
+  /** Time and materials (slice 5d): one rate for every hour, cents per hour; null = each person's rate from Time. */
+  laborRateCents?: number | null;
   status?: string;
   signedOn?: string | null;
   notes?: string;
@@ -794,6 +808,7 @@ export async function createContract(
       feePpm: input.feePpm ?? null,
       feeCents: input.feeCents ?? null,
       gmaxCents: input.gmaxCents ?? null,
+      laborRateCents: input.laborRateCents ?? null,
       status: input.status ?? "proposed",
       sequence,
       signedOn: input.signedOn ?? null,
@@ -813,6 +828,7 @@ function validateContractShape(input: {
   feePpm?: number | null;
   feeCents?: number | null;
   gmaxCents?: number | null;
+  laborRateCents?: number | null;
 }): void {
   if (
     input.feePpm != null &&
@@ -825,6 +841,12 @@ function validateContractShape(input: {
   }
   if (input.gmaxCents != null && (!Number.isInteger(input.gmaxCents) || input.gmaxCents < 0)) {
     throw new JobsError("INVALID_VALUE", "a guaranteed maximum cannot be negative");
+  }
+  if (
+    input.laborRateCents != null &&
+    (!Number.isInteger(input.laborRateCents) || input.laborRateCents < 0)
+  ) {
+    throw new JobsError("INVALID_VALUE", "a labour rate cannot be negative");
   }
   if (input.kind !== undefined && !DELIVERY_METHOD_FORMAT.test(input.kind.trim())) {
     throw new JobsError("INVALID_KIND", `invalid contract kind: ${input.kind}`);
@@ -891,6 +913,21 @@ export async function updateContract(
       "a signed contract's value is changed by change order, not by edit",
     );
   }
+  /**
+   * A FLAT LABOUR RATE IS LOCKED ONCE BILLED (ADR 0062). It carries no date,
+   * so changing it would re-rate every hour an issued certificate already
+   * carries; a rate that changes over time is Time's dated rate card.
+   */
+  if (
+    input.laborRateCents !== undefined &&
+    input.laborRateCents !== existing[0].laborRateCents &&
+    (await hasIssuedApplication(tx, ctx.tenantId, id))
+  ) {
+    throw new JobsError(
+      "RATE_LOCKED",
+      "the contract's labour rate is fixed once an application has issued",
+    );
+  }
 
   const patch: Record<string, unknown> = {
     updatedAt: new Date(),
@@ -907,6 +944,7 @@ export async function updateContract(
   if (input.feePpm !== undefined) patch.feePpm = input.feePpm;
   if (input.feeCents !== undefined) patch.feeCents = input.feeCents;
   if (input.gmaxCents !== undefined) patch.gmaxCents = input.gmaxCents;
+  if (input.laborRateCents !== undefined) patch.laborRateCents = input.laborRateCents;
   if (input.status !== undefined) patch.status = input.status;
   if (input.signedOn !== undefined) patch.signedOn = input.signedOn;
   if (input.notes !== undefined) patch.notes = input.notes.trim();
@@ -1352,12 +1390,31 @@ async function accountIdsOfType(
   tx: Tx,
   tenantId: string,
   accountType: "expense" | "income",
+  /** Time and materials: the wages accounts left out, because hours are billed by rate (ADR 0062). */
+  opts: { withoutLabor?: boolean } = {},
 ): Promise<string[]> {
+  const accounts = await tx
+    .select({ id: schema.accounts.id, subtype: schema.accounts.subtype })
+    .from(schema.accounts)
+    .where(
+      and(eq(schema.accounts.tenantId, tenantId), eq(schema.accounts.accountType, accountType)),
+    );
+  return accounts
+    .filter((a) => !opts.withoutLabor || a.subtype !== LABOR_EXPENSE_SUBTYPE)
+    .map((a) => a.id);
+}
+
+/** The wages accounts: expense accounts of the subtype the labour accrual posts to. */
+async function laborAccountIds(tx: Tx, tenantId: string): Promise<string[]> {
   const accounts = await tx
     .select({ id: schema.accounts.id })
     .from(schema.accounts)
     .where(
-      and(eq(schema.accounts.tenantId, tenantId), eq(schema.accounts.accountType, accountType)),
+      and(
+        eq(schema.accounts.tenantId, tenantId),
+        eq(schema.accounts.accountType, "expense"),
+        eq(schema.accounts.subtype, LABOR_EXPENSE_SUBTYPE),
+      ),
     );
   return accounts.map((a) => a.id);
 }
@@ -1369,7 +1426,35 @@ async function netByProject(
   accountType: "expense" | "income",
   asOf?: string,
 ): Promise<Map<string, number>> {
-  const accountIds = await accountIdsOfType(tx, tenantId, accountType);
+  return netByProjectForAccounts(
+    tx,
+    tenantId,
+    scope,
+    await accountIdsOfType(tx, tenantId, accountType),
+    asOf,
+  );
+}
+
+/**
+ * What each project carries on the WAGES accounts: the labour cost a
+ * time-and-materials job bills by rate instead of marking up (ADR 0062).
+ */
+export async function laborCostByProject(
+  tx: Tx,
+  tenantId: string,
+  scope: EntityScope,
+  asOf?: string,
+): Promise<Map<string, number>> {
+  return netByProjectForAccounts(tx, tenantId, scope, await laborAccountIds(tx, tenantId), asOf);
+}
+
+async function netByProjectForAccounts(
+  tx: Tx,
+  tenantId: string,
+  scope: EntityScope,
+  accountIds: string[],
+  asOf?: string,
+): Promise<Map<string, number>> {
   if (accountIds.length === 0) return new Map();
 
   const rows = await getBalances(tx, tenantId, {
@@ -1628,11 +1713,13 @@ export interface JobCostReport {
  * code cannot reach this column by construction. The null-member row is
  * money on the job with no code on the line.
  */
-async function actualByCode(
+export async function actualByCode(
   tx: Tx,
   tenantId: string,
   project: JobProject | null,
   asOf?: string,
+  /** Time and materials: the wages accounts left out — hours are billed by rate, never as marked-up cost. */
+  opts: { withoutLabor?: boolean } = {},
 ): Promise<{ byCode: Map<string, number>; uncodedCents: number }> {
   const empty = { byCode: new Map<string, number>(), uncodedCents: 0 };
   if (!project) return empty;
@@ -1640,7 +1727,7 @@ async function actualByCode(
     (m) => m.packEntityId === project.id,
   );
   if (!member) return empty;
-  const accountIds = await accountIdsOfType(tx, tenantId, "expense");
+  const accountIds = await accountIdsOfType(tx, tenantId, "expense", opts);
   if (accountIds.length === 0) return empty;
   const rows = await getBalances(tx, tenantId, {
     scope: { kind: "one", entityId: project.entityId },
@@ -2284,12 +2371,21 @@ export interface CostLineRow extends JobPayApplicationCost {
   name: string | null;
 }
 
+export interface LaborLineRow extends JobPayApplicationLabor {
+  /** The person, by the name Time gives them. */
+  name: string;
+}
+
 export interface PayApplicationRow {
   app: JobPayApplication;
   /** The schedule lines of a fixed-price application; empty on a cost-plus one. */
   lines: PayApplicationLineRow[];
   /** The cost lines of a cost-plus application; empty on a fixed-price one. */
   costs: CostLineRow[];
+  /** The labour lines of a time-and-materials application, as last synced; empty otherwise. */
+  labor: LaborLineRow[];
+  /** Time and materials, on a draft: worked minutes on the job not yet on an approved sheet. */
+  laborAwaitingMinutes: number;
   totals: PayApplicationTotals;
   /** The cost-plus certificate's extra figures; null on a fixed-price application. */
   costPlus: CostPlusTotals | null;
@@ -2447,7 +2543,9 @@ async function syncCostLines(
 ): Promise<void> {
   const project = await getProject(tx, tenantId, contract.projectId);
   const [ledger, previousApp, have] = await Promise.all([
-    actualByCode(tx, tenantId, project, app.periodTo),
+    actualByCode(tx, tenantId, project, app.periodTo, {
+      withoutLabor: isTimeAndMaterialsMethod(contract.billingMethod),
+    }),
     lastIssuedBefore(tx, tenantId, app.contractId, app.number),
     loadCostLines(tx, tenantId, [app.id]),
   ]);
@@ -2492,6 +2590,279 @@ async function syncCostLines(
   }
 }
 
+// ------------------------------------------------------- time and materials
+
+/**
+ * TIME AND MATERIALS (slice 5d, ADR 0062): cost plus a fee with a rate card
+ * in place of labour cost. The hours are Time's — approved worked minutes
+ * tagged with the job's cost object, the same tag a bill line carries —
+ * billed at each person's rate in force on the day, or at one flat rate on
+ * the contract; the books' other cost is billed marked up, with the wages
+ * accounts left out because the hours already cover them. Everything else —
+ * the certificate, the invoice, retainage, the void path, one draft at a
+ * time, one biller per job — is the cost-plus slice's, unchanged.
+ */
+
+/** What a time-and-materials draft bills of one person's hours this period. */
+export interface LaborLineInput {
+  workerId: string;
+  rateCents: number;
+  thisPeriodMinutes: number;
+}
+
+export interface LaborOnJob {
+  /** Approved worked minutes by person, then by the rate in force on the hour's day (0 = no rate found). */
+  byWorker: Map<string, Map<number, number>>;
+  /** Worked minutes on the job not yet on an approved sheet: said on the draft, never billed. */
+  awaitingMinutes: number;
+  /** Approved minutes with no rate to bill them at. */
+  unratedMinutes: number;
+}
+
+const laborKey = (l: { workerId: string; rateCents: number }) => `${l.workerId}|${l.rateCents}`;
+
+/** Whether Time is switched on here — the hours a T&M application bills come from nowhere else. */
+export async function timeEnabled(tx: Tx, tenantId: string): Promise<boolean> {
+  const rows = await tx
+    .select({ moduleId: schema.tenantModules.moduleId })
+    .from(schema.tenantModules)
+    .where(
+      and(
+        eq(schema.tenantModules.tenantId, tenantId),
+        eq(schema.tenantModules.moduleId, "time"),
+        eq(schema.tenantModules.enabled, true),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
+/**
+ * THE HOURS ON A JOB, from Time. An entry counts when it is WORKED (leave is
+ * a cost, never a charge), tagged with the job's cost object, dated on or
+ * before `asOf`, and on an APPROVED sheet — the gate the labour accrual
+ * uses, so what is billed and what the books carry agree. The rate is the
+ * contract's flat rate when it has one, else the person's bill rate in force
+ * on the day from Time's rate card — which is owners-only, as every verb
+ * that prices hours is; a reader who cannot see rates sees every hour as
+ * unrated, never as free.
+ */
+export async function laborOnJob(
+  tx: Tx,
+  tenantId: string,
+  project: JobProject | null,
+  asOf: string,
+  flatRateCents: number | null,
+): Promise<LaborOnJob> {
+  const out: LaborOnJob = { byWorker: new Map(), awaitingMinutes: 0, unratedMinutes: 0 };
+  if (!project) return out;
+  const member = (await listDimensionMembers(tx, tenantId, PROJECT_DIMENSION)).find(
+    (m) => m.packEntityId === project.id,
+  );
+  if (!member) return out;
+  const e = schema.timeEntries;
+  const d = schema.timeEntryDimensions;
+  const sh = schema.timeSheets;
+  const rows = await tx
+    .select({
+      workerId: e.workerId,
+      workDate: e.workDate,
+      minutes: e.minutes,
+      approved: sql<boolean>`exists (select 1 from ${sh} where ${sh.tenantId} = ${e.tenantId} and ${sh.workerId} = ${e.workerId} and ${sh.approvedAt} is not null and ${e.workDate} between ${sh.periodStartsOn} and ${sh.periodEndsOn})`,
+    })
+    .from(e)
+    .innerJoin(
+      d,
+      and(
+        eq(d.tenantId, e.tenantId),
+        eq(d.entryId, e.id),
+        eq(d.dimensionType, PROJECT_DIMENSION),
+        eq(d.memberId, member.id),
+      ),
+    )
+    .where(and(eq(e.tenantId, tenantId), eq(e.payType, "worked"), lte(e.workDate, asOf)));
+  if (rows.length === 0) return out;
+  const rates = flatRateCents === null ? await listRates(tx, tenantId) : [];
+  const rateFor = (workerId: string, day: string): number => {
+    if (flatRateCents !== null) return flatRateCents;
+    // Newest first, so the first rate that had started by the day is the one in force.
+    const inForce = rates.find((r) => r.workerId === workerId && r.effectiveOn <= day);
+    return inForce?.billRateCents ?? 0;
+  };
+  for (const r of rows) {
+    if (!r.approved) {
+      out.awaitingMinutes += r.minutes;
+      continue;
+    }
+    const rate = rateFor(r.workerId, r.workDate);
+    if (rate === 0) out.unratedMinutes += r.minutes;
+    const byRate = out.byWorker.get(r.workerId) ?? new Map<number, number>();
+    byRate.set(rate, (byRate.get(rate) ?? 0) + r.minutes);
+    out.byWorker.set(r.workerId, byRate);
+  }
+  return out;
+}
+
+/** The labour lines of applications with the person's name, in name order then by rate. */
+async function loadLaborLines(
+  tx: Tx,
+  tenantId: string,
+  appIds: string[],
+): Promise<Map<string, LaborLineRow[]>> {
+  const out = new Map<string, LaborLineRow[]>();
+  if (appIds.length === 0) return out;
+  const rows = await tx
+    .select({ line: schema.jobPayApplicationLabor, name: schema.parties.displayName })
+    .from(schema.jobPayApplicationLabor)
+    .leftJoin(
+      schema.timeWorkers,
+      and(
+        eq(schema.timeWorkers.tenantId, schema.jobPayApplicationLabor.tenantId),
+        eq(schema.timeWorkers.id, schema.jobPayApplicationLabor.workerId),
+      ),
+    )
+    .leftJoin(
+      schema.parties,
+      and(
+        eq(schema.parties.tenantId, schema.timeWorkers.tenantId),
+        eq(schema.parties.id, schema.timeWorkers.partyId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.jobPayApplicationLabor.tenantId, tenantId),
+        inArray(schema.jobPayApplicationLabor.payApplicationId, appIds),
+      ),
+    );
+  rows.sort(
+    (a, b) => (a.name ?? "").localeCompare(b.name ?? "") || a.line.rateCents - b.line.rateCents,
+  );
+  for (const r of rows) {
+    const list = out.get(r.line.payApplicationId) ?? [];
+    list.push({ ...r.line, name: r.name ?? "Somebody no longer in Time" });
+    out.set(r.line.payApplicationId, list);
+  }
+  return out;
+}
+
+/** What the labour lines have billed to date: earlier applications' share plus this one's. */
+function laborToDateCents(
+  lines: ReadonlyArray<Pick<JobPayApplicationLabor, "previousCents" | "thisPeriodCents">>,
+): number {
+  return lines.reduce((sum, l) => sum + l.previousCents + l.thisPeriodCents, 0);
+}
+
+/**
+ * Give a time-and-materials draft a line for every person and rate Time has
+ * approved hours for on the job as of the period end, carrying what earlier
+ * issued applications billed on each; `this period` defaults to the
+ * difference and is kept once typed, exactly as `syncCostLines` keeps cost.
+ * TO DATE, NEVER BY WINDOW: a sheet approved late shows up as more to date
+ * than billed and goes on the next application. A line with nothing to date
+ * and nothing before it is dropped — a person whose hours found a rate moves
+ * from the no-rate line to a priced one. A rate dated back in Time after an
+ * application issued moves hours between lines too, which shows as a credit
+ * on the old line and the hours again on the new: re-rated in the open, not
+ * quietly.
+ */
+async function syncLaborLines(
+  tx: Tx,
+  tenantId: string,
+  app: JobPayApplication,
+  contract: JobContract,
+): Promise<void> {
+  const project = await getProject(tx, tenantId, contract.projectId);
+  const [labor, previousApp, have] = await Promise.all([
+    laborOnJob(tx, tenantId, project, app.periodTo, contract.laborRateCents),
+    lastIssuedBefore(tx, tenantId, app.contractId, app.number),
+    loadLaborLines(tx, tenantId, [app.id]),
+  ]);
+  const previous = new Map<
+    string,
+    { workerId: string; rateCents: number; minutes: number; cents: number }
+  >();
+  if (previousApp) {
+    for (const l of (await loadLaborLines(tx, tenantId, [previousApp.id])).get(previousApp.id) ?? []) {
+      previous.set(laborKey(l), {
+        workerId: l.workerId,
+        rateCents: l.rateCents,
+        minutes: l.previousMinutes + l.thisPeriodMinutes,
+        cents: l.previousCents + l.thisPeriodCents,
+      });
+    }
+  }
+  const toDate = new Map<string, { workerId: string; rateCents: number; minutes: number }>();
+  for (const [workerId, byRate] of labor.byWorker) {
+    for (const [rateCents, minutes] of byRate) {
+      toDate.set(laborKey({ workerId, rateCents }), { workerId, rateCents, minutes });
+    }
+  }
+  const existing = new Map((have.get(app.id) ?? []).map((l) => [laborKey(l), l]));
+  const keys = new Set<string>([...toDate.keys(), ...previous.keys(), ...existing.keys()]);
+  for (const key of keys) {
+    const now = toDate.get(key);
+    const before = previous.get(key);
+    const line = existing.get(key);
+    const workerId = now?.workerId ?? before?.workerId ?? line!.workerId;
+    const rateCents = now?.rateCents ?? before?.rateCents ?? line!.rateCents;
+    const minutesToDate = now?.minutes ?? 0;
+    const previousMinutes = before?.minutes ?? 0;
+    const previousCents = before?.cents ?? 0;
+    if (minutesToDate === 0 && previousMinutes === 0 && previousCents === 0) {
+      if (line) {
+        await tx
+          .delete(schema.jobPayApplicationLabor)
+          .where(eq(schema.jobPayApplicationLabor.id, line.id));
+      }
+      continue;
+    }
+    if (line) {
+      const untouched = line.thisPeriodMinutes === line.minutesToDate - line.previousMinutes;
+      const thisPeriodMinutes = untouched ? minutesToDate - previousMinutes : line.thisPeriodMinutes;
+      await tx
+        .update(schema.jobPayApplicationLabor)
+        .set({
+          minutesToDate,
+          previousMinutes,
+          previousCents,
+          thisPeriodMinutes,
+          thisPeriodCents: laborLineCents(thisPeriodMinutes, rateCents),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.jobPayApplicationLabor.id, line.id));
+    } else {
+      const thisPeriodMinutes = minutesToDate - previousMinutes;
+      await tx.insert(schema.jobPayApplicationLabor).values({
+        tenantId,
+        payApplicationId: app.id,
+        workerId,
+        rateCents,
+        minutesToDate,
+        previousMinutes,
+        previousCents,
+        thisPeriodMinutes,
+        thisPeriodCents: laborLineCents(thisPeriodMinutes, rateCents),
+      });
+    }
+  }
+}
+
+/** Whether an issued application stands on a contract — what locks its flat labour rate. */
+async function hasIssuedApplication(tx: Tx, tenantId: string, contractId: string): Promise<boolean> {
+  const rows = await tx
+    .select({ id: schema.jobPayApplications.id })
+    .from(schema.jobPayApplications)
+    .where(
+      and(
+        eq(schema.jobPayApplications.tenantId, tenantId),
+        eq(schema.jobPayApplications.contractId, contractId),
+        eq(schema.jobPayApplications.status, "issued"),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
 /**
  * A JOB'S COST IS BILLED BY ONE COST-PLUS CONTRACT. Cost belongs to the
  * project, so two cost-plus contracts on it would each bill the same dollar;
@@ -2513,13 +2884,16 @@ async function assertOnlyCostPlusBiller(tx: Tx, tenantId: string, contract: JobC
         eq(schema.jobContracts.tenantId, tenantId),
         eq(schema.jobContracts.projectId, contract.projectId),
         ne(schema.jobContracts.id, contract.id),
-        eq(schema.jobContracts.billingMethod, "cost_plus_fee"),
+        inArray(schema.jobContracts.billingMethod, [
+          ...COST_PLUS_METHODS,
+          ...TIME_AND_MATERIALS_METHODS,
+        ]),
         ne(schema.jobPayApplications.status, "void"),
       ),
     )
     .limit(1);
   if (rivals.length > 0) {
-    throw new JobsError("ONE_COST_PLUS", "another cost-plus contract on this job is already billing its cost");
+    throw new JobsError("ONE_COST_PLUS", "another cost-plus or time-and-materials contract on this job is already billing its cost");
   }
 }
 
@@ -2536,7 +2910,8 @@ export async function listPayApplications(
   contractId: string,
 ): Promise<PayApplicationRow[]> {
   const contract = await loadContract(tx, tenantId, contractId);
-  const costPlus = isCostPlusMethod(contract.billingMethod);
+  const costPlus = billsTheLedger(contract.billingMethod);
+  const tm = isTimeAndMaterialsMethod(contract.billingMethod);
   const apps = await tx
     .select()
     .from(schema.jobPayApplications)
@@ -2548,9 +2923,10 @@ export async function listPayApplications(
     )
     .orderBy(asc(schema.jobPayApplications.number));
   const ids = apps.map((a) => a.id);
-  const [linesByApp, costsByApp] = await Promise.all([
+  const [linesByApp, costsByApp, laborByApp] = await Promise.all([
     loadAppLines(tx, tenantId, ids),
     loadCostLines(tx, tenantId, ids),
+    loadLaborLines(tx, tenantId, ids),
   ]);
   // A cost-plus DRAFT shows the books as they are NOW, the way a fixed-price
   // draft shows the schedule as it is now; what it bills is what was saved.
@@ -2560,23 +2936,32 @@ export async function listPayApplications(
   for (const app of apps) {
     const lines = linesByApp.get(app.id) ?? [];
     let costs = costsByApp.get(app.id) ?? [];
+    const labor = laborByApp.get(app.id) ?? [];
+    let laborAwaitingMinutes = 0;
     let totals: PayApplicationTotals;
     let cp: CostPlusTotals | null = null;
     if (app.status === "draft") {
       const previous = await lastIssuedBefore(tx, tenantId, contractId, app.number);
       if (costPlus) {
-        const ledger = await actualByCode(tx, tenantId, project, app.periodTo);
+        const ledger = await actualByCode(tx, tenantId, project, app.periodTo, { withoutLabor: tm });
         costs = costs.map((c) => ({
           ...c,
           ledgerToDateCents:
             c.costCodeId === null ? ledger.uncodedCents : (ledger.byCode.get(c.costCodeId) ?? 0),
         }));
+        if (tm) {
+          // The hours themselves are read at save; what is said live is only what is still waiting.
+          laborAwaitingMinutes = (
+            await laborOnJob(tx, tenantId, project, app.periodTo, contract.laborRateCents)
+          ).awaitingMinutes;
+        }
         cp = costPlusTotals(
           costFigures(costs),
           costPlusTerms(contract),
           app.feeToDateCents,
           app.retainagePpm,
           certifiedCents(previous),
+          laborToDateCents(labor),
         );
         totals = cp;
       } else {
@@ -2595,9 +2980,12 @@ export async function listPayApplications(
       if (costPlus) {
         cp = {
           ...totals,
+          laborToDateCents: app.laborToDateCents,
           costToDateCents: app.costToDateCents,
           feeToDateCents: app.feeToDateCents,
-          capped: app.completedToDateCents < app.costToDateCents + app.feeToDateCents,
+          capped:
+            app.completedToDateCents <
+            app.laborToDateCents + app.costToDateCents + app.feeToDateCents,
         };
       }
     }
@@ -2611,7 +2999,7 @@ export async function listPayApplications(
         totalCents: inv.totalCents,
       };
     }
-    out.push({ app, lines, costs, totals, costPlus: cp, invoice });
+    out.push({ app, lines, costs, labor, laborAwaitingMinutes, totals, costPlus: cp, invoice });
   }
   return out;
 }
@@ -2698,7 +3086,8 @@ export async function createPayApplication(
 ): Promise<JobPayApplication> {
   requireWrite(ctx, "owner");
   const contract = await loadContract(tx, ctx.tenantId, input.contractId);
-  const costPlus = isCostPlusMethod(contract.billingMethod);
+  const costPlus = billsTheLedger(contract.billingMethod);
+  const tm = isTimeAndMaterialsMethod(contract.billingMethod);
   if (costPlus) {
     await assertOnlyCostPlusBiller(tx, ctx.tenantId, contract);
   } else {
@@ -2742,8 +3131,10 @@ export async function createPayApplication(
       createdByClerkUserId: ctx.userId,
     })
     .returning();
-  if (costPlus) await syncCostLines(tx, ctx.tenantId, rows[0], contract);
-  else await syncDraftLines(tx, ctx.tenantId, rows[0]);
+  if (costPlus) {
+    await syncCostLines(tx, ctx.tenantId, rows[0], contract);
+    if (tm) await syncLaborLines(tx, ctx.tenantId, rows[0], contract);
+  } else await syncDraftLines(tx, ctx.tenantId, rows[0]);
   return rows[0];
 }
 
@@ -2796,6 +3187,8 @@ export async function updatePayApplication(
     costLines?: CostLineInput[];
     /** Cost-plus only, on a contract with a fixed fee: the fee billed to date. */
     feeToDateCents?: number;
+    /** Time and materials only: what each person's line bills this period, in minutes. */
+    laborLines?: LaborLineInput[];
     version?: number;
   },
 ): Promise<JobPayApplication> {
@@ -2809,12 +3202,36 @@ export async function updatePayApplication(
   }
   if (input.retainagePpm !== undefined) validateRetainage(input.retainagePpm);
   const contract = await loadContract(tx, ctx.tenantId, app.contractId);
-  const costPlus = isCostPlusMethod(contract.billingMethod);
+  const costPlus = billsTheLedger(contract.billingMethod);
+  const tm = isTimeAndMaterialsMethod(contract.billingMethod);
   // The period may move; the ledger is read as of the NEW period end.
   const synced = input.periodTo !== undefined ? { ...app, periodTo: input.periodTo } : app;
-  if (costPlus) await syncCostLines(tx, ctx.tenantId, synced, contract);
-  else await syncDraftLines(tx, ctx.tenantId, app);
+  if (costPlus) {
+    await syncCostLines(tx, ctx.tenantId, synced, contract);
+    if (tm) await syncLaborLines(tx, ctx.tenantId, synced, contract);
+  } else await syncDraftLines(tx, ctx.tenantId, app);
 
+  if (tm && input.laborLines) {
+    const current = (await loadLaborLines(tx, ctx.tenantId, [app.id])).get(app.id) ?? [];
+    const byKey = new Map(current.map((l) => [laborKey(l), l]));
+    for (const line of input.laborLines) {
+      const row = byKey.get(laborKey(line));
+      if (!row) {
+        throw new JobsError("NOT_FOUND", `no labour line at that rate for ${line.workerId} on this application`);
+      }
+      if (!Number.isInteger(line.thisPeriodMinutes)) {
+        throw new JobsError("INVALID_VALUE", "hours must be whole minutes");
+      }
+      await tx
+        .update(schema.jobPayApplicationLabor)
+        .set({
+          thisPeriodMinutes: line.thisPeriodMinutes,
+          thisPeriodCents: laborLineCents(line.thisPeriodMinutes, row.rateCents),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.jobPayApplicationLabor.id, row.id));
+    }
+  }
   if (costPlus && input.costLines) {
     const current = (await loadCostLines(tx, ctx.tenantId, [app.id])).get(app.id) ?? [];
     const byCode = new Map(current.map((l) => [l.costCodeId, l]));
@@ -2958,7 +3375,8 @@ export async function issuePayApplication(
     throw new JobsError("STALE_VERSION", "application changed since loaded");
   }
   const contract = await loadContract(tx, ctx.tenantId, app.contractId);
-  const costPlus = isCostPlusMethod(contract.billingMethod);
+  const costPlus = billsTheLedger(contract.billingMethod);
+  const tm = isTimeAndMaterialsMethod(contract.billingMethod);
   const previous = await lastIssuedBefore(tx, ctx.tenantId, app.contractId, app.number);
 
   /**
@@ -2972,29 +3390,51 @@ export async function issuePayApplication(
   const gross: Array<{ description: string; cents: number }> = [];
   if (costPlus) {
     await syncCostLines(tx, ctx.tenantId, app, contract);
+    if (tm) await syncLaborLines(tx, ctx.tenantId, app, contract);
     const costs = (await loadCostLines(tx, ctx.tenantId, [app.id])).get(app.id) ?? [];
-    if (costs.length === 0) {
-      throw new JobsError("NO_LINES", "the books carry no cost on this job yet");
+    const labor = tm ? ((await loadLaborLines(tx, ctx.tenantId, [app.id])).get(app.id) ?? []) : [];
+    if (costs.length === 0 && labor.length === 0) {
+      throw new JobsError(
+        "NO_LINES",
+        tm
+          ? "the books carry no cost and Time no approved hours on this job yet"
+          : "the books carry no cost on this job yet",
+      );
     }
+    // Hours with no rate are hours nobody has priced: they wait, they are not given away.
+    const unpriced = labor.find((l) => l.rateCents === 0 && l.thisPeriodMinutes !== 0);
+    if (unpriced) throw new JobsError("NO_BILL_RATE", unpriced.name);
     cp = costPlusTotals(
       costFigures(costs),
       costPlusTerms(contract),
       app.feeToDateCents,
       app.retainagePpm,
       certifiedCents(previous),
+      laborToDateCents(labor),
     );
     totals = cp;
+    const laborThisPeriod = cp.laborToDateCents - (previous?.laborToDateCents ?? 0);
     const costThisPeriod = cp.costToDateCents - (previous?.costToDateCents ?? 0);
     const feeThisPeriod = cp.feeToDateCents - (previous?.feeToDateCents ?? 0);
     const grossThisPeriod = cp.completedToDateCents - (previous?.completedToDateCents ?? 0);
-    if (grossThisPeriod !== costThisPeriod + feeThisPeriod) {
-      // The guaranteed maximum held the figure down; one line says so rather
-      // than two lines that do not add up to it.
+    if (grossThisPeriod !== laborThisPeriod + costThisPeriod + feeThisPeriod) {
+      // The maximum held the figure down; one line says so rather than lines
+      // that do not add up to it.
       gross.push({
-        description: `Application ${app.number} — cost plus fee through ${app.periodTo}, at the guaranteed maximum`,
+        description: tm
+          ? `Application ${app.number} — labour, cost and markup through ${app.periodTo}, at the not-to-exceed`
+          : `Application ${app.number} — cost plus fee through ${app.periodTo}, at the guaranteed maximum`,
         cents: grossThisPeriod,
       });
     } else {
+      // Each person's hours this period is a line the client can read against the timesheet.
+      for (const l of labor) {
+        if (l.thisPeriodCents === 0) continue;
+        gross.push({
+          description: `Application ${app.number} — ${l.name}, ${minutesToHoursString(l.thisPeriodMinutes)} h at ${(l.rateCents / 100).toFixed(2)}/h through ${app.periodTo}`,
+          cents: l.thisPeriodCents,
+        });
+      }
       if (costThisPeriod !== 0) {
         gross.push({
           description: `Application ${app.number} — cost incurred through ${app.periodTo}`,
@@ -3004,8 +3444,10 @@ export async function issuePayApplication(
       if (feeThisPeriod !== 0) {
         gross.push({
           description: contract.feePpm
-            ? `Fee (${ppmToPercentString(contract.feePpm)}% of cost)${contract.feeCents ? " and fixed fee" : ""}`
-            : "Fee",
+            ? `${tm ? "Markup" : "Fee"} (${ppmToPercentString(contract.feePpm)}% of cost)${contract.feeCents ? " and fixed fee" : ""}`
+            : tm
+              ? "Markup"
+              : "Fee",
           cents: feeThisPeriod,
         });
       }
@@ -3118,6 +3560,7 @@ export async function issuePayApplication(
       dueCents: totals.dueCents,
       costToDateCents: cp?.costToDateCents ?? 0,
       feeToDateCents: cp?.feeToDateCents ?? 0,
+      laborToDateCents: cp?.laborToDateCents ?? 0,
       version: app.version + 1,
       updatedAt: new Date(),
     })

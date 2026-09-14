@@ -385,13 +385,14 @@ export function isWipStatus(v: string): v is WipStatus {
 }
 
 /** Mirrors `job_wip_lines_reason_valid`: why a job was left out of the entry. */
-export const WIP_REASONS = ["", "no_value", "no_estimate"] as const;
+export const WIP_REASONS = ["", "no_value", "no_estimate", "no_rate"] as const;
 export type WipReason = (typeof WIP_REASONS)[number];
 
 export const WIP_REASON_LABELS: Record<WipReason, string> = {
   "": "",
   no_value: "No fixed contract value to earn against",
   no_estimate: "No budget and no estimate to measure cost against",
+  no_rate: "Hours on the job with no bill rate — set one in Time, or one rate on the contract",
 };
 
 /**
@@ -417,10 +418,12 @@ export const WIP_ENTRY_SOURCE = "wip_adjustment" as const;
 // ------------------------------------------------------------ cost plus a fee
 
 /**
- * WHICH BILLING METHODS ARE WHICH SUM (slice 5b). Four bill a share of a
- * FIXED value against a schedule of values; one bills the ledger's COST plus
- * a fee; two are recorded and billed by nothing yet. The contract page and
- * the application verbs branch on these groups, never on a contract's kind.
+ * WHICH BILLING METHODS ARE WHICH SUM (slices 5b and 5d). Four bill a share
+ * of a FIXED value against a schedule of values; one bills the ledger's COST
+ * plus a fee; one bills approved HOURS at a rate plus the books' other cost
+ * marked up (ADR 0062); one is recorded and billed by nothing yet. The
+ * contract page and the application verbs branch on these groups, never on a
+ * contract's kind.
  */
 export const FIXED_VALUE_METHODS: readonly BillingMethod[] = [
   "fixed_price",
@@ -429,10 +432,23 @@ export const FIXED_VALUE_METHODS: readonly BillingMethod[] = [
   "draw_schedule",
 ];
 export const COST_PLUS_METHODS: readonly BillingMethod[] = ["cost_plus_fee"];
-export const UNBILLED_METHODS: readonly BillingMethod[] = ["unit_price", "time_and_materials"];
+/** Cost plus with a rate card in place of labour cost (slice 5d, ADR 0062). */
+export const TIME_AND_MATERIALS_METHODS: readonly BillingMethod[] = ["time_and_materials"];
+export const UNBILLED_METHODS: readonly BillingMethod[] = ["unit_price"];
 
 export function isCostPlusMethod(v: string): boolean {
   return (COST_PLUS_METHODS as readonly string[]).includes(v);
+}
+export function isTimeAndMaterialsMethod(v: string): boolean {
+  return (TIME_AND_MATERIALS_METHODS as readonly string[]).includes(v);
+}
+/**
+ * Cost plus a fee and time and materials both bill the JOB'S BOOKS, so one
+ * such contract may bill a job (`ONE_COST_PLUS`) and both share the cost
+ * lines, the sync and the certificate; only the labour differs.
+ */
+export function billsTheLedger(v: string): boolean {
+  return isCostPlusMethod(v) || isTimeAndMaterialsMethod(v);
 }
 export function isFixedValueMethod(v: string): boolean {
   return (FIXED_VALUE_METHODS as readonly string[]).includes(v);
@@ -442,12 +458,13 @@ export function isFixedValueMethod(v: string): boolean {
 export const FEE_PPM_MAX = 1_000_000;
 
 /** Mirrors `job_wip_lines_method_valid`: how a WIP line's earned figure was measured. */
-export const WIP_METHODS = ["cost_to_cost", "cost_plus"] as const;
+export const WIP_METHODS = ["cost_to_cost", "cost_plus", "time_and_materials"] as const;
 export type WipMethod = (typeof WIP_METHODS)[number];
 
 export const WIP_METHOD_LABELS: Record<WipMethod, string> = {
   cost_to_cost: "Cost-to-cost",
   cost_plus: "Cost plus fee",
+  time_and_materials: "Time and materials",
 };
 
 

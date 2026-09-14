@@ -14,6 +14,18 @@ import type { LedgerCtx } from "@/modules/accounting/core";
 export type { LedgerCtx };
 
 /**
+ * THE SUBTYPE OF THE ACCOUNTS WAGES LAND ON. The general chart gives `6450`
+ * and `6500` — the two expense accounts `resolveLaborAccounts` posts to —
+ * `payroll_expense`, and no other account. A pack that bills hours at a rate
+ * (the jobs pack's time-and-materials application, ADR 0062) leaves accounts
+ * of this subtype out of the cost it marks up, so an hour is billed once, by
+ * rate, and never again as marked-up cost. A business that books wages to an
+ * account of another subtype has told nobody they are wages; the jobs
+ * dossier records that as the open item it is.
+ */
+export const LABOR_EXPENSE_SUBTYPE = "payroll_expense";
+
+/**
  * THE DOOR FROM A CORE MODULE ONTO THE LEDGER, for labor and nothing else.
  *
  * At `src/lib/` because **`src/modules/time/` may not import

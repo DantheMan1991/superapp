@@ -39,6 +39,8 @@ import {
   ArchiveButton,
   EndAffiliationButton,
 } from "@/modules/crm/components/record-controls";
+import { labelsForTenant } from "@/lib/packs/tenant-context";
+import { partyWords } from "@/lib/parties/vocabulary";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +53,7 @@ export default async function RecordPage({
 }) {
   const { partyId } = await params;
   const ctx = await requireTenant();
+  const words = partyWords(labelsForTenant(ctx.tenant));
   await requireModuleEnabled(ctx.tenant.id, "crm");
 
   // `{ role: ctx.role }` is what lets RLS decide whether the CRM half of a
@@ -123,8 +126,8 @@ export default async function RecordPage({
         icon={party.kind === "person" ? <User /> : <Building2 />}
         description={
           <span className="flex flex-wrap items-center gap-1.5">
-            {isCustomer && <Badge variant="secondary">Customer</Badge>}
-            {isVendor && <Badge variant="secondary">Vendor</Badge>}
+            {isCustomer && <Badge variant="secondary">{words.customer}</Badge>}
+            {isVendor && <Badge variant="secondary">{words.vendor}</Badge>}
             {!party.isActive && <Badge variant="outline">Archived</Badge>}
             {details?.visibility === "restricted" && (
               <Badge variant="outline" className="gap-1">

@@ -24,6 +24,8 @@ import {
   RenameButton,
 } from "./companies-controls";
 import { TransferButton } from "./transfer-controls";
+import { labelsForTenant } from "@/lib/packs/tenant-context";
+import { partyWords } from "@/lib/parties/vocabulary";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +40,7 @@ export const dynamic = "force-dynamic";
  */
 export default async function CompaniesPage() {
   const ctx = await requireTenant();
+  const words = partyWords(labelsForTenant(ctx.tenant));
   await requireModuleEnabled(ctx.tenant.id, "accounting");
 
   const {
@@ -115,7 +118,7 @@ export default async function CompaniesPage() {
     <div className="space-y-6">
       <PageHeader
         title="Companies"
-        description="Each company keeps its own books — its own trial balance, profit & loss and balance sheet. The chart of accounts, customers, vendors and contacts are shared across all of them."
+        description={`Each company keeps its own books — its own trial balance, profit & loss and balance sheet. The chart of accounts, ${words.customers.toLowerCase()}, ${words.vendors.toLowerCase()} and contacts are shared across all of them.`}
         icon={<Building2 />}
         actions={
           isOwner ? (

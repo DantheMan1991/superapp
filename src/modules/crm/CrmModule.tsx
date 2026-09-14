@@ -16,6 +16,8 @@ import { decodeConditions, describeFilter } from "./core/views";
 import { RecordSearch } from "./components/record-search";
 import { ViewControls } from "./components/view-controls";
 import type { CrmRecordFilter } from "./core/types";
+import { labelsForTenant } from "@/lib/packs/tenant-context";
+import { partyWords } from "@/lib/parties/vocabulary";
 
 const BASE = "/dashboard/m/crm";
 
@@ -60,6 +62,10 @@ export async function CrmModule({
 }) {
   const first = (v: string | string[] | undefined) =>
     Array.isArray(v) ? v[0] : v;
+
+  // The tenant's own words for the two party badges. `ctx.tenant` carries the
+  // industry and the overrides, so this costs no query.
+  const words = partyWords(labelsForTenant(ctx.tenant));
 
   /*
    * The same question all nine `gate()`s ask, so the screen and the action
@@ -185,7 +191,7 @@ export async function CrmModule({
             description={
               isFiltered
                 ? "Loosen a filter, or clear them to see everyone."
-                : "Anyone you invoice or buy from already appears here — the party spine means a customer and a vendor can be the same record."
+                : `Anyone you invoice or buy from already appears here — the party spine means a ${words.customer.toLowerCase()} and a ${words.vendor.toLowerCase()} can be the same record.`
             }
             action={
               isFiltered || !canWrite ? undefined : (
@@ -227,8 +233,8 @@ export async function CrmModule({
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
-                  {isCustomer && <Badge variant="secondary">Customer</Badge>}
-                  {isVendor && <Badge variant="secondary">Vendor</Badge>}
+                  {isCustomer && <Badge variant="secondary">{words.customer}</Badge>}
+                  {isVendor && <Badge variant="secondary">{words.vendor}</Badge>}
                   {details?.visibility === "restricted" && (
                     <Badge variant="outline">Restricted</Badge>
                   )}

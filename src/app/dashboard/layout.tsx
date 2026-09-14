@@ -12,7 +12,9 @@ import { getActiveModules } from "@/lib/modules";
 import { getMailBadge } from "@/lib/email/badge";
 import { getRenderableFeature } from "@/lib/features";
 import { getIndustryProfile } from "@/industries";
-import { labelFor, resolveLabels } from "@/lib/packs/resolve";
+import { labelFor, pluralOf } from "@/lib/packs/resolve";
+import { labelsForTenant } from "@/lib/packs/tenant-context";
+import { LabelProvider } from "@/components/app/label-provider";
 import {
   ENTERPRISE_FALLBACK,
   ENTERPRISE_FALLBACK_PLURAL,
@@ -37,19 +39,24 @@ export default async function DashboardLayout({
   /**
    * Resolved HERE rather than fetched: `ctx.tenant` already carries the
    * industry and the tenant's own overrides, so the rail's word costs no query.
+   *
+   * Resolved ONCE and reused, since 2026-09-13. It was inlined into the
+   * enterprise word below, and the party words added by that slice need the same
+   * map — two calls would have been two chances to resolve them differently.
    */
+  const labels = labelsForTenant(ctx.tenant);
   const enterpriseWord = labelFor(
-    resolveLabels(
-      getIndustryProfile(ctx.tenant.industry)?.labels,
-      ctx.tenant.labels,
-    ),
+    labels,
     ENTERPRISE_LABEL_KEY,
     ENTERPRISE_FALLBACK,
   );
-  const enterprisePlural =
-    enterpriseWord === ENTERPRISE_FALLBACK
-      ? ENTERPRISE_FALLBACK_PLURAL
-      : `${enterpriseWord}s`;
+  // `pluralOf` rather than the ternary this used to be: the guides and core's
+  // party words need the same rule, and it now lives in one place.
+  const enterprisePlural = pluralOf(
+    enterpriseWord,
+    ENTERPRISE_FALLBACK,
+    ENTERPRISE_FALLBACK_PLURAL,
+  );
   const [active, admin, mail, inApp, showLaunch, unreadFeedback] =
     await Promise.all([
       getActiveModules(ctx.tenant.id),
@@ -260,13 +267,20 @@ export default async function DashboardLayout({
           inside `children` and this layout is the only thing that knows the
           count. Outside it — /admin, the public share page — there is no
           provider and `ReportButton` draws nothing. */}
-      <FeedbackProvider
-        unread={unreadFeedback}
-        enabled={!ctx.support}
-        tenantId={ctx.tenant.id}
-      >
-        {children}
-      </FeedbackProvider>
+      {/* THE TENANT'S WORDS, for the client components inside `children`.
+          Same reasoning as the provider below it: a word is rendered deep in a
+          form or a nav and this layout is the only thing holding `ctx.tenant`.
+          Costs no query — the labels are resolved above from the row that
+          `requireTenant` already returned. */}
+      <LabelProvider labels={labels}>
+        <FeedbackProvider
+          unread={unreadFeedback}
+          enabled={!ctx.support}
+          tenantId={ctx.tenant.id}
+        >
+          {children}
+        </FeedbackProvider>
+      </LabelProvider>
     </AppShell>
     </>
   );

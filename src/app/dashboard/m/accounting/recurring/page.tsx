@@ -27,11 +27,14 @@ import {
   RecurringEntryDialogButton,
   RecurringEntryToggle,
 } from "./recurring-entry-controls";
+import { labelsForTenant } from "@/lib/packs/tenant-context";
+import { partyWords } from "@/lib/parties/vocabulary";
 
 export const dynamic = "force-dynamic";
 
 export default async function RecurringEntriesPage() {
   const ctx = await requireTenant();
+  const words = partyWords(labelsForTenant(ctx.tenant));
   await requireModuleEnabled(ctx.tenant.id, "accounting");
 
   const data = await withTenant(ctx.tenant.id, async (tx) => {
@@ -265,9 +268,9 @@ export default async function RecurringEntriesPage() {
                   : parsed.lines.flatMap((l) => (l.accountId ? [l.accountId] : []));
             const party =
               e.kind === "bill"
-                ? e.vendorId && (vendorName.get(e.vendorId) ?? "Supplier")
+                ? e.vendorId && (vendorName.get(e.vendorId) ?? words.vendor)
                 : e.kind === "invoice"
-                  ? e.customerId && (customerName.get(e.customerId) ?? "Customer")
+                  ? e.customerId && (customerName.get(e.customerId) ?? words.customer)
                   : null;
             return (
               <li

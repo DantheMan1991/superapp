@@ -9,6 +9,8 @@ import { EmptyState } from "@/components/app/empty-state";
 import { findMergeCandidates } from "@/modules/crm/merge-ops";
 import { CrmNav } from "@/modules/crm/components/crm-nav";
 import { DuplicateList } from "@/modules/crm/components/duplicate-list";
+import { labelsForTenant } from "@/lib/packs/tenant-context";
+import { partyWords } from "@/lib/parties/vocabulary";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +31,7 @@ export const dynamic = "force-dynamic";
  */
 export default async function DuplicatesPage() {
   const ctx = await requireTenant();
+  const words = partyWords(labelsForTenant(ctx.tenant));
   await requireModuleEnabled(ctx.tenant.id, "crm");
 
   if (ctx.role !== "owner") {
@@ -40,7 +43,7 @@ export default async function DuplicatesPage() {
           <EmptyState
             icon={<Lock />}
             title="Owners only"
-            description="Merging moves invoices and bills onto one customer and cannot be undone, so it is kept to the people who own the books."
+            description={`Merging moves invoices and bills onto one ${words.customer.toLowerCase()} and cannot be undone, so it is kept to the people who own the books.`}
           />
         </Panel>
       </div>

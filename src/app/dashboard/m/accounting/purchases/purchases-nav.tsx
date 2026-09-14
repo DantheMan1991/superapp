@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { FilterPills, type FilterPill } from "@/components/app/filter-pills";
+import { usePartyWords } from "@/components/app/label-provider";
 
 const TABS: FilterPill[] = [
   {
@@ -22,10 +23,16 @@ const TABS: FilterPill[] = [
  */
 export function PurchasesNav() {
   const pathname = usePathname();
-  const active = TABS.find((tab) => pathname.startsWith(tab.href));
+  // The tenant's word. Built here rather than in the constant above, for the
+  // reason the Sales nav spells out.
+  const { vendors } = usePartyWords();
+  const tabs = TABS.map((tab) =>
+    tab.key === "vendors" ? { ...tab, label: vendors } : tab,
+  );
+  const active = tabs.find((tab) => pathname.startsWith(tab.href));
   return (
     <FilterPills
-      items={TABS}
+      items={tabs}
       activeKey={active?.key ?? ""}
       variant="accent"
       className="print:hidden"

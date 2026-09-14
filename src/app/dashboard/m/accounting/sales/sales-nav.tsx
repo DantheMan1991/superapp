@@ -2,7 +2,14 @@
 
 import { usePathname } from "next/navigation";
 import { FilterPills, type FilterPill } from "@/components/app/filter-pills";
+import { usePartyWords } from "@/components/app/label-provider";
 
+/**
+ * The customers tab's label is the TENANT's word, so this list is built inside
+ * the component rather than being a module constant. It was a constant until
+ * 2026-09-13; eight server pages render this nav, and a prop would have been
+ * eight identical plumbing edits for one word.
+ */
 const TABS: FilterPill[] = [
   {
     key: "invoices",
@@ -39,10 +46,14 @@ const TABS: FilterPill[] = [
  */
 export function SalesNav() {
   const pathname = usePathname();
-  const active = TABS.find((tab) => pathname.startsWith(tab.href));
+  const { customers } = usePartyWords();
+  const tabs = TABS.map((tab) =>
+    tab.key === "customers" ? { ...tab, label: customers } : tab,
+  );
+  const active = tabs.find((tab) => pathname.startsWith(tab.href));
   return (
     <FilterPills
-      items={TABS}
+      items={tabs}
       activeKey={active?.key ?? ""}
       variant="accent"
       className="print:hidden"

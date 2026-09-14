@@ -46,10 +46,18 @@ the pack's "Zone" — so in a pack guide never write such a word by hand. Write
   {{zone|plural}}          its plural
   {{zone|lower}}           lowercase, for mid-sentence
   {{zone|plural|lower}}
-The key must be one the feature declares (the labels in src/packs/index.ts,
-plus "enterprise"); tests/guides.test.ts fails on an unknown one. Core-tool
-guides (accounting, documents, mail and the rest) use no placeholders and no
-trade vocabulary at all.
+The key must be one the feature declares (the labels in src/packs/index.ts AND
+src/modules/index.ts, plus "enterprise"); tests/guides.test.ts fails on an
+unknown one.
+
+CORE TOOLS NOW HAVE TWO RENAMEABLE WORDS, and this rule changed on 2026-09-13.
+It used to read "core-tool guides use no placeholders and no trade vocabulary at
+all", which was true while every declared word came from a pack. Accounting now
+declares `customer` and `vendor` — the two nouns an industry most reliably
+renames, and a business that says "client" says it on its invoices. So a core
+guide writes {{customer}} and {{vendor}} where it names those controls, and still
+writes no TRADE vocabulary of any kind. The rest of a core guide is unchanged:
+no other word in accounting, documents or mail is renameable.
 
 LINKS. Another guide: a relative markdown link, [Getting around](../workspace/getting-around.md).
 A screen: its path, [Land](/dashboard/m/land). Outside links open in a new tab.

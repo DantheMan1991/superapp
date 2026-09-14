@@ -30,6 +30,8 @@ import {
   TreatmentControl,
   UnmatchButton,
 } from "@/packs/inventory/components/matching-controls";
+import { labelsForTenant } from "@/lib/packs/tenant-context";
+import { partyWords } from "@/lib/parties/vocabulary";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +59,10 @@ export default async function InventoryMatchingPage({
 }) {
   const query = await searchParams;
   const ctx = await requireTenant();
+  // Accounting's word, rendered by a PACK screen. That is the ordinary case,
+  // not a boundary break: `livestock` renders `land`'s `zone` the same way. A
+  // receipt match names a vendor, so it must say what this business calls one.
+  const words = partyWords(labelsForTenant(ctx.tenant));
   await requireModuleEnabled(ctx.tenant.id, "inventory");
 
   const currencySymbol = ctx.tenant.currencySymbol;
@@ -192,7 +198,7 @@ export default async function InventoryMatchingPage({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Supplier</TableHead>
+                <TableHead>{words.vendor}</TableHead>
                 <TableHead>Line</TableHead>
                 <TableHead className="text-right">Charged</TableHead>
                 <TableHead>Matched</TableHead>

@@ -25,6 +25,7 @@ import {
   MAX_OFFSETS,
   MIN_OFFSET,
 } from "@/modules/accounting/invoicing/reminder-schedule";
+import { usePartyWords } from "@/components/app/label-provider";
 
 /**
  * The whole reminder schedule on one screen: the switch, and the list.
@@ -200,6 +201,7 @@ export function ReminderSettingsForm({
  * somebody most wants to read one before committing.
  */
 export function SendTestReminderButton({ invoiceId }: { invoiceId: string }) {
+  const words = usePartyWords();
   const [pending, startTransition] = useTransition();
 
   function send() {
@@ -211,7 +213,7 @@ export function SendTestReminderButton({ invoiceId }: { invoiceId: string }) {
       }
       const { to } = result.data!;
       toast.success(`Test reminder sent to ${to}`, {
-        description: "The body is exactly what the customer would receive.",
+        description: `The body is exactly what the ${words.customer.toLowerCase()} would receive.`,
       });
     });
   }

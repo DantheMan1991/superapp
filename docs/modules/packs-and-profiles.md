@@ -9,6 +9,104 @@
 
 ## Build log
 
+### 2026-09-13 — Core declares its first words, and a provider carries them to the client (`claude/core-declares-its-party-words`)
+
+**The oldest open item in this file is closed.** It read *"Core modules declare
+none at all, which is the bigger gap: 'customer' and 'invoice' are exactly the
+words an industry renames."* Accounting now declares `customer` and `vendor`, and
+every screen in Accounting and CRM renders the tenant's word for them.
+
+The forcing function was a real business: the construction pilot
+([construction.md](construction.md)) says **client**, and nothing in the product
+could make its invoice say so. `client` itself could not be the key —
+`professional-services` owns it and `collectLabelDefinitions` reports a second
+claim as a conflict — so core declares `customer` and a profile renames it, which
+is the mechanism working rather than a workaround.
+
+**A CLIENT-SIDE PROVIDER, which is new.** Packs thread one resolved word into one
+component as a prop, and that is right at their size. Core's two words are a
+different shape: about fifty sites across thirty-five files, and the worst case is
+`SalesNav` — one client component rendered by eight server pages, so a prop would
+have meant eight identical plumbing edits for one navigation label.
+[`LabelProvider`](../../src/components/app/label-provider.tsx) mounts in the
+dashboard layout beside `FeedbackProvider`, whose own comment already made this
+argument for itself: *"the provider rather than the button, because the button is
+rendered by `PageHeader` deep inside `children` and this layout is the only thing
+that knows the count."* Words are rendered deeper still. `useLabel` /
+`usePartyWords` for client components; `labelsForTenant` + `partyWords` for server
+ones, and **it costs no query** — `requireTenant()` already returns the row
+carrying `industry` and `labels`.
+
+**One plural rule, extracted.** It existed twice already — inlined in the layout
+for the sidebar's one word, and in `buildVocabulary` for the guides — and the
+party words would have been a third. Three copies of a rule about what the
+product CALLS things is how a nav item comes to read "Clients" beside a page
+headed "Customers", so `pluralOf` in
+[resolve.ts](../../src/lib/packs/resolve.ts) is now the only copy and
+`LabelDefinition` carries an optional `plural`. **An earlier draft of this slice
+declared `customerPlural` and `vendorPlural` as keys of their own** so an
+irregular plural could be overridden; it was dropped because it put four rows in
+the admin editor where two belong and disagreed with the rule the guides already
+used, so a guide could have printed a different plural from the screen it
+describes.
+
+**Four screens said "Supplier" while twelve said "Vendor".** Found by doing the
+sweep, not by looking for it: the recurring form, the recurring list's fallback,
+Mail's draft-a-record label and Inventory's matching table each said Supplier,
+against a `vendors` table, a Vendors page and a `VENDOR_INACTIVE` error code. It
+was drift rather than a distinction. All of them now say whatever the business
+calls one — which is strictly better than the old state, where four screens said
+Supplier no matter what the business called it.
+
+**Every other rendered string is byte-identical for a tenant that has renamed
+nothing.** That was held to deliberately, and one empty state had to be rewritten
+to keep it (`No customers yet. Add them on the Customers page first.`). It is why
+the 61 remaining "Customer"/"Vendor" mentions in `docs/help/` are not stale and
+did not have to be swept in this PR — only three guides named a control whose
+label actually changed, and those three were fixed.
+
+**A hole in the ratchet, found and recorded rather than fixed.**
+`tests/vocabulary.test.ts` proves every rendered key is declared by scanning the
+source for `labelFor(x, "literal")` — so **a key passed as a CONSTANT is
+invisible to it**, and `enterprise` has been going through that hole since the
+sidebar shipped: rendered on every dashboard page via `ENTERPRISE_LABEL_KEY`,
+declared by nothing at all. The scan now also covers `useLabel`, and the party
+keys are checked by name because they use constants too. `enterprise` is left
+alone here — `enterprises` is Layer 0 with no registry entry to declare a label
+on, which is a question about where Layer 0 subsystems declare vocabulary, not
+about construction. See Open items.
+
+**DRIVEN, and the rendered HTML is what proved it.** `tenants.labels` was set to
+`{customer: "Client", vendor: "Supplier"}` on Hilltop Farm on the DEV branch
+(`ep-silent-base`, which is what `.env.local` points localhost at — never
+`ep-little-fog`), and every Accounting and CRM route was fetched and scanned for
+the un-renamed words. Zero occurrences across sixteen routes; the pages read
+"Clients", "Add client", "Suppliers", "New supplier", and the A/P Aging tile read
+"What the business owes suppliers". The plurals derived correctly from the
+singular in every case. The labels were then cleared and both pages checked back
+to "Customers" and "Vendors".
+
+**Scanning the OUTPUT rather than the source is the technique worth keeping**, and
+it is what caught the one real bug in this slice. Four greps over the source had
+each assumed a delimiter — `"Customer`, `>Customer<`, a case-sensitive capital —
+and the Add button is none of those: it is a bare JSX text node, `<Plus /> Add
+customer`, so all four missed it. The page rendered a heading reading **Clients**
+above a button reading **Add customer**, which is exactly the half-swept look this
+slice set out to prevent. Three more hid the same way (`New vendor`, the Add
+dialog's title, and the Companies dialog's prose, which is wrapped across lines).
+A grep proves what a pattern can see; the rendered page proves what a person can.
+
+**Deliberately NOT swept**, with the line stated so the next slice does not have
+to re-derive it: static descriptor maps that would each need a new tenant-aware
+contract (`core/errors.ts`'s sentences, `mail/extension.ts`'s entity labels,
+`paste/targets.ts`, `setup/source.ts`, `history/format.ts`); CSV export headers
+and sheet names, which are closer to an API than to copy — somebody's spreadsheet
+keys off them; AI prompt text, which is its own question; Payments' card-reader
+status strings, outside Accounting and CRM; the `Suppliers` seed folder, whose fix
+is the one [extension-model.md §8](../extension-model.md) already names; and
+illustrative example values like `customer@example.com`.
+
+
 ### 2026-09-10 — A profile's `packConfig` reaches a pack nobody farmed for (`claude/back-office-7b-engagements-and-time`)
 
 `professional-services` ships ([professional-services.md](professional-services.md)),
@@ -570,13 +668,31 @@ Pack-owned tables follow the ordinary rules: `tenant_id`, FORCE RLS, a
   on the admin tenant page, and the words they offer come from the registry.
   ~~Neither has been driven~~ — **driven 2026-08-16**, and both were wrong in
   the way only clicking shows. See the build log.
-- **Only four features declare vocabulary**, and the sweep is partial. Each pack
-  declares the words on its list pages; plenty of nouns further in are still
-  hardcoded English ("Species", "Tag", "Batch code"). Adding one is a
-  `LabelDefinition` plus a `labelFor` call, and `tests/vocabulary.test.ts` fails
-  if a key is rendered without being declared — so the ratchet only turns one
-  way. **Core modules declare none at all**, which is the bigger gap: "customer"
-  and "invoice" are exactly the words an industry renames.
+- **The sweep is partial**, and each pack declares only the words on its list
+  pages; plenty of nouns further in are still hardcoded English ("Species",
+  "Tag", "Batch code"). Adding one is a `LabelDefinition` plus a `labelFor` call,
+  and `tests/vocabulary.test.ts` fails if a key is rendered without being
+  declared — so the ratchet only turns one way.
+  ~~**Core modules declare none at all**, which is the bigger gap: "customer" and
+  "invoice" are exactly the words an industry renames.~~ — **half closed
+  2026-09-13.** Accounting declares `customer` and `vendor`, swept across every
+  Accounting and CRM screen; see the build log. **`invoice` is still not
+  renameable** and is the obvious next one, though it is less clear it should be:
+  a construction contract bills by pay application or draw request per CONTRACT,
+  which is a `progress-billing` concern rather than one tenant-wide word.
+
+- **A KEY PASSED AS A CONSTANT IS INVISIBLE TO THE RATCHET.**
+  `tests/vocabulary.test.ts` scans the source for `labelFor(x, "literal")` and
+  `useLabel("literal")`, so a key held in a constant is never checked — and
+  `enterprise` has been through that hole since the sidebar shipped: rendered on
+  every dashboard page through `ENTERPRISE_LABEL_KEY`, declared by no feature at
+  all. The party words use constants too and are checked by name instead, which
+  is the pattern any subsystem doing the same should copy. **`enterprise` itself
+  is unfixed**, and the reason is worth stating: `enterprises` is a Layer 0
+  subsystem with no `moduleRegistry` or `packRegistry` entry, so there is nowhere
+  for it to declare a label. Deciding where Layer 0 declares vocabulary is the
+  actual open question — `feedback` and `work` have their own `vocabulary.ts`
+  files and will hit it next.
 - **Re-apply and drift** — a profile edit does not reach installed tenants. No
   action to re-run an installer, and no report of how a tenant differs from its
   manifest. Accepted cost in ADR 0009; revisit when it bites.

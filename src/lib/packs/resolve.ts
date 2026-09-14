@@ -135,6 +135,15 @@ export interface LabelDefinition {
   /** The word used when nobody has overridden it. */
   fallback: string;
   /**
+   * The plural of `fallback`, when appending an "s" would be wrong or the word
+   * is a phrase — "Lines of business", not "Line of businesss".
+   *
+   * Only ever used for the UNRENAMED word. A tenant's own word has no declared
+   * plural, so it takes an "s"; see `pluralOf` below, which is the one place
+   * that rule lives.
+   */
+  plural?: string;
+  /**
    * What it names, in a sentence — shown beside the field on the admin screen,
    * because "zone" means nothing to somebody deciding whether to rename it.
    */
@@ -221,6 +230,31 @@ export function labelFor(
   fallback: string,
 ): string {
   return labels[key] ?? fallback;
+}
+
+/**
+ * THE ONE PLACE THE PLURAL RULE LIVES.
+ *
+ * A word nobody renamed keeps its declared plural ("Lines of business"); a
+ * renamed one takes an "s", because a tenant's own word has no declared plural
+ * to fall back on.
+ *
+ * Extracted here on 2026-09-13. The rule already existed twice — in the sidebar
+ * for its one renameable word and in `buildVocabulary` for the guides — and the
+ * party words added a third caller. Three copies of a rule about what the
+ * product CALLS things is how a nav item comes to read "Clients" beside a page
+ * headed "Customers", which is the inconsistency this slice exists to remove.
+ *
+ * Takes the resolved singular rather than the label map, so a caller that has
+ * already resolved one does not resolve it twice.
+ */
+export function pluralOf(
+  singular: string,
+  fallbackSingular: string,
+  fallbackPlural?: string,
+): string {
+  if (singular === fallbackSingular && fallbackPlural) return fallbackPlural;
+  return `${singular}s`;
 }
 
 /** A renameable word with the word it currently RESOLVES to, and from where. */

@@ -26,6 +26,8 @@ import {
   ReminderSettingsForm,
   SendTestReminderButton,
 } from "./reminder-controls";
+import { labelsForTenant } from "@/lib/packs/tenant-context";
+import { partyWords } from "@/lib/parties/vocabulary";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +35,7 @@ const CHASEABLE = ["issued", "partial"] as const;
 
 export default async function RemindersPage() {
   const ctx = await requireTenant();
+  const words = partyWords(labelsForTenant(ctx.tenant));
   await requireModuleEnabled(ctx.tenant.id, "accounting");
 
   const today = todayInTimezone(ctx.tenant.timezone);
@@ -204,7 +207,7 @@ export default async function RemindersPage() {
             <thead>
               <tr className="text-left text-xs text-subtle-foreground">
                 <th className="px-4 py-2 font-medium">Invoice</th>
-                <th className="px-4 py-2 font-medium">Customer</th>
+                <th className="px-4 py-2 font-medium">{words.customer}</th>
                 <th className="px-4 py-2 font-medium">Due</th>
                 <th className="px-4 py-2 text-right font-medium">Balance</th>
                 <th className="px-4 py-2 font-medium">Next reminder</th>

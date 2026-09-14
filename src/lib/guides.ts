@@ -93,7 +93,10 @@ export function guideDefinitions(): LabelWord[] {
     })),
   );
   return [
-    ...labels.map(({ key, fallback }) => ({ key, fallback })),
+    // `plural` rides along from the declaration, so a word whose plural is not
+    // just an "s" prints correctly in a guide. Core's party words were the
+    // first to carry one (2026-09-13).
+    ...labels.map(({ key, fallback, plural }) => ({ key, fallback, plural })),
     {
       key: ENTERPRISE_LABEL_KEY,
       fallback: ENTERPRISE_FALLBACK,

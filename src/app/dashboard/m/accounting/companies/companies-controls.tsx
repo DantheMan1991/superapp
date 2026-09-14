@@ -21,6 +21,7 @@ import {
   setDefaultEntityAction,
   updateEntityAction,
 } from "@/modules/accounting/entity-actions";
+import { usePartyWords } from "@/components/app/label-provider";
 
 /**
  * Managing the companies inside one client (ADR 0010).
@@ -32,6 +33,7 @@ import {
  */
 
 export function AddCompanyButton() {
+  const words = usePartyWords();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -68,9 +70,9 @@ export function AddCompanyButton() {
             <DialogTitle>Add a company</DialogTitle>
             <DialogDescription>
               A second company keeps its own books — its own trial balance,
-              profit &amp; loss and balance sheet. The chart of accounts,
-              customers, vendors and contacts stay shared, so you still manage
-              everything in one place.
+              profit &amp; loss and balance sheet. The chart of accounts,{" "}
+              {words.customers.toLowerCase()}, {words.vendors.toLowerCase()} and
+              contacts stay shared, so you still manage everything in one place.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">

@@ -12,12 +12,15 @@
 **Pilot tenant: the founder's employer.** Shrock Premier Custom Construction LLC
 does luxury full custom residential, semi-custom and commercial on one set of
 books, with Construction, Excavation and Cabinet Shop as divisions inside it — and
-it sits under Shrock Family of Companies beside Rainbow Restoration and Shrock
-Prefab. That is deliberately the test case, because **a multi-type company inside
-a multi-company group is the case a naive design breaks on** — and if the design
-makes it an ordinary tenant rather than a special one, the design is right. Which
-it does, for everything except one industry slug: see
-[One tenant, three industries](#one-tenant-three-industries).
+it sits under Shrock Family of Companies, which prepares consolidated financials,
+beside Rainbow Restoration and Shrock Prefab. **Those two are different
+industries and are out of scope by the founder's decision (2026-09-13)**, so
+construction's first customer is one entity with three divisions. That is
+deliberately the test case, because **a multi-type company inside a
+multi-company group is the case a naive design breaks on** — and if the design
+makes it an ordinary tenant rather than a special one, the design is right.
+Which it does, at zero cost:
+[The group, and what is deliberately out of scope](#the-group-and-what-is-deliberately-out-of-scope).
 
 **But the pilot is an INSTANCE, never the axis.** The founder's instruction on
 2026-09-13, in his words: *"don't narrow the software to just me — remember other
@@ -34,6 +37,42 @@ not improvise — the same status
 [packs-and-profiles.md](packs-and-profiles.md) held on 2026-08-13.
 
 ## Build log
+
+### 2026-09-13 (fourth pass) — Scope set to one entity, and consolidation was already built (`claude/construction-industry-design`)
+
+The founder settled the two questions the third pass opened, and both answers
+made this file smaller.
+
+**Shrock Prefab and Rainbow Restoration are different industries and are out of
+scope** — *"not going to worry about right now"*. So the multi-industry-group
+problem the third pass called the largest open question in the file is **deferred,
+not solved**, and the finding plus its trigger are kept rather than deleted: the
+trigger is the day either one is put into the platform. Construction's first
+customer is **one entity, three divisions**. `entities.industry` stays designed and
+unbuilt, which is where a designed answer to a deferred problem belongs.
+
+**Shrock Family of Companies does prepare consolidated financials**, so the group
+is a real reporting level. **Nothing needs building:**
+[consolidation.ts](../../src/modules/accounting/core/consolidation.ts) is ADR 0010
+slice 3 and live, with `combined` and `consolidated` as report scopes and a
+deliberate refusal on reports that are filed per entity. Two things came out of
+reading it rather than assuming it:
+
+- Its header states an explicit non-goal: **not full GAAP consolidation**, because
+  it assumes *"commonly owned LLCs rather than a parent holding subsidiaries"*.
+  **Whether Shrock Family of Companies is brother-sister commonly owned or a true
+  holding company is now the only question left in this file**, and it is an
+  accounting question, not a construction one. Brother-sister produces *combined*
+  statements and the built version is exactly right.
+- **The consolidation requirement and the deferred industry problem arrive on the
+  same day**, both triggered by a second entity going in. Until then there is
+  nothing to consolidate and the group's statements are assembled outside the
+  platform — a fine phase-one position that should not be described as anything
+  else.
+
+**Construction's design changed not at all for either answer**, which is the
+useful result: `entity_id` on a project, one entity, and a report above it that
+already exists.
 
 ### 2026-09-13 (third pass) — Three levels of company, and the group spans three industries (`claude/construction-industry-design`)
 
@@ -77,7 +116,7 @@ inter-division allocation is.
 custom construction, restoration (insurance-driven emergency work, a genuinely
 different business), and prefab. ADR 0056 dissolved two-profiles-on-one-tenant at
 the *delivery method* level; the group brings it back at the *entity* level. See
-[One tenant, three industries](#one-tenant-three-industries) — it is narrower than
+[One tenant, three industries](#deferred-one-tenant-can-span-industries) — it is narrower than
 it first looks, and the designed answer is a one-line symmetry with ADR 0056.
 
 **Vocabulary is answered, and it exposed a prerequisite.** The pilot says
@@ -265,33 +304,80 @@ profit-per-division for this pilot needs that roadmap finished
 notion of division. If a slice finds itself wanting either, it has missed
 `entities` or `enterprises`.
 
-## One tenant, three industries
+## The group, and what is deliberately out of scope
 
-The problem ADR 0056 dissolved at the delivery-method level, returning one level
-up. Shrock Family of Companies spans **custom construction**, **restoration**
-(insurance-driven emergency work — a different business with different money) and
-**prefab**. `tenants.industry` holds one slug.
+**Scope, set by the founder on 2026-09-13: only Shrock Premier Custom
+Construction LLC.** Shrock Prefab and Rainbow Restoration are different
+industries and are *"not going to worry about right now"*. So construction's
+first customer is **one entity**, with three divisions, inside a group of three.
 
-**It is narrower than it looks.** Three things are per-tenant and one of them is
-not a problem:
+That descoping closes what was this file's largest open question, and it closes
+it the cheap way. It does not make the finding untrue, so the finding and its
+trigger are recorded here rather than deleted.
 
-| What | Per what | Does the group break it? |
+### Deferred: one tenant can span industries
+
+`tenants.industry` holds one slug, and the group spans three industries. ADR 0056
+dissolved two-profiles-on-one-tenant at the *delivery method* level; a group
+brings it back at the *entity* level. **Narrower than it looks:**
+
+| What | Per what | Does a multi-industry group break it? |
 | --- | --- | --- |
 | Which packs are switched on | `tenant_modules.enabled`, per tenant | **No.** A restoration job and a custom home can both exist; the union is simply on |
 | Vocabulary | `tenants.labels`, per tenant | **Yes.** One word list for three industries |
-| Profile seed (accounts, folders, templates) | applied once at install | **Yes**, mildly — it is additive and idempotent, so a second profile's seed can be applied on top |
+| Profile seed (accounts, folders, templates) | applied once at install | **Yes**, mildly — additive and idempotent, so a second profile's seed lands on top |
 
-So **capability is fine and words are not.** That is the whole of it, and it is
+So **capability survives and words do not.** That is the whole of it, and it is
 the open item [packs-and-profiles.md](packs-and-profiles.md) has carried since
-2026-08-14 — **now with a real customer behind it rather than a hypothetical.**
+2026-08-14 — **now with a real customer behind it rather than a hypothetical,
+even though that customer has deferred it.**
 
 **The designed answer, when it is needed, is a one-line symmetry with ADR 0056:
 the industry belongs to the ENTITY, not the tenant.** The flavour was not the
 tenant's and neither is the industry. `entities.industry`, with label resolution
-reading the active entity and falling back to the tenant — which is the shape
-label resolution already has (a tenant override on a profile default), one level
-deeper. **Not built, and not built on speculation:** the first question below
-decides whether it is needed at all.
+reading the active entity and falling back to the tenant — the shape label
+resolution already has (a tenant override on a profile default), one level
+deeper.
+
+**THE TRIGGER: the day Prefab or Restoration is put into the platform.** Not a
+date and not a guess — a specific event, so nobody has to re-derive why the
+column was designed and never built.
+
+### Consolidated financials: built, and it fits
+
+The founder confirms **Shrock Family of Companies does consolidated financials**,
+so the group is a real reporting level rather than an umbrella name. Nothing
+needs building:
+[accounting/core/consolidation.ts](../../src/modules/accounting/core/consolidation.ts)
+is ADR 0010 slice 3, live, and every report carries the scope — the entity, or
+`combined` (summed), or `consolidated` (summed with intercompany eliminated).
+Some reports **decline** consolidation on purpose, sales tax among them, because
+a return is filed per entity.
+
+Three things worth stating rather than assuming:
+
+- **It eliminates by following the link, never by matching amounts**, which is
+  why it cannot unbalance a statement: a pair's affiliate legs are always +X and
+  −X, so removing them removes zero, "with no plug and no balancing figure
+  invented anywhere".
+- **It is explicitly NOT full GAAP consolidation** — its own header says so: no
+  investment-in-subsidiary elimination, no minority interest, no purchase
+  accounting, because it assumes *"commonly owned LLCs rather than a parent
+  holding subsidiaries"*. **Whether that assumption holds for Shrock Family of
+  Companies is the one question left** (see Open items). Brother-sister commonly
+  owned entities produce **combined** statements and the built version is exactly
+  right; a true holding company owning equity in the three would need eliminations
+  the module deliberately does not do.
+- **While only Shrock Premier is in the platform there is nothing to consolidate**,
+  so the statements the bank and the surety see are assembled outside it. That is
+  a fine phase-one position and should not be described as anything else. It also
+  means the consolidation requirement and the deferred industry problem **arrive
+  on the same day** — both are triggered by a second entity going in.
+
+**Construction's design changes not at all for any of this.** A project carries
+`entity_id`, the one entity is Shrock Premier, and consolidation is a report
+above it that already exists. That is the test of ADR 0010 passing, and it is why
+this section costs nothing.
 
 ## The prerequisite the vocabulary answer exposed
 
@@ -494,8 +580,15 @@ for them rather than inventing a sixth primitive.
 - **One tenant can span industries even when one profile covers its flavours.**
   ADR 0056 dissolved that at the delivery-method level; the pilot's group brings
   it back at the entity level, and capability survives while words do not. The
-  designed answer is `entities.industry`, unbuilt on purpose — see
-  [One tenant, three industries](#one-tenant-three-industries).
+  designed answer is `entities.industry`, **unbuilt on purpose and deferred with a
+  trigger, not a date** — see
+  [Deferred: one tenant can span industries](#deferred-one-tenant-can-span-industries).
+- **The group's consolidation is built and construction touches none of it.**
+  A project carries `entity_id`; combining and eliminating happens above it in
+  [consolidation.ts](../../src/modules/accounting/core/consolidation.ts). **Do not
+  build a group-level anything in a construction pack.** The one caveat is that
+  the module is explicitly not full GAAP consolidation, so a true holding company
+  over the three would need eliminations it deliberately does not do.
 - **`jobs` is the repo's own name for this pack** ([extension-model.md
   §2](../extension-model.md) uses it), but "Job" is exactly the word §8 flags as
   failing the neutrality test — electrical says Job, plumbing says Service Call,
@@ -517,21 +610,24 @@ fill it in.
 **Every question put to the pilot has been answered** (see the three-column
 table). These are what the answers opened, in priority order:
 
-- **Does Rainbow Restoration need to be in the platform at all?** It is a
-  franchise brand, and franchises often mandate their own software. If it does,
-  `entities.industry` is needed and restoration is a second profile to design. If
-  it does not, the group is construction plus prefab and prefab may be a fifth
-  delivery method rather than another industry. **This is the largest open
-  question in this file and none of it is construction.**
-- **Is Shrock Family of Companies itself a filing entity?** If it files a
-  consolidated return it wants an `entities` row of its own, and `entities` is
-  **flat** — no parent column — so a company-under-a-company would be the first
-  thing to break. If it is only an umbrella name, it is the tenant's name and
-  nothing is needed.
-- **Is Shrock Prefab a separate industry or a delivery method?** Modular and
-  panelised construction is arguably a fifth flavour — a plant building assemblies
-  against a schedule, which is `production` plus `inventory` — rather than another
-  industry. Cheaper if it is a delivery method, and the answer is the founder's.
+- **Is Shrock Family of Companies brother-sister commonly owned, or a true holding
+  company owning equity in the three?** The only question left, and it is an
+  accounting question rather than a construction one.
+  [consolidation.ts](../../src/modules/accounting/core/consolidation.ts) assumes
+  the former in its own header and deliberately does no
+  investment-in-subsidiary elimination, no minority interest and no purchase
+  accounting. Brother-sister produces **combined** statements and the built
+  version is exactly right; a holding company would need eliminations the module
+  says would "mostly be wrong here". **Does not block construction** — it blocks
+  the day a second entity goes in.
+- ~~**Does Rainbow Restoration need to be in the platform?**~~ · ~~**Is Shrock
+  Prefab a separate industry or a delivery method?**~~ — **both out of scope by
+  the founder's decision, 2026-09-13.** Different industries, "not going to worry
+  about right now". Recorded because the deferral has a trigger (see
+  [the group section](#the-group-and-what-is-deliberately-out-of-scope)) and
+  because prefab may still be worth revisiting as a fifth delivery method rather
+  than an industry when it returns — modular is a plant building assemblies to a
+  schedule, which is `production` plus `inventory`.
 - **Does the cost share between divisions need to become an invoice later?** The
   founder says they have tried both and are sharing today. An allocation and an
   internal invoice are different builds, and a company that wants a division held

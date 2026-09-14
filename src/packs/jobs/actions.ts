@@ -13,6 +13,8 @@ import {
   createCostCodeSet,
   createProject,
   JobsError,
+  removeBudgetLine,
+  setBudgetLines,
   setDefaultCostCodeSet,
   updateCommitment,
   updateContract,
@@ -583,6 +585,86 @@ export async function updateCommitmentAction(input: unknown) {
       { role: ctx.role },
     );
     if (projectId) revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath(BASE);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const budgetSchema = z.object({
+  projectId: z.string().uuid(),
+  lines: z
+    .array(
+      z.object({
+        costCodeId: z.string().uuid(),
+        /** Money as typed, cents at the boundary — see `moneyToCents`. */
+        originalCents: moneyToCents,
+        notes: z.string().trim().max(500).optional(),
+      }),
+    )
+    .max(500),
+});
+
+export async function setBudgetAction(input: unknown) {
+  const parsed = budgetSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  /**
+   * A blank box is not a budget of zero, it is a code nobody has budgeted — so
+   * it is dropped rather than written as `0`. The difference matters on the
+   * report: zero means "carried at nil, anything spent is a variance", blank
+   * means "no plan yet", and writing one as the other would turn every
+   * untouched row into a fake overrun.
+   */
+  const lines = parsed.data.lines
+    .filter((l) => l.originalCents !== null)
+    .map((l) => ({
+      costCodeId: l.costCodeId,
+      originalCents: l.originalCents as number,
+      notes: l.notes,
+    }));
+
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const rows = await setBudgetLines(tx, ctx, parsed.data.projectId, lines);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "budget.set",
+          targetType: "project",
+          targetId: parsed.data.projectId,
+          /* Counts, never amounts. A budget by code is close to a margin, and
+             the console is read by people who are not this business. */
+          meta: { lineCount: rows.length },
+        });
+        return rows;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${parsed.data.projectId}`);
+    revalidatePath(BASE);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function removeBudgetLineAction(input: unknown) {
+  const parsed = z
+    .object({ id: z.string().uuid(), projectId: z.string().uuid() })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      (tx) => removeBudgetLine(tx, ctx, parsed.data.id),
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${parsed.data.projectId}`);
     revalidatePath(BASE);
     return { ok: true as const };
   } catch (err) {

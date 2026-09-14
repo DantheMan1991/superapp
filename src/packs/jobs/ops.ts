@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
+  JobBudgetLine,
   JobCommitment,
   JobCommitmentLine,
   JobContract,
@@ -1216,4 +1217,216 @@ export async function actualByProject(
     out.set(projectId, (out.get(projectId) ?? 0) + row.netCents);
   }
   return out;
+}
+
+// -------------------------------------------------------------------- budget
+
+export interface BudgetLineInput {
+  costCodeId: string;
+  originalCents: number;
+  notes?: string;
+}
+
+/**
+ * Write a project's budget: one amount per cost code.
+ *
+ * **UPSERT PER CODE, and a code omitted from the input is LEFT ALONE.** The
+ * alternative — replace the whole budget, the way a commitment's lines are
+ * replaced — is wrong here for a reason worth stating: a commitment's lines are
+ * one document somebody is editing in front of them, while a budget is built up
+ * over weeks by different people. Replacing it would make "I added the concrete
+ * number" quietly delete everything typed since the form was opened.
+ *
+ * Removing a code from a budget is `removeBudgetLine`, said out loud.
+ */
+export async function setBudgetLines(
+  tx: Tx,
+  ctx: JobsCtx,
+  projectId: string,
+  lines: BudgetLineInput[],
+): Promise<JobBudgetLine[]> {
+  requireWrite(ctx, "owner");
+  for (const line of lines) {
+    if (!Number.isInteger(line.originalCents) || line.originalCents < 0) {
+      throw new JobsError("INVALID_VALUE", "a budget cannot be negative");
+    }
+  }
+  if (lines.length === 0) return [];
+
+  const rows = await tx
+    .insert(schema.jobBudgetLines)
+    .values(
+      lines.map((line) => ({
+        tenantId: ctx.tenantId,
+        projectId,
+        costCodeId: line.costCodeId,
+        originalCents: line.originalCents,
+        notes: line.notes?.trim() ?? "",
+      })),
+    )
+    /**
+     * The unique index is the mechanism here, not just the backstop: one line
+     * per code per project means a second write to the same code is an EDIT, and
+     * saying so in SQL is what stops two rows making every variance ambiguous.
+     */
+    .onConflictDoUpdate({
+      target: [
+        schema.jobBudgetLines.tenantId,
+        schema.jobBudgetLines.projectId,
+        schema.jobBudgetLines.costCodeId,
+      ],
+      set: {
+        originalCents: sql`excluded.original_cents`,
+        notes: sql`excluded.notes`,
+        updatedAt: new Date(),
+      },
+    })
+    .returning();
+  return rows;
+}
+
+export async function removeBudgetLine(
+  tx: Tx,
+  ctx: JobsCtx,
+  id: string,
+): Promise<void> {
+  requireWrite(ctx, "owner");
+  const rows = await tx
+    .delete(schema.jobBudgetLines)
+    .where(
+      and(
+        eq(schema.jobBudgetLines.tenantId, ctx.tenantId),
+        eq(schema.jobBudgetLines.id, id),
+      ),
+    )
+    .returning();
+  if (rows.length === 0) {
+    throw new JobsError("NOT_FOUND", `budget line ${id} not found`);
+  }
+}
+
+/**
+ * THE JOB COST REPORT, one row per cost code.
+ *
+ * Budget against committed, per code, which is the question a builder actually
+ * asks: *is the framing going to come in?* A job-level total answers nothing —
+ * "$40k over" is a fact, "the framing is $40k over" is a decision.
+ *
+ * **EVERY CODE THAT HAS EITHER A BUDGET OR A COMMITMENT APPEARS**, not just the
+ * budgeted ones. A code somebody ordered against and never budgeted is the most
+ * interesting row on the page and would be the easiest to leave out.
+ *
+ * **THERE IS NO ACTUAL COLUMN HERE, AND THAT IS DELIBERATE.** Actual cost comes
+ * from `getBalances`, which groups by ONE dimension type — so it can answer "what
+ * has this project cost" or "what has this code cost across every project", and
+ * not "what has this code cost on THIS project". Showing a per-code actual
+ * without that would mean either reading accounting's tables directly, which
+ * this pack must not do, or quietly reporting another job's spend in this job's
+ * column. The project-level actual is on the page as its own figure; per-code
+ * waits for `getBalances` to take a second group-by, which is accounting's call
+ * and not this pack's to force.
+ */
+export interface JobCostRow {
+  costCodeId: string;
+  code: string;
+  name: string;
+  sortOrder: number;
+  budgetCents: number;
+  committedCents: number;
+  /** Budget minus committed. Negative means over. */
+  varianceCents: number;
+  hasBudget: boolean;
+}
+
+export async function jobCostRows(
+  tx: Tx,
+  tenantId: string,
+  projectId: string,
+): Promise<JobCostRow[]> {
+  const [budget, committed, codes] = await Promise.all([
+    tx
+      .select()
+      .from(schema.jobBudgetLines)
+      .where(
+        and(
+          eq(schema.jobBudgetLines.tenantId, tenantId),
+          eq(schema.jobBudgetLines.projectId, projectId),
+        ),
+      ),
+    // Committed on THIS project only, by code. `committedTotals` answers for the
+    // whole tenant; a job cost report must not borrow another job's orders.
+    tx
+      .select({
+        costCodeId: schema.jobCommitmentLines.costCodeId,
+        amountCents: sql<number>`sum(${schema.jobCommitmentLines.amountCents})`.mapWith(
+          Number,
+        ),
+      })
+      .from(schema.jobCommitmentLines)
+      .innerJoin(
+        schema.jobCommitments,
+        and(
+          eq(schema.jobCommitments.tenantId, schema.jobCommitmentLines.tenantId),
+          eq(schema.jobCommitments.id, schema.jobCommitmentLines.commitmentId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.jobCommitmentLines.tenantId, tenantId),
+          eq(schema.jobCommitments.projectId, projectId),
+          inArray(schema.jobCommitments.status, [...COMMITTED_STATUSES]),
+        ),
+      )
+      .groupBy(schema.jobCommitmentLines.costCodeId),
+    tx
+      .select()
+      .from(schema.jobCostCodes)
+      .where(eq(schema.jobCostCodes.tenantId, tenantId)),
+  ]);
+
+  const codeById = new Map(codes.map((c) => [c.id, c]));
+  const budgetByCode = new Map(budget.map((b) => [b.costCodeId, b]));
+  const committedByCode = new Map(
+    committed.filter((c) => c.costCodeId).map((c) => [c.costCodeId!, c.amountCents]),
+  );
+
+  const ids = new Set([...budgetByCode.keys(), ...committedByCode.keys()]);
+  const rows: JobCostRow[] = [];
+  for (const id of ids) {
+    const code = codeById.get(id);
+    if (!code) continue;
+    const budgetCents = budgetByCode.get(id)?.originalCents ?? 0;
+    const committedCents = committedByCode.get(id) ?? 0;
+    rows.push({
+      costCodeId: id,
+      code: code.code,
+      name: code.name,
+      sortOrder: code.sortOrder,
+      budgetCents,
+      committedCents,
+      varianceCents: budgetCents - committedCents,
+      hasBudget: budgetByCode.has(id),
+    });
+  }
+  // The order the business arranged its chart in, not the order ids came back.
+  rows.sort((a, b) => a.sortOrder - b.sortOrder || a.code.localeCompare(b.code));
+  return rows;
+}
+
+/** Every project's budget total, for the job list. */
+export async function budgetTotals(
+  tx: Tx,
+  tenantId: string,
+): Promise<Map<string, number>> {
+  const rows = await tx
+    .select({
+      projectId: schema.jobBudgetLines.projectId,
+      totalCents: sql<number>`sum(${schema.jobBudgetLines.originalCents})`.mapWith(
+        Number,
+      ),
+    })
+    .from(schema.jobBudgetLines)
+    .where(eq(schema.jobBudgetLines.tenantId, tenantId))
+    .groupBy(schema.jobBudgetLines.projectId);
+  return new Map(rows.map((r) => [r.projectId, r.totalCents]));
 }

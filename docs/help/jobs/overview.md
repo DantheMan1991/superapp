@@ -85,6 +85,39 @@ They are listed on the {{project|lower}}'s own page, numbered in the order you a
 
 The `Value` column is the same total: signed and complete only. A job with nothing signed yet shows `—` rather than `0.00`, because zero would read as "worth nothing" when the truth is "not agreed yet".
 
+## Job cost — what it was meant to cost
+
+Owners only to set. On the {{project|lower}}'s page, under **Job cost**.
+
+A budget here is **per cost code**, never one number for the whole job. That is deliberate: "the job is $40,000 over" tells you something has gone wrong and nothing about what to do; "the framing is $40,000 over" is a decision you can act on.
+
+### Setting a budget
+
+{button:Set budget|outline}. You get your whole cost code list with a box beside each, and whatever you have already set filled in.
+
+- **Leave a code blank** if you have no plan for it yet. It simply will not appear on the report.
+- **Zero is different from blank.** Zero means you are carrying that code at nil, so anything spent against it shows as a variance. Blank means you have not decided.
+- **Codes you do not touch are left alone.** Saving does not wipe the rest of the budget, so two people can fill in different trades on different days.
+- Retired codes are not offered, unless one already has a budget against it — in which case it stays editable rather than stranding the figure.
+
+`Total typed` at the bottom adds up what is in the boxes as you go.
+
+### Reading the report
+
+| Column | What it is |
+| --- | --- |
+| `Budget` | What you planned for that code. |
+| `Ordered` | What you have committed on **this job** against it — issued and closed orders only. |
+| `Left` | Budget minus ordered. **Negative and red means that trade is over.** |
+
+A code you have ordered against but never budgeted appears with a `Not budgeted` badge. That row is usually the one worth looking at.
+
+### What the report does not show yet
+
+**There is no actual cost per code.** The job's total actual is in the `Ordered` panel below; the per-code column stops at what has been ordered.
+
+The reason is honest rather than temporary: the books can group costs by job, or by cost code across every job, but not both at once. Showing a per-code figure here today would mean putting another job's spending in this job's column. It arrives when that is fixed properly.
+
 ## What you have ordered
 
 Owners only to add. On the {{project|lower}}'s page, under **Ordered**.
@@ -164,7 +197,7 @@ New codes are added to the end of the list, not the top, so a list you arranged 
 
 Worth knowing so you are not looking for it:
 
-- **No budget.** A job now shows what it is worth, what you have ordered and what it has cost. Nothing yet holds those against a planned figure per cost code — that is next.
+- **Nothing revises a budget or a contract.** A change order is the proper way either of those moves, and it is what is being built next. For now both are edited in place, so you lose the `original + approved changes = revised` line.
 - **No billing.** Every contract records how it should be billed, and nothing bills yet.
 - **Cost codes can now be put on a bill.** They appear in Accounting wherever you tag a line, beside the job itself — so a bill can say which job and which trade. Actual cost per code follows once bills carry them.
 - **Nothing is ever deleted.** A contract you should not have added is set to `Cancelled` or `Declined`; a cost code is retired; a {{project|lower}} is cancelled. That is on purpose — a job's history is the point of keeping it.

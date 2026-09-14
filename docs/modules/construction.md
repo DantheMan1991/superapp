@@ -727,13 +727,14 @@ cost-plus-fee dropped out of slice 4 because the pilot bills fixed price monthly
 | 0 | ~~`jobs` — project, cost code sets, `delivery_method`, **dimension sync**, `entity_id` and the division~~ **SHIPPED 2026-09-14** ([jobs.md](jobs.md)) | The spine. The dimension sync alone makes labor and every bill sliceable by job. Three coordinates, none of them the delivery method. **The budget and the seeded templates came OUT of this slice** — a project that collects actual cost is already the thing a spreadsheet does worst, and they belong with contracts. |
 | 1 | ~~`contracts` — many per project, the ladder, counterparty, role~~ **SHIPPED 2026-09-14** ([jobs.md](jobs.md)) | A project has no value without one. Carries the sub case and the pre-con phases from the start rather than retrofitting both. **`direction` turned out to be redundant with `role`** and was not built. |
 | 2 | ~~`commitments` — POs and subcontracts issued, committed vs actual~~ **SHIPPED 2026-09-14** ([jobs.md](jobs.md)) | Committed cost is the number a budget is useless without. Cost codes became `dimension_members` in the same slice, so a bill line can be charged to one with no change in accounting. |
-| 3 | `change-orders` — PCO → CO → approved, against a contract | The original contract value must stop being editable before anything trusts it. |
-| 4 | `progress-billing` — SOV, pay applications, retainage, draws | **Three methods, not six.** The pilot bills fixed price monthly, AIA pay application and a home draw schedule — all percent-or-milestone against a fixed value. Cost-plus-fee, GMAX and T&M are market requirements for later. |
-| 5 | `wip` — percent complete, earned revenue, over/under billing | What the bank and the surety ask for, and the credibility slice. |
-| 6 | `field` — daily log, photos, manpower, punch list, via `tell-sources` | The first slice somebody on a site touches. |
-| 7 | `selections` — option catalogue, allowances, selection deadlines | Covers the production option book and the custom selection process with one mechanism. |
-| 8 | `drawings` — sheet sets, versions, markups, measurements | The Documents industry layer already on the roadmap. |
-| 9 | `estimating` — takeoff, assemblies, unit costs, bid | Wants units of measure settled and a cost code set to estimate into. Unit-price billing for the excavation side lands here. |
-| 10 | `compliance` — COI expiry, lien waivers, W-9 | Work raised where it lives; no new task engine. |
-| 11 | `submittals` — submittals, RFIs, ASIs, transmittals | Commercial-weighted, so it waits for a commercial job run in anger. |
-| 12 | `warranty`, `bonding`, `certified-payroll` | Last, and `certified-payroll` may not belong in software at all. |
+| 3 | ~~`budget` — planned cost per code, and the job cost report~~ **SHIPPED 2026-09-14** ([jobs.md](jobs.md)) | **Inserted here, ahead of change orders, and the reorder is the point.** An approved change order revises the contract value AND the budget, so building change orders first means building the revenue half and retrofitting the cost half. The budget had been folded into slice 0, pulled out, then deferred through slices 1 and 2; this is where it belonged. |
+| 4 | `change-orders` — PCO → CO → approved, against a contract | The original contract value must stop being editable before anything trusts it — and with a budget now in place, an approved change order can revise both halves at once, which is what `original + approved changes = revised` means. |
+| 5 | `progress-billing` — SOV, pay applications, retainage, draws | **Three methods, not six.** The pilot bills fixed price monthly, AIA pay application and a home draw schedule — all percent-or-milestone against a fixed value. Cost-plus-fee, GMAX and T&M are market requirements for later. |
+| 6 | `wip` — percent complete, earned revenue, over/under billing | What the bank and the surety ask for, and the credibility slice. |
+| 7 | `field` — daily log, photos, manpower, punch list, via `tell-sources` | The first slice somebody on a site touches. |
+| 8 | `selections` — option catalogue, allowances, selection deadlines | Covers the production option book and the custom selection process with one mechanism. |
+| 9 | `drawings` — sheet sets, versions, markups, measurements | The Documents industry layer already on the roadmap. |
+| 10 | `estimating` — takeoff, assemblies, unit costs, bid | Wants units of measure settled and a cost code set to estimate into. Unit-price billing for the excavation side lands here. |
+| 11 | `compliance` — COI expiry, lien waivers, W-9 | Work raised where it lives; no new task engine. |
+| 12 | `submittals` — submittals, RFIs, ASIs, transmittals | Commercial-weighted, so it waits for a commercial job run in anger. |
+| 13 | `warranty`, `bonding`, `certified-payroll` | Last, and `certified-payroll` may not belong in software at all. |

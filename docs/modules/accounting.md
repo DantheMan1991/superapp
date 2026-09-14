@@ -22,6 +22,24 @@ changes this module MUST add an entry here (rule in AGENTS.md).
 > at the start of every accounting session, so its length is a real cost — it was
 > 4,367 lines before the 2026-09-14 sweep, 94% of it build log.
 
+### 2026-09-14 — A fifth managed source, and a second basis lens (`claude/work-in-progress`)
+
+The `jobs` pack's work-in-progress slice ([ADR 0059](../decisions/0059-work-in-progress-is-a-snapshot-and-a-self-reversing-entry.md))
+touched three of this module's files and no table of its own. `journal_entry_source`
+gains `wip_adjustment` (`drizzle/0339`, whose header says why the value is safe in a
+migration that also creates tables: nothing in the file uses it). `MANAGED_SOURCES`
+gains it — a WIP period row says `posted` and points at BOTH its adjustment and its
+reversal, so voiding either from the journal would leave a schedule claiming an entry
+the ledger no longer carries; the pack's own unpost voids the pair. And
+`src/lib/basis-lens/registry.ts` gains the pack's provider, which drops every such
+entry whole under the cash basis — the second provider, and the guard that two
+providers may not claim one line stays untested by it because it substitutes
+nothing. `getBalances`, `postEntry` and `voidEntry` are unchanged and are the whole
+seam: the pack reads billings per job from the ledger as of the period end, and the
+self-reversing entry is what keeps that read honest with no filter on the source.
+Not in `MACHINE_SOURCES`, for `inventory_cost_adjustment`'s reason: recognising
+revenue on a percent somebody estimated is an owner's decision.
+
 ### 2026-09-14 — The dossier got too big to read (`claude/dossiers-too-big-to-read`)
 
 Nothing about the module changed. This records why the file you are reading is

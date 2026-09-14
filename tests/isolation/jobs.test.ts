@@ -47,6 +47,7 @@ d("jobs tables (RLS)", () => {
   let sovA = "";
   let payAppA = "";
   let logA = "";
+  let periodA = "";
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantA, fn, { role: "staff", userId: MATE });
@@ -1016,5 +1017,112 @@ d("jobs tables (RLS)", () => {
     }));
     expect(left.logs).toEqual([]);
     expect(left.crews).toEqual([]);
+  });
+
+  // ------------------------------------------------------------------- wip
+
+  it("cannot read or change another tenant's WIP PERIOD or its lines", async () => {
+    periodA = await withSystem(async (tx) => {
+      const p = await tx
+        .insert(schema.jobWipPeriods)
+        .values({ tenantId: tenantA, entityId: entityA, periodEnd: "2026-09-30" })
+        .returning();
+      await tx.insert(schema.jobWipLines).values({
+        tenantId: tenantA,
+        periodId: p[0].id,
+        projectId: projectA,
+        estimateCents: 1_300_000_00,
+      });
+      return p[0].id;
+    });
+    const seen = await asOtherTenant(async (tx) => ({
+      periods: await tx.select().from(schema.jobWipPeriods).where(eq(schema.jobWipPeriods.id, periodA)),
+      lines: await tx.select().from(schema.jobWipLines).where(eq(schema.jobWipLines.periodId, periodA)),
+      changed: await tx
+        .update(schema.jobWipLines)
+        .set({ estimateCents: 1 })
+        .where(eq(schema.jobWipLines.periodId, periodA))
+        .returning(),
+    }));
+    expect(seen.periods).toEqual([]);
+    expect(seen.lines).toEqual([]);
+    expect(seen.changed).toEqual([]);
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.jobWipLines).where(eq(schema.jobWipLines.periodId, periodA)),
+    );
+    expect(mine).toHaveLength(1);
+  });
+
+  it("a period cannot name another tenant's COMPANY, and a line cannot name another tenant's PROJECT", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx
+          .insert(schema.jobWipPeriods)
+          .values({ tenantId: tenantA, entityId: entityB, periodEnd: "2026-10-31" }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx
+          .insert(schema.jobWipLines)
+          .values({ tenantId: tenantA, periodId: periodA, projectId: projectB }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("one schedule per company per date, and a posted period without an entry is unrepresentable", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx
+          .insert(schema.jobWipPeriods)
+          .values({ tenantId: tenantA, entityId: entityA, periodEnd: "2026-09-30" }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.jobWipPeriods)
+          .set({ status: "posted" })
+          .where(eq(schema.jobWipPeriods.id, periodA)),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx
+          .insert(schema.jobWipLines)
+          .values({ tenantId: tenantA, periodId: periodA, projectId: projectA, estimateCents: -1 }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("deleting a period takes its lines, and deleting a project takes its lines too", async () => {
+    const scratch = await withSystem(async (tx) => {
+      const p = await tx
+        .insert(schema.jobWipPeriods)
+        .values({ tenantId: tenantA, entityId: entityA, periodEnd: "2026-11-30" })
+        .returning();
+      const proj = await tx
+        .insert(schema.jobProjects)
+        .values({ tenantId: tenantA, entityId: entityA, number: "casc-wip", name: "cw" })
+        .returning();
+      await tx.insert(schema.jobWipLines).values([
+        { tenantId: tenantA, periodId: p[0].id, projectId: projectA },
+        { tenantId: tenantA, periodId: periodA, projectId: proj[0].id },
+      ]);
+      return { periodId: p[0].id, projectId: proj[0].id };
+    });
+    await withSystem(async (tx) => {
+      await tx.delete(schema.jobWipPeriods).where(eq(schema.jobWipPeriods.id, scratch.periodId));
+      await tx.delete(schema.jobProjects).where(eq(schema.jobProjects.id, scratch.projectId));
+    });
+    const left = await withSystem((tx) =>
+      tx
+        .select()
+        .from(schema.jobWipLines)
+        .where(inArray(schema.jobWipLines.periodId, [scratch.periodId, periodA])),
+    );
+    // periodA's own line (on projectA) survives; the two scratch lines are gone.
+    expect(left).toHaveLength(1);
+    expect(left[0].projectId).toBe(projectA);
   });
 });

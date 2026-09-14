@@ -170,6 +170,25 @@ export const journalEntrySource = pgEnum("journal_entry_source", [
    * already, so `requireOwnerRole` is exactly the check it should meet.
    */
   "payroll_accrual",
+  /**
+   * **THE WORK-IN-PROGRESS ADJUSTMENT** — the `jobs` pack's slice 6, ADR 0059.
+   * `source_id` names a `job_wip_periods` row. Two entries carry it per
+   * period: the adjustment dated the period end (`Dr 1240 / Cr revenue` for a
+   * job billed behind its work, `Dr revenue / Cr 2420` for one billed ahead,
+   * one pair per job, tagged with the job) and its REVERSAL dated the next
+   * day, so every period's entry is the whole figure and the books between
+   * period ends carry billings. Added in `drizzle/0339`, which also creates
+   * the two tables; nothing in that migration uses the value, so the
+   * one-transaction warning above does not bite.
+   *
+   * IN `MANAGED_SOURCES` (core/guards.ts): the period row says `posted` and
+   * points at both entries, so voiding either from the journal would leave a
+   * schedule claiming an adjustment the ledger no longer carries. The pack's
+   * own unpost voids the pair. NOT in `MACHINE_SOURCES`: recognising revenue
+   * on a percent complete somebody estimated is an owner's decision, the
+   * argument `inventory_cost_adjustment` makes word for word.
+   */
+  "wip_adjustment",
 ]);
 
 export const entryEditPolicy = pgEnum("entry_edit_policy", [

@@ -132,6 +132,9 @@ export async function JobsModule({
         description={`What ${ctx.tenant.name} is building, and what each job costs.`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/dashboard/m/jobs/wip">Work in progress</Link>
+            </Button>
             {isOwner && (
               <Button variant="outline" size="sm" asChild>
                 <Link href="/dashboard/m/jobs/cost-codes">Cost codes</Link>

@@ -37,7 +37,7 @@ import {
   COST_CODE_DIMENSION,
   PROJECT_DIMENSION,
 } from "../src/packs/jobs/vocabulary";
-import { listDimensionMembers } from "../src/modules/accounting/core";
+import { getBalances, listDimensionMembers, postEntry } from "../src/modules/accounting/core";
 import { violatedUniqueIndex } from "../src/lib/db-errors";
 import {
   addCrew,
@@ -48,6 +48,13 @@ import {
   saveDailyLog,
   setPunchDone,
 } from "../src/packs/jobs/field-ops";
+import {
+  listWipPeriods,
+  postWip,
+  saveWipEstimate,
+  unpostWip,
+  wipSchedule,
+} from "../src/packs/jobs/wip-ops";
 import { loadInvoice, loadInvoiceLines } from "../src/modules/accounting/invoicing/invoices";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import { CONSTRUCTION_COA } from "../src/industries/construction/accounts";
@@ -1787,5 +1794,468 @@ d("jobs ops", () => {
     expect(before.map((i) => [i.title, i.dueOn, i.completedAt])).toEqual([["Touch up paint", "2026-09-20", null]]);
     expect(before[0].links).toEqual([{ entityType: "project", entityId: expect.any(String) }]);
     expect(after[0].completedAt).not.toBeNull();
+  });
+
+  // ------------------------------------------------------------------- wip
+
+  /**
+   * EACH TEST BELOW GETS ITS OWN COMPANY, because a schedule is per company
+   * and every job the earlier sections made on the default one would land on
+   * it — most with no budget, which would block every post here with a
+   * refusal about somebody else's job. A company is one row.
+   */
+  const newCompany = (name: string) =>
+    withSystem(async (tx) => {
+      const rows = await tx.insert(schema.entities).values({ tenantId, name }).returning();
+      return rows[0].id;
+    });
+
+  const accountByCodeId = async (tx: Tx, code: string): Promise<string> => {
+    const rows = await tx
+      .select({ id: schema.accounts.id })
+      .from(schema.accounts)
+      .where(and(eq(schema.accounts.tenantId, tenantId), eq(schema.accounts.code, code)));
+    if (!rows[0]) throw new Error(`no account ${code}`);
+    return rows[0].id;
+  };
+
+  /** A cost on the job: Dr 5200 Job Materials tagged with the project / Cr 2000 Accounts Payable. */
+  const postCost = async (tx: Tx, entity: string, projectId: string, cents: number, date: string) => {
+    const [member] = await memberFor(tx, projectId);
+    await postEntry(tx, ctx, {
+      entityId: entity,
+      status: "posted",
+      entryDate: date,
+      memo: "job cost",
+      lines: [
+        { accountId: await accountByCodeId(tx, "5200"), amountCents: cents, dimensionMemberIds: [member.id] },
+        { accountId: await accountByCodeId(tx, "2000"), amountCents: -cents },
+      ],
+    });
+  };
+
+  /** A signed job on a company: its contract, an optional budget, some cost, some billing. */
+  const wipJob = async (
+    tx: Tx,
+    entity: string,
+    number: string,
+    args: {
+      contractCents: number | null;
+      budgetCents?: number;
+      costCents?: number;
+      costDate?: string;
+      billedCents?: number;
+      billDate?: string;
+    },
+  ) => {
+    await ensureBilling(tx);
+    const project = await createProject(tx, ctx, { entityId: entity, number, name: `WIP ${number}` });
+    const party = await seedVendor(tx, `Owner ${number}`);
+    const contract = await createContract(tx, ctx, {
+      projectId: project.id,
+      kind: "new_home",
+      counterpartyPartyId: party,
+      valueCents: args.contractCents,
+      status: "signed",
+    });
+    if (args.budgetCents !== undefined) {
+      const set =
+        (await getDefaultCostCodeSet(tx, tenantId)) ??
+        (await createCostCodeSet(tx, ctx, { name: "WIP codes" }));
+      const code = await createCostCode(tx, ctx, { setId: set.id, code: `W-${number}`, name: "Work" });
+      await setBudgetLines(tx, ctx, project.id, [{ costCodeId: code.id, originalCents: args.budgetCents }]);
+    }
+    if (args.costCents) {
+      await postCost(tx, entity, project.id, args.costCents, args.costDate ?? "2026-09-10");
+    }
+    if (args.billedCents) {
+      const sov = await saveSovLines(tx, ctx, contract.id, [
+        { description: "Contract sum", scheduledCents: args.contractCents ?? args.billedCents },
+      ]);
+      const app = await createPayApplication(tx, ctx, {
+        contractId: contract.id,
+        periodTo: args.billDate ?? "2026-09-12",
+        retainagePpm: 0,
+      });
+      await updatePayApplication(tx, ctx, app.id, {
+        lines: [{ sovLineId: sov[0].id, thisPeriodCents: args.billedCents, storedCents: 0 }],
+      });
+      await issuePayApplication(tx, ctx, app.id, { issueDate: args.billDate ?? "2026-09-12" });
+    }
+    return { project, contract };
+  };
+
+  const entryLines = (entryId: string) =>
+    run(async (tx) => {
+      const lines = await tx
+        .select()
+        .from(schema.journalLines)
+        .where(eq(schema.journalLines.entryId, entryId));
+      const accounts = await tx
+        .select({ id: schema.accounts.id, code: schema.accounts.code })
+        .from(schema.accounts)
+        .where(eq(schema.accounts.tenantId, tenantId));
+      const codeOf = new Map(accounts.map((a) => [a.id, a.code]));
+      return lines.map((l) => [codeOf.get(l.accountId), l.amountCents] as const).sort();
+    });
+
+  it("THE SCHEDULE: percent complete is cost over estimate, earned is the contract at that percent, and a job that cannot be measured says so", async () => {
+    const entity = await newCompany("WIP Co 1");
+    const a = await run((tx) =>
+      wipJob(tx, entity, "OPS-W1", {
+        contractCents: 100_000_00,
+        budgetCents: 80_000_00,
+        costCents: 40_000_00,
+        billedCents: 30_000_00,
+      }),
+    );
+    const b = await run((tx) => wipJob(tx, entity, "OPS-W2", { contractCents: 50_000_00, costCents: 5_000_00 }));
+    const s = await run((tx) => wipSchedule(tx, tenantId, { entityId: entity, periodEnd: "2026-09-30" }));
+    expect(s.period).toBeNull();
+    const rowA = s.rows.find((r) => r.projectId === a.project.id)!;
+    expect(rowA.reason).toBe("");
+    expect(rowA.figures).toMatchObject({
+      contractCents: 100_000_00,
+      estimatedCostCents: 80_000_00,
+      costToDateCents: 40_000_00,
+      billedCents: 30_000_00,
+      percentCompletePpm: 500_000,
+      earnedCents: 50_000_00,
+      underBilledCents: 20_000_00,
+      overBilledCents: 0,
+    });
+    const rowB = s.rows.find((r) => r.projectId === b.project.id)!;
+    expect(rowB.reason).toBe("no_estimate");
+    expect(rowB.figures.percentCompletePpm).toBeNull();
+    expect(s.blockers).toEqual(["OPS-W2 has no budget and no estimate"]);
+    // Only measured jobs count toward the totals.
+    expect(s.totals.underBilledCents).toBe(20_000_00);
+    expect(s.totals.contractCents).toBe(100_000_00);
+    expect(s.missingAccounts).toEqual([]);
+    // As of a date before the cost and the billing, the job has only its value.
+    const early = await run((tx) => wipSchedule(tx, tenantId, { entityId: entity, periodEnd: "2026-09-01" }));
+    expect(early.rows.find((r) => r.projectId === a.project.id)!.figures).toMatchObject({
+      costToDateCents: 0,
+      billedCents: 0,
+      earnedCents: 0,
+    });
+    // Another company's schedule does not see these jobs at all.
+    const other = await run((tx) => wipSchedule(tx, tenantId, { entityId, periodEnd: "2026-09-30" }));
+    expect(other.rows.some((r) => r.projectId === a.project.id)).toBe(false);
+  });
+
+  it("POSTING writes the adjustment and its reversal the next day, tagged with the job, and freezes the schedule", async () => {
+    const entity = await newCompany("WIP Co 2");
+    const { project } = await run((tx) =>
+      wipJob(tx, entity, "OPS-W3", {
+        contractCents: 100_000_00,
+        budgetCents: 80_000_00,
+        costCents: 40_000_00,
+        costDate: "2026-10-05",
+        billedCents: 30_000_00,
+        billDate: "2026-10-06",
+      }),
+    );
+    await expect(
+      run((tx) => postWip(tx, staffCtx, { entityId: entity, periodEnd: "2026-10-31" })),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const posted = await run((tx) => postWip(tx, ctx, { entityId: entity, periodEnd: "2026-10-31" }));
+    expect(posted.period.status).toBe("posted");
+    expect(posted.period.entryId).toBe(posted.entryId);
+    expect(posted.period.reversalEntryId).toBe(posted.reversalEntryId);
+
+    const read = await run(async (tx) => {
+      const [entry] = await tx
+        .select()
+        .from(schema.journalEntries)
+        .where(eq(schema.journalEntries.id, posted.entryId));
+      const [reversal] = await tx
+        .select()
+        .from(schema.journalEntries)
+        .where(eq(schema.journalEntries.id, posted.reversalEntryId));
+      const lines = await tx
+        .select()
+        .from(schema.journalLines)
+        .where(inArray(schema.journalLines.entryId, [posted.entryId, posted.reversalEntryId]));
+      const dims = await tx
+        .select({ journalLineId: schema.lineDimensions.journalLineId, memberId: schema.lineDimensions.memberId })
+        .from(schema.lineDimensions)
+        .where(
+          and(
+            eq(schema.lineDimensions.tenantId, tenantId),
+            inArray(schema.lineDimensions.journalLineId, lines.map((l) => l.id)),
+          ),
+        );
+      const [member] = await memberFor(tx, project.id);
+      return { entry, reversal, dims, member };
+    });
+    expect(read.entry).toMatchObject({
+      source: "wip_adjustment",
+      entryDate: "2026-10-31",
+      status: "posted",
+      entityId: entity,
+      sourceId: posted.period.id,
+    });
+    expect(read.reversal).toMatchObject({
+      source: "wip_adjustment",
+      entryDate: "2026-11-01",
+      status: "posted",
+      reversesEntryId: posted.entryId,
+    });
+    // Under-billed by 20,000: Dr 1240 / Cr 4030, one pair, tagged with the job; the reversal negated.
+    expect(await entryLines(posted.entryId)).toEqual([["1240", 20_000_00], ["4030", -20_000_00]]);
+    expect(await entryLines(posted.reversalEntryId)).toEqual([["1240", -20_000_00], ["4030", 20_000_00]]);
+    expect(read.dims).toHaveLength(4);
+    expect(new Set(read.dims.map((d) => d.memberId))).toEqual(new Set([read.member.id]));
+
+    // The ledger reads EARNED revenue at the period end and BILLINGS the day after.
+    const revenue = (asOf: string) =>
+      run(async (tx) => {
+        const rows = await getBalances(tx, tenantId, {
+          scope: { kind: "one", entityId: entity },
+          asOf,
+          accountIds: [await accountByCodeId(tx, "4030")],
+          groupByDimensionType: PROJECT_DIMENSION,
+        });
+        return rows.find((r) => r.memberId === read.member.id)?.netCents ?? 0;
+      });
+    expect(await revenue("2026-10-31")).toBe(-50_000_00);
+    expect(await revenue("2026-11-01")).toBe(-30_000_00);
+
+    // FROZEN: more cost after posting changes nothing the period says, and the next period reads it.
+    await run((tx) => postCost(tx, entity, project.id, 60_000_00, "2026-10-20"));
+    const again = await run((tx) => wipSchedule(tx, tenantId, { entityId: entity, periodEnd: "2026-10-31" }));
+    expect(again.period?.status).toBe("posted");
+    expect(again.rows[0].figures).toMatchObject({
+      costToDateCents: 40_000_00,
+      percentCompletePpm: 500_000,
+      earnedCents: 50_000_00,
+    });
+    const next = await run((tx) => wipSchedule(tx, tenantId, { entityId: entity, periodEnd: "2026-11-30" }));
+    expect(next.rows[0].figures).toMatchObject({
+      costToDateCents: 100_000_00,
+      percentCompletePpm: 1_000_000,
+      earnedCents: 100_000_00,
+      billedCents: 30_000_00,
+    });
+    await expect(
+      run((tx) => postWip(tx, ctx, { entityId: entity, periodEnd: "2026-10-31" })),
+    ).rejects.toMatchObject({ code: "INVALID_STATUS" });
+    expect((await run((tx) => listWipPeriods(tx, tenantId, entity))).map((p) => p.periodEnd)).toEqual([
+      "2026-10-31",
+    ]);
+  });
+
+  it("an estimate typed for the period replaces the budget for THAT period, and can turn an under-billing into an over-billing", async () => {
+    const entity = await newCompany("WIP Co 3");
+    const { project } = await run((tx) =>
+      wipJob(tx, entity, "OPS-W4", {
+        contractCents: 100_000_00,
+        budgetCents: 80_000_00,
+        costCents: 40_000_00,
+        billedCents: 30_000_00,
+      }),
+    );
+    const at = (estimateCents: number | null, notes?: string) => ({
+      entityId: entity,
+      periodEnd: "2026-09-30",
+      projectId: project.id,
+      estimateCents,
+      notes,
+    });
+    await expect(run((tx) => saveWipEstimate(tx, staffCtx, at(1)))).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(run((tx) => saveWipEstimate(tx, ctx, at(-1)))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    const line = await run((tx) => saveWipEstimate(tx, ctx, at(200_000_00, "sub prices came in high")));
+    expect(line.estimateCents).toBe(200_000_00);
+
+    const s = await run((tx) => wipSchedule(tx, tenantId, { entityId: entity, periodEnd: "2026-09-30" }));
+    expect(s.period?.status).toBe("draft");
+    expect(s.rows[0]).toMatchObject({
+      estimateCents: 200_000_00,
+      budgetCents: 80_000_00,
+      notes: "sub prices came in high",
+    });
+    expect(s.rows[0].figures).toMatchObject({
+      estimatedCostCents: 200_000_00,
+      percentCompletePpm: 200_000,
+      earnedCents: 20_000_00,
+      overBilledCents: 10_000_00,
+      underBilledCents: 0,
+    });
+    // The next period has no estimate of its own and falls back to the budget.
+    const next = await run((tx) => wipSchedule(tx, tenantId, { entityId: entity, periodEnd: "2026-10-31" }));
+    expect(next.rows[0].estimateCents).toBeNull();
+    expect(next.rows[0].figures.estimatedCostCents).toBe(80_000_00);
+    // Blank puts the budget back.
+    await run((tx) => saveWipEstimate(tx, ctx, at(null)));
+    const back = await run((tx) => wipSchedule(tx, tenantId, { entityId: entity, periodEnd: "2026-09-30" }));
+    expect(back.rows[0].figures.estimatedCostCents).toBe(80_000_00);
+
+    // Over-billed posts the other way: Dr revenue / Cr 2420.
+    await run((tx) => saveWipEstimate(tx, ctx, at(200_000_00)));
+    const posted = await run((tx) => postWip(tx, ctx, { entityId: entity, periodEnd: "2026-09-30" }));
+    expect(await entryLines(posted.entryId)).toEqual([["2420", -10_000_00], ["4030", 10_000_00]]);
+    // A posted period's estimate is frozen with it.
+    await expect(run((tx) => saveWipEstimate(tx, ctx, at(1)))).rejects.toMatchObject({ code: "INVALID_STATUS" });
+    const frozen = await run((tx) => wipSchedule(tx, tenantId, { entityId: entity, periodEnd: "2026-09-30" }));
+    expect(frozen.rows[0]).toMatchObject({ estimateCents: 200_000_00 });
+    expect(frozen.rows[0].figures.overBilledCents).toBe(10_000_00);
+  });
+
+  it("refuses what it cannot measure or must not do: no estimate, billings without a value, nothing to post, a period behind the last, a chart without the account", async () => {
+    // No budget and no estimate — named.
+    const one = await newCompany("WIP Co 4a");
+    const { project: bare } = await run((tx) =>
+      wipJob(tx, one, "OPS-W5", { contractCents: 100_000_00, costCents: 10_000_00 }),
+    );
+    await expect(
+      run((tx) => postWip(tx, ctx, { entityId: one, periodEnd: "2026-09-30" })),
+    ).rejects.toMatchObject({ code: "ESTIMATE_REQUIRED", message: "OPS-W5" });
+    await run((tx) =>
+      saveWipEstimate(tx, ctx, { entityId: one, periodEnd: "2026-09-30", projectId: bare.id, estimateCents: 50_000_00 }),
+    );
+    const fixed = await run((tx) => postWip(tx, ctx, { entityId: one, periodEnd: "2026-09-30" }));
+    expect(await entryLines(fixed.entryId)).toEqual([["1240", 20_000_00], ["4030", -20_000_00]]);
+
+    // Billings on a job with no fixed value — named.
+    const two = await newCompany("WIP Co 4b");
+    await run((tx) => wipJob(tx, two, "OPS-W6", { contractCents: null, billedCents: 10_000_00 }));
+    await expect(
+      run((tx) => postWip(tx, ctx, { entityId: two, periodEnd: "2026-09-30" })),
+    ).rejects.toMatchObject({ code: "BILLED_NO_VALUE", message: "OPS-W6" });
+    const twoRows = await run((tx) => wipSchedule(tx, tenantId, { entityId: two, periodEnd: "2026-09-30" }));
+    expect(twoRows.rows[0].reason).toBe("no_value");
+    expect(twoRows.blockers).toEqual(["OPS-W6 has billings but no fixed contract value"]);
+
+    // Billings equal earned: nothing to post.
+    const three = await newCompany("WIP Co 4c");
+    await run((tx) =>
+      wipJob(tx, three, "OPS-W7", {
+        contractCents: 100_000_00,
+        budgetCents: 80_000_00,
+        costCents: 40_000_00,
+        billedCents: 50_000_00,
+      }),
+    );
+    await expect(
+      run((tx) => postWip(tx, ctx, { entityId: three, periodEnd: "2026-09-30" })),
+    ).rejects.toMatchObject({ code: "NOTHING_TO_POST" });
+
+    // A period behind the latest posted one.
+    await expect(
+      run((tx) => postWip(tx, ctx, { entityId: one, periodEnd: "2026-08-31" })),
+    ).rejects.toMatchObject({ code: "NOT_FORWARD", message: "2026-09-30" });
+
+    // A chart without 1240 cannot carry an under-billing; the refusal names the code.
+    const four = await newCompany("WIP Co 4d");
+    await run((tx) =>
+      wipJob(tx, four, "OPS-W8", {
+        contractCents: 100_000_00,
+        budgetCents: 80_000_00,
+        costCents: 40_000_00,
+        billedCents: 30_000_00,
+      }),
+    );
+    await run((tx) =>
+      tx
+        .update(schema.accounts)
+        .set({ isActive: false })
+        .where(and(eq(schema.accounts.tenantId, tenantId), eq(schema.accounts.code, "1240"))),
+    );
+    const before = await run((tx) => wipSchedule(tx, tenantId, { entityId: four, periodEnd: "2026-09-30" }));
+    expect(before.missingAccounts).toEqual(["1240"]);
+    await expect(
+      run((tx) => postWip(tx, ctx, { entityId: four, periodEnd: "2026-09-30" })),
+    ).rejects.toMatchObject({ code: "ACCOUNT_MISSING", message: expect.stringContaining("1240") });
+    await run((tx) =>
+      tx
+        .update(schema.accounts)
+        .set({ isActive: true })
+        .where(and(eq(schema.accounts.tenantId, tenantId), eq(schema.accounts.code, "1240"))),
+    );
+    // Five companies and six billed jobs: the slowest test in the file by design.
+  }, 120_000);
+
+  it("UNPOST voids both entries, only for the latest period, keeps the estimate, and a re-post is a NEW pair", async () => {
+    const entity = await newCompany("WIP Co 5");
+    const { project } = await run((tx) =>
+      wipJob(tx, entity, "OPS-W9", {
+        contractCents: 100_000_00,
+        budgetCents: 80_000_00,
+        costCents: 40_000_00,
+        billedCents: 30_000_00,
+      }),
+    );
+    await run((tx) =>
+      saveWipEstimate(tx, ctx, { entityId: entity, periodEnd: "2026-09-30", projectId: project.id, estimateCents: 100_000_00 }),
+    );
+    const sep = await run((tx) => postWip(tx, ctx, { entityId: entity, periodEnd: "2026-09-30" }));
+    const oct = await run((tx) => postWip(tx, ctx, { entityId: entity, periodEnd: "2026-10-31" }));
+    await expect(run((tx) => unpostWip(tx, ctx, sep.period.id))).rejects.toMatchObject({
+      code: "NOT_LATEST_PERIOD",
+      message: "2026-10-31",
+    });
+    await expect(run((tx) => unpostWip(tx, staffCtx, oct.period.id))).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      run((tx) => unpostWip(tx, ctx, oct.period.id, { version: oct.period.version + 5 })),
+    ).rejects.toMatchObject({ code: "STALE_VERSION" });
+
+    const back = await run((tx) => unpostWip(tx, ctx, oct.period.id, { version: oct.period.version }));
+    expect(back).toMatchObject({ status: "draft", entryId: null, reversalEntryId: null, postedOn: null });
+    const statuses = await run(async (tx) =>
+      (
+        await tx
+          .select({ status: schema.journalEntries.status })
+          .from(schema.journalEntries)
+          .where(inArray(schema.journalEntries.id, [oct.entryId, oct.reversalEntryId]))
+      ).map((r) => r.status),
+    );
+    expect(statuses).toEqual(["void", "void"]);
+
+    // September is now the latest and can go too; its estimate survives.
+    await run((tx) => unpostWip(tx, ctx, sep.period.id));
+    const s = await run((tx) => wipSchedule(tx, tenantId, { entityId: entity, periodEnd: "2026-09-30" }));
+    expect(s.period?.status).toBe("draft");
+    expect(s.rows[0].estimateCents).toBe(100_000_00);
+    expect(s.rows[0].figures.percentCompletePpm).toBe(400_000);
+
+    // Posting again makes a new pair rather than reviving the voided one.
+    const again = await run((tx) => postWip(tx, ctx, { entityId: entity, periodEnd: "2026-09-30" }));
+    expect(again.entryId).not.toBe(sep.entryId);
+    const status = await run(async (tx) =>
+      (
+        await tx
+          .select({ status: schema.journalEntries.status })
+          .from(schema.journalEntries)
+          .where(eq(schema.journalEntries.id, again.entryId))
+      )[0].status,
+    );
+    expect(status).toBe("posted");
+    expect(await entryLines(again.entryId)).toEqual([["1240", 10_000_00], ["4030", -10_000_00]]);
+  });
+
+  it("the CASH lens drops the adjustment whole: no 1240 balance under cash, the full one under accrual", async () => {
+    const entity = await newCompany("WIP Co 6");
+    await run((tx) =>
+      wipJob(tx, entity, "OPS-W10", {
+        contractCents: 100_000_00,
+        budgetCents: 80_000_00,
+        costCents: 40_000_00,
+        billedCents: 30_000_00,
+      }),
+    );
+    await run((tx) => postWip(tx, ctx, { entityId: entity, periodEnd: "2026-09-30" }));
+    const balance = (basis: "accrual" | "cash") =>
+      run(async (tx) => {
+        const rows = await getBalances(tx, tenantId, {
+          scope: { kind: "one", entityId: entity },
+          asOf: "2026-09-30",
+          basis,
+          accountIds: [await accountByCodeId(tx, "1240")],
+        });
+        return rows.reduce((sum, r) => sum + r.netCents, 0);
+      });
+    expect(await balance("accrual")).toBe(20_000_00);
+    expect(await balance("cash")).toBe(0);
   });
 });

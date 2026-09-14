@@ -40,7 +40,24 @@ import {
   isPayApplicationStatus,
   isProjectStatus,
   slugLabel,
+  OVERBILLING_ACCOUNT_CODE,
+  UNDERBILLING_ACCOUNT_CODE,
+  WIP_ENTRY_SOURCE,
+  WIP_REASONS,
+  WIP_REASON_LABELS,
+  WIP_STATUSES,
+  WIP_STATUS_LABELS,
+  isWipStatus,
 } from "../src/packs/jobs/vocabulary";
+import {
+  WIP_PPM,
+  earnedCents,
+  percentCompletePpm,
+  wipFigures,
+  wipPercentLabel,
+  wipTotals,
+} from "../src/packs/jobs/wip-math";
+import { CONSTRUCTION_COA } from "../src/industries/construction/accounts";
 import {
   lineCompletedCents,
   payApplicationTotals,
@@ -565,6 +582,166 @@ describe("the field", () => {
     it("describes a job by the things that tell it from its neighbours", () => {
       expect(describeProject(jobs[0])).toBe("24-108 · Luxury custom · 118 Oak Row");
       expect(describeProject(jobs[1])).toBe("24-112 · 4 Mill Lane");
+    });
+  });
+});
+
+/*
+ * ── work in progress (slice 6) ─────────────────────────────────────────────
+ *
+ * The one-schedule-per-company-per-date index, the posted↔entry CHECK, the
+ * journal source the entries carry, and the arithmetic — pinned case by case,
+ * because a percent that rounds the wrong way is a revenue figure a bank
+ * reads.
+ */
+const WIP_SQL = readFileSync("drizzle/0339_job_wip.sql", "utf8");
+
+describe("work in progress", () => {
+  it("keeps ONE schedule per company per date, and one line per job on it, in the database", () => {
+    expect(WIP_SQL).toMatch(
+      /job_wip_periods_entity_period_idx[^;]*\("tenant_id","entity_id","period_end"\)/,
+    );
+    expect(WIP_SQL).toMatch(
+      /job_wip_lines_period_project_idx[^;]*\("tenant_id","period_id","project_id"\)/,
+    );
+  });
+
+  it("makes a posted period an entry and a draft not one, both ways, and a reversal need its adjustment", () => {
+    expect(WIP_SQL).toMatch(
+      /job_wip_periods_posted_has_entry" CHECK \(\("job_wip_periods"\."status" = 'posted'\) = \("job_wip_periods"\."entry_id" is not null\)\)/,
+    );
+    expect(WIP_SQL).toMatch(/job_wip_periods_reversal_needs_entry/);
+  });
+
+  it("MIRRORS the status and reason CHECK constraints", () => {
+    expect(WIP_SQL).toContain(
+      `CHECK ("job_wip_periods"."status" in (${WIP_STATUSES.map((s) => `'${s}'`).join(", ")}))`,
+    );
+    expect(WIP_SQL).toContain(
+      `CHECK ("job_wip_lines"."reason" in (${WIP_REASONS.map((s) => `'${s}'`).join(", ")}))`,
+    );
+  });
+
+  it("holds the company and both entries by RESTRICT, and takes the lines with the period and with the job", () => {
+    expect(WIP_SQL).toMatch(/job_wip_periods_entity_fk[^;]*ON DELETE no action/);
+    expect(WIP_SQL).toMatch(/job_wip_periods_entry_fk[^;]*ON DELETE no action/);
+    expect(WIP_SQL).toMatch(/job_wip_periods_reversal_fk[^;]*ON DELETE no action/);
+    expect(WIP_SQL).toMatch(/job_wip_lines_period_fk[^;]*ON DELETE cascade/);
+    expect(WIP_SQL).toMatch(/job_wip_lines_project_fk[^;]*ON DELETE cascade/);
+  });
+
+  it("adds the journal source both entries carry, before anything else, and nothing in the file uses it", () => {
+    expect(WIP_SQL).toContain(
+      `ALTER TYPE "public"."journal_entry_source" ADD VALUE '${WIP_ENTRY_SOURCE}'`,
+    );
+    expect(WIP_SQL.indexOf("ADD VALUE")).toBeLessThan(WIP_SQL.indexOf("CREATE TABLE"));
+    expect(WIP_SQL.split(`'${WIP_ENTRY_SOURCE}'`).length - 1).toBe(1);
+  });
+
+  it("keeps an estimate non-negative and a percent between nothing and everything", () => {
+    expect(WIP_SQL).toMatch(/job_wip_lines_estimate_nonnegative/);
+    expect(WIP_SQL).toMatch(/job_wip_lines_percent_range" CHECK \([^)]*between 0 and 1000000\)/);
+  });
+
+  it("gives every status and reason a label, and posts to the two accounts the construction profile seeds", () => {
+    for (const s of WIP_STATUSES) expect(WIP_STATUS_LABELS[s].length).toBeGreaterThan(0);
+    expect(WIP_REASON_LABELS[""]).toBe("");
+    expect(WIP_REASON_LABELS.no_value.length).toBeGreaterThan(0);
+    expect(WIP_REASON_LABELS.no_estimate.length).toBeGreaterThan(0);
+    expect(isWipStatus("posted")).toBe(true);
+    expect(isWipStatus("issued")).toBe(false);
+    const under = CONSTRUCTION_COA.accounts.find((a) => a.code === UNDERBILLING_ACCOUNT_CODE);
+    const over = CONSTRUCTION_COA.accounts.find((a) => a.code === OVERBILLING_ACCOUNT_CODE);
+    expect(under?.type).toBe("asset");
+    expect(over?.type).toBe("liability");
+  });
+
+  describe("the arithmetic", () => {
+    it("percent complete is cost over estimate, truncated, capped at 100, and null with nothing to measure", () => {
+      expect(percentCompletePpm(40_000_00, 80_000_00)).toBe(500_000);
+      expect(percentCompletePpm(1, 3)).toBe(333_333);
+      expect(percentCompletePpm(90_000_00, 80_000_00)).toBe(WIP_PPM);
+      expect(percentCompletePpm(0, 80_000_00)).toBe(0);
+      expect(percentCompletePpm(10_000_00, 0)).toBeNull();
+      // A finished job is done whatever its cost says.
+      expect(percentCompletePpm(10_000_00, 0, true)).toBe(WIP_PPM);
+      expect(percentCompletePpm(10_000_00, 80_000_00, true)).toBe(WIP_PPM);
+    });
+
+    it("earned is the contract at that percent, rounded half up, and survives a ten-figure contract", () => {
+      expect(earnedCents(100_000_00, 500_000)).toBe(50_000_00);
+      expect(earnedCents(100_000_00, 333_333)).toBe(33_333_30);
+      expect(earnedCents(1, 500_000)).toBe(1);
+      // $1,000,000,000 × 33.3333%: the product passes 2^53 and must not lose cents.
+      expect(earnedCents(1_000_000_000_00, 333_333)).toBe(333_333_000_00);
+      expect(earnedCents(100_000_00, null)).toBe(0);
+      expect(earnedCents(100_000_00, 0)).toBe(0);
+      expect(earnedCents(100_000_00, WIP_PPM)).toBe(100_000_00);
+    });
+
+    it("splits under and over, never nets them, and reads a job that cost more than planned as done", () => {
+      const under = wipFigures({
+        contractCents: 100_000_00,
+        estimatedCostCents: 80_000_00,
+        costToDateCents: 40_000_00,
+        billedCents: 30_000_00,
+      });
+      expect(under.percentCompletePpm).toBe(500_000);
+      expect(under.earnedCents).toBe(50_000_00);
+      expect(under.underBilledCents).toBe(20_000_00);
+      expect(under.overBilledCents).toBe(0);
+      expect(under.overUnderCents).toBe(20_000_00);
+      expect(under.grossProfitToDateCents).toBe(10_000_00);
+      expect(under.estimatedGrossProfitCents).toBe(20_000_00);
+      expect(under.costToCompleteCents).toBe(40_000_00);
+      expect(under.backlogCents).toBe(50_000_00);
+
+      const over = wipFigures({
+        contractCents: 100_000_00,
+        estimatedCostCents: 80_000_00,
+        costToDateCents: 16_000_00,
+        billedCents: 30_000_00,
+      });
+      expect(over.percentCompletePpm).toBe(200_000);
+      expect(over.earnedCents).toBe(20_000_00);
+      expect(over.underBilledCents).toBe(0);
+      expect(over.overBilledCents).toBe(10_000_00);
+
+      const blown = wipFigures({
+        contractCents: 100_000_00,
+        estimatedCostCents: 80_000_00,
+        costToDateCents: 95_000_00,
+        billedCents: 100_000_00,
+      });
+      expect(blown.percentCompletePpm).toBe(WIP_PPM);
+      expect(blown.earnedCents).toBe(100_000_00);
+      expect(blown.overUnderCents).toBe(0);
+      expect(blown.grossProfitToDateCents).toBe(5_000_00);
+      expect(blown.costToCompleteCents).toBe(0);
+
+      const unmeasured = wipFigures({
+        contractCents: 100_000_00,
+        estimatedCostCents: 0,
+        costToDateCents: 5_000_00,
+        billedCents: 0,
+      });
+      expect(unmeasured.percentCompletePpm).toBeNull();
+      expect(unmeasured.earnedCents).toBe(0);
+
+      const totals = wipTotals([under, over]);
+      expect(totals.underBilledCents).toBe(20_000_00);
+      expect(totals.overBilledCents).toBe(10_000_00);
+      expect(totals.earnedCents).toBe(70_000_00);
+      expect(totals.billedCents).toBe(60_000_00);
+      expect(totals.grossProfitToDateCents).toBe(14_000_00);
+    });
+
+    it("labels a percent to one decimal and says nothing for a job it cannot measure", () => {
+      expect(wipPercentLabel(500_000)).toBe("50");
+      expect(wipPercentLabel(333_333)).toBe("33.3");
+      expect(wipPercentLabel(WIP_PPM)).toBe("100");
+      expect(wipPercentLabel(0)).toBe("0");
+      expect(wipPercentLabel(null)).toBe("—");
     });
   });
 });

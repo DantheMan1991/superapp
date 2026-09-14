@@ -22,6 +22,9 @@ import {
 } from "../actions";
 import {
   costPlusTotals,
+  hoursStringToMinutes,
+  laborLineCents,
+  minutesToHoursString,
   percentStringToPpm,
   ppmToPercentString,
   type CostPlusTerms,
@@ -47,12 +50,26 @@ function money(c: number, symbol: string | null): string {
   return c < 0 ? `−${abs}` : abs;
 }
 
+/** The two ways a contract bills its books: cost plus a fee (ADR 0060), or time and materials (ADR 0062). */
+export type LedgerBillingMode = "cost_plus" | "time_and_materials";
+
 export interface EditableCostLine {
   costCodeId: string | null;
   label: string;
   ledgerToDateCents: number;
   previousCents: number;
   thisPeriodCents: number;
+}
+
+/** One person at one rate: Time's approved hours on the job, and what has been billed of them. */
+export interface EditableLaborLine {
+  workerId: string;
+  rateCents: number;
+  name: string;
+  minutesToDate: number;
+  previousMinutes: number;
+  previousCents: number;
+  thisPeriodMinutes: number;
 }
 
 export interface EditableCostPlusApplication {
@@ -66,6 +83,10 @@ export interface EditableCostPlusApplication {
   feeToDateCents: number;
   previousCertificatesCents: number;
   costs: EditableCostLine[];
+  /** Time and materials: the labour lines as last saved. */
+  labor?: EditableLaborLine[];
+  /** Time and materials: worked minutes on the job not yet on an approved sheet. */
+  laborAwaitingMinutes?: number;
 }
 
 /**
@@ -78,6 +99,13 @@ export interface EditableCostPlusApplication {
  * last application; typing less leaves a bill out, typing less than nothing
  * passes a credit on. Saving refreshes the ledger figures for the period end
  * and keeps whatever was typed.
+ *
+ * IN TIME-AND-MATERIALS MODE (ADR 0062) a labour table sits above the cost
+ * table: one row per person per rate, Time's approved hours on the job to
+ * date, what earlier applications billed of them, and the hours this period —
+ * typed in hours, stored in minutes, priced at the row's rate. The fee is the
+ * markup on cost only; the maximum is the not-to-exceed. A row with no rate
+ * cannot be billed, and the button says so before the server does.
  */
 export function CostPlusApplicationEditor({
   projectId,
@@ -85,6 +113,8 @@ export function CostPlusApplicationEditor({
   terms,
   app,
   symbol,
+  mode = "cost_plus",
+  timeEnabled = true,
   trigger,
 }: {
   projectId: string;
@@ -92,8 +122,12 @@ export function CostPlusApplicationEditor({
   terms: CostPlusTerms;
   app: EditableCostPlusApplication;
   symbol: string | null;
+  mode?: LedgerBillingMode;
+  /** Time and materials: whether the Time module is switched on, which is where the hours come from. */
+  timeEnabled?: boolean;
   trigger?: ReactNode;
 }) {
+  const tm = mode === "time_and_materials";
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -110,8 +144,30 @@ export function CostPlusApplicationEditor({
       thisPeriod: c.thisPeriodCents === 0 ? "" : (c.thisPeriodCents / 100).toFixed(2),
     })),
   );
+  const [laborRows, setLaborRows] = useState(() =>
+    (app.labor ?? []).map((l) => ({
+      ...l,
+      thisPeriodHours: l.thisPeriodMinutes === 0 ? "" : minutesToHoursString(l.thisPeriodMinutes),
+    })),
+  );
 
   const ppm = percentStringToPpm(retainage) ?? 0;
+  /** Each labour row priced live: hours typed → minutes → cents at the row's rate. */
+  const laborFigures = useMemo(
+    () =>
+      laborRows.map((l) => {
+        const minutes = hoursStringToMinutes(l.thisPeriodHours);
+        const thisPeriodMinutes = minutes ?? 0;
+        return {
+          ...l,
+          invalid: minutes === null,
+          thisPeriodMinutes,
+          thisPeriodCents: laborLineCents(thisPeriodMinutes, l.rateCents),
+        };
+      }),
+    [laborRows],
+  );
+  const laborToDateCents = laborFigures.reduce((sum, l) => sum + l.previousCents + l.thisPeriodCents, 0);
   const totals = useMemo(
     () =>
       costPlusTotals(
@@ -125,12 +181,18 @@ export function CostPlusApplicationEditor({
         toCents(feeToDate),
         ppm,
         app.previousCertificatesCents,
+        laborToDateCents,
       ),
-    [rows, terms, feeToDate, ppm, app.previousCertificatesCents],
+    [rows, terms, feeToDate, ppm, app.previousCertificatesCents, laborToDateCents],
   );
+  const unpriced = laborFigures.find((l) => l.rateCents === 0 && l.thisPeriodMinutes !== 0);
+  const invalidHours = laborFigures.some((l) => l.invalid);
 
   function setRow(i: number, thisPeriod: string) {
     setRows((prev) => prev.map((r, j) => (i === j ? { ...r, thisPeriod } : r)));
+  }
+  function setLaborRow(i: number, thisPeriodHours: string) {
+    setLaborRows((prev) => prev.map((r, j) => (i === j ? { ...r, thisPeriodHours } : r)));
   }
 
   const payload = () => ({
@@ -142,10 +204,28 @@ export function CostPlusApplicationEditor({
     notes: notes.trim(),
     costLines: rows.map((r) => ({ costCodeId: r.costCodeId, thisPeriodCents: r.thisPeriod })),
     feeToDateCents: terms.feeCents ? feeToDate : "",
+    ...(tm
+      ? {
+          laborLines: laborFigures.map((l) => ({
+            workerId: l.workerId,
+            rateCents: l.rateCents,
+            thisPeriodMinutes: l.thisPeriodMinutes,
+          })),
+        }
+      : {}),
     version: app.version,
   });
 
+  function checkHours(): boolean {
+    if (invalidHours) {
+      toast.error("Hours must be a number, like 7.5.");
+      return false;
+    }
+    return true;
+  }
+
   function save() {
+    if (!checkHours()) return;
     startTransition(async () => {
       const result = await updatePayApplicationAction(payload());
       if ("error" in result) {
@@ -159,6 +239,7 @@ export function CostPlusApplicationEditor({
   }
 
   function issue() {
+    if (!checkHours()) return;
     startTransition(async () => {
       // Save first, so the certificate is issued from what is on screen and
       // the version the issue carries is the one that save produced.
@@ -199,11 +280,14 @@ export function CostPlusApplicationEditor({
   }
 
   const feeLabel = [
-    terms.feePpm ? `${ppmToPercentString(terms.feePpm)}% of cost` : null,
+    terms.feePpm ? `${ppmToPercentString(terms.feePpm)}% ${tm ? "on" : "of"} cost` : null,
     terms.feeCents ? `fixed ${money(terms.feeCents, symbol)}` : null,
   ]
     .filter(Boolean)
     .join(" + ");
+  const capWord = tm ? "not-to-exceed" : "guaranteed maximum";
+  const sumWord = tm ? "Labour, cost and markup" : "Cost plus fee";
+  const awaiting = app.laborAwaitingMinutes ?? 0;
 
   return (
     <>
@@ -217,7 +301,9 @@ export function CostPlusApplicationEditor({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
-            <DialogTitle>Application {app.number} — draft, cost plus a fee</DialogTitle>
+            <DialogTitle>
+              Application {app.number} — draft, {tm ? "time and materials" : "cost plus a fee"}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-4">
@@ -253,7 +339,7 @@ export function CostPlusApplicationEditor({
                 </div>
               ) : (
                 <div className="space-y-1.5">
-                  <Label>Fee</Label>
+                  <Label>{tm ? "Markup" : "Fee"}</Label>
                   <p className="pt-2 text-sm text-muted-foreground">{feeLabel || "none"}</p>
                 </div>
               )}
@@ -267,6 +353,97 @@ export function CostPlusApplicationEditor({
                 />
               </div>
             </div>
+
+            {tm && (
+              /*
+                THE HOURS. One row per person per rate, from Time: approved
+                worked hours tagged with the job as of the period end. What is
+                typed is hours this period; what is stored is minutes; what is
+                billed is minutes at the row's rate, rounded once per row.
+              */
+              <div className="overflow-x-auto rounded-lg border border-border/60">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40 text-xs text-muted-foreground">
+                    <tr>
+                      <th className="px-2 py-1.5 text-left">Person</th>
+                      <th className="px-2 py-1.5 text-right">Rate</th>
+                      <th className="px-2 py-1.5 text-right">Approved to date</th>
+                      <th className="px-2 py-1.5 text-right">Billed before</th>
+                      <th className="px-2 py-1.5 text-right">This period (h)</th>
+                      <th className="px-2 py-1.5 text-right">This period</th>
+                      <th className="px-2 py-1.5 text-right">Billed to date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {laborFigures.length === 0 && (
+                      <tr>
+                        <td className="px-2 py-3 text-muted-foreground" colSpan={7}>
+                          {timeEnabled
+                            ? "No approved hours are tagged with this job through the period end. Hours come from Time: an entry tagged with the job, on an approved timesheet."
+                            : "Time is not switched on for this workspace, so no hours can reach an application. Switch it on under Modules."}
+                          {awaiting > 0 && ` ${minutesToHoursString(awaiting)} h on the job await approval.`}
+                        </td>
+                      </tr>
+                    )}
+                    {laborFigures.map((l, i) => {
+                      const unbilled = l.minutesToDate - l.previousMinutes - l.thisPeriodMinutes;
+                      return (
+                        <tr key={`${l.workerId}|${l.rateCents}`} className="border-t border-border/50">
+                          <td className="px-2 py-1">
+                            {l.name}
+                            {l.rateCents === 0 && (
+                              <span className="block text-xs text-destructive">
+                                No bill rate — see the note below
+                              </span>
+                            )}
+                            {unbilled !== 0 && (
+                              <span className="block text-xs text-muted-foreground">
+                                {unbilled > 0
+                                  ? `${minutesToHoursString(unbilled)} h left unbilled`
+                                  : `${minutesToHoursString(-unbilled)} h beyond the timesheets`}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-2 py-1 text-right tabular-nums">
+                            {l.rateCents === 0 ? "—" : `${money(l.rateCents, symbol)}/h`}
+                          </td>
+                          <td className="px-2 py-1 text-right tabular-nums">
+                            {minutesToHoursString(l.minutesToDate)} h
+                          </td>
+                          <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
+                            {minutesToHoursString(l.previousMinutes)} h
+                          </td>
+                          <td className="px-2 py-1">
+                            <Input
+                              aria-label={`Hours this period, ${l.name}`}
+                              value={l.thisPeriodHours}
+                              onChange={(e) => setLaborRow(i, e.target.value)}
+                              placeholder="0"
+                              inputMode="decimal"
+                              className={"h-8 w-24 text-right" + (l.invalid ? " border-destructive" : "")}
+                            />
+                          </td>
+                          <td className="px-2 py-1 text-right tabular-nums">
+                            {money(l.thisPeriodCents, symbol)}
+                          </td>
+                          <td className="px-2 py-1 text-right tabular-nums">
+                            {money(l.previousCents + l.thisPeriodCents, symbol)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {laborFigures.length > 0 && awaiting > 0 && (
+                      <tr className="border-t border-border/50">
+                        <td className="px-2 py-1.5 text-xs text-muted-foreground" colSpan={7}>
+                          {minutesToHoursString(awaiting)} h more on the job are on timesheets not yet
+                          approved, and are not on this application.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             <div className="overflow-x-auto rounded-lg border border-border/60">
               <table className="w-full text-sm">
@@ -283,7 +460,9 @@ export function CostPlusApplicationEditor({
                   {rows.length === 0 && (
                     <tr>
                       <td className="px-2 py-3 text-muted-foreground" colSpan={5}>
-                        The books carry no cost on this job as of the period end.
+                        {tm
+                          ? "The books carry no cost on this job as of the period end, wages aside."
+                          : "The books carry no cost on this job as of the period end."}{" "}
                         Save with a later date, or code a bill to the job first.
                       </td>
                     </tr>
@@ -336,10 +515,14 @@ export function CostPlusApplicationEditor({
             <dl className="ml-auto grid max-w-sm gap-1 text-sm">
               {(
                 [
-                  ["Cost to date", totals.costToDateCents],
-                  [`Fee to date${feeLabel ? ` (${feeLabel})` : ""}`, totals.feeToDateCents],
+                  ...(tm ? ([["Labour to date", totals.laborToDateCents]] as const) : []),
+                  [tm ? "Cost to date, wages aside" : "Cost to date", totals.costToDateCents],
                   [
-                    totals.capped ? "Cost plus fee, at the guaranteed maximum" : "Cost plus fee to date",
+                    `${tm ? "Markup" : "Fee"} to date${feeLabel ? ` (${feeLabel})` : ""}`,
+                    totals.feeToDateCents,
+                  ],
+                  [
+                    totals.capped ? `${sumWord}, at the ${capWord}` : `${sumWord} to date`,
                     totals.completedToDateCents,
                   ],
                   [`Retainage (${retainage || "0"}%)`, -totals.retainageCents],
@@ -360,7 +543,7 @@ export function CostPlusApplicationEditor({
               </div>
               {terms.gmaxCents !== null && (
                 <div className="flex justify-between gap-4 text-xs text-muted-foreground">
-                  <dt>Balance to the guaranteed maximum</dt>
+                  <dt>Balance to the {capWord}</dt>
                   <dd className="tabular-nums">{money(totals.balanceToFinishCents, symbol)}</dd>
                 </div>
               )}
@@ -385,11 +568,22 @@ export function CostPlusApplicationEditor({
               <Button variant="outline" onClick={save} disabled={pending}>
                 {pending ? "Saving…" : "Save draft"}
               </Button>
-              <Button onClick={issue} disabled={pending || totals.dueCents <= 0}>
+              <Button
+                onClick={issue}
+                disabled={pending || totals.dueCents <= 0 || unpriced !== undefined}
+                title={unpriced ? `${unpriced.name} has hours this period and no bill rate` : undefined}
+              >
                 {pending ? "Working…" : "Issue as invoice"}
               </Button>
             </div>
           </DialogFooter>
+          {unpriced && (
+            <p className="text-xs text-destructive">
+              {unpriced.name} has hours this period and no bill rate. Set a charged-out rate in
+              Time and save, or one rate for everybody on the contract — or type 0 hours to leave
+              them for a later application.
+            </p>
+          )}
         </DialogContent>
       </Dialog>
     </>

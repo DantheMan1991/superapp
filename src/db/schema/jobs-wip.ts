@@ -209,9 +209,12 @@ export const jobWipLines = pgTable(
     ),
     check(
       "job_wip_lines_reason_valid",
-      sql`${t.reason} in ('', 'no_value', 'no_estimate')`,
+      sql`${t.reason} in ('', 'no_value', 'no_estimate', 'no_rate')`,
     ),
-    check("job_wip_lines_method_valid", sql`${t.method} in ('cost_to_cost', 'cost_plus')`),
+    check(
+      "job_wip_lines_method_valid",
+      sql`${t.method} in ('cost_to_cost', 'cost_plus', 'time_and_materials')`,
+    ),
   ],
 );
 

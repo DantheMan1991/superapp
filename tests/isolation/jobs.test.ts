@@ -1219,6 +1219,97 @@ d("jobs tables (RLS)", () => {
   });
 
 
+  // ------------------------------------------------ time and materials (5d)
+
+  it("cannot read or change another tenant's LABOUR LINES; a line hangs off this tenant's application and names this tenant's worker, one per person per rate", async () => {
+    const workerA = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.timeWorkers)
+        .values({ tenantId: tenantA, partyId: clientA })
+        .returning({ id: schema.timeWorkers.id });
+      return rows[0].id;
+    });
+    const lineId = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobPayApplicationLabor)
+        .values({
+          tenantId: tenantA,
+          payApplicationId: payAppA,
+          workerId: workerA,
+          rateCents: 65_00,
+          minutesToDate: 600,
+          thisPeriodMinutes: 600,
+          thisPeriodCents: 650_00,
+        })
+        .returning();
+      return rows[0].id;
+    });
+    const seen = await asOtherTenant(async (tx) => ({
+      lines: await tx.select().from(schema.jobPayApplicationLabor).where(eq(schema.jobPayApplicationLabor.id, lineId)),
+      changed: await tx
+        .update(schema.jobPayApplicationLabor)
+        .set({ thisPeriodMinutes: 1 })
+        .where(eq(schema.jobPayApplicationLabor.id, lineId))
+        .returning(),
+    }));
+    expect(seen.lines).toEqual([]);
+    expect(seen.changed).toEqual([]);
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.jobPayApplicationLabor).where(eq(schema.jobPayApplicationLabor.id, lineId)),
+    );
+    expect(mine).toHaveLength(1);
+
+    // One line per person per rate; a second rate is a second line.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .insert(schema.jobPayApplicationLabor)
+          .values({ tenantId: tenantA, payApplicationId: payAppA, workerId: workerA, rateCents: 65_00 }),
+      ),
+    ).rejects.toThrow();
+    await withSystem((tx) =>
+      tx
+        .insert(schema.jobPayApplicationLabor)
+        .values({ tenantId: tenantA, payApplicationId: payAppA, workerId: workerA, rateCents: 70_00 }),
+    );
+    // Tenant B's worker under tenant A's line: unrepresentable.
+    const workerB = await withSystem(async (tx) => {
+      const party = (
+        await tx.select({ id: schema.parties.id }).from(schema.parties).where(eq(schema.parties.tenantId, tenantB)).limit(1)
+      )[0];
+      if (!party) return null;
+      const rows = await tx
+        .insert(schema.timeWorkers)
+        .values({ tenantId: tenantB, partyId: party.id })
+        .returning({ id: schema.timeWorkers.id });
+      return rows[0].id;
+    });
+    if (workerB) {
+      await expect(
+        withSystem((tx) =>
+          tx
+            .insert(schema.jobPayApplicationLabor)
+            .values({ tenantId: tenantA, payApplicationId: payAppA, workerId: workerB, rateCents: 1 }),
+        ),
+      ).rejects.toThrow();
+    }
+    // A person with billed hours is deactivated in Time, never deleted.
+    await expect(
+      withSystem((tx) => tx.delete(schema.timeWorkers).where(eq(schema.timeWorkers.id, workerA))),
+    ).rejects.toThrow();
+    // A negative rate is a typo, not a credit; so is a negative flat rate on the contract.
+    await expect(
+      withSystem((tx) =>
+        tx.update(schema.jobPayApplicationLabor).set({ rateCents: -1 }).where(eq(schema.jobPayApplicationLabor.id, lineId)),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.update(schema.jobContracts).set({ laborRateCents: -1 }).where(eq(schema.jobContracts.id, contractA)),
+      ),
+    ).rejects.toThrow();
+  });
+
   // ------------------------------------------ subcontractor applications (5c)
 
   it("cannot read or change another tenant's SUBCONTRACTOR APPLICATIONS or their lines; they hang off this tenant's commitment and its lines only", async () => {

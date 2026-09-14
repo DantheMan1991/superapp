@@ -315,6 +315,7 @@ export default async function CommitmentPage({
                         <TableCell className="text-right">
                           {isOwner && row.app.status === "draft" && (
                             <PayApplicationEditor
+                            key={`${row.app.id}:${row.app.version}`}
                               projectId={project.id}
                               contractId={commitment.id}
                               mode="commitment"

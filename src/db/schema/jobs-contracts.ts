@@ -142,6 +142,15 @@ export const jobContracts = pgTable(
     feeCents: bigint("fee_cents", { mode: "number" }),
     gmaxCents: bigint("gmax_cents", { mode: "number" }),
     /**
+     * TIME AND MATERIALS (slice 5d, ADR 0062): one bill rate for every hour on
+     * this contract, in cents per hour. Null means each person is billed at
+     * their own rate from Time's rate card, in force on the day of the hour.
+     * LOCKED once an application has issued — a flat rate carries no date, so
+     * changing it would re-rate hours a certificate already carries; a rate
+     * that changes over time is Time's dated rate card.
+     */
+    laborRateCents: integer("labor_rate_cents"),
+    /**
      * WHERE IT SITS IN THE LADDER. A project's contracts read in the order they
      * were agreed, not the order their dates fall in — a drawings contract
      * signed late is still the second step.
@@ -200,6 +209,10 @@ export const jobContracts = pgTable(
     ),
     check("job_contracts_fee_nonnegative", sql`${t.feeCents} is null or ${t.feeCents} >= 0`),
     check("job_contracts_gmax_nonnegative", sql`${t.gmaxCents} is null or ${t.gmaxCents} >= 0`),
+    check(
+      "job_contracts_labor_rate_nonnegative",
+      sql`${t.laborRateCents} is null or ${t.laborRateCents} >= 0`,
+    ),
   ],
 );
 

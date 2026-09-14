@@ -175,7 +175,16 @@ function toResult(err: unknown): { error: string } {
       case "ONE_COST_PLUS":
         return {
           error:
-            "Another cost-plus contract on this job is already billing its cost. A job's cost is billed once.",
+            "Another contract on this job is already billing its cost, cost plus or time and materials. A job's cost is billed once.",
+        };
+      case "NO_BILL_RATE":
+        return {
+          error: `Hours with no bill rate: ${err.message}. Set a charged-out rate in Time, or one rate for everybody on the contract.`,
+        };
+      case "RATE_LOCKED":
+        return {
+          error:
+            "The contract's labour rate is fixed once an application has issued. A rate that changes over time is set in Time, with its date.",
         };
       case "NOT_SUBCONTRACT":
         return {
@@ -461,6 +470,8 @@ const contractSchema = z.object({
   feePpm: feePercent,
   feeCents: moneyToCents,
   gmaxCents: moneyToCents,
+  /** Time and materials: one rate for everybody, per hour. Blank means each person's rate from Time. */
+  laborRateCents: moneyToCents,
   status: z.enum(CONTRACT_STATUSES).optional(),
   signedOn: optionalDate,
   notes: z.string().trim().max(2000).optional(),
@@ -1089,12 +1100,32 @@ export async function updatePayApplicationAction(input: unknown) {
       .max(500)
       .optional(),
     feeToDateCents: moneyToCents,
+    /** Time and materials: what each person's line bills this period, in whole minutes; may be negative. */
+    laborLines: z
+      .array(
+        z.object({
+          workerId: z.string().uuid(),
+          rateCents: z.number().int().nonnegative(),
+          thisPeriodMinutes: z.number().int(),
+        }),
+      )
+      .max(500)
+      .optional(),
     version: z.number().int().positive().optional(),
   });
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { error: "Check the form and try again." };
-  const { id, projectId, contractId, retainagePercent: retainagePpm, lines, costLines, feeToDateCents, ...patch } =
-    parsed.data;
+  const {
+    id,
+    projectId,
+    contractId,
+    retainagePercent: retainagePpm,
+    lines,
+    costLines,
+    feeToDateCents,
+    laborLines,
+    ...patch
+  } = parsed.data;
   try {
     const ctx = await gate();
     await withTenant(
@@ -1115,6 +1146,7 @@ export async function updatePayApplicationAction(input: unknown) {
             thisPeriodCents: l.thisPeriodCents ?? 0,
           })),
           feeToDateCents: feeToDateCents ?? undefined,
+          laborLines,
         }),
       { role: ctx.role },
     );

@@ -34,6 +34,7 @@ import {
   slugLabel,
   isCostPlusMethod,
   isFixedValueMethod,
+  isTimeAndMaterialsMethod,
 } from "../vocabulary";
 import { ppmToPercentString } from "../billing-math";
 
@@ -64,6 +65,10 @@ export interface EditableContract {
   feePpm?: number | null;
   feeCents?: number | null;
   gmaxCents?: number | null;
+  /** Time and materials: one rate for everybody, cents per hour; null = each person's rate from Time. */
+  laborRateCents?: number | null;
+  /** Time and materials: an application has issued, so the flat rate is fixed. */
+  rateLocked?: boolean;
   status: string;
   signedOn: string | null;
   notes: string;
@@ -115,11 +120,16 @@ export function ContractForm({
   const [gmax, setGmax] = useState(
     existing?.gmaxCents != null ? (existing.gmaxCents / 100).toFixed(2) : "",
   );
+  const [laborRate, setLaborRate] = useState(
+    existing?.laborRateCents != null ? (existing.laborRateCents / 100).toFixed(2) : "",
+  );
   const [status, setStatus] = useState<string>(existing?.status ?? "proposed");
   const [signedOn, setSignedOn] = useState(existing?.signedOn ?? "");
   const [notes, setNotes] = useState(existing?.notes ?? "");
 
   const ready = kind.trim() !== "";
+  const tm = isTimeAndMaterialsMethod(billingMethod);
+  const rateLocked = editing && existing.rateLocked === true;
   /**
    * **A SIGNED VALUE IS LOCKED**, here as well as in `updateContract`, so the
    * box says why before a save can be refused. Once the agreement counts, its
@@ -145,6 +155,7 @@ export function ContractForm({
         feePpm: feePercent,
         feeCents: feeFixed,
         gmaxCents: gmax,
+        laborRateCents: laborRate,
         status,
         signedOn,
         notes: notes.trim(),
@@ -320,25 +331,47 @@ export function ContractForm({
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                {isCostPlusMethod(billingMethod)
-                  ? "Billed as what the job has cost, plus the fee below."
-                  : isFixedValueMethod(billingMethod)
+                {tm
+                  ? "Billed as the hours Time has approved on the job, at each person's charged-out rate or one rate for everybody, plus the job's other cost with the markup below."
+                  : isCostPlusMethod(billingMethod)
+                    ? "Billed as what the job has cost, plus the fee below."
+                    : isFixedValueMethod(billingMethod)
                     ? "Billed against a schedule of values on the contract's page."
                     : "Recorded now; this method is not billed here yet."}
               </p>
             </div>
 
-            {isCostPlusMethod(billingMethod) && (
+            {(isCostPlusMethod(billingMethod) || tm) && (
               /*
-                THE TERMS OF A COST-PLUS AGREEMENT. A fee as a share of cost, a
-                fixed fee, or both; and a guaranteed maximum that cost plus fee
-                never passes. Shown only when the method asks for them, because
-                a box that means nothing on a fixed-price contract is a box
-                somebody fills in.
+                THE TERMS OF A COST-PLUS OR TIME-AND-MATERIALS AGREEMENT. A fee
+                (a markup, on T&M) as a share of cost, a fixed fee, or both; a
+                maximum (the not-to-exceed, on T&M) the sum never passes; and,
+                on T&M, one labour rate for everybody in place of each person's
+                rate from Time. Shown only when the method asks for them,
+                because a box that means nothing on a fixed-price contract is a
+                box somebody fills in.
               */
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className={"grid gap-3 " + (tm ? "sm:grid-cols-2" : "sm:grid-cols-3")}>
+                {tm && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="contract-labor-rate">Labour rate, everybody</Label>
+                    <Input
+                      id="contract-labor-rate"
+                      value={laborRate}
+                      onChange={(e) => setLaborRate(e.target.value)}
+                      placeholder="Each person's rate from Time"
+                      inputMode="decimal"
+                      disabled={rateLocked}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {rateLocked
+                        ? "Fixed once an application has issued."
+                        : "Per hour. Blank bills each person at their charged-out rate in Time."}
+                    </p>
+                  </div>
+                )}
                 <div className="space-y-1.5">
-                  <Label htmlFor="contract-fee-percent">Fee % of cost</Label>
+                  <Label htmlFor="contract-fee-percent">{tm ? "Markup % on cost" : "Fee % of cost"}</Label>
                   <Input
                     id="contract-fee-percent"
                     value={feePercent}
@@ -358,7 +391,7 @@ export function ContractForm({
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="contract-gmax">Guaranteed maximum</Label>
+                  <Label htmlFor="contract-gmax">{tm ? "Not to exceed" : "Guaranteed maximum"}</Label>
                   <Input
                     id="contract-gmax"
                     value={gmax}

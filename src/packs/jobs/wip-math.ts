@@ -52,6 +52,13 @@ export interface WipInputs {
    * on it, capped at the guaranteed maximum, and needs no estimate to say
    * so. Present only for a job on a single cost-plus contract.
    */
+  /**
+   * A time-and-materials job (ADR 0062): approved hours at their bill rates
+   * to date, and the labour cost among `costToDateCents` those hours already
+   * pay for — billed by rate, so never marked up. Read with `costPlus`, whose
+   * fee is the markup and whose maximum is the not-to-exceed.
+   */
+  labor?: { billableCents: number; costCents: number };
   costPlus?: {
     feePpm: number | null;
     /** The fixed fee, taken as fully earned once any cost exists — the billing side spreads it. */
@@ -114,10 +121,15 @@ export function wipFigures(input: WipInputs): WipFigures {
   let earned: number;
   if (input.costPlus) {
     const cost = Math.max(input.costToDateCents, 0);
+    // Hours are earned at their rates; the cost they already cover is not
+    // marked up on top of them.
+    const labor = input.labor ? Math.max(input.labor.billableCents, 0) : 0;
+    const marked = input.labor ? Math.max(cost - Math.max(input.labor.costCents, 0), 0) : cost;
     const uncapped =
-      cost +
-      costPlusFeeCents(cost, input.costPlus.feePpm) +
-      (cost > 0 ? (input.costPlus.feeCents ?? 0) : 0);
+      labor +
+      marked +
+      costPlusFeeCents(marked, input.costPlus.feePpm) +
+      (labor + marked > 0 ? (input.costPlus.feeCents ?? 0) : 0);
     earned =
       input.costPlus.gmaxCents !== null ? Math.min(uncapped, input.costPlus.gmaxCents) : uncapped;
   } else {

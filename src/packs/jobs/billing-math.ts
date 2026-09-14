@@ -136,6 +136,8 @@ export interface CostPlusTerms {
 }
 
 export interface CostPlusTotals extends PayApplicationTotals {
+  /** Time and materials: approved hours at their rates, billed to date. Zero on cost plus a fee. */
+  laborToDateCents: number;
   costToDateCents: number;
   /** The percentage fee on cost to date plus the fixed fee billed to date. */
   feeToDateCents: number;
@@ -154,6 +156,36 @@ export function costLineToDateCents(line: { previousCents: number; thisPeriodCen
   return line.previousCents + line.thisPeriodCents;
 }
 
+/**
+ * TIME AND MATERIALS (ADR 0062): what minutes at a rate come to — minutes ×
+ * cents per hour ÷ 60, rounded half up PER LINE, because each line is a line
+ * on the invoice and a client adds the invoice up. Negative minutes credit
+ * hours back at the same rate. A rate of nothing bills nothing.
+ */
+export function laborLineCents(minutes: number, rateCents: number): number {
+  if (!Number.isFinite(minutes) || !Number.isFinite(rateCents) || rateCents <= 0 || minutes === 0) return 0;
+  const sign = minutes < 0 ? -1 : 1;
+  return sign * Math.floor((Math.abs(minutes) * rateCents + 30) / 60);
+}
+
+/** "12.5" → 750 minutes; blank → 0; anything else → null. Hours are what a person types; minutes are what is stored. */
+export function hoursStringToMinutes(input: string): number | null {
+  const t = input.trim();
+  if (t === "") return 0;
+  const n = Number(t.replace(/,/g, ""));
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n * 60);
+}
+
+/** 750 → "12.5", 45 → "0.75", 0 → "0". At most two decimals; a third of an hour reads 0.33. */
+export function minutesToHoursString(minutes: number): string {
+  const h = minutes / 60;
+  if (Number.isInteger(h)) return String(h);
+  const fixed = h.toFixed(2);
+  // "0.50" reads 0.5; "0.75" stays. An integer never reaches here, so ".00" cannot.
+  return fixed.endsWith("0") ? fixed.slice(0, -1) : fixed;
+}
+
 export function costPlusTotals(
   lines: ReadonlyArray<CostLineFigures>,
   terms: CostPlusTerms,
@@ -161,11 +193,13 @@ export function costPlusTotals(
   fixedFeeToDateCents: number,
   retainagePpm: number,
   previousCertificatesCents: number,
+  /** Time and materials: the labour lines' billed-to-date sum. The markup is on COST only, never on hours. */
+  laborToDateCents = 0,
 ): CostPlusTotals {
   const costToDateCents = lines.reduce((sum, l) => sum + costLineToDateCents(l), 0);
   const fixedPart = terms.feeCents ? Math.max(0, Math.min(fixedFeeToDateCents, terms.feeCents)) : 0;
   const feeToDateCents = feeCents(costToDateCents, terms.feePpm) + fixedPart;
-  const uncapped = costToDateCents + feeToDateCents;
+  const uncapped = laborToDateCents + costToDateCents + feeToDateCents;
   const capped = terms.gmaxCents !== null && terms.gmaxCents >= 0 && uncapped > terms.gmaxCents;
   const completedToDateCents = capped ? (terms.gmaxCents as number) : uncapped;
   const retainage = retainageCents(completedToDateCents, retainagePpm);
@@ -178,6 +212,7 @@ export function costPlusTotals(
     previousCertificatesCents,
     dueCents: earnedLessRetainageCents - previousCertificatesCents,
     balanceToFinishCents: terms.gmaxCents === null ? 0 : terms.gmaxCents - completedToDateCents,
+    laborToDateCents,
     costToDateCents,
     feeToDateCents,
     capped,

@@ -218,6 +218,37 @@ farm-shaped remainder.
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-14 — `bill_rate_cents` gets its first reader (`claude/time-and-materials`, jobs slice 5d)
+
+No change to this module's rows or screens; a change to what reads them.
+The `jobs` pack's time-and-materials billing
+([ADR 0062](../decisions/0062-a-time-and-materials-application-bills-approved-hours-at-a-rate.md))
+bills a job's hours from here: a WORKED entry tagged with the job's `project`
+dimension member, on an APPROVED sheet, at the person's `bill_rate_cents` in
+force on the hour's day (`listRates`, newest first, the first row that had
+started by the day) — the gate `laborAccrualFor` uses, so the bill and the
+books carry the same hours. Three things that module reads from here that
+are worth knowing when this one changes:
+
+- **`time_rates` is owners-only, and the pack keeps it so.** Every verb that
+  prices hours there is owner-only; a draft's lines are stored priced, so a
+  member reading a contract page never touches the rate card. A member
+  reading the live WIP schedule sees a time-and-materials job's hours as
+  unrated, because RLS returns them no rates and nothing can tell that from
+  "no rate set".
+- **The accrual's accounts are how the pack tells wages from other cost.**
+  `src/lib/labor-posting.ts` now exports `LABOR_EXPENSE_SUBTYPE`
+  (`payroll_expense`, the general chart's subtype on `6450` and `6500`); a
+  time-and-materials application leaves accounts of that subtype out of the
+  cost it marks up, because the hours already bill them. If the accrual ever
+  posts to a different account, that constant is where the pack would
+  notice — and the open item that the accrual books every business's labour
+  to overhead rather than to a job-cost account is a question this module
+  owns.
+- **A rate dated back after an application issued re-rates hours in the
+  open**: the pack's lines are keyed by person and rate, so the hours leave
+  the old line as a credit and arrive on the new one.
+
 ### 2026-09-12 — "Clock me in" (`claude/tell-clock-in`)
 
 Voice slice 1. Slice 7 scoped the `tell-sources` filler and shipped without it, recording it as one of the two extension points left as "still promises" — this delivers that one, and `paste-targets` is still outstanding. The module's first appearance in `tell-sources`

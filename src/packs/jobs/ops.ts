@@ -1307,6 +1307,20 @@ export async function committedTotals(
  * mapping back to its own row, because `dimension_members.pack_entity_id` is
  * the only place the two are tied together.
  */
+async function accountIdsOfType(
+  tx: Tx,
+  tenantId: string,
+  accountType: "expense" | "income",
+): Promise<string[]> {
+  const accounts = await tx
+    .select({ id: schema.accounts.id })
+    .from(schema.accounts)
+    .where(
+      and(eq(schema.accounts.tenantId, tenantId), eq(schema.accounts.accountType, accountType)),
+    );
+  return accounts.map((a) => a.id);
+}
+
 async function netByProject(
   tx: Tx,
   tenantId: string,
@@ -1314,18 +1328,13 @@ async function netByProject(
   accountType: "expense" | "income",
   asOf?: string,
 ): Promise<Map<string, number>> {
-  const accounts = await tx
-    .select({ id: schema.accounts.id })
-    .from(schema.accounts)
-    .where(
-      and(eq(schema.accounts.tenantId, tenantId), eq(schema.accounts.accountType, accountType)),
-    );
-  if (accounts.length === 0) return new Map();
+  const accountIds = await accountIdsOfType(tx, tenantId, accountType);
+  if (accountIds.length === 0) return new Map();
 
   const rows = await getBalances(tx, tenantId, {
     scope,
     asOf,
-    accountIds: accounts.map((a) => a.id),
+    accountIds,
     groupByDimensionType: PROJECT_DIMENSION,
   });
 
@@ -1544,18 +1553,91 @@ export interface JobCostRow {
    */
   budgetCents: number;
   committedCents: number;
-  /** Budget minus committed. Negative means over. */
+  /** What the ledger says has been SPENT on this code, on this job only. */
+  actualCents: number;
+  /**
+   * What the code will cost at least: the greater of committed and actual.
+   * Ordered but not yet billed is still owed; billed beyond what was ordered
+   * has already happened. Neither alone is the number to hold against a
+   * budget, and their sum would count the same dollar twice.
+   */
+  projectedCents: number;
+  /** Budget minus projected. Negative means over. */
   varianceCents: number;
   /** A budget line exists, or an approved change put money on the code. */
   hasBudget: boolean;
 }
 
+export interface JobCostReport {
+  rows: JobCostRow[];
+  /** Spent on the job with no cost code on the line — coded in Accounting, not here. */
+  uncodedActualCents: number;
+  /** Every code plus the uncoded remainder: what the ledger says the job has cost. */
+  actualCents: number;
+}
+
+/**
+ * ACTUAL PER CODE, ON THIS JOB ONLY — the column that was deliberately absent
+ * from slice 3 through slice 6. `getBalances` grouped by ONE dimension type,
+ * so it could say what a job cost or what a code cost across every job and
+ * never both; a per-code figure here would have meant reading Accounting's
+ * tables or borrowing another job's spend. `withinMemberId` (Accounting,
+ * 2026-09-14) slices the ledger to the lines tagged with THIS job's cost
+ * object and groups those by cost code, so another job's spend on the same
+ * code cannot reach this column by construction. The null-member row is
+ * money on the job with no code on the line.
+ */
+async function actualByCode(
+  tx: Tx,
+  tenantId: string,
+  project: JobProject | null,
+): Promise<{ byCode: Map<string, number>; uncodedCents: number }> {
+  const empty = { byCode: new Map<string, number>(), uncodedCents: 0 };
+  if (!project) return empty;
+  const member = (await listDimensionMembers(tx, tenantId, PROJECT_DIMENSION)).find(
+    (m) => m.packEntityId === project.id,
+  );
+  if (!member) return empty;
+  const accountIds = await accountIdsOfType(tx, tenantId, "expense");
+  if (accountIds.length === 0) return empty;
+  const rows = await getBalances(tx, tenantId, {
+    scope: { kind: "one", entityId: project.entityId },
+    accountIds,
+    withinMemberId: member.id,
+    groupByDimensionType: COST_CODE_DIMENSION,
+  });
+  const codeOf = new Map(
+    (await listDimensionMembers(tx, tenantId, COST_CODE_DIMENSION)).map((m) => [m.id, m.packEntityId]),
+  );
+  const byCode = new Map<string, number>();
+  let uncodedCents = 0;
+  for (const row of rows) {
+    const codeId = row.memberId ? codeOf.get(row.memberId) : undefined;
+    if (!codeId) {
+      uncodedCents += row.netCents;
+      continue;
+    }
+    byCode.set(codeId, (byCode.get(codeId) ?? 0) + row.netCents);
+  }
+  return { byCode, uncodedCents };
+}
+
+/** The rows alone. `jobCostReport` for the uncoded remainder as well. */
 export async function jobCostRows(
   tx: Tx,
   tenantId: string,
   projectId: string,
 ): Promise<JobCostRow[]> {
-  const [budget, committed, changes, codes] = await Promise.all([
+  return (await jobCostReport(tx, tenantId, projectId)).rows;
+}
+
+export async function jobCostReport(
+  tx: Tx,
+  tenantId: string,
+  projectId: string,
+): Promise<JobCostReport> {
+  const project = await getProject(tx, tenantId, projectId);
+  const [budget, committed, changes, codes, actual] = await Promise.all([
     tx
       .select()
       .from(schema.jobBudgetLines)
@@ -1630,6 +1712,7 @@ export async function jobCostRows(
       .select()
       .from(schema.jobCostCodes)
       .where(eq(schema.jobCostCodes.tenantId, tenantId)),
+    actualByCode(tx, tenantId, project),
   ]);
 
   const codeById = new Map(codes.map((c) => [c.id, c]));
@@ -1649,6 +1732,9 @@ export async function jobCostRows(
     ...budgetByCode.keys(),
     ...committedByCode.keys(),
     ...changesByCode.keys(),
+    // Spent against a code nobody budgeted or ordered: as interesting as the
+    // ordered-but-unbudgeted row, and just as easy to leave out.
+    ...actual.byCode.keys(),
   ]);
   const rows: JobCostRow[] = [];
   for (const id of ids) {
@@ -1658,6 +1744,8 @@ export async function jobCostRows(
     const changesCents = changesByCode.get(id) ?? 0;
     const budgetCents = (originalCents ?? 0) + changesCents;
     const committedCents = committedByCode.get(id) ?? 0;
+    const actualCents = actual.byCode.get(id) ?? 0;
+    const projectedCents = Math.max(committedCents, actualCents);
     rows.push({
       costCodeId: id,
       code: code.code,
@@ -1667,13 +1755,21 @@ export async function jobCostRows(
       changesCents,
       budgetCents,
       committedCents,
-      varianceCents: budgetCents - committedCents,
+      actualCents,
+      projectedCents,
+      varianceCents: budgetCents - projectedCents,
       hasBudget: originalCents !== null || changesByCode.has(id),
     });
   }
   // The order the business arranged its chart in, not the order ids came back.
   rows.sort((a, b) => a.sortOrder - b.sortOrder || a.code.localeCompare(b.code));
-  return rows;
+  let coded = 0;
+  for (const cents of actual.byCode.values()) coded += cents;
+  return {
+    rows,
+    uncodedActualCents: actual.uncodedCents,
+    actualCents: coded + actual.uncodedCents,
+  };
 }
 
 // ------------------------------------------------------------- change orders

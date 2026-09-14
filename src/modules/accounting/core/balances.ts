@@ -93,6 +93,16 @@ export async function getBalances(
     to?: string;
     accountIds?: string[];
     groupByDimensionType?: string;
+    /**
+     * ONLY LINES TAGGED WITH THIS DIMENSION MEMBER. Combined with
+     * `groupByDimensionType` of a DIFFERENT type it answers the question one
+     * group-by cannot: one member's balances, split by another dimension —
+     * a job's cost by cost code, a property's income by unit. The result is
+     * a slice of the ledger, not a balanced set of books: a bill's payable
+     * leg carries no job, so it is not here, and nothing should expect the
+     * rows to sum to zero.
+     */
+    withinMemberId?: string;
     /** Defaults to accrual: the accrual path is byte-identical to before. */
     basis?: AccountingBasis;
   },
@@ -138,6 +148,17 @@ export async function getBalances(
     opts.from ? gte(je.entryDate, opts.from) : undefined,
     opts.to ? lte(je.entryDate, opts.to) : undefined,
     opts.accountIds?.length ? inArray(jl.accountId, opts.accountIds) : undefined,
+    // A correlated EXISTS rather than a join, so a line tagged with the member
+    // appears once whatever else it is tagged with, and the optional group-by
+    // join below stays the only thing that can widen a row.
+    opts.withinMemberId
+      ? sql`exists (
+          select 1 from ${ld} as within_member
+           where within_member.tenant_id = ${jl.tenantId}
+             and within_member.journal_line_id = ${jl.id}
+             and within_member.member_id = ${opts.withinMemberId}
+        )`
+      : undefined,
     // Cash basis drops the accrual recognition entirely; cash-basis.ts puts
     // the income and expense back on the dates the money actually moved.
     cash ? notInArray(je.source, ["invoice", "bill"] as const) : undefined,
@@ -211,6 +232,7 @@ export async function getBalances(
       to: opts.to,
       accountIds: opts.accountIds,
       groupByDimensionType: opts.groupByDimensionType,
+      withinMemberId: opts.withinMemberId,
       substitutedLineAccounts: lens.substitutedLineAccounts,
     }),
   );

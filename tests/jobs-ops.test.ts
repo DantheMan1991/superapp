@@ -21,6 +21,8 @@ import {
   getDefaultCostCodeSet,
   listContracts,
   projectValues,
+  actualByProject,
+  jobCostReport,
   jobCostRows,
   listChangeOrders,
   listCommitments,
@@ -2257,5 +2259,100 @@ d("jobs ops", () => {
       });
     expect(await balance("accrual")).toBe(20_000_00);
     expect(await balance("cash")).toBe(0);
+  });
+
+  // ------------------------------------------------------- per-code actual
+
+  it("THE SPENT COLUMN: actual per code on THIS job only, the uncoded remainder said, and Left against the greater of ordered and spent", async () => {
+    const entity = await newCompany("Per-code Co");
+    const set = await run((tx) => createCostCodeSet(tx, ctx, { name: "Per-code codes" }));
+    const [conc, carp, paint] = await run((tx) =>
+      Promise.all([
+        createCostCode(tx, ctx, { setId: set.id, code: "PC-03", name: "Concrete", sortOrder: 10 }),
+        createCostCode(tx, ctx, { setId: set.id, code: "PC-06", name: "Carpentry", sortOrder: 20 }),
+        createCostCode(tx, ctx, { setId: set.id, code: "PC-09", name: "Painting", sortOrder: 30 }),
+      ]),
+    );
+    const { project } = await run((tx) => wipJob(tx, entity, "OPS-PC1", { contractCents: 500_000_00 }));
+    const { project: other } = await run((tx) => wipJob(tx, entity, "OPS-PC2", { contractCents: 500_000_00 }));
+    const party = await run((tx) => seedVendor(tx, "Per-code Supply"));
+    await run(async (tx) => {
+      await setBudgetLines(tx, ctx, project.id, [
+        { costCodeId: conc.id, originalCents: 40_000_00 },
+        { costCodeId: carp.id, originalCents: 60_000_00 },
+      ]);
+      await createCommitment(tx, ctx, {
+        projectId: project.id,
+        partyId: party,
+        number: "PO-PC-1",
+        status: "issued",
+        lines: [
+          { costCodeId: conc.id, amountCents: 35_000_00 },
+          { costCodeId: carp.id, amountCents: 72_000_00 },
+        ],
+      });
+    });
+    const codeMember = async (tx: Tx, codeId: string) => {
+      const rows = await tx
+        .select({ id: schema.dimensionMembers.id })
+        .from(schema.dimensionMembers)
+        .where(
+          and(
+            eq(schema.dimensionMembers.tenantId, tenantId),
+            eq(schema.dimensionMembers.dimensionType, COST_CODE_DIMENSION),
+            eq(schema.dimensionMembers.packEntityId, codeId),
+          ),
+        );
+      return rows[0].id;
+    };
+    // Spend, tagged with the job AND a code — and some with the job alone.
+    await run(async (tx) => {
+      const [job] = await memberFor(tx, project.id);
+      const [otherJob] = await memberFor(tx, other.id);
+      const expense = await accountByCodeId(tx, "5200");
+      const ap = await accountByCodeId(tx, "2000");
+      const line = (cents: number, dims: string[]) => ({
+        accountId: expense,
+        amountCents: cents,
+        dimensionMemberIds: dims,
+      });
+      await postEntry(tx, ctx, {
+        entityId: entity,
+        status: "posted",
+        entryDate: "2026-09-15",
+        memo: "bills coded to the job",
+        lines: [
+          line(12_000_00, [job.id, await codeMember(tx, conc.id)]),
+          // Billed BEYOND what was ordered on carpentry.
+          line(80_000_00, [job.id, await codeMember(tx, carp.id)]),
+          // Spent on a code nobody budgeted or ordered.
+          line(1_500_00, [job.id, await codeMember(tx, paint.id)]),
+          // On the job, no code.
+          line(3_000_00, [job.id]),
+          // The OTHER job's concrete — must never reach this report.
+          line(999_000_00, [otherJob.id, await codeMember(tx, conc.id)]),
+          { accountId: ap, amountCents: -(12_000_00 + 80_000_00 + 1_500_00 + 3_000_00 + 999_000_00) },
+        ],
+      });
+    });
+
+    const report = await run((tx) => jobCostReport(tx, tenantId, project.id));
+    expect(report.rows.map((r) => r.code)).toEqual(["PC-03", "PC-06", "PC-09"]);
+    const [c, k, p] = report.rows;
+    // Concrete: ordered 35,000 is the larger, so Left is measured against it.
+    expect(c).toMatchObject({ actualCents: 12_000_00, committedCents: 35_000_00, projectedCents: 35_000_00, varianceCents: 5_000_00 });
+    // Carpentry: spent 80,000 beyond the 72,000 ordered — projected is the spend, and the code is 20,000 over.
+    expect(k).toMatchObject({ actualCents: 80_000_00, projectedCents: 80_000_00, varianceCents: -20_000_00 });
+    // Painting: spent against, never budgeted or ordered — a row, flagged.
+    expect(p).toMatchObject({ actualCents: 1_500_00, committedCents: 0, hasBudget: false });
+    // The uncoded remainder is said, and the total is what the ledger says the job cost.
+    expect(report.uncodedActualCents).toBe(3_000_00);
+    expect(report.actualCents).toBe(96_500_00);
+    // The other job's 999,000 on the same code is nowhere in this report.
+    expect(report.rows.some((r) => r.actualCents >= 999_000_00)).toBe(false);
+    // ...and the whole-job figure the page shows agrees.
+    const byProject = await run((tx) => actualByProject(tx, tenantId, { kind: "one", entityId: entity }));
+    expect(byProject.get(project.id)).toBe(96_500_00);
+    expect(byProject.get(other.id)).toBe(999_000_00);
   });
 });

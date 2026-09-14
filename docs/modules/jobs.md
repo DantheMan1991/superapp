@@ -13,6 +13,59 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-14 — The column that was deliberately absent (`claude/spent-per-code`)
+
+**Actual cost per code, on this job only.** The job cost report's `Spent`
+column, missing since slice 3 and named as an open item through slice 6
+because `getBalances` grouped by one dimension type — a job's cost, or a
+code's cost across every job, never both — and faking it would have put
+another job's spend in this job's column. Accounting's `getBalances` now takes
+`withinMemberId` (accounting.md, same day): the ledger sliced to the lines
+tagged with THIS job's cost object, then grouped by cost code. Another job's
+spend on the same code cannot reach the column by construction, which the ops
+test proves with a 999,000 line on the other job.
+
+**LEFT IS MEASURED AGAINST THE GREATER OF ORDERED AND SPENT.** Ordered but not
+yet billed is still owed; billed beyond what was ordered has already
+happened. Neither alone is the number to hold a budget against, and their
+sum would count the same dollar twice — a subcontract's bill IS its
+commitment arriving. `JobCostRow.projectedCents` is that maximum; `variance`
+is budget minus it. Every existing variance is unchanged where nothing has
+been spent, which is why the slice-3 test still passes untouched.
+
+**THE UNCODED REMAINDER IS SAID, NOT HIDDEN.** A line tagged with the job
+and no code is real cost that no row can carry; `jobCostReport` returns it
+as `uncodedActualCents` and the page says how much, where it is (the job's
+total), and where to fix it (the bill in Accounting). A code spent against
+but never budgeted or ordered joins the report as a `Not budgeted` row, the
+same treatment the ordered-but-unbudgeted row has had since slice 3.
+`jobCostRows` stays as the rows alone.
+
+Accrual figures. A job's cost is what was incurred; the cash lens is for
+statements, not for holding a trade to its budget.
+
+Tests: one more ops (three codes, one spent beyond its order, one spent
+against with no budget, an uncoded line, and the other job's spend on the
+same code; the whole-job figure agreeing), and the accounting suites above.
+The guide's *What the report does not show yet* is gone.
+
+**DRIVEN ON THE DEV BRANCH, on 24-108.** Before: *Budget $45,000.00 against
+$62,000.00 ordered and $0.00 spent*, the one row reading **$62,000.00 ·
+$0.00 · −$17,000.00**, and the note under the table: *$325,000.00 has been
+spent on this job with no cost code on the line; it is in the job's total
+below and in no row here* — the slice-6 drive's cost, which was tagged with
+the job alone. Then a journal entry through Accounting: *Dr 5100
+Subcontractor Expense $70,000.00* tagged **03 30 00 · Cast-in-place concrete,
+24-108 · Oak Row residence — phase 2** (both tags on one line, from the same
+popover) / *Cr 2000*, dated 2026-09-22 → the panel read *Budget $45,000.00
+against $62,000.00 ordered and $70,000.00 spent*, the row **$62,000.00 ·
+$70,000.00 · −$25,000.00** in red — Left now measured against the spend,
+because it passed the order — the uncoded note unchanged at $325,000.00, and
+the job's *Actual cost* tile **$395,000.00**, which is the row plus the
+uncoded remainder. Not driven: a cash-basis tenant (the farm is accrual), and
+a bill through the Purchases screen rather than the journal — the tags are
+the same rows either way.
+
 ### 2026-09-14 — Slice 6: what the work is worth, not what was billed for it (`claude/work-in-progress`, ADR 0059)
 
 `job_wip_periods` and `job_wip_lines`, one page (`/dashboard/m/jobs/wip`),
@@ -1041,6 +1094,12 @@ ordering only bites when two new tables reference each other in one file.
   ledger's own billings-by-job read needs no filter on the pack's source.
   Periods post forward only and unpost latest-first. Under the cash basis the
   entries are dropped whole by the pack's lens.
+- **Left is the budget less the GREATER of ordered and spent**, never the
+  sum: a subcontract's bill is its commitment arriving, and adding the two
+  would count one dollar twice. `projectedCents` on the row is that maximum.
+- **Actual per code comes from the ledger sliced to the job, never from a
+  second group-by over every job.** `withinMemberId` on `getBalances`; the
+  pack still reads no Accounting table.
 - **A job that cannot be measured stops the whole period.** No budget and no
   estimate, or billings with no fixed value, refuses by job number rather than
   posting the rest. A schedule missing a job is what a bank would not accept.
@@ -1064,13 +1123,13 @@ ordering only bites when two new tables reference each other in one file.
 - ~~**Nothing revises a budget or a contract value.**~~ — **closed 2026-09-14.**
   An approved change order revises both, and a signed value can no longer be
   edited in place.
-- **ACTUAL COST IS PER PROJECT, NOT PER CODE, and the blocker is now named.**
-  `getBalances` groups by ONE dimension type, so it can answer *what has this
-  project cost* or *what has this code cost across every project* — never both.
-  The job cost report therefore stops at "ordered" per code and says so on the
-  page. Closing it needs a second group-by in `getBalances`, which is
-  **accounting's call**: this pack must not read its tables, and faking it would
-  report another job's spend in this job's column.
+- ~~**ACTUAL COST IS PER PROJECT, NOT PER CODE.**~~ — **closed 2026-09-14.**
+  `getBalances` took `withinMemberId` and the report has its `Spent` column;
+  the uncoded remainder is said on the page. What is still open from it: a
+  **bill line carrying a job and no code** is the common case on day one, and
+  nothing yet nudges the person coding the bill toward the code — the setup
+  source that says *"$3,000 on 24-108 has no cost code"* is the honest next
+  step, and it is Accounting's screen it would speak from.
 - ~~**Nothing bills.**~~ — **closed 2026-09-14** for fixed-price work: a
   schedule of values and pay applications, issued as invoices. Still open
   from it: **cost-plus, unit price and T&M** are recorded on the contract and

@@ -7,6 +7,7 @@ import {
   getProfitAndLoss,
   getTrialBalance,
   type LedgerCtx,
+  upsertDimensionMember,
 } from "../src/modules/accounting/core";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import { createBankAccount } from "../src/modules/accounting/banking/accounts";
@@ -271,5 +272,86 @@ d("cash basis (DB)", () => {
     const key = (r: { accountId: string; netCents: number }) =>
       `${r.accountId}:${r.netCents}`;
     expect(withoutBasis.map(key).sort()).toEqual(explicit.map(key).sort());
+  });
+
+  it("WITHIN ONE MEMBER, cash recognises only the tagged line's share, and never the payable leg", async () => {
+    /**
+     * A bill with one line tagged with a job and one not, paid in two halves.
+     * Sliced to the job, the accrual side sees the tagged line in January; the
+     * cash side sees the tagged line's share of each payment as the money
+     * moves, and the whole of it across the year — with no AP offset, because
+     * the offset carries no job and a slice is not a balanced set of books.
+     */
+    const job = await withTenant(tenantId, (tx) =>
+      upsertDimensionMember(tx, owner, {
+        dimensionType: "site",
+        packEntityId: crypto.randomUUID(),
+        displayName: "Job for the slice",
+      }),
+    );
+    const vendor = await withTenant(tenantId, (tx) =>
+      createVendor(tx, owner, { name: "Sliced Supply" }),
+    );
+    const draft = await withTenant(tenantId, (tx) =>
+      createBillDraft(tx, owner, {
+        vendorId: vendor.id,
+        billDate: "2026-01-25",
+        lines: [
+          {
+            description: "On the job",
+            amountCents: 50_000,
+            accountId: repairsId,
+            dimensionMemberIds: [job.id],
+          },
+          { description: "Not on it", amountCents: 30_000, accountId: repairsId },
+        ],
+      }),
+    );
+    let bill = await withTenant(tenantId, (tx) =>
+      approveBill(tx, owner, { billId: draft.id, expectedVersion: draft.version }),
+    );
+    const first = await withTenant(tenantId, (tx) =>
+      recordBillPayment(tx, owner, {
+        billId: bill.id,
+        expectedVersion: bill.version,
+        paymentDate: "2026-02-25",
+        amountCents: 40_000,
+        paidFromAccountId: bankLedgerId,
+        method: "check",
+      }),
+    );
+    bill = first.bill;
+    await withTenant(tenantId, (tx) =>
+      recordBillPayment(tx, owner, {
+        billId: bill.id,
+        expectedVersion: bill.version,
+        paymentDate: "2026-03-25",
+        amountCents: 40_000,
+        paidFromAccountId: bankLedgerId,
+        method: "check",
+      }),
+    );
+    const within = (window: { from?: string; to?: string }, basis: "accrual" | "cash") =>
+      withTenant(tenantId, (tx) =>
+        getBalances(tx, tenantId, { scope: COMBINED, ...window, basis, withinMemberId: job.id }),
+      );
+    const sum = (rows: Array<{ netCents: number }>) => rows.reduce((s, r) => s + r.netCents, 0);
+    const year = { from: "2026-01-01", to: "2026-12-31" };
+
+    // Accrual: the tagged line, in the month of the bill, and nothing else.
+    const accrualJan = await within(JAN, "accrual");
+    expect(sum(accrualJan)).toBe(50_000);
+    expect(accrualJan.every((r) => r.accountId === repairsId)).toBe(true);
+    // Cash: nothing in January; the tagged share as the money moves; all of it over the year.
+    expect(sum(await within(JAN, "cash"))).toBe(0);
+    const feb = sum(await within(FEB, "cash"));
+    const mar = sum(await within(MAR, "cash"));
+    expect(feb).toBeGreaterThan(0);
+    expect(feb + mar).toBe(50_000);
+    const cashYear = await within(year, "cash");
+    expect(sum(cashYear)).toBe(50_000);
+    // No payable leg in a slice, on either basis.
+    expect(cashYear.some((r) => r.accountId === apId)).toBe(false);
+    expect((await within(year, "accrual")).some((r) => r.accountId === apId)).toBe(false);
   });
 });

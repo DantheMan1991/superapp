@@ -25,6 +25,13 @@ import {
   type CrewInput,
 } from "./field-ops";
 import { postWip, saveWipEstimate, unpostWip } from "./wip-ops";
+import {
+  approveSubApplication,
+  createSubApplication,
+  deleteSubApplication,
+  updateSubApplication,
+  voidSubApplication,
+} from "./sub-billing-ops";
 import { LedgerError, friendlyMessage } from "@/modules/accounting/core";
 import {
   createChangeOrder,
@@ -169,6 +176,10 @@ function toResult(err: unknown): { error: string } {
         return {
           error:
             "Another cost-plus contract on this job is already billing its cost. A job's cost is billed once.",
+        };
+      case "NOT_SUBCONTRACT":
+        return {
+          error: "A purchase order is billed with an ordinary bill in Accounting. Applications are for subcontracts.",
         };
     }
   }
@@ -1585,6 +1596,191 @@ export async function unpostWipAction(input: {
     );
     revalidatePath(`${BASE}/wip`);
     revalidatePath("/dashboard/m/accounting");
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+
+// ------------------------------------------------- subcontractor applications
+
+/**
+ * The payable-side mirror of the pay-application actions (ADR 0061): the
+ * same gate, the same shape, a bill at the end instead of an invoice.
+ */
+const subApplicationSchema = z.object({
+  projectId: z.string().uuid(),
+  commitmentId: z.string().uuid(),
+  periodTo: isoDate,
+  retainagePercent,
+  reference: z.string().trim().max(100).optional(),
+  notes: z.string().trim().max(2000).optional(),
+});
+
+export async function createSubApplicationAction(input: unknown) {
+  const parsed = subApplicationSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { projectId, retainagePercent: retainagePpm, ...fields } = parsed.data;
+  try {
+    const ctx = await gate();
+    const app = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const created = await createSubApplication(tx, ctx, { ...fields, retainagePpm });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "sub_application.created",
+          targetType: "sub_application",
+          targetId: created.id,
+          meta: { commitmentId: created.commitmentId, number: created.number },
+        });
+        return created;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}/commitments/${fields.commitmentId}`);
+    revalidatePath(`${BASE}/${projectId}`);
+    return { ok: true as const, subApplicationId: app.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const subApplicationLineSchema = z.object({
+  commitmentLineId: z.string().uuid(),
+  thisPeriodCents: moneyToCents,
+  storedCents: moneyToCents,
+});
+
+export async function updateSubApplicationAction(input: unknown) {
+  const schema = z.object({
+    id: z.string().uuid(),
+    projectId: z.string().uuid(),
+    commitmentId: z.string().uuid(),
+    periodTo: isoDate.optional(),
+    retainagePercent,
+    reference: z.string().trim().max(100).optional(),
+    notes: z.string().trim().max(2000).optional(),
+    lines: z.array(subApplicationLineSchema).max(500).optional(),
+    version: z.number().int().positive().optional(),
+  });
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { id, projectId, commitmentId, retainagePercent: retainagePpm, lines, ...patch } = parsed.data;
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      (tx) =>
+        updateSubApplication(tx, ctx, id, {
+          ...patch,
+          retainagePpm,
+          lines: lines?.map((l) => ({
+            commitmentLineId: l.commitmentLineId,
+            thisPeriodCents: l.thisPeriodCents ?? 0,
+            storedCents: l.storedCents ?? 0,
+          })),
+        }),
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}/commitments/${commitmentId}`);
+    revalidatePath(`${BASE}/${projectId}`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function approveSubApplicationAction(input: unknown) {
+  const parsed = z
+    .object({
+      id: z.string().uuid(),
+      projectId: z.string().uuid(),
+      commitmentId: z.string().uuid(),
+      billDate: isoDate,
+      version: z.number().int().positive().optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { id, projectId, commitmentId, ...rest } = parsed.data;
+  try {
+    const ctx = await gate();
+    const result = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const approved = await approveSubApplication(tx, ctx, id, rest);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "sub_application.approved",
+          targetType: "sub_application",
+          targetId: approved.app.id,
+          // Identifiers only: which subcontract, which bill. Never the amount.
+          meta: { commitmentId, number: approved.app.number, billId: approved.billId },
+        });
+        return approved;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}/commitments/${commitmentId}`);
+    revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath("/dashboard/m/accounting/purchases/bills");
+    return { ok: true as const, billId: result.billId };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function voidSubApplicationAction(input: unknown) {
+  const parsed = z
+    .object({
+      id: z.string().uuid(),
+      projectId: z.string().uuid(),
+      commitmentId: z.string().uuid(),
+      version: z.number().int().positive().optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { id, projectId, commitmentId, version } = parsed.data;
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const voided = await voidSubApplication(tx, ctx, id, { version });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "sub_application.voided",
+          targetType: "sub_application",
+          targetId: voided.id,
+          meta: { commitmentId, number: voided.number },
+        });
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}/commitments/${commitmentId}`);
+    revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath("/dashboard/m/accounting/purchases/bills");
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function deleteSubApplicationAction(input: unknown) {
+  const parsed = z
+    .object({ id: z.string().uuid(), projectId: z.string().uuid(), commitmentId: z.string().uuid() })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { id, projectId, commitmentId } = parsed.data;
+  try {
+    const ctx = await gate();
+    await withTenant(ctx.tenantId, (tx) => deleteSubApplication(tx, ctx, id), { role: ctx.role });
+    revalidatePath(`${BASE}/${projectId}/commitments/${commitmentId}`);
+    revalidatePath(`${BASE}/${projectId}`);
     return { ok: true as const };
   } catch (err) {
     return toResult(err);

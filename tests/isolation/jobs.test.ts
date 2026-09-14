@@ -1217,4 +1217,77 @@ d("jobs tables (RLS)", () => {
       ),
     ).rejects.toThrow();
   });
+
+
+  // ------------------------------------------ subcontractor applications (5c)
+
+  it("cannot read or change another tenant's SUBCONTRACTOR APPLICATIONS or their lines; they hang off this tenant's commitment and its lines only", async () => {
+    const [lineA] = await withSystem((tx) =>
+      tx.select().from(schema.jobCommitmentLines).where(eq(schema.jobCommitmentLines.commitmentId, commitmentA)),
+    );
+    const appId = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobSubApplications)
+        .values({ tenantId: tenantA, commitmentId: commitmentA, number: 1, periodTo: "2026-09-30", retainagePpm: 100_000 })
+        .returning();
+      await tx.insert(schema.jobSubApplicationLines).values({
+        tenantId: tenantA,
+        subApplicationId: rows[0].id,
+        commitmentLineId: lineA.id,
+        scheduledCents: 4_200_00,
+        thisPeriodCents: 1_000_00,
+      });
+      return rows[0].id;
+    });
+    const seen = await asOtherTenant(async (tx) => ({
+      apps: await tx.select().from(schema.jobSubApplications).where(eq(schema.jobSubApplications.id, appId)),
+      lines: await tx.select().from(schema.jobSubApplicationLines).where(eq(schema.jobSubApplicationLines.subApplicationId, appId)),
+      changed: await tx
+        .update(schema.jobSubApplications)
+        .set({ retainagePpm: 0 })
+        .where(eq(schema.jobSubApplications.id, appId))
+        .returning(),
+    }));
+    expect(seen.apps).toEqual([]);
+    expect(seen.lines).toEqual([]);
+    expect(seen.changed).toEqual([]);
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.jobSubApplications).where(eq(schema.jobSubApplications.id, appId)),
+    );
+    expect(mine).toHaveLength(1);
+
+    // Tenant B's commitment under tenant A's row: unrepresentable.
+    const otherCommitment = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobCommitments)
+        .values({ tenantId: tenantB, projectId: projectB, partyId: (await tx.select({ id: schema.parties.id }).from(schema.parties).where(eq(schema.parties.tenantId, tenantB)).limit(1))[0]?.id ?? clientA, number: "SC-B-1" })
+        .returning();
+      return rows[0].id;
+    }).catch(() => null);
+    if (otherCommitment) {
+      await expect(
+        withSystem((tx) =>
+          tx.insert(schema.jobSubApplications).values({ tenantId: tenantA, commitmentId: otherCommitment, number: 9, periodTo: "2026-09-30" }),
+        ),
+      ).rejects.toThrow();
+    }
+    // Numbered once per subcontract; billed means a bill, both ways; a billed line holds its subcontract line.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobSubApplications).values({ tenantId: tenantA, commitmentId: commitmentA, number: 1, periodTo: "2026-10-31" }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) => tx.update(schema.jobSubApplications).set({ status: "billed" }).where(eq(schema.jobSubApplications.id, appId))),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) => tx.delete(schema.jobCommitmentLines).where(eq(schema.jobCommitmentLines.id, lineA.id))),
+    ).rejects.toThrow();
+    // The lines go with the application.
+    await withSystem((tx) => tx.delete(schema.jobSubApplications).where(eq(schema.jobSubApplications.id, appId)));
+    const left = await withSystem((tx) =>
+      tx.select().from(schema.jobSubApplicationLines).where(eq(schema.jobSubApplicationLines.subApplicationId, appId)),
+    );
+    expect(left).toEqual([]);
+  });
 });

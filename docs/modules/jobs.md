@@ -66,6 +66,95 @@ uncoded remainder. Not driven: a cash-basis tenant (the farm is accrual), and
 a bill through the Purchases screen rather than the journal — the tags are
 the same rows either way.
 
+### 2026-09-14 — Slice 5c: retainage held from subcontractors (`claude/retainage-from-subs`, ADR 0061)
+
+`job_sub_applications` and `job_sub_application_lines`, a page per
+commitment (`/dashboard/m/jobs/[id]/commitments/[commitmentId]`), a
+`Billed` column on the project's Ordered table, and the first posting to
+`2120 Retainage Payable` — the account the construction profile seeded on
+its first day and nothing had touched through six slices.
+
+**THE OTHER SIDE OF THE TABLE, WITH THE SAME CERTIFICATE.** A subcontractor
+bills the business the way the business bills its client: an application
+against the subcontract saying how much of each line is complete to date,
+less the retainage the business holds back, less what earlier applications
+certified. So `sub-billing-ops.ts` is slice 5's billing section with the
+parent swapped — `payApplicationTotals` unchanged, one draft per subcontract,
+numbered after the last, frozen at approval, void only the latest — and
+**the subcontract's lines are the schedule of values**: written when the
+order was placed, no second setup. The pay-application editor took a `mode`
+rather than a twin; the certificate, the rows and the totals are identical
+and only the verbs and three words differ.
+
+**AN APPROVED APPLICATION IS AN ORDINARY BILL** (ADR 0061):
+`createBillDraft` → `approveBill`, a line per subcontract line for the work
+this period to `5100 Subcontractor Expense` — tagged with the JOB AND THE
+LINE'S COST CODE, which is what puts it in the job cost report's `Spent`
+column and on the next cost-plus application — and a NEGATIVE line to `2120`
+for what is held back. Dr expense (gross) · Cr Retainage Payable (held) · Cr
+AP (net). The subcontractor's own reference becomes the bill number; the
+vendor is made from the commitment's party through a new Accounting verb,
+`ensureVendorForParty`, the twin of `ensureCustomerForParty`. Releasing is
+the same line running the other way — the ops test walks a subcontract
+through two applications and the final one at 0% carries *Retainage
+released* 6,000 and pays it.
+
+**SUBCONTRACTS ONLY.** A purchase order is billed with an ordinary bill;
+retainage attaches to bought labour, not bought material — the reason
+`job_commitments.kind` is a CHECK list of two, finally cashed in.
+`NOT_SUBCONTRACT` refuses; the database cannot tell the kinds apart, so the
+ops test proves the compensating control.
+
+**A BILLED SUBCONTRACT LINE IS HELD BY RESTRICT.** `updateCommitment` replaces
+lines on edit, and without the key, editing a subcontract that has been
+billed against would have deleted the lines its certificates point at. Now
+it refuses — which is right and unfriendly: changing a billed subcontract is
+a change order's payable-side twin and an open item.
+
+Migrations `0343_sub_billing.sql` (hand-reordered like the six before it) and
+`0344_sub_billing_rls.sql`, applied to dev and prod before the merge;
+`db:verify-rls` reports **211 tables** on both, `db:verify-modules` 19/19.
+Tests: five more pure (statuses with `billed` where `issued` was, the
+bill link both ways, retainage range and per-subcontract numbering, RESTRICT
+and cascade, the two accounts), three more ops (the application from the
+subcontract's lines and the three-line bill with its entry, dimensions and
+the Spent column; the next application carrying the work and the release at
+0%; the purchase order, second draft, nothing due and missing 2120
+refusals, the held line, void latest-only with the bill), one more
+isolation.
+
+**DRIVEN ON THE DEV BRANCH, on 24-109.** *Order something* → kind
+**Subcontract**, `SC-24109-1`, Pleasant Valley Feed Mill, one line `06 10 00
+· Rough carpentry` $30,000.00, *Issued* → the Ordered table read **SC-24109-1
+· Subcontract · $30,000.00 · Billed — · Issued** with the number a link, and
+the job cost row *Ordered $30,000.00*. The subcontract's page: **Subcontract
+value $30,000.00 · Billed to date $0.00 · Retainage held $0.00 · Balance to
+finish $30,000.00**, the line at *0%*, *New application* enabled. *New
+subcontractor application* → period to 2026-09-30, retainage 10 → the row
+**$0.00 · 10% held · Draft**. *Open* → the same grid as a pay application
+with *Bill dated* where *Issue on* was; *This period* `15000` → live: **50%
+· Completed $15,000.00 · Retainage −$1,500.00 · Current payment due
+$13,500.00 · Balance to finish $15,000.00**. *Approve as bill* — refused the
+first time, in the words designed for it: *The chart of accounts is missing
+something: the chart has no 2120 Retainage Payable account* (the farm
+fixture has the general chart; `2120` was added through Accounting's *Add
+account*, the way `1230`, `1240` and `2420` were on earlier slices). Second
+time: **Billed · Bill · Open · Void**, tiles **Billed to date $13,500.00 · 1
+application · Retainage held $1,500.00 · Balance to finish $15,000.00**, the
+line at **50%**. In Accounting, the bill to Pleasant Valley Feed Mill, dated
+2026-09-14, due 2026-10-14, *approved*: **Application 1 — subcontract line
+through 2026-09-30 · 5100 · Subcontractor Expense · 15,000.00** and
+**Retainage held (10%) · 2120 · Retainage Payable · (1,500.00)**, total
+**13,500.00**. Back on the job: the *Spent* column on `06 10 00` went from
+$39,650.00 to **$54,650.00**, *Actual cost* to **$55,500.00**, and the
+Ordered table's new *Billed* column read **$13,500.00 · $1,500.00 held**.
+Two things driving showed: a subcontract line with no description produced
+a bill line called *subcontract line*, so the description now falls back to
+the cost code's label; and the new-application dialog had no box for the
+subcontractor's own invoice number, so `Their reference` was added to it in
+commitment mode. Not driven: the release at 0% and the void — both in the
+ops tests.
+
 ### 2026-09-14 — Slice 5b: cost plus a fee (`claude/cost-plus-a-fee`, ADR 0060)
 
 The second way the market bills a job, parked by slice 5 as "a different
@@ -1093,6 +1182,8 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_pay_application_costs` | One line of a COST-PLUS application per cost code (NULL = no code): the books' figure to date, what earlier applications billed, what this one bills. | Cascade from the application; **RESTRICT to the code**. Unique per `(application, code)`; the no-code line is kept single by the sync. `this_period_cents` may be less than the difference (a bill left out) or negative (a credit passed on). See ADR 0060. |
 | `job_pay_application_lines` | One line of the G703 per schedule line. | Cascade from the application; **RESTRICT to the schedule line** — billed lines are never removed. `previous` and `stored` ≥ 0; `this_period` may be NEGATIVE (a correction); CHECK that the three sum to ≥ 0. `scheduled_cents` frozen at issue. |
 | `job_commitments` | What the business has ORDERED: a purchase order or a subcontract. | `party_id` is NOT NULL — a commitment with nobody to pay is a budget line, not a commitment. `kind` is a CHECK list of two because the two diverge in behaviour later. Number unique per tenant: a vendor quotes it back on the invoice. Cascade from the project. |
+| `job_sub_applications` | A subcontractor's application against a SUBCONTRACT: the G702 read from the other side of the table. | Numbered per commitment, void ones included. `status` draft/billed/void. `retainage_ppm` 0–1,000,000. Five totals FROZEN at approval. `bill_id` RESTRICT to Accounting's `bills`; CHECK `(status = 'draft') = (bill_id is null)`, both ways. Cascade from the commitment. See ADR 0061. |
+| `job_sub_application_lines` | One line per subcontract line: previous, this period, stored. | Cascade from the application; **RESTRICT to the subcontract line** — a billed line cannot be replaced out from under its certificate. `this_period` may be negative; the total to date may not. |
 | `job_commitment_lines` | The money, one cost code at a time. | Cascade from the commitment; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative — a credit is a change order. |
 | `job_projects` | The spine. | FOUR composite FKs, each certified in `tests/isolation/jobs.test.ts`: company, division, client, cost code list. `delivery_method` is an open taxonomy (P1) with a **format check and no value check**, and is nullable. `metadata` is the P2 extension bag. |
 
@@ -1109,9 +1200,10 @@ hand-reordered like 0329) and `0335_job_billing.sql` / `0336_job_billing_rls.sql
 `0340_job_wip_rls.sql` (slice 6, built after 7; likewise, and 0339 first adds
 `wip_adjustment` to `journal_entry_source`, which nothing in the file uses)
 and `0341_cost_plus.sql` / `0342_cost_plus_rls.sql` (slice 5b; as generated,
-since the new table references existing ones only) follow the same rule —
+since the new table references existing ones only) and `0343_sub_billing.sql`
+/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) follow the same rule —
 and from slice 3 the pair is `db:verify-rls` **and `db:verify-modules`**, after
-the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **209 tables**, all enabled, forced and with
+the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **211 tables**, all enabled, forced and with
 policies, on both.
 
 **0327 needed no hand-reordering, which confirms the diagnosis in 0325.** Both
@@ -1166,6 +1258,13 @@ ordering only bites when two new tables reference each other in one file.
   the server compute the same certificate from it.
 - `src/packs/jobs/components/sov-editor.tsx` + `pay-application-editor.tsx` —
   the schedule and the G703 grid, with the totals live.
+- `src/packs/jobs/sub-billing-ops.ts` — a subcontractor's applications: the
+  subcontract's lines as the schedule, the certificate, the bill through
+  Accounting's `createBillDraft` + `approveBill`, retainage to `2120`,
+  `commitmentBilling` for the project page. The receivable side's twin.
+- `src/app/dashboard/m/jobs/[id]/commitments/[commitmentId]/page.tsx` — one
+  commitment: its lines and, on a subcontract, its applications. The
+  pay-application editor in `mode="commitment"`.
 - `src/packs/jobs/components/cost-plus-editor.tsx` — a cost-plus draft: the
   books' cost by code, what to bill of it, the fee, the cap, the certificate
   live. `billing-math.ts`'s `costPlusTotals` is the arithmetic both it and
@@ -1239,6 +1338,12 @@ ordering only bites when two new tables reference each other in one file.
 - **A job that cannot be measured stops the whole period.** No budget and no
   estimate, or billings with no fixed value, refuses by job number rather than
   posting the rest. A schedule missing a job is what a bank would not accept.
+- **A subcontractor's application is an ordinary bill, and retainage held is
+  a negative line to a payable** —
+  [ADR 0061](../decisions/0061-a-subcontractors-application-is-an-ordinary-bill.md).
+  The subcontract's lines are the schedule; the bill's lines carry the job
+  and each line's code; `2120` is credited for what is held and debited when
+  it is released; subcontracts only. One editor, two modes.
 - **A cost-plus application bills the ledger's cost to date, not the bills** —
   [ADR 0060](../decisions/0060-a-cost-plus-application-bills-the-ledger-not-the-bills.md).
   The books' tagged cost by code is the schedule of values; to date, never by
@@ -1280,8 +1385,16 @@ ordering only bites when two new tables reference each other in one file.
   **closed 2026-09-14 (slice 5b, ADR 0060)**. Still open from it: **unit
   price and T&M** are recorded on the contract and billed by nothing (T&M is
   cost-plus with a rate card in place of cost and would reuse 5b's shape);
-  **retainage held FROM subcontractors** (the payables side; `2120` is seeded
-  and nothing posts to it); **the AIA-style printout** of a certificate.
+  ~~**retainage held FROM subcontractors**~~ **closed 2026-09-14 (slice 5c,
+  ADR 0061)**; **the AIA-style printout** of a certificate.
+- **A billed subcontract cannot be changed.** Its lines are held by RESTRICT
+  once an application has billed against them, so `updateCommitment`'s
+  replace-the-lines edit refuses. The honest fix is a change order's
+  payable-side twin — a subcontract change order that adds lines and revises
+  the sum — and nobody has asked yet.
+- **Lien waivers** are the document a subcontractor signs to get the retainage
+  released, and the next thing a GC's bookkeeper asks for once retainage is
+  tracked. Work raised where it lives (extension-model §4b) when it comes.
   ~~`billing_method` is still read by no code~~ — the contract page and the
   application verbs read it since 5b.
 - **A fee rate per cost code** (labor 20%, materials 10%, subcontractors 5%)

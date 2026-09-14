@@ -37,6 +37,7 @@ import { ChangeOrderForm } from "@/packs/jobs/components/change-order-form";
 import { DailyLogForm } from "@/packs/jobs/components/daily-log-form";
 import { PunchList } from "@/packs/jobs/components/punch-list";
 import { listDailyLogs, listPunchItems } from "@/packs/jobs/field-ops";
+import { commitmentBilling } from "@/packs/jobs/sub-billing-ops";
 import { BudgetEditor } from "@/packs/jobs/components/budget-editor";
 import { ProjectForm } from "@/packs/jobs/components/project-form";
 import { Button } from "@/components/ui/button";
@@ -99,6 +100,7 @@ export default async function ProjectPage({
         commitments,
         changeOrders,
         billing,
+        subBilling,
         committed,
         costReport,
         actual,
@@ -164,6 +166,7 @@ export default async function ProjectPage({
         listCommitments(tx, ctx.tenant.id, project.id),
         listChangeOrders(tx, ctx.tenant.id, project.id),
         contractBilling(tx, ctx.tenant.id, project.id),
+        commitmentBilling(tx, ctx.tenant.id, project.id),
         committedTotals(tx, ctx.tenant.id),
         jobCostReport(tx, ctx.tenant.id, project.id),
         /*
@@ -222,6 +225,7 @@ export default async function ProjectPage({
         commitments,
         changeOrders,
         billing,
+        subBilling,
         committed,
         costRows: costReport.rows,
         uncodedActualCents: costReport.uncodedActualCents,
@@ -954,6 +958,7 @@ export default async function ProjectPage({
                   <TableHead>Who</TableHead>
                   <TableHead>For</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
+                  <TableHead className="text-right">Billed</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="w-10" />
                 </TableRow>
@@ -962,7 +967,12 @@ export default async function ProjectPage({
                 {commitments.map((row) => (
                   <TableRow key={row.commitment.id}>
                     <TableCell className="font-mono text-xs">
-                      {row.commitment.number}
+                      <Link
+                        href={`/dashboard/m/jobs/${project.id}/commitments/${row.commitment.id}`}
+                        className="hover:underline"
+                      >
+                        {row.commitment.number}
+                      </Link>
                       <span className="block font-sans text-xs text-muted-foreground">
                         {isCommitmentKind(row.commitment.kind)
                           ? COMMITMENT_KIND_LABELS[row.commitment.kind]
@@ -980,6 +990,29 @@ export default async function ProjectPage({
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {formatMoney(row.totalCents, symbol)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {/*
+                        WHAT THE SUBCONTRACTOR HAS BILLED, and what is held back
+                        from them — the retainage the profile's 2120 exists for.
+                        A purchase order shows a dash: it is billed in Accounting.
+                      */}
+                      {(() => {
+                        const b = data.subBilling.get(row.commitment.id);
+                        if (!b || b.billedCount === 0) {
+                          return <span className="text-muted-foreground">—</span>;
+                        }
+                        return (
+                          <>
+                            {formatMoney(b.billedCents, symbol)}
+                            {b.retainageHeldCents > 0 && (
+                              <span className="block text-xs text-muted-foreground">
+                                {formatMoney(b.retainageHeldCents, symbol)} held
+                              </span>
+                            )}
+                          </>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell>
                       <Badge

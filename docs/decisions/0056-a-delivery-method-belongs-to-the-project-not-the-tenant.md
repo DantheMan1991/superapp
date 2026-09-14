@@ -138,14 +138,21 @@ worth more than building it early.
 **Consolidated financials needed nothing.** The group does prepare them, and
 [consolidation.ts](../../src/modules/accounting/core/consolidation.ts) is ADR 0010
 slice 3, live, with `combined` and `consolidated` report scopes and a deliberate
-refusal on anything filed per entity. One caveat came from reading its header
-rather than assuming: it is **explicitly not full GAAP consolidation**, assuming
-*"commonly owned LLCs rather than a parent holding subsidiaries"* — so whether the
-group is brother-sister (combined statements, exactly right) or a true holding
-company (needs eliminations it does not do) is an accounting question to settle
-before a second entity goes in. **Construction's design changes not at all for
-any of it**: `entity_id` on a project, one entity, a report above it that already
-exists. That is ADR 0010 doing its job.
+refusal on anything filed per entity. Its header states an explicit non-goal —
+**not full GAAP consolidation**, assuming *"commonly owned LLCs rather than a
+parent holding subsidiaries"* — and **the founder confirmed that assumption holds
+exactly: brother-sister, the family owning all three directly.** So its non-goals
+are non-goals here rather than gaps, and the group's reporting needs no work.
+**Construction's design changes not at all for any of it**: `entity_id` on a
+project, one entity, a report above it that already exists. That is ADR 0010 doing
+its job, and it is the strongest evidence in this ADR that the entity layer was
+designed at the right altitude.
+
+One thing came out of asking, and it belongs to accounting rather than here:
+statements for commonly owned entities are properly titled **combined**, which is
+the word the report control currently gives to the scope that does *not*
+eliminate. Recorded in [accounting.md](../modules/accounting.md) Open items —
+mechanism right, title in question, and an accountant settles it.
 
 ## Alternatives rejected
 

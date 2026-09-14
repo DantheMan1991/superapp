@@ -4256,6 +4256,27 @@ sentence rather than leaving it aspirational.
 
 ## Open items
 
+**The two group scopes may be named backwards for the commonest case** (found
+2026-09-13 while designing [construction.md](construction.md); an accountant
+should confirm before any user-facing word changes). The report control offers
+"All companies (combined)" for a plain sum and "All companies (consolidated)" for
+a sum with intercompany eliminated. In accounting usage those labels sit the
+other way round for entities under **common ownership without a parent**:
+*combined* statements are the ones prepared for brother-sister companies and they
+**do** eliminate intercompany, while *consolidated* additionally eliminates a
+parent's investment in a subsidiary and presents noncontrolling interests — which
+[consolidation.ts](../../src/modules/accounting/core/consolidation.ts) states in
+its own header that it deliberately does not do.
+
+So the mechanism is right and only the title is in question. It matters because
+the first real group on the platform is brother-sister commonly owned (the
+construction pilot: three LLCs owned directly by one family, confirmed
+2026-09-13), its statements go to a bank and a surety, and the word on the page is
+what they read. The cheap version is a wording change plus the export filename;
+the wrong version is renaming the scope values in the URL, which are an API. **Do
+not change either on a hunch** — the module's own header is evidence the
+distinction was understood, so ask what was intended first.
+
 **Never confirmed by a human** (as of 2026-08-10, found while driving the live
 app): the **Send button on an issued invoice** — the draft case is proven, but
 two attempts to click Issue did not register, so nobody has watched Send appear

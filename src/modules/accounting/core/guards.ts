@@ -84,6 +84,11 @@ const MANAGED_SOURCES = new Set([
   // A credit memo's entry is also the entry of the payment row that settles
   // the invoice; the memo's own void removes both.
   "credit_memo",
+  // A WIP period says `posted` and points at its adjustment AND its reversal
+  // (ADR 0059). Voiding either from the journal would leave the schedule
+  // claiming an entry the ledger no longer carries; the jobs pack's own
+  // unpost voids the pair and resets the period.
+  "wip_adjustment",
 ]);
 
 /**

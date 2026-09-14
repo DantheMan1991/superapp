@@ -317,6 +317,94 @@ Under **Punch list** on the {{project|lower}}'s page: what still needs fixing or
 
 The tell box knows the site. *"Poured the garage slab at Oak Row, four guys, six hours"* becomes a line on today's report for 24-108 with a crew of four at six hours each; *"punch item at Oak Row: touch up the paint in the master bath"* becomes a punch item on that job. The job is found by its number, its name or its street — say whichever you would say on the phone. A log entry is read back for you to confirm; a punch item records itself, because it lands on a list you can see and remove from in one press.
 
+## Work in progress — earned revenue and over/under billing
+
+{button:Work in progress|outline} on the {{project|plural|lower}} list, at `/dashboard/m/jobs/wip`. Everyone can read it; only an owner can type an estimate or post.
+
+Your books say what you have **billed**. This schedule says what you have **earned** on each job as of a date, and the difference between the two — per job, never netted — is what a bank or a surety asks to see before anything else. Posting it puts that difference in your books for the period, so the profit and loss for the month reads the work that was done rather than the draws that happened to go out.
+
+### Picking the company and the date
+
+- **Company** appears only when you keep more than one set of books. A schedule is per company, because the entry lands in one company's books and each company closes its own months.
+- **As of** is the period end — a month end for nearly everybody. It starts on the last complete month. Type any date and press {button:Show|outline}.
+
+Under the picker one line says where the period stands:
+
+- `Draft` — *Live figures as of …* The numbers come from your books as they are right now, and change as bills and invoices land. If you have typed estimates for this date, the line says they are kept.
+- `Posted` — *Posted on …, figures frozen*, with links to **the adjustment** and **its reversal** in Accounting's journal, and {button:Unpost|outline} for an owner.
+
+### Reading the schedule
+
+One row per {{project|lower}} of the company that has a contract value, a cost or a billing as of the date. A cancelled job is never shown. A job marked complete stays until it has been fully billed, then drops off — the schedule is for work in progress, not for every job you have ever finished.
+
+| Column | What it is |
+| --- | --- |
+| `Contract` | Original value plus approved change orders, over signed and complete contracts. `—` when the job has no fixed value. |
+| `Est. cost` | What the job is expected to cost in total: the revised budget, unless you typed an estimate for this period (then `budget $…` sits underneath, or `re-estimated` once posted). |
+| `Cost to date` | Everything in your books tagged to the job on an expense account, dated on or before the period end. Bills, timecards, journal entries — whatever carries the job. |
+| `% done` | Cost to date divided by estimated cost. Capped at 100. A job marked `Complete` is 100 whatever its cost says. `—` when there is nothing to divide by. |
+| `Earned` | The contract value at that percent. |
+| `Billed` | Everything invoiced against the job, before retainage, dated on or before the period end — pay applications and any other invoice tagged to the job. |
+| `Under-billed` | Earned minus billed, when the work is ahead of the billing. Money you have earned and not yet asked for: an asset. |
+| `Over-billed` | Billed minus earned, when the billing is ahead of the work. Money you have been paid for work not yet done: a liability. |
+| `Profit to date` | Earned minus cost to date. Red when negative. |
+
+The total row adds each column and says how many jobs were measured and how many were left out. The two billing columns are added separately and never against each other: a job billed ahead and a job billed behind are two facts, and your balance sheet carries both.
+
+A row may carry a badge saying why it is left out of the entry:
+
+- `No budget and no estimate to measure cost against` — the job has value or cost but nothing to divide by. Type an estimate here, or set a budget on the job's page. **Until you do, the period cannot post**: a schedule missing a job is exactly what a bank would not accept, so nothing posts quietly around it.
+- `No fixed contract value to earn against` — a cost-plus, unit-price or time-and-materials job, or a signed contract with no value yet. It is shown and left out. If it also has billings, the period cannot post, because those billings cannot be measured this way.
+
+### The estimate
+
+Owners only, and only while the period is a draft. The box in the `Est. cost` column shows the budget as its placeholder. Type the total cost you now expect the job to finish at — `1300000` or `1,300,000.00` both work — and press Enter or click away; it saves on its own. `budget $…` appears underneath so you can see what you overrode. Clear the box to go back to the budget.
+
+An estimate belongs to **this period only**. Next month starts from the budget again unless you type one — which is what a monthly cost-to-complete review is.
+
+A wrong entry says *An estimate must be an amount, like 1300000 or 1,300,000.00.* Once the period has posted the boxes become plain figures, and trying to save says *That is not something this can do next.*
+
+### Posting the entry
+
+The panel **The entry** says what will post, in the words your accountant uses:
+
+- *$… under-billed: Dr 1240 Costs in Excess of Billings / Cr revenue.*
+- *$… over-billed: Dr revenue / Cr 2420 Billings in Excess of Costs.*
+- *One pair of lines per job, tagged with the job, dated the period end and reversed the next day.*
+
+If billings equal earned revenue on every measured job it says so and there is nothing to post. If a job is blocking, its reason is listed in red. If your chart lacks an account the entry needs — `1240`, `2420`, or a revenue account — it says which; add it under Accounting first. The construction profile seeds all three; a pack never adds an account to your chart on its own.
+
+{button:Post the adjustment|primary} asks you to confirm with the same figures, then posts two entries in Accounting: the adjustment dated the period end, and its reversal dated the next day. The status line turns to `Posted`, the figures freeze, and the estimate boxes become plain figures.
+
+**Why a reversal.** Each period's entry is the whole over/under as of that date. Reversing it the next morning means your books between period ends carry billings, exactly as before, and the month-end statements carry what was earned. Next period's entry is the whole figure again. Nothing accumulates and nothing has to be reconciled.
+
+Messages you may see instead:
+
+- *Give every job a budget or an estimate before posting: 24-108.* — the badge above, by job number.
+- *A job with billings needs a fixed contract value to measure against: 24-110.*
+- *A period must come after the latest posted one, 2026-08-31. Unpost that one first.* — periods post forward only, latest first, the way a month is closed.
+- *Billings equal earned revenue on every job, so there is nothing to post for this period.*
+- *The chart of accounts is missing something: the chart has no 1240 Costs in Excess of Billings account.*
+- *Period closed through …* — the period end is inside a month you have already closed in Accounting. Reopen it there or pick a later date.
+- *Only an owner can change a project.* — posting is an owner's decision.
+
+### Unposting
+
+{button:Unpost|outline} on a posted period asks you to confirm, voids both entries in Accounting, and puts the period back to `Draft` with the estimates you typed kept and the figures live again. Only the **latest** posted period of a company can be unposted — *Only the latest posted period can be unposted, and that is 2026-10-31.* — so to redo August you unpost September first. Accounting refuses in its own words if the entries sit in a closed month or on a reconciled line.
+
+Neither entry can be voided from the journal itself; they belong to the period, and the journal says so.
+
+### Periods
+
+The list at the bottom is every period saved or posted for the company, newest first, each a link back to its schedule with a `Posted` or `Draft` badge. A draft period exists as soon as an estimate has been typed for a date.
+
+### What this changes elsewhere
+
+- **Reports at a period end** — a profit and loss ending on a posted date carries earned revenue, and the balance sheet carries `1240` and `2420`. Between period ends everything reads billings.
+- **A job's revenue on reports** is earned revenue at a posted period end, because every line of the entry is tagged with the job.
+- **Cash-basis reports ignore the adjustment entirely.** Percent complete is an accrual idea; a cash report reads what came in.
+- **Closing a month** in Accounting after posting locks both entries, the same as any other.
+
 ## Changing something
 
 Owners only. Everything you can add, you can change.
@@ -361,6 +449,7 @@ Worth knowing so you are not looking for it:
 - **The daily log is not a timecard.** Who was on site is a headcount for the record; your own people's hours for wages are in Time, and the two are not joined.
 - **Only fixed-price billing.** A schedule of values and pay applications cover fixed price, progress draws, AIA applications and draw schedules — everything billed as a share of a fixed sum. Cost-plus, unit price and time-and-materials are recorded on the contract and not yet billed.
 - **Retainage you hold from subcontractors** is not tracked yet; only what clients hold from you.
+- **Cost-plus, unit-price and time-and-materials jobs are not measured on the work in progress schedule.** They have no fixed value to earn against, so they are shown and left out — and a period with billings on one cannot post until that job has a value.
 - **No printed application.** The certificate is on screen and its invoice is in Accounting; an AIA-style printout is coming.
 - **Cost codes can now be put on a bill.** They appear in Accounting wherever you tag a line, beside the job itself — so a bill can say which job and which trade. Actual cost per code follows once bills carry them.
 - **Nothing is ever deleted.** A contract you should not have added is set to `Cancelled` or `Declined`; a cost code is retired; a {{project|lower}} is cancelled. That is on purpose — a job's history is the point of keeping it.
@@ -376,5 +465,7 @@ Worth knowing so you are not looking for it:
 | Set a schedule of values, or issue a pay application | ● | | |
 | Log a day on site, or add and tick a punch item | ● | ● | ● |
 | Add photos to a day | ● | ● | |
+| See the work in progress schedule | ● | ● | ● |
+| Type an estimate, post or unpost a work in progress period | ● | | |
 
 Starting a job is a decision, and it creates the thing your books group costs by — which is why it is kept to owners. Reading the list is ordinary work for anybody who has to go and stand on the site.

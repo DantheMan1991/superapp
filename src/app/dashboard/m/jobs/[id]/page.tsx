@@ -910,6 +910,13 @@ export default async function ProjectPage({
             </dd>
           </div>
         </dl>
+        <p className="mb-3 text-xs text-muted-foreground">
+          What this job has EARNED against what it has billed is on the{" "}
+          <Link href="/dashboard/m/jobs/wip" className="underline">
+            work in progress schedule
+          </Link>
+          , per period end.
+        </p>
 
         {commitments.length === 0 ? (
           <p className="text-sm text-muted-foreground">

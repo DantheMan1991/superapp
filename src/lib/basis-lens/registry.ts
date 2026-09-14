@@ -1,6 +1,7 @@
 import "server-only";
 import type { Tx } from "@/db";
 import { inventoryBasisLens } from "@/packs/inventory/basis-lens";
+import { jobsWipBasisLens } from "@/packs/jobs/basis-lens";
 import type { BasisLensProvider } from "./types";
 
 /**
@@ -32,4 +33,8 @@ import type { BasisLensProvider } from "./types";
  */
 export const BASIS_LENS_PROVIDERS: BasisLensProvider<Tx>[] = [
   inventoryBasisLens,
+  // A work-in-progress adjustment is dropped whole under the cash basis
+  // (ADR 0059). Same posture as above: one cheap read, nothing on a tenant
+  // that never posted one, and not gated on the pack being switched on.
+  jobsWipBasisLens,
 ];

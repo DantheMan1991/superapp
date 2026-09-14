@@ -13,6 +13,139 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-14 — Slice 6: what the work is worth, not what was billed for it (`claude/work-in-progress`, ADR 0059)
+
+`job_wip_periods` and `job_wip_lines`, one page (`/dashboard/m/jobs/wip`),
+and the pack's first journal entry of its own: **the work-in-progress
+schedule** — percent complete, earned revenue, under- and over-billing per
+job as of a period end — and **the adjustment that trues revenue up to the
+work**, posted through Accounting's `postEntry` and reversed the next day.
+Built after slice 7, because the founder chose the field first; numbered 6
+because that is where the design put it.
+
+**EVERY INPUT ALREADY EXISTED, WHICH IS WHY THE SLICE IS SMALL.** Contract
+value is slice 1 plus slice 4's approved changes (`projectValues`); the
+estimated cost is slice 3's revised budget summed per job (`budgetByProject`,
+new); cost to date is `actualByProject`, which gained an `asOf`; billings are
+`billedByProject`, new and the same query on income accounts, negated. All
+four read as of the period end, through the project's cost object, and the
+pack reads no Accounting table. The one thing a person types is the
+**re-estimated total cost** per job per period — the input a monthly WIP
+meeting exists to produce — and null means the budget stands, so a business
+that never re-estimates types nothing.
+
+**COST-TO-COST, CAPPED, AND A FINISHED JOB IS DONE.** `wip-math.ts` is pure
+and `tests/jobs.test.ts` pins it: percent complete is cost over estimate in
+parts per million, truncated, capped at 100%; earned is the contract at that
+percent, rounded half up, through BigInt because a nine-figure contract times
+a million passes 2^53; a job marked `complete` is 100% whatever its cost
+says; under and over are two columns and never netted. A job with nothing to
+divide by has a null percent and a badge, not a zero.
+
+**WHICH JOBS ARE ON IT.** Every job of the company with a contract value, a
+cost or a billing as of the date; never a cancelled one; a completed one
+until its billings catch its value, then it drops off, because a schedule of
+every job ever finished stops being readable within a year. A job with no
+budget and no estimate BLOCKS the period by name (`ESTIMATE_REQUIRED`) — a
+schedule missing a job is exactly what a bank would not accept, and posting
+the rest quietly would be worse than refusing. A job with billings and no
+fixed value blocks likewise (`BILLED_NO_VALUE`); one with no value and no
+billings — a spec home accumulating cost — is shown and left out
+(`reason = no_value`).
+
+**THE ENTRY, AND WHY IT REVERSES ITSELF** (ADR 0059). One pair of lines per
+job, tagged with the job: `Dr 1240 / Cr revenue` for a job billed behind its
+work, `Dr revenue / Cr 2420` for one billed ahead, both accounts the
+construction profile seeded for exactly this and both refused by name when a
+chart lacks them. Dated the period end, source `wip_adjustment` (a new value
+of `journal_entry_source`, drizzle/0339, in `MANAGED_SOURCES` so the journal
+refuses to void it), and a second entry with the same source, negated,
+`reverses_entry_id` set, dated the next day. Because every period's entry is
+the whole figure and reverses, the books between period ends carry billings,
+the month-end statements carry earned revenue, and — the reason that matters
+to this pack — `billedByProject` read as of any later period end sees each
+earlier adjustment and its reversal together and nets them to nothing, with
+no filter on the source and no knowledge of its own earlier entries. The
+idempotency key carries the period's version, so a period unposted and posted
+again is a new pair rather than the voided one answering. Periods post
+FORWARD ONLY (`NOT_FORWARD`) and only the latest unposts
+(`NOT_LATEST_PERIOD`), the way a close is reopened latest-first.
+
+**FROZEN AT POSTING, LIVE WHILE A DRAFT.** Six figures per line are written
+down when the period posts — contract, estimate, cost, billed, percent,
+earned — and the page reads those, not the ledger, for a posted period; a
+bill dated inside the period that lands late changes the next period's
+opening and never the schedule a bank was shown. Unposting voids both
+entries through `voidEntry` (Accounting's refusals — a closed period, a
+reconciled line — arrive in its own words), zeroes the frozen figures and
+keeps the estimates. The same rule an issued pay application's totals follow.
+
+**A WIP ADJUSTMENT IS NOT CASH.** `src/packs/jobs/basis-lens.ts` is the
+pack's provider in `basis-lens/registry.ts`: under the cash basis every
+`wip_adjustment` entry is dropped whole. The construction dossier's finding
+that "percent complete is not a basis lens" stands — a lens may not INVENT the
+adjustment, which is why the pack posts a real entry; it may say the entry
+does not belong in a basis, which is what this does. One indexed read,
+nothing on a tenant that never posted one.
+
+**PER COMPANY, LIKE A CLOSE.** The period carries `entity_id` and is unique
+per `(entity, period_end)`; a tenant with one company never sees the picker.
+The ops tests give every test its own company for the same reason a
+schedule is per company: every job the earlier tests made on the default one
+would land on it, most with no budget, and block every post with a refusal
+about somebody else's job.
+
+Migrations `0339_job_wip.sql` (the enum value first, then the two tables,
+hand-reordered like the five before it) and `0340_job_wip_rls.sql`, applied
+to dev and prod before the merge; `db:verify-rls` reports **208 tables** on
+both, `db:verify-modules` 19/19. Tests: eleven more pure (the indexes and
+CHECKs mirrored, the enum value first in the file and used nowhere in it,
+the two accounts seeded as an asset and a liability, and the arithmetic case
+by case including the ten-figure contract), six more ops (the schedule with a
+measured and an unmeasured job and an as-of date before the cost; posting
+with both entries read back line by line and by dimension, the ledger's
+revenue-by-job reading earned at the period end and billings the day after,
+the frozen period against a live next one; the estimate replacing the budget
+for one period and turning an under-billing into an over-billing; the five
+refusals; unpost latest-only with the estimate kept and a re-post as a new
+pair; the cash lens dropping the adjustment), four more isolation (read and
+write across tenants, the company and project FKs, one period per company
+per date and the posted↔entry CHECK, cascade from the period and from the
+project). `ledger` and `discovery-prompt` re-run for the enum and the source
+set.
+
+**DRIVEN ON THE DEV BRANCH, on Hilltop Farm's 24-108.** The schedule as of
+`2026-08-31` read the job at **$1,962,000.00** contract, **$45,000.00**
+estimated cost, nothing spent and **nothing billed** — the September pay
+application correctly outside an August period end — and *Billings equal
+earned revenue on every measured job, so there is nothing to post*. As of
+`2026-09-30`: billed **$370,900.00**, over-billed the same, and the red
+line *The chart of accounts has no 2420 account. Add it in Accounting
+first*, with the button disabled. `1240` and `2420` were added through
+Accounting's own *Add account*. A cost was posted through Accounting's
+journal — *Dr 5100 Subcontractor Expense $325,000.00* tagged `24-108 · Oak
+Row residence — phase 2` / *Cr 2000 Accounts Payable*, dated 2026-09-20 —
+and the schedule read **$325,000.00 · 100% · earned $1,962,000.00 ·
+under-billed $1,591,100.00**: the whole job earned against a $45,000
+budget, which is exactly what the re-estimate exists for. `1300000` typed in
+the box → **budget $45,000.00** underneath, **25% · earned $490,500.00 ·
+under-billed $119,600.00 · profit to date $165,500.00**, the period listed
+as *Draft*. *Post the adjustment* → **Posted on 2026-09-14 · figures frozen
+· the adjustment · its reversal on 2026-10-01**, the estimate box now a
+plain *$1,300,000.00 re-estimated*. The adjustment in Accounting's journal:
+*2026-09-30 · wip adjustment · Work in progress through 2026-09-30 —
+Hilltop Farm · posted · Reversed by this entry*, two lines — **1240 Costs
+in Excess of Billings 119,600.00** and **4000 Sales 119,600.00** (the farm
+chart has no 4030, so the fallback posted), each tagged *24-108 · Oak Row
+residence — phase 2* — and no *Void* button, because the source is managed.
+*Unpost* → *Draft* again with the $1,300,000 estimate kept and the entry
+panel back; *Post the adjustment* again → *Posted*, a new pair. Two things
+driving showed: the estimate box saves on blur (Enter blurs it), and the
+pane's `type` action never reached React's state, so the first attempt saved
+nothing — `form_input` plus a click elsewhere did. Not driven: a
+two-company tenant's picker (the farm has one company) and a closed period's
+refusal.
+
 ### 2026-09-14 — Slice 7: the first slice somebody on a site touches (`claude/the-first-slice-on-a-site`)
 
 `job_daily_logs` and `job_daily_log_crews`, a daily-log page per project
@@ -772,6 +905,8 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_daily_logs` | One report per project per day: weather, what happened. | Unique `(tenant, project, log_date)` — the whole design; `saveDailyLog` upserts and `appendNotes` adds a line. Cascade from the project. Photos hang on it through Documents' `document_attachments` (`entity_type = 'job_daily_log'`), detached when the day goes. |
 | `job_daily_log_crews` | Who was on site that day: a trade or a subcontractor, how many, hours each (tenths). | Cascade from the day; `party_id` RESTRICT to `parties`. CHECK `workers >= 0`, `hours_tenths >= 0`, and that a line names a trade OR a party. A HEADCOUNT, not a time entry — the two are not joined. |
 | *(punch list)* | What still needs fixing: Work's `work_items`, linked to the project. | No table of this pack's. `work_item_links` with `extension_slug = 'jobs'`, `entity_type = 'project'`, through `createWorkForEntity` — never a second task engine. |
+| `job_wip_periods` | One work-in-progress schedule per COMPANY per period end: its status, and the adjustment and reversal it posted. | Unique `(tenant, entity, period_end)`. RESTRICT to the company and to both entries. CHECK `(status = 'posted') = (entry_id is not null)`, both ways, and a reversal needs its adjustment. `status` draft/posted. |
+| `job_wip_lines` | One job on a schedule: the re-estimate typed for the period (`estimate_cents`, null = the budget) and six figures FROZEN at posting, zero while a draft. | Cascade from the period and from the project. `percent_complete_ppm` 0–1,000,000; `reason` is `''`, `no_value` or `no_estimate` — why the job was left out of the entry. Over/under is not stored: it is earned − billed. |
 | `job_pay_application_lines` | One line of the G703 per schedule line. | Cascade from the application; **RESTRICT to the schedule line** — billed lines are never removed. `previous` and `stored` ≥ 0; `this_period` may be NEGATIVE (a correction); CHECK that the three sum to ≥ 0. `scheduled_cents` frozen at issue. |
 | `job_commitments` | What the business has ORDERED: a purchase order or a subcontract. | `party_id` is NOT NULL — a commitment with nobody to pay is a budget line, not a commitment. `kind` is a CHECK list of two because the two diverge in behaviour later. Number unique per tenant: a vendor quotes it back on the invoice. Cascade from the project. |
 | `job_commitment_lines` | The money, one cost code at a time. | Cascade from the commitment; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative — a credit is a change order. |
@@ -786,9 +921,12 @@ to dev and prod before its merge, per
 `0333_job_change_orders.sql` / `0334_job_change_orders_rls.sql` (slice 4,
 hand-reordered like 0329) and `0335_job_billing.sql` / `0336_job_billing_rls.sql`
 (slice 5, hand-reordered the same way) and `0337_job_field.sql` /
-`0338_job_field_rls.sql` (slice 7, likewise) follow the same rule —
+`0338_job_field_rls.sql` (slice 7, likewise) and `0339_job_wip.sql` /
+`0340_job_wip_rls.sql` (slice 6, built after 7; likewise, and 0339 first adds
+`wip_adjustment` to `journal_entry_source`, which nothing in the file uses)
+follow the same rule —
 and from slice 3 the pair is `db:verify-rls` **and `db:verify-modules`**, after
-the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **206 tables**, all enabled, forced and with
+the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **208 tables**, all enabled, forced and with
 policies, on both.
 
 **0327 needed no hand-reordering, which confirms the diagnosis in 0325.** Both
@@ -827,6 +965,18 @@ ordering only bites when two new tables reference each other in one file.
 - `src/packs/jobs/components/daily-log-form.tsx` + `punch-list.tsx`, and
   `src/app/dashboard/m/jobs/[id]/log/page.tsx` — the day, the crews, the
   photos (Documents' `RecordPhotos`) and the list.
+- `src/packs/jobs/wip-ops.ts` — the work-in-progress schedule (live or frozen),
+  the estimate, and the two verbs that move the ledger: `postWip` (the
+  adjustment and its reversal through `postEntry`) and `unpostWip` (both
+  through `voidEntry`). Reads Accounting only through `getBalances`.
+- `src/packs/jobs/wip-math.ts` — percent complete, earned, under and over,
+  pure and BigInt-safe; the page and the posting compute the same figures.
+- `src/packs/jobs/basis-lens.ts` — the pack's provider in
+  `src/lib/basis-lens/registry.ts`: a WIP adjustment does not exist under the
+  cash basis.
+- `src/app/dashboard/m/jobs/wip/page.tsx` +
+  `src/packs/jobs/components/wip-controls.tsx` — the schedule, the estimate
+  box, and the post and unpost buttons.
 - `src/packs/jobs/billing-math.ts` — the G702 arithmetic, pure: the form and
   the server compute the same certificate from it.
 - `src/packs/jobs/components/sov-editor.tsx` + `pay-application-editor.tsx` —
@@ -884,6 +1034,16 @@ ordering only bites when two new tables reference each other in one file.
 - **`jobs.log` is read back; `jobs.punch` records itself.** ADR 0050's three
   tests, applied inside one source: a line on the wrong job is not visible on
   a screen this person already looks at; a punch item on a list is.
+- **Work in progress is a snapshot and a self-reversing entry** —
+  [ADR 0059](../decisions/0059-work-in-progress-is-a-snapshot-and-a-self-reversing-entry.md).
+  Cost-to-cost, capped; the re-estimated total cost is the one human input;
+  the adjustment is dated the period end and reversed the next day, so the
+  ledger's own billings-by-job read needs no filter on the pack's source.
+  Periods post forward only and unpost latest-first. Under the cash basis the
+  entries are dropped whole by the pack's lens.
+- **A job that cannot be measured stops the whole period.** No budget and no
+  estimate, or billings with no fixed value, refuses by job number rather than
+  posting the rest. A schedule missing a job is what a bank would not accept.
 - **A pay application is an ordinary invoice, and retainage is a negative
   line to a receivable** —
   [ADR 0058](../decisions/0058-a-pay-application-is-an-ordinary-invoice.md).
@@ -956,3 +1116,22 @@ ordering only bites when two new tables reference each other in one file.
   own way and the pilot's scheme is unknown, so the field is free text and the
   form suggests nothing. A generator is worth building only once a real scheme is
   in front of us.
+- **The work in progress schedule measures fixed-value jobs only.** Cost-plus,
+  unit-price and T&M contracts have no value to earn against; a job on one is
+  shown with `No fixed contract value` and left out, and one with billings
+  blocks the period. When those billing methods are built, the schedule needs
+  a second method for them (revenue = cost + fee, or units × price).
+- **Percent complete cannot be typed.** Cost-to-cost is the only method. A
+  business that measures by units delivered or an engineer's estimate would
+  need a second nullable column on the line (ADR 0059 leaves the door open);
+  nobody has asked.
+- **No schedule of completed contracts.** A finished job drops off once fully
+  billed; the bank's other schedule — every contract completed in the year,
+  with its final margin — is a different report and not built.
+- **The reversal can be voided from the journal.** `wip_adjustment` is a
+  managed source, so neither entry can be voided there; but a reversal posted
+  with `reverses_entry_id` set is protected only by its own source, which is
+  the same one, so it is covered — noted because the general guard
+  (`assertEntryNotSourceManaged`) checks the entry's own source and not what it
+  reverses, and a future source that reverses with `source = 'reversal'` would
+  not be.

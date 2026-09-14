@@ -368,3 +368,47 @@ export function tenthsToHours(tenths: number): string {
   const h = tenths / 10;
   return Number.isInteger(h) ? String(h) : h.toFixed(1);
 }
+
+// ------------------------------------------------------------------------ wip
+
+/** Mirrors `job_wip_periods_status_valid`. Kept in sync by tests/jobs.test.ts. */
+export const WIP_STATUSES = ["draft", "posted"] as const;
+export type WipStatus = (typeof WIP_STATUSES)[number];
+
+export const WIP_STATUS_LABELS: Record<WipStatus, string> = {
+  draft: "Draft",
+  posted: "Posted",
+};
+
+export function isWipStatus(v: string): v is WipStatus {
+  return (WIP_STATUSES as readonly string[]).includes(v);
+}
+
+/** Mirrors `job_wip_lines_reason_valid`: why a job was left out of the entry. */
+export const WIP_REASONS = ["", "no_value", "no_estimate"] as const;
+export type WipReason = (typeof WIP_REASONS)[number];
+
+export const WIP_REASON_LABELS: Record<WipReason, string> = {
+  "": "",
+  no_value: "No fixed contract value to earn against",
+  no_estimate: "No budget and no estimate to measure cost against",
+};
+
+/**
+ * The two balance-sheet accounts the adjustment posts to, by the codes the
+ * construction profile seeds: under-billing to an ASSET (work done and not
+ * yet billed), over-billing to a LIABILITY (billed ahead of the work). A
+ * tenant whose chart lacks the one a period needs is refused by name, the
+ * same rule as `1230` — a pack must not create accounts in a business's chart.
+ * Revenue is `REVENUE_ACCOUNT_CODES`, the account billing itself posts to.
+ */
+export const UNDERBILLING_ACCOUNT_CODE = "1240";
+export const OVERBILLING_ACCOUNT_CODE = "2420";
+
+/**
+ * The journal source both entries of a period carry — the adjustment and its
+ * reversal. A value of `journal_entry_source` (drizzle/0339), and in
+ * Accounting's `MANAGED_SOURCES`, so the journal refuses to void either and
+ * only the pack's own unpost does.
+ */
+export const WIP_ENTRY_SOURCE = "wip_adjustment" as const;

@@ -8,6 +8,7 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
 import { violatedUniqueIndex } from "@/lib/db-errors";
 import { allowsWrite } from "@/lib/packs/authorize";
+import { parseMoneyToCents } from "@/lib/money";
 import {
   detachDocumentFromRecord,
   registerAttachedPhoto,
@@ -23,6 +24,7 @@ import {
   setPunchDone,
   type CrewInput,
 } from "./field-ops";
+import { postWip, saveWipEstimate, unpostWip } from "./wip-ops";
 import { LedgerError, friendlyMessage } from "@/modules/accounting/core";
 import {
   createChangeOrder,
@@ -143,6 +145,26 @@ function toResult(err: unknown): { error: string } {
         return { error: `The chart of accounts is missing something: ${err.message}.` };
       case "NOT_LAST":
         return { error: "Only the latest issued application can be voided." };
+      case "ESTIMATE_REQUIRED":
+        return {
+          error: `Give every job a budget or an estimate before posting: ${err.message}.`,
+        };
+      case "BILLED_NO_VALUE":
+        return {
+          error: `A job with billings needs a fixed contract value to measure against: ${err.message}.`,
+        };
+      case "NOT_FORWARD":
+        return {
+          error: `A period must come after the latest posted one, ${err.message}. Unpost that one first.`,
+        };
+      case "NOTHING_TO_POST":
+        return {
+          error: "Billings equal earned revenue on every job, so there is nothing to post for this period.",
+        };
+      case "NOT_LATEST_PERIOD":
+        return {
+          error: `Only the latest posted period can be unposted, and that is ${err.message}.`,
+        };
     }
   }
   /**
@@ -1381,6 +1403,148 @@ export async function setPunchDoneAction(input: unknown) {
     );
     revalidatePath(`${BASE}/${parsed.data.projectId}`);
     revalidatePath("/dashboard/m/work");
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// ------------------------------------------------------------------------ wip
+
+const wipPeriodSchema = z.object({
+  entityId: z.string().uuid(),
+  periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+
+/**
+ * The one thing a person types on a WIP schedule: what a job is now expected
+ * to cost in total. Blank puts the revised budget back. Owner-only in the
+ * op, because a re-estimate moves earned revenue.
+ */
+export async function saveWipEstimateAction(input: {
+  entityId: string;
+  periodEnd: string;
+  projectId: string;
+  estimate: string;
+  notes?: string;
+}): Promise<{ ok: true } | { error: string }> {
+  const parsed = wipPeriodSchema
+    .extend({
+      projectId: z.string().uuid(),
+      estimate: z.string().trim().max(24),
+      notes: z.string().trim().max(500).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  let estimateCents: number | null = null;
+  if (parsed.data.estimate !== "") {
+    estimateCents = parseMoneyToCents(parsed.data.estimate.replace(/,/g, ""));
+    if (estimateCents === null || estimateCents < 0) {
+      return { error: "An estimate must be an amount, like 1300000 or 1,300,000.00." };
+    }
+  }
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const line = await saveWipEstimate(tx, ctx, {
+          entityId: parsed.data.entityId,
+          periodEnd: parsed.data.periodEnd,
+          projectId: parsed.data.projectId,
+          estimateCents,
+          notes: parsed.data.notes,
+        });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "wip.estimated",
+          targetType: "wip_line",
+          targetId: line.id,
+          // Identifiers only: which job and which period, never the figure.
+          meta: { projectId: line.projectId, periodEnd: parsed.data.periodEnd },
+        });
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/wip`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** Post the period: freeze the schedule and post the adjustment and its reversal. */
+export async function postWipAction(input: {
+  entityId: string;
+  periodEnd: string;
+  version?: number;
+}): Promise<{ ok: true; entryId: string } | { error: string }> {
+  const parsed = wipPeriodSchema
+    .extend({ version: z.number().int().positive().optional() })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+    const posted = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const result = await postWip(tx, ctx, parsed.data);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "wip.posted",
+          targetType: "wip_period",
+          targetId: result.period.id,
+          meta: {
+            entityId: parsed.data.entityId,
+            periodEnd: parsed.data.periodEnd,
+            entryId: result.entryId,
+            reversalEntryId: result.reversalEntryId,
+          },
+        });
+        return result;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/wip`);
+    revalidatePath("/dashboard/m/accounting");
+    return { ok: true as const, entryId: posted.entryId };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** Void both entries and put the period back to a draft. Latest period only. */
+export async function unpostWipAction(input: {
+  periodId: string;
+  version: number;
+}): Promise<{ ok: true } | { error: string }> {
+  const parsed = z
+    .object({ periodId: z.string().uuid(), version: z.number().int().positive() })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const period = await unpostWip(tx, ctx, parsed.data.periodId, {
+          version: parsed.data.version,
+        });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "wip.unposted",
+          targetType: "wip_period",
+          targetId: period.id,
+          meta: { entityId: period.entityId, periodEnd: period.periodEnd },
+        });
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/wip`);
+    revalidatePath("/dashboard/m/accounting");
     return { ok: true as const };
   } catch (err) {
     return toResult(err);

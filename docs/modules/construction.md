@@ -639,7 +639,7 @@ coverage ([security.md §4](../security.md)).
 | `commitments` / `commitment_lines` | What the company issues **outward**: POs and subcontracts. | Billing against a commitment is what `payables` matching already does for a bill. Contrast `contracts`, which is what it bills against. |
 | `change_orders` / `change_order_lines` | PCO → CO → approved, with its budget effect. | Belongs to a **contract**, not a project — a change order changes one agreement. An approved CO revises the budget; it does not edit the original. |
 | `pay_applications` / `sov_lines` **(SHIPPED as `job_sov_lines` / `job_pay_applications` / `job_pay_application_lines`, 2026-09-14)** | Schedule of values, percent complete, retainage held and released. | Per contract. The AIA G702/G703 shape, which is also a draw request with different words. An issued application IS an Accounting invoice (ADR 0058); its totals are frozen at issue. |
-| `wip_snapshots` | Percent complete, earned revenue, over/under billing, per period. | Computed, then posted as an ordinary journal entry. Per contract, summed per entity. See the basis-lens finding above. |
+| `wip_snapshots` **(SHIPPED as `job_wip_periods` / `job_wip_lines`, 2026-09-14)** | Percent complete, earned revenue, over/under billing, per period. | Computed, then posted as an ordinary journal entry — and reversed the next day (ADR 0059). **Per PROJECT, summed per entity**, not per contract: the budget and the cost are the project's, so the percent is too; a project's contracts sum into its value. See the basis-lens finding above. |
 
 ## Key files & seams
 
@@ -688,7 +688,9 @@ for them rather than inventing a sixth primitive.
   to prevent, one level down. The same goes for `contracts.kind`: a pack reads
   the billing method, never the kind.
 - **Percent complete is not a basis lens.** See the build log. A lens may not
-  invent an entry, and over/under billing is an invented entry.
+  invent an entry, and over/under billing is an invented entry. Shipped that
+  way in jobs slice 6 (ADR 0059): the pack posts a real, self-reversing entry,
+  and the lens it registers only DROPS those entries under the cash basis.
 - **Vocabulary is tenant-wide and that is ENOUGH — the pilot settled it.** It says
   **client**, one word, commercial and custom alike, so label-per-delivery-method
   is machinery nobody needs and must not be built on speculation. What the answer
@@ -821,7 +823,7 @@ cost-plus-fee dropped out of slice 4 because the pilot bills fixed price monthly
 | 3 | ~~`budget` — planned cost per code, and the job cost report~~ **SHIPPED 2026-09-14** ([jobs.md](jobs.md)) | **Inserted here, ahead of change orders, and the reorder is the point.** An approved change order revises the contract value AND the budget, so building change orders first means building the revenue half and retrofitting the cost half. The budget had been folded into slice 0, pulled out, then deferred through slices 1 and 2; this is where it belonged. |
 | 4 | ~~`change-orders` — PCO → CO → approved, against a contract~~ **SHIPPED 2026-09-14** ([jobs.md](jobs.md)) | The original contract value must stop being editable before anything trusts it — and with a budget now in place, an approved change order can revise both halves at once, which is what `original + approved changes = revised` means. |
 | 5 | ~~`progress-billing` — SOV, pay applications, retainage, draws~~ **SHIPPED 2026-09-14** ([jobs.md](jobs.md), [ADR 0058](../decisions/0058-a-pay-application-is-an-ordinary-invoice.md)) | **Three methods, not six.** The pilot bills fixed price monthly, AIA pay application and a home draw schedule — all percent-or-milestone against a fixed value, and one model covers all three. An issued application is an ordinary Accounting invoice; retainage is a negative line to the receivable the profile seeds, and lowering the rate releases it. Cost-plus-fee, GMAX and T&M are market requirements for later; retainage held FROM subcontractors and the AIA printout are open items. |
-| 6 | `wip` — percent complete, earned revenue, over/under billing | What the bank and the surety ask for, and the credibility slice. |
+| 6 | ~~`wip` — percent complete, earned revenue, over/under billing~~ **SHIPPED 2026-09-14** ([jobs.md](jobs.md), [ADR 0059](../decisions/0059-work-in-progress-is-a-snapshot-and-a-self-reversing-entry.md)) | What the bank and the surety ask for, and the credibility slice. Built after 7, at the founder's choice. Cost-to-cost with the re-estimated total cost as the one input; a snapshot per company per period end; the adjustment posted per job and reversed the next day, so the books between period ends carry billings and the ledger's own read of them needs no filter. A job that cannot be measured stops the period by name. |
 | 7 | ~~`field` — daily log, photos, manpower, punch list, via `tell-sources`~~ **SHIPPED 2026-09-14** ([jobs.md](jobs.md)) | The first slice somebody on a site touches. One report per job per day (upserted, so a sentence appends), a headcount by trade or subcontractor that is NOT a time entry, photos through Documents' attachments, the punch list as Work items linked to the project, and the pack's first tell source — *"poured the garage slab at Oak Row, four guys, six hours"* is one sentence. |
 | 8 | `selections` — option catalogue, allowances, selection deadlines | Covers the production option book and the custom selection process with one mechanism. |
 | 9 | `drawings` — sheet sets, versions, markups, measurements | The Documents industry layer already on the roadmap. |

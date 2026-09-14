@@ -101,7 +101,17 @@ export class JobsError extends Error {
       /** The chart lacks an account billing needs; the message names it. */
       | "ACCOUNT_MISSING"
       /** Only the latest issued application on a contract can be voided. */
-      | "NOT_LAST",
+      | "NOT_LAST"
+      /** A job on the schedule has no budget and no estimate; the message names the jobs. */
+      | "ESTIMATE_REQUIRED"
+      /** A job with billings but no fixed contract value cannot be measured; the message names it. */
+      | "BILLED_NO_VALUE"
+      /** A WIP period must come after the company's latest posted one; the message says which. */
+      | "NOT_FORWARD"
+      /** Billings equal earned revenue on every job: there is no entry to post. */
+      | "NOTHING_TO_POST"
+      /** Only the latest posted WIP period of a company can be unposted. */
+      | "NOT_LATEST_PERIOD",
     message: string,
   ) {
     super(message);
@@ -1289,40 +1299,124 @@ export async function committedTotals(
  * Expense accounts only: a project's costs, not its billings. `netCents` is
  * debit-positive for an expense, which is the sign a builder expects.
  */
-export async function actualByProject(
+/**
+ * NET LEDGER MOVEMENT PER PROJECT on one kind of account, as of a date: the
+ * one query `actualByProject` and `billedByProject` share.
+ *
+ * `memberId` is the dimension member, not the project. The pack owns the
+ * mapping back to its own row, because `dimension_members.pack_entity_id` is
+ * the only place the two are tied together.
+ */
+async function netByProject(
   tx: Tx,
   tenantId: string,
   scope: EntityScope,
+  accountType: "expense" | "income",
+  asOf?: string,
 ): Promise<Map<string, number>> {
-  const expenseAccounts = await tx
+  const accounts = await tx
     .select({ id: schema.accounts.id })
     .from(schema.accounts)
     .where(
-      and(eq(schema.accounts.tenantId, tenantId), eq(schema.accounts.accountType, "expense")),
+      and(eq(schema.accounts.tenantId, tenantId), eq(schema.accounts.accountType, accountType)),
     );
-  if (expenseAccounts.length === 0) return new Map();
+  if (accounts.length === 0) return new Map();
 
   const rows = await getBalances(tx, tenantId, {
     scope,
-    accountIds: expenseAccounts.map((a) => a.id),
+    asOf,
+    accountIds: accounts.map((a) => a.id),
     groupByDimensionType: PROJECT_DIMENSION,
   });
 
-  /**
-   * `memberId` is the dimension member, not the project. The pack owns the
-   * mapping back to its own row, because `dimension_members.pack_entity_id` is
-   * the only place the two are tied together.
-   */
   const members = await listDimensionMembers(tx, tenantId, PROJECT_DIMENSION);
   const projectOf = new Map(members.map((m) => [m.id, m.packEntityId]));
 
   const out = new Map<string, number>();
   for (const row of rows) {
-    if (!row.memberId) continue; // untagged cost belongs to no job
+    if (!row.memberId) continue; // untagged money belongs to no job
     const projectId = projectOf.get(row.memberId);
     if (!projectId) continue;
     out.set(projectId, (out.get(projectId) ?? 0) + row.netCents);
   }
+  return out;
+}
+
+/** What each project has COST: every expense line tagged with it, as of a date when one is given. */
+export async function actualByProject(
+  tx: Tx,
+  tenantId: string,
+  scope: EntityScope,
+  asOf?: string,
+): Promise<Map<string, number>> {
+  return netByProject(tx, tenantId, scope, "expense", asOf);
+}
+
+/**
+ * GROSS BILLINGS PER PROJECT: every income line tagged with the job — a pay
+ * application's revenue line, a plain invoice somebody wrote against the job,
+ * a credit memo — as of a date. Read from the ledger rather than from this
+ * pack's own applications so a job billed any other way still counts, and as
+ * of the period end so an invoice dated after it stays out.
+ *
+ * THE WIP ADJUSTMENT'S OWN ENTRIES STAY OUT BY DATE, NOT BY FILTER (ADR 0059):
+ * each period's adjustment is dated its period end and reversed the next
+ * day, so a read as of any LATER period end sees both and nets to nothing —
+ * and a posted period's own figures are frozen on its lines rather than
+ * re-read. Income is a credit, so the net is negated into a positive figure.
+ */
+export async function billedByProject(
+  tx: Tx,
+  tenantId: string,
+  scope: EntityScope,
+  asOf?: string,
+): Promise<Map<string, number>> {
+  const net = await netByProject(tx, tenantId, scope, "income", asOf);
+  return new Map([...net].map(([projectId, cents]) => [projectId, -cents]));
+}
+
+/**
+ * THE REVISED BUDGET PER PROJECT: original lines plus approved change-order
+ * lines, the same two sums `jobCostRows` makes per code, added up per job.
+ * What a WIP schedule uses as the estimated total cost until somebody
+ * re-estimates.
+ */
+export async function budgetByProject(tx: Tx, tenantId: string): Promise<Map<string, number>> {
+  const [original, changes] = await Promise.all([
+    tx
+      .select({
+        projectId: schema.jobBudgetLines.projectId,
+        cents: sql<number>`coalesce(sum(${schema.jobBudgetLines.originalCents}), 0)`.mapWith(Number),
+      })
+      .from(schema.jobBudgetLines)
+      .where(eq(schema.jobBudgetLines.tenantId, tenantId))
+      .groupBy(schema.jobBudgetLines.projectId),
+    tx
+      .select({
+        projectId: schema.jobContracts.projectId,
+        cents: sql<number>`coalesce(sum(${schema.jobChangeOrderLines.amountCents}), 0)`.mapWith(Number),
+      })
+      .from(schema.jobChangeOrderLines)
+      .innerJoin(
+        schema.jobChangeOrders,
+        and(
+          eq(schema.jobChangeOrders.tenantId, schema.jobChangeOrderLines.tenantId),
+          eq(schema.jobChangeOrders.id, schema.jobChangeOrderLines.changeOrderId),
+        ),
+      )
+      .innerJoin(
+        schema.jobContracts,
+        and(
+          eq(schema.jobContracts.tenantId, schema.jobChangeOrders.tenantId),
+          eq(schema.jobContracts.id, schema.jobChangeOrders.contractId),
+        ),
+      )
+      .where(and(eq(schema.jobChangeOrderLines.tenantId, tenantId), countedChange()))
+      .groupBy(schema.jobContracts.projectId),
+  ]);
+  const out = new Map<string, number>();
+  for (const r of original) out.set(r.projectId, r.cents);
+  for (const r of changes) out.set(r.projectId, (out.get(r.projectId) ?? 0) + r.cents);
   return out;
 }
 
@@ -2439,7 +2533,7 @@ export async function deletePayApplication(tx: Tx, ctx: JobsCtx, id: string): Pr
 }
 
 /** An active account by code, or null. The pack reads the chart; it never writes it. */
-async function accountByCode(tx: Tx, tenantId: string, codes: readonly string[]): Promise<string | null> {
+export async function accountByCode(tx: Tx, tenantId: string, codes: readonly string[]): Promise<string | null> {
   for (const code of codes) {
     const row = await tx.query.accounts.findFirst({
       where: and(

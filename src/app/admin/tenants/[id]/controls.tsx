@@ -136,8 +136,8 @@ export function ProfileInstaller({
     name: string;
     description: string;
     packs: string[];
-    /** What the profile contributes on install, counted (slice 7a). */
-    seed: { accounts: number; folders: number };
+    /** What the profile contributes on install, counted (slice 7a); a line per pack seed (ADR 0057). */
+    seed: { accounts: number; folders: number; packs: string[] };
   }[];
 }) {
   const [pending, startTransition] = useTransition();
@@ -171,7 +171,9 @@ export function ProfileInstaller({
                 sees. */}
             Switches on: {chosen.packs.join(", ")}.
           </p>
-          {(chosen.seed.accounts > 0 || chosen.seed.folders > 0) && (
+          {(chosen.seed.accounts > 0 ||
+            chosen.seed.folders > 0 ||
+            chosen.seed.packs.length > 0) && (
             <p>
               {/* The seed, named before the button too: a chart of accounts
                   landing in a client's books is a change they will notice. */}
@@ -181,6 +183,7 @@ export function ProfileInstaller({
                   `${chosen.seed.accounts} account${chosen.seed.accounts === 1 ? "" : "s"} to the chart`,
                 chosen.seed.folders > 0 &&
                   `${chosen.seed.folders} folder${chosen.seed.folders === 1 ? "" : "s"}`,
+                ...chosen.seed.packs,
               ]
                 .filter(Boolean)
                 .join(" and ")}
@@ -215,6 +218,7 @@ export function ProfileInstaller({
             const added = [
               seeded && seeded.accountsCreated > 0 && `${seeded.accountsCreated} accounts added`,
               seeded && seeded.foldersCreated > 0 && `${seeded.foldersCreated} folders added`,
+              ...(seeded?.packs.map((p) => `${p.description} added`) ?? []),
             ].filter(Boolean);
             const waiting =
               seeded && seeded.waitingOn.length > 0

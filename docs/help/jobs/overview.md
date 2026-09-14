@@ -252,7 +252,7 @@ You can also renumber a code in place, which is what moving from your own scheme
 
 {button:Cost codes|outline} on the {{project|plural}} page. Owners only to change; anyone can read.
 
-**Nothing here suggests a list to you**, and that is on purpose — some businesses use CSI MasterFormat, some use NAHB's chart, and plenty use codes they made up years ago. Yours are whichever you already put on a job cost report.
+**If your industry profile brought starter lists, they are already here** — a construction business starts with `Residential phases` (a home's phases in build order, the default) and `CSI divisions` (the commercial convention, at division level). They are yours from that moment: rename, renumber, retire what you do not use, or make the other one the default. Without a profile nothing suggests a list, and that is on purpose — some businesses use CSI MasterFormat, some use NAHB's chart, and plenty use codes they made up years ago. Yours are whichever you already put on a job cost report.
 
 - {button:New list|primary} — give it a name. **The first list you add becomes the default**, so jobs use it without being asked.
 - {button:Make default|ghost} — on any list that is not already the default. Only one list can be the default at a time; making a new one takes it off the old one for you.

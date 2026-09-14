@@ -1,6 +1,7 @@
 import type { IndustryProfile } from "./types";
 import { homesteadFarm } from "./homestead-farm";
 import { agency } from "./agency";
+import { construction } from "./construction";
 
 /**
  * Layer 2b registry: slug → manifest.
@@ -14,6 +15,7 @@ import { agency } from "./agency";
 export const industryRegistry: Record<string, IndustryProfile> = {
   "homestead-farm": homesteadFarm,
   agency,
+  construction,
 };
 
 /** The value `tenants.industry` carries when no profile has been installed. */

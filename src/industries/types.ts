@@ -57,6 +57,16 @@ export interface IndustryProfile {
     accounts?: CoaTemplate;
     /** Root folders, beside the platform's starter cabinet, in this order. */
     folders?: string[];
+    /**
+     * Seeds into PACK tables, keyed by pack slug — ADR 0057. The value is
+     * `unknown` here on purpose: this Layer 0 type must not know what a pack's
+     * seed looks like, the same reason `packConfig` is untyped. The pack owns
+     * the shape and registers the applier in `src/packs/seeds.ts`; a profile
+     * imports the pack's own type for its constant so the editor still
+     * checks it. Applied when that pack is on, and again when it is switched
+     * on later, like the two above.
+     */
+    packs?: Record<string, unknown>;
   };
   /**
    * Config handed to packs on install. A pack reads ITS OWN KEY and never the

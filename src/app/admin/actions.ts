@@ -220,9 +220,11 @@ export async function toggleModule(input: z.infer<typeof toggleModuleSchema>) {
   // chart or folders waiting, and this is the moment they can land. After the
   // row is enabled, so the base provisioning above stays the invariant it is;
   // a failure here is reported, not fatal — the module is on, and re-running
-  // the install adds what is missing.
+  // the install adds what is missing. Since ADR 0057 a PACK can carry a seed
+  // too, so this asks for every module switched on rather than naming two;
+  // `applyProfileSeed` does nothing for a module the profile seeds nothing into.
   let warning: string | undefined;
-  if (enabled && (moduleId === "accounting" || moduleId === "documents")) {
+  if (enabled) {
     const tenant = await withSystem((tx) =>
       tx.query.tenants.findFirst({
         where: eq(schema.tenants.id, tenantId),
@@ -232,8 +234,12 @@ export async function toggleModule(input: z.infer<typeof toggleModuleSchema>) {
     const profile = tenant ? getIndustryProfile(tenant.industry) : null;
     if (profile?.seed) {
       try {
-        const seeded = await applyProfileSeed(tenantId, profile, [moduleId]);
-        if (seeded.accountsCreated > 0 || seeded.foldersCreated > 0) {
+        const seeded = await applyProfileSeed(tenantId, profile, [moduleId], userId);
+        if (
+          seeded.accountsCreated > 0 ||
+          seeded.foldersCreated > 0 ||
+          seeded.packs.length > 0
+        ) {
           await logAudit({
             action: "profile.seeded",
             tenantId,
@@ -244,6 +250,7 @@ export async function toggleModule(input: z.infer<typeof toggleModuleSchema>) {
               module: moduleId,
               accountsCreated: seeded.accountsCreated,
               foldersCreated: seeded.foldersCreated,
+              packs: seeded.packs.map((p) => ({ slug: p.slug, created: p.created })),
             },
           });
         }
@@ -367,7 +374,7 @@ export async function installProfile(
   // withSystem, which is why this cannot share the transaction above.
   let seeded: SeedReport;
   try {
-    seeded = await applyProfileSeed(tenantId, profile, enabledAfter);
+    seeded = await applyProfileSeed(tenantId, profile, enabledAfter, userId);
   } catch (err) {
     console.error("profile seed failed", err);
     return {
@@ -386,6 +393,7 @@ export async function installProfile(
       switchedOn,
       accountsCreated: seeded.accountsCreated,
       foldersCreated: seeded.foldersCreated,
+      seededPacks: seeded.packs.map((p) => ({ slug: p.slug, created: p.created })),
       waitingOn: seeded.waitingOn,
     },
   });

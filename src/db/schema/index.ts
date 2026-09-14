@@ -57,3 +57,4 @@ export * from "./production";
 export * from "./retail";
 export * from "./professional-services";
 export * from "./jobs";
+export * from "./jobs-contracts";

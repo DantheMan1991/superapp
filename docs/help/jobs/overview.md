@@ -45,6 +45,46 @@ Before you have added anything you see `No {{project|plural|lower}} yet`. Staff 
 
 `Cost codes` below it lists the codes this job is charged against, or a link to add some.
 
+## Contracts
+
+A {{project|lower}} can have **several agreements over its life**, and that is the normal case rather than the exception. A custom home often runs a design agreement, then a drawings agreement, then the build — three contracts, one job, and **the first two may be the only two that ever happen** if the client sees the number and stops there.
+
+They are listed on the {{project|lower}}'s own page, numbered in the order you agreed them. Owners only to add.
+
+### Adding one
+
+{button:Add contract|primary} on the {{project|lower}}'s page.
+
+1. **`Kind`** — required. What sort of agreement it is. If your industry pack is set up you pick from a list; otherwise you type it, lowercase with underscores: `concept_design`, `new_home`, `aia`.
+2. **`Name`** — optional, for when the kind alone will not tell two apart.
+3. **`Who holds it`** — `We hold the contract` when the job is yours, or `We are a subcontractor` when you are working under somebody else's general contractor. The next field's label changes to match.
+4. **`{{customer}}`** / **`General contractor`** — who the agreement is with, picked from the people in your books. `Nobody yet` is fine for a proposal written before they are on file.
+5. **`Value`** — what was agreed. Type it however you like: `182,500`, `$182500` and `182500.00` all mean the same thing. Leave it blank for cost-plus work that has no fixed number until it is done.
+6. **`Signed`** — optional.
+7. **`Billed by`** — how this one gets invoiced. Recorded now and used when billing is built; nothing bills yet.
+8. **`Status`** — see below.
+9. **`Notes`**.
+
+{button:Add contract|primary} stays greyed until the kind is filled in. Every field resets afterwards, so adding a second agreement does not quietly inherit the first one's status.
+
+### Status, and what counts as money
+
+| Status | Counts toward the job's value |
+| --- | :-: |
+| `Proposed` | |
+| `Signed` | ● |
+| `Complete` | ● |
+| `Declined` | |
+| `Cancelled` | |
+
+**Only signed and complete agreements are added up.** A proposal the client has not accepted is not money, and a job that counted it would make the business look bigger than it is. Proposals still show in the list, and the line above it says how many are outstanding: *"Worth $1,854,500.00 across 2 signed agreements, with 1 still proposed."*
+
+`Declined` is a real ending, not a failure to record something — it is the client who read the number and walked.
+
+### On the {{project|plural}} list
+
+The `Value` column is the same total: signed and complete only. A job with nothing signed yet shows `—` rather than `0.00`, because zero would read as "worth nothing" when the truth is "not agreed yet".
+
 ## Cost codes
 
 {button:Cost codes|outline} on the {{project|plural}} page. Owners only to change; anyone can read.
@@ -61,9 +101,9 @@ New codes are added to the end of the list, not the top, so a list you arranged 
 
 Worth knowing so you are not looking for it:
 
-- **No budget.** A job collects what it cost; nothing yet compares that to what it was meant to cost.
-- **No contracts and no billing.** Those come next.
-- **A {{project|lower}} cannot be edited once created**, and codes cannot be renamed or removed from the screen. Ask us if you need one changed.
+- **No budget.** A job now has a value and collects what it cost; nothing yet compares the two.
+- **No billing.** Every contract records how it should be billed, and nothing bills yet.
+- **Nothing can be edited once created** — not a {{project|lower}}, not a contract, not a cost code. A contract that moves from proposed to signed has to be added again rather than changed. Ask us if you need one corrected; editing is the next thing being built.
 
 ## Who can do what
 

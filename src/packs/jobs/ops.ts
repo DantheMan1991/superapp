@@ -2,7 +2,12 @@ import "server-only";
 import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
-import type { JobCostCode, JobCostCodeSet, JobProject } from "@/db/schema";
+import type {
+  JobContract,
+  JobCostCode,
+  JobCostCodeSet,
+  JobProject,
+} from "@/db/schema";
 import {
   archiveDimensionMember,
   listDimensionMembers,
@@ -11,6 +16,9 @@ import {
 import {
   DELIVERY_METHOD_FORMAT,
   PROJECT_DIMENSION,
+  isBillingMethod,
+  isContractRole,
+  isContractStatus,
   isProjectStatus,
 } from "./vocabulary";
 
@@ -32,6 +40,10 @@ export class JobsError extends Error {
       | "NOT_FOUND"
       | "FORBIDDEN"
       | "INVALID_STATUS"
+      | "INVALID_KIND"
+      | "INVALID_ROLE"
+      | "INVALID_BILLING_METHOD"
+      | "INVALID_VALUE"
       | "INVALID_DELIVERY_METHOD"
       | "NUMBER_TAKEN"
       | "NAME_TAKEN"
@@ -519,4 +531,211 @@ export async function listProjectRows(
     enterpriseName: r.enterpriseName,
     costCodeSetName: r.costCodeSetName,
   }));
+}
+
+// ----------------------------------------------------------------- contracts
+
+export interface ContractInput {
+  projectId: string;
+  kind: string;
+  name?: string;
+  counterpartyPartyId?: string | null;
+  role?: string;
+  billingMethod?: string;
+  valueCents?: number | null;
+  status?: string;
+  signedOn?: string | null;
+  notes?: string;
+}
+
+export async function listContracts(
+  tx: Tx,
+  tenantId: string,
+  projectId: string,
+): Promise<JobContract[]> {
+  return tx
+    .select()
+    .from(schema.jobContracts)
+    .where(
+      and(
+        eq(schema.jobContracts.tenantId, tenantId),
+        eq(schema.jobContracts.projectId, projectId),
+      ),
+    )
+    .orderBy(asc(schema.jobContracts.sequence), asc(schema.jobContracts.createdAt));
+}
+
+/**
+ * What each project is worth, and how many agreements it took.
+ *
+ * **ONLY SIGNED AND COMPLETE CONTRACTS COUNT.** A concept the client has not
+ * signed is not money; adding it in would report a business as bigger than it
+ * is, which is the number an owner takes to a bank. `proposed`, `declined` and
+ * `cancelled` are simply not summed.
+ *
+ * **A COUNT OF OUTSTANDING PROPOSALS IS DELIBERATELY NOT HERE.** It was, briefly,
+ * and nothing read it: the job list shows a value, and the project page counts
+ * its own contracts in memory. A field nothing reads is worse than an honest
+ * absence — the standard this pack set one slice ago by refusing to add
+ * `PackDefinition.dimensionTypes`. Add it the day a screen wants it.
+ *
+ * ONE STATEMENT FOR THE WHOLE LIST, grouped in the database rather than a query
+ * per project — the reason `listProjectRows` reads the way it does.
+ */
+export interface ProjectValue {
+  projectId: string;
+  valueCents: number;
+  signedCount: number;
+}
+
+export async function projectValues(
+  tx: Tx,
+  tenantId: string,
+): Promise<Map<string, ProjectValue>> {
+  const rows = await tx
+    .select({
+      projectId: schema.jobContracts.projectId,
+      valueCents: sql<number>`coalesce(sum(${schema.jobContracts.valueCents}) filter (
+        where ${schema.jobContracts.status} in ('signed', 'complete')
+      ), 0)`.mapWith(Number),
+      signedCount: sql<number>`count(*) filter (
+        where ${schema.jobContracts.status} in ('signed', 'complete')
+      )`.mapWith(Number),
+    })
+    .from(schema.jobContracts)
+    .where(eq(schema.jobContracts.tenantId, tenantId))
+    .groupBy(schema.jobContracts.projectId);
+
+  return new Map(rows.map((r) => [r.projectId, r]));
+}
+
+export async function createContract(
+  tx: Tx,
+  ctx: JobsCtx,
+  input: ContractInput,
+): Promise<JobContract> {
+  requireWrite(ctx, "owner");
+  validateContractShape(input);
+
+  /**
+   * NEXT IN THE LADDER. A new agreement goes after the ones already on the
+   * project, because Concept Design → Drawings → New Home is the order they were
+   * agreed and the order somebody reads them in. Dates cannot do this job: a
+   * drawings contract signed late is still the second step.
+   */
+  const sequence =
+    (
+      await tx
+        .select({
+          max: sql<number>`coalesce(max(${schema.jobContracts.sequence}), -1)`.mapWith(
+            Number,
+          ),
+        })
+        .from(schema.jobContracts)
+        .where(
+          and(
+            eq(schema.jobContracts.tenantId, ctx.tenantId),
+            eq(schema.jobContracts.projectId, input.projectId),
+          ),
+        )
+    )[0].max + 1;
+
+  const rows = await tx
+    .insert(schema.jobContracts)
+    .values({
+      tenantId: ctx.tenantId,
+      projectId: input.projectId,
+      kind: input.kind.trim(),
+      name: input.name?.trim() ?? "",
+      counterpartyPartyId: input.counterpartyPartyId ?? null,
+      role: input.role ?? "prime",
+      billingMethod: input.billingMethod ?? "fixed_price",
+      valueCents: input.valueCents ?? null,
+      status: input.status ?? "proposed",
+      sequence,
+      signedOn: input.signedOn ?? null,
+      notes: input.notes?.trim() ?? "",
+      createdByClerkUserId: ctx.userId,
+    })
+    .returning();
+  return rows[0];
+}
+
+function validateContractShape(input: {
+  kind?: string;
+  role?: string;
+  status?: string;
+  billingMethod?: string;
+  valueCents?: number | null;
+}): void {
+  if (input.kind !== undefined && !DELIVERY_METHOD_FORMAT.test(input.kind.trim())) {
+    throw new JobsError("INVALID_KIND", `invalid contract kind: ${input.kind}`);
+  }
+  if (input.role !== undefined && !isContractRole(input.role)) {
+    throw new JobsError("INVALID_ROLE", `invalid role: ${input.role}`);
+  }
+  if (input.status !== undefined && !isContractStatus(input.status)) {
+    throw new JobsError("INVALID_STATUS", `invalid status: ${input.status}`);
+  }
+  if (input.billingMethod !== undefined && !isBillingMethod(input.billingMethod)) {
+    throw new JobsError(
+      "INVALID_BILLING_METHOD",
+      `invalid billing method: ${input.billingMethod}`,
+    );
+  }
+  if (
+    input.valueCents !== undefined &&
+    input.valueCents !== null &&
+    input.valueCents < 0
+  ) {
+    throw new JobsError("INVALID_VALUE", "a contract value cannot be negative");
+  }
+}
+
+export async function updateContract(
+  tx: Tx,
+  ctx: JobsCtx,
+  id: string,
+  input: Partial<ContractInput> & { version?: number },
+): Promise<JobContract> {
+  requireWrite(ctx, "owner");
+  validateContractShape(input);
+  const existing = await tx
+    .select()
+    .from(schema.jobContracts)
+    .where(
+      and(eq(schema.jobContracts.tenantId, ctx.tenantId), eq(schema.jobContracts.id, id)),
+    )
+    .limit(1);
+  if (existing.length === 0) {
+    throw new JobsError("NOT_FOUND", `contract ${id} not found`);
+  }
+  if (input.version !== undefined && input.version !== existing[0].version) {
+    throw new JobsError("STALE_VERSION", "contract changed since loaded");
+  }
+
+  const patch: Record<string, unknown> = {
+    updatedAt: new Date(),
+    version: existing[0].version + 1,
+  };
+  if (input.kind !== undefined) patch.kind = input.kind.trim();
+  if (input.name !== undefined) patch.name = input.name.trim();
+  if (input.counterpartyPartyId !== undefined) {
+    patch.counterpartyPartyId = input.counterpartyPartyId;
+  }
+  if (input.role !== undefined) patch.role = input.role;
+  if (input.billingMethod !== undefined) patch.billingMethod = input.billingMethod;
+  if (input.valueCents !== undefined) patch.valueCents = input.valueCents;
+  if (input.status !== undefined) patch.status = input.status;
+  if (input.signedOn !== undefined) patch.signedOn = input.signedOn;
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+
+  const rows = await tx
+    .update(schema.jobContracts)
+    .set(patch)
+    .where(
+      and(eq(schema.jobContracts.tenantId, ctx.tenantId), eq(schema.jobContracts.id, id)),
+    )
+    .returning();
+  return rows[0];
 }

@@ -46,6 +46,7 @@ import {
   resolveTaxRate,
   type TaxRateLike,
 } from "@/modules/accounting/invoicing/tax";
+import { usePartyWords } from "@/components/app/label-provider";
 
 export interface BuilderCustomer {
   id: string;
@@ -178,6 +179,7 @@ export function InvoiceBuilder({
   defaultTaxRateId?: string | null;
 }) {
   const router = useRouter();
+  const words = usePartyWords();
   const [pending, startTransition] = useTransition();
   const defaultAccount = incomeAccounts[0]?.id ?? "";
   // Type-ahead pickers: a customer list and a chart of accounts are the lists
@@ -358,7 +360,7 @@ export function InvoiceBuilder({
         resolvedCustomerId = created.data!.customerId;
       }
       if (!resolvedCustomerId) {
-        toast.error("Pick or create a customer.");
+        toast.error(`Pick or create a ${words.customer.toLowerCase()}.`);
         return;
       }
       const payload = {
@@ -414,20 +416,20 @@ export function InvoiceBuilder({
 
         <div className="grid gap-3 sm:grid-cols-4">
           <div className="space-y-1.5 sm:col-span-2">
-            <Label>Customer</Label>
+            <Label>{words.customer}</Label>
             <Combobox
               options={customerOptions}
               value={customerId || undefined}
               onValueChange={applyCustomer}
-              placeholder="Select customer"
+              placeholder={`Select ${words.customer.toLowerCase()}`}
               searchPlaceholder="Type a name…"
-              emptyText="No customer matches."
-              aria-label="Customer"
+              emptyText={`No ${words.customer.toLowerCase()} matches.`}
+              aria-label={words.customer}
             />
             {!invoice && (
               <Input
                 className="h-8"
-                placeholder="…or type a new customer name"
+                placeholder={`…or type a new ${words.customer.toLowerCase()} name`}
                 value={newCustomerName}
                 onChange={(e) => {
                   setNewCustomerName(e.target.value);

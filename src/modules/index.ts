@@ -26,6 +26,54 @@ export const moduleRegistry: Record<string, ModuleDefinition> = {
     slug: "accounting",
     name: "Accounting",
     icon: "calculator",
+    /**
+     * **THE FIRST VOCABULARY A CORE MODULE HAS EVER DECLARED.**
+     *
+     * Every one of the fifteen keys in the registry before this came from a
+     * PACK, which left the two words an industry most reliably renames — the
+     * people you bill and the people you buy from — as hardcoded English with
+     * no way to change them. `packs-and-profiles.md` had called that "the
+     * bigger gap" since 2026-08-14; the construction pilot is what made it
+     * urgent, because that business says **client** and the invoice said
+     * Customer.
+     *
+     * ACCOUNTING OWNS THEM, not CRM, even though both render them. A key may
+     * have exactly one owner (`collectLabelDefinitions` reports two as a
+     * conflict rather than merging), and accounting is where the Customers and
+     * Vendors pages live, where an invoice picks one and a bill the other. CRM
+     * reads these keys the way `livestock` reads `land`'s `zone` — a feature
+     * displaying another's word is the normal case, not a violation.
+     *
+     * NOT `client`: that key already belongs to `professional-services`, and a
+     * second claim on it would be a registry conflict. A profile renames
+     * `customer` TO "Client", which is the mechanism working as designed rather
+     * than a workaround.
+     *
+     * ONE KEY PER WORD, with its plural on the definition. The plural of an
+     * UNRENAMED word is declared (a phrase like "Lines of business" cannot take
+     * an "s"); a tenant's own word takes an "s", which is the rule `pluralOf`
+     * holds for the whole product. An earlier draft of this slice gave the
+     * plurals keys of their own so an irregular one could be overridden — it put
+     * four rows in the admin editor where two belong, and disagreed with the
+     * rule the tenant guides already used, so a guide could print a different
+     * plural from the screen it describes.
+     */
+    labels: [
+      {
+        key: "customer",
+        fallback: "Customer",
+        plural: "Customers",
+        describes:
+          "Somebody you invoice. A builder or a consultancy says client, a shop says customer, a surgery says patient — and whichever word you choose appears on invoices, statements, reminders and the navigation.",
+      },
+      {
+        key: "vendor",
+        fallback: "Vendor",
+        plural: "Vendors",
+        describes:
+          "Somebody you buy from and owe money to. Trades usually say supplier; whichever word you choose appears on bills, receipts and the purchases screens.",
+      },
+    ],
     Component: AccountingModule,
   },
   crm: {

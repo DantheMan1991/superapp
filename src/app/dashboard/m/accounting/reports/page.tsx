@@ -11,6 +11,8 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
+import { labelsForTenant } from "@/lib/packs/tenant-context";
+import { partyWords, type PartyWords } from "@/lib/parties/vocabulary";
 
 export const dynamic = "force-dynamic";
 
@@ -54,8 +56,10 @@ const REPORTS = [
     href: "/dashboard/m/accounting/reports/ap-aging",
     icon: Hourglass,
     title: "A/P Aging",
-    description:
-      "What the business owes vendors — open bill balances bucketed by days past due.",
+    // The one description naming a party. A function of the tenant's word rather
+    // than a string, so this list can stay a module constant.
+    description: (words: PartyWords) =>
+      `What the business owes ${words.vendors.toLowerCase()} — open bill balances bucketed by days past due.`,
   },
   {
     href: "/dashboard/m/accounting/reports/sales-tax",
@@ -68,6 +72,7 @@ const REPORTS = [
 
 export default async function ReportsHubPage() {
   const ctx = await requireTenant();
+  const words = partyWords(labelsForTenant(ctx.tenant));
   await requireModuleEnabled(ctx.tenant.id, "accounting");
 
   return (
@@ -94,7 +99,9 @@ export default async function ReportsHubPage() {
               {r.title}
             </p>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              {r.description}
+              {typeof r.description === "function"
+                ? r.description(words)
+                : r.description}
             </p>
           </Link>
         ))}

@@ -48,6 +48,8 @@ import {
 import { entityScopeCondition } from "@/modules/accounting/core";
 import { reportEntityOr404 } from "@/modules/accounting/lib/report-entity";
 import { PurchasesNav } from "../purchases-nav";
+import { labelsForTenant } from "@/lib/packs/tenant-context";
+import { partyWords } from "@/lib/parties/vocabulary";
 
 export const dynamic = "force-dynamic";
 
@@ -83,6 +85,7 @@ export default async function BillsPage({
   }>;
 }) {
   const ctx = await requireTenant();
+  const words = partyWords(labelsForTenant(ctx.tenant));
   await requireModuleEnabled(ctx.tenant.id, "accounting");
   const tenantId = ctx.tenant.id;
   const sp = await searchParams;
@@ -326,7 +329,9 @@ export default async function BillsPage({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <PurchasesNav />
         <div className="flex flex-wrap items-center gap-3">
-        <ListSearch placeholder="Search vendor, invoice # or memo" />
+        <ListSearch
+          placeholder={`Search ${words.vendor.toLowerCase()}, invoice # or memo`}
+        />
         <CompanyPicker
           entities={data.entityView.entities.map((e) => ({
             id: e.id,
@@ -379,7 +384,7 @@ export default async function BillsPage({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Vendor</TableHead>
+              <TableHead>{words.vendor}</TableHead>
               {showCompany && <TableHead>Company</TableHead>}
               <TableHead className="hidden sm:table-cell">Invoice #</TableHead>
               <TableHead>Bill date</TableHead>

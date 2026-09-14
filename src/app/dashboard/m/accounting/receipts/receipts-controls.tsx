@@ -72,6 +72,7 @@ import {
   formatCents,
   parseMoneyToCents,
 } from "@/modules/accounting/lib/money";
+import { usePartyWords } from "@/components/app/label-provider";
 
 export interface AccountOption {
   id: string;
@@ -637,6 +638,7 @@ export function CreateBillDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const router = useRouter();
+  const words = usePartyWords();
   const [pending, startTransition] = useTransition();
   const [candidates, setCandidates] = useState<Array<{ id: string; name: string }> | null>(null);
   const [vendorId, setVendorId] = useState("");
@@ -658,7 +660,7 @@ export function CreateBillDialog({
 
   function submit() {
     if (!vendorId && !newName.trim()) {
-      toast.error("Pick or name the vendor.");
+      toast.error(`Pick or name the ${words.vendor.toLowerCase()}.`);
       return;
     }
     startTransition(async () => {
@@ -718,7 +720,9 @@ export function CreateBillDialog({
                 }}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Match to an existing vendor" />
+                  <SelectValue
+                    placeholder={`Match to an existing ${words.vendor.toLowerCase()}`}
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   {candidates.map((c) => (
@@ -737,8 +741,8 @@ export function CreateBillDialog({
           <div className="space-y-1.5">
             <Label htmlFor={`nv-${row.id}`}>
               {candidates && candidates.length > 0
-                ? "…or create a new vendor"
-                : "New vendor name"}
+                ? `…or create a new ${words.vendor.toLowerCase()}`
+                : `New ${words.vendor.toLowerCase()} name`}
             </Label>
             <Input
               id={`nv-${row.id}`}
@@ -778,6 +782,7 @@ export function RecordExpenseDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const router = useRouter();
+  const words = usePartyWords();
   const [pending, startTransition] = useTransition();
   const [amount, setAmount] = useState(
     row.totalCents !== null ? formatCents(Math.abs(row.totalCents)).replace(/,/g, "") : "",
@@ -864,7 +869,7 @@ export function RecordExpenseDialog({
               id={`memo-${row.id}`}
               value={memo}
               onChange={(e) => setMemo(e.target.value)}
-              placeholder="Vendor / what it was"
+              placeholder={`${words.vendor} / what it was`}
             />
           </div>
           <div className="space-y-1.5">

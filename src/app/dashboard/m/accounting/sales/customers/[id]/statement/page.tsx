@@ -32,6 +32,8 @@ import {
 } from "@/modules/accounting/lib/money";
 import { SalesNav } from "../../../sales-nav";
 import { PrintStatementButton } from "./statement-controls";
+import { labelsForTenant } from "@/lib/packs/tenant-context";
+import { partyWords } from "@/lib/parties/vocabulary";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +54,7 @@ export default async function CustomerStatementPage({
   if (!z.string().uuid().safeParse(id).success) notFound();
   const sp = await searchParams;
   const ctx = await requireTenant();
+  const words = partyWords(labelsForTenant(ctx.tenant));
   await requireModuleEnabled(ctx.tenant.id, "accounting");
 
   const data = await withTenant(ctx.tenant.id, async (tx) => {
@@ -107,7 +110,7 @@ export default async function CustomerStatementPage({
         actions={
           <>
             <Button asChild size="sm" variant="outline">
-              <Link href="/dashboard/m/accounting/sales/customers">Customers</Link>
+              <Link href="/dashboard/m/accounting/sales/customers">{words.customers}</Link>
             </Button>
             <PrintStatementButton />
           </>
@@ -134,7 +137,7 @@ export default async function CustomerStatementPage({
           <EmptyState
             icon={<FileText />}
             title="Nothing owed, nothing happened"
-            description="No invoice was issued and no payment arrived in this period, and the customer owed nothing coming into it."
+            description={`No invoice was issued and no payment arrived in this period, and the ${words.customer.toLowerCase()} owed nothing coming into it.`}
           />
         </Panel>
       ) : (

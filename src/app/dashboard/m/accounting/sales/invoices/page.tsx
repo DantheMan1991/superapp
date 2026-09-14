@@ -48,6 +48,8 @@ import {
 import { entityScopeCondition } from "@/modules/accounting/core";
 import { reportEntityOr404 } from "@/modules/accounting/lib/report-entity";
 import { SalesNav } from "../sales-nav";
+import { labelsForTenant } from "@/lib/packs/tenant-context";
+import { partyWords } from "@/lib/parties/vocabulary";
 
 export const dynamic = "force-dynamic";
 
@@ -85,6 +87,7 @@ export default async function InvoicesPage({
   }>;
 }) {
   const ctx = await requireTenant();
+  const words = partyWords(labelsForTenant(ctx.tenant));
   await requireModuleEnabled(ctx.tenant.id, "accounting");
   const sp = await searchParams;
   const bucket = isArBucket(sp.bucket) ? sp.bucket : null;
@@ -470,7 +473,9 @@ export default async function InvoicesPage({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <SalesNav />
         <div className="flex flex-wrap items-center gap-3">
-        <ListSearch placeholder="Search number, customer or memo" />
+        <ListSearch
+          placeholder={`Search number, ${words.customer.toLowerCase()} or memo`}
+        />
         <CompanyPicker
           entities={data.entityView.entities.map((e) => ({
             id: e.id,
@@ -498,7 +503,7 @@ export default async function InvoicesPage({
               term
                 ? `Nothing matches “${term}”`
                 : filter.key === "all"
-                  ? "Bill your first customer"
+                  ? `Bill your first ${words.customer.toLowerCase()}`
                   : `Nothing under ${filter.label}`
             }
             description={
@@ -524,7 +529,7 @@ export default async function InvoicesPage({
           <TableHeader>
             <TableRow>
               <TableHead>Number</TableHead>
-              <TableHead>Customer</TableHead>
+              <TableHead>{words.customer}</TableHead>
               {showCompany && <TableHead>Company</TableHead>}
               <TableHead>Issued</TableHead>
               <TableHead>Due</TableHead>

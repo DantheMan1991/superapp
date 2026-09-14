@@ -14,6 +14,20 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-09-13 — The party badges say the business's word (`claude/core-declares-its-party-words`)
+
+CRM renders `customer` and `vendor`, which **Accounting declares** — a feature
+displaying another's word is the ordinary case, the way `livestock` displays
+`land`'s `zone`, and a key may have only one owner. Swept here: the two role
+badges on a record (both in `CrmModule` and on the record page), the records
+empty-state sentence about the party spine, and the owners-only notice on
+Duplicates.
+
+`setup/source.ts` was left alone on purpose — its step text is a static
+`SetupSource` descriptor whose `collect` receives only a `tenantId`, so speaking
+the tenant's word there means widening the `setup-sources` contract. Recorded as a
+follow-up in [packs-and-profiles.md](packs-and-profiles.md) rather than bodged.
+
 ### 2026-09-10 — Which website sent the lead (`claude/which-site-sent-the-lead`)
 
 `source = 'website'` stopped being an answer the day a business could publish

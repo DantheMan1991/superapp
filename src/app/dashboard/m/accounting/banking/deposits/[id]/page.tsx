@@ -21,6 +21,8 @@ import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { listEntities } from "@/modules/accounting/core";
 import { formatCents } from "@/modules/accounting/lib/money";
 import { VoidDepositButton } from "./deposit-controls";
+import { labelsForTenant } from "@/lib/packs/tenant-context";
+import { partyWords } from "@/lib/parties/vocabulary";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +35,7 @@ export default async function DepositPage({
   const { id } = await params;
   if (!z.string().uuid().safeParse(id).success) notFound();
   const ctx = await requireTenant();
+  const words = partyWords(labelsForTenant(ctx.tenant));
   await requireModuleEnabled(ctx.tenant.id, "accounting");
   const tenantId = ctx.tenant.id;
 
@@ -138,7 +141,7 @@ export default async function DepositPage({
           <TableHeader>
             <TableRow>
               <TableHead>Date</TableHead>
-              <TableHead>Customer</TableHead>
+              <TableHead>{words.customer}</TableHead>
               <TableHead>Invoice</TableHead>
               <TableHead className="hidden sm:table-cell">Method</TableHead>
               <TableHead className="hidden md:table-cell">Memo</TableHead>

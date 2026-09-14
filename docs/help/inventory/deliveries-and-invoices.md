@@ -12,7 +12,7 @@ This is where a supplier's invoice gets tied to the delivery it is paying for.
 
 - **The posting panel at the top.** It reads `Stock is on the balance sheet` or `Stock is not on the balance sheet`, with a switch marked `On` or `Off`. Owners only, and see below before you touch it.
 - **`Arrived, not yet invoiced`.** What you hold and have not been billed for. It only appears once stock is on the balance sheet. Under it, how many deliveries are waiting and what they are worth. A minus in front of it means you have been billed for more than turned up.
-- **`Bills waiting to be matched`.** `Supplier`, `Line`, `Charged` and `Matched`. Click a supplier to open the bill in Accounting.
+- **`Bills waiting to be matched`.** `{{vendor}}`, `Line`, `Charged` and `Matched`. Click a {{vendor|lower}} to open the bill in Accounting.
 - **`Matched`** reads `Nothing yet`, or a badge like {badge:2 deliveries · $6,000.00|secondary}.
 - **{button:Match|outline}** and **{button:Unpick|ghost}** at the end of each bill row. Owners only, and only when stock is on the balance sheet.
 - **`Deliveries with no invoice yet`.** `When`, `What`, `Batch`, `Still open` and `Worth`. These are the priced deliveries waiting for a bill, oldest first. Past fifty there are pages, with a line under the table reading `Showing 1 to 50 of 214, oldest first.` and `Older` and `Newer` beside it. The card above counts every one of them, whatever page you are on.

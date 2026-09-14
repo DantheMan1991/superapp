@@ -26,6 +26,8 @@ import { listPaymentTerms } from "@/modules/accounting/invoicing/catalogue";
 import { PurchasesNav } from "../purchases-nav";
 import { PasteListButton } from "@/components/app/paste-list-button";
 import { VendorDialogButton } from "./vendor-dialogs";
+import { labelsForTenant } from "@/lib/packs/tenant-context";
+import { partyWords } from "@/lib/parties/vocabulary";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +40,7 @@ export default async function VendorsPage({
   searchParams: Promise<{ q?: string; page?: string }>;
 }) {
   const ctx = await requireTenant();
+  const words = partyWords(labelsForTenant(ctx.tenant));
   await requireModuleEnabled(ctx.tenant.id, "accounting");
   const tenantId = ctx.tenant.id;
   const sp = await searchParams;
@@ -100,15 +103,18 @@ export default async function VendorsPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Vendors"
+        title={words.vendors}
         description={`Who ${ctx.tenant.name} buys from. A default expense account prefills new bill lines.`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {ctx.role !== "expert" && (
               <PasteListButton
                 slug="accounting.vendors"
-                label="vendors"
-                noun={{ one: "vendor", many: "vendors" }}
+                label={words.vendors.toLowerCase()}
+                noun={{
+                  one: words.vendor.toLowerCase(),
+                  many: words.vendors.toLowerCase(),
+                }}
                 example={"Tractor Supply, ap@tractorsupply.com, 555-0100\nRural King — feed and fencing"}
               />
             )}
@@ -129,7 +135,9 @@ export default async function VendorsPage({
         empty={
           <EmptyState
             icon={<Building2 />}
-            title={term ? `Nothing matches “${term}”` : "No vendors yet"}
+            title={
+              term ? `Nothing matches “${term}”` : `No ${words.vendors.toLowerCase()} yet`
+            }
             description={
               term
                 ? "Try fewer words, or add them now."
@@ -200,7 +208,10 @@ export default async function VendorsPage({
 
       <Pager
         window={window}
-        noun={{ one: "vendor", many: "vendors" }}
+        noun={{
+          one: words.vendor.toLowerCase(),
+          many: words.vendors.toLowerCase(),
+        }}
         hrefFor={pageHref}
         labels={{ prev: "Previous", next: "Next" }}
       />

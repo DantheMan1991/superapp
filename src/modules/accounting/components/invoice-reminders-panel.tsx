@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { setInvoiceRemindersMutedAction } from "@/modules/accounting/invoicing/actions";
 import { describeOffset } from "@/modules/accounting/invoicing/reminder-schedule";
+import { usePartyWords } from "@/components/app/label-provider";
 
 export interface ReminderHistoryRow {
   offset: number;
@@ -43,6 +44,7 @@ export function InvoiceRemindersPanel({
   canAct: boolean;
 }) {
   const router = useRouter();
+  const words = usePartyWords();
   const [pending, startTransition] = useTransition();
 
   function toggle() {
@@ -76,7 +78,7 @@ export function InvoiceRemindersPanel({
             {muted
               ? "This invoice is not chased automatically."
               : customerMuted
-                ? "This customer is never chased automatically."
+                ? `This ${words.customer.toLowerCase()} is never chased automatically.`
                 : !enabled
                   ? "Automatic reminders are off for the business."
                   : nextLabel

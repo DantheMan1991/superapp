@@ -13,6 +13,30 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-13 — The two party words become the tenant's (`claude/core-declares-its-party-words`)
+
+Accounting is the first CORE module to declare vocabulary. It owns `customer` and
+`vendor` — not CRM, though CRM renders them, because a key has exactly one owner
+and the Customers and Vendors pages are here.
+
+Every screen in the module that names a party now renders the business's own
+word: both list pages and their empty states and pagers, the invoice and bill
+builders, the customer and vendor dialogs, opening balances, recurring templates,
+receipts and the bill-from-receipt dialog, the deposits table, credit memos,
+reminders and the statement, the A/P Aging tile's description and the Companies
+page's explanation of what is shared. The machinery, the provider and the line
+between what was swept and what was not are all in
+[packs-and-profiles.md](packs-and-profiles.md).
+
+**Two things a reader of this module should know.** Four of its screens said
+"Supplier" while the rest said "Vendor" — the recurring form and the recurring
+list among them — against a `vendors` table and a `VENDOR_INACTIVE` error code;
+that was drift, and they now all say whatever the business calls one. And
+**`core/errors.ts` was deliberately left alone**: its sentences ("That customer no
+longer exists.") are a static map with no tenant in scope, so making them speak
+the tenant's word needs a contract change rather than a call, and it is named as a
+follow-up rather than half-done.
+
 ### 2026-09-13 — The quick add gets a verb a sentence can call (`claude/paid-the-feed-store`)
 
 **A refactor with no behaviour in it, done for a slice that needs it next.**

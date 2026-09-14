@@ -18,6 +18,8 @@ import { SalesNav } from "../sales-nav";
 import { listPaymentTerms } from "@/modules/accounting/invoicing/catalogue";
 import { PasteListButton } from "@/components/app/paste-list-button";
 import { AddCustomerButton, CustomerRowActions } from "./customer-dialogs";
+import { labelsForTenant } from "@/lib/packs/tenant-context";
+import { partyWords } from "@/lib/parties/vocabulary";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +32,7 @@ export default async function CustomersPage({
   searchParams: Promise<{ q?: string; page?: string }>;
 }) {
   const ctx = await requireTenant();
+  const words = partyWords(labelsForTenant(ctx.tenant));
   await requireModuleEnabled(ctx.tenant.id, "accounting");
   const sp = await searchParams;
   const term = searchTerm(sp.q);
@@ -130,15 +133,18 @@ export default async function CustomersPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Customers"
+        title={words.customers}
         description={`Who ${ctx.tenant.name} bills.`}
         actions={
           isOwnerOrStaff && (
             <div className="flex flex-wrap items-center gap-2">
               <PasteListButton
                 slug="accounting.customers"
-                label="customers"
-                noun={{ one: "customer", many: "customers" }}
+                label={words.customers.toLowerCase()}
+                noun={{
+                  one: words.customer.toLowerCase(),
+                  many: words.customers.toLowerCase(),
+                }}
                 example={"Maple Street Market, orders@maplestreet.example\nThe Hendersons — half a beef each fall"}
               />
               <AddCustomerButton terms={termOptions} />
@@ -159,7 +165,11 @@ export default async function CustomersPage({
         empty={
           <EmptyState
             icon={<Users />}
-            title={term ? `Nothing matches “${term}”` : "Add your first customer"}
+            title={
+              term
+                ? `Nothing matches “${term}”`
+                : `Add your first ${words.customer.toLowerCase()}`
+            }
             description={
               term
                 ? "Try fewer words, or add them now."
@@ -223,7 +233,10 @@ export default async function CustomersPage({
 
       <Pager
         window={window}
-        noun={{ one: "customer", many: "customers" }}
+        noun={{
+          one: words.customer.toLowerCase(),
+          many: words.customers.toLowerCase(),
+        }}
         hrefFor={pageHref}
         labels={{ prev: "Previous", next: "Next" }}
       />

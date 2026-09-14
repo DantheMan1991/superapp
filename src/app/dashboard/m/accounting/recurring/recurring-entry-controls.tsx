@@ -48,6 +48,7 @@ import {
   type PartyPickOption as PartyOption,
   type Unpickable,
 } from "@/modules/accounting/lib/pick-options";
+import { usePartyWords } from "@/components/app/label-provider";
 
 /** The first option somebody may actually pick — a kept, marked one is never a default. */
 const firstPickable = (options: ReadonlyArray<{ id: string; unpickable?: Unpickable }>) =>
@@ -291,6 +292,7 @@ export function RecurringEntryDialogButton({
   existing?: ExistingRecurringEntry;
 }) {
   const router = useRouter();
+  const words = usePartyWords();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const stored = existing?.template;
@@ -718,10 +720,10 @@ export function RecurringEntryDialogButton({
             ) : kind === "invoice" ? (
               <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label htmlFor="rec-customer">Customer</Label>
+                  <Label htmlFor="rec-customer">{words.customer}</Label>
                   <Select value={customerId} onValueChange={setCustomerId}>
                     <SelectTrigger className="w-full" id="rec-customer">
-                      <SelectValue placeholder="Pick a customer" />
+                      <SelectValue placeholder={`Pick a ${words.customer.toLowerCase()}`} />
                     </SelectTrigger>
                     <SelectContent>
                       {customers.map((c) => (
@@ -843,10 +845,10 @@ export function RecurringEntryDialogButton({
             ) : (
               <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label htmlFor="rec-vendor">Supplier</Label>
+                  <Label htmlFor="rec-vendor">{words.vendor}</Label>
                   <Select value={vendorId} onValueChange={setVendorId}>
                     <SelectTrigger className="w-full" id="rec-vendor">
-                      <SelectValue placeholder="Pick a supplier" />
+                      <SelectValue placeholder={`Pick a ${words.vendor.toLowerCase()}`} />
                     </SelectTrigger>
                     <SelectContent>
                       {vendors.map((v) => (

@@ -7,6 +7,30 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-13 — A core guide may now use a placeholder (`claude/core-declares-its-party-words`)
+
+`_TEMPLATE.md` said *"core-tool guides (accounting, documents, mail and the rest)
+use no placeholders and no trade vocabulary at all."* The first half stopped being
+true when Accounting declared `customer` and `vendor`, so the rule now reads: a
+core guide writes `{{customer}}` and `{{vendor}}` where it names those controls,
+and still writes no TRADE vocabulary of any kind. No other word in a core tool is
+renameable.
+
+`guideDefinitions()` already read `moduleRegistry` as well as `packRegistry`, so
+both keys became valid placeholders with no change to the guide machinery, and
+`LabelDefinition.plural` now rides along so `{{customer|plural}}` is correct for a
+word whose plural is not just an "s".
+
+**Three guide lines were stale and are fixed** — the only three that named a
+control whose label actually changed: `accounting/recurring.md` and
+`email/records.md` said `Supplier`, and `inventory/deliveries-and-invoices.md` had
+a `Supplier` column header. The other 61 mentions of Customer/Vendor across
+`docs/help/` are NOT stale, because every swept string renders byte-identically
+for a tenant that has renamed nothing. Converting them to placeholders is a real
+follow-up, and it is a blocker on the first profile that renames `customer`:
+after that, a guide saying "Customers" beside a screen saying "Clients" is exactly
+the failure the rule exists to prevent.
+
 ### 2026-09-03 — Work, in three guides (`claude/work-guides`)
 
 `overview`, `work`, `lists`. A core module, so no vocabulary placeholders.

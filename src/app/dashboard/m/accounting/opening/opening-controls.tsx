@@ -26,6 +26,7 @@ import {
   recordOpeningBillAction,
   recordOpeningInvoiceAction,
 } from "@/modules/accounting/opening/actions";
+import { usePartyWords } from "@/components/app/label-provider";
 
 interface Option {
   id: string;
@@ -72,7 +73,9 @@ export function OpeningDocumentDialog({
 
   const invoice = kind === "invoice";
   const noun = invoice ? "invoice" : "bill";
-  const partyWord = invoice ? "Customer" : "Vendor";
+  const words = usePartyWords();
+  const partyWord = invoice ? words.customer : words.vendor;
+  const partyPlural = invoice ? words.customers : words.vendors;
   const ceiling = booksStartOn ? dayBefore(booksStartOn) : undefined;
   const amountCents = Math.round(Number(amount) * 100);
   const ready =
@@ -117,7 +120,7 @@ export function OpeningDocumentDialog({
       toast.success(
         invoice
           ? `Recorded ${result.data?.number ?? "the invoice"}, open from ${documentDate}`
-          : `Recorded the bill from ${party?.name ?? "the vendor"}, open from ${documentDate}`,
+          : `Recorded the bill from ${party?.name ?? `the ${words.vendor.toLowerCase()}`}, open from ${documentDate}`,
       );
       setOpen(false);
       reset();
@@ -162,7 +165,7 @@ export function OpeningDocumentDialog({
               <Label htmlFor="opening-party">{partyWord}</Label>
               <Select value={partyId} onValueChange={setPartyId}>
                 <SelectTrigger id="opening-party">
-                  <SelectValue placeholder={invoice ? "Pick a customer" : "Pick a vendor"} />
+                  <SelectValue placeholder={`Pick a ${partyWord.toLowerCase()}`} />
                 </SelectTrigger>
                 <SelectContent>
                   {parties.map((p) => (
@@ -174,9 +177,7 @@ export function OpeningDocumentDialog({
               </Select>
               {parties.length === 0 && (
                 <p className="text-xs text-muted-foreground">
-                  {invoice
-                    ? "No customers yet. Add them on the Customers page first."
-                    : "No vendors yet. Add them on the Vendors page first."}
+                  {`No ${partyPlural.toLowerCase()} yet. Add them on the ${partyPlural} page first.`}
                 </p>
               )}
             </div>
@@ -188,7 +189,11 @@ export function OpeningDocumentDialog({
                   id="opening-number"
                   value={number}
                   onChange={(e) => setNumber(e.target.value)}
-                  placeholder={invoice ? "As on the invoice, or blank for the next" : "The vendor's invoice number"}
+                  placeholder={
+                    invoice
+                      ? "As on the invoice, or blank for the next"
+                      : `The ${words.vendor.toLowerCase()}'s invoice number`
+                  }
                   maxLength={40}
                 />
               </div>

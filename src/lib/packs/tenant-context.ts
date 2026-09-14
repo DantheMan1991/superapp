@@ -1,6 +1,7 @@
 import "server-only";
 import { and, eq } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
+import type { Tenant } from "@/db/schema";
 import { getIndustryProfile } from "@/industries";
 import { resolveLabels } from "./resolve";
 
@@ -37,6 +38,30 @@ export interface PackContext {
    * like, which is exactly the coupling packs exist to avoid.
    */
   config: unknown;
+}
+
+/**
+ * Vocabulary for a tenant, from the row a page already has. **No query.**
+ *
+ * `packContext` below is for a PACK: it needs a `Tx` because it also resolves
+ * that pack's `tenant_modules.config`. A CORE module wants only the words, and
+ * `requireTenant()` already hands it `ctx.tenant` — a full `tenants` row
+ * carrying both `industry` and `labels`. So this is a pure lookup plus
+ * `resolveLabels`, and adding vocabulary to a core screen costs nothing at the
+ * database.
+ *
+ * Takes the two columns rather than the whole row so a caller holding a
+ * narrowed select still type-checks.
+ *
+ * Degrades exactly as `resolveLabels` does and for the same reason: `industry`
+ * defaults to `'general'`, which is not a profile and never will be, so the
+ * no-profile path is the common one and must yield the core words rather than
+ * throw.
+ */
+export function labelsForTenant(
+  tenant: Pick<Tenant, "industry" | "labels">,
+): Record<string, string> {
+  return resolveLabels(getIndustryProfile(tenant.industry)?.labels, tenant.labels);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

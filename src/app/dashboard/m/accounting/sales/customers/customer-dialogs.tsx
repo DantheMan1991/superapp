@@ -36,6 +36,7 @@ import {
   setCustomerRemindersMutedAction,
   updateCustomerAction,
 } from "@/modules/accounting/invoicing/actions";
+import { usePartyWords } from "@/components/app/label-provider";
 
 /** A payment term as the dialog offers it. Inactive ones are offered only when they are the customer's current one. */
 export interface TermOption {
@@ -164,6 +165,7 @@ function CustomerFields({
 
 export function AddCustomerButton({ terms = [] }: { terms?: TermOption[] }) {
   const router = useRouter();
+  const words = usePartyWords();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [form, setForm] = useState<CustomerForm>(EMPTY);
@@ -180,7 +182,7 @@ export function AddCustomerButton({ terms = [] }: { terms?: TermOption[] }) {
       });
       if ("error" in result) toast.error(result.error);
       else {
-        toast.success("Customer added");
+        toast.success(`${words.customer} added`);
         setOpen(false);
         setForm(EMPTY);
         router.refresh();
@@ -191,18 +193,18 @@ export function AddCustomerButton({ terms = [] }: { terms?: TermOption[] }) {
   return (
     <>
       <Button size="sm" onClick={() => setOpen(true)}>
-        <Plus className="mr-1.5 size-4" /> Add customer
+        <Plus className="mr-1.5 size-4" /> Add {words.customer.toLowerCase()}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add customer</DialogTitle>
+            <DialogTitle>Add {words.customer.toLowerCase()}</DialogTitle>
             <DialogDescription>Someone {`you'll`} invoice.</DialogDescription>
           </DialogHeader>
           <CustomerFields form={form} setForm={setForm} terms={terms} />
           <DialogFooter>
             <Button onClick={submit} disabled={pending || !form.name.trim()}>
-              {pending ? "Adding…" : "Add customer"}
+              {pending ? "Adding…" : `Add ${words.customer.toLowerCase()}`}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -225,6 +227,7 @@ export function CustomerRowActions({
   terms?: TermOption[];
 }) {
   const router = useRouter();
+  const words = usePartyWords();
   const [editOpen, setEditOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [form, setForm] = useState<CustomerForm>({
@@ -252,7 +255,7 @@ export function CustomerRowActions({
       });
       if ("error" in result) toast.error(result.error);
       else {
-        toast.success("Customer updated");
+        toast.success(`${words.customer} updated`);
         setEditOpen(false);
         router.refresh();
       }
@@ -283,8 +286,8 @@ export function CustomerRowActions({
       else {
         toast.success(
           customer.remindersMuted
-            ? "Reminders resumed for this customer"
-            : "This customer will not be chased automatically",
+            ? `Reminders resumed for this ${words.customer.toLowerCase()}`
+            : `This ${words.customer.toLowerCase()} will not be chased automatically`,
         );
         router.refresh();
       }
@@ -297,7 +300,7 @@ export function CustomerRowActions({
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className="size-7">
             <MoreHorizontal className="size-4" />
-            <span className="sr-only">Customer actions</span>
+            <span className="sr-only">{words.customer} actions</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">

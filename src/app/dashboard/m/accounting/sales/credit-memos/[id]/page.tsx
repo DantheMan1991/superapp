@@ -14,6 +14,8 @@ import { listEntities } from "@/modules/accounting/core";
 import { formatCents } from "@/modules/accounting/lib/money";
 import { SalesNav } from "../../sales-nav";
 import { VoidCreditMemoButton } from "./credit-memo-controls";
+import { labelsForTenant } from "@/lib/packs/tenant-context";
+import { partyWords } from "@/lib/parties/vocabulary";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +28,7 @@ export default async function CreditMemoPage({
   const { id } = await params;
   if (!z.string().uuid().safeParse(id).success) notFound();
   const ctx = await requireTenant();
+  const words = partyWords(labelsForTenant(ctx.tenant));
   await requireModuleEnabled(ctx.tenant.id, "accounting");
   const tenantId = ctx.tenant.id;
 
@@ -63,7 +66,7 @@ export default async function CreditMemoPage({
   const companyName = data.entities.find((e) => e.id === memo.entityId)?.name;
 
   const rows: Array<[string, React.ReactNode]> = [
-    ["Customer", customer?.name ?? "—"],
+    [words.customer, customer?.name ?? "—"],
     [
       "Against",
       invoice ? (

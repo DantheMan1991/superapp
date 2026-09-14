@@ -34,6 +34,8 @@ import { getOpeningPosition } from "@/modules/accounting/opening/position";
 import { formatCents } from "@/modules/accounting/lib/money";
 import { BooksStartControls } from "../close/close-controls";
 import { OpeningDocumentDialog } from "./opening-controls";
+import { labelsForTenant } from "@/lib/packs/tenant-context";
+import { partyWords } from "@/lib/parties/vocabulary";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +56,7 @@ export default async function OpeningPage({
   searchParams: Promise<{ entity?: string }>;
 }) {
   const ctx = await requireTenant();
+  const words = partyWords(labelsForTenant(ctx.tenant));
   await requireModuleEnabled(ctx.tenant.id, "accounting");
   const sp = await searchParams;
   const tenantId = ctx.tenant.id;
@@ -200,7 +203,7 @@ export default async function OpeningPage({
                 <TableHeader>
                   <TableRow>
                     <TableHead>Number</TableHead>
-                    <TableHead>Customer</TableHead>
+                    <TableHead>{words.customer}</TableHead>
                     <TableHead className="hidden sm:table-cell">Issued</TableHead>
                     <TableHead className="hidden sm:table-cell">Due</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
@@ -267,7 +270,7 @@ export default async function OpeningPage({
                 <TableHeader>
                   <TableRow>
                     <TableHead>Number</TableHead>
-                    <TableHead>Vendor</TableHead>
+                    <TableHead>{words.vendor}</TableHead>
                     <TableHead className="hidden sm:table-cell">Billed</TableHead>
                     <TableHead className="hidden sm:table-cell">Due</TableHead>
                     <TableHead className="text-right">Amount</TableHead>

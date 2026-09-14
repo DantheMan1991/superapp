@@ -21,6 +21,7 @@ import {
   acceptThreadDraftAction,
   draftFromThreadAction,
 } from "../thread-draft-actions";
+import { usePartyWords } from "@/components/app/label-provider";
 
 /**
  * "Draft an invoice from this conversation", and the review that follows.
@@ -54,6 +55,7 @@ export function ThreadDraftButton({
   label: string;
 }) {
   const router = useRouter();
+  const words = usePartyWords();
   const [open, setOpen] = useState(false);
   const [record, setRecord] = useState<DraftedRecord | null>(null);
   const [included, setIncluded] = useState<boolean[]>([]);
@@ -151,7 +153,7 @@ export function ThreadDraftButton({
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="draft-party">
-                    {record.kind === "bill" ? "Supplier" : "Customer"}
+                    {record.kind === "bill" ? words.vendor : words.customer}
                   </Label>
                   <Input
                     id="draft-party"

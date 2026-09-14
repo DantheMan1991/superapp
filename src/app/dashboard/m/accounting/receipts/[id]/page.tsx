@@ -23,6 +23,8 @@ import {
   type DocumentRowData,
 } from "../receipts-controls";
 import { DetachLinkButton } from "./detail-controls";
+import { labelsForTenant } from "@/lib/packs/tenant-context";
+import { partyWords } from "@/lib/parties/vocabulary";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +34,7 @@ export default async function ReceiptDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const ctx = await requireTenant();
+  const words = partyWords(labelsForTenant(ctx.tenant));
   await requireModuleEnabled(ctx.tenant.id, "accounting");
   const tenantId = ctx.tenant.id;
   const { id } = await params;
@@ -87,7 +90,7 @@ export default async function ReceiptDetailPage({
     extraction
       ? [
           {
-            label: "Vendor",
+            label: words.vendor,
             value: extraction.fields.vendorName.value,
             confidence: extraction.fields.vendorName.confidence,
           },

@@ -1,4 +1,5 @@
 import { parseHeader, stripComments } from "./markdown-meta";
+import { pluralOf } from "./packs/resolve";
 
 /**
  * Tenant guides — the pure half. Everything here runs anywhere: the API route,
@@ -337,11 +338,13 @@ export function buildVocabulary(
   const vocabulary: Vocabulary = {};
   for (const definition of definitions) {
     const singular = labels[definition.key] ?? definition.fallback;
-    const plural =
-      singular === definition.fallback && definition.plural
-        ? definition.plural
-        : `${singular}s`;
-    vocabulary[definition.key] = { singular, plural };
+    vocabulary[definition.key] = {
+      singular,
+      // `pluralOf` rather than the arithmetic inline: the same rule is needed by
+      // the sidebar and by core's party words, and three copies of it is how a
+      // guide comes to print a different plural from the screen it describes.
+      plural: pluralOf(singular, definition.fallback, definition.plural),
+    };
   }
   return vocabulary;
 }

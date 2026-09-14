@@ -49,6 +49,7 @@ import {
 } from "@/modules/accounting/banking/actions";
 import { formatCents, parseMoneyToCents } from "@/modules/accounting/lib/money";
 import { useConfirm } from "@/components/app/use-confirm";
+import { usePartyWords } from "@/components/app/label-provider";
 
 const ACCEPT_THRESHOLD = 0.7;
 
@@ -189,6 +190,7 @@ export function PayeeVendors({
   bankAccountId: string;
   payees: RegisterPayeeView[];
 }) {
+  const words = usePartyWords();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -220,7 +222,11 @@ export function PayeeVendors({
       }
       const { vendorsCreated = 0, rowsNamed = 0 } = result.data ?? {};
       toast.success(
-        `${vendorsCreated} ${vendorsCreated === 1 ? "vendor" : "vendors"} added, ${rowsNamed} ${
+        `${vendorsCreated} ${
+          vendorsCreated === 1
+            ? words.vendor.toLowerCase()
+            : words.vendors.toLowerCase()
+        } added, ${rowsNamed} ${
           rowsNamed === 1 ? "line" : "lines"
         } named`,
       );

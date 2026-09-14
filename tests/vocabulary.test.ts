@@ -9,6 +9,7 @@ import {
 import { packRegistry } from "../src/packs";
 import { moduleRegistry } from "../src/modules";
 import { getIndustryProfile } from "../src/industries";
+import { PARTY_LABEL_KEYS } from "../src/lib/parties/vocabulary";
 
 const homesteadFarm = getIndustryProfile("homestead-farm");
 
@@ -36,12 +37,24 @@ const declarations = collectLabelDefinitions([
   })),
 ]);
 
-/** Every `labelFor(x, "key", …)` in the source tree, with the file it is in. */
+/**
+ * Every `labelFor(x, "key", …)` and `useLabel("key", …)` in the source tree.
+ *
+ * `useLabel` was added to the scan on 2026-09-13, with the client-side provider
+ * it belongs to. A word rendered through a hook is as undeclarable as one
+ * rendered through the server helper, so both have to be visible here or the
+ * ratchet only covers half the product.
+ */
 function usedLabelKeys(): { key: string; file: string }[] {
   const out: { key: string; file: string }[] = [];
   // Assembled rather than written whole, so this file does not match its own
   // rule — the same trick tests/db-backed-files.test.ts uses on its markers.
-  const pattern = new RegExp("labelFor" + "\\(\\s*[^,]+,\\s*[\"'`]([^\"'`]+)", "g");
+  // Two patterns rather than one alternation: each reads on its own, and the
+  // combined version did not.
+  const patterns = [
+    new RegExp("labelFor" + "\\(\\s*[^,]+,\\s*[\"'`]([^\"'`]+)", "g"),
+    new RegExp("useLabel" + "\\(\\s*[\"'`]([^\"'`]+)", "g"),
+  ];
 
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir)) {
@@ -53,8 +66,10 @@ function usedLabelKeys(): { key: string; file: string }[] {
       }
       if (!/\.tsx?$/.test(entry)) continue;
       const text = readFileSync(full, "utf8");
-      for (const match of text.matchAll(pattern)) {
-        out.push({ key: match[1], file: full });
+      for (const pattern of patterns) {
+        for (const match of text.matchAll(pattern)) {
+          out.push({ key: match[1], file: full });
+        }
       }
     }
   };
@@ -111,6 +126,36 @@ describe("the real registry", () => {
       undeclared.map((u) => `${u.key} (${u.file})`),
       "labelFor keys must be declared in the feature's `labels`",
     ).toEqual([]);
+  });
+
+  /**
+   * THE SOURCE SCAN ABOVE CANNOT SEE A KEY PASSED AS A CONSTANT, and that is
+   * not hypothetical: `enterprise` is rendered on the nav rail of every
+   * dashboard page through `ENTERPRISE_LABEL_KEY` and is declared by nothing at
+   * all — it slips the scan because the regex needs a literal. Found
+   * 2026-09-13 while adding the party words, and left alone in that slice
+   * because `enterprises` is Layer 0 with no registry entry to declare it on
+   * (logged in docs/modules/packs-and-profiles.md).
+   *
+   * The party words use constants too, deliberately — a magic string in twenty
+   * files is worse — so they are checked by name here instead. Any subsystem
+   * that keys labels off constants should add its list the same way.
+   */
+  it("declares every key the party vocabulary names", () => {
+    const declared = declarations.labels.map((l) => l.key);
+    for (const key of PARTY_LABEL_KEYS) {
+      expect(declared, `${key} is rendered but declared nowhere`).toContain(key);
+    }
+  });
+
+  it("attributes the party words to accounting, which owns the screens", () => {
+    // Not CRM, though CRM renders them: one key has one owner, and the
+    // Customers and Vendors pages are accounting's.
+    for (const key of PARTY_LABEL_KEYS) {
+      expect(declarations.labels.find((l) => l.key === key)?.owner).toBe(
+        "accounting",
+      );
+    }
   });
 
   it("declares more than one word, which is the whole point", () => {

@@ -37,6 +37,7 @@ import {
   DimensionTags,
   type DimensionTypeOption,
 } from "@/components/app/dimension-tags";
+import { usePartyWords } from "@/components/app/label-provider";
 
 export interface BuilderVendor {
   id: string;
@@ -164,6 +165,7 @@ export function BillBuilder({
   derivedAccountIds?: string[];
 }) {
   const router = useRouter();
+  const words = usePartyWords();
   const [pending, startTransition] = useTransition();
   const derivedAccounts = useMemo(
     () => new Set(derivedAccountIds),
@@ -281,7 +283,7 @@ export function BillBuilder({
         resolvedVendorId = created.data!.vendorId;
       }
       if (!resolvedVendorId) {
-        toast.error("Pick or create a vendor.");
+        toast.error(`Pick or create a ${words.vendor.toLowerCase()}.`);
         return;
       }
       const lines = filled.map((p) => ({
@@ -375,20 +377,20 @@ export function BillBuilder({
 
         <div className="grid gap-3 sm:grid-cols-4">
           <div className="space-y-1.5 sm:col-span-2">
-            <Label>Vendor</Label>
+            <Label>{words.vendor}</Label>
             <Combobox
               options={vendorOptions}
               value={vendorId || undefined}
               onValueChange={applyVendor}
-              placeholder="Select vendor"
+              placeholder={`Select ${words.vendor.toLowerCase()}`}
               searchPlaceholder="Type a name…"
-              emptyText="No vendor matches."
-              aria-label="Vendor"
+              emptyText={`No ${words.vendor.toLowerCase()} matches.`}
+              aria-label={words.vendor}
             />
             {!bill && (
               <Input
                 className="h-8"
-                placeholder="…or type a new vendor name"
+                placeholder={`…or type a new ${words.vendor.toLowerCase()} name`}
                 value={newVendorName}
                 onChange={(e) => {
                   setNewVendorName(e.target.value);
@@ -398,7 +400,7 @@ export function BillBuilder({
             )}
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="bill-number">Vendor invoice #</Label>
+            <Label htmlFor="bill-number">{words.vendor} invoice #</Label>
             <Input
               id="bill-number"
               value={number}

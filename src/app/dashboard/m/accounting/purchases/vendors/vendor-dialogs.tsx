@@ -26,6 +26,7 @@ import {
   setVendorActiveAction,
   updateVendorAction,
 } from "@/modules/accounting/payables/actions";
+import { usePartyWords } from "@/components/app/label-provider";
 
 const NONE = "__none__";
 
@@ -61,6 +62,7 @@ export function VendorDialogButton({
   vendor?: VendorData;
 }) {
   const router = useRouter();
+  const words = usePartyWords();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [name, setName] = useState(vendor?.name ?? "");
@@ -96,7 +98,7 @@ export function VendorDialogButton({
         : await createVendorAction(patch);
       if ("error" in result && result.error) toast.error(result.error);
       else {
-        toast.success(vendor ? "Vendor updated." : "Vendor created.");
+        toast.success(`${words.vendor} ${vendor ? "updated" : "created"}.`);
         setOpen(false);
         router.refresh();
       }
@@ -113,7 +115,9 @@ export function VendorDialogButton({
       });
       if ("error" in result && result.error) toast.error(result.error);
       else {
-        toast.success(vendor.isActive ? "Vendor deactivated." : "Vendor reactivated.");
+        toast.success(
+          `${words.vendor} ${vendor.isActive ? "deactivated" : "reactivated"}.`,
+        );
         setOpen(false);
         router.refresh();
       }
@@ -128,13 +132,17 @@ export function VendorDialogButton({
         </Button>
       ) : (
         <Button onClick={() => setOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" /> New vendor
+          <Plus className="mr-2 h-4 w-4" /> New {words.vendor.toLowerCase()}
         </Button>
       )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{vendor ? "Edit vendor" : "New vendor"}</DialogTitle>
+            <DialogTitle>
+              {vendor
+                ? `Edit ${words.vendor.toLowerCase()}`
+                : `New ${words.vendor.toLowerCase()}`}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">

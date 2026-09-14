@@ -7,19 +7,27 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
 import { violatedUniqueIndex } from "@/lib/db-errors";
+import { percentStringToPpm } from "./billing-math";
+import { LedgerError, friendlyMessage } from "@/modules/accounting/core";
 import {
   createChangeOrder,
   createCommitment,
   createContract,
   createCostCode,
   createCostCodeSet,
+  createPayApplication,
   createProject,
+  deletePayApplication,
+  issuePayApplication,
   JobsError,
   removeBudgetLine,
+  saveSovLines,
   setBudgetLines,
   setDefaultCostCodeSet,
   updateChangeOrder,
   updateCommitment,
+  updatePayApplication,
+  voidPayApplication,
   updateContract,
   updateCostCode,
   updateCostCodeSet,
@@ -104,7 +112,29 @@ function toResult(err: unknown): { error: string } {
         };
       case "APPROVAL_DATE_REQUIRED":
         return { error: "Give an approved change order the date it was approved." };
+      case "SOV_LINE_BILLED":
+        return {
+          error: "That line has been billed on an application, so it cannot be removed.",
+        };
+      case "ONE_DRAFT":
+        return { error: "This contract already has a draft application. Finish that one first." };
+      case "NOTHING_DUE":
+        return { error: "Nothing is due on this application, so there is nothing to invoice." };
+      case "COUNTERPARTY_REQUIRED":
+        return { error: "Say who the contract is with before billing it." };
+      case "ACCOUNT_MISSING":
+        return { error: `The chart of accounts is missing something: ${err.message}.` };
+      case "NOT_LAST":
+        return { error: "Only the latest issued application can be voided." };
     }
+  }
+  /**
+   * Billing posts through Accounting's own verbs, so Accounting's refusals
+   * arrive here in its own words — a closed period, an invoice with payments
+   * on it, an account nobody may pick — and are handed on as it would say them.
+   */
+  if (err instanceof LedgerError) {
+    return { error: friendlyMessage(err) };
   }
   /**
    * The unique indexes are the backstop for a duplicate number or list name,
@@ -821,6 +851,275 @@ export async function updateChangeOrderAction(input: unknown) {
     );
     if (projectId) revalidatePath(`${BASE}/${projectId}`);
     revalidatePath(BASE);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// ------------------------------------------------------------------- billing
+
+/**
+ * A signed money box: `moneyToCents` with the sign kept, for a pay
+ * application's `this period`, which may correct an earlier over-billing.
+ * `moneyToCents` already keeps it — `Number("-1,500")` is a negative — so this
+ * is the same transform under a name that says so.
+ */
+const signedMoneyToCents = moneyToCents;
+
+const sovLineSchema = z.object({
+  id: optionalUuid,
+  description: z.string().trim().max(300),
+  scheduledCents: moneyToCents,
+  costCodeId: optionalUuid,
+  changeOrderId: optionalUuid,
+});
+
+const sovSchema = z.object({
+  projectId: z.string().uuid(),
+  contractId: z.string().uuid(),
+  lines: z.array(sovLineSchema).max(500),
+});
+
+export async function saveSovAction(input: unknown) {
+  const parsed = sovSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  // A row with no description is the empty last row; a described row with a
+  // blank amount is scheduled at nothing, which is a real thing for a
+  // milestone not yet priced.
+  const lines = parsed.data.lines
+    .filter((l) => l.description !== "")
+    .map((l) => ({
+      id: l.id ?? undefined,
+      description: l.description,
+      scheduledCents: l.scheduledCents ?? 0,
+      costCodeId: l.costCodeId,
+      changeOrderId: l.changeOrderId,
+    }));
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const saved = await saveSovLines(tx, ctx, parsed.data.contractId, lines);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "sov.saved",
+          targetType: "contract",
+          targetId: parsed.data.contractId,
+          /* Counts, never amounts: a schedule of values is the price of the
+             job broken down, and the console is read by people who are not
+             this business. */
+          meta: { lineCount: saved.length },
+        });
+        return saved;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${parsed.data.projectId}/contracts/${parsed.data.contractId}`);
+    revalidatePath(`${BASE}/${parsed.data.projectId}`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** "10" or "7.5" → parts per million; a blank box is no retainage. */
+const retainagePercent = z
+  .string()
+  .trim()
+  .optional()
+  .transform((v, ctx) => {
+    if (v === undefined || v === "") return undefined;
+    const ppm = percentStringToPpm(v);
+    if (ppm === null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "retainage must be a percent" });
+      return z.NEVER;
+    }
+    return ppm;
+  });
+
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+const payApplicationSchema = z.object({
+  projectId: z.string().uuid(),
+  contractId: z.string().uuid(),
+  periodTo: isoDate,
+  retainagePercent,
+  notes: z.string().trim().max(2000).optional(),
+});
+
+export async function createPayApplicationAction(input: unknown) {
+  const parsed = payApplicationSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { projectId, retainagePercent: retainagePpm, ...fields } = parsed.data;
+  try {
+    const ctx = await gate();
+    const app = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const created = await createPayApplication(tx, ctx, { ...fields, retainagePpm });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "pay_application.created",
+          targetType: "pay_application",
+          targetId: created.id,
+          meta: { contractId: created.contractId, number: created.number },
+        });
+        return created;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}/contracts/${fields.contractId}`);
+    revalidatePath(`${BASE}/${projectId}`);
+    return { ok: true as const, payApplicationId: app.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const payApplicationLineSchema = z.object({
+  sovLineId: z.string().uuid(),
+  /** May be negative: a correction of an earlier over-billing. */
+  thisPeriodCents: signedMoneyToCents,
+  storedCents: moneyToCents,
+});
+
+export async function updatePayApplicationAction(input: unknown) {
+  const schema = z.object({
+    id: z.string().uuid(),
+    projectId: z.string().uuid(),
+    contractId: z.string().uuid(),
+    periodTo: isoDate.optional(),
+    retainagePercent,
+    notes: z.string().trim().max(2000).optional(),
+    lines: z.array(payApplicationLineSchema).max(500).optional(),
+    version: z.number().int().positive().optional(),
+  });
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { id, projectId, contractId, retainagePercent: retainagePpm, lines, ...patch } = parsed.data;
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      (tx) =>
+        updatePayApplication(tx, ctx, id, {
+          ...patch,
+          retainagePpm,
+          // A blank box is nothing this period and nothing stored.
+          lines: lines?.map((l) => ({
+            sovLineId: l.sovLineId,
+            thisPeriodCents: l.thisPeriodCents ?? 0,
+            storedCents: l.storedCents ?? 0,
+          })),
+        }),
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}/contracts/${contractId}`);
+    revalidatePath(`${BASE}/${projectId}`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function issuePayApplicationAction(input: unknown) {
+  const parsed = z
+    .object({
+      id: z.string().uuid(),
+      projectId: z.string().uuid(),
+      contractId: z.string().uuid(),
+      issueDate: isoDate,
+      version: z.number().int().positive().optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { id, projectId, contractId, ...rest } = parsed.data;
+  try {
+    const ctx = await gate();
+    const result = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const issued = await issuePayApplication(tx, ctx, id, rest);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "pay_application.issued",
+          targetType: "pay_application",
+          targetId: issued.app.id,
+          /* Identifiers only. The amount is on the invoice, where Accounting's
+             own audit of it lives. */
+          meta: {
+            contractId: issued.app.contractId,
+            number: issued.app.number,
+            invoiceId: issued.invoiceId,
+          },
+        });
+        return issued;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}/contracts/${contractId}`);
+    revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath("/dashboard/m/accounting");
+    return { ok: true as const, invoiceId: result.invoiceId };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function voidPayApplicationAction(input: unknown) {
+  const parsed = z
+    .object({
+      id: z.string().uuid(),
+      projectId: z.string().uuid(),
+      contractId: z.string().uuid(),
+      version: z.number().int().positive().optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { id, projectId, contractId, version } = parsed.data;
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const voided = await voidPayApplication(tx, ctx, id, { version });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "pay_application.voided",
+          targetType: "pay_application",
+          targetId: voided.id,
+          meta: { contractId: voided.contractId, number: voided.number },
+        });
+        return voided;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}/contracts/${contractId}`);
+    revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath("/dashboard/m/accounting");
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function deletePayApplicationAction(input: unknown) {
+  const parsed = z
+    .object({ id: z.string().uuid(), projectId: z.string().uuid(), contractId: z.string().uuid() })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { id, projectId, contractId } = parsed.data;
+  try {
+    const ctx = await gate();
+    await withTenant(ctx.tenantId, (tx) => deletePayApplication(tx, ctx, id), { role: ctx.role });
+    revalidatePath(`${BASE}/${projectId}/contracts/${contractId}`);
+    revalidatePath(`${BASE}/${projectId}`);
     return { ok: true as const };
   } catch (err) {
     return toResult(err);

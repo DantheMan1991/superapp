@@ -49,7 +49,7 @@ Before you have added anything you see `No {{project|plural|lower}} yet`. Staff 
 
 A {{project|lower}} can have **several agreements over its life**, and that is the normal case rather than the exception. A custom home often runs a design agreement, then a drawings agreement, then the build — three contracts, one job, and **the first two may be the only two that ever happen** if the client sees the number and stops there.
 
-They are listed on the {{project|lower}}'s own page, numbered in the order you agreed them. Owners only to add.
+They are listed on the {{project|lower}}'s own page, numbered in the order you agreed them. Owners only to add. **Click a contract's kind to open its own page** — its schedule of values and its pay applications; see Billing a contract. The `Billed` column is what has been certified for payment so far, with what is held back under it, and `—` until the first application is issued.
 
 ### Adding one
 
@@ -148,6 +148,67 @@ The line above the table adds up the approved ones: *"2 approved, worth $12,500.
 
 The pencil at the end of its row. Everything except which contract it is against. **Changing the lines replaces all of them**, so what you see in the dialog is what you get — and removing every line is a real instruction, not a mistake, because a change order with no lines is a legitimate thing to be.
 
+## Billing a contract
+
+Owners only. Click a contract's kind in the **Contracts** table on the {{project|lower}}'s page to open the contract's own page: its **schedule of values** and the **pay applications** drawn against it.
+
+A fixed-price contract is billed in draws. The schedule breaks the contract sum into lines — by trade, by phase, or as milestones — and each application says how much of each line is complete to date. What is due is that, less the retainage held back, less what earlier applications already certified. **Issuing an application makes it an ordinary invoice** in Accounting, so it ages, gets chased and gets paid like any other.
+
+Five figures sit at the top of the page:
+
+- **Contract value** — the revised value, original plus approved change orders.
+- **Scheduled** — what the schedule adds up to. When it does not match the contract you see `$… not on the schedule` or `$… over the contract` in red. Neither stops you; both mean the schedule is not finished.
+- **Billed to date** — the payment due on every issued application, added up.
+- **Retainage held** — what the latest issued application holds back.
+- **Balance to finish** — scheduled, less everything completed to date.
+
+### The schedule of values
+
+{button:Set up the schedule|outline} the first time, {button:Edit schedule|outline} after. Each line takes a **description** (required — a row without one is ignored), an optional **cost code**, where it came from (**Original contract**, or the approved **change order** that added it) and its **scheduled value**. {button:Add line|ghost} for more. The total is shown against the contract as you type.
+
+- **One line for the whole contract** — offered when the schedule is empty. A home billed monthly on percent complete needs no breakdown; this gives it one line worth the contract sum.
+- **Saving replaces the schedule** with what is in the dialog, in that order. Except a line that has been billed on an application: its remove button is greyed and reads *Billed on an application; cannot be removed*. Its value can still change.
+- The `Complete` column on the schedule reads from the latest issued application.
+
+### Starting an application
+
+{button:New application|primary}. Greyed with a reason when there is no schedule yet, or when a draft is already open — **a contract holds one draft at a time**, because each application carries the previous one's figures forward.
+
+1. **`Period to`** — the last day the application covers.
+2. **`Retainage %`** — held back from everything completed to date. It carries over from the last application, so you set it once. Blank is none.
+3. **`Notes`**.
+
+{button:Start application|primary} numbers it after the last one on the contract, void ones included, and gives it a line for every schedule line.
+
+### Filling in a draft
+
+{button:Open|outline} on the draft's row. One row per schedule line:
+
+| Column | What it is |
+| --- | --- |
+| `Scheduled` | The line's value. |
+| `Previous` | Work completed on earlier applications. Carried, not typed. |
+| `This period` | What was completed this period. **May be negative** to correct an earlier over-billing. |
+| `Stored` | Materials on site, not yet installed. Entered fresh each period. |
+| `To date` | Previous + this period + stored. Cannot go below nothing. |
+| `%` | To date as a share of scheduled. |
+
+Under the table, live as you type: *Completed and stored to date*, *Retainage*, *Total earned less retainage*, *Less previous certificates*, and **Current payment due** — the same arithmetic the invoice will carry. If the schedule gained lines since the draft was started (a change order's, say), they appear when you save.
+
+- {button:Save draft|outline} keeps it.
+- {button:Issue as invoice|primary} — dated `Issue on` — freezes the certificate and posts it as an invoice to the contract's {{customer|lower}}, on the {{project|lower}}'s company's books. Greyed while nothing is due. The invoice has two lines: the work earned this period to contract revenue, and the retainage withheld this period as a negative line to Retainage Receivable — so the ledger reads Dr AR (net), Dr Retainage Receivable (held), Cr Revenue (gross). You see `Application N issued as an invoice`, and the row shows the invoice's number and whether it is `Open`, `Partly paid` or `Paid`.
+- {button:Delete draft|ghost} throws it away; an issued application is never deleted.
+
+What can stop an issue, in its own words: `Nothing is due on this application, so there is nothing to invoice.` · `Say who the contract is with before billing it.` · `The chart of accounts is missing something: …` (a business withholding retainage needs a `1230` Retainage Receivable account; the construction profile adds it) · Accounting's own refusals, such as a closed period.
+
+### Releasing retainage
+
+There is no separate step. A later application at a **lower rate** — the final one at `0` — computes less retainage to date than the last certificate held, and the difference is due: the invoice carries a `Retainage released` line. Set the rate to zero on the last application and everything held comes back.
+
+### Voiding
+
+{button:Void|ghost} on the **latest issued** application only — every later one was computed from it. Accounting voids its invoice too, and refuses if a payment has been recorded against it (unapply the payment first). The next draft then certifies against the application before it.
+
 ## Job cost — what it was meant to cost
 
 Owners only to set. On the {{project|lower}}'s page, under **Job cost**.
@@ -232,6 +293,7 @@ Owners only. Everything you can add, you can change.
 - **A {{project|lower}}** — {button:Edit|outline} beside the status on its page. Every field except the company, which is fixed at creation because moving a job's costs between two sets of books is not an edit.
 - **A contract** — the pencil at the end of its row. Its value, once signed, moves only by change order.
 - **A change order** — the pencil at the end of its row. Everything except which contract it is against.
+- **A pay application** — only while it is a draft. Issued, it is a certificate and an invoice; it is voided, never edited.
 - **A cost code, or the list it is in** — the pencil beside each, on the Cost codes page.
 
 **If somebody else saved while you had the form open**, you see `Somebody changed this while you had it open. Reload and try again.` Nothing you typed is sent. Reload, look at what changed, and make your change again — this is deliberately a refusal rather than letting the last person to press Save quietly overwrite the first.
@@ -265,7 +327,9 @@ New codes are added to the end of the list, not the top, so a list you arranged 
 Worth knowing so you are not looking for it:
 
 - **A change order cannot be moved to another contract.** Raise it again on the right one and set the wrong one to `Void`.
-- **No billing.** Every contract records how it should be billed, and nothing bills yet.
+- **Only fixed-price billing.** A schedule of values and pay applications cover fixed price, progress draws, AIA applications and draw schedules — everything billed as a share of a fixed sum. Cost-plus, unit price and time-and-materials are recorded on the contract and not yet billed.
+- **Retainage you hold from subcontractors** is not tracked yet; only what clients hold from you.
+- **No printed application.** The certificate is on screen and its invoice is in Accounting; an AIA-style printout is coming.
 - **Cost codes can now be put on a bill.** They appear in Accounting wherever you tag a line, beside the job itself — so a bill can say which job and which trade. Actual cost per code follows once bills carry them.
 - **Nothing is ever deleted.** A contract you should not have added is set to `Cancelled` or `Declined`; a cost code is retired; a {{project|lower}} is cancelled. That is on purpose — a job's history is the point of keeping it.
 
@@ -277,5 +341,6 @@ Worth knowing so you are not looking for it:
 | Start a {{project|lower}} | ● | | |
 | Add or change cost code lists | ● | | |
 | Add, approve or change a change order | ● | | |
+| Set a schedule of values, or issue a pay application | ● | | |
 
 Starting a job is a decision, and it creates the thing your books group costs by — which is why it is kept to owners. Reading the list is ordinary work for anybody who has to go and stand on the site.

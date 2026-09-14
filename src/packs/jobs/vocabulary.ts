@@ -66,6 +66,18 @@ export const STATUS_LABELS: Record<ProjectStatus, string> = {
  */
 export const PROJECT_DIMENSION = "project";
 
+/**
+ * The dimension type a COST CODE syncs into, from slice 2.
+ *
+ * **THIS IS WHAT MAKES A CODE MORE THAN A LIST.** Once a code is a cost object,
+ * a bill line can be charged to it and every accounting report can group by it —
+ * and accounting needs no change at all, because the bill builder derives the
+ * types it offers from whatever members exist (`dimensionTypesFrom`). A project
+ * says WHICH JOB; a cost code says WHICH TRADE; a line may carry one of each,
+ * because `loadDimensionMembers` refuses only two members of the SAME type.
+ */
+export const COST_CODE_DIMENSION = "cost_code";
+
 /** "laying_hens" → "Laying hens". Slugs are for machines. */
 export function slugLabel(slug: string): string {
   const spaced = slug.replace(/_/g, " ").trim();
@@ -201,4 +213,57 @@ export function contractKindsFrom(config: unknown): string[] {
     }
   }
   return [];
+}
+
+// ---------------------------------------------------------------- commitments
+
+/** Mirrors `job_commitments_kind_valid`. Kept in sync by tests/jobs.test.ts. */
+export const COMMITMENT_KINDS = ["purchase_order", "subcontract"] as const;
+export type CommitmentKind = (typeof COMMITMENT_KINDS)[number];
+
+/**
+ * A CHECK list of two, unlike a contract's `kind`. The two diverge in BEHAVIOUR
+ * later — retainage, lien waivers and certified payroll attach to bought labour
+ * and not to bought material — so the pack has to be able to tell them apart.
+ * What each is CALLED is a label; what each IS, is this.
+ */
+export const COMMITMENT_KIND_LABELS: Record<CommitmentKind, string> = {
+  purchase_order: "Purchase order",
+  subcontract: "Subcontract",
+};
+
+/** Mirrors `job_commitments_status_valid`. */
+export const COMMITMENT_STATUSES = [
+  "draft",
+  "issued",
+  "closed",
+  "cancelled",
+] as const;
+export type CommitmentStatus = (typeof COMMITMENT_STATUSES)[number];
+
+export const COMMITMENT_STATUS_LABELS: Record<CommitmentStatus, string> = {
+  draft: "Draft",
+  issued: "Issued",
+  closed: "Closed",
+  cancelled: "Cancelled",
+};
+
+/**
+ * The statuses whose money is actually COMMITTED.
+ *
+ * **A DRAFT IS NOT A COMMITMENT**, for the same reason a proposed contract is
+ * not revenue: nobody has been told. `closed` still counts — the work was
+ * ordered and done, and dropping it would make a finished job look cheaper than
+ * it was. `cancelled` never happened.
+ *
+ * One constant, read by the SQL roll-up and by anything on a page that sums, so
+ * the two cannot disagree about what a job has committed.
+ */
+export const COMMITTED_STATUSES: readonly CommitmentStatus[] = ["issued", "closed"];
+
+export function isCommitmentKind(v: string): v is CommitmentKind {
+  return (COMMITMENT_KINDS as readonly string[]).includes(v);
+}
+export function isCommitmentStatus(v: string): v is CommitmentStatus {
+  return (COMMITMENT_STATUSES as readonly string[]).includes(v);
 }

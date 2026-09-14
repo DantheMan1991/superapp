@@ -13,6 +13,88 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-14 — Slice 2: committed cost, and a cost code becomes a cost object (`claude/committed-cost`)
+
+`job_commitments` + `job_commitment_lines` — what the business has ordered — and
+the change that makes a cost code worth having: **every code is now a
+`dimension_members` row.**
+
+**COMMITTED COST IS THE NUMBER A BUDGET IS USELESS WITHOUT.** A job that has
+spent $400k of a $1.8m contract looks healthy right up until you notice it has
+also issued $1.5m of subcontracts. Actual answers "what has been billed";
+committed answers "what is already owed whether or not the invoice has arrived",
+and only the second tells a builder whether the job is in trouble. It is the
+thing a spreadsheet gets wrong most often, because the PO lives in one place and
+the ledger in another.
+
+**A COST CODE IS NOW A COST OBJECT, and accounting needed no change at all.** The
+bill builder derives the dimension types it offers from whatever members exist
+(`dimensionTypesFrom`), so codes simply appear on a bill line the moment they
+sync. A project says WHICH JOB, a code says WHICH TRADE, and a line may carry one
+of each because `loadDimensionMembers` refuses only two members of the *same*
+type. That is the P5 seam paying for itself: one sync function in the pack, zero
+lines in the module it reports through.
+
+`0330` backfills the codes that already existed. A chart where some lines are
+taggable and others silently are not is worse than one where none are, and the
+difference would only surface as a bill somebody could not code. **It carries
+`is_active` through**, so a code retired in the previous slice arrives archived
+rather than quietly being offered again.
+
+**ACTUAL COST COMES FROM A CORE EXPORT, NOT A QUERY OF ACCOUNTING'S TABLES.**
+`actualByProject` asks `getBalances` for expense balances grouped by the
+`project` dimension — which already applies the basis lens and the entity scope,
+so a job cost figure that disagreed with the P&L is not reachable. The direction
+stays core → lib → pack; accounting still knows nothing about this pack.
+
+**Header and lines, not a flat table.** A framing subcontract covers labour and
+materials under one agreement with one vendor and one number. Value and cost code
+on the header would have been half the work today and a migration tomorrow. The
+form offers one line and an "Add line" button, because one line is the common
+case.
+
+**Two asymmetries with `job_contracts`, both deliberate:**
+
+- **`party_id` is NOT NULL here.** A contract may be proposed before the other
+  side is a record in the books; a commitment with nobody to pay is not a
+  commitment, it is a budget line.
+- **`kind` is a CHECK list of two, not an open taxonomy.** A subcontract and a
+  purchase order diverge in BEHAVIOUR later — retainage, lien waivers and
+  certified payroll attach to bought labour and not to bought material — so the
+  pack has to tell them apart. What each is *called* is a label; what each *is*,
+  is this.
+
+**Only `issued` and `closed` count as committed.** A draft is written but not
+sent, so nobody is owed anything — the same shape of rule, and the same reason,
+as a proposed contract not being revenue. One exported constant, read by the SQL
+roll-up and by anything that sums.
+
+**An edit REPLACES lines rather than merging them.** A line-by-line patch needs
+stable ids round-tripping through a form and a rule for what a missing id means;
+replacing is one delete and one insert inside the transaction the caller already
+holds, and cannot leave a line nobody meant to keep. Omitting `lines` entirely
+leaves them alone, so a status change does not disturb the money.
+
+**A HOLE FOUND BY DRIVING IT.** The cost-code picker on a project was hidden
+whenever the tenant had one list — the same "only at two" rule that stops a
+single-company business being asked which company. But a project created *before*
+the chart of cost existed has no list, and could therefore never be given one:
+the control that would do it was hidden by the rule. The picker now also shows
+when the row has no list and one exists. No test would have caught this; opening
+the form did.
+
+**The FK ordering bit again, exactly as predicted.** `job_commitment_lines`
+references `job_commitments`, both new in `0329`, so drizzle-kit emitted the
+constraint before the unique index it needs. Hand-reordered with the reason in
+the file, as `0325` was — and `0327` needed nothing, which is the control case:
+it only bites when two *new* tables reference each other.
+
+**Driven on the dev branch:** a two-line subcontract (`SC-2041`, framing labour
+$62,000 and materials $38,500) against Tractor Supply Co, issued. The project's
+Ordered panel reads **Contract value $1,949,500.00 · Committed $100,500.00 ·
+Actual cost $0.00** — actual is genuinely zero because no bill has been coded to
+the job yet, which is the honest answer rather than a missing figure.
+
 ### 2026-09-14 — Everything you can create, you can change (`claude/everything-you-can-create-you-can-change`)
 
 Edit surfaces for all three things the pack owns — a project, a contract, a cost
@@ -207,14 +289,17 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_cost_code_sets` | A named list of cost codes. One or several per tenant. | FORCE RLS, member-wide. `job_cost_code_sets_one_default_idx` is a PARTIAL unique index, so **two defaults fail at the database** rather than depending on the action having cleared the first. |
 | `job_cost_codes` | One line of the chart of cost. | Composite FK to `(tenant_id, set_id)`, **cascade** — deleting a list deletes its codes. `code` is free text, never a number: CSI writes `03 30 00`, NAHB writes `1000`, a builder writes `CONC-SLAB`. `sort_order` is what orders the list, so a code never has to be sortable to be right. |
 | `job_contracts` | **Many per project.** Kind, value, billing method, counterparty, role, status, and a `sequence` that keeps the ladder in agreed order. | Composite FK to the project, **cascade** — a project's agreements are part of it, proved in the isolation suite rather than assumed, because a dangling contract would still be summed by `projectValues`. `kind` is an open taxonomy (format check only); `role`, `status` and `billing_method` are CHECK lists. **No `direction` column** — see the build log. |
+| `job_commitments` | What the business has ORDERED: a purchase order or a subcontract. | `party_id` is NOT NULL — a commitment with nobody to pay is a budget line, not a commitment. `kind` is a CHECK list of two because the two diverge in behaviour later. Number unique per tenant: a vendor quotes it back on the invoice. Cascade from the project. |
+| `job_commitment_lines` | The money, one cost code at a time. | Cascade from the commitment; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative — a credit is a change order. |
 | `job_projects` | The spine. | FOUR composite FKs, each certified in `tests/isolation/jobs.test.ts`: company, division, client, cost code list. `delivery_method` is an open taxonomy (P1) with a **format check and no value check**, and is nullable. `metadata` is the P2 extension bag. |
 
 Migrations `0325_jobs.sql` / `0326_jobs_rls.sql` (slice 0) and
 `0327_job_contracts.sql` / `0328_job_contracts_rls.sql` (slice 1), each applied
 to dev and prod before its merge, per
 [ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md).
-`db:verify-rls` reports 196 tables, all enabled, forced and with policies, on
-both.
+`0329_job_commitments.sql` / `0330_job_commitments_rls.sql` (slice 2) follow the
+same rule. `db:verify-rls` reports **198 tables**, all enabled, forced and with
+policies, on both.
 
 **0327 needed no hand-reordering, which confirms the diagnosis in 0325.** Both
 tables it references — `job_projects` and `parties` — are from earlier
@@ -269,8 +354,15 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Open items
 
-- **No budget and no commitments.** Slice 2. A project now has a value and
-  collects actual cost, and nothing compares the two.
+- **No budget.** A project now has a contract value, a committed total and an
+  actual cost, and nothing holds it to a planned figure per cost code. That is
+  the next slice, and it is now the only one of the four numbers missing.
+- **ACTUAL COST IS PER PROJECT, NOT PER CODE.** `committedTotals` already returns
+  `byCostCode`; the ledger side does not, because a bill line has to be TAGGED
+  with a code before it can be grouped by one — and nothing has been yet. The
+  machinery is in place from this slice: codes are dimension members, so the bill
+  builder offers them. Per-code variance is a query away once real bills carry
+  codes, and is deliberately not built against zero data.
 - **Nothing bills.** `billing_method` is recorded on every contract and read by
   no code. Pay applications, retainage and the schedule of values are slice 4.
 - ~~**A contract cannot be edited from the screen.**~~ — **closed 2026-09-14.**

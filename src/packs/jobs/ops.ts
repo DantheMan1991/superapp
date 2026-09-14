@@ -1,8 +1,10 @@
 import "server-only";
-import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
+  JobCommitment,
+  JobCommitmentLine,
   JobContract,
   JobCostCode,
   JobCostCodeSet,
@@ -10,13 +12,19 @@ import type {
 } from "@/db/schema";
 import {
   archiveDimensionMember,
+  getBalances,
   listDimensionMembers,
   upsertDimensionMember,
+  type EntityScope,
 } from "@/modules/accounting/core";
 import {
+  COMMITTED_STATUSES,
+  COST_CODE_DIMENSION,
   DELIVERY_METHOD_FORMAT,
   PROJECT_DIMENSION,
   isBillingMethod,
+  isCommitmentKind,
+  isCommitmentStatus,
   isContractRole,
   isContractStatus,
   isProjectStatus,
@@ -44,6 +52,7 @@ export class JobsError extends Error {
       | "INVALID_ROLE"
       | "INVALID_BILLING_METHOD"
       | "INVALID_VALUE"
+      | "NO_LINES"
       | "INVALID_DELIVERY_METHOD"
       | "NUMBER_TAKEN"
       | "NAME_TAKEN"
@@ -252,7 +261,20 @@ export async function createCostCode(
       notes: input.notes?.trim() ?? "",
     })
     .returning();
+
+  // Same transaction, always — see the file header. A code that is not a cost
+  // object is one nobody can charge a bill to.
+  await upsertDimensionMember(tx, ctx, {
+    dimensionType: COST_CODE_DIMENSION,
+    packEntityId: rows[0].id,
+    displayName: codeLabel(rows[0]),
+  });
   return rows[0];
+}
+
+/** What a cost code is called in a report's dimension column. */
+export function codeLabel(code: Pick<JobCostCode, "code" | "name">): string {
+  return `${code.code} · ${code.name}`;
 }
 
 // ------------------------------------------------------------------ projects
@@ -836,5 +858,362 @@ export async function updateCostCode(
     )
     .returning();
   if (rows.length === 0) throw new JobsError("NOT_FOUND", `code ${id} not found`);
+
+  /**
+   * THE COST OBJECT FOLLOWS THE CODE, including its retirement.
+   *
+   * A renumbered code must not leave reports grouping by the old number, and a
+   * RETIRED one must stop being offered on a new bill while everything already
+   * charged to it keeps reporting — which is exactly what `is_active` on a
+   * dimension member means. `upsertDimensionMember` sets `isActive: true`, so a
+   * retire needs the archive verb instead.
+   */
+  const code = rows[0];
+  if (code.isActive) {
+    await upsertDimensionMember(tx, ctx, {
+      dimensionType: COST_CODE_DIMENSION,
+      packEntityId: code.id,
+      displayName: codeLabel(code),
+    });
+  } else {
+    const members = await listDimensionMembers(tx, ctx.tenantId, COST_CODE_DIMENSION);
+    const mine = members.find((m) => m.packEntityId === code.id);
+    if (mine && mine.isActive) {
+      await archiveDimensionMember(tx, ctx, { memberId: mine.id });
+    }
+  }
+  return code;
+}
+
+// --------------------------------------------------------------- commitments
+
+export interface CommitmentLineInput {
+  costCodeId?: string | null;
+  description?: string;
+  amountCents: number;
+}
+
+export interface CommitmentInput {
+  projectId: string;
+  partyId: string;
+  kind?: string;
+  number: string;
+  description?: string;
+  status?: string;
+  issuedOn?: string | null;
+  notes?: string;
+  lines: CommitmentLineInput[];
+}
+
+function validateCommitmentShape(input: {
+  kind?: string;
+  status?: string;
+  lines?: CommitmentLineInput[];
+}): void {
+  if (input.kind !== undefined && !isCommitmentKind(input.kind)) {
+    throw new JobsError("INVALID_KIND", `invalid commitment kind: ${input.kind}`);
+  }
+  if (input.status !== undefined && !isCommitmentStatus(input.status)) {
+    throw new JobsError("INVALID_STATUS", `invalid status: ${input.status}`);
+  }
+  if (input.lines !== undefined) {
+    /**
+     * **A COMMITMENT WITH NO LINES COMMITS NOTHING**, and would sit on a project
+     * looking like an order while adding zero to what the job owes. Refused here
+     * rather than allowed and then filtered out of every sum afterwards.
+     */
+    if (input.lines.length === 0) {
+      throw new JobsError("NO_LINES", "a commitment needs at least one line");
+    }
+    for (const line of input.lines) {
+      if (!Number.isInteger(line.amountCents) || line.amountCents < 0) {
+        throw new JobsError("INVALID_VALUE", "a committed amount cannot be negative");
+      }
+    }
+  }
+}
+
+export async function createCommitment(
+  tx: Tx,
+  ctx: JobsCtx,
+  input: CommitmentInput,
+): Promise<JobCommitment> {
+  requireWrite(ctx, "owner");
+  validateCommitmentShape(input);
+
+  const rows = await tx
+    .insert(schema.jobCommitments)
+    .values({
+      tenantId: ctx.tenantId,
+      projectId: input.projectId,
+      partyId: input.partyId,
+      kind: input.kind ?? "purchase_order",
+      number: input.number.trim(),
+      description: input.description?.trim() ?? "",
+      status: input.status ?? "draft",
+      issuedOn: input.issuedOn ?? null,
+      notes: input.notes?.trim() ?? "",
+      createdByClerkUserId: ctx.userId,
+    })
+    .returning();
+  const commitment = rows[0];
+
+  await tx.insert(schema.jobCommitmentLines).values(
+    input.lines.map((line, i) => ({
+      tenantId: ctx.tenantId,
+      commitmentId: commitment.id,
+      costCodeId: line.costCodeId ?? null,
+      description: line.description?.trim() ?? "",
+      amountCents: line.amountCents,
+      sortOrder: i * 10,
+    })),
+  );
+
+  return commitment;
+}
+
+/**
+ * Change a commitment's header, and REPLACE its lines when any are given.
+ *
+ * **REPLACE, NOT MERGE**, and the choice is worth stating. A line-by-line patch
+ * needs stable ids round-tripping through a form and a rule for what a missing
+ * id means; replacing is one delete and one insert inside the transaction the
+ * caller already holds, and it cannot leave behind a line nobody meant to keep.
+ * The cost is that an edit rewrites rows that did not change, which matters to
+ * nothing here: no other table points at a commitment line.
+ *
+ * Omitting `lines` entirely leaves them alone, so a status change does not
+ * disturb the money.
+ */
+export async function updateCommitment(
+  tx: Tx,
+  ctx: JobsCtx,
+  id: string,
+  input: Partial<CommitmentInput> & { version?: number },
+): Promise<JobCommitment> {
+  requireWrite(ctx, "owner");
+  validateCommitmentShape(input);
+  const existing = await tx
+    .select()
+    .from(schema.jobCommitments)
+    .where(
+      and(
+        eq(schema.jobCommitments.tenantId, ctx.tenantId),
+        eq(schema.jobCommitments.id, id),
+      ),
+    )
+    .limit(1);
+  if (existing.length === 0) {
+    throw new JobsError("NOT_FOUND", `commitment ${id} not found`);
+  }
+  if (input.version !== undefined && input.version !== existing[0].version) {
+    throw new JobsError("STALE_VERSION", "commitment changed since loaded");
+  }
+
+  const patch: Record<string, unknown> = {
+    updatedAt: new Date(),
+    version: existing[0].version + 1,
+  };
+  if (input.partyId !== undefined) patch.partyId = input.partyId;
+  if (input.kind !== undefined) patch.kind = input.kind;
+  if (input.number !== undefined) patch.number = input.number.trim();
+  if (input.description !== undefined) patch.description = input.description.trim();
+  if (input.status !== undefined) patch.status = input.status;
+  if (input.issuedOn !== undefined) patch.issuedOn = input.issuedOn;
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+
+  const rows = await tx
+    .update(schema.jobCommitments)
+    .set(patch)
+    .where(
+      and(
+        eq(schema.jobCommitments.tenantId, ctx.tenantId),
+        eq(schema.jobCommitments.id, id),
+      ),
+    )
+    .returning();
+
+  if (input.lines !== undefined) {
+    await tx
+      .delete(schema.jobCommitmentLines)
+      .where(
+        and(
+          eq(schema.jobCommitmentLines.tenantId, ctx.tenantId),
+          eq(schema.jobCommitmentLines.commitmentId, id),
+        ),
+      );
+    await tx.insert(schema.jobCommitmentLines).values(
+      input.lines.map((line, i) => ({
+        tenantId: ctx.tenantId,
+        commitmentId: id,
+        costCodeId: line.costCodeId ?? null,
+        description: line.description?.trim() ?? "",
+        amountCents: line.amountCents,
+        sortOrder: i * 10,
+      })),
+    );
+  }
+
   return rows[0];
+}
+
+export interface CommitmentRow {
+  commitment: JobCommitment;
+  vendorName: string;
+  lines: JobCommitmentLine[];
+  totalCents: number;
+}
+
+export async function listCommitments(
+  tx: Tx,
+  tenantId: string,
+  projectId: string,
+): Promise<CommitmentRow[]> {
+  const headers = await tx
+    .select({
+      commitment: schema.jobCommitments,
+      vendorName: schema.parties.displayName,
+    })
+    .from(schema.jobCommitments)
+    .leftJoin(
+      schema.parties,
+      and(
+        eq(schema.parties.tenantId, schema.jobCommitments.tenantId),
+        eq(schema.parties.id, schema.jobCommitments.partyId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.jobCommitments.tenantId, tenantId),
+        eq(schema.jobCommitments.projectId, projectId),
+      ),
+    )
+    .orderBy(asc(schema.jobCommitments.number));
+  if (headers.length === 0) return [];
+
+  // One statement for every line on the page, not one per commitment.
+  const lines = await tx
+    .select()
+    .from(schema.jobCommitmentLines)
+    .where(
+      and(
+        eq(schema.jobCommitmentLines.tenantId, tenantId),
+        inArray(
+          schema.jobCommitmentLines.commitmentId,
+          headers.map((h) => h.commitment.id),
+        ),
+      ),
+    )
+    .orderBy(asc(schema.jobCommitmentLines.sortOrder));
+
+  return headers.map((h) => {
+    const mine = lines.filter((l) => l.commitmentId === h.commitment.id);
+    return {
+      commitment: h.commitment,
+      vendorName: h.vendorName ?? "—",
+      lines: mine,
+      totalCents: mine.reduce((sum, l) => sum + l.amountCents, 0),
+    };
+  });
+}
+
+/**
+ * WHAT EACH PROJECT HAS COMMITTED, by project and by cost code.
+ *
+ * **Only `issued` and `closed` count.** A draft is written but not sent, so
+ * nobody is owed anything — the same rule, and the same reason, as a proposed
+ * contract not being revenue. The constant is shared so the two cannot drift.
+ */
+export interface CommittedTotals {
+  byProject: Map<string, number>;
+  byCostCode: Map<string, number>;
+}
+
+export async function committedTotals(
+  tx: Tx,
+  tenantId: string,
+): Promise<CommittedTotals> {
+  const rows = await tx
+    .select({
+      projectId: schema.jobCommitments.projectId,
+      costCodeId: schema.jobCommitmentLines.costCodeId,
+      amountCents: sql<number>`sum(${schema.jobCommitmentLines.amountCents})`.mapWith(
+        Number,
+      ),
+    })
+    .from(schema.jobCommitmentLines)
+    .innerJoin(
+      schema.jobCommitments,
+      and(
+        eq(schema.jobCommitments.tenantId, schema.jobCommitmentLines.tenantId),
+        eq(schema.jobCommitments.id, schema.jobCommitmentLines.commitmentId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.jobCommitmentLines.tenantId, tenantId),
+        inArray(schema.jobCommitments.status, [...COMMITTED_STATUSES]),
+      ),
+    )
+    .groupBy(schema.jobCommitments.projectId, schema.jobCommitmentLines.costCodeId);
+
+  const byProject = new Map<string, number>();
+  const byCostCode = new Map<string, number>();
+  for (const r of rows) {
+    byProject.set(r.projectId, (byProject.get(r.projectId) ?? 0) + r.amountCents);
+    if (r.costCodeId) {
+      byCostCode.set(r.costCodeId, (byCostCode.get(r.costCodeId) ?? 0) + r.amountCents);
+    }
+  }
+  return { byProject, byCostCode };
+}
+
+/**
+ * WHAT EACH PROJECT HAS ACTUALLY COST, from the ledger.
+ *
+ * **THIS IS A CORE EXPORT DOING THE WORK, NOT A QUERY OF ITS TABLES.**
+ * `getBalances` already groups by a dimension type and already applies the basis
+ * lens, so a pack asks it for expense balances grouped by `project` and gets an
+ * answer that agrees with every other report in the product. Accounting learns
+ * nothing about this pack; the direction stays core → lib → pack, and a job cost
+ * figure that disagreed with the P&L would be worse than no figure at all.
+ *
+ * Expense accounts only: a project's costs, not its billings. `netCents` is
+ * debit-positive for an expense, which is the sign a builder expects.
+ */
+export async function actualByProject(
+  tx: Tx,
+  tenantId: string,
+  scope: EntityScope,
+): Promise<Map<string, number>> {
+  const expenseAccounts = await tx
+    .select({ id: schema.accounts.id })
+    .from(schema.accounts)
+    .where(
+      and(eq(schema.accounts.tenantId, tenantId), eq(schema.accounts.accountType, "expense")),
+    );
+  if (expenseAccounts.length === 0) return new Map();
+
+  const rows = await getBalances(tx, tenantId, {
+    scope,
+    accountIds: expenseAccounts.map((a) => a.id),
+    groupByDimensionType: PROJECT_DIMENSION,
+  });
+
+  /**
+   * `memberId` is the dimension member, not the project. The pack owns the
+   * mapping back to its own row, because `dimension_members.pack_entity_id` is
+   * the only place the two are tied together.
+   */
+  const members = await listDimensionMembers(tx, tenantId, PROJECT_DIMENSION);
+  const projectOf = new Map(members.map((m) => [m.id, m.packEntityId]));
+
+  const out = new Map<string, number>();
+  for (const row of rows) {
+    if (!row.memberId) continue; // untagged cost belongs to no job
+    const projectId = projectOf.get(row.memberId);
+    if (!projectId) continue;
+    out.set(projectId, (out.get(projectId) ?? 0) + row.netCents);
+  }
+  return out;
 }

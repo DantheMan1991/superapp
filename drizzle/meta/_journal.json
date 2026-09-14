@@ -2304,6 +2304,20 @@
       "when": 1789381061453,
       "tag": "0328_job_contracts_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 329,
+      "version": "7",
+      "when": 1789385916928,
+      "tag": "0329_job_commitments",
+      "breakpoints": true
+    },
+    {
+      "idx": 330,
+      "version": "7",
+      "when": 1789385917928,
+      "tag": "0330_job_commitments_rls",
+      "breakpoints": true
     }
   ]
 }

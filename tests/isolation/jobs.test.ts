@@ -39,6 +39,8 @@ d("jobs tables (RLS)", () => {
   let projectA = "";
   let projectB = "";
   let contractA = "";
+  let commitmentA = "";
+  let codeA = "";
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantA, fn, { role: "staff", userId: MATE });
@@ -81,10 +83,14 @@ d("jobs tables (RLS)", () => {
       setA = sets[0].id;
       setB = sets[1].id;
 
-      await tx.insert(schema.jobCostCodes).values([
-        { tenantId: tenantA, setId: setA, code: "1000", name: "Sitework" },
-        { tenantId: tenantB, setId: setB, code: "1000", name: "Sitework" },
-      ]);
+      const codes = await tx
+        .insert(schema.jobCostCodes)
+        .values([
+          { tenantId: tenantA, setId: setA, code: "1000", name: "Sitework" },
+          { tenantId: tenantB, setId: setB, code: "1000", name: "Sitework" },
+        ])
+        .returning();
+      codeA = codes[0].id;
 
       const projects = await tx
         .insert(schema.jobProjects)
@@ -108,6 +114,24 @@ d("jobs tables (RLS)", () => {
         .returning();
       projectA = projects[0].id;
       projectB = projects[1].id;
+
+      const commitments = await tx
+        .insert(schema.jobCommitments)
+        .values({
+          tenantId: tenantA,
+          projectId: projectA,
+          partyId: clientA,
+          number: "PO-ISO-1",
+          status: "issued",
+        })
+        .returning();
+      commitmentA = commitments[0].id;
+      await tx.insert(schema.jobCommitmentLines).values({
+        tenantId: tenantA,
+        commitmentId: commitmentA,
+        costCodeId: codeA,
+        amountCents: 4_200_00,
+      });
 
       const contracts = await tx
         .insert(schema.jobContracts)
@@ -334,6 +358,110 @@ d("jobs tables (RLS)", () => {
     expect(left).toEqual([]);
     const mine = await asOwner((tx) => tx.select().from(schema.jobContracts));
     expect(mine.map((r) => r.id)).toEqual([contractA]);
+  });
+
+  it("a tenant sees only its own commitments and their lines", async () => {
+    const { heads, lines } = await asOwner(async (tx) => ({
+      heads: await tx.select().from(schema.jobCommitments),
+      lines: await tx.select().from(schema.jobCommitmentLines),
+    }));
+    expect(heads.map((h) => h.id)).toEqual([commitmentA]);
+    expect(lines).toHaveLength(1);
+  });
+
+  it("cannot read another tenant's committed AMOUNT", async () => {
+    const rows = await asOtherTenant((tx) =>
+      tx
+        .select()
+        .from(schema.jobCommitmentLines)
+        .where(eq(schema.jobCommitmentLines.commitmentId, commitmentA)),
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it("a commitment cannot hang off another tenant's PROJECT", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobCommitments).values({
+          tenantId: tenantA,
+          projectId: projectB,
+          partyId: clientA,
+          number: "x-proj",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a commitment line cannot name another tenant's COST CODE", async () => {
+    const otherCode = await withSystem(async (tx) => {
+      const r = await tx
+        .select()
+        .from(schema.jobCostCodes)
+        .where(eq(schema.jobCostCodes.setId, setB));
+      return r[0].id;
+    });
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobCommitmentLines).values({
+          tenantId: tenantA,
+          commitmentId: commitmentA,
+          costCodeId: otherCode,
+          amountCents: 1,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a cost code with money committed against it CANNOT be deleted", async () => {
+    /*
+     * The key is the backstop for a rule the app already keeps: `updateCostCode`
+     * has no delete verb, codes are retired instead. If a delete ever appeared,
+     * this refuses it rather than letting a year of job history lose its code.
+     */
+    await expect(
+      withSystem((tx) =>
+        tx.delete(schema.jobCostCodes).where(eq(schema.jobCostCodes.id, codeA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("deleting a project takes its commitments AND their lines", async () => {
+    const scratch = await withSystem(async (tx) => {
+      const p = await tx
+        .insert(schema.jobProjects)
+        .values({ tenantId: tenantA, entityId: entityA, number: "casc-2", name: "c2" })
+        .returning();
+      const c = await tx
+        .insert(schema.jobCommitments)
+        .values({
+          tenantId: tenantA,
+          projectId: p[0].id,
+          partyId: clientA,
+          number: "casc-po",
+        })
+        .returning();
+      await tx.insert(schema.jobCommitmentLines).values({
+        tenantId: tenantA,
+        commitmentId: c[0].id,
+        amountCents: 500,
+      });
+      return { projectId: p[0].id, commitmentId: c[0].id };
+    });
+    await withSystem((tx) =>
+      tx.delete(schema.jobProjects).where(eq(schema.jobProjects.id, scratch.projectId)),
+    );
+    const left = await asOwner(async (tx) => ({
+      heads: await tx
+        .select()
+        .from(schema.jobCommitments)
+        .where(eq(schema.jobCommitments.id, scratch.commitmentId)),
+      lines: await tx
+        .select()
+        .from(schema.jobCommitmentLines)
+        .where(eq(schema.jobCommitmentLines.commitmentId, scratch.commitmentId)),
+    }));
+    expect(left.heads).toEqual([]);
+    expect(left.lines).toEqual([]);
   });
 
   it("keeps the two builders' identically-numbered codes apart", async () => {

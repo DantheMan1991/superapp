@@ -6,7 +6,9 @@ import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
+import { violatedUniqueIndex } from "@/lib/db-errors";
 import {
+  createChangeOrder,
   createCommitment,
   createContract,
   createCostCode,
@@ -16,15 +18,18 @@ import {
   removeBudgetLine,
   setBudgetLines,
   setDefaultCostCodeSet,
+  updateChangeOrder,
   updateCommitment,
   updateContract,
   updateCostCode,
   updateCostCodeSet,
   updateProject,
+  type ChangeOrderLineInput,
   type JobsCtx,
 } from "./ops";
 import {
   BILLING_METHODS,
+  CHANGE_ORDER_STATUSES,
   COMMITMENT_KINDS,
   COMMITMENT_STATUSES,
   CONTRACT_ROLES,
@@ -93,6 +98,12 @@ function toResult(err: unknown): { error: string } {
         return {
           error: "Somebody changed this while you had it open. Reload and try again.",
         };
+      case "VALUE_LOCKED":
+        return {
+          error: "That contract is signed, so its value changes with a change order.",
+        };
+      case "APPROVAL_DATE_REQUIRED":
+        return { error: "Give an approved change order the date it was approved." };
     }
   }
   /**
@@ -101,19 +112,24 @@ function toResult(err: unknown): { error: string } {
    * cannot see an uncommitted row. Translated here rather than left as a
    * Postgres string, because "duplicate key value violates unique constraint" is
    * not a sentence for a person.
+   *
+   * **READ FROM THE CAUSE, NOT THE MESSAGE.** Until slice 4 this matched on
+   * `err.message`, which under drizzle's wrapper is the SQL and never the
+   * constraint — so all four sentences below were dead and a duplicate job
+   * number said "Something went wrong". Found by a test asserting on the message
+   * and failing; `violatedUniqueIndex` says why.
    */
-  const message = err instanceof Error ? err.message : "";
-  if (message.includes("job_projects_tenant_number_idx")) {
-    return { error: "That job number is already in use. Pick another." };
-  }
-  if (message.includes("job_cost_code_sets_tenant_name_idx")) {
-    return { error: "A list with that name already exists." };
-  }
-  if (message.includes("job_cost_codes_set_code_idx")) {
-    return { error: "That code is already in this list." };
-  }
-  if (message.includes("job_commitments_tenant_number_idx")) {
-    return { error: "That order number is already in use. Pick another." };
+  switch (violatedUniqueIndex(err)) {
+    case "job_projects_tenant_number_idx":
+      return { error: "That job number is already in use. Pick another." };
+    case "job_cost_code_sets_tenant_name_idx":
+      return { error: "A list with that name already exists." };
+    case "job_cost_codes_set_code_idx":
+      return { error: "That code is already in this list." };
+    case "job_commitments_tenant_number_idx":
+      return { error: "That order number is already in use. Pick another." };
+    case "job_change_orders_contract_number_idx":
+      return { error: "That change order number is already used on this contract." };
   }
   console.error("jobs action failed", err);
   return { error: "Something went wrong. Try again." };
@@ -665,6 +681,145 @@ export async function removeBudgetLineAction(input: unknown) {
       { role: ctx.role },
     );
     revalidatePath(`${BASE}/${parsed.data.projectId}`);
+    revalidatePath(BASE);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const changeOrderLineSchema = z.object({
+  costCodeId: optionalUuid,
+  description: z.string().trim().max(200).optional(),
+  /** Money as typed, cents at the boundary. `-4,500` is a deduction. */
+  amountCents: moneyToCents,
+});
+
+const changeOrderSchema = z.object({
+  /** For revalidation only — the change order itself hangs off the contract. */
+  projectId: z.string().uuid(),
+  contractId: z.string().uuid(),
+  number: z.string().trim().min(1).max(40),
+  title: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(2000).optional(),
+  status: z.enum(CHANGE_ORDER_STATUSES).optional(),
+  /** The change to the contract's value. Negative is a deduction. */
+  valueCents: moneyToCents,
+  requestedOn: optionalDate,
+  approvedOn: optionalDate,
+  notes: z.string().trim().max(2000).optional(),
+  lines: z.array(changeOrderLineSchema).max(200).optional(),
+});
+
+/**
+ * A blank row costs nothing and is dropped, as on a commitment. A row with an
+ * amount and NO code is refused rather than dropped: a change-order line's only
+ * job is to move a code's budget, so one without a code would be money that
+ * moved nothing, and dropping it silently would make the cost total disagree
+ * with what the person typed.
+ */
+function changeOrderLines(
+  lines:
+    | Array<{ costCodeId: string | null; description?: string; amountCents: number | null }>
+    | undefined,
+): { ok: true; lines: ChangeOrderLineInput[] | undefined } | { ok: false; error: string } {
+  if (lines === undefined) return { ok: true, lines: undefined };
+  const kept = lines.filter((l) => l.amountCents !== null);
+  if (kept.some((l) => !l.costCodeId)) {
+    return { ok: false, error: "Every line on a change order needs a cost code." };
+  }
+  return {
+    ok: true,
+    lines: kept.map((l) => ({
+      costCodeId: l.costCodeId as string,
+      description: l.description,
+      amountCents: l.amountCents as number,
+    })),
+  };
+}
+
+export async function createChangeOrderAction(input: unknown) {
+  const parsed = changeOrderSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { projectId, valueCents, lines: rawLines, ...fields } = parsed.data;
+  const lines = changeOrderLines(rawLines);
+  if (!lines.ok) return { error: lines.error };
+  try {
+    const ctx = await gate();
+    const changeOrder = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const created = await createChangeOrder(tx, ctx, {
+          ...fields,
+          // A blank price box is a change with no price, which is zero.
+          valueCents: valueCents ?? 0,
+          lines: lines.lines,
+        });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "change_order.created",
+          targetType: "change_order",
+          targetId: created.id,
+          /* Identifiers and shape only. Neither the price nor the cost is
+             logged, for the reason a contract's value is not: together they are
+             the margin on the change, and the console is read by people who are
+             not this business. */
+          meta: {
+            contractId: created.contractId,
+            status: created.status,
+            lineCount: lines.lines?.length ?? 0,
+          },
+        });
+        return created;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath(BASE);
+    return { ok: true as const, changeOrderId: changeOrder.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function updateChangeOrderAction(input: unknown) {
+  const schema = changeOrderSchema
+    // The contract a change order is against does not change; see updateChangeOrder.
+    .omit({ contractId: true })
+    .partial()
+    .extend({
+      id: z.string().uuid(),
+      version: z.number().int().positive().optional(),
+    });
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { id, projectId, valueCents, lines: rawLines, ...patch } = parsed.data;
+  const lines = changeOrderLines(rawLines);
+  if (!lines.ok) return { error: lines.error };
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const updated = await updateChangeOrder(tx, ctx, id, {
+          ...patch,
+          valueCents: valueCents ?? 0,
+          ...(lines.lines === undefined ? {} : { lines: lines.lines }),
+        });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "change_order.updated",
+          targetType: "change_order",
+          targetId: updated.id,
+          meta: { contractId: updated.contractId, status: updated.status },
+        });
+        return updated;
+      },
+      { role: ctx.role },
+    );
+    if (projectId) revalidatePath(`${BASE}/${projectId}`);
     revalidatePath(BASE);
     return { ok: true as const };
   } catch (err) {

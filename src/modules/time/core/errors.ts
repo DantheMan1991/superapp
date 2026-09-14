@@ -229,12 +229,9 @@ export function roleMayApprove(role: TimeRole): boolean {
  * Returns the NAME rather than a boolean so the caller matches on the index it
  * means, and a violation of any other one keeps travelling as the failure it
  * is.
+ *
+ * MOVED to `src/lib/db-errors.ts` on 2026-09-14, when the `jobs` pack shipped
+ * the same dead shape and needed the same fix without importing this module.
+ * Re-exported here so nothing in `time` moves.
  */
-export function violatedUniqueIndex(err: unknown): string | null {
-  const own = err as { code?: string; constraint?: string } | null;
-  const cause = (err as { cause?: { code?: string; constraint?: string } } | null)
-    ?.cause;
-  const code = own?.code ?? cause?.code;
-  if (code !== "23505") return null;
-  return own?.constraint ?? cause?.constraint ?? null;
-}
+export { violatedUniqueIndex } from "@/lib/db-errors";

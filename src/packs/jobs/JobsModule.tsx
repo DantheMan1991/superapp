@@ -5,7 +5,7 @@ import { schema, withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
 import { packContext } from "@/lib/packs/tenant-context";
 import { labelFor, pluralOf } from "@/lib/packs/resolve";
-import { formatMoney } from "@/lib/money";
+import { formatMoneySign } from "@/lib/money";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { Badge } from "@/components/ui/badge";
@@ -204,11 +204,26 @@ export async function JobsModule({
                      * Signed agreements only. A job with nothing signed shows a
                      * dash rather than a zero, because zero reads as "worth
                      * nothing" and the truth is "not agreed yet".
+                     *
+                     * REVISED, with the approved changes said underneath when
+                     * there are any — so a job that grew is seen to have grown,
+                     * not silently re-signed at a bigger number. Signed
+                     * renderers, because a deduction is a negative and
+                     * `formatMoney` would print it as its own opposite.
                      */}
                     {(() => {
                       const v = values.get(project.id);
                       if (!v || v.signedCount === 0) return "—";
-                      return formatMoney(v.valueCents, symbol);
+                      return (
+                        <>
+                          {formatMoneySign(v.valueCents, symbol)}
+                          {v.changesCents !== 0 && (
+                            <span className="block text-xs text-muted-foreground">
+                              incl. {formatMoneySign(v.changesCents, symbol)} in changes
+                            </span>
+                          )}
+                        </>
+                      );
                     })()}
                   </TableCell>
                   <TableCell>

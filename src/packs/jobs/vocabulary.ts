@@ -267,3 +267,43 @@ export function isCommitmentKind(v: string): v is CommitmentKind {
 export function isCommitmentStatus(v: string): v is CommitmentStatus {
   return (COMMITMENT_STATUSES as readonly string[]).includes(v);
 }
+
+// -------------------------------------------------------------- change orders
+
+/** Mirrors `job_change_orders_status_valid`. Kept in sync by tests/jobs.test.ts. */
+export const CHANGE_ORDER_STATUSES = [
+  "proposed",
+  "approved",
+  "declined",
+  "void",
+] as const;
+export type ChangeOrderStatus = (typeof CHANGE_ORDER_STATUSES)[number];
+
+/**
+ * What each status is called. `proposed` is what a commercial job calls a PCO —
+ * priced and put to the owner, not yet answered. The words are the pack's
+ * because every flavour of the trade uses them; a profile that wanted "PCO" on
+ * screen would relabel, not restructure.
+ */
+export const CHANGE_ORDER_STATUS_LABELS: Record<ChangeOrderStatus, string> = {
+  proposed: "Proposed",
+  approved: "Approved",
+  declined: "Declined",
+  void: "Void",
+};
+
+/**
+ * The statuses whose money COUNTS — toward what a contract is now worth and
+ * toward what a cost code is now budgeted at.
+ *
+ * **ONLY APPROVED**, and it is a one-element list on purpose: the rule lives in
+ * one exported constant so the SQL roll-ups and anything on a page that sums
+ * cannot disagree, which is the shape `VALUED_CONTRACT_STATUSES` and
+ * `COMMITTED_STATUSES` already have. A proposed change is a price somebody has
+ * been shown; nothing has moved until they say yes.
+ */
+export const APPROVED_CHANGE_STATUSES: readonly ChangeOrderStatus[] = ["approved"];
+
+export function isChangeOrderStatus(v: string): v is ChangeOrderStatus {
+  return (CHANGE_ORDER_STATUSES as readonly string[]).includes(v);
+}

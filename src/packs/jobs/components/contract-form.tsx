@@ -30,6 +30,7 @@ import {
   CONTRACT_STATUSES,
   CONTRACT_STATUS_LABELS,
   ROLE_LABELS,
+  VALUED_CONTRACT_STATUSES,
   slugLabel,
 } from "../vocabulary";
 
@@ -104,6 +105,17 @@ export function ContractForm({
   const [notes, setNotes] = useState(existing?.notes ?? "");
 
   const ready = kind.trim() !== "";
+  /**
+   * **A SIGNED VALUE IS LOCKED**, here as well as in `updateContract`, so the
+   * box says why before a save can be refused. Once the agreement counts, its
+   * value is the ORIGINAL half of *original + approved changes = revised*, and
+   * the way it moves is a change order. A signed contract whose value was never
+   * recorded may still have it filled in once — that is entry, not revision.
+   */
+  const valueLocked =
+    editing &&
+    existing.valueCents !== null &&
+    (VALUED_CONTRACT_STATUSES as readonly string[]).includes(existing.status);
 
   function submit() {
     startTransition(async () => {
@@ -256,7 +268,13 @@ export function ContractForm({
                   onChange={(e) => setValue(e.target.value)}
                   placeholder="182,500"
                   inputMode="decimal"
+                  disabled={valueLocked}
                 />
+                {valueLocked && (
+                  <p className="text-xs text-muted-foreground">
+                    Signed. Change the value with a change order.
+                  </p>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="contract-signed">Signed</Label>

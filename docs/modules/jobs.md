@@ -13,6 +13,143 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-14 — Slice 4: original + approved changes = revised (`claude/original-plus-approved-changes`)
+
+`job_change_orders` and `job_change_order_lines`, and the line every owner and
+surety reads on every pay application — **original + approved changes =
+revised** — computed on both halves of a job at once.
+
+**A CHANGE ORDER BELONGS TO A CONTRACT, NOT A PROJECT.** It changes ONE
+agreement: a custom home on its third of three contracts has a change order
+against the New Home contract, not the concept-design agreement it grew out of,
+and the pay application it appears on is that contract's. `project_id` is
+reachable through the contract and deliberately not duplicated; `listChangeOrders`
+joins through, and the join is the proof it does not need to be. Numbers are
+unique per CONTRACT, so CO-1 on the drawings agreement and CO-1 on the build are
+what they are on paper: two documents on two pay applications.
+
+**PRICE ON THE HEADER, COST ON THE LINES, AND THEY ARE DIFFERENT NUMBERS.** A
+change order has a price to the owner — `value_cents`, the revenue side — and
+an estimated cost by cost code, the budget side. The price carries the markup;
+a model that stored one and derived the other would be wrong on every job where
+the markup is not flat, which is all of them. Zero lines is legitimate (a pure
+price change); a zero price with lines is legitimate too (scope moved between
+trades at no charge).
+
+**REVISED IS COMPUTED, NEVER STORED.** `job_contracts.value_cents` stays the
+original, `job_budget_lines.original_cents` was named for exactly this moment,
+and revised is original plus the sum of APPROVED change orders, computed
+wherever it is shown. A stored `revised_cents` would be a column that could
+disagree with the rows it summarises, and nothing would be gained: the sum is
+one indexed query. `projectValues` returns the revised value and the approved
+changes beside it; `jobCostRows` returns `originalCents`, `changesCents` and
+`budgetCents` (revised) per code. A code budgeted only by an approved change is
+budgeted — it joins the report at the change, without the `Not budgeted` badge,
+because that badge is for money ordered against a code nobody planned for and a
+code the owner approved money onto has been planned for, late.
+
+**WHEN A CHANGE COUNTS IS ONE PREDICATE, `countedChange`**: the change order is
+approved AND the contract it changes is one whose value counts. An approved
+change on a declined or cancelled contract is a change to nothing, and summing
+it would grow a job the business never got. Both roll-ups in `ops.ts` and the
+page's own in-memory sum read the same two exported constants, so three places
+cannot hold three opinions about what "approved" means.
+
+**THE FIRST MONEY IN THIS PACK THAT MAY BE NEGATIVE, ON PURPOSE.** Every other
+amount carries a `>= 0` CHECK. A deductive change order — the owner drops the
+pool — is `-18,500`, not a separate "credit" concept, and each cost line may go
+either way. It has consequences one layer up: `formatMoney` drops the sign, so
+every change-order figure and every revised total renders through
+`formatMoneySign`, or a deduction prints as its own opposite.
+
+**APPROVED NEEDS A DATE, BOTH WAYS, AND THE DATABASE SAYS SO.**
+`job_change_orders_approved_has_date` is `(status = 'approved') = (approved_on
+is not null)`. The date is the evidence; a status anybody can flip without one is
+a status nobody has to justify. The action refuses an approved change with no
+date (`APPROVAL_DATE_REQUIRED`) and CLEARS the date on anything else, because a
+change taken back to proposed was not approved on that day after all and a form
+should not have to know to blank the box. The form fills today into the box when
+`Approved` is picked and the box is empty.
+
+**A SIGNED CONTRACT'S VALUE IS LOCKED — AND THE BUDGET IS NOT.** Once an
+agreement counts, its value is the ORIGINAL half of the line, and a value that
+can still be edited in place makes the line meaningless; `updateContract` throws
+`VALUE_LOCKED` and the form disables the box with `Signed. Change the value with
+a change order.` A typo in a signed value is corrected by a change order, which
+is what the business does on paper. The one exception is a signed contract whose
+value was never recorded: filling it in once is entry, not revision. The budget
+is NOT locked the same way, and the asymmetry is the point: a contract is an
+agreement with another party, a budget is an internal plan, and the editor still
+writes `original_cents` — it is handed the original, never the revised, or a
+save would fold the approved changes into the original and count them twice.
+
+### Four sentences that had never been said
+
+`toResult` translated a duplicate job number, list name, code and order number
+into a sentence by matching on `err.message`. **Not one of those translations
+had ever fired.** Drizzle wraps the driver's error, so the message is `Failed
+query: insert into …` — the SQL, never the constraint; the constraint is on
+`err.cause`. A duplicate job number has said `Something went wrong. Try again.`
+since slice 0. Found by the new suite asserting on the message and failing, which
+is what the assertion is for; the time module had found the same thing on its own
+tables and written `violatedUniqueIndex`, so that helper moved to
+`src/lib/db-errors.ts` where a pack can reach it without importing another
+module, and time re-exports it.
+
+### Two holes found by driving it, both in the form
+
+**An empty listbox.** The dev tenant's only cost code was retired (by slice 3's
+own drive), so the line's `Cost code` dropdown opened on nothing and the form
+said nothing about why — and a hidden blank row then failed the save with
+`Every line on a change order needs a cost code.` An empty listbox is a form
+lying about a choice it cannot offer. With no active codes the lines block is
+now a sentence — *No active cost codes on this job's list, so the change cannot
+be costed by code yet* — and the action is sent no lines at all, whatever a
+hidden row might hold. The retired-code rule itself stands: a change order
+offers active codes plus any it already names, the budget editor's rule one
+table over.
+
+**A sentinel with no item.** The first cut initialised a line's code to
+`"__none__"` the way the commitment form does — but that form has a `No code`
+item and this one deliberately does not, so Radix rendered neither the value
+nor the placeholder and the trigger collapsed to a chevron. An empty string is
+what shows a placeholder.
+
+**Driven on the dev branch, on 24-108's New Home contract:** CO-1 *Add covered
+porch*, price $12,500.00, approved today, no lines (no active code yet). The
+contracts panel read **Worth $1,962,000.00 across 3 signed agreements,
+including $12,500.00 in approved changes**, the New Home row **$1,854,500.00 /
+orig. $1,842,000.00**, the job list **$1,962,000.00 / incl. $12,500.00 in
+changes**. Then `03 30 00` un-retired on the cost-codes page and CO-1 edited to
+carry one line, $5,000.00 against it: the job cost report read **Budget
+$45,000.00 against $62,000.00 ordered, after $5,000.00 in approved changes**,
+the row **$45,000.00 / orig. $40,000.00 · Left −$17,000.00**, and the change
+order's Cost column $5,000.00. The edit dialog shows the contract as text with
+*A change order stays on the agreement it was raised against*, and the New Home
+contract's own edit dialog has its value box disabled with *Signed. Change the
+value with a change order.*
+
+### What was removed
+
+`budgetTotals` shipped in slice 3 and nothing read it. Deleted, by the standard
+this pack set for `PackDefinition.dimensionTypes` and `projectValues.openCount`:
+a field nothing reads is worse than an honest absence. The job list still shows
+worth only; planned, ordered and spent columns are a list-screen slice the day a
+screen wants them.
+
+Migration `0333_job_change_orders.sql` needed the same hand-reordering as 0325
+and 0329 — two new tables referencing each other in one file — and
+`0334_job_change_orders_rls.sql` is the pattern. Both applied to dev and prod
+before the merge; `db:verify-rls` reports **201 tables** on both, and
+`db:verify-modules` 19 of 19. Tests: nine more pure (the status CHECK mirrored,
+the absent floor, the approval-date CHECK, no `project_id`, per-contract
+numbering), thirteen more ops (approved-only counting, the deduction, a change
+on a contract that does not count, the revised budget with its original kept,
+the value lock and its exception, the date rule both ways, lines replaced and
+an empty list as an instruction, per-contract numbering, staff refused, the
+protected code), eight more isolation (read, write, cross-tenant contract and
+code, the date CHECK, the negative, per-contract numbering, cascade).
+
 ### 2026-09-14 — Slice 3: what it was meant to cost (`claude/what-it-was-meant-to-cost`)
 
 `job_budget_lines` — one amount per cost code per project — and the **job cost
@@ -400,7 +537,9 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_cost_code_sets` | A named list of cost codes. One or several per tenant. | FORCE RLS, member-wide. `job_cost_code_sets_one_default_idx` is a PARTIAL unique index, so **two defaults fail at the database** rather than depending on the action having cleared the first. |
 | `job_cost_codes` | One line of the chart of cost. | Composite FK to `(tenant_id, set_id)`, **cascade** — deleting a list deletes its codes. `code` is free text, never a number: CSI writes `03 30 00`, NAHB writes `1000`, a builder writes `CONC-SLAB`. `sort_order` is what orders the list, so a code never has to be sortable to be right. |
 | `job_contracts` | **Many per project.** Kind, value, billing method, counterparty, role, status, and a `sequence` that keeps the ladder in agreed order. | Composite FK to the project, **cascade** — a project's agreements are part of it, proved in the isolation suite rather than assumed, because a dangling contract would still be summed by `projectValues`. `kind` is an open taxonomy (format check only); `role`, `status` and `billing_method` are CHECK lists. **No `direction` column** — see the build log. |
-| `job_budget_lines` | What each cost code was PLANNED to cost. | One line per code per project, enforced by a unique index rather than by the action remembering — two would make every variance ambiguous. `cost_code_id` is NOT NULL, unlike a commitment line's: a budget without a code is a single number for the whole job, which is what this table exists to stop being the answer. `original_cents` is named for the revision slice 4 will add beside it. RESTRICT to the code, so a budgeted code is retired and never deleted. |
+| `job_budget_lines` | What each cost code was PLANNED to cost. | One line per code per project, enforced by a unique index rather than by the action remembering — two would make every variance ambiguous. `cost_code_id` is NOT NULL, unlike a commitment line's: a budget without a code is a single number for the whole job, which is what this table exists to stop being the answer. `original_cents` is the ORIGINAL; revised is original plus approved change-order lines, computed by `jobCostRows` and never stored. RESTRICT to the code, so a budgeted code is retired and never deleted. |
+| `job_change_orders` | A change to ONE contract: its price to the client (`value_cents`), its status, and when it was approved. | Composite FK to the CONTRACT, **cascade** — never to the project, which is reachable through the contract and deliberately not duplicated. Number unique per `(tenant, contract)`. `value_cents` **may be negative** — the one money column in the pack without a floor; a deduction is a negative number, not a credit concept. `job_change_orders_approved_has_date` makes `(status = 'approved') = (approved_on is not null)` a database fact, both ways. |
+| `job_change_order_lines` | What the change costs, one cost code at a time — the budget side. | Cascade from the change order; **RESTRICT to the cost code**, the same rule as a commitment line and a budget line. `amount_cents` may be negative. Zero lines is legitimate: a pure price change. |
 | `job_commitments` | What the business has ORDERED: a purchase order or a subcontract. | `party_id` is NOT NULL — a commitment with nobody to pay is a budget line, not a commitment. `kind` is a CHECK list of two because the two diverge in behaviour later. Number unique per tenant: a vendor quotes it back on the invoice. Cascade from the project. |
 | `job_commitment_lines` | The money, one cost code at a time. | Cascade from the commitment; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative — a credit is a change order. |
 | `job_projects` | The spine. | FOUR composite FKs, each certified in `tests/isolation/jobs.test.ts`: company, division, client, cost code list. `delivery_method` is an open taxonomy (P1) with a **format check and no value check**, and is nullable. `metadata` is the P2 extension bag. |
@@ -410,9 +549,11 @@ Migrations `0325_jobs.sql` / `0326_jobs_rls.sql` (slice 0) and
 to dev and prod before its merge, per
 [ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md).
 `0329_job_commitments.sql` / `0330_job_commitments_rls.sql` (slice 2) and
-`0331_job_budget.sql` / `0332_job_budget_rls.sql` (slice 3) follow the same rule —
+`0331_job_budget.sql` / `0332_job_budget_rls.sql` (slice 3) and
+`0333_job_change_orders.sql` / `0334_job_change_orders_rls.sql` (slice 4,
+hand-reordered like 0329) follow the same rule —
 and from slice 3 the pair is `db:verify-rls` **and `db:verify-modules`**, after
-the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **198 tables**, all enabled, forced and with
+the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **201 tables**, all enabled, forced and with
 policies, on both.
 
 **0327 needed no hand-reordering, which confirms the diagnosis in 0325.** Both
@@ -438,6 +579,11 @@ ordering only bites when two new tables reference each other in one file.
   would, and the alternative is discovering it from a report quietly missing a
   column.
 - `src/app/dashboard/m/jobs/cost-codes/page.tsx` — the chart of cost.
+- `src/packs/jobs/components/change-order-form.tsx` — price and cost typed
+  separately, negative allowed, `Approved` fills the date box.
+- `src/lib/db-errors.ts` — `violatedUniqueIndex`, the constraint name from
+  `err.cause`. Every unique-index sentence in `actions.ts` goes through it,
+  because matching on `err.message` never fired (slice 4 build log).
 
 ## Decisions & gotchas
 
@@ -465,15 +611,29 @@ ordering only bites when two new tables reference each other in one file.
   per-project visibility model, which is a bigger question than this pack and one
   nobody has asked; Documents' owners-only folder is where a contract with a
   price in it belongs today. Said out loud in `0326_jobs_rls.sql` too.
+- **A change order belongs to a CONTRACT, and revised is computed, never
+  stored.** `value_cents` and `original_cents` stay the originals; revised is
+  original plus approved changes, summed where it is shown. One predicate,
+  `countedChange` — approved AND the contract counts — is what every roll-up and
+  the page share. See the slice 4 build log.
+- **A signed contract's value is locked; a budget is not.** An agreement with
+  another party moves by change order; an internal plan is edited. `VALUE_LOCKED`
+  in `updateContract`, the box disabled in the form, and one exception: a signed
+  contract with no value yet may be filled in once.
+- **A change order is the only money here that may be negative**, so every
+  figure it touches renders through `formatMoneySign`. `formatMoney` drops the
+  sign and would print a deduction as its own opposite.
+- **Read the constraint from `err.cause`, never `err.message`.** Under drizzle's
+  wrapper the message is the SQL. `violatedUniqueIndex` in `src/lib/db-errors.ts`;
+  four translations in this pack were dead for three slices before a test noticed.
 
 ## Open items
 
 - ~~**No budget.**~~ — **closed 2026-09-14.** All four numbers exist: worth,
   planned, ordered, spent.
-- **Nothing revises a budget or a contract value.** An approved change order is
-  the one legitimate reason either moves, and it is slice 4. Today both are edited
-  in place, which loses the *original + approved changes = revised* line every
-  owner and surety reads.
+- ~~**Nothing revises a budget or a contract value.**~~ — **closed 2026-09-14.**
+  An approved change order revises both, and a signed value can no longer be
+  edited in place.
 - **ACTUAL COST IS PER PROJECT, NOT PER CODE, and the blocker is now named.**
   `getBalances` groups by ONE dimension type, so it can answer *what has this
   project cost* or *what has this code cost across every project* — never both.
@@ -482,7 +642,7 @@ ordering only bites when two new tables reference each other in one file.
   **accounting's call**: this pack must not read its tables, and faking it would
   report another job's spend in this job's column.
 - **Nothing bills.** `billing_method` is recorded on every contract and read by
-  no code. Pay applications, retainage and the schedule of values are slice 4.
+  no code. Pay applications, retainage and the schedule of values are slice 5.
 - ~~**A contract cannot be edited from the screen.**~~ — **closed 2026-09-14.**
 - **Nothing can be DELETED, and that is deliberate rather than missing.** A
   contract that should not exist is `cancelled` or `declined`; a cost code is
@@ -490,14 +650,16 @@ ordering only bites when two new tables reference each other in one file.
   created entirely by mistake, which today can only be `cancelled` — acceptable
   while a project is cheap to ignore, and worth revisiting if a business starts
   accumulating typos.
-- **A contract's project cannot be changed.** Moving an agreement between jobs is
-  a different and riskier act than editing it, and nobody has asked.
+- **A contract's project cannot be changed, and neither can a change order's
+  contract.** Moving an agreement between jobs, or a change between agreements,
+  is a different and riskier act than editing it — the second would silently move
+  money between two pay applications — and nobody has asked.
 - ~~**Nothing edits a project yet.**~~ · ~~**A cost code cannot be renamed,
   reordered or retired from the UI.**~~ — **both closed 2026-09-14.** Every
   thing the pack creates can now be changed, and the version check that had
   existed unused since slice 0 is finally passed by the forms.
-- **Nobody has clicked any of it.** Written, typechecked, built and certified
-  against a real database — but the screens have not been driven by a person.
+- **The founder has not clicked any of it.** Every slice from 2 on was driven
+  in the browser on the dev branch by the builder, which is not the same thing.
   The construction profile does not exist yet either, so `deliveryMethodsFrom`
   has never returned a non-empty list outside a test.
 - **`job_projects.number` is not generated.** Every business numbers its jobs its

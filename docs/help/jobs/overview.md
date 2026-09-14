@@ -59,7 +59,7 @@ They are listed on the {{project|lower}}'s own page, numbered in the order you a
 2. **`Name`** — optional, for when the kind alone will not tell two apart.
 3. **`Who holds it`** — `We hold the contract` when the job is yours, or `We are a subcontractor` when you are working under somebody else's general contractor. The next field's label changes to match.
 4. **`{{customer}}`** / **`General contractor`** — who the agreement is with, picked from the people in your books. `Nobody yet` is fine for a proposal written before they are on file.
-5. **`Value`** — what was agreed. Type it however you like: `182,500`, `$182500` and `182500.00` all mean the same thing. Leave it blank for cost-plus work that has no fixed number until it is done.
+5. **`Value`** — what was agreed. Type it however you like: `182,500`, `$182500` and `182500.00` all mean the same thing. Leave it blank for cost-plus work that has no fixed number until it is done. **Once the contract is signed the box is locked** and reads `Signed. Change the value with a change order.` — see Change orders below. A signed contract whose value was never filled in can still have it filled in once.
 6. **`Signed`** — optional.
 7. **`Billed by`** — how this one gets invoiced. Recorded now and used when billing is built; nothing bills yet.
 8. **`Status`** — see below.
@@ -81,9 +81,72 @@ They are listed on the {{project|lower}}'s own page, numbered in the order you a
 
 `Declined` is a real ending, not a failure to record something — it is the client who read the number and walked.
 
+The `Value` column shows what each agreement is worth **now** — its original value plus any approved change orders — with `orig. $…` underneath when the two differ, and the sentence above adds *"including $… in approved changes"* when there are any. See Change orders.
+
 ### On the {{project|plural}} list
 
-The `Value` column is the same total: signed and complete only. A job with nothing signed yet shows `—` rather than `0.00`, because zero would read as "worth nothing" when the truth is "not agreed yet".
+The `Value` column is the same total: signed and complete only, revised by approved change orders, with `incl. $… in changes` under it when there are any. A job with nothing signed yet shows `—` rather than `0.00`, because zero would read as "worth nothing" when the truth is "not agreed yet".
+
+## Change orders
+
+Owners only to add. On the {{project|lower}}'s page, under **Change orders**.
+
+A change order is the one proper way a signed contract's value or a job's budget moves. It records two different numbers at once: **what the client pays** for the change, and **what it costs you**, by cost code. They are different because the price carries your markup, so the form asks for both rather than guessing one from the other.
+
+The line the panel is built around is *original + approved changes = revised*. Only an **approved** change order moves anything; a proposed one is a price the client has been shown and not yet answered.
+
+### Adding one
+
+{button:Add change order|primary}. The button only appears once the {{project|lower}} has a contract, because a change order changes an agreement — if there is none, the panel says `A change order changes an agreement, so add a contract first.`
+
+1. **`Against`** — which agreement this changes. Filled in for you when the job has one contract, or one signed one; otherwise you pick. **It cannot be changed afterwards** — a change order stays on the agreement it was raised against.
+2. **`Number`** — required. However you number them: `CO-3`, `PCO 12`, `7`. It has to be different from the other change orders **on the same contract**; two contracts may each have a `CO-1`. You see `That change order number is already used on this contract.` if it clashes.
+3. **`Title`** — required. `Add covered porch`.
+4. **`What changes`** — optional. The scope, as it will read on the pay application.
+5. **`Price to the client`** — what the contract value moves by. Type it however you like. **Negative is allowed here**, and it is the one money box in Jobs where it is: a deduction — the client drops the pool — is `-18,500`, not a separate kind of form. Leave it blank for a change with no price.
+6. **`Requested`** — optional date.
+7. **Cost, by code** — what the change is expected to cost you. Each line takes a `Cost code` (required on any line with an amount), an optional description and an `Amount`, which may also be negative to move a code down. {button:Add line|ghost} for more. **A line with no amount is ignored**; a line with an amount and no code is refused with `Every line on a change order needs a cost code.` `Cost typed` on the right adds up the lines as you go. No lines at all is fine — a negotiated price change with no extra scope has none. If the job's list has no active codes, the lines are replaced by a note saying so: the price still moves the contract value, and restoring or adding a code under Cost codes brings the lines back.
+8. **`Status`** — see below.
+9. **`Approved on`** — appears when the status is `Approved`, and fills in with today's date if it was empty. Change it to the day the signature actually landed. An approved change order cannot be saved without one: `Give an approved change order the date it was approved.`
+10. **`Notes`**.
+
+{button:Add change order|primary} stays greyed until the contract, number and title are filled in. On success you see `Change order added`; the contract stays selected for the next one and everything else clears.
+
+### Status, and what it moves
+
+| Status | Moves the contract value and the budget |
+| --- | :-: |
+| `Proposed` | |
+| `Approved` | ● |
+| `Declined` | |
+| `Void` | |
+
+`Proposed` is what a commercial job calls a PCO — priced and put to the client. `Declined` is the client saying no. `Void` is withdrawn before anybody answered. Setting an approved change order back to any of these clears its approval date.
+
+An approved change order on a contract that does not itself count — one that is proposed, declined or cancelled — moves nothing. It is a change to an agreement that is not there.
+
+### Reading the table
+
+| Column | What it is |
+| --- | --- |
+| `Number` | Yours. |
+| `Change` | The title, with `Approved <date>` under it once it is. |
+| `Against` | Which contract it changes. |
+| `Price` | What the client pays. A minus sign is a deduction. |
+| `Cost` | The lines added up, with how many codes when there is more than one. `—` when there are no lines. |
+| `Status` | As above. |
+
+The line above the table adds up the approved ones: *"2 approved, worth $12,500.00 on the contract value, with 1 still proposed."*
+
+### Where it shows up
+
+- **Contracts.** The `Value` column shows the **revised** value — original plus approved changes — with `orig. $…` underneath when they differ, and the sentence above the table says how much of the total is approved changes. The number in the column is the one the next pay application is against.
+- **Job cost.** The `Budget` column is the revised budget per code, with `orig. $…` underneath where a change moved it. A code that was never budgeted but has an approved change against it is budgeted at the change, and does not get the `Not budgeted` badge — the client approved money onto it, which is a plan, arrived late.
+- **The {{project|plural}} list.** `Value` is revised, with `incl. $… in changes` under it when there are any.
+
+### Editing one
+
+The pencil at the end of its row. Everything except which contract it is against. **Changing the lines replaces all of them**, so what you see in the dialog is what you get — and removing every line is a real instruction, not a mistake, because a change order with no lines is a legitimate thing to be.
 
 ## Job cost — what it was meant to cost
 
@@ -99,6 +162,7 @@ A budget here is **per cost code**, never one number for the whole job. That is 
 - **Zero is different from blank.** Zero means you are carrying that code at nil, so anything spent against it shows as a variance. Blank means you have not decided.
 - **Codes you do not touch are left alone.** Saving does not wipe the rest of the budget, so two people can fill in different trades on different days.
 - Retired codes are not offered, unless one already has a budget against it — in which case it stays editable rather than stranding the figure.
+- **What you type is the original.** Approved change orders sit on top of it, and the report shows both.
 
 `Total typed` at the bottom adds up what is in the boxes as you go.
 
@@ -106,11 +170,13 @@ A budget here is **per cost code**, never one number for the whole job. That is 
 
 | Column | What it is |
 | --- | --- |
-| `Budget` | What you planned for that code. |
+| `Budget` | What you planned for that code, revised by approved change orders, with `orig. $…` underneath when one moved it. |
 | `Ordered` | What you have committed on **this job** against it — issued and closed orders only. |
 | `Left` | Budget minus ordered. **Negative and red means that trade is over.** |
 
-A code you have ordered against but never budgeted appears with a `Not budgeted` badge. That row is usually the one worth looking at.
+A code you have ordered against but never budgeted appears with a `Not budgeted` badge. That row is usually the one worth looking at. A code that was never budgeted but has an approved change order against it appears without the badge, budgeted at the change.
+
+The line above the table reads *"Budget $… against $… ordered"*, and adds *"after $… in approved changes"* when there are any.
 
 ### What the report does not show yet
 
@@ -126,7 +192,7 @@ A purchase order or a subcontract is money the job **already owes**, whether or 
 
 Three figures sit at the top of the panel:
 
-- **Contract value** — what you are being paid, from signed agreements.
+- **Contract value** — what you are being paid, from signed agreements, including approved change orders.
 - **Committed** — what you have ordered.
 - **Actual cost** — what has actually been billed to the job in the books.
 
@@ -164,7 +230,8 @@ The pencil at the end of its row. **Changing the lines replaces all of them**, s
 Owners only. Everything you can add, you can change.
 
 - **A {{project|lower}}** — {button:Edit|outline} beside the status on its page. Every field except the company, which is fixed at creation because moving a job's costs between two sets of books is not an edit.
-- **A contract** — the pencil at the end of its row.
+- **A contract** — the pencil at the end of its row. Its value, once signed, moves only by change order.
+- **A change order** — the pencil at the end of its row. Everything except which contract it is against.
 - **A cost code, or the list it is in** — the pencil beside each, on the Cost codes page.
 
 **If somebody else saved while you had the form open**, you see `Somebody changed this while you had it open. Reload and try again.` Nothing you typed is sent. Reload, look at what changed, and make your change again — this is deliberately a refusal rather than letting the last person to press Save quietly overwrite the first.
@@ -197,7 +264,7 @@ New codes are added to the end of the list, not the top, so a list you arranged 
 
 Worth knowing so you are not looking for it:
 
-- **Nothing revises a budget or a contract.** A change order is the proper way either of those moves, and it is what is being built next. For now both are edited in place, so you lose the `original + approved changes = revised` line.
+- **A change order cannot be moved to another contract.** Raise it again on the right one and set the wrong one to `Void`.
 - **No billing.** Every contract records how it should be billed, and nothing bills yet.
 - **Cost codes can now be put on a bill.** They appear in Accounting wherever you tag a line, beside the job itself — so a bill can say which job and which trade. Actual cost per code follows once bills carry them.
 - **Nothing is ever deleted.** A contract you should not have added is set to `Cancelled` or `Declined`; a cost code is retired; a {{project|lower}} is cancelled. That is on purpose — a job's history is the point of keeping it.
@@ -209,5 +276,6 @@ Worth knowing so you are not looking for it:
 | See {{project|plural|lower}} and cost codes | ● | ● | ● |
 | Start a {{project|lower}} | ● | | |
 | Add or change cost code lists | ● | | |
+| Add, approve or change a change order | ● | | |
 
 Starting a job is a decision, and it creates the thing your books group costs by — which is why it is kept to owners. Reading the list is ordinary work for anybody who has to go and stand on the site.

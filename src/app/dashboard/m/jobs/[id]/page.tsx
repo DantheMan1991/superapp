@@ -23,6 +23,7 @@ import {
   committedTotals,
   jobCostRows,
   getProject,
+  listChangeOrders,
   listCommitments,
   listContracts,
   listCostCodes,
@@ -31,12 +32,15 @@ import { allowsWrite } from "@/lib/packs/authorize";
 import { formatMoney, formatMoneySign } from "@/lib/money";
 import { ContractForm } from "@/packs/jobs/components/contract-form";
 import { CommitmentForm } from "@/packs/jobs/components/commitment-form";
+import { ChangeOrderForm } from "@/packs/jobs/components/change-order-form";
 import { BudgetEditor } from "@/packs/jobs/components/budget-editor";
 import { ProjectForm } from "@/packs/jobs/components/project-form";
 import { Button } from "@/components/ui/button";
 import { listCostCodeSets } from "@/packs/jobs/ops";
 import {
+  APPROVED_CHANGE_STATUSES,
   BILLING_METHOD_LABELS,
+  CHANGE_ORDER_STATUS_LABELS,
   COMMITMENT_KIND_LABELS,
   COMMITMENT_STATUS_LABELS,
   CONTRACT_STATUS_LABELS,
@@ -45,6 +49,7 @@ import {
   VALUED_CONTRACT_STATUSES,
   STATUS_LABELS,
   isBillingMethod,
+  isChangeOrderStatus,
   isCommitmentKind,
   isCommitmentStatus,
   isContractStatus,
@@ -88,6 +93,7 @@ export default async function ProjectPage({
         codes,
         contracts,
         commitments,
+        changeOrders,
         committed,
         costRows,
         actual,
@@ -149,6 +155,7 @@ export default async function ProjectPage({
           : Promise.resolve([]),
         listContracts(tx, ctx.tenant.id, project.id),
         listCommitments(tx, ctx.tenant.id, project.id),
+        listChangeOrders(tx, ctx.tenant.id, project.id),
         committedTotals(tx, ctx.tenant.id),
         jobCostRows(tx, ctx.tenant.id, project.id),
         /*
@@ -202,6 +209,7 @@ export default async function ProjectPage({
         codes,
         contracts,
         commitments,
+        changeOrders,
         committed,
         costRows,
         actual,
@@ -218,7 +226,7 @@ export default async function ProjectPage({
   );
 
   if (!data) notFound();
-  const { project, codes, contracts, commitments, member } = data;
+  const { project, codes, contracts, commitments, changeOrders, member } = data;
   const committedCents = data.committed.byProject.get(project.id) ?? 0;
   const actualCents = data.actual.get(project.id) ?? 0;
   const budgetTotal = data.costRows.reduce((sum, r) => sum + r.budgetCents, 0);
@@ -241,8 +249,40 @@ export default async function ProjectPage({
   const valued = contracts.filter((c) =>
     VALUED_CONTRACT_STATUSES.includes(c.status as (typeof VALUED_CONTRACT_STATUSES)[number]),
   );
-  const signedValue = valued.reduce((sum, c) => sum + (c.valueCents ?? 0), 0);
+  /**
+   * APPROVED CHANGES BY CONTRACT, from the rows already loaded — the same rule
+   * `projectValues` applies in SQL for the list (`countedChange`), through the
+   * same exported constant, so the list and this page cannot disagree about
+   * what a job is worth. A change on a contract that does not count is summed
+   * here and then never read, because only `valued` contracts are added up.
+   */
+  const approvedByContract = new Map<string, number>();
+  for (const row of changeOrders) {
+    if (!(APPROVED_CHANGE_STATUSES as readonly string[]).includes(row.changeOrder.status)) {
+      continue;
+    }
+    approvedByContract.set(
+      row.contract.id,
+      (approvedByContract.get(row.contract.id) ?? 0) + row.changeOrder.valueCents,
+    );
+  }
+  /** Original + approved changes: what the agreement is worth NOW. */
+  const revisedOf = (c: { id: string; valueCents: number | null }) =>
+    (c.valueCents ?? 0) + (approvedByContract.get(c.id) ?? 0);
+  const signedValue = valued.reduce((sum, c) => sum + revisedOf(c), 0);
+  const changesValue = valued.reduce(
+    (sum, c) => sum + (approvedByContract.get(c.id) ?? 0),
+    0,
+  );
   const signedCount = valued.length;
+  const approvedCount = changeOrders.filter((r) =>
+    (APPROVED_CHANGE_STATUSES as readonly string[]).includes(r.changeOrder.status),
+  ).length;
+  const proposedChangeCount = changeOrders.filter(
+    (r) => r.changeOrder.status === "proposed",
+  ).length;
+  /** How much of the revised budget is approved changes. */
+  const budgetChanges = data.costRows.reduce((sum, r) => sum + r.changesCents, 0);
   const proposedCount = contracts.filter((c) => c.status === "proposed").length;
   const projectWord = labelFor(data.labels, "project", "Project");
   const clientWord = labelFor(data.labels, "customer", "Customer");
@@ -375,8 +415,12 @@ export default async function ProjectPage({
            */}
           {contracts.length === 0
             ? "No agreements yet. A job can have several — a design agreement, then drawings, then the build."
-            : `Worth ${formatMoney(signedValue, symbol)} across ${signedCount} signed ${
+            : `Worth ${formatMoneySign(signedValue, symbol)} across ${signedCount} signed ${
                 signedCount === 1 ? "agreement" : "agreements"
+              }${
+                changesValue !== 0
+                  ? `, including ${formatMoneySign(changesValue, symbol)} in approved changes`
+                  : ""
               }${proposedCount > 0 ? `, with ${proposedCount} still proposed` : ""}.`}
         </p>
         {contracts.length > 0 && (
@@ -421,9 +465,22 @@ export default async function ProjectPage({
                         : c.billingMethod}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {c.valueCents === null
+                      {/*
+                        REVISED — original + approved changes — with the
+                        original underneath only when they differ. The number
+                        in the column is the one the next pay application is
+                        against; signed renderer because a deduction can take
+                        it below the original.
+                      */}
+                      {c.valueCents === null && !approvedByContract.has(c.id)
                         ? "—"
-                        : formatMoney(c.valueCents, symbol)}
+                        : formatMoneySign(revisedOf(c), symbol)}
+                      {(approvedByContract.get(c.id) ?? 0) !== 0 && (
+                        <span className="block text-xs text-muted-foreground">
+                          orig.{" "}
+                          {c.valueCents === null ? "—" : formatMoney(c.valueCents, symbol)}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge
@@ -476,6 +533,164 @@ export default async function ProjectPage({
       <Panel>
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-heading text-sm font-medium tracking-heading">
+            Change orders
+          </h2>
+          {isOwner && contracts.length > 0 && (
+            <ChangeOrderForm
+              projectId={project.id}
+              contracts={contracts.map((c) => ({
+                id: c.id,
+                label: `${slugLabel(c.kind)}${c.name ? ` · ${c.name}` : ""}`,
+                status: c.status,
+              }))}
+              costCodes={data.codes
+                .filter((c) => c.isActive)
+                .map((c) => ({ id: c.id, label: `${c.code} · ${c.name}` }))}
+            />
+          )}
+        </div>
+        <p className="mb-3 text-sm text-muted-foreground">
+          {/*
+            THE LINE EVERY OWNER AND SURETY READS: original + approved changes
+            = revised. Said in words here, and only APPROVED ones are in the
+            number — a proposed change is a price somebody has been shown.
+          */}
+          {contracts.length === 0
+            ? "A change order changes an agreement, so add a contract first."
+            : changeOrders.length === 0
+              ? "None yet. When the scope moves, a change order records what it costs the client and what it costs you, and only an approved one moves the numbers."
+              : `${approvedCount} approved, worth ${formatMoneySign(changesValue, symbol)} on the contract value${
+                  proposedChangeCount > 0
+                    ? `, with ${proposedChangeCount} still proposed`
+                    : ""
+                }.`}
+        </p>
+        {changeOrders.length > 0 && (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Number</TableHead>
+                  <TableHead>Change</TableHead>
+                  <TableHead>Against</TableHead>
+                  <TableHead className="text-right">Price</TableHead>
+                  <TableHead className="text-right">Cost</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="w-10" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {changeOrders.map((row) => (
+                  <TableRow key={row.changeOrder.id}>
+                    <TableCell className="font-mono text-xs">
+                      {row.changeOrder.number}
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      {row.changeOrder.title}
+                      {row.changeOrder.approvedOn && (
+                        <span className="block text-xs font-normal text-muted-foreground">
+                          Approved {row.changeOrder.approvedOn}
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {slugLabel(row.contract.kind)}
+                      {row.contract.name && (
+                        <span className="block text-muted-foreground">
+                          {row.contract.name}
+                        </span>
+                      )}
+                    </TableCell>
+                    {/*
+                      SIGNED RENDERERS ON PURPOSE. A deduction is a negative
+                      number here, and `formatMoney` would print it as its own
+                      opposite.
+                    */}
+                    <TableCell className="text-right tabular-nums">
+                      {formatMoneySign(row.changeOrder.valueCents, symbol)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.lines.length === 0
+                        ? "—"
+                        : formatMoneySign(row.costCents, symbol)}
+                      {row.lines.length > 1 && (
+                        <span className="block text-xs text-muted-foreground">
+                          {row.lines.length} codes
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={
+                          row.changeOrder.status === "approved" ? "default" : "secondary"
+                        }
+                      >
+                        {isChangeOrderStatus(row.changeOrder.status)
+                          ? CHANGE_ORDER_STATUS_LABELS[row.changeOrder.status]
+                          : row.changeOrder.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="w-10 text-right">
+                      {isOwner && (
+                        <ChangeOrderForm
+                          projectId={project.id}
+                          contracts={contracts.map((c) => ({
+                            id: c.id,
+                            label: `${slugLabel(c.kind)}${c.name ? ` · ${c.name}` : ""}`,
+                            status: c.status,
+                          }))}
+                          /*
+                            Active codes plus any this change already names, so
+                            retiring a code cannot strand a line nobody can
+                            reopen — the budget editor's rule, one table over.
+                          */
+                          costCodes={data.codes
+                            .filter(
+                              (c) =>
+                                c.isActive ||
+                                row.lines.some((l) => l.costCodeId === c.id),
+                            )
+                            .map((c) => ({ id: c.id, label: `${c.code} · ${c.name}` }))}
+                          existing={{
+                            id: row.changeOrder.id,
+                            version: row.changeOrder.version,
+                            contractId: row.changeOrder.contractId,
+                            number: row.changeOrder.number,
+                            title: row.changeOrder.title,
+                            description: row.changeOrder.description,
+                            status: row.changeOrder.status,
+                            valueCents: row.changeOrder.valueCents,
+                            requestedOn: row.changeOrder.requestedOn,
+                            approvedOn: row.changeOrder.approvedOn,
+                            notes: row.changeOrder.notes,
+                            lines: row.lines.map((l) => ({
+                              costCodeId: l.costCodeId,
+                              description: l.description,
+                              amountCents: l.amountCents,
+                            })),
+                          }}
+                          trigger={
+                            <Button variant="ghost" size="icon">
+                              <Pencil className="size-4" />
+                              <span className="sr-only">
+                                Edit {row.changeOrder.number}
+                              </span>
+                            </Button>
+                          }
+                        />
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </Panel>
+
+      <Panel>
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-heading text-sm font-medium tracking-heading">
             Job cost
           </h2>
           {isOwner && (
@@ -495,14 +710,19 @@ export default async function ProjectPage({
                   (c) =>
                     c.isActive ||
                     data.costRows.some(
-                      (r) => r.costCodeId === c.id && r.hasBudget,
+                      (r) => r.costCodeId === c.id && r.originalCents !== null,
                     ),
                 )
                 .map((c) => ({ id: c.id, code: c.code, name: c.name }))}
+              /*
+                THE ORIGINAL, never the revised. The editor writes
+                `original_cents`; handing it the revised figure would save the
+                approved changes into the original and count them twice.
+              */
               existing={Object.fromEntries(
                 data.costRows
-                  .filter((r) => r.hasBudget)
-                  .map((r) => [r.costCodeId, r.budgetCents]),
+                  .filter((r) => r.originalCents !== null)
+                  .map((r) => [r.costCodeId, r.originalCents as number]),
               )}
             />
           )}
@@ -515,10 +735,14 @@ export default async function ProjectPage({
           */}
           {data.costRows.length === 0
             ? "No budget set. Until there is one, committed and actual say what has happened but not whether it was the plan."
-            : `Budget ${formatMoney(budgetTotal, symbol)} against ${formatMoney(
+            : `Budget ${formatMoneySign(budgetTotal, symbol)} against ${formatMoney(
                 committedOfBudgeted,
                 symbol,
-              )} ordered.`}
+              )} ordered${
+                budgetChanges !== 0
+                  ? `, after ${formatMoneySign(budgetChanges, symbol)} in approved changes`
+                  : ""
+              }.`}
         </p>
 
         {data.costRows.length > 0 && (
@@ -552,7 +776,21 @@ export default async function ProjectPage({
                       )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {r.hasBudget ? formatMoney(r.budgetCents, symbol) : "—"}
+                      {/*
+                        REVISED, with the original underneath only when a
+                        change moved it — the same shape as the contract's
+                        value one panel up, because it is the same line:
+                        original + approved changes = revised.
+                      */}
+                      {r.hasBudget ? formatMoneySign(r.budgetCents, symbol) : "—"}
+                      {r.changesCents !== 0 && (
+                        <span className="block text-xs text-muted-foreground">
+                          orig.{" "}
+                          {r.originalCents === null
+                            ? "—"
+                            : formatMoney(r.originalCents, symbol)}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {formatMoney(r.committedCents, symbol)}

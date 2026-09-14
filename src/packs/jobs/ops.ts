@@ -4,6 +4,8 @@ import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
   JobBudgetLine,
+  JobChangeOrder,
+  JobChangeOrderLine,
   JobCommitment,
   JobCommitmentLine,
   JobContract,
@@ -19,11 +21,14 @@ import {
   type EntityScope,
 } from "@/modules/accounting/core";
 import {
+  APPROVED_CHANGE_STATUSES,
   COMMITTED_STATUSES,
   COST_CODE_DIMENSION,
   DELIVERY_METHOD_FORMAT,
   PROJECT_DIMENSION,
+  VALUED_CONTRACT_STATUSES,
   isBillingMethod,
+  isChangeOrderStatus,
   isCommitmentKind,
   isCommitmentStatus,
   isContractRole,
@@ -58,7 +63,11 @@ export class JobsError extends Error {
       | "NUMBER_TAKEN"
       | "NAME_TAKEN"
       | "SET_IN_USE"
-      | "STALE_VERSION",
+      | "STALE_VERSION"
+      /** A signed contract's value moves by change order, not by edit. */
+      | "VALUE_LOCKED"
+      /** An approved change order carries the date it was approved. */
+      | "APPROVAL_DATE_REQUIRED",
     message: string,
   ) {
     super(message);
@@ -602,12 +611,23 @@ export async function listContracts(
  * absence — the standard this pack set one slice ago by refusing to add
  * `PackDefinition.dimensionTypes`. Add it the day a screen wants it.
  *
- * ONE STATEMENT FOR THE WHOLE LIST, grouped in the database rather than a query
+ * TWO STATEMENTS FOR THE WHOLE LIST, grouped in the database rather than a query
  * per project — the reason `listProjectRows` reads the way it does.
+ *
+ * **REVISED, NOT ORIGINAL, since slice 4.** `valueCents` is what the signed
+ * agreements are worth NOW: their original values plus every APPROVED change
+ * order against them. A list that showed the original would report a job that
+ * grew by $60k of approved changes at the number it was signed for, which is the
+ * number nobody bills. `changesCents` is the approved total on its own, so a
+ * screen can say how much of the value is growth. When a change counts is one
+ * rule, `countedChange`, shared with the job cost report.
  */
 export interface ProjectValue {
   projectId: string;
+  /** Original + approved changes, over signed and complete contracts. */
   valueCents: number;
+  /** The approved changes alone. Negative when deductions outweigh additions. */
+  changesCents: number;
   signedCount: number;
 }
 
@@ -615,21 +635,54 @@ export async function projectValues(
   tx: Tx,
   tenantId: string,
 ): Promise<Map<string, ProjectValue>> {
-  const rows = await tx
-    .select({
-      projectId: schema.jobContracts.projectId,
-      valueCents: sql<number>`coalesce(sum(${schema.jobContracts.valueCents}) filter (
-        where ${schema.jobContracts.status} in ('signed', 'complete')
-      ), 0)`.mapWith(Number),
-      signedCount: sql<number>`count(*) filter (
-        where ${schema.jobContracts.status} in ('signed', 'complete')
-      )`.mapWith(Number),
-    })
-    .from(schema.jobContracts)
-    .where(eq(schema.jobContracts.tenantId, tenantId))
-    .groupBy(schema.jobContracts.projectId);
+  const [contracts, changes] = await Promise.all([
+    tx
+      .select({
+        projectId: schema.jobContracts.projectId,
+        valueCents: sql<number>`coalesce(sum(${schema.jobContracts.valueCents}) filter (
+          where ${schema.jobContracts.status} in ('signed', 'complete')
+        ), 0)`.mapWith(Number),
+        signedCount: sql<number>`count(*) filter (
+          where ${schema.jobContracts.status} in ('signed', 'complete')
+        )`.mapWith(Number),
+      })
+      .from(schema.jobContracts)
+      .where(eq(schema.jobContracts.tenantId, tenantId))
+      .groupBy(schema.jobContracts.projectId),
+    tx
+      .select({
+        projectId: schema.jobContracts.projectId,
+        changesCents: sql<number>`coalesce(sum(${schema.jobChangeOrders.valueCents}), 0)`.mapWith(
+          Number,
+        ),
+      })
+      .from(schema.jobChangeOrders)
+      .innerJoin(
+        schema.jobContracts,
+        and(
+          eq(schema.jobContracts.tenantId, schema.jobChangeOrders.tenantId),
+          eq(schema.jobContracts.id, schema.jobChangeOrders.contractId),
+        ),
+      )
+      .where(and(eq(schema.jobChangeOrders.tenantId, tenantId), countedChange()))
+      .groupBy(schema.jobContracts.projectId),
+  ]);
 
-  return new Map(rows.map((r) => [r.projectId, r]));
+  const changesByProject = new Map(changes.map((r) => [r.projectId, r.changesCents]));
+  return new Map(
+    contracts.map((r) => {
+      const changesCents = changesByProject.get(r.projectId) ?? 0;
+      return [
+        r.projectId,
+        {
+          projectId: r.projectId,
+          valueCents: r.valueCents + changesCents,
+          changesCents,
+          signedCount: r.signedCount,
+        },
+      ];
+    }),
+  );
 }
 
 export async function createContract(
@@ -735,6 +788,26 @@ export async function updateContract(
   }
   if (input.version !== undefined && input.version !== existing[0].version) {
     throw new JobsError("STALE_VERSION", "contract changed since loaded");
+  }
+  /**
+   * **A SIGNED VALUE IS LOCKED.** Once the agreement counts — signed or
+   * complete — its value is the ORIGINAL half of *original + approved changes =
+   * revised*, and a value that can still be edited in place makes that line
+   * meaningless. The way it moves is a change order, which is what the business
+   * does on paper too; a typo in a signed value is a change order that says so.
+   * The one exception is a signed contract with NO value recorded yet: filling
+   * that in the first time is entry, not revision. Slice 4.
+   */
+  if (
+    input.valueCents !== undefined &&
+    existing[0].valueCents !== null &&
+    input.valueCents !== existing[0].valueCents &&
+    (VALUED_CONTRACT_STATUSES as readonly string[]).includes(existing[0].status)
+  ) {
+    throw new JobsError(
+      "VALUE_LOCKED",
+      "a signed contract's value is changed by change order, not by edit",
+    );
   }
 
   const patch: Record<string, unknown> = {
@@ -1331,10 +1404,21 @@ export interface JobCostRow {
   code: string;
   name: string;
   sortOrder: number;
+  /** What the code was budgeted at before any change order; null when no budget line exists. */
+  originalCents: number | null;
+  /** Approved change-order lines against the code. Can be negative. */
+  changesCents: number;
+  /**
+   * The REVISED budget — original plus approved changes — and the figure every
+   * variance is measured against. Named `budgetCents` rather than
+   * `revisedCents` because it is what "budget" means once a job has moved: the
+   * screen shows this and mentions the original only when they differ.
+   */
   budgetCents: number;
   committedCents: number;
   /** Budget minus committed. Negative means over. */
   varianceCents: number;
+  /** A budget line exists, or an approved change put money on the code. */
   hasBudget: boolean;
 }
 
@@ -1343,7 +1427,7 @@ export async function jobCostRows(
   tenantId: string,
   projectId: string,
 ): Promise<JobCostRow[]> {
-  const [budget, committed, codes] = await Promise.all([
+  const [budget, committed, changes, codes] = await Promise.all([
     tx
       .select()
       .from(schema.jobBudgetLines)
@@ -1378,6 +1462,42 @@ export async function jobCostRows(
         ),
       )
       .groupBy(schema.jobCommitmentLines.costCodeId),
+    /*
+     * THE OTHER HALF OF THE BUDGET: approved change-order lines on THIS project,
+     * by code. Through the contract, because a change order belongs to one and
+     * that is the only way it knows which project it is on — and because the
+     * contract's own status is part of whether the change counts.
+     */
+    tx
+      .select({
+        costCodeId: schema.jobChangeOrderLines.costCodeId,
+        amountCents: sql<number>`sum(${schema.jobChangeOrderLines.amountCents})`.mapWith(
+          Number,
+        ),
+      })
+      .from(schema.jobChangeOrderLines)
+      .innerJoin(
+        schema.jobChangeOrders,
+        and(
+          eq(schema.jobChangeOrders.tenantId, schema.jobChangeOrderLines.tenantId),
+          eq(schema.jobChangeOrders.id, schema.jobChangeOrderLines.changeOrderId),
+        ),
+      )
+      .innerJoin(
+        schema.jobContracts,
+        and(
+          eq(schema.jobContracts.tenantId, schema.jobChangeOrders.tenantId),
+          eq(schema.jobContracts.id, schema.jobChangeOrders.contractId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.jobChangeOrderLines.tenantId, tenantId),
+          eq(schema.jobContracts.projectId, projectId),
+          countedChange(),
+        ),
+      )
+      .groupBy(schema.jobChangeOrderLines.costCodeId),
     tx
       .select()
       .from(schema.jobCostCodes)
@@ -1389,23 +1509,38 @@ export async function jobCostRows(
   const committedByCode = new Map(
     committed.filter((c) => c.costCodeId).map((c) => [c.costCodeId!, c.amountCents]),
   );
+  const changesByCode = new Map(changes.map((c) => [c.costCodeId, c.amountCents]));
 
-  const ids = new Set([...budgetByCode.keys(), ...committedByCode.keys()]);
+  /*
+   * A code with an approved change and no budget line IS budgeted — at the
+   * change — so it joins the report as a budgeted row rather than a `Not
+   * budgeted` one. The badge is for money ordered against a code nobody planned
+   * for; a code the owner approved money onto has been planned for, late.
+   */
+  const ids = new Set([
+    ...budgetByCode.keys(),
+    ...committedByCode.keys(),
+    ...changesByCode.keys(),
+  ]);
   const rows: JobCostRow[] = [];
   for (const id of ids) {
     const code = codeById.get(id);
     if (!code) continue;
-    const budgetCents = budgetByCode.get(id)?.originalCents ?? 0;
+    const originalCents = budgetByCode.get(id)?.originalCents ?? null;
+    const changesCents = changesByCode.get(id) ?? 0;
+    const budgetCents = (originalCents ?? 0) + changesCents;
     const committedCents = committedByCode.get(id) ?? 0;
     rows.push({
       costCodeId: id,
       code: code.code,
       name: code.name,
       sortOrder: code.sortOrder,
+      originalCents,
+      changesCents,
       budgetCents,
       committedCents,
       varianceCents: budgetCents - committedCents,
-      hasBudget: budgetByCode.has(id),
+      hasBudget: originalCents !== null || changesByCode.has(id),
     });
   }
   // The order the business arranged its chart in, not the order ids came back.
@@ -1413,20 +1548,331 @@ export async function jobCostRows(
   return rows;
 }
 
-/** Every project's budget total, for the job list. */
-export async function budgetTotals(
+// ------------------------------------------------------------- change orders
+
+/**
+ * THE ONE RULE FOR WHEN A CHANGE ORDER'S MONEY COUNTS, as a SQL condition every
+ * roll-up in this file shares: the change order is APPROVED, and the contract
+ * it changes is one whose value counts. An approved change on a declined or
+ * cancelled contract is a change to nothing, and summing it would grow a job
+ * the business never got. Needs `job_contracts` joined by the caller.
+ *
+ * Two exported constants, one predicate — so `projectValues`, `jobCostRows` and
+ * a page adding change orders up in memory cannot drift into three opinions
+ * about what "approved" means.
+ */
+function countedChange() {
+  return and(
+    inArray(schema.jobChangeOrders.status, [...APPROVED_CHANGE_STATUSES]),
+    inArray(schema.jobContracts.status, [...VALUED_CONTRACT_STATUSES]),
+  );
+}
+
+export interface ChangeOrderLineInput {
+  costCodeId: string;
+  description?: string;
+  /** May be negative: a deduction is a negative line, not a separate concept. */
+  amountCents: number;
+}
+
+export interface ChangeOrderInput {
+  contractId: string;
+  number: string;
+  title: string;
+  description?: string;
+  status?: string;
+  /** The change to the contract's value. May be negative. */
+  valueCents?: number;
+  requestedOn?: string | null;
+  approvedOn?: string | null;
+  notes?: string;
+  /** Zero lines is legitimate: a pure price change with no scope to cost. */
+  lines?: ChangeOrderLineInput[];
+}
+
+function validateChangeOrderShape(input: {
+  status?: string;
+  valueCents?: number;
+  lines?: ChangeOrderLineInput[];
+}): void {
+  if (input.status !== undefined && !isChangeOrderStatus(input.status)) {
+    throw new JobsError("INVALID_STATUS", `invalid status: ${input.status}`);
+  }
+  /*
+   * NO SIGN CHECK, on purpose, and it is the only money in this pack without
+   * one. A deductive change order — the owner drops the pool — is ordinary, and
+   * the schema header says why it is a negative number rather than a credit.
+   */
+  if (input.valueCents !== undefined && !Number.isInteger(input.valueCents)) {
+    throw new JobsError("INVALID_VALUE", "a change order value must be whole cents");
+  }
+  for (const line of input.lines ?? []) {
+    if (!line.costCodeId) {
+      throw new JobsError(
+        "INVALID_VALUE",
+        "a change order line needs a cost code: its only job is to move that code's budget",
+      );
+    }
+    if (!Number.isInteger(line.amountCents)) {
+      throw new JobsError("INVALID_VALUE", "a change order line must be whole cents");
+    }
+  }
+}
+
+/**
+ * The approval date follows the status, both ways.
+ *
+ * Approved with no date is refused — the date is the evidence, and a status
+ * anybody can flip without one is a status nobody has to justify. Anything
+ * other than approved CLEARS the date, because a change order taken back to
+ * proposed or declined was not approved on that day after all, and a form
+ * should not have to know to blank the box. `job_change_orders_approved_has_date`
+ * is the backstop for any path that skips this.
+ */
+function approvalDateFor(status: string, approvedOn: string | null): string | null {
+  if (status === "approved") {
+    if (!approvedOn) {
+      throw new JobsError(
+        "APPROVAL_DATE_REQUIRED",
+        "an approved change order needs the date it was approved",
+      );
+    }
+    return approvedOn;
+  }
+  return null;
+}
+
+export async function createChangeOrder(
+  tx: Tx,
+  ctx: JobsCtx,
+  input: ChangeOrderInput,
+): Promise<JobChangeOrder> {
+  requireWrite(ctx, "owner");
+  validateChangeOrderShape(input);
+
+  // The contract is the parent, and it has to be this tenant's. The composite
+  // FK would refuse a cross-tenant one anyway; this turns that into NOT_FOUND
+  // rather than a constraint name.
+  const contract = await tx
+    .select({ id: schema.jobContracts.id })
+    .from(schema.jobContracts)
+    .where(
+      and(
+        eq(schema.jobContracts.tenantId, ctx.tenantId),
+        eq(schema.jobContracts.id, input.contractId),
+      ),
+    )
+    .limit(1);
+  if (contract.length === 0) {
+    throw new JobsError("NOT_FOUND", `contract ${input.contractId} not found`);
+  }
+
+  const status = input.status ?? "proposed";
+  const rows = await tx
+    .insert(schema.jobChangeOrders)
+    .values({
+      tenantId: ctx.tenantId,
+      contractId: input.contractId,
+      number: input.number.trim(),
+      title: input.title.trim(),
+      description: input.description?.trim() ?? "",
+      status,
+      valueCents: input.valueCents ?? 0,
+      requestedOn: input.requestedOn ?? null,
+      approvedOn: approvalDateFor(status, input.approvedOn ?? null),
+      notes: input.notes?.trim() ?? "",
+      createdByClerkUserId: ctx.userId,
+    })
+    .returning();
+  const changeOrder = rows[0];
+
+  if (input.lines && input.lines.length > 0) {
+    await tx.insert(schema.jobChangeOrderLines).values(
+      input.lines.map((line, i) => ({
+        tenantId: ctx.tenantId,
+        changeOrderId: changeOrder.id,
+        costCodeId: line.costCodeId,
+        description: line.description?.trim() ?? "",
+        amountCents: line.amountCents,
+        sortOrder: i * 10,
+      })),
+    );
+  }
+
+  return changeOrder;
+}
+
+/**
+ * Change a change order's header, and REPLACE its lines when any are given —
+ * the same rule as a commitment's, for the same reason: the lines are one
+ * document somebody is editing in front of them. An empty array is a real
+ * instruction here, unlike on a commitment, because a change order with no
+ * lines is a legitimate thing to be.
+ *
+ * **THE CONTRACT IS NOT EDITABLE.** A change order changes the agreement it was
+ * raised against; moving it would renumber it under another contract's pay
+ * applications and silently move money between two agreements. Raise it again
+ * on the right one.
+ */
+export async function updateChangeOrder(
+  tx: Tx,
+  ctx: JobsCtx,
+  id: string,
+  input: Partial<Omit<ChangeOrderInput, "contractId">> & { version?: number },
+): Promise<JobChangeOrder> {
+  requireWrite(ctx, "owner");
+  validateChangeOrderShape(input);
+  const existing = await tx
+    .select()
+    .from(schema.jobChangeOrders)
+    .where(
+      and(
+        eq(schema.jobChangeOrders.tenantId, ctx.tenantId),
+        eq(schema.jobChangeOrders.id, id),
+      ),
+    )
+    .limit(1);
+  if (existing.length === 0) {
+    throw new JobsError("NOT_FOUND", `change order ${id} not found`);
+  }
+  if (input.version !== undefined && input.version !== existing[0].version) {
+    throw new JobsError("STALE_VERSION", "change order changed since loaded");
+  }
+
+  const status = input.status ?? existing[0].status;
+  const approvedOn =
+    input.approvedOn !== undefined ? input.approvedOn : existing[0].approvedOn;
+
+  const patch: Record<string, unknown> = {
+    updatedAt: new Date(),
+    version: existing[0].version + 1,
+    status,
+    approvedOn: approvalDateFor(status, approvedOn),
+  };
+  if (input.number !== undefined) patch.number = input.number.trim();
+  if (input.title !== undefined) patch.title = input.title.trim();
+  if (input.description !== undefined) patch.description = input.description.trim();
+  if (input.valueCents !== undefined) patch.valueCents = input.valueCents;
+  if (input.requestedOn !== undefined) patch.requestedOn = input.requestedOn;
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+
+  const rows = await tx
+    .update(schema.jobChangeOrders)
+    .set(patch)
+    .where(
+      and(
+        eq(schema.jobChangeOrders.tenantId, ctx.tenantId),
+        eq(schema.jobChangeOrders.id, id),
+      ),
+    )
+    .returning();
+
+  if (input.lines !== undefined) {
+    await tx
+      .delete(schema.jobChangeOrderLines)
+      .where(
+        and(
+          eq(schema.jobChangeOrderLines.tenantId, ctx.tenantId),
+          eq(schema.jobChangeOrderLines.changeOrderId, id),
+        ),
+      );
+    if (input.lines.length > 0) {
+      await tx.insert(schema.jobChangeOrderLines).values(
+        input.lines.map((line, i) => ({
+          tenantId: ctx.tenantId,
+          changeOrderId: id,
+          costCodeId: line.costCodeId,
+          description: line.description?.trim() ?? "",
+          amountCents: line.amountCents,
+          sortOrder: i * 10,
+        })),
+      );
+    }
+  }
+
+  return rows[0];
+}
+
+export interface ChangeOrderRow {
+  changeOrder: JobChangeOrder;
+  contract: Pick<JobContract, "id" | "kind" | "name" | "status" | "sequence">;
+  lines: JobChangeOrderLine[];
+  /** The lines summed: what the change is estimated to COST, beside its price. */
+  costCents: number;
+}
+
+/**
+ * Every change order on a project, in the order its contracts sit, with the
+ * contract each one changes and the lines that say what it costs.
+ *
+ * Reached through the contract — a change order does not carry `project_id`,
+ * and the join is the proof that it does not need to.
+ */
+export async function listChangeOrders(
   tx: Tx,
   tenantId: string,
-): Promise<Map<string, number>> {
-  const rows = await tx
+  projectId: string,
+): Promise<ChangeOrderRow[]> {
+  const heads = await tx
     .select({
-      projectId: schema.jobBudgetLines.projectId,
-      totalCents: sql<number>`sum(${schema.jobBudgetLines.originalCents})`.mapWith(
-        Number,
-      ),
+      changeOrder: schema.jobChangeOrders,
+      contract: {
+        id: schema.jobContracts.id,
+        kind: schema.jobContracts.kind,
+        name: schema.jobContracts.name,
+        status: schema.jobContracts.status,
+        sequence: schema.jobContracts.sequence,
+      },
     })
-    .from(schema.jobBudgetLines)
-    .where(eq(schema.jobBudgetLines.tenantId, tenantId))
-    .groupBy(schema.jobBudgetLines.projectId);
-  return new Map(rows.map((r) => [r.projectId, r.totalCents]));
+    .from(schema.jobChangeOrders)
+    .innerJoin(
+      schema.jobContracts,
+      and(
+        eq(schema.jobContracts.tenantId, schema.jobChangeOrders.tenantId),
+        eq(schema.jobContracts.id, schema.jobChangeOrders.contractId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.jobChangeOrders.tenantId, tenantId),
+        eq(schema.jobContracts.projectId, projectId),
+      ),
+    )
+    .orderBy(
+      asc(schema.jobContracts.sequence),
+      asc(schema.jobChangeOrders.createdAt),
+      asc(schema.jobChangeOrders.number),
+    );
+  if (heads.length === 0) return [];
+
+  const lines = await tx
+    .select()
+    .from(schema.jobChangeOrderLines)
+    .where(
+      and(
+        eq(schema.jobChangeOrderLines.tenantId, tenantId),
+        inArray(
+          schema.jobChangeOrderLines.changeOrderId,
+          heads.map((h) => h.changeOrder.id),
+        ),
+      ),
+    )
+    .orderBy(asc(schema.jobChangeOrderLines.sortOrder));
+
+  const linesByCo = new Map<string, JobChangeOrderLine[]>();
+  for (const line of lines) {
+    const list = linesByCo.get(line.changeOrderId) ?? [];
+    list.push(line);
+    linesByCo.set(line.changeOrderId, list);
+  }
+
+  return heads.map((h) => {
+    const own = linesByCo.get(h.changeOrder.id) ?? [];
+    return {
+      changeOrder: h.changeOrder,
+      contract: h.contract,
+      lines: own,
+      costCents: own.reduce((sum, l) => sum + l.amountCents, 0),
+    };
+  });
 }

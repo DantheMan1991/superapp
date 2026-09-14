@@ -85,6 +85,28 @@ They are listed on the {{project|lower}}'s own page, numbered in the order you a
 
 The `Value` column is the same total: signed and complete only. A job with nothing signed yet shows `—` rather than `0.00`, because zero would read as "worth nothing" when the truth is "not agreed yet".
 
+## Changing something
+
+Owners only. Everything you can add, you can change.
+
+- **A {{project|lower}}** — {button:Edit|outline} beside the status on its page. Every field except the company, which is fixed at creation because moving a job's costs between two sets of books is not an edit.
+- **A contract** — the pencil at the end of its row.
+- **A cost code, or the list it is in** — the pencil beside each, on the Cost codes page.
+
+**If somebody else saved while you had the form open**, you see `Somebody changed this while you had it open. Reload and try again.` Nothing you typed is sent. Reload, look at what changed, and make your change again — this is deliberately a refusal rather than letting the last person to press Save quietly overwrite the first.
+
+### Changing a {{project|lower}}'s status
+
+Setting it to `Cancelled` **takes it off every list a bill or an hour can be charged to.** What is already charged stays exactly where it is. Setting it back to any other status puts it back.
+
+`Complete` does **not** do that, on purpose: bills keep arriving for months after a job finishes.
+
+### Retiring a cost code
+
+Tick `Retire this code` in its dialog. It stops being offered on new work; everything already charged to it stays. Untick it to bring it back. **Codes are never deleted** — one that vanished would take a year of job history with it.
+
+You can also renumber a code in place, which is what moving from your own scheme to CSI actually means. Two codes in one list cannot share a number; you see `That code is already in this list.` if they would.
+
 ## Cost codes
 
 {button:Cost codes|outline} on the {{project|plural}} page. Owners only to change; anyone can read.
@@ -103,7 +125,7 @@ Worth knowing so you are not looking for it:
 
 - **No budget.** A job now has a value and collects what it cost; nothing yet compares the two.
 - **No billing.** Every contract records how it should be billed, and nothing bills yet.
-- **Nothing can be edited once created** — not a {{project|lower}}, not a contract, not a cost code. A contract that moves from proposed to signed has to be added again rather than changed. Ask us if you need one corrected; editing is the next thing being built.
+- **Nothing is ever deleted.** A contract you should not have added is set to `Cancelled` or `Declined`; a cost code is retired; a {{project|lower}} is cancelled. That is on purpose — a job's history is the point of keeping it.
 
 ## Who can do what
 

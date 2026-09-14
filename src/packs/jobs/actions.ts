@@ -14,6 +14,8 @@ import {
   JobsError,
   setDefaultCostCodeSet,
   updateContract,
+  updateCostCode,
+  updateCostCodeSet,
   updateProject,
   type JobsCtx,
 } from "./ops";
@@ -393,6 +395,69 @@ export async function updateContractAction(input: unknown) {
     );
     if (projectId) revalidatePath(`${BASE}/${projectId}`);
     revalidatePath(BASE);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const costCodeSetPatch = z.object({
+  id: z.string().uuid(),
+  name: z.string().trim().min(1).max(120).optional(),
+  notes: z.string().trim().max(2000).optional(),
+  version: z.number().int().positive().optional(),
+});
+
+export async function updateCostCodeSetAction(input: unknown) {
+  const parsed = costCodeSetPatch.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { id, ...patch } = parsed.data;
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const set = await updateCostCodeSet(tx, ctx, id, patch);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "cost_code_set.updated",
+          targetType: "cost_code_set",
+          targetId: set.id,
+        });
+        return set;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/cost-codes`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const costCodePatch = z.object({
+  id: z.string().uuid(),
+  code: z.string().trim().min(1).max(40).optional(),
+  name: z.string().trim().min(1).max(200).optional(),
+  sortOrder: z.number().int().optional(),
+  /** Retire or re-offer. There is no delete: see `updateCostCode`. */
+  isActive: z.boolean().optional(),
+  notes: z.string().trim().max(2000).optional(),
+});
+
+export async function updateCostCodeAction(input: unknown) {
+  const parsed = costCodePatch.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { id, ...patch } = parsed.data;
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => updateCostCode(tx, ctx, id, patch),
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/cost-codes`);
     return { ok: true as const };
   } catch (err) {
     return toResult(err);

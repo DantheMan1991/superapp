@@ -2290,6 +2290,20 @@
       "when": 1789358630283,
       "tag": "0326_jobs_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 327,
+      "version": "7",
+      "when": 1789381060453,
+      "tag": "0327_job_contracts",
+      "breakpoints": true
+    },
+    {
+      "idx": 328,
+      "version": "7",
+      "when": 1789381061453,
+      "tag": "0328_job_contracts_rls",
+      "breakpoints": true
     }
   ]
 }

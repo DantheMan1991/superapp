@@ -38,6 +38,7 @@ d("jobs tables (RLS)", () => {
   let setB = "";
   let projectA = "";
   let projectB = "";
+  let contractA = "";
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantA, fn, { role: "staff", userId: MATE });
@@ -107,6 +108,28 @@ d("jobs tables (RLS)", () => {
         .returning();
       projectA = projects[0].id;
       projectB = projects[1].id;
+
+      const contracts = await tx
+        .insert(schema.jobContracts)
+        .values([
+          {
+            tenantId: tenantA,
+            projectId: projectA,
+            kind: "new_home",
+            counterpartyPartyId: clientA,
+            valueCents: 18250000,
+            status: "signed",
+          },
+          {
+            tenantId: tenantB,
+            projectId: projectB,
+            kind: "aia",
+            valueCents: 99900000,
+            status: "signed",
+          },
+        ])
+        .returning();
+      contractA = contracts[0].id;
     });
   });
 
@@ -226,6 +249,91 @@ d("jobs tables (RLS)", () => {
         }),
       ),
     ).rejects.toThrow();
+  });
+
+  it("a tenant sees only its own contracts", async () => {
+    const rows = await asOwner((tx) => tx.select().from(schema.jobContracts));
+    expect(rows.map((r) => r.id)).toEqual([contractA]);
+  });
+
+  it("cannot read another tenant's contract VALUE by id", async () => {
+    // The sharpest case in this file: a contract value is what a business is
+    // being paid, and it is the one number nobody volunteers.
+    const rows = await asOtherTenant((tx) =>
+      tx.select().from(schema.jobContracts).where(eq(schema.jobContracts.id, contractA)),
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it("cannot update another tenant's contract", async () => {
+    const rows = await asOtherTenant((tx) =>
+      tx
+        .update(schema.jobContracts)
+        .set({ valueCents: 1 })
+        .where(eq(schema.jobContracts.id, contractA))
+        .returning(),
+    );
+    expect(rows).toEqual([]);
+    const still = await asOwner((tx) =>
+      tx.select().from(schema.jobContracts).where(eq(schema.jobContracts.id, contractA)),
+    );
+    expect(still[0].valueCents).toBe(18250000);
+  });
+
+  it("a contract cannot hang off another tenant's PROJECT", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobContracts).values({
+          tenantId: tenantA,
+          projectId: projectB,
+          kind: "smuggled",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a contract cannot name another tenant's COUNTERPARTY", async () => {
+    const otherParty = await withSystem((tx) => seedParty(tx, tenantB, "Their GC"));
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobContracts).values({
+          tenantId: tenantA,
+          projectId: projectA,
+          kind: "sub_work",
+          counterpartyPartyId: otherParty,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("deleting a project takes its contracts with it, and nothing else", async () => {
+    // The cascade is deliberate: a project's agreements are part of it. Proved
+    // rather than assumed, because a dangling contract would still be summed by
+    // `projectValues` and would report money against a job that is gone.
+    const scratch = await withSystem(async (tx) => {
+      const p = await tx
+        .insert(schema.jobProjects)
+        .values({ tenantId: tenantA, entityId: entityA, number: "casc-1", name: "c" })
+        .returning();
+      await tx.insert(schema.jobContracts).values({
+        tenantId: tenantA,
+        projectId: p[0].id,
+        kind: "x",
+      });
+      return p[0].id;
+    });
+    await withSystem((tx) =>
+      tx.delete(schema.jobProjects).where(eq(schema.jobProjects.id, scratch)),
+    );
+    const left = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.jobContracts)
+        .where(eq(schema.jobContracts.projectId, scratch)),
+    );
+    expect(left).toEqual([]);
+    const mine = await asOwner((tx) => tx.select().from(schema.jobContracts));
+    expect(mine.map((r) => r.id)).toEqual([contractA]);
   });
 
   it("keeps the two builders' identically-numbered codes apart", async () => {

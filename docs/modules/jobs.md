@@ -13,6 +13,62 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-14 — Slice 1: a contract is a table (`claude/contracts-many-per-project`)
+
+`job_contracts`, many per project, plus the value roll-up and the form that
+writes them. **No pay applications, no retainage, no schedule of values** —
+those are the billing slice, and a column nothing reads is worse than an honest
+absence.
+
+**A CORRECTION TO `construction.md`: there is no `direction` column.** The
+dossier's data model listed one — *"`direction` says whether the pilot bills it
+or is billed on it"* — while its prose two hundred lines earlier already said the
+true thing: *"`commitments` stays what the company issues outward; `contracts` is
+what it bills against."* Both cannot hold. Once commitments are their own table
+on the cost side, every row here is billed BY the business and direction has
+nothing left to distinguish.
+
+What genuinely varies is **`role`**: `prime` (the business holds the contract
+with the owner) or `subcontract` (it holds a subcontract under somebody else's
+GC — the pilot's cabinet shop and excavation division on other people's jobs).
+Both are billed by the business; what changes is who the counterparty is and,
+later, whether retainage is held FROM it. `tests/jobs.test.ts` asserts the column
+is absent, so a future slice that adds one has to argue with a test first.
+
+**`sequence`, not dates, keeps the ladder in order.** Concept Design →
+Construction Drawings → New Home is the order the agreements were made, and a
+drawings contract signed late is still the second step. A new contract lands at
+the end.
+
+**ONLY SIGNED AND COMPLETE CONTRACTS COUNT toward what a job is worth**, and this
+is the one rule in the slice with a money consequence. A concept the client has
+not signed is not revenue; a total that quietly included it would report the
+business as bigger than it is, which is the number an owner takes to a bank. The
+rule is one exported constant, `VALUED_CONTRACT_STATUSES`, read by both the SQL
+roll-up in `projectValues` and the project page's own sum — two places that must
+never disagree about what a job is worth.
+
+**`billing_method` is a CLOSED list, unlike `kind`.** A kind is a word, and a
+pack shipping that list would know its industry; a billing method is a *sum*, so
+the pack has to implement one before it can honestly offer it and adding one is a
+migration. Seven are declared, the pilot uses three (`progress_draw`,
+`schedule_of_values`, `draw_schedule`). **Slice 1 only records which applies.**
+
+**A BUG FOUND BY DRIVING IT, with a money consequence.** Adding two contracts in
+a row: the second silently inherited `Complete` from the first, because the
+dialog is one component and `submit()` cleared the text fields but not the
+selects. An unsigned proposal would have been recorded as money owed. Status,
+role and billing method now reset — all three, because a form that remembers some
+fields and forgets others is worse than one that forgets all of them. No test
+would have caught this; two clicks did.
+
+**Driven on the dev branch**: three agreements on `24-108 Oak Row residence` —
+Concept Design $12,500 complete, New Home $1,842,000 complete, Change Order 1
+$95,000 proposed. The panel reads *"Worth $1,854,500.00 across 2 signed
+agreements, with 1 still proposed"*, and the job list's SQL roll-up agrees with
+the page's own sum to the cent. `$1,842,000` and `12,500` both parsed from what a
+person actually types.
+
 ### 2026-09-14 — Slice 0: the project spine (`claude/jobs-the-project-spine`)
 
 Three tables, the dimension sync, and the two screens that make them usable.
@@ -86,13 +142,20 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | --- | --- | --- |
 | `job_cost_code_sets` | A named list of cost codes. One or several per tenant. | FORCE RLS, member-wide. `job_cost_code_sets_one_default_idx` is a PARTIAL unique index, so **two defaults fail at the database** rather than depending on the action having cleared the first. |
 | `job_cost_codes` | One line of the chart of cost. | Composite FK to `(tenant_id, set_id)`, **cascade** — deleting a list deletes its codes. `code` is free text, never a number: CSI writes `03 30 00`, NAHB writes `1000`, a builder writes `CONC-SLAB`. `sort_order` is what orders the list, so a code never has to be sortable to be right. |
+| `job_contracts` | **Many per project.** Kind, value, billing method, counterparty, role, status, and a `sequence` that keeps the ladder in agreed order. | Composite FK to the project, **cascade** — a project's agreements are part of it, proved in the isolation suite rather than assumed, because a dangling contract would still be summed by `projectValues`. `kind` is an open taxonomy (format check only); `role`, `status` and `billing_method` are CHECK lists. **No `direction` column** — see the build log. |
 | `job_projects` | The spine. | FOUR composite FKs, each certified in `tests/isolation/jobs.test.ts`: company, division, client, cost code list. `delivery_method` is an open taxonomy (P1) with a **format check and no value check**, and is nullable. `metadata` is the P2 extension bag. |
 
-Migrations `0325_jobs.sql` (tables) and `0326_jobs_rls.sql` (policies), applied to
-dev and prod on 2026-09-14 before the merge, per
+Migrations `0325_jobs.sql` / `0326_jobs_rls.sql` (slice 0) and
+`0327_job_contracts.sql` / `0328_job_contracts_rls.sql` (slice 1), each applied
+to dev and prod before its merge, per
 [ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md).
-`db:verify-rls` reports 195 tables, all enabled, forced and with policies, on
+`db:verify-rls` reports 196 tables, all enabled, forced and with policies, on
 both.
+
+**0327 needed no hand-reordering, which confirms the diagnosis in 0325.** Both
+tables it references — `job_projects` and `parties` — are from earlier
+migrations, so their unique indexes already existed when the FKs were added. The
+ordering only bites when two new tables reference each other in one file.
 
 ## Key files & seams
 
@@ -142,8 +205,15 @@ both.
 
 ## Open items
 
-- **No contracts, no budget, no commitments.** Slices 1 and 2. A project today
-  collects actual cost and nothing compares it to anything.
+- **No budget and no commitments.** Slice 2. A project now has a value and
+  collects actual cost, and nothing compares the two.
+- **Nothing bills.** `billing_method` is recorded on every contract and read by
+  no code. Pay applications, retainage and the schedule of values are slice 4.
+- **A contract cannot be edited from the screen.** `updateContract` and
+  `updateContractAction` exist, are validated and are covered by the ops tests;
+  no UI calls them, so a contract that moves from proposed to signed has to be
+  re-thought rather than re-clicked. That is the most obviously missing thing in
+  the slice and the first candidate for the next one.
 - **Nothing edits a project yet.** `updateProject` and `updateProjectAction`
   exist and are tested through the ops layer, but no screen calls them — the
   detail page is read-only. The next slice that needs an edit form gets one.

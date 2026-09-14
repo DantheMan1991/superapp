@@ -7,15 +7,23 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
 import {
+  createContract,
   createCostCode,
   createCostCodeSet,
   createProject,
   JobsError,
   setDefaultCostCodeSet,
+  updateContract,
   updateProject,
   type JobsCtx,
 } from "./ops";
-import { PACK, PROJECT_STATUSES } from "./vocabulary";
+import {
+  BILLING_METHODS,
+  CONTRACT_ROLES,
+  CONTRACT_STATUSES,
+  PACK,
+  PROJECT_STATUSES,
+} from "./vocabulary";
 
 /**
  * The jobs write surface.
@@ -49,7 +57,17 @@ function toResult(err: unknown): { error: string } {
       case "NOT_FOUND":
         return { error: "That project no longer exists." };
       case "INVALID_STATUS":
-        return { error: "That is not something this project can do next." };
+        return { error: "That is not something this can do next." };
+      case "INVALID_KIND":
+        return {
+          error: "A kind of contract must be lowercase letters, numbers and underscores.",
+        };
+      case "INVALID_ROLE":
+        return { error: "Say whether you hold the contract or are a subcontractor." };
+      case "INVALID_BILLING_METHOD":
+        return { error: "Pick how this contract is billed." };
+      case "INVALID_VALUE":
+        return { error: "A contract value cannot be negative." };
       case "INVALID_DELIVERY_METHOD":
         return {
           error:
@@ -267,6 +285,114 @@ export async function createCostCodeAction(input: unknown) {
       { role: ctx.role },
     );
     revalidatePath(`${BASE}/cost-codes`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * A contract's write surface.
+ *
+ * **THE VALUE ARRIVES AS A STRING AND LEAVES AS CENTS**, converted here at the
+ * edge rather than in `ops.ts`. Money typed into a form is `"182,500"` or
+ * `"182500.00"`, and the ledger's rule is that cents are integers — so the one
+ * place that turns one into the other is the boundary, and everything below it
+ * only ever sees a whole number.
+ */
+const moneyToCents = z
+  .union([z.string(), z.number(), z.literal("")])
+  .optional()
+  .transform((v) => {
+    if (v === "" || v === undefined || v === null) return null;
+    const n = typeof v === "number" ? v : Number(String(v).replace(/[,\s$]/g, ""));
+    if (!Number.isFinite(n)) return null;
+    return Math.round(n * 100);
+  });
+
+const contractSchema = z.object({
+  projectId: z.string().uuid(),
+  /** Format only, never a list: the kinds come from the installed profile. */
+  kind: z.string().trim().min(1).max(63),
+  name: z.string().trim().max(200).optional(),
+  counterpartyPartyId: optionalUuid,
+  role: z.enum(CONTRACT_ROLES).optional(),
+  billingMethod: z.enum(BILLING_METHODS).optional(),
+  valueCents: moneyToCents,
+  status: z.enum(CONTRACT_STATUSES).optional(),
+  signedOn: optionalDate,
+  notes: z.string().trim().max(2000).optional(),
+});
+
+export async function createContractAction(input: unknown) {
+  const parsed = contractSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+    const contract = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const created = await createContract(tx, ctx, parsed.data);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "contract.created",
+          targetType: "contract",
+          targetId: created.id,
+          /*
+           * Identifiers and coarse shape only. **The VALUE is deliberately not
+           * logged**: the audit log is read in the console by people who are not
+           * this business, and what a job is worth is the one number on a
+           * construction project that nobody volunteers.
+           */
+          meta: {
+            projectId: created.projectId,
+            kind: created.kind,
+            role: created.role,
+            billingMethod: created.billingMethod,
+            status: created.status,
+          },
+        });
+        return created;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${parsed.data.projectId}`);
+    revalidatePath(BASE);
+    return { ok: true as const, contractId: contract.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function updateContractAction(input: unknown) {
+  const schema = contractSchema.partial().extend({
+    id: z.string().uuid(),
+    version: z.number().int().positive().optional(),
+  });
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { id, projectId, ...patch } = parsed.data;
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const updated = await updateContract(tx, ctx, id, patch);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "contract.updated",
+          targetType: "contract",
+          targetId: updated.id,
+          meta: { projectId: updated.projectId, status: updated.status },
+        });
+        return updated;
+      },
+      { role: ctx.role },
+    );
+    if (projectId) revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath(BASE);
     return { ok: true as const };
   } catch (err) {
     return toResult(err);

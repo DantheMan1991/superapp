@@ -5,6 +5,7 @@ import { schema, withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
 import { packContext } from "@/lib/packs/tenant-context";
 import { labelFor, pluralOf } from "@/lib/packs/resolve";
+import { formatMoney } from "@/lib/money";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { listCostCodeSets, listProjectRows } from "./ops";
+import { listCostCodeSets, listProjectRows, projectValues } from "./ops";
 import {
   PACK,
   STATUS_LABELS,
@@ -47,12 +48,14 @@ export async function JobsModule({
   ctx: TenantContext;
   searchParams: Record<string, string | string[] | undefined>;
 }) {
-  const { rows, entities, parties, enterprises, sets, labels, config } =
+  const { rows, values, entities, parties, enterprises, sets, labels, config } =
     await withTenant(
       ctx.tenant.id,
       async (tx) => {
-        const [rows, entities, parties, enterprises, sets, pack] = await Promise.all([
+        const [rows, values, entities, parties, enterprises, sets, pack] =
+          await Promise.all([
           listProjectRows(tx, ctx.tenant.id),
+          projectValues(tx, ctx.tenant.id),
           tx
             .select({ id: schema.entities.id, name: schema.entities.name })
             .from(schema.entities)
@@ -79,6 +82,7 @@ export async function JobsModule({
         ]);
         return {
           rows,
+          values,
           entities,
           parties,
           enterprises,
@@ -103,6 +107,7 @@ export async function JobsModule({
    * correct answer for a tenant with no profile installed.
    */
   const deliveryMethods = deliveryMethodsFrom(config);
+  const symbol = ctx.tenant.currencySymbol;
 
   const form = isOwner ? (
     <ProjectForm
@@ -158,6 +163,7 @@ export async function JobsModule({
                 <TableHead>{clientWord}</TableHead>
                 <TableHead>Kind</TableHead>
                 <TableHead>Company</TableHead>
+                <TableHead className="text-right">Value</TableHead>
                 <TableHead>Status</TableHead>
               </TableRow>
             </TableHeader>
@@ -192,6 +198,18 @@ export async function JobsModule({
                         {enterpriseName}
                       </span>
                     )}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {/*
+                     * Signed agreements only. A job with nothing signed shows a
+                     * dash rather than a zero, because zero reads as "worth
+                     * nothing" and the truth is "not agreed yet".
+                     */}
+                    {(() => {
+                      const v = values.get(project.id);
+                      if (!v || v.signedCount === 0) return "—";
+                      return formatMoney(v.valueCents, symbol);
+                    })()}
                   </TableCell>
                   <TableCell>
                     <Badge variant={project.status === "active" ? "default" : "secondary"}>

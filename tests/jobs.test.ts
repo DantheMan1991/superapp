@@ -1,11 +1,22 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  BILLING_METHODS,
+  BILLING_METHOD_LABELS,
+  CONTRACT_ROLES,
+  CONTRACT_STATUSES,
+  CONTRACT_STATUS_LABELS,
   DELIVERY_METHOD_FORMAT,
   PACK,
   PROJECT_STATUSES,
   STATUS_LABELS,
+  ROLE_LABELS,
+  VALUED_CONTRACT_STATUSES,
+  contractKindsFrom,
   deliveryMethodsFrom,
+  isBillingMethod,
+  isContractRole,
+  isContractStatus,
   isProjectStatus,
   slugLabel,
 } from "../src/packs/jobs/vocabulary";
@@ -128,5 +139,82 @@ describe("slugLabel", () => {
 
   it("does not fall over on an empty string", () => {
     expect(slugLabel("")).toBe("");
+  });
+});
+
+/**
+ * Contracts. The mirror tests matter more here than on the project, because
+ * `billing_method` is a CLOSED list in both places: a method offered on screen
+ * that the CHECK constraint refuses is a form that looks fine and fails on save.
+ */
+const CONTRACTS_SQL = readFileSync("drizzle/0327_job_contracts.sql", "utf8");
+
+describe("contracts", () => {
+  it("MIRRORS the billing-method CHECK constraint", () => {
+    const m = CONTRACTS_SQL.match(/job_contracts_billing_method_valid[^(]*\(([^)]*)\)/);
+    expect(m, "constraint not found").not.toBeNull();
+    const inSql = [...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]);
+    expect(inSql.sort()).toEqual([...BILLING_METHODS].sort());
+  });
+
+  it("MIRRORS the status CHECK constraint", () => {
+    const m = CONTRACTS_SQL.match(/job_contracts_status_valid[^(]*\(([^)]*)\)/);
+    const inSql = [...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]);
+    expect(inSql.sort()).toEqual([...CONTRACT_STATUSES].sort());
+  });
+
+  it("MIRRORS the role CHECK constraint", () => {
+    const m = CONTRACTS_SQL.match(/job_contracts_role_valid[^(]*\(([^)]*)\)/);
+    const inSql = [...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]);
+    expect(inSql.sort()).toEqual([...CONTRACT_ROLES].sort());
+  });
+
+  it("has NO direction column, and role is what replaced it", () => {
+    /*
+     * The dossier listed one. Every row here is billed BY the business; what it
+     * issues outward is `commitments`, a different table. If a direction column
+     * ever appears, one of those two claims has stopped being true and the
+     * boundary needs re-reading rather than a column adding.
+     */
+    expect(CONTRACTS_SQL).not.toMatch(/"direction"/);
+    expect(CONTRACTS_SQL).toMatch(/"role" text/);
+  });
+
+  it("counts only signed and complete contracts toward a project's value", () => {
+    // The rule lives in one exported constant so the SQL roll-up and the page's
+    // own sum cannot drift into disagreeing about what a job is worth.
+    expect([...VALUED_CONTRACT_STATUSES].sort()).toEqual(["complete", "signed"]);
+    for (const notMoney of ["proposed", "declined", "cancelled"] as const) {
+      expect(VALUED_CONTRACT_STATUSES).not.toContain(notMoney);
+    }
+  });
+
+  it("gives every role, status and billing method a readable label", () => {
+    for (const r of CONTRACT_ROLES) expect(ROLE_LABELS[r]).toBeTruthy();
+    for (const s of CONTRACT_STATUSES) expect(CONTRACT_STATUS_LABELS[s]).toBeTruthy();
+    for (const m of BILLING_METHODS) expect(BILLING_METHOD_LABELS[m]).toBeTruthy();
+  });
+
+  it("reads contract kinds from a profile and ships none of its own", () => {
+    expect(contractKindsFrom({ contractKinds: ["concept_design", "aia"] })).toEqual([
+      "concept_design",
+      "aia",
+    ]);
+    expect(contractKindsFrom({})).toEqual([]);
+    expect(contractKindsFrom(undefined)).toEqual([]);
+    expect(contractKindsFrom({ contractKinds: "nonsense" })).toEqual([]);
+    // One bad word must not take the list down with it.
+    expect(contractKindsFrom({ contractKinds: ["aia", "Not A Slug", 7] })).toEqual([
+      "aia",
+    ]);
+  });
+
+  it("recognises its own values and nothing else", () => {
+    expect(isContractRole("subcontract")).toBe(true);
+    expect(isContractRole("gc")).toBe(false);
+    expect(isBillingMethod("schedule_of_values")).toBe(true);
+    expect(isBillingMethod("whatever")).toBe(false);
+    expect(isContractStatus("declined")).toBe(true);
+    expect(isContractStatus("lost")).toBe(false);
   });
 });

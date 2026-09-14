@@ -22,7 +22,7 @@ import {
   actualByProject,
   committedTotals,
   contractBilling,
-  jobCostRows,
+  jobCostReport,
   getProject,
   listChangeOrders,
   listCommitments,
@@ -100,7 +100,7 @@ export default async function ProjectPage({
         changeOrders,
         billing,
         committed,
-        costRows,
+        costReport,
         actual,
         allEntities,
         allEnterprises,
@@ -165,7 +165,7 @@ export default async function ProjectPage({
         listChangeOrders(tx, ctx.tenant.id, project.id),
         contractBilling(tx, ctx.tenant.id, project.id),
         committedTotals(tx, ctx.tenant.id),
-        jobCostRows(tx, ctx.tenant.id, project.id),
+        jobCostReport(tx, ctx.tenant.id, project.id),
         /*
          * ACTUAL COST COMES FROM THE LEDGER through a CORE export, never from a
          * query of accounting's tables. `getBalances` already applies the basis
@@ -223,7 +223,8 @@ export default async function ProjectPage({
         changeOrders,
         billing,
         committed,
-        costRows,
+        costRows: costReport.rows,
+        uncodedActualCents: costReport.uncodedActualCents,
         actual,
         allEntities,
         allEnterprises,
@@ -252,6 +253,9 @@ export default async function ProjectPage({
   const committedOfBudgeted = data.costRows
     .filter((r) => r.hasBudget)
     .reduce((sum, r) => sum + r.committedCents, 0);
+  const spentOfBudgeted = data.costRows
+    .filter((r) => r.hasBudget)
+    .reduce((sum, r) => sum + r.actualCents, 0);
   const isOwner = allowsWrite(ctx.role, "owner");
   /** The field is a chore: whoever is on the site logs the day and ticks the list. */
   const canLog = allowsWrite(ctx.role, "member");
@@ -783,7 +787,7 @@ export default async function ProjectPage({
             : `Budget ${formatMoneySign(budgetTotal, symbol)} against ${formatMoney(
                 committedOfBudgeted,
                 symbol,
-              )} ordered${
+              )} ordered and ${formatMoney(spentOfBudgeted, symbol)} spent${
                 budgetChanges !== 0
                   ? `, after ${formatMoneySign(budgetChanges, symbol)} in approved changes`
                   : ""
@@ -799,6 +803,7 @@ export default async function ProjectPage({
                   <TableHead>Name</TableHead>
                   <TableHead className="text-right">Budget</TableHead>
                   <TableHead className="text-right">Ordered</TableHead>
+                  <TableHead className="text-right">Spent</TableHead>
                   <TableHead className="text-right">Left</TableHead>
                 </TableRow>
               </TableHeader>
@@ -840,6 +845,15 @@ export default async function ProjectPage({
                     <TableCell className="text-right tabular-nums">
                       {formatMoney(r.committedCents, symbol)}
                     </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {/*
+                        THIS JOB'S SPEND ON THIS CODE, and nobody else's: the
+                        ledger sliced to the job's cost object, then split by
+                        code. The column slices 3 to 6 said out loud they could
+                        not show.
+                      */}
+                      {formatMoney(r.actualCents, symbol)}
+                    </TableCell>
                     <TableCell
                       className={
                         "text-right tabular-nums " +
@@ -855,15 +869,20 @@ export default async function ProjectPage({
           </div>
         )}
         <p className="mt-3 text-xs text-muted-foreground">
-          {/*
-            SAID RATHER THAN FAKED. `getBalances` groups by one dimension type,
-            so it can answer "what has this project cost" or "what has this code
-            cost across every project" — not both. Showing a per-code actual here
-            would mean borrowing another job's spend.
-          */}
-          Ordered is what has been committed on this job. Actual cost is shown
-          for the whole job above; per-code actuals arrive once bills carry cost
-          codes.
+          Ordered is what has been committed on this job; spent is what the
+          books have been billed for it, by code. Left is the budget less the
+          greater of the two — what the code will cost at least.
+          {data.uncodedActualCents !== 0 && (
+            <>
+              {" "}
+              <span className="font-medium text-foreground">
+                {formatMoney(data.uncodedActualCents, symbol)}
+              </span>{" "}
+              has been spent on this job with no cost code on the line; it is in
+              the job&apos;s total below and in no row here. Add the code on the
+              bill in Accounting.
+            </>
+          )}
         </p>
       </Panel>
 

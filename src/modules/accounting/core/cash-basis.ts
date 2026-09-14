@@ -92,6 +92,15 @@ export async function cashBasisAdjustment(
     accountIds?: string[];
     groupByDimensionType?: string;
     /**
+     * ONLY RECOGNITION LINES TAGGED WITH THIS MEMBER — the same slice
+     * `getBalances` takes on the accrual side, so the two halves of a cash
+     * report agree about what "within a job" means. The control leg that
+     * keeps an ordinary cash report balanced is NOT pushed under this filter:
+     * it carries no member, and the accrual half never includes an untagged
+     * line either. A sliced report is not a balanced one, on either basis.
+     */
+    withinMemberId?: string;
+    /**
      * `journalLineId` → the account this line should be recognised under
      * instead, from `@/lib/basis-lens`. Empty for nearly every tenant.
      *
@@ -248,6 +257,15 @@ export async function cashBasisAdjustment(
         inScope,
         inArray(je.source, ["invoice", "bill"]),
         inArray(je.sourceId, documentIds),
+        // The same correlated EXISTS as getBalances, on the same table.
+        opts.withinMemberId
+          ? sql`exists (
+              select 1 from ${ld} as within_member
+               where within_member.tenant_id = ${jl.tenantId}
+                 and within_member.journal_line_id = ${jl.id}
+                 and within_member.member_id = ${opts.withinMemberId}
+            )`
+          : undefined,
       ),
     )
     .orderBy(jl.lineNo);
@@ -305,6 +323,26 @@ export async function cashBasisAdjustment(
     });
     recognitionByDoc.set(row.documentId, list);
   }
+  /**
+   * Opening documents recognise from their own lines (below), so the member
+   * filter has to be applied to THOSE lines' tags — which hang off
+   * `invoice_line_id` / `bill_line_id` rather than a journal line. One read
+   * of the tagged ids, then a filter, rather than a join per branch.
+   */
+  const taggedDocumentLineIds = async (
+    column: "invoiceLineId" | "billLineId",
+    ids: string[],
+  ): Promise<Set<string> | null> => {
+    if (!opts.withinMemberId || ids.length === 0) return null;
+    const col = column === "invoiceLineId" ? ld.invoiceLineId : ld.billLineId;
+    const rows = await tx
+      .select({ id: col })
+      .from(ld)
+      .where(
+        and(eq(ld.tenantId, tenantId), eq(ld.memberId, opts.withinMemberId), inArray(col, ids)),
+      );
+    return new Set(rows.map((r) => r.id).filter((id): id is string => !!id));
+  };
   if (openingInvoices.length > 0) {
     const lines = await tx.query.invoiceLines.findMany({
       where: and(
@@ -315,8 +353,10 @@ export async function cashBasisAdjustment(
         ),
       ),
     });
+    const tagged = await taggedDocumentLineIds("invoiceLineId", lines.map((l) => l.id));
     for (const l of lines) {
       if (l.amountCents === 0) continue;
+      if (tagged && !tagged.has(l.id)) continue;
       const list = recognitionByDoc.get(l.invoiceId) ?? [];
       // A credit, as the issuance's income line would have been.
       list.push({ accountId: l.incomeAccountId, memberId: null, amountCents: -l.amountCents });
@@ -333,8 +373,10 @@ export async function cashBasisAdjustment(
         ),
       ),
     });
+    const tagged = await taggedDocumentLineIds("billLineId", lines.map((l) => l.id));
     for (const l of lines) {
       if (l.amountCents === 0 || !l.accountId) continue;
+      if (tagged && !tagged.has(l.id)) continue;
       const list = recognitionByDoc.get(l.billId) ?? [];
       list.push({ accountId: l.accountId, memberId: null, amountCents: l.amountCents });
       recognitionByDoc.set(l.billId, list);
@@ -386,8 +428,12 @@ export async function cashBasisAdjustment(
         deltas.push(line);
         recognised += line.amountCents;
       }
-      // The leg that keeps the report balanced.
-      deltas.push({ accountId: control, memberId: null, amountCents: -recognised });
+      // The leg that keeps the report balanced — unless the report is a slice
+      // of one member, in which case the untagged leg does not belong (see
+      // `withinMemberId` above).
+      if (!opts.withinMemberId) {
+        deltas.push({ accountId: control, memberId: null, amountCents: -recognised });
+      }
     }
   }
 

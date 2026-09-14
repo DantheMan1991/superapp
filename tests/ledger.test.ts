@@ -1375,4 +1375,109 @@ d("core ledger platform", () => {
       expect(err).toBeInstanceOf(LedgerError);
     }
   });
+
+  // ------------------------------------------------ balances within one member
+
+  describe("balances WITHIN one member (jobs slice 6b)", () => {
+    /**
+     * One group-by could say what a job cost, or what a trade cost across every
+     * job — never one job's cost by trade. `withinMemberId` slices the ledger
+     * to the lines carrying one member and lets the group-by split THOSE. The
+     * rows are a slice, not a balanced set: a bill's payable leg carries no
+     * job and is not here.
+     */
+    let jobA = "";
+    let jobB = "";
+    let tradeConcrete = "";
+    let tradeFraming = "";
+
+    beforeAll(async () => {
+      const mk = (dimensionType: string, displayName: string) =>
+        withTenant(tenantId, (tx) =>
+          upsertDimensionMember(tx, owner, {
+            dimensionType,
+            packEntityId: crypto.randomUUID(),
+            displayName,
+          }),
+        );
+      jobA = (await mk("site", "Job A")).id;
+      jobB = (await mk("site", "Job B")).id;
+      tradeConcrete = (await mk("trade", "Concrete")).id;
+      tradeFraming = (await mk("trade", "Framing")).id;
+      const exp = await accountId("6400");
+      const ap = await accountId("2000");
+      await withTenant(tenantId, (tx) =>
+        postEntry(tx, owner, {
+          entityId,
+          status: "posted",
+          entryDate: "2026-04-10",
+          memo: "two jobs, two trades",
+          lines: [
+            { accountId: exp, amountCents: 1_000, dimensionMemberIds: [jobA, tradeConcrete] },
+            { accountId: exp, amountCents: 2_000, dimensionMemberIds: [jobA, tradeFraming] },
+            // On job A with no trade at all.
+            { accountId: exp, amountCents: 4_000, dimensionMemberIds: [jobA] },
+            // The same trade on the OTHER job — the line that must never leak.
+            { accountId: exp, amountCents: 8_000, dimensionMemberIds: [jobB, tradeConcrete] },
+            // Untagged entirely.
+            { accountId: exp, amountCents: 16_000 },
+            { accountId: ap, amountCents: -31_000 },
+          ],
+        }),
+      );
+    });
+
+    it("splits ONE member's balances by another dimension, and no other member's spend reaches it", async () => {
+      const exp = await accountId("6400");
+      const rows = await withTenant(tenantId, (tx) =>
+        getBalances(tx, tenantId, {
+          scope: COMBINED,
+          accountIds: [exp],
+          withinMemberId: jobA,
+          groupByDimensionType: "trade",
+        }),
+      );
+      const byTrade = new Map(rows.map((r) => [r.memberId, r.netCents]));
+      expect(byTrade.get(tradeConcrete)).toBe(1_000); // job B's 8,000 on the same trade stays out
+      expect(byTrade.get(tradeFraming)).toBe(2_000);
+      expect(byTrade.get(null)).toBe(4_000); // on the job, no trade
+      expect(rows.reduce((s, r) => s + r.netCents, 0)).toBe(7_000);
+    });
+
+    it("is a slice, not a balanced set: the payable leg carries no member and is absent", async () => {
+      const rows = await withTenant(tenantId, (tx) =>
+        getBalances(tx, tenantId, { scope: COMBINED, withinMemberId: jobA }),
+      );
+      const ap = await accountId("2000");
+      expect(rows.some((r) => r.accountId === ap)).toBe(false);
+      expect(rows.reduce((s, r) => s + r.netCents, 0)).toBe(7_000);
+    });
+
+    it("without the filter the same group-by answers the OTHER question — the trade across every job", async () => {
+      const exp = await accountId("6400");
+      const rows = await withTenant(tenantId, (tx) =>
+        getBalances(tx, tenantId, {
+          scope: COMBINED,
+          accountIds: [exp],
+          groupByDimensionType: "trade",
+        }),
+      );
+      const concrete = rows.find((r) => r.memberId === tradeConcrete);
+      expect(concrete?.netCents).toBe(9_000); // both jobs
+    });
+
+    it("a member nothing carries yields nothing, not an error", async () => {
+      const ghost = await withTenant(tenantId, (tx) =>
+        upsertDimensionMember(tx, owner, {
+          dimensionType: "site",
+          packEntityId: crypto.randomUUID(),
+          displayName: "Nothing yet",
+        }),
+      );
+      const rows = await withTenant(tenantId, (tx) =>
+        getBalances(tx, tenantId, { scope: COMBINED, withinMemberId: ghost.id }),
+      );
+      expect(rows).toEqual([]);
+    });
+  });
 });

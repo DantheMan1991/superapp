@@ -233,17 +233,16 @@ A budget here is **per cost code**, never one number for the whole job. That is 
 | --- | --- |
 | `Budget` | What you planned for that code, revised by approved change orders, with `orig. $…` underneath when one moved it. |
 | `Ordered` | What you have committed on **this job** against it — issued and closed orders only. |
-| `Left` | Budget minus ordered. **Negative and red means that trade is over.** |
+| `Spent` | What your books have been billed for it on **this job** — every bill, timecard or journal line tagged with the job and this code. Another job's spend on the same code is never here. |
+| `Left` | Budget minus the **greater** of ordered and spent — what the code will cost at least. Ordered but not yet billed is still owed; billed beyond what was ordered has already happened; adding the two would count one dollar twice. **Negative and red means that trade is over.** |
 
-A code you have ordered against but never budgeted appears with a `Not budgeted` badge. That row is usually the one worth looking at. A code that was never budgeted but has an approved change order against it appears without the badge, budgeted at the change.
+A code you have ordered against or spent against but never budgeted appears with a `Not budgeted` badge. That row is usually the one worth looking at. A code that was never budgeted but has an approved change order against it appears without the badge, budgeted at the change.
 
-The line above the table reads *"Budget $… against $… ordered"*, and adds *"after $… in approved changes"* when there are any.
+The line above the table reads *"Budget $… against $… ordered and $… spent"*, and adds *"after $… in approved changes"* when there are any. Ordered and spent there are over budgeted codes only, so the headline compares like with like.
 
-### What the report does not show yet
+### Spend with no cost code
 
-**There is no actual cost per code.** The job's total actual is in the `Ordered` panel below; the per-code column stops at what has been ordered.
-
-The reason is honest rather than temporary: the books can group costs by job, or by cost code across every job, but not both at once. Showing a per-code figure here today would mean putting another job's spending in this job's column. It arrives when that is fixed properly.
+A bill line can carry the job and no code. That money is real, it is in the job's `Actual cost` in the panel below, and no row of this table can hold it — so the note under the table says how much: *"$3,000.00 has been spent on this job with no cost code on the line."* Fix it where it happened: open the bill in Accounting and put the code on the line. The `Spent` column is only ever as good as the coding on the bills.
 
 ## What you have ordered
 
@@ -451,7 +450,7 @@ Worth knowing so you are not looking for it:
 - **Retainage you hold from subcontractors** is not tracked yet; only what clients hold from you.
 - **Cost-plus, unit-price and time-and-materials jobs are not measured on the work in progress schedule.** They have no fixed value to earn against, so they are shown and left out — and a period with billings on one cannot post until that job has a value.
 - **No printed application.** The certificate is on screen and its invoice is in Accounting; an AIA-style printout is coming.
-- **Cost codes can now be put on a bill.** They appear in Accounting wherever you tag a line, beside the job itself — so a bill can say which job and which trade. Actual cost per code follows once bills carry them.
+- **Nothing codes a bill for you.** Cost codes appear in Accounting wherever you tag a line, beside the job itself, and the `Spent` column reads what the bills carry. A line with the job and no code shows up as the uncoded note under the job cost table, not on a row.
 - **Nothing is ever deleted.** A contract you should not have added is set to `Cancelled` or `Declined`; a cost code is retired; a {{project|lower}} is cancelled. That is on purpose — a job's history is the point of keeping it.
 
 ## Who can do what

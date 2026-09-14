@@ -22,6 +22,27 @@ changes this module MUST add an entry here (rule in AGENTS.md).
 > at the start of every accounting session, so its length is a real cost — it was
 > 4,367 lines before the 2026-09-14 sweep, 94% of it build log.
 
+### 2026-09-14 — Balances within one member (`claude/spent-per-code`)
+
+`getBalances` gains `withinMemberId`: only the lines tagged with that dimension
+member, which with `groupByDimensionType` of a DIFFERENT type answers the question
+one group-by never could — one member's balances split by another dimension. The
+`jobs` pack's job cost report wanted it for three slices (a job's spend by cost
+code) and said so on the page rather than reading this module's tables or
+borrowing another job's spend. A correlated EXISTS on `line_dimensions`, so a
+tagged line appears once whatever else it carries. **A slice is not a balanced set
+of books**: a bill's payable leg carries no job and is absent, on BOTH bases —
+`cashBasisAdjustment` takes the same filter on its recognition lines (and on an
+opening document's own lines, whose tags hang off `invoice_line_id` /
+`bill_line_id`) and does not push the control offset under it, so the two halves
+agree about what "within a job" means. Pinned in `tests/ledger.test.ts` (four cases,
+including the other job's spend on the same trade staying out) and
+`tests/cash-basis-db.test.ts` (the tagged line's share as the money moves, the
+whole of it over the year, no AP row). No table, no migration. One known limit,
+inherited rather than new: an OPENING document's lines are recognised with no
+dimension member even when grouped (they always were), so under the cash basis a
+tagged opening line inside a slice lands in the null-member row.
+
 ### 2026-09-14 — A fifth managed source, and a second basis lens (`claude/work-in-progress`)
 
 The `jobs` pack's work-in-progress slice ([ADR 0059](../decisions/0059-work-in-progress-is-a-snapshot-and-a-self-reversing-entry.md))

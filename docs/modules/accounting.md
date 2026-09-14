@@ -13,6 +13,46 @@ export for the accountant.
 
 ## Build log
 
+### 2026-09-13 — The quick add gets a verb a sentence can call (`claude/paid-the-feed-store`)
+
+**A refactor with no behaviour in it, done for a slice that needs it next.**
+
+`quickAddTransactionAction` held the whole rule in its body — the lines, the
+transfer's far end, the entity, the `posted`-or-`draft` status, the refusals.
+That is fine for a screen and impossible for anything else: a server action opens
+its own transaction and reads its own session, so nothing that already has a
+`tx` can call it.
+
+[tell.md](tell.md)'s slice C1 needs exactly that — *"paid the feed store two
+hundred forty cash"* — and a tell source records through **the module's own
+verb**, inside the transaction the platform opened
+([ADR 0039](../decisions/0039-a-pack-declares-what-it-can-be-told-in-one-sentence.md)'s
+third rule). The alternative was a second copy of the posting rule, which is how
+two doors come to disagree about somebody's books.
+
+So `banking/quick-add.ts` owns it and the action is the thin wrapper it should
+always have been. **Same lines, same statuses, same refusals, same audit** — the
+audit stayed in the action because it describes the DOOR (`via: "quick_add"`),
+which is the one thing the two callers genuinely differ about.
+
+Two things are said out loud that were implicit before:
+
+- **`status` is returned.** A non-owner's entry is a DRAFT, and a caller that
+  does not say so is telling somebody their money is in the books when it is
+  waiting for an owner. The screen never had to care; a spoken confirmation does.
+- **The expert check is on the verb.** `actions.ts`'s gate refuses the outside
+  accountant every write, and a second door that did not would hand them writes
+  their own screens refuse them. ADR 0039 says the verb's level is the rule, so
+  that is where it is.
+
+`quickAddPosting` is the read-only half, for the preview
+([ADR 0054](../decisions/0054-tell-may-draft-never-send.md) §2). It builds the
+same lines from the same input rather than describing them alongside — two
+descriptions of one posting is how a preview comes to be confidently wrong.
+
+**31 banking tests pass unchanged**, which is the whole proof a behaviour-
+preserving move can offer.
+
 ### 2026-09-10 — The platform's own revenue posts through the ordinary invoice (`claude/back-office-5-the-money-loop`)
 
 Back-office slice 5, [ADR 0043](../decisions/0043-the-platforms-revenue-is-posted-by-the-webhook-as-the-operators-owner.md).

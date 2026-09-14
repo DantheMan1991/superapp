@@ -106,7 +106,7 @@ Gated on A2 and A4. Never `unattended`. Every action previews its posting.
 
 | # | Slice |
 | --- | --- |
-| **C1** | **An expense paid** — *"paid the feed store two hundred forty cash"*. The simplest money verb, and the one that proves the preview |
+| **C1** | **An expense paid** — *"paid the feed store two hundred forty cash"*. The simplest money verb, and the one that proves the preview. **Its prerequisite shipped 2026-09-13**: the quick add's rule moved out of the server action into `banking/quick-add.ts`, so a sentence can call the module's own verb rather than keeping a second copy of the posting ([accounting.md](accounting.md)) |
 | **C2** | **A bill that arrived** — *"got a bill from the vet for three eighty, due the fifteenth"* |
 | **C3** | **A draft invoice** — *"invoice Acme for twelve hours"*. Creates a draft, says so, and stops |
 

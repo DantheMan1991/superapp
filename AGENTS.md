@@ -59,7 +59,10 @@ that matter for code:
 
 ## Adding a module (the Phase 2 workflow)
 
-1. Row in `scripts/seed.ts` (status `available`) + re-seed.
+1. Row in `scripts/seed-catalogue.ts` (status `available`), then re-seed **both
+   databases** — `npm run db:seed -- --dev` AND `npm run db:seed`. A module with
+   no catalogue row cannot be switched on and does not exist as far as any tenant
+   is concerned; see the seed note under Commands, which the `jobs` pack paid for.
 2. Renderer in `src/modules/<slug>/` + entry in `src/modules/index.ts`.
 3. Tables: declare them in the right `src/db/schema/<domain>.ts` (the barrel
    `index.ts` re-exports every domain, so `@/db/schema` is unchanged). Include
@@ -136,8 +139,8 @@ and skipped by the build-docs walker:
 
 ## Commands
 
-- `npm run db:migrate` / `db:seed` / `db:generate` / `db:verify-rls` — run as
-  the owner URL (`DATABASE_URL_OWNER`).
+- `npm run db:migrate` / `db:seed` / `db:generate` / `db:verify-rls` /
+  `db:verify-modules` — run as the owner URL (`DATABASE_URL_OWNER`).
 - **NOTHING IN THE DEPLOY APPLIES MIGRATIONS, and `main` auto-deploys.** A merged
   PR is live within minutes; its migration is not. Apply it yourself, in this
   order, **before** merging: `npm run db:migrate -- --dev`, then
@@ -149,6 +152,16 @@ and skipped by the build-docs walker:
   the `full-tests` label. Skipping the step is what took `/dashboard/m/production`
   down for five hours on 2026-08-23; see
   [ADR 0014](docs/decisions/0014-migrations-are-applied-before-the-merge.md).
+- **AND NOTHING IN THE DEPLOY RUNS THE SEED EITHER.** The rule above covers a
+  module's SCHEMA and says nothing about its CATALOGUE ROW, which is how the
+  `jobs` pack reached production on 2026-09-14 with all six tables migrated, RLS
+  verified on 198 tables, and no row in `modules` — four PRs of work, fully
+  deployed, invisible, and nothing anywhere said so. A new or changed module row
+  needs `npm run db:seed -- --dev` and `npm run db:seed`, in the same
+  before-the-merge ritual as a migration, then **`npm run db:verify-modules`**
+  (and `-- --dev`) to prove the database's registry matches the code's. It exits
+  1 and names what is missing. `tests/module-catalogue.test.ts` covers the other
+  half — that every registered pack HAS a row in the first place.
 - `npm run db:create-role` — creates/rotates the `app_user` role the app
   connects as. Required: Neon's owner role has BYPASSRLS, so the app must
   never run as it (`DATABASE_URL` = app_user).

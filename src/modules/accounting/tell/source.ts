@@ -13,6 +13,12 @@ import {
 import { LedgerError, friendlyMessage } from "../core";
 import { isCodableAccount, listAccounts } from "../core/coa";
 import { quickAddPosting, quickAddTransaction } from "../banking/quick-add";
+import {
+  createBillDraft,
+  findApAccount,
+  findPossibleDuplicates,
+} from "../payables/bills";
+import { dueDateFromVendorTerms, listVendors } from "../payables/vendors";
 
 /**
  * What the books can be told in one sentence (tell.md, Phase C, slice C1).
@@ -138,11 +144,22 @@ export const accountingTellSource: TellSource = {
      */
     if (ctx.role === "expert") return [];
 
-    const [from, categories, tenant] = await Promise.all([
+    const [from, categories, tenant, vendorRows] = await Promise.all([
       registers(tx, ctx.tenantId),
       codableExpenses(tx, ctx.tenantId),
       tx.query.tenants.findFirst({ where: eq(schema.tenants.id, ctx.tenantId) }),
+      listVendors(tx, ctx.tenantId),
     ]);
+    /*
+     * **A VENDOR IS NEVER CREATED FROM A SENTENCE.** A misheard name makes a
+     * party that outlives the mistake and turns up in every picker afterwards,
+     * and the bill screen is where somebody adds one having looked. So a bill
+     * can only be told about a vendor that already exists, and a business with
+     * none is not offered the action at all.
+     */
+    const vendors: Named[] = vendorRows
+      .filter((v) => v.name.trim() !== "")
+      .map((v) => ({ value: v.id, label: v.name }));
     /*
      * The symbol is a TENANT setting, not a module choice, and money shown two
      * ways inside one workspace is worse than either way consistently. Null
@@ -181,6 +198,23 @@ export const accountingTellSource: TellSource = {
         categoryAccountId,
         amountCents,
         memo: text(values.payee) ?? undefined,
+      };
+    };
+
+    const asBill = (values: TellValues) => {
+      const vendorId = text(values.vendor);
+      const dollars = Number(values.amount);
+      if (!vendorId || !Number.isFinite(dollars)) return null;
+      const amountCents = parseMoneyToCents(String(dollars));
+      if (amountCents === null || amountCents <= 0) return null;
+      return {
+        vendorId,
+        amountCents,
+        billDate: text(values.on)!,
+        dueDate: text(values.due),
+        // Nullable by design: an uncoded bill is normal, and a guess here is an
+        // account somebody has to notice was wrong.
+        accountId: text(values.category),
       };
     };
 
@@ -299,6 +333,161 @@ export const accountingTellSource: TellSource = {
           };
         },
       },
+
+      /**
+       * A BILL THAT HAS ARRIVED AND IS NOT PAID (tell.md, slice C2).
+       *
+       * **NOTHING POSTS.** `createBillDraft` makes a draft, and approving it is
+       * what puts `Dr expense / Cr Accounts Payable` in the books — which is the
+       * shape [ADR 0054](../../../../docs/decisions/0054-tell-may-draft-never-send.md)
+       * wanted everywhere and the payables module already had. A sentence
+       * cannot approve one, and is not meant to.
+       *
+       * It is also the answer to the sentence C1's own golden set could not
+       * take: *"we owe the feed store two forty"*. Owing is not paying, and
+       * until now the honest response was nothing at all.
+       */
+      ...(vendors.length === 0
+        ? []
+        : [
+            {
+              slug: "accounting.bill",
+              title: "Bill arrived",
+              about:
+                "A bill that has COME IN and is not paid yet. Examples: “got a bill from the vet for three eighty due the fifteenth”, “the feed store invoiced us two forty”. Never for money already gone — that is the other one.",
+              fields: [
+                {
+                  key: "vendor",
+                  label: "Who from",
+                  kind: "choice" as const,
+                  required: true,
+                  hint: "Who sent it, in the sentence's own words.",
+                  find: async (_tx: Tx, _ctx: TellCtx, said: string) =>
+                    findNamed(vendors, said),
+                },
+                {
+                  key: "amount",
+                  label: "How much",
+                  kind: "number" as const,
+                  required: true,
+                  hint: "IN DOLLARS. “three eighty” is 380. Never cents.",
+                },
+                {
+                  key: "category",
+                  label: "What for",
+                  kind: "choice" as const,
+                  /*
+                   * **NOT REQUIRED, AND THAT IS THE MODULE'S OWN DESIGN.** A
+                   * bill line's `accountId` is nullable on purpose (P10) —
+                   * uncoded until somebody codes it. A sentence that does not
+                   * say what a bill was for should leave it uncoded for the
+                   * bill screen rather than guess, because a guess here is an
+                   * account somebody has to notice was wrong.
+                   */
+                  hint: "What it was for, if the sentence says. LEAVE IT OUT when it does not — an uncoded bill is normal.",
+                  find: async (_tx: Tx, _ctx: TellCtx, said: string) =>
+                    findNamed(categories, said),
+                },
+                {
+                  key: "due",
+                  label: "Due",
+                  kind: "date" as const,
+                  hint: "Only when the sentence says. Left out, the vendor's own terms decide.",
+                },
+                {
+                  key: "on",
+                  label: "Dated",
+                  kind: "date" as const,
+                  required: true,
+                  hint: "The date on the bill.",
+                  defaultToday: true,
+                },
+              ],
+
+              async preview(tx: Tx, previewCtx: TellCtx, values: TellValues) {
+                const bill = asBill(values);
+                if (!bill) return null;
+                const vendor = vendors.find((v) => v.value === bill.vendorId);
+
+                const [apId, accounts, due, duplicates] = await Promise.all([
+                  findApAccount(tx, previewCtx.tenantId),
+                  listAccounts(tx, previewCtx.tenantId),
+                  bill.dueDate
+                    ? Promise.resolve(bill.dueDate)
+                    : dueDateFromVendorTerms(tx, previewCtx.tenantId, { id: bill.vendorId }, bill.billDate),
+                  findPossibleDuplicates(tx, previewCtx.tenantId, {
+                    vendorId: bill.vendorId,
+                    billNumber: "",
+                    totalCents: bill.amountCents,
+                    billDate: bill.billDate,
+                  }),
+                ]);
+                const nameOf = (id: string) => {
+                  const account = accounts.find((a) => a.id === id);
+                  return account ? `${account.code} ${account.name}` : "an account";
+                };
+
+                return {
+                  lines: [
+                    {
+                      label: bill.accountId
+                        ? `Dr ${nameOf(bill.accountId)}`
+                        : "Dr — not coded yet",
+                      value: formatCents(bill.amountCents),
+                    },
+                    { label: `Cr ${nameOf(apId)}`, value: formatCents(bill.amountCents) },
+                    { label: "due", value: due ?? "not set" },
+                    // Said as a LINE rather than a warning, because it is always
+                    // true and a warning that never varies stops being read.
+                    { label: "a draft until somebody approves it" },
+                  ],
+                  /*
+                   * **THE SAME BILL TWICE IS THE FAILURE THIS PREVENTS.** The
+                   * module already looks for it on the screen; a sentence is if
+                   * anything likelier to repeat one, because saying it again is
+                   * cheaper than checking.
+                   */
+                  warning:
+                    duplicates.length > 0
+                      ? `${vendor?.label ?? "That vendor"} already has a bill for this amount around this date.`
+                      : undefined,
+                };
+              },
+
+              async record(tx: Tx, recordCtx: TellCtx, values: TellValues) {
+                const bill = asBill(values);
+                if (!bill) throw new TellRefusal("say who it is from and how much");
+                try {
+                  const due =
+                    bill.dueDate ??
+                    (await dueDateFromVendorTerms(
+                      tx,
+                      recordCtx.tenantId,
+                      { id: bill.vendorId },
+                      bill.billDate,
+                    ));
+                  await createBillDraft(tx, recordCtx, {
+                    vendorId: bill.vendorId,
+                    billDate: bill.billDate,
+                    dueDate: due,
+                    lines: [
+                      {
+                        description: "",
+                        amountCents: bill.amountCents,
+                        accountId: bill.accountId,
+                      },
+                    ],
+                  });
+                } catch (err) {
+                  throw refusal(err);
+                }
+                const vendor = vendors.find((v) => v.value === bill.vendorId);
+                return {
+                  summary: `${formatMoney(bill.amountCents, symbol)} from ${vendor?.label ?? "a vendor"} — bill drafted`,
+                };
+              },
+            },
+          ]),
     ];
   },
 };

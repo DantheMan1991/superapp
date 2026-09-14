@@ -11,6 +11,7 @@ import { createLivestockLot } from "../src/packs/livestock/ops";
 import { createUnlinkedWork } from "../src/lib/work/entity-work";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import { createBankAccount } from "../src/modules/accounting/banking/accounts";
+import { createVendor } from "../src/modules/accounting/payables/vendors";
 import { TELL_CASES } from "./fixtures/tell-sentences";
 
 /**
@@ -148,6 +149,9 @@ d("the catalogue every tenant's model is given", () => {
         openingBalanceCents: 500_00,
         openingBalanceDate: "2026-01-01",
       });
+      // A vendor too, or `accounting.bill` is never offered and the budget
+      // below measures everything except the action with six fields.
+      await createVendor(tx, ctx(), { name: "The Feed Store" });
     });
 
     // Each source asked directly. `proposeTold` would do this too, behind a

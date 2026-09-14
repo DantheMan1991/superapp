@@ -107,7 +107,7 @@ Gated on A2 and A4. Never `unattended`. Every action previews its posting.
 | # | Slice |
 | --- | --- |
 | **C1** ✅ | **An expense paid — shipped 2026-09-13.** *"paid the feed store two hundred forty cash"*. The simplest money verb, and the one that proved the preview. **Its prerequisite shipped the same day**: the quick add's rule moved out of the server action into `banking/quick-add.ts`, so a sentence can call the module's own verb rather than keeping a second copy of the posting ([accounting.md](accounting.md)) |
-| **C2** | **A bill that arrived** — *"got a bill from the vet for three eighty, due the fifteenth"* |
+| **C2** ✅ | **A bill that arrived — shipped 2026-09-13.** *"got a bill from the vet for three eighty, due the fifteenth"*. Nothing posts: a draft somebody approves |
 | **C3** | **A draft invoice** — *"invoice Acme for twelve hours"*. Creates a draft, says so, and stops |
 
 ### Phase D — the difference between "it works" and "it is used all the time"
@@ -130,6 +130,65 @@ screen.
 | **D10** | **Say both rather than guess.** When the model was torn between two ACTIONS, show both and let one tap settle it | Rule 2 already does this for choices within an action. It does not yet do it for the action itself |
 
 ## Build log
+
+### 2026-09-13 — Slice C2: a bill that arrived (`claude/paid-the-feed-store`)
+
+**NOTHING POSTS, and the module already had the right shape.** `createBillDraft`
+makes a draft; approving it is what writes `Dr expense / Cr Accounts Payable`. A
+sentence cannot approve one and is not meant to — which is the arrangement
+[ADR 0054](../decisions/0054-tell-may-draft-never-send.md) wanted everywhere and
+payables had already built for its own reasons.
+
+It is also the answer to the sentence C1's golden set had to leave homeless.
+*"We owe the feed store two forty"* expected NOTHING under C1, because owing is
+not paying and there was no verb for a liability. There is one now.
+
+```
+  Dr 5010 Feed expense        380.00
+  Cr 2000 Accounts Payable    380.00
+  due                     2026-09-15
+  a draft until somebody approves it
+```
+
+- **WHAT IT IS FOR IS OPTIONAL, and that is the module's own design.** A bill
+  line's `accountId` is nullable on purpose — uncoded until somebody codes it.
+  A sentence that does not say what a bill was for leaves it uncoded for the
+  bill screen rather than guessing, because a guess is an account somebody has
+  to notice was wrong. The preview says `Dr — not coded yet` out loud.
+- **The draft is said as a LINE, not a warning.** It is always true, and a
+  warning that never varies stops being read. The `warning` slot is kept for the
+  thing that does vary.
+- **WHICH IS THE DUPLICATE.** `findPossibleDuplicates` already exists for the
+  screen, and a sentence is if anything likelier to repeat a bill, because
+  saying it again is cheaper than checking. Told twice, the second preview says
+  so above the button.
+- **The due date comes from the vendor's own terms** when the sentence does not
+  say, through `dueDateFromVendorTerms` — better than leaving it blank and not
+  a guess, because the terms are a fact the business already recorded.
+
+**A VENDOR IS NEVER CREATED FROM A SENTENCE.** A misheard name makes a party that
+outlives the mistake and turns up in every picker afterwards, and the bill screen
+is where somebody adds one having looked. So a business with no vendors is not
+offered the action at all — asserted, because that is the only moment there is
+not one.
+
+#### Measured
+
+```
+  ████████████████████████  102/102 runs picked the right verb
+  catalogue: 13 actions, 11744 characters (was 12 and 10533)
+```
+
+Three cases moved or added, and the one that matters is the pair: *"paid the feed
+store two hundred forty cash"* stays `accounting.paid` while *"the feed store
+invoiced us two forty"* becomes `accounting.bill`. Money gone and money owed are
+one word apart in a sentence and opposite facts in the books.
+
+**And the catalogue fixture had the same gap twice.** It enabled no accounting
+for C1, and then had no VENDOR for C2 — so `accounting.bill` was invisible to the
+budget guard, which would have measured everything except the action with the
+most fields. A vendor is now part of the fixture. **The shape of that mistake is
+worth remembering: a source that offers nothing measures as nothing, and passes.**
 
 ### 2026-09-13 — Slice C1: the books can be told (`claude/paid-the-feed-store`)
 

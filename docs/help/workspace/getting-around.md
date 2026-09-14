@@ -209,6 +209,7 @@ appear when they have something to work with.
 | `Stock lost or found` | Stock gone for a reason nobody chose, or turned up unexpectedly | What, how much, and what happened — `Went off`, `Thrown away`, `Damaged`, `Shrinkage`, `Missing`, `Taken for the house` or `Found`. Only `Found` adds stock; the rest take it away |
 | `Counted what is there` | The TOTAL you counted, with Yosher working out the correction | What, and how many there are. **Say the total, not the difference** — the card shows you both before you record it |
 | `Money paid out` | Money that has already LEFT one of your accounts | Which account, how much, and what it was for. The card shows **the posting** — which accounts it will hit — before you record it. Only for money already gone: not a bill you have not paid, and not money coming in |
+| `Bill arrived` | A bill that has come in and is **not paid yet** | Who it is from, and how much. What it is for is optional — an uncoded bill is normal. It is saved as a **draft**: approving it on the Bills screen is what puts it in your books. Only offered once you have a vendor |
 
 ## What records itself, and what waits for you
 

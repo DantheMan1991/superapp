@@ -5,6 +5,7 @@ import { schema, withSystem, withTenant, type Tx } from "../src/db";
 import { accountingTellSource } from "../src/modules/accounting/tell/source";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import { createBankAccount } from "../src/modules/accounting/banking/accounts";
+import { createVendor } from "../src/modules/accounting/payables/vendors";
 import type { TellAction, TellCtx, TellValues } from "../src/lib/tell-sources/types";
 
 /**
@@ -28,6 +29,7 @@ d("telling the books something", () => {
   let tenantId = "";
   let bankAccountId = "";
   let bankLedgerAccountId = "";
+  let vendorId = "";
 
   const ctxFor = (role: "owner" | "staff" | "expert"): TellCtx => ({
     tenantId,
@@ -46,6 +48,12 @@ d("telling the books something", () => {
   const paidFor = async (role: "owner" | "staff"): Promise<TellAction> => {
     const found = (await actionsFor(role)).find((a) => a.slug === "accounting.paid");
     if (!found) throw new Error("accounting.paid was not offered");
+    return found;
+  };
+
+  const billFor = async (role: "owner" | "staff"): Promise<TellAction> => {
+    const found = (await actionsFor(role)).find((a) => a.slug === "accounting.bill");
+    if (!found) throw new Error("accounting.bill was not offered");
     return found;
   };
 
@@ -279,5 +287,123 @@ d("telling the books something", () => {
       }),
     );
     expect(drafted.some((e) => e.memo === "the vet")).toBe(true);
+  });
+  /* ── a bill that arrived (slice C2) ─────────────────────────────────────── */
+
+  /**
+   * **A VENDOR IS NEVER CREATED FROM A SENTENCE**, so a business with none is
+   * not offered the action. A misheard name would make a party that outlives
+   * the mistake and turns up in every picker afterwards.
+   *
+   * Runs FIRST of the bill cases on purpose: the vendor is made by the one
+   * below it, and this is the only moment there is not one.
+   */
+  it("does not offer a bill until the business has a vendor", async () => {
+    const list = await actionsFor("owner");
+    expect(list.map((a) => a.slug)).toEqual(["accounting.paid"]);
+  });
+
+  it("offers it once there is somebody it could be from", async () => {
+    await as("owner", async (tx) => {
+      const vendor = await createVendor(tx, ctxFor("owner"), { name: "The Feed Store" });
+      vendorId = vendor.id;
+    });
+    const list = await actionsFor("owner");
+    expect(list.map((a) => a.slug).sort()).toEqual(["accounting.bill", "accounting.paid"]);
+
+    const bill = await billFor("owner");
+    // Nothing here posts, and nothing records itself.
+    expect(bill.unattended).toBeUndefined();
+    expect(typeof bill.preview).toBe("function");
+    // What it is FOR is optional: a bill line's account is nullable by design,
+    // and a sentence that does not say should leave it uncoded rather than
+    // guess at an account somebody has to notice was wrong.
+    expect(bill.fields.find((f) => f.key === "category")!.required).toBeUndefined();
+  });
+
+  /**
+   * **NOTHING POSTS.** `createBillDraft` makes a draft; approving it is what
+   * writes Dr expense / Cr Accounts Payable. So the preview shows what
+   * approving WILL do, and says out loud that it has not happened.
+   */
+  it("shows what approving it will do, and that it has not happened", async () => {
+    const bill = await billFor("owner");
+    const category = (await categoryFor(""))[0];
+    const shown = await as("owner", (tx) =>
+      bill.preview!(tx, ctxFor("owner"), {
+        vendor: vendorId,
+        amount: 380,
+        category: category.value,
+        due: "2026-09-15",
+        on: TODAY,
+      }),
+    );
+
+    expect(shown!.lines[0].label.startsWith("Dr ")).toBe(true);
+    expect(shown!.lines[0].value).toBe("380.00");
+    expect(shown!.lines[1].label).toContain("Accounts Payable");
+    expect(shown!.lines[1].value).toBe("380.00");
+    expect(shown!.lines[2]).toEqual({ label: "due", value: "2026-09-15" });
+    // Said as a LINE rather than a warning: it is always true, and a warning
+    // that never varies stops being read.
+    expect(shown!.lines[3].label).toBe("a draft until somebody approves it");
+    expect(shown!.warning).toBeUndefined();
+  });
+
+  it("leaves a bill uncoded when the sentence does not say what it was for", async () => {
+    const bill = await billFor("owner");
+    const shown = await as("owner", (tx) =>
+      bill.preview!(tx, ctxFor("owner"), {
+        vendor: vendorId,
+        amount: 380,
+        category: null,
+        due: null,
+        on: TODAY,
+      }),
+    );
+    expect(shown!.lines[0].label).toBe("Dr — not coded yet");
+  });
+
+  it("drafts the bill, uncoded, with the total it was told", async () => {
+    const bill = await billFor("owner");
+    const done = await as("owner", (tx) =>
+      bill.record(tx, ctxFor("owner"), {
+        vendor: vendorId,
+        amount: 380,
+        category: null,
+        due: "2026-09-15",
+        on: TODAY,
+      }),
+    );
+    expect(done.summary).toBe("$380.00 from The Feed Store — bill drafted");
+
+    const bills = await as("owner", (tx) =>
+      tx.query.bills.findMany({ where: eq(schema.bills.tenantId, tenantId) }),
+    );
+    expect(bills).toHaveLength(1);
+    expect(bills[0].status).toBe("draft");
+    expect(bills[0].totalCents).toBe(380_00);
+    expect(bills[0].dueDate).toBe("2026-09-15");
+  });
+
+  /**
+   * **THE SAME BILL TWICE IS THE FAILURE THIS PREVENTS.** The module already
+   * looks for it on the screen; a sentence is if anything likelier to repeat
+   * one, because saying it again is cheaper than checking.
+   */
+  it("warns that this vendor already has a bill like this one", async () => {
+    const bill = await billFor("owner");
+    const shown = await as("owner", (tx) =>
+      bill.preview!(tx, ctxFor("owner"), {
+        vendor: vendorId,
+        amount: 380,
+        category: null,
+        due: null,
+        on: TODAY,
+      }),
+    );
+    expect(shown!.warning).toBe(
+      "The Feed Store already has a bill for this amount around this date.",
+    );
   });
 });

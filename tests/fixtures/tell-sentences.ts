@@ -207,9 +207,9 @@ export const TELL_CASES: readonly TellCase[] = [
   },
   {
     said: "we owe the feed store two forty",
-    expect: [],
-    tolerate: [["work.add"]],
-    why: "OWING IS NOT PAYING, and what must never happen is a PAYMENT — money is still in the account. The model wrote it down as a job to pay them instead, three times out of three, which is a defensible reading of a liability somebody mentioned out loud and touches no books. Nothing is the cleaner answer; a reminder is not a failure.",
+    expect: ["accounting.bill"],
+    tolerate: [[], ["work.add"]],
+    why: "THE CASE THAT GOT A HOME. Under C1 this expected NOTHING — owing is not paying, and there was no verb for a liability — and the model wrote a job to pay them instead. C2 gave it one. What must still never happen is a PAYMENT: the money is in the account until somebody pays it.",
     needs: ["accounting", "work"],
   },
   {
@@ -217,6 +217,18 @@ export const TELL_CASES: readonly TellCase[] = [
     expect: ["accounting.paid"],
     why: "THE PAIR THAT MATTERS NOW. Paying FOR feed is money out; using feed is stock out. Nothing was consumed here, so inventory.used would be wrong twice \u2014 a movement that never happened and a payment that never landed.",
     needs: ["accounting", "inventory"],
+  },
+  {
+    said: "got a bill from the feed store for three eighty due the fifteenth",
+    expect: ["accounting.bill"],
+    why: "The plain shape, with a due date said out loud — which must reach the card rather than being left to the vendor\u2019s terms.",
+    needs: ["accounting"],
+  },
+  {
+    said: "the feed store invoiced us two forty",
+    expect: ["accounting.bill"],
+    why: "\u201cInvoiced us\u201d is money we OWE. The trap is reading an invoice as something we sent, or as money already gone.",
+    needs: ["accounting"],
   },
   /* ── across modules, which is where it will actually break ────────────── */
   {

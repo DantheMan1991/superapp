@@ -42,6 +42,8 @@ d("jobs tables (RLS)", () => {
   let commitmentA = "";
   let budgetA = "";
   let codeA = "";
+  let contractB = "";
+  let changeOrderA = "";
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantA, fn, { role: "staff", userId: MATE });
@@ -166,6 +168,27 @@ d("jobs tables (RLS)", () => {
         ])
         .returning();
       contractA = contracts[0].id;
+      contractB = contracts[1].id;
+
+      const changeOrders = await tx
+        .insert(schema.jobChangeOrders)
+        .values({
+          tenantId: tenantA,
+          contractId: contractA,
+          number: "CO-1",
+          title: "Covered porch",
+          status: "approved",
+          approvedOn: "2026-09-01",
+          valueCents: 12_500_00,
+        })
+        .returning();
+      changeOrderA = changeOrders[0].id;
+      await tx.insert(schema.jobChangeOrderLines).values({
+        tenantId: tenantA,
+        changeOrderId: changeOrderA,
+        costCodeId: codeA,
+        amountCents: 5_000_00,
+      });
     });
   });
 
@@ -548,5 +571,204 @@ d("jobs tables (RLS)", () => {
     expect(b).toHaveLength(1);
     expect(a[0].id).not.toBe(b[0].id);
     expect(projectB).not.toBe(projectA);
+  });
+
+  it("cannot read another tenant's CHANGE ORDERS, or their lines", async () => {
+    // The price of a change beside its cost is the margin on that change.
+    const { heads, lines } = await asOtherTenant(async (tx) => ({
+      heads: await tx
+        .select()
+        .from(schema.jobChangeOrders)
+        .where(eq(schema.jobChangeOrders.id, changeOrderA)),
+      lines: await tx
+        .select()
+        .from(schema.jobChangeOrderLines)
+        .where(eq(schema.jobChangeOrderLines.changeOrderId, changeOrderA)),
+    }));
+    expect(heads).toEqual([]);
+    expect(lines).toEqual([]);
+  });
+
+  it("cannot approve, re-price or delete another tenant's change order", async () => {
+    const touched = await asOtherTenant(async (tx) => ({
+      updated: await tx
+        .update(schema.jobChangeOrders)
+        .set({ valueCents: 1 })
+        .where(eq(schema.jobChangeOrders.id, changeOrderA))
+        .returning(),
+      deleted: await tx
+        .delete(schema.jobChangeOrders)
+        .where(eq(schema.jobChangeOrders.id, changeOrderA))
+        .returning(),
+    }));
+    expect(touched.updated).toEqual([]);
+    expect(touched.deleted).toEqual([]);
+    const still = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.jobChangeOrders)
+        .where(eq(schema.jobChangeOrders.id, changeOrderA)),
+    );
+    expect(still[0].valueCents).toBe(12_500_00);
+  });
+
+  it("a change order cannot hang off another tenant's CONTRACT", async () => {
+    // Even under withSystem: the composite FK makes the row unrepresentable.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobChangeOrders).values({
+          tenantId: tenantA,
+          contractId: contractB,
+          number: "X-1",
+          title: "Across the wall",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a change order line cannot name another tenant's COST CODE", async () => {
+    const otherCode = await withSystem(async (tx) => {
+      const r = await tx
+        .select()
+        .from(schema.jobCostCodes)
+        .where(eq(schema.jobCostCodes.setId, setB));
+      return r[0].id;
+    });
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobChangeOrderLines).values({
+          tenantId: tenantA,
+          changeOrderId: changeOrderA,
+          costCodeId: otherCode,
+          amountCents: 1,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("an APPROVED change order without a date is unrepresentable, and so is a dated one that is not", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobChangeOrders).values({
+          tenantId: tenantA,
+          contractId: contractA,
+          number: "X-2",
+          title: "Approved by nobody on no day",
+          status: "approved",
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobChangeOrders).values({
+          tenantId: tenantA,
+          contractId: contractA,
+          number: "X-3",
+          title: "Dated but not approved",
+          status: "proposed",
+          approvedOn: "2026-09-01",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a change order may be NEGATIVE — the one money here without a floor", async () => {
+    // A deduction is a negative number, not a credit concept. Both halves.
+    const ids = await withSystem(async (tx) => {
+      const co = await tx
+        .insert(schema.jobChangeOrders)
+        .values({
+          tenantId: tenantA,
+          contractId: contractA,
+          number: "X-4",
+          title: "Drop the pool",
+          valueCents: -18_500_00,
+        })
+        .returning();
+      const line = await tx
+        .insert(schema.jobChangeOrderLines)
+        .values({
+          tenantId: tenantA,
+          changeOrderId: co[0].id,
+          costCodeId: codeA,
+          amountCents: -9_000_00,
+        })
+        .returning();
+      return { co: co[0].id, line: line[0].id };
+    });
+    const back = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.jobChangeOrderLines)
+        .where(eq(schema.jobChangeOrderLines.id, ids.line)),
+    );
+    expect(back[0].amountCents).toBe(-9_000_00);
+    await withSystem((tx) =>
+      tx.delete(schema.jobChangeOrders).where(eq(schema.jobChangeOrders.id, ids.co)),
+    );
+  });
+
+  it("numbers a change order per contract: the same number on two contracts is fine, twice on one is not", async () => {
+    const second = await withSystem(async (tx) => {
+      const c = await tx
+        .insert(schema.jobContracts)
+        .values({ tenantId: tenantA, projectId: projectA, kind: "aia", sequence: 9 })
+        .returning();
+      await tx.insert(schema.jobChangeOrders).values({
+        tenantId: tenantA,
+        contractId: c[0].id,
+        number: "CO-1", // same as changeOrderA's, on a different contract
+        title: "Fine",
+      });
+      return c[0].id;
+    });
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobChangeOrders).values({
+          tenantId: tenantA,
+          contractId: contractA,
+          number: "CO-1",
+          title: "Twice on one",
+        }),
+      ),
+    ).rejects.toThrow();
+    await withSystem((tx) =>
+      tx.delete(schema.jobContracts).where(eq(schema.jobContracts.id, second)),
+    );
+  });
+
+  it("deleting a contract takes its change orders AND their lines", async () => {
+    const scratch = await withSystem(async (tx) => {
+      const c = await tx
+        .insert(schema.jobContracts)
+        .values({ tenantId: tenantA, projectId: projectA, kind: "aia", sequence: 8 })
+        .returning();
+      const co = await tx
+        .insert(schema.jobChangeOrders)
+        .values({ tenantId: tenantA, contractId: c[0].id, number: "casc-1", title: "c" })
+        .returning();
+      await tx.insert(schema.jobChangeOrderLines).values({
+        tenantId: tenantA,
+        changeOrderId: co[0].id,
+        costCodeId: codeA,
+        amountCents: 500,
+      });
+      return { contractId: c[0].id, changeOrderId: co[0].id };
+    });
+    await withSystem((tx) =>
+      tx.delete(schema.jobContracts).where(eq(schema.jobContracts.id, scratch.contractId)),
+    );
+    const left = await asOwner(async (tx) => ({
+      heads: await tx
+        .select()
+        .from(schema.jobChangeOrders)
+        .where(eq(schema.jobChangeOrders.id, scratch.changeOrderId)),
+      lines: await tx
+        .select()
+        .from(schema.jobChangeOrderLines)
+        .where(eq(schema.jobChangeOrderLines.changeOrderId, scratch.changeOrderId)),
+    }));
+    expect(left.heads).toEqual([]);
+    expect(left.lines).toEqual([]);
   });
 });

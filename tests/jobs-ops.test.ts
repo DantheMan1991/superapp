@@ -5,6 +5,7 @@ import { withSystem, withTenant, schema, type Tx } from "../src/db";
 import {
   JobsError,
   committedTotals,
+  createChangeOrder,
   createCommitment,
   createContract,
   createCostCode,
@@ -14,8 +15,10 @@ import {
   listContracts,
   projectValues,
   jobCostRows,
+  listChangeOrders,
   listCommitments,
   setBudgetLines,
+  updateChangeOrder,
   updateCommitment,
   updateContract,
   updateCostCode,
@@ -28,6 +31,7 @@ import {
   PROJECT_DIMENSION,
 } from "../src/packs/jobs/vocabulary";
 import { listDimensionMembers } from "../src/modules/accounting/core";
+import { violatedUniqueIndex } from "../src/lib/db-errors";
 
 /**
  * The `jobs` pack's write verbs, against a real database.
@@ -843,6 +847,490 @@ d("jobs ops", () => {
         await tx
           .delete(schema.jobCostCodes)
           .where(eq(schema.jobCostCodes.id, code.id));
+      }),
+    ).rejects.toThrow();
+  });
+
+  // ------------------------------------------------------------ change orders
+
+  it("ONLY AN APPROVED CHANGE ORDER moves what a project is worth", async () => {
+    const { values, p } = await run(async (tx) => {
+      const p = await createProject(tx, ctx, {
+        entityId,
+        number: "OPS-X1",
+        name: "Changed",
+      });
+      const c = await createContract(tx, ctx, {
+        projectId: p.id,
+        kind: "new_home",
+        valueCents: 500_000_00,
+        status: "signed",
+      });
+      await createChangeOrder(tx, ctx, {
+        contractId: c.id,
+        number: "CO-1",
+        title: "Covered porch",
+        status: "approved",
+        approvedOn: "2026-09-01",
+        valueCents: 12_500_00,
+      });
+      // Shown to the owner, not yet answered. Not money.
+      await createChangeOrder(tx, ctx, {
+        contractId: c.id,
+        number: "CO-2",
+        title: "Pool",
+        status: "proposed",
+        valueCents: 60_000_00,
+      });
+      await createChangeOrder(tx, ctx, {
+        contractId: c.id,
+        number: "CO-3",
+        title: "Declined thing",
+        status: "declined",
+        valueCents: 9_000_00,
+      });
+      return { values: await projectValues(tx, tenantId), p };
+    });
+    const v = values.get(p.id)!;
+    expect(v.valueCents).toBe(512_500_00); // revised, not original
+    expect(v.changesCents).toBe(12_500_00);
+    expect(v.signedCount).toBe(1);
+  });
+
+  it("a DEDUCTIVE change order is a negative number, and it lowers the value", async () => {
+    // The only money in this pack that may be negative. Not a "credit" concept.
+    const { values, p, rows } = await run(async (tx) => {
+      const p = await createProject(tx, ctx, {
+        entityId,
+        number: "OPS-X2",
+        name: "Deducted",
+      });
+      const c = await createContract(tx, ctx, {
+        projectId: p.id,
+        kind: "new_home",
+        valueCents: 500_000_00,
+        status: "signed",
+      });
+      await createChangeOrder(tx, ctx, {
+        contractId: c.id,
+        number: "CO-1",
+        title: "Drop the pool",
+        status: "approved",
+        approvedOn: "2026-09-02",
+        valueCents: -18_500_00,
+      });
+      return {
+        values: await projectValues(tx, tenantId),
+        p,
+        rows: await listChangeOrders(tx, tenantId, p.id),
+      };
+    });
+    expect(values.get(p.id)!.valueCents).toBe(481_500_00);
+    expect(values.get(p.id)!.changesCents).toBe(-18_500_00);
+    expect(rows[0].changeOrder.valueCents).toBe(-18_500_00);
+  });
+
+  it("an approved change on a contract that does not count, counts for nothing", async () => {
+    /*
+     * `countedChange` needs BOTH halves: the change approved AND the contract
+     * signed or complete. An approved change on a proposed or declined
+     * agreement is a change to nothing, and summing it would grow a job the
+     * business never got.
+     */
+    const { values, p } = await run(async (tx) => {
+      const p = await createProject(tx, ctx, {
+        entityId,
+        number: "OPS-X3",
+        name: "Not counted",
+      });
+      const proposed = await createContract(tx, ctx, {
+        projectId: p.id,
+        kind: "new_home",
+        valueCents: 500_000_00,
+        status: "proposed",
+      });
+      const declined = await createContract(tx, ctx, {
+        projectId: p.id,
+        kind: "aia",
+        valueCents: 900_000_00,
+        status: "declined",
+      });
+      for (const c of [proposed, declined]) {
+        await createChangeOrder(tx, ctx, {
+          contractId: c.id,
+          number: "CO-1",
+          title: "Approved on nothing",
+          status: "approved",
+          approvedOn: "2026-09-01",
+          valueCents: 10_000_00,
+        });
+      }
+      return { values: await projectValues(tx, tenantId), p };
+    });
+    const v = values.get(p.id)!;
+    expect(v.signedCount).toBe(0);
+    expect(v.valueCents).toBe(0);
+    expect(v.changesCents).toBe(0);
+  });
+
+  it("an approved change order REVISES THE BUDGET per code and keeps the original", async () => {
+    const rows = await run(async (tx) => {
+      const p = await createProject(tx, ctx, {
+        entityId,
+        number: "OPS-X4",
+        name: "Revised budget",
+      });
+      const set = await createCostCodeSet(tx, ctx, { name: "C4 codes" });
+      const conc = await createCostCode(tx, ctx, {
+        setId: set.id,
+        code: "03 30 00",
+        name: "Concrete",
+        sortOrder: 10,
+      });
+      const carp = await createCostCode(tx, ctx, {
+        setId: set.id,
+        code: "06 10 00",
+        name: "Carpentry",
+        sortOrder: 20,
+      });
+      const elec = await createCostCode(tx, ctx, {
+        setId: set.id,
+        code: "26 00 00",
+        name: "Electrical",
+        sortOrder: 30,
+      });
+      await setBudgetLines(tx, ctx, p.id, [
+        { costCodeId: conc.id, originalCents: 40_000_00 },
+        { costCodeId: carp.id, originalCents: 60_000_00 },
+      ]);
+      const c = await createContract(tx, ctx, {
+        projectId: p.id,
+        kind: "new_home",
+        valueCents: 500_000_00,
+        status: "signed",
+      });
+      await createChangeOrder(tx, ctx, {
+        contractId: c.id,
+        number: "CO-1",
+        title: "Scope moved and added",
+        status: "approved",
+        approvedOn: "2026-09-01",
+        valueCents: 4_000_00,
+        lines: [
+          { costCodeId: conc.id, amountCents: 5_000_00 },
+          { costCodeId: carp.id, amountCents: -10_000_00 },
+          // A code nobody budgeted, now budgeted by the change.
+          { costCodeId: elec.id, amountCents: 3_000_00 },
+        ],
+      });
+      // Proposed: the lines must not reach the report.
+      await createChangeOrder(tx, ctx, {
+        contractId: c.id,
+        number: "CO-2",
+        title: "Still a PCO",
+        status: "proposed",
+        lines: [{ costCodeId: conc.id, amountCents: 99_000_00 }],
+      });
+      return jobCostRows(tx, tenantId, p.id);
+    });
+
+    expect(rows.map((r) => r.code)).toEqual(["03 30 00", "06 10 00", "26 00 00"]);
+    const [conc, carp, elec] = rows;
+    expect(conc.originalCents).toBe(40_000_00);
+    expect(conc.changesCents).toBe(5_000_00);
+    expect(conc.budgetCents).toBe(45_000_00);
+    expect(carp.budgetCents).toBe(50_000_00); // a negative line moves it down
+    expect(carp.varianceCents).toBe(50_000_00); // nothing ordered yet
+    // Budgeted by the change alone: no line, a revised figure, not "Not budgeted".
+    expect(elec.originalCents).toBeNull();
+    expect(elec.changesCents).toBe(3_000_00);
+    expect(elec.budgetCents).toBe(3_000_00);
+    expect(elec.hasBudget).toBe(true);
+  });
+
+  it("a SIGNED contract's value is LOCKED, and moves only by change order", async () => {
+    const { locked, sameValue, statusOnly, filledOnce } = await run(async (tx) => {
+      const p = await createProject(tx, ctx, {
+        entityId,
+        number: "OPS-X5",
+        name: "Locked",
+      });
+      const c = await createContract(tx, ctx, {
+        projectId: p.id,
+        kind: "new_home",
+        valueCents: 500_000_00,
+        status: "signed",
+      });
+      const locked = await updateContract(tx, ctx, c.id, { valueCents: 510_000_00 })
+        .then(() => null)
+        .catch((e: unknown) => (e instanceof JobsError ? e.code : "other"));
+      // The form round-trips the value unchanged; that must not be refused.
+      const sameValue = await updateContract(tx, ctx, c.id, {
+        valueCents: 500_000_00,
+        notes: "Round trip",
+      });
+      const statusOnly = await updateContract(tx, ctx, c.id, { status: "complete" });
+
+      // Signed with no value recorded: filling it in the first time is entry,
+      // not revision — and then it is locked.
+      const blank = await createContract(tx, ctx, {
+        projectId: p.id,
+        kind: "aia",
+        valueCents: null,
+        status: "signed",
+      });
+      await updateContract(tx, ctx, blank.id, { valueCents: 90_000_00 });
+      const filledOnce = await updateContract(tx, ctx, blank.id, { valueCents: 91_000_00 })
+        .then(() => null)
+        .catch((e: unknown) => (e instanceof JobsError ? e.code : "other"));
+      return { locked, sameValue, statusOnly, filledOnce };
+    });
+    expect(locked).toBe("VALUE_LOCKED");
+    expect(sameValue.notes).toBe("Round trip");
+    expect(statusOnly.status).toBe("complete");
+    expect(filledOnce).toBe("VALUE_LOCKED");
+  });
+
+  it("a PROPOSED contract's value is still editable", async () => {
+    const updated = await run(async (tx) => {
+      const p = await createProject(tx, ctx, {
+        entityId,
+        number: "OPS-X6",
+        name: "Still open",
+      });
+      const c = await createContract(tx, ctx, {
+        projectId: p.id,
+        kind: "new_home",
+        valueCents: 500_000_00,
+        status: "proposed",
+      });
+      return updateContract(tx, ctx, c.id, { valueCents: 525_000_00 });
+    });
+    expect(updated.valueCents).toBe(525_000_00);
+  });
+
+  it("APPROVED NEEDS A DATE, and un-approving clears it", async () => {
+    const { noDate, approved, backToProposed, reApproveNoDate } = await run(
+      async (tx) => {
+        const p = await createProject(tx, ctx, {
+          entityId,
+          number: "OPS-X7",
+          name: "Dated",
+        });
+        const c = await createContract(tx, ctx, {
+          projectId: p.id,
+          kind: "new_home",
+          valueCents: 100_000_00,
+          status: "signed",
+        });
+        const noDate = await createChangeOrder(tx, ctx, {
+          contractId: c.id,
+          number: "CO-1",
+          title: "No date",
+          status: "approved",
+          valueCents: 1_00,
+        })
+          .then(() => null)
+          .catch((e: unknown) => (e instanceof JobsError ? e.code : "other"));
+        const approved = await createChangeOrder(tx, ctx, {
+          contractId: c.id,
+          number: "CO-1",
+          title: "Dated",
+          status: "approved",
+          approvedOn: "2026-09-03",
+          valueCents: 1_00,
+        });
+        const backToProposed = await updateChangeOrder(tx, ctx, approved.id, {
+          status: "proposed",
+        });
+        const reApproveNoDate = await updateChangeOrder(tx, ctx, approved.id, {
+          status: "approved",
+        })
+          .then(() => null)
+          .catch((e: unknown) => (e instanceof JobsError ? e.code : "other"));
+        return { noDate, approved, backToProposed, reApproveNoDate };
+      },
+    );
+    expect(noDate).toBe("APPROVAL_DATE_REQUIRED");
+    expect(approved.approvedOn).toBe("2026-09-03");
+    expect(backToProposed.approvedOn).toBeNull(); // cleared, not carried
+    // The date was cleared by the un-approval, so approving again needs one.
+    expect(reApproveNoDate).toBe("APPROVAL_DATE_REQUIRED");
+  });
+
+  it("REPLACES a change order's lines on edit, and an EMPTY list is an instruction", async () => {
+    const { afterOne, afterNone, untouched } = await run(async (tx) => {
+      const p = await createProject(tx, ctx, {
+        entityId,
+        number: "OPS-X8",
+        name: "Relined",
+      });
+      const set = await createCostCodeSet(tx, ctx, { name: "C8 codes" });
+      const a = await createCostCode(tx, ctx, { setId: set.id, code: "01", name: "A" });
+      const b = await createCostCode(tx, ctx, { setId: set.id, code: "02", name: "B" });
+      const c = await createContract(tx, ctx, {
+        projectId: p.id,
+        kind: "new_home",
+        valueCents: 100_000_00,
+        status: "signed",
+      });
+      const co = await createChangeOrder(tx, ctx, {
+        contractId: c.id,
+        number: "CO-1",
+        title: "Two lines",
+        lines: [
+          { costCodeId: a.id, amountCents: 1_000_00 },
+          { costCodeId: b.id, amountCents: 2_000_00 },
+        ],
+      });
+      const linesOf = async () =>
+        (await listChangeOrders(tx, tenantId, p.id))[0].lines;
+      await updateChangeOrder(tx, ctx, co.id, {
+        lines: [{ costCodeId: a.id, amountCents: 5_000_00 }],
+      });
+      const afterOne = await linesOf();
+      // A change order with no lines is a legitimate thing to be — a pure
+      // price change — so [] means "remove them", unlike on a commitment.
+      await updateChangeOrder(tx, ctx, co.id, { lines: [] });
+      const afterNone = await linesOf();
+      await updateChangeOrder(tx, ctx, co.id, {
+        lines: [{ costCodeId: b.id, amountCents: 7_00 }],
+      });
+      await updateChangeOrder(tx, ctx, co.id, { title: "Renamed only" });
+      const untouched = await linesOf();
+      return { afterOne, afterNone, untouched };
+    });
+    expect(afterOne).toHaveLength(1);
+    expect(afterOne[0].amountCents).toBe(5_000_00);
+    expect(afterNone).toHaveLength(0);
+    expect(untouched).toHaveLength(1);
+    expect(untouched[0].amountCents).toBe(7_00);
+  });
+
+  it("numbers a change order per CONTRACT, so two agreements may both have a CO-1", async () => {
+    const { dup } = await run(async (tx) => {
+      const p = await createProject(tx, ctx, {
+        entityId,
+        number: "OPS-X9",
+        name: "Numbered",
+      });
+      const one = await createContract(tx, ctx, {
+        projectId: p.id,
+        kind: "construction_drawings",
+        valueCents: 10_000_00,
+        status: "signed",
+      });
+      const two = await createContract(tx, ctx, {
+        projectId: p.id,
+        kind: "new_home",
+        valueCents: 500_000_00,
+        status: "signed",
+      });
+      await createChangeOrder(tx, ctx, { contractId: one.id, number: "CO-1", title: "a" });
+      await createChangeOrder(tx, ctx, { contractId: two.id, number: "CO-1", title: "b" });
+      const dup = await createChangeOrder(tx, ctx, {
+        contractId: two.id,
+        number: "CO-1",
+        title: "again",
+      })
+        .then(() => "allowed")
+        // The constraint is on the CAUSE, not the message — see src/lib/db-errors.ts.
+        .catch((e: unknown) => violatedUniqueIndex(e) ?? "some other failure");
+      return { dup };
+    });
+    expect(dup).toBe("job_change_orders_contract_number_idx");
+  });
+
+  it("lists a project's change orders THROUGH ITS CONTRACTS, with their cost", async () => {
+    const { mine, theirs } = await run(async (tx) => {
+      const set = await createCostCodeSet(tx, ctx, { name: "C10 codes" });
+      const code = await createCostCode(tx, ctx, { setId: set.id, code: "01", name: "A" });
+      const a = await createProject(tx, ctx, { entityId, number: "OPS-X10a", name: "Mine" });
+      const b = await createProject(tx, ctx, { entityId, number: "OPS-X10b", name: "Theirs" });
+      const ca = await createContract(tx, ctx, {
+        projectId: a.id,
+        kind: "new_home",
+        name: "Lot 4",
+        status: "signed",
+      });
+      const cb = await createContract(tx, ctx, { projectId: b.id, kind: "aia", status: "signed" });
+      await createChangeOrder(tx, ctx, {
+        contractId: ca.id,
+        number: "CO-1",
+        title: "Mine",
+        valueCents: 3_000_00,
+        lines: [
+          { costCodeId: code.id, amountCents: 1_000_00 },
+          { costCodeId: code.id, amountCents: 1_250_00, description: "second" },
+        ],
+      });
+      await createChangeOrder(tx, ctx, { contractId: cb.id, number: "CO-1", title: "Theirs" });
+      return {
+        mine: await listChangeOrders(tx, tenantId, a.id),
+        theirs: await listChangeOrders(tx, tenantId, b.id),
+      };
+    });
+    expect(mine).toHaveLength(1);
+    expect(mine[0].contract.kind).toBe("new_home");
+    expect(mine[0].contract.name).toBe("Lot 4");
+    expect(mine[0].costCents).toBe(2_250_00);
+    expect(mine[0].lines).toHaveLength(2);
+    expect(theirs).toHaveLength(1);
+    expect(theirs[0].changeOrder.title).toBe("Theirs");
+  });
+
+  it("STAFF cannot raise a change order", async () => {
+    await expect(
+      withTenant(
+        tenantId,
+        async (tx) => {
+          const p = await createProject(tx, ctx, {
+            entityId,
+            number: "OPS-X11",
+            name: "Staff",
+          });
+          const c = await createContract(tx, ctx, {
+            projectId: p.id,
+            kind: "new_home",
+            status: "signed",
+          });
+          return createChangeOrder(tx, staffCtx, {
+            contractId: c.id,
+            number: "CO-1",
+            title: "Nope",
+          });
+        },
+        { role: "owner", userId: `${STAMP}-owner` },
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("a change order against a contract that is not there is NOT_FOUND", async () => {
+    await expect(
+      run((tx) =>
+        createChangeOrder(tx, ctx, {
+          contractId: "00000000-0000-0000-0000-000000000000",
+          number: "CO-1",
+          title: "Orphan",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("a cost code with a CHANGE against it cannot be deleted", async () => {
+    await expect(
+      run(async (tx) => {
+        const p = await createProject(tx, ctx, { entityId, number: "OPS-X12", name: "P" });
+        const set = await createCostCodeSet(tx, ctx, { name: "C12 codes" });
+        const code = await createCostCode(tx, ctx, { setId: set.id, code: "01", name: "X" });
+        const c = await createContract(tx, ctx, { projectId: p.id, kind: "new_home" });
+        await createChangeOrder(tx, ctx, {
+          contractId: c.id,
+          number: "CO-1",
+          title: "Protects the code",
+          lines: [{ costCodeId: code.id, amountCents: 1_00 }],
+        });
+        await tx.delete(schema.jobCostCodes).where(eq(schema.jobCostCodes.id, code.id));
       }),
     ).rejects.toThrow();
   });

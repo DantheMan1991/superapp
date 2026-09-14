@@ -1,7 +1,10 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  APPROVED_CHANGE_STATUSES,
   BILLING_METHODS,
+  CHANGE_ORDER_STATUSES,
+  CHANGE_ORDER_STATUS_LABELS,
   COMMITMENT_KINDS,
   COMMITMENT_KIND_LABELS,
   COMMITMENT_STATUSES,
@@ -22,6 +25,7 @@ import {
   contractKindsFrom,
   deliveryMethodsFrom,
   isBillingMethod,
+  isChangeOrderStatus,
   isCommitmentKind,
   isCommitmentStatus,
   isContractRole,
@@ -280,5 +284,83 @@ describe("commitments", () => {
     // A line may carry one of each: `loadDimensionMembers` refuses only two
     // members of the SAME type, so a bill can say which job AND which trade.
     expect(PROJECT_DIMENSION).not.toBe(COST_CODE_DIMENSION);
+  });
+});
+
+/**
+ * Change orders. The status list is CLOSED in both places, the money is the
+ * only money in the pack WITHOUT a floor, and an approval is not an approval
+ * without a date — and all three are read from the migration rather than
+ * trusted, because each would fail silently: a form that looks fine and a save
+ * that says "Something went wrong".
+ */
+const CHANGE_ORDERS_SQL = readFileSync("drizzle/0333_job_change_orders.sql", "utf8");
+
+describe("change orders", () => {
+  it("MIRRORS the status CHECK constraint", () => {
+    const m = CHANGE_ORDERS_SQL.match(/job_change_orders_status_valid[^(]*\(([^)]*)\)/);
+    expect(m, "constraint not found").not.toBeNull();
+    const inSql = [...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]);
+    expect(inSql.sort()).toEqual([...CHANGE_ORDER_STATUSES].sort());
+  });
+
+  it("counts ONLY APPROVED as money that has moved", () => {
+    // One constant, read by the SQL roll-ups and by the page, so they cannot
+    // drift into two opinions about whether a proposed change is money.
+    expect([...APPROVED_CHANGE_STATUSES]).toEqual(["approved"]);
+    for (const notMoney of ["proposed", "declined", "void"] as const) {
+      expect(APPROVED_CHANGE_STATUSES).not.toContain(notMoney);
+    }
+  });
+
+  it("has NO floor on either amount, and that is the one place in the pack without one", () => {
+    /*
+     * A deductive change order is a negative number, not a separate "credit"
+     * concept. Every other money column here carries a `>= 0` CHECK; if one
+     * appears on these two, somebody has made a deduction unrepresentable.
+     */
+    expect(CHANGE_ORDERS_SQL).not.toMatch(/nonnegative/);
+    expect(CHANGE_ORDERS_SQL).not.toMatch(/value_cents"? >= 0/);
+    expect(CHANGE_ORDERS_SQL).not.toMatch(/amount_cents"? >= 0/);
+  });
+
+  it("makes the approval date part of BEING approved, in the database", () => {
+    // The date is the evidence; a status anybody can flip without one is a
+    // status nobody has to justify. The action enforces it and this backs it.
+    expect(CHANGE_ORDERS_SQL).toMatch(/job_change_orders_approved_has_date/);
+    expect(CHANGE_ORDERS_SQL).toMatch(/= 'approved'\) = \("job_change_orders"."approved_on" is not null\)/);
+  });
+
+  it("belongs to a CONTRACT and carries no project_id of its own", () => {
+    // A change order changes ONE agreement. The project is reachable through
+    // the contract, and a second copy of it here would be the one that drifts.
+    expect(CHANGE_ORDERS_SQL).toMatch(/"contract_id" uuid NOT NULL/);
+    expect(CHANGE_ORDERS_SQL).not.toMatch(/"project_id"/);
+  });
+
+  it("is numbered per CONTRACT, not per tenant", () => {
+    // CO-1 on the drawings agreement and CO-1 on the build are different
+    // documents on different pay applications.
+    expect(CHANGE_ORDERS_SQL).toMatch(
+      /job_change_orders_contract_number_idx[^;]*\("tenant_id","contract_id","number"\)/,
+    );
+  });
+
+  it("keeps a code with a change against it from being deleted", () => {
+    // RESTRICT, like a commitment line's and a budget line's: retired, never deleted.
+    expect(CHANGE_ORDERS_SQL).toMatch(
+      /job_change_order_lines_code_fk[^;]*ON DELETE no action/,
+    );
+  });
+
+  it("gives every status a readable label", () => {
+    for (const s of CHANGE_ORDER_STATUSES) expect(CHANGE_ORDER_STATUS_LABELS[s]).toBeTruthy();
+  });
+
+  it("recognises its own values and nothing else", () => {
+    expect(isChangeOrderStatus("void")).toBe(true);
+    expect(isChangeOrderStatus("approved")).toBe(true);
+    expect(isChangeOrderStatus("signed")).toBe(false);
+    expect(isChangeOrderStatus("pco")).toBe(false);
   });
 });

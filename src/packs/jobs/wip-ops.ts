@@ -209,7 +209,7 @@ function reasonFor(contractCents: number, figures: WipFigures, method: WipMethod
   return "";
 }
 
-interface LedgerTerms {
+export interface LedgerTerms {
   method: "cost_plus" | "time_and_materials";
   feePpm: number | null;
   feeCents: number | null;
@@ -224,7 +224,7 @@ interface LedgerTerms {
  * agreements cannot be measured this way and falls through to the
  * fixed-value rule — which leaves it out with `no_value` and says so.
  */
-async function ledgerTermsByProject(tx: Tx, tenantId: string): Promise<Map<string, LedgerTerms>> {
+export async function ledgerTermsByProject(tx: Tx, tenantId: string): Promise<Map<string, LedgerTerms>> {
   const rows = await tx
     .select({
       projectId: schema.jobContracts.projectId,

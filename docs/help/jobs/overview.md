@@ -33,9 +33,45 @@ Owners only. Click {button:New {{project|lower}}|primary} on the {{project|plura
 
 ## The list
 
-Six columns: `Number`, `{{project}}`, `{{customer}}`, `Kind`, `Company`, `Status`. The number is a link to the job's own page. A `—` means nothing was filled in, which is not an error.
+Every {{project|lower}} you have, and what each one is worth, has cost and has been billed. The page is built to answer one question without opening anything: which {{project|lower}} needs you today.
+
+### The four figures along the top
+
+- **`Under contract`** — everything signed, revised by approved change orders. Underneath, how many {{project|plural|lower}} have something signed. A proposal nobody has signed yet is not in this figure.
+- **`Earned to date`** — what the work done so far is worth. Measured cost-to-cost: what a {{project|lower}} has cost so far against what it was expected to cost, applied to its contract. `cost-to-cost, to date` under the figure is the reminder that it is measured from your books, not typed in by anyone.
+- **`Under-billed`** — earned but not yet invoiced. Work you have done and not asked to be paid for.
+- **`Over-billed`** — invoiced ahead of what has been earned.
+
+**`Under-billed` and `Over-billed` are never added together**, and the footnote says so. One {{project|lower}} billed behind and another billed ahead are two separate facts about two separate {{project|plural|lower}}; netting them into one number would hide both. Cancelled {{project|plural|lower}} are in none of these four figures.
+
+The line under the page title says how many {{project|plural|lower}} are underway, and adds a sentence in red when any of them are billed ahead of what they have earned.
+
+### Narrowing the list
+
+`All`, `Active`, `Planned`, `On hold`, `Complete` — and `Cancelled` only when you have some. Each carries its own count, and clicking one puts it in the address, so a filtered list survives a refresh and can be sent to somebody. The four figures at the top do **not** change when you filter: they describe the whole business, not the rows on screen.
+
+The search box on the right matches the number, the name, the address and the {{customer|lower}}. It keeps whichever filter you are on.
+
+### The columns
+
+- **`{{project}}`** — the number (a link to the {{project|lower}}'s own page), the name, and the address underneath.
+- **`{{customer}} & kind`** — who it is for, then the kind of work and how it is billed, then the company and division it belongs to.
+- **`Complete · cost to date`** — how far along, then what it has cost and what it was expected to cost, then a bar. What you see here is never a rounded-down zero:
+  - a percentage and a bar when there is a budget to measure against;
+  - `Not started` when nothing has been spent yet;
+  - `No estimate` when money has been spent but there is no budget to measure it against — the fix is to give the {{project|lower}} a budget;
+  - `By hours` on a time-and-materials {{project|lower}}, because what it has earned depends on each approved hour at its rate. That figure is on the **Work in progress** page rather than guessed at here.
+- **`Contract`** — the revised value, with `incl. $… in changes` beneath when approved change orders have moved it. A {{project|lower}} with nothing signed reads `Nothing signed`, and shows what is out for signature underneath when there is a proposal waiting.
+- **`Billed vs earned`** — what has been invoiced, and underneath whether that is behind or ahead of what has been earned: `under-billed` in green, `over-billed` in red, `level with earned` when they match. A complete {{project|lower}} shows its gross profit instead, because the variance no longer matters once the job is done.
+- **`Status`** — where the {{project|lower}} stands. A {{project|lower}} billed ahead also gets `Billed ahead` under the badge and a faint red wash across the row.
+
+Clicking anywhere on a row opens that {{project|lower}}. The number stays a real link, so you can still middle-click or right-click it to open in a new tab.
+
+### When the list is empty
 
 Before you have added anything you see `No {{project|plural|lower}} yet`. Staff see the same page with no buttons and a line saying an owner sets the first one up.
+
+If a filter or a search hides everything, the panel says so and offers `Show all` rather than leaving you looking at an empty table wondering whether the data is gone.
 
 ## A {{project|lower}}'s page
 
@@ -192,7 +228,7 @@ The `Value` column shows what each agreement is worth **now** — its original v
 
 ### On the {{project|plural}} list
 
-The `Value` column is the same total: signed and complete only, revised by approved change orders, with `incl. $… in changes` under it when there are any. A job with nothing signed yet shows `—` rather than `0.00`, because zero would read as "worth nothing" when the truth is "not agreed yet".
+The `Contract` column is the same total: signed and complete only, revised by approved change orders, with `incl. $… in changes` under it when there are any. A {{project|lower}} with nothing signed yet reads `Nothing signed` rather than `0.00`, because zero would read as "worth nothing" when the truth is "not agreed yet" — and underneath it shows what is out for signature, so an unsigned {{project|lower}} still tells you what is waiting on a client.
 
 ## Change orders
 

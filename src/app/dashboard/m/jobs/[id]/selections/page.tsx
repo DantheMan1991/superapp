@@ -1,6 +1,5 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, Pencil } from "lucide-react";
+import { Pencil } from "lucide-react";
 import { eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
@@ -181,12 +180,6 @@ export default async function SelectionsPage({ params }: { params: Promise<{ id:
 
   return (
     <div className="space-y-4">
-      <Link
-        href={`/dashboard/m/jobs/${project.id}`}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeft className="size-4" /> {project.number} · {project.name}
-      </Link>
       <PageHeader
         title="Selections"
         description={`${projectWord} ${project.number} · ${summary.count} ${summary.count === 1 ? "selection" : "selections"}, ${summary.pending} pending${summary.overdue > 0 ? `, ${summary.overdue} overdue` : ""}`}

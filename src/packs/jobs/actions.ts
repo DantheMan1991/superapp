@@ -26,6 +26,12 @@ import {
 } from "./field-ops";
 import { postWip, saveWipEstimate, unpostWip } from "./wip-ops";
 import {
+  askForWaiver,
+  createLienWaiver,
+  getLienWaiver,
+  updateLienWaiver,
+} from "./compliance-ops";
+import {
   approveSubApplication,
   createSubApplication,
   deleteSubApplication,
@@ -67,6 +73,9 @@ import {
   CHANGE_ORDER_STATUSES,
   COMMITMENT_KINDS,
   COMMITMENT_STATUSES,
+  LIEN_WAIVER_ENTITY,
+  LIEN_WAIVER_KINDS,
+  LIEN_WAIVER_STATUSES,
   CONTRACT_ROLES,
   CONTRACT_STATUSES,
   DAILY_LOG_ENTITY,
@@ -213,7 +222,9 @@ function toResult(err: unknown): { error: string } {
             "The subcontractor has billed against that change, so it stays approved and its lines stay as they are. Raise another change.",
         };
       case "WRONG_PROJECT":
-        return { error: "That client change order is on another job." };
+        return { error: `That is on another job: ${err.message}.` };
+      case "RECEIVED_DATE_REQUIRED":
+        return { error: "Give a received waiver the date it arrived." };
     }
   }
   /**
@@ -1989,6 +2000,216 @@ export async function deleteSubApplicationAction(input: unknown) {
     await withTenant(ctx.tenantId, (tx) => deleteSubApplication(tx, ctx, id), { role: ctx.role });
     revalidatePath(`${BASE}/${projectId}/commitments/${commitmentId}`);
     revalidatePath(`${BASE}/${projectId}`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// ------------------------------------------------------------ lien waivers
+
+const lienWaiverSchema = z.object({
+  projectId: z.string().uuid(),
+  partyId: z.string().uuid(),
+  commitmentId: optionalUuid,
+  subApplicationId: optionalUuid,
+  kind: z.enum(LIEN_WAIVER_KINDS),
+  throughDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  /** The payment the form names; blank means it states none. */
+  amountCents: moneyToCents,
+  status: z.enum(LIEN_WAIVER_STATUSES).optional(),
+  requestedOn: optionalDate,
+  receivedOn: optionalDate,
+  signedBy: z.string().trim().max(200).optional(),
+  reference: z.string().trim().max(80).optional(),
+  notes: z.string().trim().max(2000).optional(),
+});
+
+/**
+ * Recording a waiver is a `member` chore — the decision it protects is the
+ * payment, which is Accounting's and an owner's — and its photos follow the
+ * daily log's gate.
+ */
+async function waiverGate(): Promise<JobsCtx> {
+  const ctx = await gate();
+  if (!allowsWrite(ctx.role, "member")) {
+    throw new JobsError("FORBIDDEN", "cannot record lien waivers");
+  }
+  return ctx;
+}
+
+export async function createLienWaiverAction(input: unknown) {
+  const parsed = lienWaiverSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { amountCents, ...fields } = parsed.data;
+  try {
+    const ctx = await waiverGate();
+    const waiver = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const created = await createLienWaiver(tx, ctx, { ...fields, amountCents: amountCents ?? 0 });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "lien_waiver.created",
+          targetType: "lien_waiver",
+          targetId: created.id,
+          meta: { projectId: created.projectId, commitmentId: created.commitmentId, kind: created.kind, status: created.status },
+        });
+        return created;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${fields.projectId}`);
+    if (fields.commitmentId) revalidatePath(`${BASE}/${fields.projectId}/commitments/${fields.commitmentId}`);
+    return { ok: true as const, lienWaiverId: waiver.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function updateLienWaiverAction(input: unknown) {
+  const schema = lienWaiverSchema
+    .omit({ projectId: true })
+    .partial()
+    .extend({
+      id: z.string().uuid(),
+      /** For revalidation only. */
+      projectId: z.string().uuid(),
+      version: z.number().int().positive().optional(),
+    });
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { id, projectId, amountCents, ...patch } = parsed.data;
+  try {
+    const ctx = await waiverGate();
+    const updated = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const row = await updateLienWaiver(tx, ctx, id, {
+          ...patch,
+          ...(amountCents === undefined ? {} : { amountCents: amountCents ?? 0 }),
+        });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "lien_waiver.updated",
+          targetType: "lien_waiver",
+          targetId: row.id,
+          meta: { projectId: row.projectId, commitmentId: row.commitmentId, kind: row.kind, status: row.status },
+        });
+        return row;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}`);
+    if (updated.commitmentId) revalidatePath(`${BASE}/${projectId}/commitments/${updated.commitmentId}`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const askForWaiverSchema = z.object({
+  projectId: z.string().uuid(),
+  commitmentId: z.string().uuid(),
+  missing: z.enum(["unconditional", "conditional"]),
+  throughDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  dueOn: optionalDate,
+});
+
+/** The chase, as a Work item linked to the order. */
+export async function askForWaiverAction(input: unknown) {
+  const parsed = askForWaiverSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  const { projectId, ...fields } = parsed.data;
+  try {
+    const ctx = await waiverGate();
+    const itemId = await withTenant(ctx.tenantId, (tx) => askForWaiver(tx, ctx, fields), { role: ctx.role });
+    revalidatePath(`${BASE}/${projectId}/commitments/${fields.commitmentId}`);
+    return { ok: true as const, itemId };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** The signed copy: photos on the waiver, through Documents, the daily log's way. */
+const waiverTarget = (entityId: string) => ({
+  extensionSlug: PACK,
+  entityType: LIEN_WAIVER_ENTITY,
+  entityId,
+});
+
+async function assertWaiver(ctx: JobsCtx, waiverId: string): Promise<{ projectId: string; commitmentId: string | null }> {
+  const waiver = await withTenant(ctx.tenantId, (tx) => getLienWaiver(tx, ctx.tenantId, waiverId), {
+    role: ctx.role,
+  });
+  if (!waiver) throw new JobsError("NOT_FOUND", `lien waiver ${waiverId} not found`);
+  return { projectId: waiver.projectId, commitmentId: waiver.commitmentId };
+}
+
+function revalidateWaiver(where: { projectId: string; commitmentId: string | null }): void {
+  revalidatePath(`${BASE}/${where.projectId}`);
+  if (where.commitmentId) revalidatePath(`${BASE}/${where.projectId}/commitments/${where.commitmentId}`);
+}
+
+export async function attachWaiverPhotoAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoInput.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    const where = await assertWaiver(ctx, parsed.data.entityId);
+    const result = await registerAttachedPhoto(
+      { tenantId: ctx.tenantId, userId: ctx.userId, role: ctx.role },
+      { pathname: parsed.data.pathname, target: waiverTarget(parsed.data.entityId), title: "Lien waiver" },
+    );
+    revalidateWaiver(where);
+    return { ok: true as const, documentId: result.documentId };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function setWaiverPhotoPrimaryAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoRef.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    const where = await assertWaiver(ctx, parsed.data.entityId);
+    await withTenant(
+      ctx.tenantId,
+      (tx) =>
+        setPrimaryAttachment(
+          tx,
+          { tenantId: ctx.tenantId, userId: ctx.userId, role: ctx.role },
+          { documentId: parsed.data.documentId, target: waiverTarget(parsed.data.entityId) },
+        ),
+      { role: ctx.role },
+    );
+    revalidateWaiver(where);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function detachWaiverPhotoAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoRef.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    const where = await assertWaiver(ctx, parsed.data.entityId);
+    await withTenant(
+      ctx.tenantId,
+      (tx) =>
+        detachDocumentFromRecord(
+          tx,
+          { tenantId: ctx.tenantId, userId: ctx.userId, role: ctx.role },
+          { documentId: parsed.data.documentId, target: waiverTarget(parsed.data.entityId) },
+        ),
+      { role: ctx.role },
+    );
+    revalidateWaiver(where);
     return { ok: true as const };
   } catch (err) {
     return toResult(err);

@@ -13,6 +13,109 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-14 — Slice 11a: lien waivers (`claude/lien-waivers`, ADR 0066)
+
+`job_lien_waivers`, a **Lien waivers** panel on every order's page, a line
+under the job's Ordered tiles, and the first of construction plan slice 11
+(`compliance`): the document a subcontractor or supplier signs to give up
+its lien right for the work paid — the next thing a GC's bookkeeper asks for
+once retainage is tracked, and what the owner's bank wants to see before it
+funds the next draw.
+
+**A RECORD, NEVER A FORM.** The words on a waiver are the state's — a dozen
+states mandate the text — or the lawyer's, and a Canadian business signs a
+statutory declaration instead; a pack that carried one state's form would be
+the narrowing the standing rule forbids. What every one has in common is
+what the row keeps: WHO gives it (any party — usually the order's, sometimes
+their supplier), on WHICH job and under which order, of which KIND
+(conditional or unconditional × progress or final, the vocabulary every
+American form uses, a CHECK because the gap rule reads it), THROUGH which
+date, for HOW MUCH, and whether the signed copy has been RECEIVED — with the
+date it arrived, required, as a change order's approval date is. The signed
+copy is a Documents attachment on the row (`job_lien_waiver`), the daily
+log's gallery with the pack's own actions.
+
+**THE GAP IS DERIVED, NEVER STORED.** `waiverGaps` walks the subcontractor's
+billed applications, asks Accounting's own `loadBill` whether money went out
+(paid or partial), and checks the waivers received on the order: one covers
+an application when it names it, when it is a final one, or when its
+through date is on or after the application's period end. Paid and nothing
+unconditional → the gap the bank cares about, in red; billed, unpaid and
+nothing at all → the softer one. A waiver that arrives closes the gap by
+existing, and a bill paid in Accounting opens one without Accounting
+learning anything about the pack — the platform's rule for obligations
+(derived, not stored events), applied to paperwork. `waiverCoverage` is the
+same read summarised per order: unconditional through, conditional through,
+a final on file.
+
+**THE CHASE IS WORK, LINKED TO THE ORDER.** *Ask for it* beside a gap raises
+a Work item — *Lien waiver from Pleasant Valley Feed Mill: unconditional
+through 2026-10-31 (SC-24109-1)* — through `createWorkForEntity` on a new
+`job_commitment` entity, not on the job's punch list (which is the site's),
+and the panel says *Being chased in Work* until it is ticked off there.
+Work raised where it lives, as the plan's row 11 said; no task engine of the
+pack's own.
+
+**A MEMBER'S CHORE.** Recording that a waiver was asked for or arrived is
+`member`-level, as the daily log is: the decision it protects — paying — is
+Accounting's and an owner's. The photo follows Documents' own rule
+(`roleMayWrite`), the daily log's gate.
+
+**WHAT THE PAGES SAY.** The order's page: the coverage sentence, a sentence
+per gap with the button, the table (kind with their reference, from with
+who signed, through, amount or a dash, covers, status with the date, signed
+copy count) and the dialog (on, from, kind, through, amount, covers — billed
+applications only —, status, requested, received, signed by, reference,
+notes; the gallery once the record exists); every billed application in the
+applications table says *Unconditional waiver on file*, *Conditional waiver
+on file*, *No waiver yet* or, in red, *Paid · no unconditional waiver*. The
+job's page: *Lien waivers: 1 paid application with no unconditional waiver
+on file — SC-24109-1 (Pleasant Valley Feed Mill)* under the Ordered tiles,
+and *paid, no waiver* / *waiver through <date>* / *final waiver on file*
+under each order's Billed figure.
+
+**DRIVEN ON THE DEV BRANCH, on 24-109's SC-24109-1** (two billed
+applications after 4b, neither paid). The order's page opened on the new
+panel reading **No unconditional waiver on file** with a sentence per
+application — *Application 1 (2026-09-30) is billed and no waiver covers it
+yet* — and *No waiver yet* under each application's status. In Accounting,
+*Record payment* on application 1's bill ($13,500.00 from Farm Checking);
+back on the order: the application read **Bill · Paid · Paid · no
+unconditional waiver** in red and the panel **Application 1 (2026-09-30,
+$13,500.00) has been paid and no unconditional waiver covers it**, also in
+red. *Ask for it* → *Added to Work* and the panel read **Being chased in
+Work: Lien waiver from Pleasant Valley Feed Mill: unconditional through
+2026-09-30 (SC-24109-1)**. *Record waiver* → from *Pleasant Valley Feed
+Mill* (filled in), *Unconditional, progress*, through `2026-09-30`,
+`13500`, *Covers* `Application 1 — 2026-09-30 · $13,500.00`, *Received*
+with today filled in, signed by *J. Miller*, their ref. `LW-1` → *Waiver
+recorded*: the panel **Unconditional waiver on file through 2026-09-30**,
+the gap gone, application 1 **Unconditional waiver on file**, the table
+**Unconditional, progress · Their ref. LW-1 · Pleasant Valley Feed Mill ·
+Signed by J. Miller · 2026-09-30 · $13,500.00 · Application 1 · Received
+2026-09-14 · —**. The job's page: **Lien waivers: every paid application has
+an unconditional waiver on file. 1 billed and unpaid with no waiver yet.**
+under the Ordered tiles, and **waiver through 2026-09-30** under the order's
+Billed figure. Not driven: the photo of the signed page (the pane cannot
+supply a file — the gallery is the daily log's, unchanged), a void, and a
+final waiver; the last two are in the ops test.
+
+Migrations `0350_lien_waivers.sql` / `0351_lien_waivers_rls.sql` applied to
+dev and prod before the merge; `db:verify-rls` **214 tables** on both,
+`db:verify-modules` 19/19. As generated: one new table referencing existing
+ones only. Tests: five more pure (the two CHECK lists mirrored with their
+labels, the kinds that stand alone and the kinds that cover everything, the
+receipt-date CHECK and the floor, the four keys, the two entity slugs), one
+more ops (a draft cannot be named; the softer gap; a received waiver needs
+its date; staff record one; requested is not on file; received closes the
+gap; the bill paid opens the unconditional gap; the chase on the order and
+not the punch list; a later unconditional covers without naming; the list
+with counts; void stops counting; a final ends the asking; another job's
+order, another order's application and an unknown kind refused), one more
+isolation (read, write, the four cross-tenant parents, the date rule both
+ways and the floor, the party and the application held, cascade from the
+job).
+
 ### 2026-09-14 — Slice 4b: subcontract change orders (`claude/subcontract-change-orders`, ADR 0065)
 
 `job_commitment_change_orders`, a `change_order_id` tag on
@@ -1669,6 +1772,7 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_commitment_change_orders` | A change to ONE commitment — a subcontract change order or a purchase-order revision: number, title, the client-side statuses, the approval date, and the client's change order it passes down, if any (4b, ADR 0065). Its MONEY is the commitment lines tagged with it. | Cascade from the commitment; **RESTRICT to `job_change_orders`** — the client's change a sub change passes down cannot go from under it, and must be on the same job (the verb checks). Number unique per `(tenant, commitment)`. CHECK `(status = 'approved') = (approved_on is not null)`, both ways, as the client-side row. |
 | `job_sub_applications` | A subcontractor's application against a SUBCONTRACT: the G702 read from the other side of the table. | Numbered per commitment, void ones included. `status` draft/billed/void. `retainage_ppm` 0–1,000,000. Five totals FROZEN at approval. `bill_id` RESTRICT to Accounting's `bills`; CHECK `(status = 'draft') = (bill_id is null)`, both ways. Cascade from the commitment. See ADR 0061. |
 | `job_sub_application_lines` | One line per subcontract line: previous, this period, stored. | Cascade from the application; **RESTRICT to the subcontract line** — a billed line cannot be replaced out from under its certificate. `this_period` may be negative; the total to date may not — on a DEDUCTIVE line (a change order's negative line) the floors flip: completed to less than nothing and never more, `scheduled_cents` kept equal to the line's amount by the sync while a draft (4b). |
+| `job_lien_waivers` | A lien waiver as a RECORD (11a, ADR 0066): the claimant (any party), the job, the order and the billed application it covers, its kind (conditional/unconditional × progress/final), the through date, the amount, and whether it was requested or received. The signed copy is a Documents attachment (`job_lien_waiver`). | Cascade from the project and the order; **no action to the party and to the application** — who signed is held, and a named application stays. CHECK: received has its date, requested has none, void keeps what it had; amount ≥ 0. Nothing here says "outstanding": the gap is derived from the applications' bills at read time. |
 | `job_commitment_lines` | The money, one cost code at a time — the lines the order was placed with (`change_order_id` null) and each change order's, tagged with it (4b). | Cascade from the commitment and from the change; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative on an original line — a credit is a change order — and a change's line may be negative, the one exception in the CHECK. A line counts when it is original or its change is approved: `countedCommitmentLine`, one predicate for every roll-up. |
 | `job_projects` | The spine. | FOUR composite FKs, each certified in `tests/isolation/jobs.test.ts`: company, division, client, cost code list. `delivery_method` is an open taxonomy (P1) with a **format check and no value check**, and is nullable. `metadata` is the P2 extension bag. |
 
@@ -1686,9 +1790,9 @@ hand-reordered like 0329) and `0335_job_billing.sql` / `0336_job_billing_rls.sql
 `wip_adjustment` to `journal_entry_source`, which nothing in the file uses)
 and `0341_cost_plus.sql` / `0342_cost_plus_rls.sql` (slice 5b; as generated,
 since the new table references existing ones only) and `0343_sub_billing.sql`
-/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) follow the same rule —
+/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) and `0350_lien_waivers.sql` / `0351_lien_waivers_rls.sql` (slice 11a; as generated, one new table referencing existing ones) follow the same rule —
 and from slice 3 the pair is `db:verify-rls` **and `db:verify-modules`**, after
-the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **213 tables**, all enabled, forced and with
+the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **214 tables**, all enabled, forced and with
 policies, on both.
 
 **0327 needed no hand-reordering, which confirms the diagnosis in 0325.** Both
@@ -1860,6 +1964,12 @@ ordering only bites when two new tables reference each other in one file.
   fixed-value methods get a schedule; cost plus a fee gets the books' cost;
   time and materials gets Time's hours and the books' cost without the
   wages; unit price gets a note. Never the kind.
+- **A lien waiver is a record with a kind and a through date, and the gap
+  is derived from the payment** — [ADR 0066](../decisions/0066-a-lien-waiver-is-a-record-with-a-kind-and-a-through-date-and-the-gap-is-derived.md).
+  Never a form: who, which job and order, which kind, through when, how
+  much, received or not, the signed copy attached; "paid with no
+  unconditional waiver on file" computed from the applications' bills at
+  read time; the chase a Work item on the order; a member's chore.
 - **A subcontract change order adds lines to the order it changes, and an
   issued order's lines are locked** — [ADR 0065](../decisions/0065-a-subcontract-change-order-adds-lines-to-the-order-and-an-issued-orders-lines-are-locked.md).
   Its own row against one commitment, the client-side statuses and date
@@ -1939,9 +2049,18 @@ ordering only bites when two new tables reference each other in one file.
   is not a change to the scope and is not built; it is a negative line on
   the application with its own account, the day a GC asks. And **a change
   order does not print**, as the subcontractor's application does not.
-- **Lien waivers** are the document a subcontractor signs to get the retainage
+- ~~**Lien waivers** are the document a subcontractor signs to get the retainage
   released, and the next thing a GC's bookkeeper asks for once retainage is
-  tracked. Work raised where it lives (extension-model §4b) when it comes.
+  tracked.~~ — **closed 2026-09-14 (slice 11a, ADR 0066)** as a record with
+  the gap derived and the chase raised in Work on the order. Still open from
+  it: **a PDF waiver cannot be attached** — the signed copy is a photo through
+  the shared gallery, and a file already in Documents has a verb
+  (`attachDocumentToRecord`) and no picker on a record; **the waiver is not
+  generated** — the tenant's own state form through Documents' templates,
+  filled with the row's facts, is the door; **a purchase order's waivers have
+  no gap rule**, because its bills are not tied to it; and **certificates of
+  insurance and W-9s**, the rest of plan slice 11, are a party-level record
+  with an expiry and wait for their own slice.
   ~~`billing_method` is still read by no code~~ — the contract page and the
   application verbs read it since 5b.
 - **Time and materials has no rate card of its own.** Each person's rate is

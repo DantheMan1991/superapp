@@ -1577,4 +1577,106 @@ d("jobs tables (RLS)", () => {
     );
     expect(left).toEqual([]);
   });
+
+  it("cannot read or change another tenant's LIEN WAIVERS; a waiver hangs off this tenant's job, party, order and application; received has its date; the party is held; the job takes its waivers with it", async () => {
+    const appId = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobSubApplications)
+        .values({ tenantId: tenantA, commitmentId: commitmentA, number: 8, periodTo: "2026-12-31" })
+        .returning();
+      return rows[0].id;
+    });
+    const waiverId = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobLienWaivers)
+        .values({
+          tenantId: tenantA,
+          projectId: projectA,
+          partyId: clientA,
+          commitmentId: commitmentA,
+          subApplicationId: appId,
+          kind: "unconditional_progress",
+          throughDate: "2026-12-31",
+          amountCents: 4_000_00,
+          status: "received",
+          receivedOn: "2027-01-05",
+        })
+        .returning();
+      return rows[0].id;
+    });
+    const seen = await asOtherTenant(async (tx) => ({
+      rows: await tx.select().from(schema.jobLienWaivers).where(eq(schema.jobLienWaivers.id, waiverId)),
+      changed: await tx
+        .update(schema.jobLienWaivers)
+        .set({ status: "void" })
+        .where(eq(schema.jobLienWaivers.id, waiverId))
+        .returning(),
+    }));
+    expect(seen.rows).toEqual([]);
+    expect(seen.changed).toEqual([]);
+    const mine = await asStaff((tx) => tx.select().from(schema.jobLienWaivers).where(eq(schema.jobLienWaivers.id, waiverId)));
+    expect(mine).toHaveLength(1);
+
+    // Tenant B's job, party, order or application under tenant A's row: unrepresentable.
+    const otherParty = await withSystem((tx) => seedParty(tx, tenantB, "Builder B's supplier"));
+    const base = { tenantId: tenantA, kind: "conditional_progress", throughDate: "2026-12-31" } as const;
+    await expect(
+      withSystem((tx) => tx.insert(schema.jobLienWaivers).values({ ...base, projectId: projectB, partyId: clientA })),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) => tx.insert(schema.jobLienWaivers).values({ ...base, projectId: projectA, partyId: otherParty })),
+    ).rejects.toThrow();
+    const otherCommitment = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobCommitments)
+        .values({ tenantId: tenantB, projectId: projectB, partyId: otherParty, number: "SC-B-LW" })
+        .returning();
+      return rows[0].id;
+    });
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobLienWaivers).values({ ...base, projectId: projectA, partyId: clientA, commitmentId: otherCommitment }),
+      ),
+    ).rejects.toThrow();
+    // Received has its date and requested has none; the amount has a floor.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobLienWaivers).values({ ...base, projectId: projectA, partyId: clientA, status: "received" }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobLienWaivers).values({ ...base, projectId: projectA, partyId: clientA, status: "requested", receivedOn: "2026-12-31" }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobLienWaivers).values({ ...base, projectId: projectA, partyId: clientA, amountCents: -1 }),
+      ),
+    ).rejects.toThrow();
+    // The party that signed is held; the application named is held; the job takes its waivers with it.
+    await expect(withSystem((tx) => tx.delete(schema.parties).where(eq(schema.parties.id, clientA)))).rejects.toThrow();
+    await expect(
+      withSystem((tx) => tx.delete(schema.jobSubApplications).where(eq(schema.jobSubApplications.id, appId))),
+    ).rejects.toThrow();
+    const scratch = await withSystem(async (tx) => {
+      const p = await tx
+        .insert(schema.jobProjects)
+        .values({ tenantId: tenantA, entityId: entityA, number: "casc-lw", name: "lw" })
+        .returning();
+      const w = await tx
+        .insert(schema.jobLienWaivers)
+        .values({ ...base, projectId: p[0].id, partyId: clientA })
+        .returning();
+      return { projectId: p[0].id, waiverId: w[0].id };
+    });
+    await withSystem((tx) => tx.delete(schema.jobProjects).where(eq(schema.jobProjects.id, scratch.projectId)));
+    const left = await withSystem((tx) =>
+      tx.select().from(schema.jobLienWaivers).where(eq(schema.jobLienWaivers.id, scratch.waiverId)),
+    );
+    expect(left).toEqual([]);
+    // Tidy: the waiver, then the application it named.
+    await withSystem((tx) => tx.delete(schema.jobLienWaivers).where(eq(schema.jobLienWaivers.id, waiverId)));
+    await withSystem((tx) => tx.delete(schema.jobSubApplications).where(eq(schema.jobSubApplications.id, appId)));
+  });
 });

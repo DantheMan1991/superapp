@@ -354,6 +354,61 @@ export const RETAINAGE_RECEIVABLE_CODE = "1230";
  */
 export const DAILY_LOG_ENTITY = "job_daily_log";
 export const PROJECT_ENTITY = "project";
+/** A lien waiver's signed copy hangs on the waiver (Documents' attachments, ADR 0066). */
+export const LIEN_WAIVER_ENTITY = "job_lien_waiver";
+/** Work raised about an order — a waiver to chase — is linked to the order, not to the job's punch list. */
+export const COMMITMENT_ENTITY = "job_commitment";
+
+// ---------------------------------------------------------------- lien waivers
+
+/**
+ * Mirrors `job_lien_waivers_kind_valid`. Kept in sync by tests/jobs.test.ts.
+ *
+ * Conditional or unconditional, progress or final — the vocabulary every
+ * American form uses, whatever the state's words on the page. A conditional
+ * waiver is given with the application and takes effect when the payment
+ * clears; an unconditional one is given once the money arrived, and is the
+ * one the owner's bank wants to see before the next draw.
+ */
+export const LIEN_WAIVER_KINDS = [
+  "conditional_progress",
+  "unconditional_progress",
+  "conditional_final",
+  "unconditional_final",
+] as const;
+export type LienWaiverKind = (typeof LIEN_WAIVER_KINDS)[number];
+
+export const LIEN_WAIVER_KIND_LABELS: Record<LienWaiverKind, string> = {
+  conditional_progress: "Conditional, progress",
+  unconditional_progress: "Unconditional, progress",
+  conditional_final: "Conditional, final",
+  unconditional_final: "Unconditional, final",
+};
+
+/** Mirrors `job_lien_waivers_status_valid`. */
+export const LIEN_WAIVER_STATUSES = ["requested", "received", "void"] as const;
+export type LienWaiverStatus = (typeof LIEN_WAIVER_STATUSES)[number];
+
+export const LIEN_WAIVER_STATUS_LABELS: Record<LienWaiverStatus, string> = {
+  requested: "Requested",
+  received: "Received",
+  void: "Void",
+};
+
+export function isLienWaiverKind(v: string): v is LienWaiverKind {
+  return (LIEN_WAIVER_KINDS as readonly string[]).includes(v);
+}
+export function isLienWaiverStatus(v: string): v is LienWaiverStatus {
+  return (LIEN_WAIVER_STATUSES as readonly string[]).includes(v);
+}
+/** The waiver that stands on its own once given: the one a bank asks for. */
+export function isUnconditionalWaiver(kind: string): boolean {
+  return kind === "unconditional_progress" || kind === "unconditional_final";
+}
+/** A final waiver covers the whole job, whatever its through date says. */
+export function isFinalWaiver(kind: string): boolean {
+  return kind === "conditional_final" || kind === "unconditional_final";
+}
 
 /** "6.5" → 65 tenths of an hour; null for anything that is not a non-negative number of hours. */
 export function hoursToTenths(input: string): number | null {

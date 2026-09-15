@@ -38,6 +38,7 @@ import { DailyLogForm } from "@/packs/jobs/components/daily-log-form";
 import { PunchList } from "@/packs/jobs/components/punch-list";
 import { listDailyLogs, listPunchItems } from "@/packs/jobs/field-ops";
 import { commitmentBilling } from "@/packs/jobs/sub-billing-ops";
+import { waiverCoverage, waiverGaps } from "@/packs/jobs/compliance-ops";
 import { BudgetEditor } from "@/packs/jobs/components/budget-editor";
 import { ProjectForm } from "@/packs/jobs/components/project-form";
 import { Button } from "@/components/ui/button";
@@ -113,6 +114,8 @@ export default async function ProjectPage({
         pack,
         days,
         punch,
+        waiverGapList,
+        waiverCover,
       ] = await Promise.all([
         tx
           .select({ name: schema.entities.name })
@@ -214,6 +217,8 @@ export default async function ProjectPage({
         // The field: the last few days, and what is open on the walk-through.
         listDailyLogs(tx, ctx.tenant.id, project.id, { limit: 5 }),
         listPunchItems(tx, ctx.tenant.id, project.id),
+        waiverGaps(tx, ctx.tenant.id, project.id),
+        waiverCoverage(tx, ctx.tenant.id, project.id),
       ]);
       return {
         project,
@@ -240,6 +245,8 @@ export default async function ProjectPage({
         config: pack.config,
         days,
         punch,
+        waiverGaps: waiverGapList,
+        waiverCoverage: waiverCover,
       };
     },
     { role: ctx.role },
@@ -946,6 +953,34 @@ export default async function ProjectPage({
           </Link>
           , per period end.
         </p>
+        {/*
+          THE BOOKKEEPER'S QUESTION, answered where the orders are: who has been
+          paid with no unconditional lien waiver on file (ADR 0066). Derived
+          from the applications and their bills, never stored.
+        */}
+        {(data.waiverGaps.length > 0 || data.waiverCoverage.size > 0) &&
+          (() => {
+            const paid = data.waiverGaps.filter((g) => g.paid);
+            const unpaid = data.waiverGaps.length - paid.length;
+            const orders = [...new Set(paid.map((g) => `${g.commitmentNumber} (${g.partyName})`))];
+            return (
+              <p className="mb-3 text-xs text-muted-foreground">
+                {paid.length > 0 ? (
+                  <>
+                    <span className="font-medium text-destructive">
+                      Lien waivers: {paid.length} paid{" "}
+                      {paid.length === 1 ? "application" : "applications"} with no unconditional
+                      waiver on file
+                    </span>{" "}
+                    — {orders.join(", ")}.
+                  </>
+                ) : (
+                  "Lien waivers: every paid application has an unconditional waiver on file."
+                )}
+                {unpaid > 0 && ` ${unpaid} billed and unpaid with no waiver yet.`}
+              </p>
+            );
+          })()}
 
         {commitments.length === 0 ? (
           <p className="text-sm text-muted-foreground">
@@ -1015,6 +1050,17 @@ export default async function ProjectPage({
                         if (!b || b.billedCount === 0) {
                           return <span className="text-muted-foreground">—</span>;
                         }
+                        const cover = data.waiverCoverage.get(row.commitment.id);
+                        const paidWithout = data.waiverGaps.some(
+                          (g) => g.commitmentId === row.commitment.id && g.paid,
+                        );
+                        const waiverWord = paidWithout
+                          ? "paid, no waiver"
+                          : cover?.finalOnFile
+                            ? "final waiver on file"
+                            : cover?.unconditionalThrough
+                              ? `waiver through ${cover.unconditionalThrough}`
+                              : "no waiver yet";
                         return (
                           <>
                             {formatMoney(b.billedCents, symbol)}
@@ -1023,6 +1069,12 @@ export default async function ProjectPage({
                                 {formatMoney(b.retainageHeldCents, symbol)} held
                               </span>
                             )}
+                            {/* The bookkeeper's question per order (ADR 0066). */}
+                            <span
+                              className={`block text-xs ${paidWithout ? "text-destructive" : "text-muted-foreground"}`}
+                            >
+                              {waiverWord}
+                            </span>
                           </>
                         );
                       })()}

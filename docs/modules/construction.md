@@ -828,6 +828,6 @@ cost-plus-fee dropped out of slice 4 because the pilot bills fixed price monthly
 | 8 | `selections` — option catalogue, allowances, selection deadlines | Covers the production option book and the custom selection process with one mechanism. |
 | 9 | `drawings` — sheet sets, versions, markups, measurements | The Documents industry layer already on the roadmap. |
 | 10 | `estimating` — takeoff, assemblies, unit costs, bid | Wants units of measure settled and a cost code set to estimate into. Unit-price billing for the excavation side lands here. |
-| 11 | `compliance` — COI expiry, lien waivers, W-9 | Work raised where it lives; no new task engine. |
+| 11 | `compliance` — COI expiry, ~~lien waivers~~, W-9 | Work raised where it lives; no new task engine. **Lien waivers shipped as slice 11a, 2026-09-14 ([jobs.md](jobs.md), [ADR 0066](../decisions/0066-a-lien-waiver-is-a-record-with-a-kind-and-a-through-date-and-the-gap-is-derived.md)): a record on the order — who, which kind, through when, received or not, the signed copy attached — with "paid and no unconditional waiver on file" derived from the applications' bills and the chase raised as a Work item on the order.** COI and W-9 are a party-level record with an expiry and wait. |
 | 12 | `submittals` — submittals, RFIs, ASIs, transmittals | Commercial-weighted, so it waits for a commercial job run in anger. |
 | 13 | `warranty`, `bonding`, `certified-payroll` | Last, and `certified-payroll` may not belong in software at all. |

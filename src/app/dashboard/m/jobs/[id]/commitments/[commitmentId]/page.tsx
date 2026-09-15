@@ -2,9 +2,14 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { ChevronLeft, Pencil } from "lucide-react";
-import { withTenant } from "@/db";
+import { eq } from "drizzle-orm";
+import { schema, withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
-import { requireModuleEnabled } from "@/lib/modules";
+import { isModuleEnabled, requireModuleEnabled } from "@/lib/modules";
+import { attachmentsForRecord } from "@/modules/documents/attachments";
+import { isDisplayableImage } from "@/modules/documents/allowlist";
+import { roleMayWrite } from "@/modules/documents/core/errors";
+import type { RecordPhoto } from "@/modules/documents/components/record-photos";
 import { labelFor } from "@/lib/packs/resolve";
 import { packContext } from "@/lib/packs/tenant-context";
 import { allowsWrite } from "@/lib/packs/authorize";
@@ -38,14 +43,28 @@ import {
   CHANGE_ORDER_STATUS_LABELS,
   COMMITMENT_KIND_LABELS,
   COMMITMENT_STATUS_LABELS,
+  LIEN_WAIVER_ENTITY,
+  LIEN_WAIVER_KIND_LABELS,
+  LIEN_WAIVER_STATUS_LABELS,
   PACK,
   SUB_APPLICATION_STATUS_LABELS,
   isChangeOrderStatus,
   isCommitmentKind,
   isCommitmentStatus,
+  isFinalWaiver,
+  isLienWaiverKind,
+  isLienWaiverStatus,
   isSubApplicationStatus,
+  isUnconditionalWaiver,
 } from "@/packs/jobs/vocabulary";
 import { CommitmentChangeForm } from "@/packs/jobs/components/commitment-change-form";
+import {
+  listLienWaivers,
+  listWaiverWork,
+  waiverCoverage,
+  waiverGaps,
+} from "@/packs/jobs/compliance-ops";
+import { AskForWaiverButton, LienWaiverForm } from "@/packs/jobs/components/lien-waiver-form";
 import {
   NewPayApplication,
   PayApplicationEditor,
@@ -86,6 +105,7 @@ export default async function CommitmentPage({
   const { id, commitmentId } = await params;
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, PACK);
+  const documentsOn = await isModuleEnabled(ctx.tenant.id, "documents");
 
   const data = await withTenant(
     ctx.tenant.id,
@@ -94,18 +114,52 @@ export default async function CommitmentPage({
       if (!project) return null;
       const commitment = await getCommitment(tx, ctx.tenant.id, commitmentId);
       if (!commitment || commitment.projectId !== project.id) return null;
-      const [rows, apps, codes, billing, changes, clientChanges, pack] = await Promise.all([
-        listCommitments(tx, ctx.tenant.id, project.id),
-        listSubApplications(tx, ctx.tenant.id, commitment.id),
-        project.costCodeSetId
-          ? listCostCodes(tx, ctx.tenant.id, project.costCodeSetId)
-          : Promise.resolve([]),
-        commitmentBilling(tx, ctx.tenant.id, project.id),
-        listCommitmentChangeOrders(tx, ctx.tenant.id, project.id),
-        listChangeOrders(tx, ctx.tenant.id, project.id),
-        packContext(tx, ctx.tenant.id, ctx.tenant.industry, PACK),
-      ]);
+      const [rows, apps, codes, billing, changes, clientChanges, allWaivers, coverage, gaps, chasing, parties, pack] =
+        await Promise.all([
+          listCommitments(tx, ctx.tenant.id, project.id),
+          listSubApplications(tx, ctx.tenant.id, commitment.id),
+          project.costCodeSetId
+            ? listCostCodes(tx, ctx.tenant.id, project.costCodeSetId)
+            : Promise.resolve([]),
+          commitmentBilling(tx, ctx.tenant.id, project.id),
+          listCommitmentChangeOrders(tx, ctx.tenant.id, project.id),
+          listChangeOrders(tx, ctx.tenant.id, project.id),
+          listLienWaivers(tx, ctx.tenant.id, project.id),
+          waiverCoverage(tx, ctx.tenant.id, project.id),
+          waiverGaps(tx, ctx.tenant.id, project.id),
+          listWaiverWork(tx, ctx.tenant.id, commitment.id),
+          tx
+            .select({ id: schema.parties.id, name: schema.parties.displayName })
+            .from(schema.parties)
+            .where(eq(schema.parties.tenantId, ctx.tenant.id))
+            .limit(500),
+          packContext(tx, ctx.tenant.id, ctx.tenant.industry, PACK),
+        ]);
       const row = rows.find((r) => r.commitment.id === commitment.id) ?? null;
+      const waivers = allWaivers.filter((w) => w.waiver.commitmentId === commitment.id);
+      // The signed copies, Documents' rows: the same gallery a daily log's photos use.
+      const photos = new Map<string, RecordPhoto[]>();
+      if (documentsOn) {
+        for (const w of waivers) {
+          const attachments = await attachmentsForRecord(tx, ctx.tenant.id, {
+            extensionSlug: PACK,
+            entityType: LIEN_WAIVER_ENTITY,
+            entityId: w.waiver.id,
+          });
+          photos.set(
+            w.waiver.id,
+            attachments
+              .filter((a) => isDisplayableImage(a.document.mimeType))
+              .map((a) => ({
+                documentId: a.document.id,
+                fileName: a.document.fileName,
+                title: a.document.title ?? "",
+                mimeType: a.document.mimeType,
+                isPrimary: a.isPrimary,
+              })),
+          );
+        }
+      }
       return {
         project,
         commitment,
@@ -120,6 +174,12 @@ export default async function CommitmentPage({
         /** This order's change orders, and the job's client-side ones a change may pass down. */
         changes: changes.filter((c) => c.commitment.id === commitment.id),
         clientChanges,
+        waivers,
+        coverage: coverage.get(commitment.id) ?? null,
+        gaps: gaps.filter((g) => g.commitmentId === commitment.id),
+        chasing,
+        parties,
+        photos,
         labels: pack.labels,
       };
     },
@@ -158,6 +218,53 @@ export default async function CommitmentPage({
       ? linesWord
       : `orig. ${formatMoney(data.originalCents, symbol)} · ${formatMoneySign(data.changesCents, symbol)} in approved changes · ${linesWord}`;
   const commitmentLabel = `${commitment.number}${commitment.description ? ` · ${commitment.description}` : ""}`;
+  /** Recording a waiver is a chore; a photo of the signed page follows Documents' own rule. */
+  const canWaiver = allowsWrite(ctx.role, "member");
+  const canPhoto = canWaiver && roleMayWrite(ctx.role);
+  const gapFor = new Map(data.gaps.map((g) => [g.subApplicationId, g]));
+  /** Whether a RECEIVED waiver of the kind covers the application: names it, is final, or runs through its period end. */
+  const onFile = (app: { id: string; periodTo: string }, unconditional: boolean) =>
+    data.waivers.some(
+      (w) =>
+        w.waiver.status === "received" &&
+        isUnconditionalWaiver(w.waiver.kind) === unconditional &&
+        (w.waiver.subApplicationId === app.id ||
+          isFinalWaiver(w.waiver.kind) ||
+          w.waiver.throughDate >= app.periodTo),
+    );
+  const waiverForm = (
+    existing?: Parameters<typeof LienWaiverForm>[0]["existing"],
+    trigger?: ReactNode,
+  ) => (
+    <LienWaiverForm
+      projectId={project.id}
+      commitmentId={commitment.id}
+      commitmentLabel={commitmentLabel}
+      defaultPartyId={commitment.partyId}
+      parties={data.parties}
+      applications={billed.map((a) => ({
+        id: a.app.id,
+        label: `Application ${a.app.number} — ${a.app.periodTo} · ${formatMoneySign(a.totals.dueCents, symbol)}`,
+      }))}
+      documentsOn={documentsOn}
+      tenantId={ctx.tenant.id}
+      canPhoto={canPhoto}
+      photos={existing ? (data.photos.get(existing.id) ?? []) : []}
+      existing={existing}
+      trigger={trigger}
+    />
+  );
+  const cov = data.coverage;
+  const coverageSentence =
+    data.waivers.length === 0 && billed.length === 0
+      ? "None yet. A lien waiver is the document a subcontractor or supplier signs to give up its lien right for the work paid — conditional with the application, unconditional once the money has gone out. Record each one here, and the job's page says who has been paid without one."
+      : `${
+          cov?.finalOnFile
+            ? "A final unconditional waiver is on file"
+            : cov?.unconditionalThrough
+              ? `Unconditional waiver on file through ${cov.unconditionalThrough}`
+              : "No unconditional waiver on file"
+        }${cov?.conditionalThrough ? `; conditional through ${cov.conditionalThrough}` : ""}.`;
   const changeForm = (existing?: Parameters<typeof CommitmentChangeForm>[0]["existing"], trigger?: ReactNode) => (
     <CommitmentChangeForm
       projectId={project.id}
@@ -470,6 +577,24 @@ export default async function CommitmentPage({
                               · {billWord(row.bill.status)}
                             </span>
                           )}
+                          {row.app.status === "billed" &&
+                            (() => {
+                              const gap = gapFor.get(row.app.id);
+                              const text = gap
+                                ? gap.paid
+                                  ? "Paid · no unconditional waiver"
+                                  : "No waiver yet"
+                                : onFile(row.app, true)
+                                  ? "Unconditional waiver on file"
+                                  : "Conditional waiver on file";
+                              return (
+                                <span
+                                  className={`block text-xs ${gap?.paid ? "text-destructive" : "text-muted-foreground"}`}
+                                >
+                                  {text}
+                                </span>
+                              );
+                            })()}
                         </TableCell>
                         <TableCell className="text-right">
                           {isOwner && row.app.status === "draft" && (
@@ -533,6 +658,140 @@ export default async function CommitmentPage({
           </p>
         </Panel>
       )}
+
+      <Panel className="p-5">
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-heading text-sm font-medium tracking-heading">Lien waivers</h2>
+          {canWaiver && waiverForm()}
+        </div>
+        {/*
+          A RECORD, NEVER A FORM (ADR 0066): who gave it, of which kind, through
+          which date, whether it arrived. The gap — paid, and nothing
+          unconditional on file — is derived from the applications and their
+          bills, never stored, so a waiver that arrives closes it by existing.
+        */}
+        <p className="mb-3 text-sm text-muted-foreground">{coverageSentence}</p>
+        {data.gaps.length > 0 && (
+          <ul className="mb-3 space-y-2 text-sm">
+            {data.gaps.map((g) => (
+              <li key={g.subApplicationId} className="flex flex-wrap items-center justify-between gap-2">
+                <span className={g.paid ? "text-destructive" : ""}>
+                  {g.paid
+                    ? `Application ${g.applicationNumber} (${g.periodTo}, ${formatMoneySign(g.dueCents, symbol)}) has been paid and no unconditional waiver covers it.`
+                    : `Application ${g.applicationNumber} (${g.periodTo}) is billed and no waiver covers it yet.`}
+                </span>
+                {canWaiver && (
+                  <AskForWaiverButton
+                    projectId={project.id}
+                    commitmentId={commitment.id}
+                    missing={g.missing}
+                    throughDate={g.periodTo}
+                  />
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {data.chasing.length > 0 && (
+          <p className="mb-3 text-xs text-muted-foreground">
+            Being chased in Work: {data.chasing.map((w) => w.title).join(" · ")}
+          </p>
+        )}
+        {data.waivers.length > 0 && (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Kind</TableHead>
+                  <TableHead>From</TableHead>
+                  <TableHead>Through</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead>Covers</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Signed copy</TableHead>
+                  <TableHead className="w-10" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.waivers.map((w) => (
+                  <TableRow key={w.waiver.id}>
+                    <TableCell className="font-medium">
+                      {isLienWaiverKind(w.waiver.kind) ? LIEN_WAIVER_KIND_LABELS[w.waiver.kind] : w.waiver.kind}
+                      {w.waiver.reference && (
+                        <span className="block text-xs font-normal text-muted-foreground">
+                          Their ref. {w.waiver.reference}
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {w.partyName}
+                      {w.waiver.signedBy && (
+                        <span className="block text-muted-foreground">Signed by {w.waiver.signedBy}</span>
+                      )}
+                    </TableCell>
+                    <TableCell>{w.waiver.throughDate}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {w.waiver.amountCents === 0 ? "—" : formatMoney(w.waiver.amountCents, symbol)}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {w.applicationNumber !== null ? `Application ${w.applicationNumber}` : "Work through the date"}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={w.waiver.status === "received" ? "default" : "secondary"}>
+                        {isLienWaiverStatus(w.waiver.status)
+                          ? LIEN_WAIVER_STATUS_LABELS[w.waiver.status]
+                          : w.waiver.status}
+                      </Badge>
+                      {w.waiver.receivedOn && (
+                        <span className="block text-xs text-muted-foreground">{w.waiver.receivedOn}</span>
+                      )}
+                      {w.waiver.status === "requested" && w.waiver.requestedOn && (
+                        <span className="block text-xs text-muted-foreground">Asked {w.waiver.requestedOn}</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {w.attachmentCount === 0
+                        ? "—"
+                        : `${w.attachmentCount} ${w.attachmentCount === 1 ? "photo" : "photos"}`}
+                    </TableCell>
+                    <TableCell className="w-10 text-right">
+                      {canWaiver &&
+                        waiverForm(
+                          {
+                            id: w.waiver.id,
+                            version: w.waiver.version,
+                            partyId: w.waiver.partyId,
+                            subApplicationId: w.waiver.subApplicationId,
+                            kind: w.waiver.kind,
+                            throughDate: w.waiver.throughDate,
+                            amountCents: w.waiver.amountCents,
+                            status: w.waiver.status,
+                            requestedOn: w.waiver.requestedOn,
+                            receivedOn: w.waiver.receivedOn,
+                            signedBy: w.waiver.signedBy,
+                            reference: w.waiver.reference,
+                            notes: w.waiver.notes,
+                          },
+                          <Button variant="ghost" size="icon">
+                            <Pencil className="size-4" />
+                            <span className="sr-only">Edit waiver through {w.waiver.throughDate}</span>
+                          </Button>,
+                        )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+        <p className="mt-3 text-xs text-muted-foreground">
+          A waiver covers an application when it names it, when it is a final
+          one, or when its through date is on or after the application&apos;s
+          period end. Only a received waiver counts. The words on the form are
+          your state&apos;s or your lawyer&apos;s; what is kept here is who signed,
+          for what, through when — and a photo of the signed page.
+        </p>
+      </Panel>
     </div>
   );
 }

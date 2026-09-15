@@ -66,6 +66,16 @@ import {
   SUB_APPLICATION_STATUSES,
   SUB_APPLICATION_STATUS_LABELS,
   isSubApplicationStatus,
+  LIEN_WAIVER_KINDS,
+  LIEN_WAIVER_KIND_LABELS,
+  LIEN_WAIVER_STATUSES,
+  LIEN_WAIVER_STATUS_LABELS,
+  LIEN_WAIVER_ENTITY,
+  COMMITMENT_ENTITY,
+  isFinalWaiver,
+  isLienWaiverKind,
+  isLienWaiverStatus,
+  isUnconditionalWaiver,
 } from "../src/packs/jobs/vocabulary";
 import {
   WIP_PPM,
@@ -1044,6 +1054,62 @@ describe("subcontract change orders", () => {
     expect(percentComplete(-500_00, -2_000_00)).toBe(25);
     expect(percentComplete(0, -2_000_00)).toBe(0);
     expect(percentComplete(0, 0)).toBeNull();
+  });
+});
+
+// ------------------------------------------------------------ lien waivers (11a)
+
+/**
+ * A lien waiver is a record, never a form (ADR 0066): the kind and status
+ * lists are CHECKs read from the migration, a received one carries its date,
+ * and the row hangs off the job, the party, the order and the billed
+ * application it covers.
+ */
+const LIEN_WAIVERS_SQL = readFileSync("drizzle/0350_lien_waivers.sql", "utf8");
+
+describe("lien waivers", () => {
+  it("MIRRORS the kind and status CHECKs", () => {
+    const k = LIEN_WAIVERS_SQL.match(/job_lien_waivers_kind_valid[^(]*\(([^)]*)\)/);
+    expect(k, "kind constraint not found").not.toBeNull();
+    expect([...k![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]).sort()).toEqual([...LIEN_WAIVER_KINDS].sort());
+    const st = LIEN_WAIVERS_SQL.match(/job_lien_waivers_status_valid[^(]*\(([^)]*)\)/);
+    expect([...st![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]).sort()).toEqual([...LIEN_WAIVER_STATUSES].sort());
+    for (const kind of LIEN_WAIVER_KINDS) expect(LIEN_WAIVER_KIND_LABELS[kind]).toBeTruthy();
+    for (const status of LIEN_WAIVER_STATUSES) expect(LIEN_WAIVER_STATUS_LABELS[status]).toBeTruthy();
+  });
+
+  it("knows which kinds stand on their own and which cover the whole job", () => {
+    // The gap rule reads these: an unconditional waiver is the one a bank
+    // wants; a final one covers everything whatever its through date.
+    expect(LIEN_WAIVER_KINDS.filter(isUnconditionalWaiver)).toEqual(["unconditional_progress", "unconditional_final"]);
+    expect(LIEN_WAIVER_KINDS.filter(isFinalWaiver)).toEqual(["conditional_final", "unconditional_final"]);
+    expect(isLienWaiverKind("partial")).toBe(false);
+    expect(isLienWaiverStatus("received")).toBe(true);
+    expect(isLienWaiverStatus("signed")).toBe(false);
+  });
+
+  it("makes the receipt date part of BEING received, in the database", () => {
+    expect(LIEN_WAIVERS_SQL).toMatch(/job_lien_waivers_received_has_date/);
+    expect(LIEN_WAIVERS_SQL).toMatch(
+      /\("job_lien_waivers"."status" = 'requested' and "job_lien_waivers"."received_on" is null\) or \("job_lien_waivers"."status" = 'received' and "job_lien_waivers"."received_on" is not null\) or "job_lien_waivers"."status" = 'void'/,
+    );
+    expect(LIEN_WAIVERS_SQL).toMatch(/job_lien_waivers_amount_nonnegative/);
+  });
+
+  it("hangs off the job and the order (cascade), the party and the application (no action)", () => {
+    expect(LIEN_WAIVERS_SQL).toMatch(/job_lien_waivers_project_fk[^;]*ON DELETE cascade/);
+    expect(LIEN_WAIVERS_SQL).toMatch(/job_lien_waivers_commitment_fk[^;]*ON DELETE cascade/);
+    expect(LIEN_WAIVERS_SQL).toMatch(/job_lien_waivers_party_fk[^;]*REFERENCES "public"."parties"[^;]*ON DELETE no action/);
+    expect(LIEN_WAIVERS_SQL).toMatch(
+      /job_lien_waivers_application_fk[^;]*REFERENCES "public"."job_sub_applications"[^;]*ON DELETE no action/,
+    );
+  });
+
+  it("names its attachment target and the order's, and they are slugs Documents accepts", () => {
+    for (const entity of [LIEN_WAIVER_ENTITY, COMMITMENT_ENTITY]) {
+      expect(entity).toMatch(/^[a-z][a-z0-9_]{0,62}$/);
+    }
+    expect(LIEN_WAIVER_ENTITY).not.toBe(COMMITMENT_ENTITY);
   });
 });
 

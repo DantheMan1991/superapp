@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, Pencil } from "lucide-react";
+import { ChevronLeft, FileText, Pencil } from "lucide-react";
 import { and, eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
@@ -653,6 +653,16 @@ export default async function ContractPage({
                         )}
                       </TableCell>
                       <TableCell className="text-right">
+                        {/* The printout: the certificate page and the continuation sheet, drafts watermarked. */}
+                        <Button variant="ghost" size="sm" asChild>
+                          <a
+                            href={`/api/jobs/applications/${row.app.id}/pdf`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <FileText className="mr-1.5 size-4" /> PDF
+                          </a>
+                        </Button>
                         {isOwner && row.app.status === "draft" && ledgerBilled && (
                           <CostPlusApplicationEditor
                             key={`${row.app.id}:${row.app.version}`}

@@ -25,6 +25,7 @@ import {
   voidInvoice,
 } from "@/modules/accounting/invoicing/invoices";
 import {
+  customerForParty,
   dueDateFromCustomerTerms,
   ensureCustomerForParty,
 } from "@/modules/accounting/invoicing/customers";
@@ -3613,6 +3614,69 @@ export async function voidPayApplication(
     )
     .returning();
   return rows[0];
+}
+
+// ------------------------------------------------------------ the printout
+
+/** Everything the certificate PDF prints, read once (slice 5e, ADR 0063). */
+export interface CertificateData {
+  app: JobPayApplication;
+  contract: JobContract;
+  project: JobProject;
+  row: PayApplicationRow;
+  /** The last issued application before this one; its period end splits the change orders. */
+  previous: JobPayApplication | null;
+  /** The APPROVED change orders on this contract. */
+  changeOrders: ChangeOrderRow[];
+  ownerName: string;
+  ownerAddress: string;
+}
+
+/**
+ * A pay application with the facts its printout needs: the contract and the
+ * project it belongs to, the row the contract page shows (live for a draft,
+ * frozen once issued), the approved change orders, the party the application
+ * is made to. Null when there is no such application in this tenant — the
+ * route answers 404, never the pack.
+ */
+export async function payApplicationCertificate(
+  tx: Tx,
+  tenantId: string,
+  id: string,
+): Promise<CertificateData | null> {
+  const apps = await tx
+    .select()
+    .from(schema.jobPayApplications)
+    .where(and(eq(schema.jobPayApplications.tenantId, tenantId), eq(schema.jobPayApplications.id, id)))
+    .limit(1);
+  const app = apps[0];
+  if (!app) return null;
+  const contract = await getContract(tx, tenantId, app.contractId);
+  if (!contract) return null;
+  const project = await getProject(tx, tenantId, contract.projectId);
+  if (!project) return null;
+  const row = (await listPayApplications(tx, tenantId, contract.id)).find((r) => r.app.id === id);
+  if (!row) return null;
+  const previous = await lastIssuedBefore(tx, tenantId, contract.id, app.number);
+  const changeOrders = (await listChangeOrders(tx, tenantId, project.id)).filter(
+    (r) =>
+      r.contract.id === contract.id &&
+      (APPROVED_CHANGE_STATUSES as readonly string[]).includes(r.changeOrder.status),
+  );
+  let ownerName = "";
+  let ownerAddress = "";
+  if (contract.counterpartyPartyId) {
+    const party = await tx
+      .select({ name: schema.parties.displayName })
+      .from(schema.parties)
+      .where(and(eq(schema.parties.tenantId, tenantId), eq(schema.parties.id, contract.counterpartyPartyId)))
+      .limit(1);
+    ownerName = party[0]?.name ?? "";
+    // The only postal address the product keeps is the customer's, in
+    // Accounting; a party that has never been billed prints its name alone.
+    ownerAddress = (await customerForParty(tx, tenantId, contract.counterpartyPartyId))?.address ?? "";
+  }
+  return { app, contract, project, row, previous, changeOrders, ownerName, ownerAddress };
 }
 
 export interface ContractBilling {

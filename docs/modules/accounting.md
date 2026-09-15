@@ -22,6 +22,16 @@ changes this module MUST add an entry here (rule in AGENTS.md).
 > at the start of every accounting session, so its length is a real cost — it was
 > 4,367 lines before the 2026-09-14 sweep, 94% of it build log.
 
+### 2026-09-14 — A customer for a party, read only (`claude/pay-application-printout`)
+
+One verb: `customerForParty` in `invoicing/customers.ts`, the read-only twin
+of `ensureCustomerForParty` — the customer a party already is, or null,
+never a new one. The jobs pack's certificate
+([ADR 0063](../decisions/0063-a-pay-applications-printout-is-rendered-from-the-frozen-certificate.md))
+names the party an application is made to and prints the postal address the
+product keeps for it, which is the customer's, here; a document must not
+create a customer by being printed. Nothing else changed.
+
 ### 2026-09-14 — A vendor for a party (`claude/retainage-from-subs`)
 
 One verb: `ensureVendorForParty` in `payables/vendors.ts`, the AP twin of

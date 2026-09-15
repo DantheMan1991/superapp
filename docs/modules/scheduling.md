@@ -16,6 +16,26 @@
 
 ## Build log
 
+### 2026-09-15 — The first trade pack arrives, and slice 6's managed calendar with it (`claude/job-schedule`)
+
+The jobs pack's schedule ([ADR 0071](../decisions/0071-a-jobs-schedule-is-its-phases-as-items-on-the-business-calendar-and-a-move-pushes-what-follows.md))
+is the pack the roadmap said would come "after 7" and would land its
+Gantt, its dependency edges and its progress fields in `src/packs/` with
+nothing in `src/modules/scheduling/` changing. That held. What moved is
+the lib seam: `src/lib/schedule/managed-calendars.ts` gained
+`ExtensionCalendarSpec`, `findExtensionCalendarId` and
+`ensureExtensionCalendar` — the managed-calendar primitive slice 6
+deferred "with the first real pack in hand" — and Marketing's
+`findManagedCalendarId` / `ensureManagedCalendar` now delegate to them
+with their own slug. A job's phase is an all-day item on a business-owned
+*Job schedule* calendar (slug `jobs`, key `schedule`, violet), kind
+`job_phase` (the open taxonomy, P1), linked to the project through
+`schedule_item_links` (P3) — and the jobs pack registered the first
+entity-link provider from beneath the core modules so those links
+resolve. Item fields (P2) were not needed: the pack keeps its own table
+beside the item. The view seam (slice 7) is still unbuilt; the pack draws
+its own timeline on its own page from the same items.
+
 ### 2026-09-05 — The first business calendar: Bookings, made by Marketing (`claude/marketing-site-bookings`)
 
 The website's `Book a time` section (Marketing slice 8,
@@ -1228,7 +1248,7 @@ Slices, in order. Each is a PR that leaves `main` green and shippable.
 | 3 | ✅ **Shipped.** Links + the shared entity-link contract extracted out of Mail. Nine entity types, no new implementations | Reuses `mail_links`' primitive; makes the calendar part of the product rather than beside it |
 | 4 | ✅ **Shipped.** Attention source leading the digest. Seed row flips to `available` | The digest gets its strongest source; the module goes live |
 | 5 | ✅ **Shipped.** Per-person subscribe feed: hashed revocable token, ICS, revoke button | Same query as 4, no session. Reaches the person who will never open the app |
-| 6 | ⏸ **Deferred** (2026-08-09). Extension seam: item kinds, item fields, managed calendars | Would ship three primitives with zero implementors. Build it with the first real pack in hand |
+| 6 | ◐ **Managed calendars landed 2026-09-15** with the jobs pack's schedule (`ensureExtensionCalendar`); item kinds needed nothing (open taxonomy); item fields still unbuilt, nobody has asked | Would ship three primitives with zero implementors. Built with the first real pack in hand, as planned |
 | 7 | The view seam, with a core view moved onto it | The new primitive, shipped with two users |
 | 8 | ✅ **Shipped.** Recurrence: RRULE + overrides, expanded on read | Hardest slice. The feed emits OCCURRENCES rather than the rule — see the build log |
 | 9 | ✅ **Shipped.** Free/busy + availability, reading `show_as` | Settled scope: no booking page, but a booking pack can call this. No migration — assembled from slice 0's projection, as designed |

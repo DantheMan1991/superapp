@@ -53,6 +53,7 @@ import {
   type EstimateLineInput,
 } from "./estimating-ops";
 import { rateStringToPpm } from "./estimate-math";
+import { createPhase, deletePhase, updatePhase } from "./schedule-ops";
 import {
   approveSubApplication,
   createSubApplication,
@@ -103,6 +104,8 @@ import {
   SELECTION_STATUSES,
   ESTIMATE_STATUSES,
   PROPOSAL_PRESENTATIONS,
+  PHASE_KINDS,
+  PHASE_STATUSES,
   PARTY_DOCUMENT_ENTITY,
   PARTY_DOCUMENT_FORMAT,
   PARTY_DOCUMENT_STATUSES,
@@ -261,6 +264,12 @@ function toResult(err: unknown): { error: string } {
         };
       case "ESTIMATE_ACCEPTED":
         return { error: `That estimate is fixed: ${err.message}.` };
+      case "PHASE_CYCLE":
+        return { error: `That would make the schedule loop: ${err.message}.` };
+      case "SCHEDULE_NOT_MADE":
+        return {
+          error: "The business's Job schedule calendar is made by an owner. Ask one to open the schedule or add the first phase; from then anybody can.",
+        };
     }
   }
   /**
@@ -3116,6 +3125,137 @@ export async function attachPartyDocumentDocumentAction(input: unknown) {
     await assertPartyDocument(ctx, parsed.data.entityId);
     await attachExisting(ctx, partyDocumentTarget(parsed.data.entityId), parsed.data.documentId);
     revalidatePath(SUBS_PATH);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// --------------------------------------------------------------- schedule
+
+/** A uuid, "" to clear, or absent to leave alone. */
+const clearableUuid = z
+  .union([z.string().uuid(), z.literal("")])
+  .optional()
+  .transform((v) => (v === undefined ? undefined : v === "" ? null : v));
+
+const phaseSchema = z.object({
+  projectId: z.string().uuid(),
+  name: z.string().trim().min(1).max(200),
+  kind: z.enum(PHASE_KINDS).optional(),
+  startOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endOn: optionalDate,
+  predecessorId: clearableUuid,
+  lagDays: z.coerce.number().int().min(-365).max(365).optional(),
+  partyId: clearableUuid,
+  costCodeId: clearableUuid,
+  status: z.enum(PHASE_STATUSES).optional(),
+  notes: z.string().trim().max(2000).optional(),
+});
+
+/** The pack's gate, plus the zone a day is written in: a phase's day is the business's day. */
+async function zonedGate(): Promise<{ ctx: JobsCtx; timeZone: string }> {
+  const tenant = await requireTenant();
+  await requireModuleEnabled(tenant.tenant.id, PACK);
+  const ctx: JobsCtx = { tenantId: tenant.tenant.id, userId: tenant.userId, role: tenant.role };
+  if (!allowsWrite(ctx.role, "member")) throw new JobsError("FORBIDDEN", "cannot write the schedule");
+  return { ctx, timeZone: tenant.tenant.timezone };
+}
+
+function revalidateSchedule(projectId: string): void {
+  revalidatePath(`${BASE}/${projectId}`);
+  revalidatePath(`${BASE}/${projectId}/schedule`);
+  revalidatePath("/dashboard/m/scheduling");
+}
+
+export async function createPhaseAction(input: unknown) {
+  const parsed = phaseSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const { ctx, timeZone } = await zonedGate();
+    const phase = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const row = await createPhase(tx, ctx, parsed.data, timeZone);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "phase.created",
+          targetType: "phase",
+          targetId: row.id,
+          meta: { projectId: row.projectId, kind: row.kind, status: row.status },
+        });
+        return row;
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateSchedule(parsed.data.projectId);
+    return { ok: true as const, phaseId: phase.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function updatePhaseAction(input: unknown) {
+  const schema = phaseSchema
+    .omit({ projectId: true, startOn: true })
+    .partial()
+    .extend({
+      id: z.string().uuid(),
+      /** For revalidation only. */
+      projectId: z.string().uuid(),
+      startOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      version: z.number().int().positive().optional(),
+    });
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { id, projectId, ...patch } = parsed.data;
+  try {
+    const { ctx, timeZone } = await zonedGate();
+    const result = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const out = await updatePhase(tx, ctx, id, patch, timeZone);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "phase.updated",
+          targetType: "phase",
+          targetId: out.phase.id,
+          meta: { projectId: out.phase.projectId, status: out.phase.status, moved: out.moved.length },
+        });
+        return out;
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateSchedule(projectId);
+    return { ok: true as const, moved: result.moved.length };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function deletePhaseAction(input: unknown) {
+  const parsed = z.object({ id: z.string().uuid(), projectId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  try {
+    const { ctx } = await zonedGate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        await deletePhase(tx, ctx, parsed.data.id);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "phase.deleted",
+          targetType: "phase",
+          targetId: parsed.data.id,
+          meta: { projectId: parsed.data.projectId },
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateSchedule(parsed.data.projectId);
     return { ok: true as const };
   } catch (err) {
     return toResult(err);

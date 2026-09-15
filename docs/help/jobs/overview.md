@@ -649,6 +649,60 @@ Once a selection is **approved** and its pick is over or under the allowance, {b
 
 A pending selection past its `Needed by` reads `overdue` in red. {button:Remind|outline} adds an item to Work — `Selection needed: Master bath tile by 2026-10-15 (24-108)`, due that day — linked to the selection, beside everything else the office has to do; the row reads `Reminder open in Work` until it is ticked off there. It is not on the {{project|lower}}'s punch list, which is for the site.
 
+## The schedule
+
+Anybody on the {{project|lower}} may keep it. On the {{project|lower}}'s page under **Schedule**, and on its own page — {button:All phases|outline}.
+
+The schedule is the {{project|lower}}'s phases in order — site work, foundation, framing, roof — each with the days it takes and the trade doing it, and the milestones between (an inspection, a delivery, a walk-through). Every phase is also an event on the business's **Job schedule** calendar, so it shows on the company calendar in Scheduling, on the week and month views, and on the phone feed of anybody who subscribes — with no extra work.
+
+### The panel on the {{project|lower}}'s page
+
+One sentence: *7 phases from 2026-09-14 to 2026-10-29: 2 done, underway: Framing, next Roof on 2026-10-24, 1 overdue.* — or *No phases yet* and what a schedule is. {button:All phases|outline} opens the page; {button:Add phase|primary} opens the dialog below.
+
+### The page
+
+The sentence again at the top, {button:Company calendar|outline} to Scheduling, and {button:Add phase|primary}. Then one row per phase, soonest first, and a timeline beside them.
+
+| Column | What it is |
+| --- | --- |
+| `Phase` | The name — a small diamond before a milestone — with what it follows and the lag (`after Slab +2d`), or `no predecessor`, and its cost code, under it. |
+| `Who` | The trade or crew doing it. |
+| `Starts` / `Ends` | First and last day, inclusive. `not started` in red under a planned phase whose first day has passed. A milestone has no end. |
+| `Days` | Calendar days from first to last. |
+| `Status` | `Planned`, `Underway` or `Done`, with `overdue` in red under a phase past its last day and not done. |
+| The timeline | Sunday-first weeks across the whole schedule, a bar per phase (grey planned, dark underway, green done, a red ring when overdue), a diamond for a milestone, a red line for today. Hover a bar for its dates. |
+
+At the end of each row: the pencil.
+
+### Adding one
+
+{button:Add phase|primary}.
+
+1. **`Phase`** — required. `Framing`.
+2. **`Kind`** — `Phase` (runs for days) or `Milestone` (one day: an inspection, a delivery).
+3. **`Starts`** and **`Ends`** — the first and last day on site, inclusive; leave the end blank for a one-day phase. A milestone asks for `On` alone.
+4. **`Follows`** — the phase this one waits for, or `Nothing in particular`. With one named, **`Lag, days`** is how many days after its last day this one may start: `0` is the next day, `2` leaves two clear days, `-2` starts two days before it finishes. A line under it says *May start from <date>, the day after <phase>*, and turns red — with the button greyed — if the start you typed is too early.
+5. **`Who`** — the trade or crew, from your people and businesses, or `Nobody yet`.
+6. **`Cost code`** — optional; shown under the phase.
+7. **`Status`** — `Planned`, `Underway`, `Done`.
+8. **`Notes`** — `Inspection booked for the Thursday.`
+
+{button:Add phase|primary} stays greyed until the name and the start are filled in. On success: `Phase added`. The very first phase in the business — or the first time an owner opens a schedule — makes the **Job schedule** calendar, and only an owner can make it: a staff member who gets there first sees `The business's Job schedule calendar is made by an owner. Ask one to open the schedule or add the first phase; from then anybody can.` What can stop a save: `<Phase> cannot start before <date>: <predecessor> runs to <date>.` · `That would make the schedule loop: …` (naming a phase that already comes after this one) · `That is on another job: the phase named as predecessor is on another job.`
+
+### Moving one, and what moves with it
+
+Open a phase with the pencil and change its dates. **Move a phase later and everything that follows it moves with it**, each phase keeping its length, until every one starts no earlier than its predecessor allows — the toast says `Phase saved — 3 later phases moved with it`. Move a phase earlier and nothing else moves: slack you left in the schedule is yours to close. Change only the start and the phase keeps its length; change the end alone and it grows or shrinks in place.
+
+Marking a phase `Done` clears its `overdue`; `Underway` clears `not started`. Renaming a phase renames its event on the calendar.
+
+### Removing one
+
+In the dialog, {button:Remove|ghost} then {button:Remove <phase>|destructive}. Whatever followed the removed phase now follows what it followed, with its own lag; the event leaves the calendar. `Phase removed — what followed it now follows what it followed`.
+
+### On the company calendar
+
+Every phase is an all-day event named `<{{project|lower}} number> · <phase>` on the **Job schedule** calendar, which the business owns and everyone can see and change. Opening one there shows the {{project|lower}} it belongs to and opens it. Moving it there moves the phase here — but only this phase; the pushing of what follows happens when a phase is moved from the schedule page.
+
 ## On site — the daily log, photos and the punch list
 
 Anyone on the team, not only owners: the field is a chore, and the person with the phone on the site is rarely the owner.
@@ -816,6 +870,7 @@ Worth knowing so you are not looking for it:
 - **A cost-plus job on the work in progress schedule earns what it has cost plus its fee**, capped at its maximum, with no estimate asked for — when it is the job's only signed contract. A time-and-materials job earns its approved hours at their rates plus the rest of its cost marked up, the same way; one with hours nobody has priced shows `Hours on the job with no bill rate` and blocks the period until a rate is set. A job mixing methods is shown and left out, and a period with billings on one cannot post until it has a value.
 - **A subcontractor's application does not print**, and neither does a change order on an order. They are the subcontractor's documents, prepared on their side; your own applications print from their row.
 - **A lien waiver is not generated.** The form itself is your state's or your lawyer's, not something Jobs prints; the signed one attaches as a photo, a file or from Documents.
+- **The schedule counts calendar days, and a phase waits only for the one it follows.** No working-day calendar or holidays yet, no start-to-start dependencies, no baseline to measure slip against, and nothing tells the trade — the phase names them, and the company calendar and the feed are how they hear. A schedule is typed per {{project|lower}}; a template that fills a new one is next.
 - **An estimate is lines you type.** No assemblies (a bundle of lines dropped in as one), no unit cost book that remembers what concrete cost last time, no takeoff from the drawings. A supplier's quote cannot be attached to an estimate yet. The proposal prints but is not sent from here, and the client cannot accept it on a screen of their own — the signed page comes back the way it always has.
 - **A subcontractor out of standing is not stopped.** An order can be issued and a bill paid while a certificate is missing or expired; the Subcontractors page and the order's page say so in red, and the decision is yours. Which kinds are required is set in the module's configuration for now, not on a screen.
 - **The option book is per job.** The same selections with the same choices on every plan are entered on each job for now; a book that seeds a new job is next. Nothing here lets the client choose for themselves; the office records what they said.
@@ -839,6 +894,7 @@ Worth knowing so you are not looking for it:
 | Accept an estimate, or make it the budget or the schedule of values | ● | | |
 | Draw up selections, record the client's choice, remind them in Work | ● | ● | ● |
 | Raise a selection's difference as a change order | ● | | |
+| Add, move, mark done or remove a phase of the schedule | ● | ● | ● |
 | Log a day on site, or add and tick a punch item | ● | ● | ● |
 | Add photos to a day | ● | ● | |
 | See the work in progress schedule | ● | ● | ● |

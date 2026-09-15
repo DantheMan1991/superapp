@@ -458,6 +458,40 @@ export function isProposalPresentation(v: string): v is ProposalPresentation {
   return (PROPOSAL_PRESENTATIONS as readonly string[]).includes(v);
 }
 
+// ------------------------------------------------------------- the schedule
+
+/** A job's schedule (ADR 0071): a phase runs for days, a milestone is a day. */
+export const PHASE_KINDS = ["phase", "milestone"] as const;
+export type PhaseKind = (typeof PHASE_KINDS)[number];
+export const PHASE_KIND_LABELS: Record<PhaseKind, string> = { phase: "Phase", milestone: "Milestone" };
+export function isPhaseKind(v: string): v is PhaseKind {
+  return (PHASE_KINDS as readonly string[]).includes(v);
+}
+
+export const PHASE_STATUSES = ["planned", "underway", "done"] as const;
+export type PhaseStatus = (typeof PHASE_STATUSES)[number];
+export const PHASE_STATUS_LABELS: Record<PhaseStatus, string> = { planned: "Planned", underway: "Underway", done: "Done" };
+export function isPhaseStatus(v: string): v is PhaseStatus {
+  return (PHASE_STATUSES as readonly string[]).includes(v);
+}
+
+/**
+ * The business calendar every job's phases sit on — made once, shared with
+ * everyone at write, the way Marketing's Bookings calendar is — so the
+ * company calendar and the phone feed carry every job with no work of
+ * their own.
+ */
+export const JOB_CALENDAR = {
+  extensionSlug: PACK,
+  extensionKey: "schedule",
+  name: "Job schedule",
+  kind: "job_schedule",
+  color: "violet",
+} as const;
+
+/** The item kind a phase writes; the calendar's open taxonomy. */
+export const PHASE_ITEM_KIND = "job_phase";
+
 // ------------------------------------------------------------------ selections
 
 /**

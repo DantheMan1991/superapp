@@ -106,6 +106,7 @@ import {
   proposalData,
   updateEstimate,
 } from "../src/packs/jobs/estimating-ops";
+import { createPhase, deletePhase, listPhases, scheduleSummary, updatePhase } from "../src/packs/jobs/schedule-ops";
 import { certificateInputFrom } from "../src/packs/jobs/certificate";
 import { loadInvoice, loadInvoiceLines } from "../src/modules/accounting/invoicing/invoices";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
@@ -4213,5 +4214,115 @@ d("jobs ops", () => {
     expect(data?.row.contract?.id).toBe(contract.id);
     expect(data?.toName).toContain("Oak Row Owner");
     expect(client).toBeTruthy();
+  }, 120_000);
+
+  it("A JOB'S SCHEDULE is phases on the business's Job schedule calendar: a phase is an all-day item linked to the job, made once per business and shared with everyone; a successor may not start before its predecessor allows; a loop is refused; moving a phase later pushes what follows and nothing is pulled earlier; a milestone is a day; removing a phase re-points what followed it and cancels its item", async () => {
+    const TZ = "America/New_York";
+    const entity = await newCompany("Sched Co 1");
+    const { project, framer, code } = await run(async (tx) => {
+      const p = await createProject(tx, ctx, { entityId: entity, number: "OPS-SCH1", name: "Scheduled" });
+      const set = (await getDefaultCostCodeSet(tx, tenantId)) ?? (await createCostCodeSet(tx, ctx, { name: "Sched codes" }));
+      const code = await createCostCode(tx, ctx, { setId: set.id, code: "SCH-06-10", name: "Framing", sortOrder: 60 });
+      const framer = await seedVendor(tx, "Framing crew");
+      return { project: p, framer, code };
+    });
+    // The shape: a name, a real date, a kind and a status on the list, a lag within a year.
+    await expect(run((tx) => createPhase(tx, staffCtx, { projectId: project.id, name: " ", startOn: "2026-09-14" }, TZ))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => createPhase(tx, staffCtx, { projectId: project.id, name: "x", startOn: "soon" }, TZ))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => createPhase(tx, staffCtx, { projectId: project.id, name: "x", startOn: "2026-09-14", kind: "task" }, TZ))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => createPhase(tx, staffCtx, { projectId: project.id, name: "x", startOn: "2026-09-14", status: "late" }, TZ))).rejects.toMatchObject({ code: "INVALID_STATUS" });
+    await expect(run((tx) => createPhase(tx, staffCtx, { projectId: project.id, name: "x", startOn: "2026-09-14", endOn: "2026-09-10" }, TZ))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+
+    // The business's calendar is an owner's to make: staff before it exists are told to ask; the owner's first phase makes it, and staff lay out the rest.
+    await expect(run((tx) => createPhase(tx, staffCtx, { projectId: project.id, name: "Site work", startOn: "2026-09-14" }, TZ))).rejects.toMatchObject({ code: "SCHEDULE_NOT_MADE" });
+    const site = await run((tx) => createPhase(tx, ctx, { projectId: project.id, name: "Site work", startOn: "2026-09-14", endOn: "2026-09-18" }, TZ));
+    const slab = await run((tx) => createPhase(tx, staffCtx, { projectId: project.id, name: "Slab", startOn: "2026-09-21", endOn: "2026-09-25", predecessorId: site.id, costCodeId: code.id }, TZ));
+    // Too early for its predecessor: refused, and the message says when it may start.
+    await expect(
+      run((tx) => createPhase(tx, staffCtx, { projectId: project.id, name: "Framing", startOn: "2026-09-26", endOn: "2026-10-16", predecessorId: slab.id, lagDays: 2 }, TZ)),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE", message: expect.stringContaining("cannot start before 2026-09-28") });
+    const framing = await run((tx) => createPhase(tx, staffCtx, { projectId: project.id, name: "Framing", startOn: "2026-09-28", endOn: "2026-10-16", predecessorId: slab.id, lagDays: 2, partyId: framer }, TZ));
+    const roof = await run((tx) => createPhase(tx, staffCtx, { projectId: project.id, name: "Roof", startOn: "2026-10-19", endOn: "2026-10-23", predecessorId: framing.id }, TZ));
+    const inspection = await run((tx) => createPhase(tx, staffCtx, { projectId: project.id, name: "Frame inspection", kind: "milestone", startOn: "2026-10-26", endOn: "2026-10-30", predecessorId: roof.id }, TZ));
+    expect([site.status, site.kind, framing.partyId, slab.costCodeId]).toEqual(["planned", "phase", framer, code.id]);
+
+    // The calendar: one business calendar, shared with everyone at write; one all-day item per phase, linked to the job, titled with the job number.
+    const calendar = await run((tx) =>
+      tx.select().from(schema.scheduleCalendars).where(and(eq(schema.scheduleCalendars.tenantId, tenantId), eq(schema.scheduleCalendars.extensionSlug, "jobs"))),
+    );
+    expect(calendar.map((c) => [c.name, c.extensionKey, c.ownerClerkUserId])).toEqual([["Job schedule", "schedule", null]]);
+    const share = await run((tx) => tx.select().from(schema.scheduleShares).where(eq(schema.scheduleShares.calendarId, calendar[0].id)));
+    expect(share.map((s) => [s.granteeClerkUserId, s.access])).toEqual([["", "write"]]);
+    const item = await run((tx) => tx.select().from(schema.scheduleItems).where(eq(schema.scheduleItems.id, framing.itemId)));
+    expect([item[0].title, item[0].allDay, item[0].kind, item[0].calendarId, item[0].timeZone]).toEqual(["OPS-SCH1 · Framing", true, "job_phase", calendar[0].id, TZ]);
+    const links = await run((tx) => tx.select().from(schema.scheduleItemLinks).where(eq(schema.scheduleItemLinks.itemId, framing.itemId)));
+    expect(links.map((l) => [l.extensionSlug, l.entityType, l.entityId])).toEqual([["jobs", "project", project.id]]);
+
+    // The list reads the dates back through the zone: a milestone is one day whatever end it was given.
+    const rowsOf = (today = "2026-09-15") => run((tx) => listPhases(tx, tenantId, project.id, TZ, today));
+    let rows = await rowsOf();
+    expect(rows.map((r) => [r.phase.name, r.startOn, r.endOn, r.durationDays, r.predecessor?.name ?? null, r.earliestStart, r.partyName, r.codeLabel])).toEqual([
+      ["Site work", "2026-09-14", "2026-09-18", 5, null, null, null, null],
+      ["Slab", "2026-09-21", "2026-09-25", 5, "Site work", "2026-09-19", null, "SCH-06-10 · Framing"],
+      ["Framing", "2026-09-28", "2026-10-16", 19, "Slab", "2026-09-28", expect.stringContaining("Framing crew"), null],
+      ["Roof", "2026-10-19", "2026-10-23", 5, "Framing", "2026-10-17", null, null],
+      ["Frame inspection", "2026-10-26", "2026-10-26", 1, "Roof", "2026-10-24", null, null],
+    ]);
+    expect(scheduleSummary(rows, "2026-09-15")).toMatchObject({ count: 5, milestones: 1, done: 0, underway: 0, overdue: 0, startOn: "2026-09-14", endOn: "2026-10-26", spanDays: 43 });
+
+    // A loop is refused; another job's phase is refused; a phase cannot follow itself.
+    await expect(run((tx) => updatePhase(tx, staffCtx, site.id, { predecessorId: roof.id }, TZ))).rejects.toMatchObject({ code: "PHASE_CYCLE" });
+    await expect(run((tx) => updatePhase(tx, staffCtx, site.id, { predecessorId: site.id }, TZ))).rejects.toMatchObject({ code: "PHASE_CYCLE" });
+    const other = await run((tx) => createProject(tx, ctx, { entityId: entity, number: "OPS-SCH1-B", name: "Other" }));
+    const otherPhase = await run((tx) => createPhase(tx, staffCtx, { projectId: other.id, name: "Elsewhere", startOn: "2026-09-01" }, TZ));
+    await expect(run((tx) => updatePhase(tx, staffCtx, site.id, { predecessorId: otherPhase.id }, TZ))).rejects.toMatchObject({ code: "WRONG_PROJECT" });
+
+    // The slab slips a week: framing (two days' lag), the roof and the inspection move with it, each keeping its length; site work does not.
+    const slipped = await run((tx) => updatePhase(tx, staffCtx, slab.id, { version: slab.version, startOn: "2026-09-28", endOn: "2026-10-02", status: "underway" }, TZ));
+    expect(slipped.moved).toEqual([
+      { id: framing.id, startOn: "2026-10-05", endOn: "2026-10-23" },
+      { id: roof.id, startOn: "2026-10-24", endOn: "2026-10-28" },
+      { id: inspection.id, startOn: "2026-10-29", endOn: "2026-10-29" },
+    ]);
+    rows = await rowsOf("2026-10-06");
+    expect(rows.map((r) => [r.phase.name, r.startOn, r.endOn, r.phase.status])).toEqual([
+      ["Site work", "2026-09-14", "2026-09-18", "planned"],
+      ["Slab", "2026-09-28", "2026-10-02", "underway"],
+      ["Framing", "2026-10-05", "2026-10-23", "planned"],
+      ["Roof", "2026-10-24", "2026-10-28", "planned"],
+      ["Frame inspection", "2026-10-29", "2026-10-29", "planned"],
+    ]);
+    // As of October 6th: site work never started and is overdue; the slab is overdue too; framing is late to start.
+    expect(rows.map((r) => [r.phase.name, r.overdue, r.lateToStart])).toEqual([
+      ["Site work", true, true],
+      ["Slab", true, false],
+      ["Framing", false, true],
+      ["Roof", false, false],
+      ["Frame inspection", false, false],
+    ]);
+    const movedItem = await run((tx) => tx.select().from(schema.scheduleItems).where(eq(schema.scheduleItems.id, framing.itemId)));
+    expect(movedItem[0].startsAt.toISOString()).toBe("2026-10-05T04:00:00.000Z"); // midnight New York, EDT
+    // Pulling the slab back leaves the successors where they are; a stale version is refused; a rename reaches the item's title.
+    await expect(run((tx) => updatePhase(tx, staffCtx, slab.id, { version: slab.version, startOn: "2026-09-21" }, TZ))).rejects.toMatchObject({ code: "STALE_VERSION" });
+    const pulled = await run((tx) => updatePhase(tx, staffCtx, slab.id, { startOn: "2026-09-21", endOn: "2026-09-25", name: "Slab and footings" }, TZ));
+    expect(pulled.moved).toEqual([]);
+    expect((await run((tx) => tx.select().from(schema.scheduleItems).where(eq(schema.scheduleItems.id, slab.itemId))))[0].title).toBe("OPS-SCH1 · Slab and footings");
+    expect((await rowsOf()).find((r) => r.phase.id === framing.id)?.startOn).toBe("2026-10-05");
+    // Done is done: marking the site work done clears its overdue.
+    await run((tx) => updatePhase(tx, staffCtx, site.id, { status: "done" }, TZ));
+    expect((await rowsOf("2026-10-06")).find((r) => r.phase.id === site.id)?.overdue).toBe(false);
+
+    // Removing the slab: framing now follows site work, and the slab's item is cancelled rather than deleted.
+    await run((tx) => deletePhase(tx, staffCtx, slab.id));
+    rows = await rowsOf();
+    expect(rows.map((r) => [r.phase.name, r.predecessor?.name ?? null])).toEqual([
+      ["Site work", null],
+      ["Framing", "Site work"],
+      ["Roof", "Framing"],
+      ["Frame inspection", "Roof"],
+    ]);
+    expect((await run((tx) => tx.select().from(schema.scheduleItems).where(eq(schema.scheduleItems.id, slab.itemId))))[0].cancelledAt).not.toBeNull();
+    // An expert is a member in a pack and may keep the schedule; only the calendar itself is an owner's to make.
+    expect((await run((tx) => createPhase(tx, { ...ctx, role: "expert" }, { projectId: project.id, name: "Punch walk", startOn: "2026-11-02" }, TZ))).name).toBe("Punch walk");
   }, 120_000);
 });

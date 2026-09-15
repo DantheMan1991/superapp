@@ -54,32 +54,34 @@ address when there is one, the certificate's rule. A draft prints under
 DRAFT with *Not yet sent*; declined and superseded under those words;
 sent and accepted clean. Rendered on request, never stored.
 
-**DRIVEN AS FAR AS A SIGNED-OUT PANE ALLOWS.** The browser pane's Clerk
-session had expired and only the founder can sign it in, so the editor's
-Proposal block was not clicked; the PDF was made the other way round —
-a throwaway script (never committed) stubbing `server-only` through a
-tsconfig `paths` entry, calling the real `loadProposal` → `renderProposal`
-path against the dev branch's Hilltop Farm, EST-1 on 24-109 (accepted onto
-the cost-plus contract), its scope, three exclusions and three lines of
-terms written straight to the row. Three renders, read back through
-Documents' own PDF text extractor: line by line — *Hilltop Farm · Grass-fed
-since 1998 · PROPOSAL · Barn conversion, as drawn · Project 24-109 · Site 4
-Mill Lane · Proposal no. EST-1 · Date 2026-09-15 · Valid until 2026-10-15 ·
-To Tractor Supply Co* (the contract's counterparty, not the job's client,
-which it has none) *· From Hilltop Farm*, the scope, then **Slab, 4in, fibre
-mesh 120 cy 30,891.30 · Framing labour 53,240.00 · Rebar 2 ton 1,452.00
-2,904.00 · Permit 2,087.25 · Total 89,122.55** — the quantity column only on
-the two lines with one, the per-unit column only on the rebar, the contract
-sum to the cent — the three exclusions as three lines, the terms, *This
-proposal is valid until 2026-10-15*, the acceptance sentence and the two
-signature blocks on a second page; by cost code as a draft — **03 30 00 ·
-Cast-in-place concrete 33,795.30 · 06 10 00 · Rough carpentry 53,240.00 ·
-Other 2,087.25 · Total 89,122.55**, *Not yet sent*, DRAFT on both pages;
-one sum — *Price for the work described 89,122.55* and no table. Nothing
-on any of the three says cost, markup, overhead, profit or margin. The
-editor block, the Print button and the list's Proposal button await the
-founder's session; the actions they call are the estimate's own, tested
-in the ops suite.
+**DRIVEN, in two halves.** The browser pane came up signed out, so the
+first pass rendered by script — a throwaway file (never committed) that
+stubs `server-only` through a tsconfig `paths` entry and calls the real
+`loadProposal` → `renderProposal` path against the dev branch's Hilltop
+Farm, EST-1 on 24-109 (accepted onto the cost-plus contract) with its scope,
+three exclusions and three lines of terms written to the row, three
+renders read back through Documents' own PDF text extractor, to the cent.
+Then the founder signed in and the screens were clicked: the list's
+*Proposal* button on the row; EST-1's Proposal block with the three texts
+greyed and fixed and *Show the price* still live — switched to *By cost
+code*, *Estimate saved*, and the row read it back; *New estimate* EST-2
+landed on its editor with **EST-1's terms already in the Terms box** and
+scope and exclusions blank; a scope, two exclusions, 15 / 10 / 10 and one
+$18,500 line saved as *One sum*, the six figures returned from the row
+(cost 18,500.00, price 21,275.00, overhead 2,127.50, profit 2,340.25,
+total 25,742.75, margin 28.1%); then the route itself, fetched from the
+page and shown through Chrome's viewer (the pane treats a PDF response as
+a download): EST-2 under **DRAFT**, *Not yet sent*, *Valid until —*, *To —*
+(the job has no client party), *Price for the work described 25,742.75*,
+*Accepted for the client*; EST-1 by cost code — **03 30 00 · Cast-in-place
+concrete 33,795.30 · 06 10 00 · Rough carpentry 53,240.00 · Other 2,087.25
+· Total 89,122.55** — the farm's logo and green, *To Tractor Supply Co*
+from the contract. One thing found by looking: EST-1's signature block
+wrapped alone onto a second page by a few points, an acceptance sentence
+on one page and the lines to sign on the next. The closing is now one
+non-wrapping block, trimmed with the page's bottom padding, and both
+proposals print on one page; a long one still carries its closing whole
+onto the next.
 
 Migration `0358_proposal.sql` applied to dev and prod before the merge;
 `db:verify-rls` **219 tables** (none new) on both, `db:verify-modules`

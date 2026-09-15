@@ -24,7 +24,7 @@ const styles = StyleSheet.create({
     fontFamily: "NotoSans",
     fontSize: 9.5,
     paddingTop: 36,
-    paddingBottom: 48,
+    paddingBottom: 40,
     paddingHorizontal: 48,
     color: ink,
     lineHeight: 1.35,
@@ -71,12 +71,13 @@ const styles = StyleSheet.create({
   pAmount: { width: 90, textAlign: "right" },
   sumRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 8, borderTopWidth: 1, borderBottomWidth: 1, borderColor: ink, fontWeight: "bold", fontSize: 12 },
   validity: { marginTop: 8, color: "#374151" },
-  acceptance: { marginTop: 10, color: "#374151", fontSize: 8, lineHeight: 1.4 },
-  signatures: { flexDirection: "row", marginTop: 10 },
+  closing: { marginTop: 6 },
+  acceptance: { color: "#374151", fontSize: 8, lineHeight: 1.4 },
+  signatures: { flexDirection: "row", marginTop: 4 },
   signature: { width: "50%", paddingRight: 16 },
-  signatureHeading: { fontSize: 7, letterSpacing: 1, color: muted, marginBottom: 6 },
+  signatureHeading: { fontSize: 7, letterSpacing: 1, color: muted, marginBottom: 4 },
   signatureLine: {
-    marginTop: 14,
+    marginTop: 9,
     borderBottomWidth: 1,
     borderBottomColor: ink,
     fontSize: 7,
@@ -238,17 +239,22 @@ function proposalPage(m: ProposalModel): ReactElement {
 
   const tail: ReactElement[] = [];
   if (m.validity) tail.push(text(styles.validity, m.validity, "validity"));
-  tail.push(text(styles.acceptance, m.acceptance, "acceptance"));
+  // The acceptance sentence and the signature lines stay together: a page break between them reads as two documents.
   tail.push(
     createElement(
       View,
-      { key: "sig", style: styles.signatures, wrap: false },
-      ...m.signatures.map((s, i) =>
-        createElement(
-          View,
-          { key: `sg${i}`, style: styles.signature },
-          text(styles.signatureHeading, s.heading.toUpperCase()),
-          ...s.lines.map((l, j) => text(styles.signatureLine, l, `sl${i}${j}`)),
+      { key: "closing", style: styles.closing, wrap: false },
+      text(styles.acceptance, m.acceptance, "acceptance"),
+      createElement(
+        View,
+        { key: "sig", style: styles.signatures },
+        ...m.signatures.map((s, i) =>
+          createElement(
+            View,
+            { key: `sg${i}`, style: styles.signature },
+            text(styles.signatureHeading, s.heading.toUpperCase()),
+            ...s.lines.map((l, j) => text(styles.signatureLine, l, `sl${i}${j}`)),
+          ),
         ),
       ),
     ),

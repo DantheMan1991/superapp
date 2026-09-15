@@ -34,8 +34,8 @@ empty state says *Nothing attached yet* when the doors are open.
 `splitAttachments` is the one place a page decides which side of the gallery
 an attachment sits on (the inline-safe image list; an SVG is a file), pinned
 in `tests/documents-record-files.test.ts`. The jobs pack wired it into the
-daily log, lien waivers and selections in the same PR; the subcontractor
-documents follow once their own PR lands.
+daily log, lien waivers and selections in the same PR, and into subcontractor
+documents once the branch had merged 11b.
 
 Not built: a picker that browses folders (search covers it), attaching one
 file to several records from the picker, and a preview of a PDF in the

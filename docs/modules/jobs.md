@@ -21,12 +21,13 @@ the page and nothing else, because the shared gallery uploaded images only
 and a file already in Documents had a verb and no button. Documents' gallery
 now has two more doors — *Add a file* (any allowed type) and *From
 Documents* (the cabinet's own search) — and this pack passes its own actions
-for both on the daily log, lien waivers and selections
-(`attach<Entity>FileAction` through `registerAttachedFile`,
+for both on the daily log, lien waivers, selections and subcontractor
+documents (`attach<Entity>FileAction` through `registerAttachedFile`,
 `attach<Entity>DocumentAction` through `attachDocumentToRecord`, same gate as
 a photo, never the picture). The pages split what is attached with
-`splitAttachments` and the counts say *files*. Subcontractor documents get the
-same two doors once their PR (11b) is on main; the signed pay-application
+`splitAttachments` and the counts say *files*. Subcontractor documents got the
+same two doors when this branch merged 11b (the Subcontractors page splits
+its attachments the same way); the signed pay-application
 certificate stays open, wanting its own control on the applications table.
 Details in the Documents dossier, same date.
 

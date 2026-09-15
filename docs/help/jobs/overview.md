@@ -481,7 +481,7 @@ The line under the title counts them: *5 with orders on live jobs · 1 not in go
 7. **`Status`** — `On file` (fills **`Received`** with today, and the date is required: `Give a received document the date it arrived.`), `Requested` (with the date you asked), or `Void` for a wrong one.
 8. **`Notes`** — additional insured named, endorsements, what is missing.
 
-{button:Record document|primary} is greyed until a kind is set. On success you see `Document recorded`. Open it again with the pencil to add a **scanned copy** — a photo of the page, through Documents. A renewal is a second document of the same kind with the later date: the one that runs longest is the one that counts, so the old one can stay for the record.
+{button:Record document|primary} is greyed until a kind is set. On success you see `Document recorded`. Open it again with the pencil to attach the **Scanned copy** — three ways, all through Documents (it needs Documents switched on): {button:Add a photo|outline|image-plus} for a picture of the page (on a phone, {button:Take photo|outline|camera}), {button:Add a file|outline|paperclip} for the PDF the broker sent, or {button:From Documents|outline|folder-open} to pick a file already in your cabinet — type in `Search your files`, newest first, {button:Attach|outline} beside the one. Photos show as a gallery, files as a list with their kind and size; the × beside either removes it from the document and leaves the file in Documents. A renewal is a second document of the same kind with the later date: the one that runs longest is the one that counts, so the old one can stay for the record.
 
 ### On an order's page
 

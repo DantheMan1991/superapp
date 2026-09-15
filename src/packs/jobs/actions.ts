@@ -2831,3 +2831,31 @@ export async function detachPartyDocumentPhotoAction(input: unknown) {
     return toResult(err);
   }
 }
+
+export async function attachPartyDocumentFileAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoInput.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    await assertPartyDocument(ctx, parsed.data.entityId);
+    const result = await attachUploaded(ctx, partyDocumentTarget(parsed.data.entityId), parsed.data.pathname, "Subcontractor document");
+    revalidatePath(SUBS_PATH);
+    return { ok: true as const, documentId: result.documentId };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function attachPartyDocumentDocumentAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = existingInput.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    await assertPartyDocument(ctx, parsed.data.entityId);
+    await attachExisting(ctx, partyDocumentTarget(parsed.data.entityId), parsed.data.documentId);
+    revalidatePath(SUBS_PATH);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}

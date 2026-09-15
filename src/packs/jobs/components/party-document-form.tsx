@@ -22,9 +22,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { RecordPhotos, type RecordPhoto } from "@/modules/documents/components/record-photos";
+import { RecordPhotos, type RecordFile, type RecordPhoto } from "@/modules/documents/components/record-photos";
 import {
   askForPartyDocumentAction,
+  attachPartyDocumentDocumentAction,
+  attachPartyDocumentFileAction,
   attachPartyDocumentPhotoAction,
   createPartyDocumentAction,
   detachPartyDocumentPhotoAction,
@@ -94,6 +96,7 @@ export function PartyDocumentForm({
   tenantId,
   canPhoto,
   photos = [],
+  files = [],
   existing,
   trigger,
 }: {
@@ -105,6 +108,7 @@ export function PartyDocumentForm({
   tenantId: string;
   canPhoto: boolean;
   photos?: RecordPhoto[];
+  files?: RecordFile[];
   existing?: EditablePartyDocument;
   trigger?: ReactNode;
 }) {
@@ -348,14 +352,17 @@ export function PartyDocumentForm({
                     entityId={existing.id}
                     tenantId={tenantId}
                     photos={photos}
+                    files={files}
                     canEdit={canPhoto}
                     subject="document"
                     attachAction={attachPartyDocumentPhotoAction}
                     setPrimaryAction={setPartyDocumentPhotoPrimaryAction}
                     detachAction={detachPartyDocumentPhotoAction}
+                    attachFileAction={attachPartyDocumentFileAction}
+                    attachExistingAction={attachPartyDocumentDocumentAction}
                   />
                 ) : (
-                  <p className="text-xs text-muted-foreground">A photo of the page needs Documents switched on.</p>
+                  <p className="text-xs text-muted-foreground">The scanned copy needs Documents switched on.</p>
                 )}
               </div>
             )}

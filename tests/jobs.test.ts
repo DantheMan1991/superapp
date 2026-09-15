@@ -76,6 +76,11 @@ import {
   isLienWaiverKind,
   isLienWaiverStatus,
   isUnconditionalWaiver,
+  CHOSEN_SELECTION_STATUSES,
+  SELECTION_ENTITY,
+  SELECTION_STATUSES,
+  SELECTION_STATUS_LABELS,
+  isSelectionStatus,
 } from "../src/packs/jobs/vocabulary";
 import {
   WIP_PPM,
@@ -1110,6 +1115,65 @@ describe("lien waivers", () => {
       expect(entity).toMatch(/^[a-z][a-z0-9_]{0,62}$/);
     }
     expect(LIEN_WAIVER_ENTITY).not.toBe(COMMITMENT_ENTITY);
+  });
+});
+
+// -------------------------------------------------------------- selections (8)
+
+/**
+ * A selection and its choices (ADR 0067): the status list is a CHECK read
+ * from the migration, one choice is chosen per selection at the database, a
+ * choice is priced by the unit or not at all, and the difference moves by
+ * change order — so the row points at the change order it raised.
+ */
+const SELECTIONS_SQL = readFileSync("drizzle/0352_selections.sql", "utf8");
+
+describe("selections", () => {
+  it("MIRRORS the status CHECK, and counts a chosen price from selected on", () => {
+    const m = SELECTIONS_SQL.match(/job_selections_status_valid[^(]*\(([^)]*)\)/);
+    expect(m, "constraint not found").not.toBeNull();
+    expect([...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]).sort()).toEqual([...SELECTION_STATUSES].sort());
+    for (const st of SELECTION_STATUSES) expect(SELECTION_STATUS_LABELS[st]).toBeTruthy();
+    expect([...CHOSEN_SELECTION_STATUSES]).toEqual(["selected", "approved"]);
+    expect(isSelectionStatus("pending")).toBe(true);
+    expect(isSelectionStatus("ordered")).toBe(false);
+  });
+
+  it("chooses ONE choice per selection, in the database", () => {
+    // A partial unique index — the cost code set's default rule — so two
+    // prices for one decision are unrepresentable.
+    expect(SELECTIONS_SQL).toMatch(
+      /job_selection_choices_one_chosen_idx[^;]*\("tenant_id","selection_id"\) WHERE "job_selection_choices"."is_selected"/,
+    );
+  });
+
+  it("prices a choice by the unit or not at all, and floors every amount", () => {
+    expect(SELECTIONS_SQL).toContain(
+      `("job_selection_choices"."quantity_thousandths" is null) = ("job_selection_choices"."unit_price_cents" is null)`,
+    );
+    expect(SELECTIONS_SQL).toMatch(/job_selection_choices_price_nonnegative/);
+    expect(SELECTIONS_SQL).toMatch(/job_selections_allowance_nonnegative/);
+    expect(SELECTIONS_SQL).toMatch(/job_selections_name_present/);
+    expect(SELECTIONS_SQL).toMatch(/job_selection_choices_description_present/);
+  });
+
+  it("hangs off the job (cascade), the contract, the change order and the code (no action); the choices go with the selection", () => {
+    expect(SELECTIONS_SQL).toMatch(/job_selections_project_fk[^;]*ON DELETE cascade/);
+    expect(SELECTIONS_SQL).toMatch(/job_selections_contract_fk[^;]*ON DELETE no action/);
+    expect(SELECTIONS_SQL).toMatch(
+      /job_selections_change_order_fk[^;]*REFERENCES "public"."job_change_orders"[^;]*ON DELETE no action/,
+    );
+    expect(SELECTIONS_SQL).toMatch(/job_selections_code_fk[^;]*ON DELETE no action/);
+    expect(SELECTIONS_SQL).toMatch(/job_selection_choices_selection_fk[^;]*ON DELETE cascade/);
+    expect(SELECTIONS_SQL).toMatch(/job_selection_choices_party_fk[^;]*ON DELETE no action/);
+    // Hand-reordered: the selections' unique index lands before the choices' key to it.
+    expect(SELECTIONS_SQL.indexOf('CREATE UNIQUE INDEX "job_selections_tenant_id_id_idx"')).toBeLessThan(
+      SELECTIONS_SQL.indexOf('ADD CONSTRAINT "job_selection_choices_selection_fk"'),
+    );
+  });
+
+  it("names its attachment target, a slug Documents accepts", () => {
+    expect(SELECTION_ENTITY).toMatch(/^[a-z][a-z0-9_]{0,62}$/);
   });
 });
 

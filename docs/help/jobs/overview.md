@@ -449,6 +449,61 @@ The panel's first line says what is on file: `Unconditional waiver on file throu
 
 A waiver on a **purchase order** is recorded the same way — suppliers have lien rights too — but the gaps are only worked out for subcontracts, whose applications the pack bills.
 
+## Selections and allowances
+
+Anybody on the job may draw up the list and record a choice; raising the money is owners only. On the {{project|lower}}'s page under **Selections**, and on its own page — {button:All selections|outline}.
+
+A selection is a decision the client still owes: the tile, the countertops, the front door hardware. Each carries what the contract **set aside** for it (the allowance), the date it is **needed by** so the schedule holds, and the **choices** on offer — the standard and the upgrades, or whatever came back from the showroom — each with a price. When the client picks one, the difference against the allowance is worked out for you, and once you have approved the pick it is raised as an ordinary change order on the contract.
+
+### The panel on the {{project|lower}}'s page
+
+One sentence: *3 selections, 1 pending (1 overdue) · allowances $16,600.00 · chosen $13,100.00, under by $500.00 · $2,500.00 approved and not yet raised as a change order.* {button:All selections|outline} opens the page; {button:Add selection|primary} opens the dialog below.
+
+### The page
+
+Five figures sit at the top: **Allowances** (every selection that is not cancelled), **Chosen** (the picked prices, where the client has chosen), **Over** or **Under** (chosen less allowances), **To raise** (approved differences not yet a change order) and **Raised** (the change orders raised, whatever their status short of void).
+
+| Column | What it is |
+| --- | --- |
+| `Selection` | The name, with the room, the cost code and the contract under it. |
+| `Needed by` | The date; in red with `overdue` under it when a pending selection is past it. |
+| `Allowance` | What the contract set aside. `—` for a standard included item. |
+| `Chosen` | The client's pick, with its reference and `320 sf at $4.20` when priced by the unit; `2 on offer` or `Nothing on offer yet` until they choose. |
+| `Price` | The chosen price. |
+| `Over / under` | Chosen less allowance, once the client has chosen; over in red, under with a minus sign. |
+| `Status` | `Pending`, `Selected`, `Approved` or `Cancelled`, with `Decided <date>`, the change order raised (`CO-4 · Approved`), reminders open in Work, and photos. |
+
+At the end of each row: {button:Raise overage|outline} or {button:Raise credit|outline} (owners, once the selection is approved with a difference and no change order standing), {button:Remind|outline} (while pending) and the pencil.
+
+### Adding one
+
+{button:Add selection|primary}.
+
+1. **`Selection`** — required. `Master bath tile`.
+2. **`Where`** — the room or area, optional.
+3. **`In the price of`** — the contract whose price holds the allowance; filled in when the job has one. `No contract yet` while the list is drawn up during design — a difference cannot be raised until one is named.
+4. **`Cost code`** — where the money lands in the budget; a raised change order carries one line on it.
+5. **`Allowance`** — what the contract set aside. Blank for a standard included item.
+6. **`Needed by`** — the date the choice is needed for the schedule.
+7. **`Status`** — `Pending` (the client owes it), `Selected` (they chose; needs a choice marked), `Approved` (you confirmed the pick and its price), `Cancelled`. Picking `Selected` or `Approved` shows **`Decided on`**, filled in with today.
+8. **`What it covers`** — optional.
+9. **Choices** — one row per thing on offer: the radio marks the client's pick; `Description` (required on any row that counts; a blank row is ignored), `Model / SKU`, `Supplier` (somebody in your books, or `No supplier`), `Qty`, unit, `per unit` and `Price`. Type a quantity and a unit price and the price box becomes the computed figure — `320` sf at `4.20` is `1,344.00`; leave them blank and type the price. Beside the block: `Over by …`, `Under by …`, `On the allowance` or `No choice marked`, live. {button:Add choice|ghost} for more.
+10. **`Notes`**.
+
+{button:Add selection|primary} stays greyed until the name is filled in. On success you see `Selection added`. What can stop a save: `Mark the choice the client made before calling the selection selected.` · `One choice is chosen, not two.` · `A choice priced by the unit needs both a quantity and a price per unit.` · `That is on another job: the contract named is on another job.`
+
+Open a selection again with the pencil to add **samples and spec sheets** — photos, through Documents, the same gallery a day on site uses.
+
+### Raising the difference
+
+Once a selection is **approved** and its pick is over or under the allowance, {button:Raise overage|outline} or {button:Raise credit|outline} appears (owners). The dialog says the amount and asks for the change order's **`Number`** (yours), a **`Title`** (filled in: `Master bath tile: allowance overage`), and whether it starts **`Proposed`** or **`Approved`** (with `Approved on`). The change order carries the difference as its price — a credit as a negative — and one cost line moving the selection's code by the same amount; it appears in the {{project|lower}}'s **Change orders** panel like any other and moves the contract value and the budget when approved. The selection shows the number under its status.
+
+**Once raised, the allowance and the choices are fixed**: the dialog shows them but does not send them — `Fixed: raised as CO-4.` Void that change order (in the Change orders panel) to re-price, and raise again. Raising twice is refused: `The difference on that selection has been raised: already raised as change order CO-4. Void the change order to re-price it.` A pick exactly on the allowance has nothing to raise, and a selection with no contract has nowhere to.
+
+### Reminders
+
+A pending selection past its `Needed by` reads `overdue` in red. {button:Remind|outline} adds an item to Work — `Selection needed: Master bath tile by 2026-10-15 (24-108)`, due that day — linked to the selection, beside everything else the office has to do; the row reads `Reminder open in Work` until it is ticked off there. It is not on the {{project|lower}}'s punch list, which is for the site.
+
 ## On site — the daily log, photos and the punch list
 
 Anyone on the team, not only owners: the field is a chore, and the person with the phone on the site is rarely the owner.
@@ -616,6 +671,7 @@ Worth knowing so you are not looking for it:
 - **A cost-plus job on the work in progress schedule earns what it has cost plus its fee**, capped at its maximum, with no estimate asked for — when it is the job's only signed contract. A time-and-materials job earns its approved hours at their rates plus the rest of its cost marked up, the same way; one with hours nobody has priced shows `Hours on the job with no bill rate` and blocks the period until a rate is set. A job mixing methods is shown and left out, and a period with billings on one cannot post until it has a value.
 - **A subcontractor's application does not print**, and neither does a change order on an order. They are the subcontractor's documents, prepared on their side; your own applications print from their row.
 - **A lien waiver cannot be attached as a PDF, and is not generated.** The signed copy is a photo of the page; a PDF that came by email lives in Documents and cannot yet be pointed at from the waiver. The form itself is your state's or your lawyer's, not something Jobs prints.
+- **The option book is per job.** The same selections with the same choices on every plan are entered on each job for now; a book that seeds a new job is next. Nothing here lets the client choose for themselves; the office records what they said.
 - **A back-charge is not a change order.** Money you deduct from a subcontractor's payment for something you paid on their behalf reduces the payment, not the scope; a deductive change order reduces the scope. Record a back-charge as a credit in Accounting for now.
 - **Nothing codes a bill for you.** Cost codes appear in Accounting wherever you tag a line, beside the job itself, and the `Spent` column reads what the bills carry. A line with the job and no code shows up as the uncoded note under the job cost table, not on a row.
 - **Nothing is ever deleted.** A contract you should not have added is set to `Cancelled` or `Declined`; a cost code is retired; a {{project|lower}} is cancelled. That is on purpose — a job's history is the point of keeping it.
@@ -631,6 +687,8 @@ Worth knowing so you are not looking for it:
 | Set a schedule of values, or issue a pay application | ● | | |
 | Record or approve a subcontractor's application | ● | | |
 | Record a lien waiver, or ask for one in Work | ● | ● | ● |
+| Draw up selections, record the client's choice, remind them in Work | ● | ● | ● |
+| Raise a selection's difference as a change order | ● | | |
 | Log a day on site, or add and tick a punch item | ● | ● | ● |
 | Add photos to a day | ● | ● | |
 | See the work in progress schedule | ● | ● | ● |

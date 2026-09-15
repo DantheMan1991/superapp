@@ -146,7 +146,9 @@ export class JobsError extends Error {
       /** The client's change order named — or the order a waiver names — is on another job. */
       | "WRONG_PROJECT"
       /** A received lien waiver carries the date it arrived. */
-      | "RECEIVED_DATE_REQUIRED",
+      | "RECEIVED_DATE_REQUIRED"
+      /** A selection's difference has been raised as a change order that still stands; the message names it. */
+      | "SELECTION_RAISED",
     message: string,
   ) {
     super(message);

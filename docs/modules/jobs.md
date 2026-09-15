@@ -13,6 +13,111 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-14 — Slice 8: selections and allowances (`claude/selections`, ADR 0067)
+
+`job_selections` and `job_selection_choices`, a **Selections** page per job
+(`/dashboard/m/jobs/[id]/selections`), a Selections panel on the job's
+page, and the difference raised as a change order — the custom builder's
+other daily number, and the production builder's option book, as one
+mechanism.
+
+**A SELECTION AND ITS CHOICES.** A selection is a decision the client owes:
+a name, the room, the cost code, the **allowance** the contract set aside,
+the date it is **needed by**, and pending / selected / approved /
+cancelled. Its choices are what is on offer — description, supplier,
+reference, a price by the unit (320 sf at $4.20, ADR 0064's thousandths
+and rounding, computed on save) or as a sum — and the one the client
+picked, **at most one per selection by a partial unique index**, the cost
+code set's default rule. A production option is a selection whose
+allowance is the standard's price and whose choices are the upgrades; a
+custom allowance is a selection whose choices are the showroom samples.
+Choices are written the schedule of values' way — updated by id, inserted,
+removed when left out — so a chosen choice keeps its identity across an
+edit, and the chosen flags are cleared before the rows are written so the
+partial index cannot trip on write order.
+
+**THE DIFFERENCE IS COMPUTED AND MOVES BY CHANGE ORDER.** Chosen price less
+allowance, worked out in `listSelections` and summed by `summarise` (the
+five numbers: allowances, chosen, over/under, to raise, raised), counted
+once the client has chosen. Approved, it is raised by
+`raiseSelectionChangeOrder` through `createChangeOrder` — the overage as
+the change's price, an underage as a credit, one cost line on the
+selection's code — and the selection keeps `change_order_id`, so
+`SELECTION_RAISED` refuses a second raising and fixes the allowance and the
+choices while the change order stands; a voided one frees them, and the
+ops test re-prices to a credit that way. A selection on the allowance to
+the cent has nothing to raise; one with no contract has nowhere to.
+
+**THE REMINDER IS WORK ON THE SELECTION** (`job_selection`, not the punch
+list's `project`), *Selection needed: Master bath tile by 2026-09-01
+(24-108)*, due on the needed-by date; the page reads Work's open items
+once and counts them per selection. Samples and spec sheets are the shared
+gallery on the selection. Drawing up the list and recording the choice is
+a member's chore; raising money is the change order's owner gate.
+
+**WHAT THE PAGES SAY.** The Selections page: five tiles, the table
+(selection with room, code and contract; needed by, red and *overdue* when
+past; allowance; the chosen choice with its reference and unit pricing, or
+how many are on offer; price; over/under signed and red when over; status
+with the decided date, the change order's number and status, reminders
+open and photos) and per row *Raise overage* / *Raise credit* (owner, when
+approved with a difference and no standing change order), *Remind*
+(pending) and the pencil. The dialog: selection, where, in the price of
+(the contract), cost code, allowance, needed by, status (with decided on),
+what it covers, the choices (radio, description, reference; supplier,
+quantity, unit, unit price, price — the price box becomes the computed
+figure when the unit pair is typed), notes, and the gallery once it exists;
+the running *Over by / Under by / On the allowance* beside the choices;
+once raised, the allowance and choices shown fixed with the change order's
+number. The job's page: a Selections panel — *N selections, M pending (K
+overdue) · allowances … · chosen …, over by … · … approved and not yet
+raised as a change order* — with *All selections* and *Add selection*.
+
+**DRIVEN ON THE DEV BRANCH, on 24-108** (three contracts, CO-1 on the
+New Home agreement). The empty Selections page: five tiles at nothing and
+the sentence saying what a selection is. *Add selection* → *Master bath
+tile*, *Master bath*, in the price of *New home*, allowance `4000`, needed
+by `2026-09-01`, two choices — *Daltile Rittenhouse 3x6, white* `0100-36`
+at `320` sf × `4.20`, the price box turning into **1,344.00** as the pair
+was typed, and *Marble herringbone* at `6500` — → *Selection added*: **1
+selection, 1 pending, 1 overdue · Allowances $4,000.00**, the row *2026-09-01
+overdue* in red, *2 on offer*, *Pending*. *Remind* → *Added to Work* and
+*Reminder open in Work* under the status. The pencil: the marble's radio,
+*Over by 2,500.00* live beside the choices, status *Selected* filling
+*Decided on* with today → **Chosen $6,500.00 · Over $2,500.00**, the row
+*Marble herringbone · $6,500.00 · $2,500.00* in red, *Selected · Decided
+2026-09-14*. The pencil again, *Approved* → **To raise $2,500.00** and
+*Raise overage* on the row → the dialog *Over the allowance by $2,500.00*,
+number `CO-2`, the title filled in, status *Approved* → *Change order
+raised*: **To raise $0.00 · Raised $2,500.00**, the row *CO-2 · Approved*,
+the button gone. The job's page: the contracts panel **Worth $1,964,500.00
+across 3 signed agreements, including $15,000.00 in approved changes**, the
+New Home row **$1,857,000.00 / orig. $1,842,000.00**, the change orders
+panel **CO-2 · Master bath tile: allowance overage · Approved 2026-09-14 ·
+New home · $2,500.00 · — · Approved** beside CO-1, and the Selections
+panel **1 selection, 0 pending · allowances $4,000.00 · chosen $6,500.00,
+over by $2,500.00**. Not driven: a credit, a void and re-price, a cancelled
+selection and the photos (the pane cannot supply a file); the first three
+are in the ops test.
+
+Migrations `0352_selections.sql` (hand-reordered like the seven before it:
+two new tables, the selections' unique index moved ahead of the choices'
+key to it) and `0353_selections_rls.sql`, applied to dev and prod before
+the merge; `db:verify-rls` **216 tables** on both, `db:verify-modules`
+19/19. Tests: five more pure (the status list mirrored and which statuses
+count, the one-chosen index, the unit pair and the floors, the six keys
+and the reordering, the entity slug), one more ops (a selected selection
+needs a choice; another job's contract; staff draw it up with a unit-priced
+choice whose typed price is ignored; overdue; the reminder on the selection
+and not the punch list; two chosen refused and a choice keeping its id;
+raising needs approval then an owner; the change order with its line, the
+project's revised value and the summary; twice refused, the money fixed,
+the words free; void → re-price → a credit; on the allowance to the cent;
+no contract; cancelled out of the sums), one more isolation (read, write,
+the four cross-tenant parents of a selection and the two of a choice, one
+chosen, the unit pair, the floors, the held change order and code, cascade
+both ways).
+
 ### 2026-09-14 — Slice 11a: lien waivers (`claude/lien-waivers`, ADR 0066)
 
 `job_lien_waivers`, a **Lien waivers** panel on every order's page, a line
@@ -1772,6 +1877,8 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_commitment_change_orders` | A change to ONE commitment — a subcontract change order or a purchase-order revision: number, title, the client-side statuses, the approval date, and the client's change order it passes down, if any (4b, ADR 0065). Its MONEY is the commitment lines tagged with it. | Cascade from the commitment; **RESTRICT to `job_change_orders`** — the client's change a sub change passes down cannot go from under it, and must be on the same job (the verb checks). Number unique per `(tenant, commitment)`. CHECK `(status = 'approved') = (approved_on is not null)`, both ways, as the client-side row. |
 | `job_sub_applications` | A subcontractor's application against a SUBCONTRACT: the G702 read from the other side of the table. | Numbered per commitment, void ones included. `status` draft/billed/void. `retainage_ppm` 0–1,000,000. Five totals FROZEN at approval. `bill_id` RESTRICT to Accounting's `bills`; CHECK `(status = 'draft') = (bill_id is null)`, both ways. Cascade from the commitment. See ADR 0061. |
 | `job_sub_application_lines` | One line per subcontract line: previous, this period, stored. | Cascade from the application; **RESTRICT to the subcontract line** — a billed line cannot be replaced out from under its certificate. `this_period` may be negative; the total to date may not — on a DEDUCTIVE line (a change order's negative line) the floors flip: completed to less than nothing and never more, `scheduled_cents` kept equal to the line's amount by the sync while a draft (4b). |
+| `job_selections` | A decision the client owes (8, ADR 0067): name, room, cost code, the allowance the contract set aside, the date it is needed by, pending / selected / approved / cancelled, the date decided, and the change order its difference was raised as. | Cascade from the project; **no action to the contract, the change order and the code** (retired, never deleted). `allowance_cents` ≥ 0. The difference — chosen price less allowance — is computed, never stored; while the raised change order stands, the allowance and the choices are fixed (the verb). |
+| `job_selection_choices` | What is on offer for a selection, one row each: description, supplier, reference, a price by the unit (both or neither, ADR 0064's thousandths) or as a sum, `price_cents` the extended figure, and `is_selected` for the client's pick. | Cascade from the selection; no action to the party. **One chosen per selection**: a partial unique index on `(tenant, selection) where is_selected`. Price, quantity and unit price ≥ 0; the unit pair both or neither. Nothing points at a choice, so an edit replaces by id. |
 | `job_lien_waivers` | A lien waiver as a RECORD (11a, ADR 0066): the claimant (any party), the job, the order and the billed application it covers, its kind (conditional/unconditional × progress/final), the through date, the amount, and whether it was requested or received. The signed copy is a Documents attachment (`job_lien_waiver`). | Cascade from the project and the order; **no action to the party and to the application** — who signed is held, and a named application stays. CHECK: received has its date, requested has none, void keeps what it had; amount ≥ 0. Nothing here says "outstanding": the gap is derived from the applications' bills at read time. |
 | `job_commitment_lines` | The money, one cost code at a time — the lines the order was placed with (`change_order_id` null) and each change order's, tagged with it (4b). | Cascade from the commitment and from the change; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative on an original line — a credit is a change order — and a change's line may be negative, the one exception in the CHECK. A line counts when it is original or its change is approved: `countedCommitmentLine`, one predicate for every roll-up. |
 | `job_projects` | The spine. | FOUR composite FKs, each certified in `tests/isolation/jobs.test.ts`: company, division, client, cost code list. `delivery_method` is an open taxonomy (P1) with a **format check and no value check**, and is nullable. `metadata` is the P2 extension bag. |
@@ -1790,9 +1897,9 @@ hand-reordered like 0329) and `0335_job_billing.sql` / `0336_job_billing_rls.sql
 `wip_adjustment` to `journal_entry_source`, which nothing in the file uses)
 and `0341_cost_plus.sql` / `0342_cost_plus_rls.sql` (slice 5b; as generated,
 since the new table references existing ones only) and `0343_sub_billing.sql`
-/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) and `0350_lien_waivers.sql` / `0351_lien_waivers_rls.sql` (slice 11a; as generated, one new table referencing existing ones) follow the same rule —
+/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) and `0350_lien_waivers.sql` / `0351_lien_waivers_rls.sql` (slice 11a; as generated, one new table referencing existing ones) and `0352_selections.sql` / `0353_selections_rls.sql` (slice 8; hand-reordered — two new tables, the selections' unique index ahead of the choices' key) follow the same rule —
 and from slice 3 the pair is `db:verify-rls` **and `db:verify-modules`**, after
-the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **214 tables**, all enabled, forced and with
+the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **216 tables**, all enabled, forced and with
 policies, on both.
 
 **0327 needed no hand-reordering, which confirms the diagnosis in 0325.** Both
@@ -1964,6 +2071,12 @@ ordering only bites when two new tables reference each other in one file.
   fixed-value methods get a schedule; cost plus a fee gets the books' cost;
   time and materials gets Time's hours and the books' cost without the
   wages; unit price gets a note. Never the kind.
+- **A selection is a decision with an allowance and priced choices, and its
+  difference moves by change order** — [ADR 0067](../decisions/0067-a-selection-is-a-decision-with-an-allowance-and-priced-choices-and-its-difference-moves-by-change-order.md).
+  One model for the option book and the allowance list; one chosen choice
+  at the database; the difference computed and raised as an ordinary change
+  order once approved, fixed while that stands; the reminder Work on the
+  selection; a member's chore except the money.
 - **A lien waiver is a record with a kind and a through date, and the gap
   is derived from the payment** — [ADR 0066](../decisions/0066-a-lien-waiver-is-a-record-with-a-kind-and-a-through-date-and-the-gap-is-derived.md).
   Never a form: who, which job and order, which kind, through when, how
@@ -2029,6 +2142,14 @@ ordering only bites when two new tables reference each other in one file.
   ~~**retainage held FROM subcontractors**~~ **closed 2026-09-14 (slice 5c,
   ADR 0061)**; ~~**the AIA-style printout** of a certificate~~ **closed
   2026-09-14 (slice 5e, ADR 0063)**.
+- **The option book is per job.** A production builder's catalogue — the
+  same selections with the same choices on every plan — is entered on each
+  job until slice 8b seeds a new job's selections from a tenant-level book.
+  A client portal for the client to choose from is not built; the office
+  records what the client said. A selection sheet does not print. The
+  Selections panel shows on every job: a project template that turns the
+  workflow off for a delivery method without selections is the plan's
+  `workflows` field, later.
 - **The certificate has no architect of record and no certified amount.**
   The owner's or architect's block is signed with a pen and its *Amount
   certified* line is blank: the pack records what was applied for. The day a

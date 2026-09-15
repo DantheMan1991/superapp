@@ -358,6 +358,35 @@ export const PROJECT_ENTITY = "project";
 export const LIEN_WAIVER_ENTITY = "job_lien_waiver";
 /** Work raised about an order — a waiver to chase — is linked to the order, not to the job's punch list. */
 export const COMMITMENT_ENTITY = "job_commitment";
+/** A selection's samples and spec sheets hang on the selection; a reminder to the client is Work linked to it (ADR 0067). */
+export const SELECTION_ENTITY = "job_selection";
+
+// ------------------------------------------------------------------ selections
+
+/**
+ * Mirrors `job_selections_status_valid`. Kept in sync by tests/jobs.test.ts.
+ *
+ * `pending` is a decision the client owes; `selected` is the client having
+ * chosen; `approved` is the builder confirming the choice and its price, the
+ * point from which the difference can be raised as a change order;
+ * `cancelled` is a selection that is no longer part of the job.
+ */
+export const SELECTION_STATUSES = ["pending", "selected", "approved", "cancelled"] as const;
+export type SelectionStatus = (typeof SELECTION_STATUSES)[number];
+
+export const SELECTION_STATUS_LABELS: Record<SelectionStatus, string> = {
+  pending: "Pending",
+  selected: "Selected",
+  approved: "Approved",
+  cancelled: "Cancelled",
+};
+
+/** The statuses whose chosen price COUNTS against the allowance: the client has chosen, or the builder has confirmed. */
+export const CHOSEN_SELECTION_STATUSES: readonly SelectionStatus[] = ["selected", "approved"];
+
+export function isSelectionStatus(v: string): v is SelectionStatus {
+  return (SELECTION_STATUSES as readonly string[]).includes(v);
+}
 
 // ---------------------------------------------------------------- lien waivers
 

@@ -39,6 +39,8 @@ import { PunchList } from "@/packs/jobs/components/punch-list";
 import { listDailyLogs, listPunchItems } from "@/packs/jobs/field-ops";
 import { commitmentBilling } from "@/packs/jobs/sub-billing-ops";
 import { waiverCoverage, waiverGaps } from "@/packs/jobs/compliance-ops";
+import { selectionSummary } from "@/packs/jobs/selections-ops";
+import { SelectionForm } from "@/packs/jobs/components/selection-form";
 import { BudgetEditor } from "@/packs/jobs/components/budget-editor";
 import { ProjectForm } from "@/packs/jobs/components/project-form";
 import { Button } from "@/components/ui/button";
@@ -116,6 +118,7 @@ export default async function ProjectPage({
         punch,
         waiverGapList,
         waiverCover,
+        selections,
       ] = await Promise.all([
         tx
           .select({ name: schema.entities.name })
@@ -219,6 +222,7 @@ export default async function ProjectPage({
         listPunchItems(tx, ctx.tenant.id, project.id),
         waiverGaps(tx, ctx.tenant.id, project.id),
         waiverCoverage(tx, ctx.tenant.id, project.id),
+        selectionSummary(tx, ctx.tenant.id, project.id, new Date().toISOString().slice(0, 10)),
       ]);
       return {
         project,
@@ -247,6 +251,7 @@ export default async function ProjectPage({
         punch,
         waiverGaps: waiverGapList,
         waiverCoverage: waiverCover,
+        selections,
       };
     },
     { role: ctx.role },
@@ -1138,6 +1143,57 @@ export default async function ProjectPage({
             </Table>
           </div>
         )}
+      </Panel>
+
+      <Panel className="p-5">
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-heading text-sm font-medium tracking-heading">
+            Selections
+          </h2>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/dashboard/m/jobs/${project.id}/selections`}>All selections</Link>
+            </Button>
+            {canLog && (
+              <SelectionForm
+                projectId={project.id}
+                contracts={contracts.map((c) => ({
+                  id: c.id,
+                  label: `${slugLabel(c.kind)}${c.name ? ` · ${c.name}` : ""}`,
+                }))}
+                costCodes={data.codes
+                  .filter((c) => c.isActive)
+                  .map((c) => ({ id: c.id, label: `${c.code} · ${c.name}` }))}
+                parties={data.parties}
+                documentsOn={false}
+                tenantId={ctx.tenant.id}
+                canPhoto={false}
+              />
+            )}
+          </div>
+        </div>
+        <p className="mb-3 text-sm text-muted-foreground">
+          {/*
+            WHAT THE CLIENT STILL OWES, and what it is costing against the
+            allowances — the custom builder's other daily number (ADR 0067).
+            Computed from the rows on the selections page; nothing stored.
+          */}
+          {data.selections.count === 0
+            ? "Nothing to choose yet. Selections are the decisions the client owes — tile, countertops, fixtures — each with the allowance the contract set aside and the date it is needed by."
+            : `${data.selections.count} ${data.selections.count === 1 ? "selection" : "selections"}, ${data.selections.pending} pending${
+                data.selections.overdue > 0 ? ` (${data.selections.overdue} overdue)` : ""
+              } · allowances ${formatMoney(data.selections.allowancesCents, symbol)}${
+                data.selections.count - data.selections.pending > 0
+                  ? ` · chosen ${formatMoney(data.selections.chosenCents, symbol)}, ${
+                      data.selections.differenceCents >= 0 ? "over" : "under"
+                    } by ${formatMoney(Math.abs(data.selections.differenceCents), symbol)}`
+                  : ""
+              }${
+                data.selections.toRaiseCents !== 0
+                  ? ` · ${formatMoneySign(data.selections.toRaiseCents, symbol)} approved and not yet raised as a change order`
+                  : ""
+              }.`}
+        </p>
       </Panel>
 
       <Panel className="p-5">

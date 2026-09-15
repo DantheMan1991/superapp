@@ -13,6 +13,89 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-15 — Slice 10b: the proposal (`claude/proposal`, ADR 0070)
+
+An estimate as the document the client is sent: four columns on
+`job_estimates` (migration `0358_proposal.sql`, columns and a CHECK on an
+existing table, so no RLS migration), a **Proposal** block in the
+estimate's editor, a *Print proposal* button there and a *Proposal* button
+on every row of the estimates list, and a GET route
+`/api/jobs/estimates/[id]/pdf` — three files that mirror the pay
+application's printout exactly: `proposal-model.ts` (pure, every word and
+figure, table-tested), `proposal-pdf.tsx` (layout only, `@react-pdf/renderer`,
+the same NotoSans faces) and `proposal.ts` (rows to input, brand, bytes),
+with `proposalData` in `estimating-ops.ts` reading the estimate, its
+arithmetic, the job and the client in one go.
+
+**THE PROPOSAL SHOWS PRICES, NEVER COST.** Every line prints at its price
+with overhead and profit spread into it — `scheduleFromEstimate`, the same
+spread the schedule of values takes — so the lines add to the total the
+contract is signed at, and a line sold by the unit prints its raised unit
+price. The unit cost, markup, overhead, profit and margin appear nowhere;
+the pure test builds the model with the business's own words blanked and
+scans it for the five words, all three ways. **Three ways to show the
+price**, per estimate: line by line (quantity and per-unit columns appear
+only when a line needs them), by cost code (the no-code lines as *Other*),
+or one sum (no rows; *Price for the work described* on its own line). When
+unit prices cannot add to the total to the cent, a *Rounding* row carries
+the difference so the page adds up.
+
+**THE WORDS LIVE ON THE ESTIMATE AND ARE FIXED WITH THE MONEY.** Scope,
+exclusions and terms are three texts beside the lines, each typed line its
+own paragraph on the page (so an exclusions list stays a list). They are
+the agreement: an accepted estimate refuses them with its rates and lines
+(`ESTIMATE_ACCEPTED`); the presentation is a printing choice and stays
+free. A new estimate starts with the **terms of the newest estimate that
+has any** (`lastTerms`, tenant-wide), terms given blank stay blank — the
+habit of copying last time's terms, without a settings screen for one
+paragraph. The client is the contract's counterparty once the estimate
+names a contract, else the job's client party; Accounting's customer
+address when there is one, the certificate's rule. A draft prints under
+DRAFT with *Not yet sent*; declined and superseded under those words;
+sent and accepted clean. Rendered on request, never stored.
+
+**DRIVEN, in two halves.** The browser pane came up signed out, so the
+first pass rendered by script — a throwaway file (never committed) that
+stubs `server-only` through a tsconfig `paths` entry and calls the real
+`loadProposal` → `renderProposal` path against the dev branch's Hilltop
+Farm, EST-1 on 24-109 (accepted onto the cost-plus contract) with its scope,
+three exclusions and three lines of terms written to the row, three
+renders read back through Documents' own PDF text extractor, to the cent.
+Then the founder signed in and the screens were clicked: the list's
+*Proposal* button on the row; EST-1's Proposal block with the three texts
+greyed and fixed and *Show the price* still live — switched to *By cost
+code*, *Estimate saved*, and the row read it back; *New estimate* EST-2
+landed on its editor with **EST-1's terms already in the Terms box** and
+scope and exclusions blank; a scope, two exclusions, 15 / 10 / 10 and one
+$18,500 line saved as *One sum*, the six figures returned from the row
+(cost 18,500.00, price 21,275.00, overhead 2,127.50, profit 2,340.25,
+total 25,742.75, margin 28.1%); then the route itself, fetched from the
+page and shown through Chrome's viewer (the pane treats a PDF response as
+a download): EST-2 under **DRAFT**, *Not yet sent*, *Valid until —*, *To —*
+(the job has no client party), *Price for the work described 25,742.75*,
+*Accepted for the client*; EST-1 by cost code — **03 30 00 · Cast-in-place
+concrete 33,795.30 · 06 10 00 · Rough carpentry 53,240.00 · Other 2,087.25
+· Total 89,122.55** — the farm's logo and green, *To Tractor Supply Co*
+from the contract. One thing found by looking: EST-1's signature block
+wrapped alone onto a second page by a few points, an acceptance sentence
+on one page and the lines to sign on the next. The closing is now one
+non-wrapping block, trimmed with the page's bottom padding, and both
+proposals print on one page; a long one still carries its closing whole
+onto the next.
+
+Migration `0358_proposal.sql` applied to dev and prod before the merge;
+`db:verify-rls` **219 tables** (none new) on both, `db:verify-modules`
+19/19. Tests: `tests/jobs-proposal.test.ts` (the three presentations on
+the estimating suites' four lines to the cent, the uncoded case, the
+rounding row, the facts and their fallbacks, paragraphs, the acceptance
+block and the signatures, the watermarks, the scan for the five words,
+three renders to real PDF bytes), one more pure in `tests/jobs.test.ts`
+(the presentation CHECK mirrored, the three text columns defaulted), one
+more ops (terms copied from the last estimate and only the terms, blank
+terms kept, a presentation off the list, `proposalData` naming the job's
+party then the contract's counterparty, an accepted estimate refusing its
+words and taking a presentation), and the isolation CHECK.
+
 ### 2026-09-15 — Slice 10: estimating (`claude/estimating`, ADR 0069)
 
 `job_estimates` and `job_estimate_lines`, an **Estimates** page per job
@@ -2106,7 +2189,7 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_sub_application_lines` | One line per subcontract line: previous, this period, stored. | Cascade from the application; **RESTRICT to the subcontract line** — a billed line cannot be replaced out from under its certificate. `this_period` may be negative; the total to date may not — on a DEDUCTIVE line (a change order's negative line) the floors flip: completed to less than nothing and never more, `scheduled_cents` kept equal to the line's amount by the sync while a draft (4b). |
 | `job_selections` | A decision the client owes (8, ADR 0067): name, room, cost code, the allowance the contract set aside, the date it is needed by, pending / selected / approved / cancelled, the date decided, and the change order its difference was raised as. | Cascade from the project; **no action to the contract, the change order and the code** (retired, never deleted). `allowance_cents` ≥ 0. The difference — chosen price less allowance — is computed, never stored; while the raised change order stands, the allowance and the choices are fixed (the verb). |
 | `job_selection_choices` | What is on offer for a selection, one row each: description, supplier, reference, a price by the unit (both or neither, ADR 0064's thousandths) or as a sum, `price_cents` the extended figure, and `is_selected` for the client's pick. | Cascade from the selection; no action to the party. **One chosen per selection**: a partial unique index on `(tenant, selection) where is_selected`. Price, quantity and unit price ≥ 0; the unit pair both or neither. Nothing points at a choice, so an edit replaces by id. |
-| `job_estimates` | The job priced before anybody signs (10, ADR 0069): a number unique per job, title, draft / sent / accepted / declined / superseded, sent / decided / valid-until dates, the three rates in ppm — markup on cost (the lines' default), overhead on the subtotal, profit on the subtotal plus overhead — notes, and the contract an accepted one became. | Cascade from the project; **no action to the contract**. CHECK: status on the list, every rate 0..10,000,000 ppm (`RATE_PPM_MAX`), number present. Nothing stores a total: `estimate-math.ts` computes them. Accepted, the rates and lines are fixed by the verb, not the database. |
+| `job_estimates` | The job priced before anybody signs (10, ADR 0069): a number unique per job, title, draft / sent / accepted / declined / superseded, sent / decided / valid-until dates, the three rates in ppm — markup on cost (the lines' default), overhead on the subtotal, profit on the subtotal plus overhead — notes, and the contract an accepted one became. | Cascade from the project; **no action to the contract**. CHECK: status on the list, every rate 0..10,000,000 ppm (`RATE_PPM_MAX`), number present. Nothing stores a total: `estimate-math.ts` computes them. Accepted, the rates and lines are fixed by the verb, not the database. Since 10b (ADR 0070) also `presentation` (CHECK lines / codes / sum) and the proposal's `scope`, `exclusions` and `terms` — the words fixed with the money, the presentation free. |
 | `job_estimate_lines` | One line of an estimate: cost code, description, unit, quantity in thousandths (1000 = one, a lump sum), unit cost, an optional markup of its own, an optional unit price that wins over any markup, notes, sort order. | Cascade from the estimate; **no action to the code**. CHECK: description present, quantity / unit cost / unit price ≥ 0, markup 0..10,000,000 ppm or null. Written by id (updated, inserted, removed when left out), so a line keeps its identity across an edit; nothing points at one. |
 | `job_party_documents` | What a subcontractor or supplier has on file with the business (11b, ADR 0068): the party, an open-taxonomy `kind` (format-checked; three suggested), title, issuer, number, issued and expires dates, a coverage limit, requested / received / void with the receipt date, notes. The scanned copy is a Documents attachment (`job_party_document`). | **No action to the party** — one with documents on file cannot be merged away. CHECK: the kind is a slug; received has its date, requested has none, void keeps what it had; limit ≥ 0. Standing (missing / expired / expiring / ok) is derived against today and the tenant's required list, never stored. |
 | `job_lien_waivers` | A lien waiver as a RECORD (11a, ADR 0066): the claimant (any party), the job, the order and the billed application it covers, its kind (conditional/unconditional × progress/final), the through date, the amount, and whether it was requested or received. The signed copy is a Documents attachment (`job_lien_waiver`). | Cascade from the project and the order; **no action to the party and to the application** — who signed is held, and a named application stays. CHECK: received has its date, requested has none, void keeps what it had; amount ≥ 0. Nothing here says "outstanding": the gap is derived from the applications' bills at read time. |
@@ -2127,7 +2210,7 @@ hand-reordered like 0329) and `0335_job_billing.sql` / `0336_job_billing_rls.sql
 `wip_adjustment` to `journal_entry_source`, which nothing in the file uses)
 and `0341_cost_plus.sql` / `0342_cost_plus_rls.sql` (slice 5b; as generated,
 since the new table references existing ones only) and `0343_sub_billing.sql`
-/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) and `0350_lien_waivers.sql` / `0351_lien_waivers_rls.sql` (slice 11a; as generated, one new table referencing existing ones) and `0352_selections.sql` / `0353_selections_rls.sql` (slice 8; hand-reordered — two new tables, the selections' unique index ahead of the choices' key) and `0354_party_documents.sql` / `0355_party_documents_rls.sql` (slice 11b; as generated) and `0356_estimates.sql` / `0357_estimates_rls.sql` (slice 10; hand-reordered — two new tables, the estimates' unique index ahead of the lines' key) follow the same rule —
+/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) and `0350_lien_waivers.sql` / `0351_lien_waivers_rls.sql` (slice 11a; as generated, one new table referencing existing ones) and `0352_selections.sql` / `0353_selections_rls.sql` (slice 8; hand-reordered — two new tables, the selections' unique index ahead of the choices' key) and `0354_party_documents.sql` / `0355_party_documents_rls.sql` (slice 11b; as generated) and `0356_estimates.sql` / `0357_estimates_rls.sql` (slice 10; hand-reordered — two new tables, the estimates' unique index ahead of the lines' key) and `0358_proposal.sql` (slice 10b; four columns and a CHECK on `job_estimates`, so no RLS migration) follow the same rule —
 and from slice 3 the pair is `db:verify-rls` **and `db:verify-modules`**, after
 the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **219 tables**, all enabled, forced and with
 policies, on both.
@@ -2217,6 +2300,13 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Decisions & gotchas
 
+- **[ADR 0070](../decisions/0070-a-proposal-is-the-estimate-at-its-price-and-its-words-are-fixed-with-the-money.md)** —
+  the proposal is the estimate printed at its PRICE: overhead and profit
+  spread into the lines (the schedule's spread), cost and markup never on
+  the page, three ways to show the price. Scope, exclusions and terms live
+  on the estimate and are fixed with the money once accepted; a new
+  estimate starts with the last one's terms. Rendered on request, never
+  stored.
 - **[ADR 0069](../decisions/0069-an-estimate-prices-the-job-before-anybody-signs-and-accepting-it-names-the-contract.md)** —
   an estimate line carries COST and PRICE as two numbers (a markup on cost,
   the line's or the estimate's, unless a unit price is typed, which wins);
@@ -2367,13 +2457,16 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Open items
 
+- **The proposal prints; it is not sent, and the client cannot accept it on
+  a screen of their own (10b, ADR 0070).** Mail's seam is there for the
+  sending when somebody asks; a client portal is a decision of its own.
 - **An estimate is lines, and nothing more yet (slice 10, ADR 0069).**
   Assemblies — a named bundle of lines dropped in as one ("interior door,
   prehung": slab, hardware, casing, labour) — a tenant-level unit cost book
-  that fills a line's cost from the last time it was priced, a takeoff
-  from the drawings, and the proposal as a printed document are each a
-  real thing the trade has and each a slice of its own; the first two want
-  a few real estimates typed before their shape is set. An estimate is not
+  that fills a line's cost from the last time it was priced, and a takeoff
+  from the drawings are each a real thing the trade has and each a slice
+  of its own; the first two want a few real estimates typed before their
+  shape is set. ~~The proposal as a printed document~~ shipped as 10b. An estimate is not
   attached to Documents (a scanned quote, a supplier's price sheet) — the
   gallery seam is there and nothing on the estimate calls it yet. An
   estimate on a schedule where every line is sold by the unit can miss the

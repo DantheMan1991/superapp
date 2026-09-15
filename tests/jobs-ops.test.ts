@@ -103,6 +103,7 @@ import {
   applyEstimateToSchedule,
   createEstimate,
   listEstimates,
+  proposalData,
   updateEstimate,
 } from "../src/packs/jobs/estimating-ops";
 import { certificateInputFrom } from "../src/packs/jobs/certificate";
@@ -4172,5 +4173,45 @@ d("jobs ops", () => {
     await expect(
       run((tx) => createPartyDocument(tx, ctx, { partyId: framer, kind: "license", limitCents: -1, receivedOn: "2026-09-15" })),
     ).rejects.toMatchObject({ code: "INVALID_VALUE" });
+  }, 120_000);
+
+  it("A PROPOSAL is the estimate at its price: a new estimate starts with the last one's terms, the presentation is checked, an accepted estimate's words are fixed but how the price is shown is not, and the client is the contract's counterparty once one is named", async () => {
+    const entity = await newCompany("Prop Co 1");
+    const { project, contract, client } = await run(async (tx) => {
+      const client = await seedVendor(tx, "Oak Row Owner");
+      const p = await createProject(tx, ctx, { entityId: entity, number: "OPS-PROP1", name: "Proposed", partyId: client });
+      const contract = await createContract(tx, ctx, { projectId: p.id, kind: "new_home", valueCents: 0, counterpartyPartyId: client });
+      return { project: p, contract, client };
+    });
+    const first = await run((tx) =>
+      createEstimate(tx, staffCtx, {
+        projectId: project.id,
+        number: "P-1",
+        terms: "Ten percent on signing.",
+        scope: "Everything on the drawings.",
+        lines: [{ description: "Everything", unitCostCents: 100_000_00 }],
+      }),
+    );
+    expect([first.presentation, first.terms, first.scope, first.exclusions]).toEqual(["lines", "Ten percent on signing.", "Everything on the drawings.", ""]);
+    // The next estimate starts with the last one's terms — and only the terms; blank terms given stay blank.
+    const second = await run((tx) => createEstimate(tx, staffCtx, { projectId: project.id, number: "P-2" }));
+    expect([second.terms, second.scope]).toEqual(["Ten percent on signing.", ""]);
+    expect((await run((tx) => createEstimate(tx, staffCtx, { projectId: project.id, number: "P-3", terms: "" }))).terms).toBe("");
+    await expect(run((tx) => createEstimate(tx, staffCtx, { projectId: project.id, number: "P-4", presentation: "poster" }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    // The client is the job's party until a contract is named; a party never billed prints as a name alone.
+    let data = await run((tx) => proposalData(tx, tenantId, first.id));
+    expect([data?.project.number, data?.row.totals.totalCents, data?.toAddress]).toEqual(["OPS-PROP1", 100_000_00, ""]);
+    expect(data?.toName).toContain("Oak Row Owner");
+    expect(await run((tx) => proposalData(tx, tenantId, "00000000-0000-0000-0000-000000000000"))).toBeNull();
+    // Accepted: the words are fixed, the presentation is not, and the contract's counterparty is the client.
+    await run((tx) => acceptEstimate(tx, ctx, first.id, { contractId: contract.id, decidedOn: "2026-09-15" }));
+    await expect(run((tx) => updateEstimate(tx, ctx, first.id, { scope: "More" }))).rejects.toMatchObject({ code: "ESTIMATE_ACCEPTED" });
+    await expect(run((tx) => updateEstimate(tx, ctx, first.id, { terms: "" }))).rejects.toMatchObject({ code: "ESTIMATE_ACCEPTED" });
+    const shown = await run((tx) => updateEstimate(tx, ctx, first.id, { presentation: "sum", scope: "Everything on the drawings." }));
+    expect([shown.presentation, shown.status]).toEqual(["sum", "accepted"]);
+    data = await run((tx) => proposalData(tx, tenantId, first.id));
+    expect(data?.row.contract?.id).toBe(contract.id);
+    expect(data?.toName).toContain("Oak Row Owner");
+    expect(client).toBeTruthy();
   }, 120_000);
 });

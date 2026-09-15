@@ -102,6 +102,10 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
             overheadPpm: row.estimate.overheadPpm,
             profitPpm: row.estimate.profitPpm,
             notes: row.estimate.notes,
+            presentation: row.estimate.presentation,
+            scope: row.estimate.scope,
+            exclusions: row.estimate.exclusions,
+            terms: row.estimate.terms,
             contractId: row.estimate.contractId,
             lines: row.lines.map((l) => ({
               id: l.id,

@@ -68,6 +68,7 @@ Newest first.
 | `Margin` | Total less cost, and the percentage of the total it is. |
 | `Status` | `Draft`, `Sent`, `Accepted`, `Declined` or `Superseded`, with the date decided under it. |
 | `Contract` | The agreement an accepted estimate became; opens it. |
+| {button:Proposal|outline|file-text} | Opens the proposal — the estimate as the client sees it — as a PDF in a new tab. |
 
 ### Starting one
 
@@ -109,7 +110,17 @@ Cost and price are worked out as you type and never stored, so a line typed as 3
 
 **The six figures.** `Cost` (every line at cost), `Price` (every line at its price), `Overhead`, `Profit`, `Total` (price plus overhead plus profit — what the client is asked for) and `Margin` (total less cost, with its percentage of the total).
 
-**`Notes`** — whatever the estimate should remember: the terms, the exclusions.
+**The proposal block.** What the client is sent, saved with the rest of the form.
+
+- **`Show the price`** — `Line by line` (every line, with quantity and per-unit columns when a line has them — a takeoff, or a unit-price bid), `By cost code` (each code's sum, the no-code lines as *Other*) or `One sum` (one figure). The total is the same in all three, and overhead and profit are in the prices whichever you pick: cost, markup, overhead and profit never print.
+- **`Scope of work`** — what the price covers, in the client's words. Every line you type is its own paragraph on the page.
+- **`Not included`** — one exclusion per line: *Permits and utility fees.* *Landscaping.*
+- **`Terms`** — the payment schedule, what a change costs, how long the price holds. A new estimate starts with the terms of the last one you wrote, so this is usually a read-through.
+- {button:Print proposal|outline|file-text} opens the PDF in a new tab. It prints the estimate **as saved** — save first.
+
+Once the estimate is accepted the three texts are fixed with the price (they are the agreement); how the price is shown can still change.
+
+**`Notes`** — anything the estimate should remember that the client does not see.
 
 What can stop a save: `Check the form and try again.` (a rate or a quantity that is not a number) · `That estimate number is already used on this job.` · `A markup must be between 0% and 1,000%.` · `A unit cost cannot be negative.` · `Somebody changed this while you had it open. Reload and try again.`
 
@@ -132,6 +143,14 @@ Neither button is automatic on accepting: a {{project|lower}} budgeted at cost a
 ### By cost code
 
 Under the editor, once the estimate has lines: each code's cost and price from the saved lines — the cost is what **Use as budget** writes, the price is what the job cost report will compare it with once the {{project|lower}} is billed. `No cost code` is the last row.
+
+### The proposal
+
+{button:Print proposal|outline|file-text} on the estimate's page, or {button:Proposal|outline|file-text} on the list. One letter page (a second when the scope, the lines or the terms need it), under your logo and colour where the brand kit has them: **PROPOSAL** and the estimate's title; the {{project|lower}} (number and name), the site if the {{project|lower}} carries an address, the proposal number, its date (the `Sent` date; *Not yet sent* on a draft) and `Valid until`; **To** the client — the contract's counterparty once the estimate names a contract, else the {{project|lower}}'s customer, with their address from Accounting when they have been billed before — and **From** your business.
+
+Then **Scope of work** (your paragraphs), **The price** the way you chose — item, quantity and per-unit columns only when a line needs them, amount; a *Rounding* line only when unit prices cannot add to the total to the cent; the **Total** — or, for one sum, *Price for the work described* on its own line; **Not included**; **Terms**; *This proposal is valid until …* when a date is set; the acceptance sentence; and two signature blocks, *Accepted for <the client>* (signed, name, date) and *For <your business>* (signed, date). A draft prints under **DRAFT**, a declined one under **DECLINED**, a superseded one under **SUPERSEDED**; sent and accepted print clean. The footer names the business, the proposal and the {{project|lower}} on every page.
+
+The proposal is made from the estimate every time it is opened, never stored, so a draft's proposal is always the draft as it is now. It is not sent from here yet — save the PDF and attach it to your own message.
 
 ## Contracts
 
@@ -797,7 +816,7 @@ Worth knowing so you are not looking for it:
 - **A cost-plus job on the work in progress schedule earns what it has cost plus its fee**, capped at its maximum, with no estimate asked for — when it is the job's only signed contract. A time-and-materials job earns its approved hours at their rates plus the rest of its cost marked up, the same way; one with hours nobody has priced shows `Hours on the job with no bill rate` and blocks the period until a rate is set. A job mixing methods is shown and left out, and a period with billings on one cannot post until it has a value.
 - **A subcontractor's application does not print**, and neither does a change order on an order. They are the subcontractor's documents, prepared on their side; your own applications print from their row.
 - **A lien waiver is not generated.** The form itself is your state's or your lawyer's, not something Jobs prints; the signed one attaches as a photo, a file or from Documents.
-- **An estimate is lines you type.** No assemblies (a bundle of lines dropped in as one), no unit cost book that remembers what concrete cost last time, no takeoff from the drawings, and the proposal does not print — send the client your own document for now. A supplier's quote cannot be attached to an estimate yet.
+- **An estimate is lines you type.** No assemblies (a bundle of lines dropped in as one), no unit cost book that remembers what concrete cost last time, no takeoff from the drawings. A supplier's quote cannot be attached to an estimate yet. The proposal prints but is not sent from here, and the client cannot accept it on a screen of their own — the signed page comes back the way it always has.
 - **A subcontractor out of standing is not stopped.** An order can be issued and a bill paid while a certificate is missing or expired; the Subcontractors page and the order's page say so in red, and the decision is yours. Which kinds are required is set in the module's configuration for now, not on a screen.
 - **The option book is per job.** The same selections with the same choices on every plan are entered on each job for now; a book that seeds a new job is next. Nothing here lets the client choose for themselves; the office records what they said.
 - **A back-charge is not a change order.** Money you deduct from a subcontractor's payment for something you paid on their behalf reduces the payment, not the scope; a deductive change order reduces the scope. Record a back-charge as a credit in Accounting for now.
@@ -816,7 +835,7 @@ Worth knowing so you are not looking for it:
 | Record or approve a subcontractor's application | ● | | |
 | Record a lien waiver, or ask for one in Work | ● | ● | ● |
 | Record a subcontractor's certificate or W-9, or ask for one in Work | ● | ● | ● |
-| Write, send, decline or supersede an estimate | ● | ● | ● |
+| Write, send, decline or supersede an estimate, or print its proposal | ● | ● | ● |
 | Accept an estimate, or make it the budget or the schedule of values | ● | | |
 | Draw up selections, record the client's choice, remind them in Work | ● | ● | ● |
 | Raise a selection's difference as a change order | ● | | |

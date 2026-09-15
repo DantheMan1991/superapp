@@ -446,6 +446,18 @@ export function isEstimateStatus(v: string): v is EstimateStatus {
 /** The most a markup, an overhead or a profit rate may be: 1,000% in ppm, which is a typo guard, not a policy. */
 export const RATE_PPM_MAX = 10_000_000;
 
+/** How a proposal shows its price (ADR 0070): every line, each cost code's sum, or one figure. */
+export const PROPOSAL_PRESENTATIONS = ["lines", "codes", "sum"] as const;
+export type ProposalPresentation = (typeof PROPOSAL_PRESENTATIONS)[number];
+export const PROPOSAL_PRESENTATION_LABELS: Record<ProposalPresentation, string> = {
+  lines: "Line by line",
+  codes: "By cost code",
+  sum: "One sum",
+};
+export function isProposalPresentation(v: string): v is ProposalPresentation {
+  return (PROPOSAL_PRESENTATIONS as readonly string[]).includes(v);
+}
+
 // ------------------------------------------------------------------ selections
 
 /**

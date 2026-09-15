@@ -1819,6 +1819,7 @@ d("jobs tables (RLS)", () => {
     ).rejects.toThrow();
     // The CHECKs: a status off the list, a rate past 1,000%, a negative cost, quantity or price, a blank description.
     await expect(withSystem((tx) => tx.update(schema.jobEstimates).set({ status: "won" }).where(eq(schema.jobEstimates.id, estimateId)))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.update(schema.jobEstimates).set({ presentation: "poster" }).where(eq(schema.jobEstimates.id, estimateId)))).rejects.toThrow();
     await expect(withSystem((tx) => tx.update(schema.jobEstimates).set({ overheadPpm: 10_000_001 }).where(eq(schema.jobEstimates.id, estimateId)))).rejects.toThrow();
     await expect(withSystem((tx) => tx.update(schema.jobEstimates).set({ profitPpm: -1 }).where(eq(schema.jobEstimates.id, estimateId)))).rejects.toThrow();
     for (const bad of [

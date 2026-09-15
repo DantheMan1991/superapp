@@ -10,7 +10,9 @@ import { violatedUniqueIndex } from "@/lib/db-errors";
 import { allowsWrite } from "@/lib/packs/authorize";
 import { parseMoneyToCents } from "@/lib/money";
 import {
+  attachDocumentToRecord,
   detachDocumentFromRecord,
+  registerAttachedFile,
   registerAttachedPhoto,
   setPrimaryAttachment,
 } from "@/modules/documents/attachments";
@@ -2510,6 +2512,132 @@ export async function detachSelectionPhotoAction(input: unknown) {
         ),
       { role: ctx.role },
     );
+    revalidatePath(`${BASE}/${projectId}/selections`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// ------------------------------------------------ files on a record (any kind)
+
+/**
+ * THE TWO OTHER DOORS on a record's gallery: upload any allowed file (the
+ * waiver that came back as a PDF), or hang one already in Documents. Same
+ * gate as a photo, same target — the pack names the record, Documents keeps
+ * the file. Never the record's picture: a picture is an image.
+ */
+const existingInput = z.object({ entityId: z.string().uuid(), documentId: z.string().uuid() });
+
+async function attachUploaded(
+  ctx: JobsCtx,
+  target: { extensionSlug: string; entityType: string; entityId: string },
+  pathname: string,
+  title: string,
+): Promise<{ documentId: string }> {
+  const result = await registerAttachedFile(
+    { tenantId: ctx.tenantId, userId: ctx.userId, role: ctx.role },
+    { pathname, target, title },
+  );
+  return { documentId: result.documentId };
+}
+
+async function attachExisting(
+  ctx: JobsCtx,
+  target: { extensionSlug: string; entityType: string; entityId: string },
+  documentId: string,
+): Promise<void> {
+  await withTenant(
+    ctx.tenantId,
+    (tx) =>
+      attachDocumentToRecord(
+        tx,
+        { tenantId: ctx.tenantId, userId: ctx.userId, role: ctx.role },
+        { documentId, target, makePrimary: false },
+      ),
+    { role: ctx.role },
+  );
+}
+
+export async function attachLogFileAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoInput.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    const projectId = await assertLog(ctx, parsed.data.entityId);
+    const result = await attachUploaded(ctx, photoTarget(parsed.data.entityId), parsed.data.pathname, "Daily log");
+    revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath(`${BASE}/${projectId}/log`);
+    return { ok: true as const, documentId: result.documentId };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function attachLogDocumentAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = existingInput.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    const projectId = await assertLog(ctx, parsed.data.entityId);
+    await attachExisting(ctx, photoTarget(parsed.data.entityId), parsed.data.documentId);
+    revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath(`${BASE}/${projectId}/log`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function attachWaiverFileAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoInput.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    const where = await assertWaiver(ctx, parsed.data.entityId);
+    const result = await attachUploaded(ctx, waiverTarget(parsed.data.entityId), parsed.data.pathname, "Lien waiver");
+    revalidateWaiver(where);
+    return { ok: true as const, documentId: result.documentId };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function attachWaiverDocumentAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = existingInput.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    const where = await assertWaiver(ctx, parsed.data.entityId);
+    await attachExisting(ctx, waiverTarget(parsed.data.entityId), parsed.data.documentId);
+    revalidateWaiver(where);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function attachSelectionFileAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoInput.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    const projectId = await assertSelection(ctx, parsed.data.entityId);
+    const result = await attachUploaded(ctx, selectionTarget(parsed.data.entityId), parsed.data.pathname, "Selection");
+    revalidatePath(`${BASE}/${projectId}/selections`);
+    return { ok: true as const, documentId: result.documentId };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function attachSelectionDocumentAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = existingInput.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    const projectId = await assertSelection(ctx, parsed.data.entityId);
+    await attachExisting(ctx, selectionTarget(parsed.data.entityId), parsed.data.documentId);
     revalidatePath(`${BASE}/${projectId}/selections`);
     return { ok: true as const };
   } catch (err) {

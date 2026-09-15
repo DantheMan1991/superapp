@@ -10,6 +10,38 @@
 
 ## Build log
 
+### 2026-09-15 — A record takes any file, uploaded or picked (`claude/record-files`)
+
+The gallery every pack shares (`RecordPhotos`) grows two doors beside *Add a
+photo*: **Add a file** — any type the allowlist accepts, the lien waiver that
+came back as a PDF — and **From Documents** — a file already in the cabinet,
+found by the cabinet's own search. Both are optional props; a pack that
+passes neither gets the gallery exactly as it was, which is what livestock
+and assets still get.
+
+**THE ATTACH IS THE PACK'S, THE SEARCH IS THIS MODULE'S.** `registerAttachedFile`
+is the photo path with the image check off — filed at the cabinet's root
+rather than under Photos, never the record's picture, because a picture is
+an image — and `attachDocumentToRecord` (2026-08-27) finally has a button in
+front of it. Each pack passes its own actions for both, so the module gate
+and the entity type stay the pack's facts; the search behind *From Documents*
+is `pickDocumentsAction` in `picker-actions.ts`, this module's own server
+action, reading through `searchDocuments` under the reader's role (an
+owners-only file is not offered to staff), newest first with no term, twelve
+at a time. The gallery renders files as a list under the photos — kind,
+size, the file opened in a new tab — with the same remove button, and its
+empty state says *Nothing attached yet* when the doors are open.
+`splitAttachments` is the one place a page decides which side of the gallery
+an attachment sits on (the inline-safe image list; an SVG is a file), pinned
+in `tests/documents-record-files.test.ts`. The jobs pack wired it into the
+daily log, lien waivers and selections in the same PR; the subcontractor
+documents follow once their own PR lands.
+
+Not built: a picker that browses folders (search covers it), attaching one
+file to several records from the picker, and a preview of a PDF in the
+gallery row (the file tiles' pdf.js thumbnail would do; the row links to the
+file instead).
+
 ### 2026-09-04 — Documents reads, and says so (`claude/documents-reads-and-says-so`)
 
 **Ten screens rendered every control enabled for an `expert` and refused every

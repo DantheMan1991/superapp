@@ -6,10 +6,9 @@ import { eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { isModuleEnabled, requireModuleEnabled } from "@/lib/modules";
-import { attachmentsForRecord } from "@/modules/documents/attachments";
-import { isDisplayableImage } from "@/modules/documents/allowlist";
+import { attachmentsForRecord, splitAttachments } from "@/modules/documents/attachments";
 import { roleMayWrite } from "@/modules/documents/core/errors";
-import type { RecordPhoto } from "@/modules/documents/components/record-photos";
+import type { RecordFile, RecordPhoto } from "@/modules/documents/components/record-photos";
 import { labelFor } from "@/lib/packs/resolve";
 import { packContext } from "@/lib/packs/tenant-context";
 import { allowsWrite } from "@/lib/packs/authorize";
@@ -139,6 +138,7 @@ export default async function CommitmentPage({
       const waivers = allWaivers.filter((w) => w.waiver.commitmentId === commitment.id);
       // The signed copies, Documents' rows: the same gallery a daily log's photos use.
       const photos = new Map<string, RecordPhoto[]>();
+      const files = new Map<string, RecordFile[]>();
       if (documentsOn) {
         for (const w of waivers) {
           const attachments = await attachmentsForRecord(tx, ctx.tenant.id, {
@@ -146,18 +146,9 @@ export default async function CommitmentPage({
             entityType: LIEN_WAIVER_ENTITY,
             entityId: w.waiver.id,
           });
-          photos.set(
-            w.waiver.id,
-            attachments
-              .filter((a) => isDisplayableImage(a.document.mimeType))
-              .map((a) => ({
-                documentId: a.document.id,
-                fileName: a.document.fileName,
-                title: a.document.title ?? "",
-                mimeType: a.document.mimeType,
-                isPrimary: a.isPrimary,
-              })),
-          );
+          const split = splitAttachments(attachments);
+          photos.set(w.waiver.id, split.photos);
+          files.set(w.waiver.id, split.files);
         }
       }
       return {
@@ -180,6 +171,7 @@ export default async function CommitmentPage({
         chasing,
         parties,
         photos,
+        files,
         labels: pack.labels,
       };
     },
@@ -250,6 +242,7 @@ export default async function CommitmentPage({
       tenantId={ctx.tenant.id}
       canPhoto={canPhoto}
       photos={existing ? (data.photos.get(existing.id) ?? []) : []}
+      files={existing ? (data.files.get(existing.id) ?? []) : []}
       existing={existing}
       trigger={trigger}
     />
@@ -752,7 +745,7 @@ export default async function CommitmentPage({
                     <TableCell className="text-xs text-muted-foreground">
                       {w.attachmentCount === 0
                         ? "—"
-                        : `${w.attachmentCount} ${w.attachmentCount === 1 ? "photo" : "photos"}`}
+                        : `${w.attachmentCount} ${w.attachmentCount === 1 ? "file" : "files"}`}
                     </TableCell>
                     <TableCell className="w-10 text-right">
                       {canWaiver &&

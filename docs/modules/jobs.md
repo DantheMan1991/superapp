@@ -13,6 +13,23 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-15 — The signed copy as a file (`claude/record-files`)
+
+The one thing three slices in a row recorded as open: a lien waiver, a
+selection's spec sheet and a subcontractor's certificate could be a PHOTO of
+the page and nothing else, because the shared gallery uploaded images only
+and a file already in Documents had a verb and no button. Documents' gallery
+now has two more doors — *Add a file* (any allowed type) and *From
+Documents* (the cabinet's own search) — and this pack passes its own actions
+for both on the daily log, lien waivers and selections
+(`attach<Entity>FileAction` through `registerAttachedFile`,
+`attach<Entity>DocumentAction` through `attachDocumentToRecord`, same gate as
+a photo, never the picture). The pages split what is attached with
+`splitAttachments` and the counts say *files*. Subcontractor documents get the
+same two doors once their PR (11b) is on main; the signed pay-application
+certificate stays open, wanting its own control on the applications table.
+Details in the Documents dossier, same date.
+
 ### 2026-09-14 — Slice 8: selections and allowances (`claude/selections`, ADR 0067)
 
 `job_selections` and `job_selection_choices`, a **Selections** page per job
@@ -2174,9 +2191,9 @@ ordering only bites when two new tables reference each other in one file.
   released, and the next thing a GC's bookkeeper asks for once retainage is
   tracked.~~ — **closed 2026-09-14 (slice 11a, ADR 0066)** as a record with
   the gap derived and the chase raised in Work on the order. Still open from
-  it: **a PDF waiver cannot be attached** — the signed copy is a photo through
-  the shared gallery, and a file already in Documents has a verb
-  (`attachDocumentToRecord`) and no picker on a record; **the waiver is not
+  it: ~~**a PDF waiver cannot be attached**~~ — **closed 2026-09-15**: the
+  gallery's *Add a file* and *From Documents* doors, wired to waivers,
+  selections and the daily log; **the waiver is not
   generated** — the tenant's own state form through Documents' templates,
   filled with the row's facts, is the door; **a purchase order's waivers have
   no gap rule**, because its bills are not tied to it; and **certificates of

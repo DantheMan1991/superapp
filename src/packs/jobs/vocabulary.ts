@@ -360,6 +360,64 @@ export const LIEN_WAIVER_ENTITY = "job_lien_waiver";
 export const COMMITMENT_ENTITY = "job_commitment";
 /** A selection's samples and spec sheets hang on the selection; a reminder to the client is Work linked to it (ADR 0067). */
 export const SELECTION_ENTITY = "job_selection";
+/** A subcontractor's certificate or W-9 hangs on the document row; the chase for one is Work linked to the PARTY (ADR 0068). */
+export const PARTY_DOCUMENT_ENTITY = "job_party_document";
+export const PARTY_ENTITY = "party";
+
+// ------------------------------------------------------------ party documents
+
+/**
+ * The kinds of document a business asks a subcontractor for — an OPEN
+ * taxonomy with a format check, as a contract's kind is, because what is
+ * required differs by state, by insurer and by lawyer. The pack suggests the
+ * common three and labels them; anything else is spelled by `slugLabel`.
+ */
+export const PARTY_DOCUMENT_FORMAT = /^[a-z][a-z0-9_]{0,62}$/;
+export const SUGGESTED_PARTY_DOCUMENT_KINDS = ["insurance_certificate", "w9", "license"] as const;
+export const PARTY_DOCUMENT_KIND_LABELS: Record<string, string> = {
+  insurance_certificate: "Certificate of insurance",
+  w9: "W-9",
+  license: "Licence",
+};
+export function partyDocumentKindLabel(kind: string): string {
+  return PARTY_DOCUMENT_KIND_LABELS[kind] ?? slugLabel(kind);
+}
+export function isPartyDocumentKind(v: string): boolean {
+  return PARTY_DOCUMENT_FORMAT.test(v);
+}
+
+/** Mirrors `job_party_documents_status_valid`. */
+export const PARTY_DOCUMENT_STATUSES = ["requested", "received", "void"] as const;
+export type PartyDocumentStatus = (typeof PARTY_DOCUMENT_STATUSES)[number];
+export const PARTY_DOCUMENT_STATUS_LABELS: Record<PartyDocumentStatus, string> = {
+  requested: "Requested",
+  received: "On file",
+  void: "Void",
+};
+export function isPartyDocumentStatus(v: string): v is PartyDocumentStatus {
+  return (PARTY_DOCUMENT_STATUSES as readonly string[]).includes(v);
+}
+
+/**
+ * Which kinds a party must have on file, current, to be in good standing:
+ * the pack's default, or the tenant's own list from the pack config
+ * (`requiredPartyDocuments`) — a value, never a branch. The same shape as
+ * `deliveryMethodsFrom`.
+ */
+export const DEFAULT_REQUIRED_PARTY_DOCUMENTS: readonly string[] = ["insurance_certificate", "w9"];
+export function requiredPartyDocumentsFrom(config: unknown): string[] {
+  if (config && typeof config === "object" && !Array.isArray(config)) {
+    const value = (config as Record<string, unknown>).requiredPartyDocuments;
+    if (Array.isArray(value)) {
+      const kinds = value.filter((v): v is string => typeof v === "string" && PARTY_DOCUMENT_FORMAT.test(v));
+      if (kinds.length > 0) return kinds;
+    }
+  }
+  return [...DEFAULT_REQUIRED_PARTY_DOCUMENTS];
+}
+
+/** A certificate this close to its date is worth a sentence before it is a gap. */
+export const EXPIRING_SOON_DAYS = 30;
 
 // ------------------------------------------------------------------ estimates
 

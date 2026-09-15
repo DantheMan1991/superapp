@@ -135,6 +135,9 @@ export async function JobsModule({
             <Button variant="outline" size="sm" asChild>
               <Link href="/dashboard/m/jobs/wip">Work in progress</Link>
             </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/dashboard/m/jobs/subcontractors">Subcontractors</Link>
+            </Button>
             {isOwner && (
               <Button variant="outline" size="sm" asChild>
                 <Link href="/dashboard/m/jobs/cost-codes">Cost codes</Link>

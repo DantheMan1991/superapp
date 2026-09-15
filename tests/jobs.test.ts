@@ -85,7 +85,20 @@ import {
   SELECTION_STATUSES,
   SELECTION_STATUS_LABELS,
   isSelectionStatus,
+  DEFAULT_REQUIRED_PARTY_DOCUMENTS,
+  EXPIRING_SOON_DAYS,
+  PARTY_DOCUMENT_ENTITY,
+  PARTY_DOCUMENT_FORMAT,
+  PARTY_DOCUMENT_STATUSES,
+  PARTY_DOCUMENT_STATUS_LABELS,
+  PARTY_ENTITY,
+  SUGGESTED_PARTY_DOCUMENT_KINDS,
+  isPartyDocumentKind,
+  isPartyDocumentStatus,
+  partyDocumentKindLabel,
+  requiredPartyDocumentsFrom,
 } from "../src/packs/jobs/vocabulary";
+import { standingFor } from "../src/packs/jobs/compliance-ops";
 import {
   WIP_PPM,
   earnedCents,
@@ -1350,6 +1363,107 @@ describe("estimates", () => {
       expect(rateStringToPpm("")).toBeNull();
       expect(rateStringToPpm("ten")).toBeNull();
     });
+  });
+});
+
+// --------------------------------------------------------- party documents (11b)
+
+/**
+ * A subcontractor's documents (ADR 0068): the kind is the business's (a format
+ * check, mirrored), the required list is the tenant's or the default, the
+ * status list is a CHECK read from the migration, and the standing rule is
+ * pure — so it is pinned here, date by date.
+ */
+const PARTY_DOCUMENTS_SQL = readFileSync("drizzle/0354_party_documents.sql", "utf8");
+
+const doc = (over: Partial<Parameters<typeof standingFor>[0][number]>) => ({
+  id: "d",
+  tenantId: "t",
+  partyId: "p",
+  kind: "insurance_certificate",
+  title: "",
+  reference: "",
+  issuer: "",
+  issuedOn: null,
+  expiresOn: null,
+  limitCents: null,
+  status: "received",
+  requestedOn: null,
+  receivedOn: "2026-01-01",
+  notes: "",
+  createdByClerkUserId: null,
+  version: 1,
+  createdAt: new Date(0),
+  updatedAt: new Date(0),
+  ...over,
+});
+
+describe("party documents", () => {
+  it("MIRRORS the kind format and the status CHECK, and labels the suggested kinds", () => {
+    expect(PARTY_DOCUMENTS_SQL).toContain(`"job_party_documents"."kind" ~ '${PARTY_DOCUMENT_FORMAT.source}'`);
+    const m = PARTY_DOCUMENTS_SQL.match(/job_party_documents_status_valid[^(]*\(([^)]*)\)/);
+    expect(m, "constraint not found").not.toBeNull();
+    expect([...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]).sort()).toEqual([...PARTY_DOCUMENT_STATUSES].sort());
+    for (const st of PARTY_DOCUMENT_STATUSES) expect(PARTY_DOCUMENT_STATUS_LABELS[st]).toBeTruthy();
+    for (const k of SUGGESTED_PARTY_DOCUMENT_KINDS) expect(partyDocumentKindLabel(k)).not.toBe(k);
+    expect(partyDocumentKindLabel("safety_plan")).toBe("Safety plan");
+    expect(isPartyDocumentKind("w9")).toBe(true);
+    expect(isPartyDocumentKind("W-9")).toBe(false);
+    expect(isPartyDocumentStatus("received")).toBe(true);
+    expect(isPartyDocumentStatus("expired")).toBe(false);
+  });
+
+  it("makes the receipt date part of being on file, floors the limit, and holds the party", () => {
+    expect(PARTY_DOCUMENTS_SQL).toMatch(/job_party_documents_received_has_date/);
+    expect(PARTY_DOCUMENTS_SQL).toMatch(/job_party_documents_limit_nonnegative/);
+    expect(PARTY_DOCUMENTS_SQL).toMatch(/job_party_documents_party_fk[^;]*REFERENCES "public"."parties"[^;]*ON DELETE no action/);
+    for (const entity of [PARTY_DOCUMENT_ENTITY, PARTY_ENTITY]) expect(entity).toMatch(/^[a-z][a-z0-9_]{0,62}$/);
+  });
+
+  it("reads the required list from the tenant's config, or falls back to the default", () => {
+    expect([...DEFAULT_REQUIRED_PARTY_DOCUMENTS]).toEqual(["insurance_certificate", "w9"]);
+    expect(requiredPartyDocumentsFrom(null)).toEqual(["insurance_certificate", "w9"]);
+    expect(requiredPartyDocumentsFrom({ requiredPartyDocuments: ["license", "W-9", "insurance_certificate"] })).toEqual([
+      "license",
+      "insurance_certificate",
+    ]);
+    expect(requiredPartyDocumentsFrom({ requiredPartyDocuments: [] })).toEqual(["insurance_certificate", "w9"]);
+  });
+
+  it("STANDING: missing, expired, expiring within a month, ok — the longest-running document answers, and a W-9 never runs out", () => {
+    expect(EXPIRING_SOON_DAYS).toBe(30);
+    const required = ["insurance_certificate", "w9"];
+    // Nothing on file.
+    expect(standingFor([], required, "2026-09-15").required.map((r) => r.state)).toEqual(["missing", "missing"]);
+    // A certificate expired yesterday and a W-9 with no expiry.
+    const expired = standingFor(
+      [doc({ id: "c1", expiresOn: "2026-09-14" }), doc({ id: "w", kind: "w9" })],
+      required,
+      "2026-09-15",
+    );
+    expect(expired.required.map((r) => [r.state, r.document?.id])).toEqual([["expired", "c1"], ["ok", "w"]]);
+    expect(expired.good).toBe(false);
+    // A newer certificate runs longer and answers; 30 days out is expiring, 31 is ok.
+    const renewed = standingFor(
+      [doc({ id: "c1", expiresOn: "2026-09-14" }), doc({ id: "c2", expiresOn: "2026-10-15" }), doc({ id: "w", kind: "w9" })],
+      required,
+      "2026-09-15",
+    );
+    expect(renewed.required[0]).toMatchObject({ state: "expiring", document: { id: "c2" } });
+    expect(renewed.good).toBe(true);
+    expect(standingFor([doc({ expiresOn: "2026-10-16" })], ["insurance_certificate"], "2026-09-15").required[0].state).toBe("ok");
+    // Requested and void are not on file; anything not required is listed beside.
+    const mixed = standingFor(
+      [
+        doc({ id: "r", status: "requested", receivedOn: null }),
+        doc({ id: "v", status: "void" }),
+        doc({ id: "l", kind: "license", expiresOn: "2027-01-01" }),
+      ],
+      required,
+      "2026-09-15",
+    );
+    expect(mixed.required.map((r) => r.state)).toEqual(["missing", "missing"]);
+    expect(mixed.others.map((d) => d.id)).toEqual(["l"]);
   });
 });
 

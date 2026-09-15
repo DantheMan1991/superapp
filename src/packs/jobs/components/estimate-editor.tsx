@@ -3,7 +3,7 @@
 import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Plus, Trash2 } from "lucide-react";
+import { FileText, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -31,7 +31,12 @@ import {
 } from "../actions";
 import { quantityStringToThousandths, thousandthsToQuantityString } from "../billing-math";
 import { estimateTotals, lineCostCents, linePriceCents, rateStringToPpm } from "../estimate-math";
-import { ESTIMATE_STATUSES, ESTIMATE_STATUS_LABELS } from "../vocabulary";
+import {
+  ESTIMATE_STATUSES,
+  ESTIMATE_STATUS_LABELS,
+  PROPOSAL_PRESENTATIONS,
+  PROPOSAL_PRESENTATION_LABELS,
+} from "../vocabulary";
 
 const NONE = "__none__";
 
@@ -101,6 +106,10 @@ export interface EditableEstimate {
   overheadPpm: number;
   profitPpm: number;
   notes: string;
+  presentation: string;
+  scope: string;
+  exclusions: string;
+  terms: string;
   contractId: string | null;
   lines: Array<{
     id: string;
@@ -232,6 +241,10 @@ export function EstimateEditor({
   const [overhead, setOverhead] = useState(ppmToRate(estimate.overheadPpm));
   const [profit, setProfit] = useState(ppmToRate(estimate.profitPpm));
   const [notes, setNotes] = useState(estimate.notes);
+  const [presentation, setPresentation] = useState(estimate.presentation);
+  const [scope, setScope] = useState(estimate.scope);
+  const [exclusions, setExclusions] = useState(estimate.exclusions);
+  const [termsText, setTermsText] = useState(estimate.terms);
   const [lines, setLines] = useState<LineDraft[]>(
     estimate.lines.length > 0
       ? estimate.lines.map((l) => ({
@@ -277,13 +290,17 @@ export function EstimateEditor({
         decidedOn,
         validUntil,
         notes: notes.trim(),
-        // An accepted estimate's money is not sent: the rates and the lines stay as they were.
+        presentation,
+        // An accepted estimate's money is not sent, nor the proposal's words: they are the agreement.
         ...(locked
           ? {}
           : {
               markupPercent: markup,
               overheadPercent: overhead,
               profitPercent: profit,
+              scope: scope.trim(),
+              exclusions: exclusions.trim(),
+              terms: termsText.trim(),
               lines: lines
                 .filter((l) => l.description.trim() !== "")
                 .map((l) => ({
@@ -369,7 +386,7 @@ export function EstimateEditor({
         </div>
         {locked && (
           <p className="mt-3 text-xs text-muted-foreground">
-            Accepted, so the rates and the lines are fixed. To revise, start a new estimate and mark this one superseded.
+            Accepted, so the rates, the lines and the proposal&apos;s words are fixed. To revise, start a new estimate and mark this one superseded.
           </p>
         )}
       </div>
@@ -539,6 +556,78 @@ export function EstimateEditor({
             <dd className="text-base font-medium tabular-nums">{fmt(cents, symbol)}</dd>
           </div>
         ))}
+      </div>
+
+      <div className="rounded-lg border border-border/60 p-4">
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-heading text-sm font-medium tracking-heading">Proposal</h2>
+          <Button variant="outline" size="sm" asChild>
+            <a href={`/api/jobs/estimates/${estimate.id}/pdf`} target="_blank" rel="noopener noreferrer">
+              <FileText className="mr-1.5 size-4" /> Print proposal
+            </a>
+          </Button>
+        </div>
+        <p className="mb-3 text-xs text-muted-foreground">
+          What the client is sent: the price as saved, shown the way you choose, with the words below around it.
+          Cost, markup, overhead and profit never print — they are in the prices.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-[14rem_1fr]">
+          <div className="space-y-1.5">
+            <Label htmlFor="est-presentation">Show the price</Label>
+            <Select value={presentation} onValueChange={setPresentation} disabled={!canEdit}>
+              <SelectTrigger className="w-full" id="est-presentation">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PROPOSAL_PRESENTATIONS.map((p) => (
+                  <SelectItem key={p} value={p}>
+                    {PROPOSAL_PRESENTATION_LABELS[p]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">Every line, each cost code&apos;s sum, or one figure.</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="est-scope">Scope of work</Label>
+            <Textarea
+              id="est-scope"
+              value={scope}
+              onChange={(e) => setScope(e.target.value)}
+              rows={3}
+              maxLength={8000}
+              disabled={!editable}
+              placeholder="What the price covers, in the client's words."
+            />
+          </div>
+        </div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="est-exclusions">Not included</Label>
+            <Textarea
+              id="est-exclusions"
+              value={exclusions}
+              onChange={(e) => setExclusions(e.target.value)}
+              rows={4}
+              maxLength={8000}
+              disabled={!editable}
+              placeholder="Permits and utility fees. Landscaping. Anything not listed above."
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="est-terms">Terms</Label>
+            <Textarea
+              id="est-terms"
+              value={termsText}
+              onChange={(e) => setTermsText(e.target.value)}
+              rows={4}
+              maxLength={8000}
+              disabled={!editable}
+              placeholder="The payment schedule, what a change costs, how long the price holds."
+            />
+            <p className="text-xs text-muted-foreground">A new estimate starts with the terms of the last one you wrote.</p>
+          </div>
+        </div>
       </div>
 
       <div className="space-y-1.5">

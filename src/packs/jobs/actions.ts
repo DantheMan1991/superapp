@@ -102,6 +102,7 @@ import {
   SELECTION_ENTITY,
   SELECTION_STATUSES,
   ESTIMATE_STATUSES,
+  PROPOSAL_PRESENTATIONS,
   PARTY_DOCUMENT_ENTITY,
   PARTY_DOCUMENT_FORMAT,
   PARTY_DOCUMENT_STATUSES,
@@ -2583,6 +2584,11 @@ const estimateSchema = z.object({
   overheadPercent: rateToPpm,
   profitPercent: rateToPpm,
   notes: z.string().trim().max(4000).optional(),
+  /** The proposal (ADR 0070): how the price is shown, and the client's three texts. */
+  presentation: z.enum(PROPOSAL_PRESENTATIONS).optional(),
+  scope: z.string().trim().max(8000).optional(),
+  exclusions: z.string().trim().max(8000).optional(),
+  terms: z.string().trim().max(8000).optional(),
   lines: z.array(estimateLineSchema).max(500).optional(),
 });
 

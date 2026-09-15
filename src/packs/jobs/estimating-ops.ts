@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { JobEstimate, JobEstimateLine } from "@/db/schema";
 import {
@@ -19,7 +19,8 @@ import {
   updateContract,
   type JobsCtx,
 } from "./ops";
-import { RATE_PPM_MAX, isEstimateStatus } from "./vocabulary";
+import { customerForParty } from "@/modules/accounting/invoicing/customers";
+import { RATE_PPM_MAX, isEstimateStatus, isProposalPresentation } from "./vocabulary";
 
 /**
  * Estimates — slice 10 of the construction plan, ADR 0069: the front end of
@@ -61,6 +62,11 @@ export interface EstimateInput {
   overheadPpm?: number;
   profitPpm?: number;
   notes?: string;
+  /** The proposal (ADR 0070): how the price is shown, and the client's three texts. */
+  presentation?: string;
+  scope?: string;
+  exclusions?: string;
+  terms?: string;
   lines?: EstimateLineInput[];
 }
 
@@ -77,6 +83,9 @@ function validateEstimateShape(input: Partial<EstimateInput>): void {
   }
   if (input.status !== undefined && !isEstimateStatus(input.status)) {
     throw new JobsError("INVALID_STATUS", `invalid status: ${input.status}`);
+  }
+  if (input.presentation !== undefined && !isProposalPresentation(input.presentation)) {
+    throw new JobsError("INVALID_VALUE", "a proposal shows its price line by line, by cost code or as one sum");
   }
   validateRate(input.markupPpm, "a markup");
   validateRate(input.overheadPpm, "overhead");
@@ -162,11 +171,23 @@ async function saveLines(tx: Tx, tenantId: string, estimateId: string, lines: Es
   }
 }
 
+/** The terms of the newest estimate that has any: a business's terms are mostly boilerplate, so a new estimate starts with them. */
+async function lastTerms(tx: Tx, tenantId: string): Promise<string> {
+  const rows = await tx
+    .select({ terms: schema.jobEstimates.terms })
+    .from(schema.jobEstimates)
+    .where(and(eq(schema.jobEstimates.tenantId, tenantId), sql`${schema.jobEstimates.terms} <> ''`))
+    .orderBy(desc(schema.jobEstimates.createdAt))
+    .limit(1);
+  return rows[0]?.terms ?? "";
+}
+
 export async function createEstimate(tx: Tx, ctx: JobsCtx, input: EstimateInput): Promise<JobEstimate> {
   requireWrite(ctx, "member");
   validateEstimateShape(input);
   const project = await getProject(tx, ctx.tenantId, input.projectId);
   if (!project) throw new JobsError("NOT_FOUND", `project ${input.projectId} not found`);
+  const terms = input.terms === undefined ? await lastTerms(tx, ctx.tenantId) : input.terms.trim();
   const rows = await tx
     .insert(schema.jobEstimates)
     .values({
@@ -182,6 +203,10 @@ export async function createEstimate(tx: Tx, ctx: JobsCtx, input: EstimateInput)
       overheadPpm: input.overheadPpm ?? 0,
       profitPpm: input.profitPpm ?? 0,
       notes: input.notes?.trim() ?? "",
+      presentation: input.presentation ?? "lines",
+      scope: input.scope?.trim() ?? "",
+      exclusions: input.exclusions?.trim() ?? "",
+      terms,
       createdByClerkUserId: ctx.userId,
     })
     .returning();
@@ -211,11 +236,15 @@ export async function updateEstimate(
   }
   const status = input.status ?? existing.status;
   if (existing.status === "accepted") {
+    // The money, and the proposal's words — they are the agreement. The presentation is a printing choice and stays free.
     const moneyMoves =
       input.lines !== undefined ||
       (input.markupPpm !== undefined && input.markupPpm !== existing.markupPpm) ||
       (input.overheadPpm !== undefined && input.overheadPpm !== existing.overheadPpm) ||
-      (input.profitPpm !== undefined && input.profitPpm !== existing.profitPpm);
+      (input.profitPpm !== undefined && input.profitPpm !== existing.profitPpm) ||
+      (input.scope !== undefined && input.scope.trim() !== existing.scope) ||
+      (input.exclusions !== undefined && input.exclusions.trim() !== existing.exclusions) ||
+      (input.terms !== undefined && input.terms.trim() !== existing.terms);
     if (moneyMoves || (status !== "accepted" && status !== "superseded")) {
       throw new JobsError("ESTIMATE_ACCEPTED", `estimate ${existing.number} was accepted; revise it as a new one`);
     }
@@ -237,6 +266,10 @@ export async function updateEstimate(
   if (input.overheadPpm !== undefined) patch.overheadPpm = input.overheadPpm;
   if (input.profitPpm !== undefined) patch.profitPpm = input.profitPpm;
   if (input.notes !== undefined) patch.notes = input.notes.trim();
+  if (input.presentation !== undefined) patch.presentation = input.presentation;
+  if (input.scope !== undefined) patch.scope = input.scope.trim();
+  if (input.exclusions !== undefined) patch.exclusions = input.exclusions.trim();
+  if (input.terms !== undefined) patch.terms = input.terms.trim();
   const rows = await tx
     .update(schema.jobEstimates)
     .set(patch)
@@ -337,6 +370,48 @@ export async function getEstimate(tx: Tx, tenantId: string, id: string): Promise
     .limit(1);
   if (rows.length === 0) return null;
   return (await listEstimates(tx, tenantId, rows[0].projectId)).find((r) => r.estimate.id === id) ?? null;
+}
+
+export interface ProposalData {
+  row: EstimateRow;
+  project: NonNullable<Awaited<ReturnType<typeof getProject>>>;
+  /** The client the proposal is made to, and the only postal address the product keeps for them, Accounting's. */
+  toName: string;
+  toAddress: string;
+}
+
+/**
+ * What the proposal prints (ADR 0070): the estimate with its arithmetic,
+ * the job, and the client — the contract's counterparty when the estimate
+ * names a contract, else the job's client party; a party never billed
+ * prints as a name alone, the certificate's rule.
+ */
+export async function proposalData(tx: Tx, tenantId: string, id: string): Promise<ProposalData | null> {
+  const row = await getEstimate(tx, tenantId, id);
+  if (!row) return null;
+  const project = await getProject(tx, tenantId, row.estimate.projectId);
+  if (!project) return null;
+  let partyId: string | null = project.partyId ?? null;
+  if (row.estimate.contractId) {
+    const contract = await tx
+      .select({ counterpartyPartyId: schema.jobContracts.counterpartyPartyId })
+      .from(schema.jobContracts)
+      .where(and(eq(schema.jobContracts.tenantId, tenantId), eq(schema.jobContracts.id, row.estimate.contractId)))
+      .limit(1);
+    partyId = contract[0]?.counterpartyPartyId ?? partyId;
+  }
+  let toName = "";
+  let toAddress = "";
+  if (partyId) {
+    const party = await tx
+      .select({ name: schema.parties.displayName })
+      .from(schema.parties)
+      .where(and(eq(schema.parties.tenantId, tenantId), eq(schema.parties.id, partyId)))
+      .limit(1);
+    toName = party[0]?.name ?? "";
+    toAddress = (await customerForParty(tx, tenantId, partyId))?.address ?? "";
+  }
+  return { row, project, toName, toAddress };
 }
 
 /** The contract an estimate is applied to has to be this job's. */

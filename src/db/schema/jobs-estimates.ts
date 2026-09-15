@@ -74,6 +74,17 @@ export const jobEstimates = pgTable(
     /** Profit on the subtotal plus overhead, in ppm. */
     profitPpm: integer("profit_ppm").notNull().default(0),
     notes: text("notes").notNull().default(""),
+    /**
+     * THE PROPOSAL (ADR 0070): how the price is shown to the client — line by
+     * line, by cost code, or one sum — and the three texts around it. The
+     * words are the agreement's, so they are fixed with the money once the
+     * estimate is accepted; the presentation is a printing choice and stays
+     * free. A new estimate starts with the last one's terms.
+     */
+    presentation: text("presentation").notNull().default("lines"),
+    scope: text("scope").notNull().default(""),
+    exclusions: text("exclusions").notNull().default(""),
+    terms: text("terms").notNull().default(""),
     createdByClerkUserId: text("created_by_clerk_user_id"),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -105,6 +116,7 @@ export const jobEstimates = pgTable(
       "job_estimates_status_valid",
       sql`${t.status} in ('draft', 'sent', 'accepted', 'declined', 'superseded')`,
     ),
+    check("job_estimates_presentation_valid", sql`${t.presentation} in ('lines', 'codes', 'sum')`),
     check("job_estimates_markup_range", sql`${t.markupPpm} >= 0 and ${t.markupPpm} <= 10000000`),
     check("job_estimates_overhead_range", sql`${t.overheadPpm} >= 0 and ${t.overheadPpm} <= 10000000`),
     check("job_estimates_profit_range", sql`${t.profitPpm} >= 0 and ${t.profitPpm} <= 10000000`),

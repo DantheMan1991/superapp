@@ -30,6 +30,9 @@ import {
   ESTIMATE_STATUSES,
   ESTIMATE_STATUS_LABELS,
   isEstimateStatus,
+  PROPOSAL_PRESENTATIONS,
+  PROPOSAL_PRESENTATION_LABELS,
+  isProposalPresentation,
   STATUS_LABELS,
   ROLE_LABELS,
   VALUED_CONTRACT_STATUSES,
@@ -1207,6 +1210,7 @@ describe("selections", () => {
 // ---------------------------------------------------------------- estimates
 
 const ESTIMATES_SQL = readFileSync("drizzle/0356_estimates.sql", "utf8");
+const PROPOSAL_SQL = readFileSync("drizzle/0358_proposal.sql", "utf8");
 
 describe("estimates", () => {
   it("MIRRORS the status CHECK and labels every status", () => {
@@ -1216,6 +1220,17 @@ describe("estimates", () => {
     for (const st of ESTIMATE_STATUSES) expect(ESTIMATE_STATUS_LABELS[st]).toBeTruthy();
     expect(isEstimateStatus("sent")).toBe(true);
     expect(isEstimateStatus("won")).toBe(false);
+  });
+
+  it("MIRRORS the proposal's presentation CHECK (10b) and labels every way of showing the price", () => {
+    const m = PROPOSAL_SQL.match(/job_estimates_presentation_valid[^(]*\(([^)]*)\)/);
+    expect(m, "constraint not found").not.toBeNull();
+    expect([...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]).sort()).toEqual([...PROPOSAL_PRESENTATIONS].sort());
+    for (const p of PROPOSAL_PRESENTATIONS) expect(PROPOSAL_PRESENTATION_LABELS[p]).toBeTruthy();
+    expect(isProposalPresentation("codes")).toBe(true);
+    expect(isProposalPresentation("poster")).toBe(false);
+    // The three texts are columns with a default, so an old estimate prints a proposal with nothing around the price.
+    for (const c of ["scope", "exclusions", "terms"]) expect(PROPOSAL_SQL).toContain(`ADD COLUMN "${c}" text DEFAULT '' NOT NULL`);
   });
 
   it("caps every rate at 1,000% in the database, the same number the code uses", () => {

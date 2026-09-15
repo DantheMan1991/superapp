@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, FileText } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -11,6 +11,7 @@ import { formatMoney, formatMoneySign } from "@/lib/money";
 import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -86,6 +87,7 @@ export default async function EstimatesPage({ params }: { params: Promise<{ id: 
                   <TableHead className="text-right">Margin</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Contract</TableHead>
+                  <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -141,6 +143,13 @@ export default async function EstimatesPage({ params }: { params: Promise<{ id: 
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
+                    </TableCell>
+                    <TableCell>
+                      <Button variant="outline" size="sm" asChild>
+                        <a href={`/api/jobs/estimates/${row.estimate.id}/pdf`} target="_blank" rel="noopener noreferrer">
+                          <FileText className="mr-1.5 size-4" /> Proposal
+                        </a>
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}

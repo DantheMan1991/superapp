@@ -1679,4 +1679,98 @@ d("jobs tables (RLS)", () => {
     await withSystem((tx) => tx.delete(schema.jobLienWaivers).where(eq(schema.jobLienWaivers.id, waiverId)));
     await withSystem((tx) => tx.delete(schema.jobSubApplications).where(eq(schema.jobSubApplications.id, appId)));
   });
+
+  it("cannot read or change another tenant's SELECTIONS or their choices; a selection hangs off this tenant's job, contract, code and change order, a choice off this tenant's selection and party; one choice is chosen; a choice is priced by the unit or not at all; the choices go with the selection and the selections with the job", async () => {
+    const selectionId = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobSelections)
+        .values({
+          tenantId: tenantA,
+          projectId: projectA,
+          contractId: contractA,
+          costCodeId: codeA,
+          changeOrderId: changeOrderA,
+          name: "Master bath tile",
+          allowanceCents: 4_000_00,
+          neededBy: "2026-09-01",
+        })
+        .returning();
+      await tx.insert(schema.jobSelectionChoices).values([
+        { tenantId: tenantA, selectionId: rows[0].id, partyId: clientA, description: "Daltile", priceCents: 1_344_00, isSelected: true, sortOrder: 10 },
+        { tenantId: tenantA, selectionId: rows[0].id, description: "Marble", priceCents: 6_500_00, sortOrder: 20 },
+      ]);
+      return rows[0].id;
+    });
+    const seen = await asOtherTenant(async (tx) => ({
+      rows: await tx.select().from(schema.jobSelections).where(eq(schema.jobSelections.id, selectionId)),
+      choices: await tx.select().from(schema.jobSelectionChoices).where(eq(schema.jobSelectionChoices.selectionId, selectionId)),
+      changed: await tx
+        .update(schema.jobSelections)
+        .set({ allowanceCents: 1 })
+        .where(eq(schema.jobSelections.id, selectionId))
+        .returning(),
+    }));
+    expect(seen.rows).toEqual([]);
+    expect(seen.choices).toEqual([]);
+    expect(seen.changed).toEqual([]);
+    const mine = await asStaff((tx) => tx.select().from(schema.jobSelectionChoices).where(eq(schema.jobSelectionChoices.selectionId, selectionId)));
+    expect(mine).toHaveLength(2);
+
+    // Tenant B's job, contract, code or change order under tenant A's row: unrepresentable.
+    const otherCode = await withSystem(async (tx) => {
+      const r = await tx.select().from(schema.jobCostCodes).where(eq(schema.jobCostCodes.setId, setB));
+      return r[0].id;
+    });
+    const otherChange = await withSystem(async (tx) => {
+      const r = await tx
+        .insert(schema.jobChangeOrders)
+        .values({ tenantId: tenantB, contractId: contractB, number: "CO-B-SEL", title: "Theirs" })
+        .returning();
+      return r[0].id;
+    });
+    const base = { tenantId: tenantA, name: "x" } as const;
+    await expect(withSystem((tx) => tx.insert(schema.jobSelections).values({ ...base, projectId: projectB }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobSelections).values({ ...base, projectId: projectA, contractId: contractB }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobSelections).values({ ...base, projectId: projectA, costCodeId: otherCode }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobSelections).values({ ...base, projectId: projectA, changeOrderId: otherChange }))).rejects.toThrow();
+    // A choice under tenant B's selection, or naming tenant B's party: unrepresentable.
+    const otherParty = await withSystem((tx) => seedParty(tx, tenantB, "Builder B's showroom"));
+    const otherSelection = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobSelections).values({ tenantId: tenantB, projectId: projectB, name: "Theirs" }).returning();
+      return r[0].id;
+    });
+    await expect(
+      withSystem((tx) => tx.insert(schema.jobSelectionChoices).values({ tenantId: tenantA, selectionId: otherSelection, description: "x", priceCents: 1 })),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) => tx.insert(schema.jobSelectionChoices).values({ tenantId: tenantA, selectionId, partyId: otherParty, description: "x", priceCents: 1 })),
+    ).rejects.toThrow();
+    // One chosen per selection; a quantity needs a unit price; the floors.
+    await expect(
+      withSystem((tx) => tx.insert(schema.jobSelectionChoices).values({ tenantId: tenantA, selectionId, description: "Second pick", priceCents: 1, isSelected: true })),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) => tx.insert(schema.jobSelectionChoices).values({ tenantId: tenantA, selectionId, description: "Half priced", quantityThousandths: 1_000, priceCents: 1 })),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) => tx.insert(schema.jobSelectionChoices).values({ tenantId: tenantA, selectionId, description: "Negative", priceCents: -1 })),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) => tx.update(schema.jobSelections).set({ allowanceCents: -1 }).where(eq(schema.jobSelections.id, selectionId))),
+    ).rejects.toThrow();
+    // The change order raised, the contract, the code and the party are held; the choices go with the selection; the selections with the job.
+    await expect(withSystem((tx) => tx.delete(schema.jobChangeOrders).where(eq(schema.jobChangeOrders.id, changeOrderA)))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.delete(schema.jobCostCodes).where(eq(schema.jobCostCodes.id, codeA)))).rejects.toThrow();
+    await withSystem((tx) => tx.delete(schema.jobSelections).where(eq(schema.jobSelections.id, selectionId)));
+    const left = await withSystem((tx) => tx.select().from(schema.jobSelectionChoices).where(eq(schema.jobSelectionChoices.selectionId, selectionId)));
+    expect(left).toEqual([]);
+    const scratch = await withSystem(async (tx) => {
+      const p = await tx.insert(schema.jobProjects).values({ tenantId: tenantA, entityId: entityA, number: "casc-sel", name: "sel" }).returning();
+      const s = await tx.insert(schema.jobSelections).values({ tenantId: tenantA, projectId: p[0].id, name: "Goes with the job" }).returning();
+      return { projectId: p[0].id, selectionId: s[0].id };
+    });
+    await withSystem((tx) => tx.delete(schema.jobProjects).where(eq(schema.jobProjects.id, scratch.projectId)));
+    expect(await withSystem((tx) => tx.select().from(schema.jobSelections).where(eq(schema.jobSelections.id, scratch.selectionId)))).toEqual([]);
+    await withSystem((tx) => tx.delete(schema.jobSelections).where(eq(schema.jobSelections.id, otherSelection)));
+  });
 });

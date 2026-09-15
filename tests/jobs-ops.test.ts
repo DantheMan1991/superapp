@@ -79,6 +79,15 @@ import {
   waiverCoverage,
   waiverGaps,
 } from "../src/packs/jobs/compliance-ops";
+import {
+  createSelection,
+  listSelectionWork,
+  listSelections,
+  raiseSelectionChangeOrder,
+  remindSelection,
+  summarise,
+  updateSelection,
+} from "../src/packs/jobs/selections-ops";
 import { certificateInputFrom } from "../src/packs/jobs/certificate";
 import { loadInvoice, loadInvoiceLines } from "../src/modules/accounting/invoicing/invoices";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
@@ -3766,5 +3775,148 @@ d("jobs ops", () => {
         createLienWaiver(tx, ctx, { projectId: project.id, partyId: party, kind: "partial", throughDate: "2026-09-30" }),
       ),
     ).rejects.toMatchObject({ code: "INVALID_KIND" });
+  }, 120_000);
+
+  // ------------------------------------------------------------ selections (8)
+
+  it("A SELECTION carries an allowance and its priced choices; the chosen price less the allowance is the difference; approved, it is raised as a change order on the contract, once, and the money is fixed until that is void; a pending one past its date is overdue and its reminder is Work on the selection", async () => {
+    const entity = await newCompany("Sel Co 1");
+    const { project, contract, code, party, otherContract } = await run(async (tx) => {
+      await ensureBilling(tx);
+      const p = await createProject(tx, ctx, { entityId: entity, number: "OPS-SEL1", name: "Selected" });
+      const set = (await getDefaultCostCodeSet(tx, tenantId)) ?? (await createCostCodeSet(tx, ctx, { name: "Sel codes" }));
+      const code = await createCostCode(tx, ctx, { setId: set.id, code: "SEL-09-30", name: "Tile", sortOrder: 30 });
+      const contract = await createContract(tx, ctx, { projectId: p.id, kind: "new_home", valueCents: 300_000_00, status: "signed" });
+      const other = await createProject(tx, ctx, { entityId: entity, number: "OPS-SEL1-B", name: "Other" });
+      const otherContract = await createContract(tx, ctx, { projectId: other.id, kind: "new_home", valueCents: 1_00, status: "signed" });
+      const party = await seedVendor(tx, "Tile Shop");
+      return { project: p, contract, code, party, otherContract };
+    });
+    // A selected selection has a chosen choice; another job's contract is refused.
+    await expect(
+      run((tx) =>
+        createSelection(tx, ctx, { projectId: project.id, name: "x", status: "selected", choices: [{ description: "A", priceCents: 1 }] }),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE", message: expect.stringContaining("mark the choice") });
+    await expect(
+      run((tx) => createSelection(tx, ctx, { projectId: project.id, contractId: otherContract.id, name: "x" })),
+    ).rejects.toMatchObject({ code: "WRONG_PROJECT" });
+
+    // Staff draws it up: an allowance, a date, two choices — one priced by the unit, its typed price ignored.
+    const sel = await run((tx) =>
+      createSelection(tx, staffCtx, {
+        projectId: project.id,
+        contractId: contract.id,
+        costCodeId: code.id,
+        name: "Master bath tile",
+        location: "Master bath",
+        allowanceCents: 4_000_00,
+        neededBy: "2026-09-01",
+        choices: [
+          { description: "Daltile Rittenhouse 3x6, white", reference: "0100-36", partyId: party, unit: "sf", quantityThousandths: 320_000, unitPriceCents: 4_20, priceCents: 999 },
+          { description: "Marble herringbone", priceCents: 6_500_00 },
+        ],
+      }),
+    );
+    const rowsOf = () => run((tx) => listSelections(tx, tenantId, project.id, "2026-09-14"));
+    let rows = await rowsOf();
+    expect(rows[0].choices.map((c) => [c.description, c.priceCents, c.isSelected])).toEqual([
+      ["Daltile Rittenhouse 3x6, white", 1_344_00, false],
+      ["Marble herringbone", 6_500_00, false],
+    ]);
+    expect([rows[0].overdue, rows[0].differenceCents, rows[0].codeLabel, rows[0].contract?.kind]).toEqual([true, null, "SEL-09-30 · Tile", "new_home"]);
+    expect(summarise(rows)).toMatchObject({ count: 1, pending: 1, overdue: 1, allowancesCents: 4_000_00, chosenCents: 0, differenceCents: 0, toRaiseCents: 0, raisedCents: 0 });
+    // The reminder is Work on the SELECTION, not on the job's punch list.
+    const itemId = await run((tx) => remindSelection(tx, staffCtx, sel.id));
+    expect((await run((tx) => listSelectionWork(tx, tenantId, sel.id))).map((w) => [w.title, w.dueOn])).toEqual([
+      ["Selection needed: Master bath tile by 2026-09-01 (OPS-SEL1)", "2026-09-01"],
+    ]);
+    expect((await run((tx) => listPunchItems(tx, tenantId, project.id))).map((p) => p.id)).not.toContain(itemId);
+
+    // The client picks the marble: two chosen is refused, one keeps its identity.
+    const [tile, marble] = rows[0].choices;
+    const both = [
+      { id: tile.id, description: tile.description, quantityThousandths: 320_000, unitPriceCents: 4_20, priceCents: 0, isSelected: true },
+      { id: marble.id, description: marble.description, priceCents: 6_500_00, isSelected: true },
+    ];
+    await expect(run((tx) => updateSelection(tx, staffCtx, sel.id, { choices: both }))).rejects.toMatchObject({
+      code: "INVALID_VALUE",
+      message: expect.stringContaining("not two"),
+    });
+    await run((tx) =>
+      updateSelection(tx, staffCtx, sel.id, {
+        status: "selected",
+        decidedOn: "2026-09-10",
+        choices: [both[0] && { ...both[0], isSelected: false }, both[1]],
+      }),
+    );
+    rows = await rowsOf();
+    expect([rows[0].chosen?.description, rows[0].chosen?.id, rows[0].differenceCents, rows[0].overdue]).toEqual([
+      "Marble herringbone",
+      marble.id,
+      2_500_00,
+      false,
+    ]);
+    expect(summarise(rows)).toMatchObject({ pending: 0, chosenCents: 6_500_00, differenceCents: 2_500_00, toRaiseCents: 0 });
+
+    // Raising: approved first, then an owner; the change order carries the difference and the code's line.
+    await expect(run((tx) => raiseSelectionChangeOrder(tx, ctx, sel.id, { number: "CO-1" }))).rejects.toMatchObject({ code: "INVALID_STATUS" });
+    await run((tx) => updateSelection(tx, ctx, sel.id, { status: "approved" }));
+    expect(summarise(await rowsOf()).toRaiseCents).toBe(2_500_00);
+    await expect(run((tx) => raiseSelectionChangeOrder(tx, staffCtx, sel.id, { number: "CO-1" }))).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const co = await run((tx) => raiseSelectionChangeOrder(tx, ctx, sel.id, { number: "CO-1", status: "approved", approvedOn: "2026-09-12" }));
+    expect(co).toMatchObject({ contractId: contract.id, number: "CO-1", title: "Master bath tile: allowance overage", valueCents: 2_500_00, status: "approved" });
+    expect(co.description).toContain("Marble herringbone at 6,500.00 against a 4,000.00 allowance");
+    const cos = await run((tx) => listChangeOrders(tx, tenantId, project.id));
+    expect(cos.map((c) => [c.changeOrder.number, c.lines.map((l) => [l.costCodeId, l.amountCents])])).toEqual([["CO-1", [[code.id, 2_500_00]]]]);
+    expect((await run((tx) => projectValues(tx, tenantId))).get(project.id)?.valueCents).toBe(302_500_00);
+    rows = await rowsOf();
+    expect(rows[0].changeOrder?.number).toBe("CO-1");
+    expect(summarise(rows)).toMatchObject({ toRaiseCents: 0, raisedCents: 2_500_00 });
+    // Raised: twice is refused, the money is fixed, the words still move.
+    await expect(run((tx) => raiseSelectionChangeOrder(tx, ctx, sel.id, { number: "CO-2" }))).rejects.toMatchObject({ code: "SELECTION_RAISED" });
+    await expect(run((tx) => updateSelection(tx, ctx, sel.id, { allowanceCents: 5_000_00 }))).rejects.toMatchObject({ code: "SELECTION_RAISED" });
+    const renamed = await run((tx) => updateSelection(tx, ctx, sel.id, { name: "Master bath floor tile", allowanceCents: 4_000_00, notes: "Grout: warm grey" }));
+    expect([renamed.name, renamed.notes]).toEqual(["Master bath floor tile", "Grout: warm grey"]);
+    // Void the change order: re-price under the allowance, and a credit is raised.
+    await run((tx) => updateChangeOrder(tx, ctx, co.id, { status: "void" }));
+    await run((tx) => updateSelection(tx, ctx, sel.id, { allowanceCents: 7_000_00 }));
+    rows = await rowsOf();
+    expect([rows[0].changeOrder, rows[0].differenceCents]).toEqual([null, -500_00]);
+    const credit = await run((tx) => raiseSelectionChangeOrder(tx, ctx, sel.id, { number: "CO-2" }));
+    expect(credit).toMatchObject({ valueCents: -500_00, title: "Master bath floor tile: allowance credit", status: "proposed" });
+
+    // On the allowance to the cent: nothing to raise. No contract: nowhere to. Cancelled: out of the sums.
+    const exact = await run((tx) =>
+      createSelection(tx, ctx, {
+        projectId: project.id,
+        contractId: contract.id,
+        name: "Front door hardware",
+        allowanceCents: 600_00,
+        status: "approved",
+        decidedOn: "2026-09-11",
+        choices: [{ description: "Schlage Camelot, matte black", priceCents: 600_00, isSelected: true }],
+      }),
+    );
+    await expect(run((tx) => raiseSelectionChangeOrder(tx, ctx, exact.id, { number: "CO-3" }))).rejects.toMatchObject({
+      code: "INVALID_VALUE",
+      message: expect.stringContaining("nothing to raise"),
+    });
+    const loose = await run((tx) =>
+      createSelection(tx, ctx, {
+        projectId: project.id,
+        name: "Mailbox",
+        status: "approved",
+        choices: [{ description: "Cast aluminium", priceCents: 180_00, isSelected: true }],
+      }),
+    );
+    await expect(run((tx) => raiseSelectionChangeOrder(tx, ctx, loose.id, { number: "CO-3" }))).rejects.toMatchObject({
+      code: "INVALID_VALUE",
+      message: expect.stringContaining("no contract"),
+    });
+    await run((tx) => updateSelection(tx, ctx, loose.id, { status: "cancelled" }));
+    rows = await rowsOf();
+    expect(rows.map((r) => r.selection.name)).toEqual(["Master bath floor tile", "Front door hardware", "Mailbox"]);
+    expect(summarise(rows)).toMatchObject({ count: 2, allowancesCents: 7_600_00, chosenCents: 7_100_00, differenceCents: -500_00, raisedCents: -500_00 });
   }, 120_000);
 });

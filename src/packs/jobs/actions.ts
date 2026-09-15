@@ -32,6 +32,13 @@ import {
   updateLienWaiver,
 } from "./compliance-ops";
 import {
+  createSelection,
+  getSelection,
+  raiseSelectionChangeOrder,
+  remindSelection,
+  updateSelection,
+} from "./selections-ops";
+import {
   approveSubApplication,
   createSubApplication,
   deleteSubApplication,
@@ -68,6 +75,7 @@ import {
   type CommitmentChangeLineInput,
   type JobsCtx,
 } from "./ops";
+import type { SelectionChoiceInput } from "./selections-ops";
 import {
   BILLING_METHODS,
   CHANGE_ORDER_STATUSES,
@@ -76,6 +84,8 @@ import {
   LIEN_WAIVER_ENTITY,
   LIEN_WAIVER_KINDS,
   LIEN_WAIVER_STATUSES,
+  SELECTION_ENTITY,
+  SELECTION_STATUSES,
   CONTRACT_ROLES,
   CONTRACT_STATUSES,
   DAILY_LOG_ENTITY,
@@ -225,6 +235,10 @@ function toResult(err: unknown): { error: string } {
         return { error: `That is on another job: ${err.message}.` };
       case "RECEIVED_DATE_REQUIRED":
         return { error: "Give a received waiver the date it arrived." };
+      case "SELECTION_RAISED":
+        return {
+          error: `The difference on that selection has been raised: ${err.message}. Void the change order to re-price it.`,
+        };
     }
   }
   /**
@@ -2210,6 +2224,293 @@ export async function detachWaiverPhotoAction(input: unknown) {
       { role: ctx.role },
     );
     revalidateWaiver(where);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// -------------------------------------------------------------- selections
+
+const selectionChoiceSchema = z.object({
+  id: optionalUuid,
+  description: z.string().trim().min(1).max(300),
+  partyId: optionalUuid,
+  reference: z.string().trim().max(120).optional(),
+  unit: z.string().trim().max(20).optional(),
+  /** "320" → 320,000 thousandths; blank → null. */
+  quantity: quantityToThousandths,
+  unitPriceCents: moneyToCents,
+  priceCents: moneyToCents,
+  isSelected: z.boolean().optional(),
+  notes: z.string().trim().max(1000).optional(),
+});
+
+const selectionSchema = z.object({
+  projectId: z.string().uuid(),
+  contractId: optionalUuid,
+  costCodeId: optionalUuid,
+  name: z.string().trim().min(1).max(200),
+  location: z.string().trim().max(200).optional(),
+  description: z.string().trim().max(2000).optional(),
+  allowanceCents: moneyToCents,
+  neededBy: optionalDate,
+  status: z.enum(SELECTION_STATUSES).optional(),
+  decidedOn: optionalDate,
+  notes: z.string().trim().max(2000).optional(),
+  choices: z.array(selectionChoiceSchema).max(100).optional(),
+});
+
+/**
+ * A choice with no description is a blank row and is dropped; the extended
+ * price is what was typed, or the quantity at the unit price when both are
+ * given — `saveChoices` computes that, so a blank price beside a unit pair is
+ * not a zero.
+ */
+function selectionChoices(
+  choices: z.infer<typeof selectionChoiceSchema>[] | undefined,
+): SelectionChoiceInput[] | undefined {
+  if (choices === undefined) return undefined;
+  return choices
+    .filter((c) => c.description.trim() !== "")
+    .map((c) => ({
+      id: c.id ?? undefined,
+      description: c.description,
+      partyId: c.partyId,
+      reference: c.reference,
+      unit: c.unit,
+      quantityThousandths: c.quantity,
+      unitPriceCents: c.unitPriceCents,
+      priceCents: c.priceCents ?? 0,
+      isSelected: c.isSelected ?? false,
+      notes: c.notes,
+    }));
+}
+
+/** Drawing up the list and recording the client's choice is a member's chore; raising money is not (see below). */
+async function selectionGate(): Promise<JobsCtx> {
+  const ctx = await gate();
+  if (!allowsWrite(ctx.role, "member")) {
+    throw new JobsError("FORBIDDEN", "cannot record selections");
+  }
+  return ctx;
+}
+
+export async function createSelectionAction(input: unknown) {
+  const parsed = selectionSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { allowanceCents, choices, ...fields } = parsed.data;
+  try {
+    const ctx = await selectionGate();
+    const selection = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const created = await createSelection(tx, ctx, {
+          ...fields,
+          allowanceCents: allowanceCents ?? 0,
+          choices: selectionChoices(choices),
+        });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "selection.created",
+          targetType: "selection",
+          targetId: created.id,
+          /* Identifiers and shape only: the allowance is the contract's price. */
+          meta: { projectId: created.projectId, contractId: created.contractId, status: created.status },
+        });
+        return created;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${fields.projectId}`);
+    revalidatePath(`${BASE}/${fields.projectId}/selections`);
+    return { ok: true as const, selectionId: selection.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function updateSelectionAction(input: unknown) {
+  const schema = selectionSchema
+    .omit({ projectId: true })
+    .partial()
+    .extend({
+      id: z.string().uuid(),
+      /** For revalidation only. */
+      projectId: z.string().uuid(),
+      version: z.number().int().positive().optional(),
+    });
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { id, projectId, allowanceCents, choices, ...patch } = parsed.data;
+  try {
+    const ctx = await selectionGate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const row = await updateSelection(tx, ctx, id, {
+          ...patch,
+          ...(allowanceCents === undefined ? {} : { allowanceCents: allowanceCents ?? 0 }),
+          ...(choices === undefined ? {} : { choices: selectionChoices(choices) }),
+        });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "selection.updated",
+          targetType: "selection",
+          targetId: row.id,
+          meta: { projectId: row.projectId, contractId: row.contractId, status: row.status },
+        });
+        return row;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath(`${BASE}/${projectId}/selections`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const raiseSelectionSchema = z.object({
+  projectId: z.string().uuid(),
+  selectionId: z.string().uuid(),
+  number: z.string().trim().min(1).max(40),
+  title: z.string().trim().max(200).optional(),
+  status: z.enum(CHANGE_ORDER_STATUSES).optional(),
+  approvedOn: optionalDate,
+  requestedOn: optionalDate,
+});
+
+/** The difference as a change order — an owner's act, held by the change order's own verb. */
+export async function raiseSelectionChangeOrderAction(input: unknown) {
+  const parsed = raiseSelectionSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { projectId, selectionId, ...fields } = parsed.data;
+  try {
+    const ctx = await gate();
+    const changeOrder = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const created = await raiseSelectionChangeOrder(tx, ctx, selectionId, fields);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "change_order.created",
+          targetType: "change_order",
+          targetId: created.id,
+          meta: { contractId: created.contractId, status: created.status, selectionId },
+        });
+        return created;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath(`${BASE}/${projectId}/selections`);
+    revalidatePath(BASE);
+    return { ok: true as const, changeOrderId: changeOrder.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const remindSelectionSchema = z.object({
+  projectId: z.string().uuid(),
+  selectionId: z.string().uuid(),
+  dueOn: optionalDate,
+});
+
+/** The reminder, as a Work item linked to the selection. */
+export async function remindSelectionAction(input: unknown) {
+  const parsed = remindSelectionSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  const { projectId, selectionId, dueOn } = parsed.data;
+  try {
+    const ctx = await selectionGate();
+    const itemId = await withTenant(ctx.tenantId, (tx) => remindSelection(tx, ctx, selectionId, { dueOn }), {
+      role: ctx.role,
+    });
+    revalidatePath(`${BASE}/${projectId}/selections`);
+    return { ok: true as const, itemId };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** Samples and spec sheets: photos on the selection, through Documents, the daily log's way. */
+const selectionTarget = (entityId: string) => ({
+  extensionSlug: PACK,
+  entityType: SELECTION_ENTITY,
+  entityId,
+});
+
+async function assertSelection(ctx: JobsCtx, selectionId: string): Promise<string> {
+  const selection = await withTenant(ctx.tenantId, (tx) => getSelection(tx, ctx.tenantId, selectionId), {
+    role: ctx.role,
+  });
+  if (!selection) throw new JobsError("NOT_FOUND", `selection ${selectionId} not found`);
+  return selection.projectId;
+}
+
+export async function attachSelectionPhotoAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoInput.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    const projectId = await assertSelection(ctx, parsed.data.entityId);
+    const result = await registerAttachedPhoto(
+      { tenantId: ctx.tenantId, userId: ctx.userId, role: ctx.role },
+      { pathname: parsed.data.pathname, target: selectionTarget(parsed.data.entityId), title: "Selection" },
+    );
+    revalidatePath(`${BASE}/${projectId}/selections`);
+    return { ok: true as const, documentId: result.documentId };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function setSelectionPhotoPrimaryAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoRef.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    const projectId = await assertSelection(ctx, parsed.data.entityId);
+    await withTenant(
+      ctx.tenantId,
+      (tx) =>
+        setPrimaryAttachment(
+          tx,
+          { tenantId: ctx.tenantId, userId: ctx.userId, role: ctx.role },
+          { documentId: parsed.data.documentId, target: selectionTarget(parsed.data.entityId) },
+        ),
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}/selections`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function detachSelectionPhotoAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoRef.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    const projectId = await assertSelection(ctx, parsed.data.entityId);
+    await withTenant(
+      ctx.tenantId,
+      (tx) =>
+        detachDocumentFromRecord(
+          tx,
+          { tenantId: ctx.tenantId, userId: ctx.userId, role: ctx.role },
+          { documentId: parsed.data.documentId, target: selectionTarget(parsed.data.entityId) },
+        ),
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}/selections`);
     return { ok: true as const };
   } catch (err) {
     return toResult(err);

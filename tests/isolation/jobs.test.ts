@@ -1958,4 +1958,88 @@ d("jobs tables (RLS)", () => {
       await tx.delete(schema.scheduleCalendars).where(inArray(schema.scheduleCalendars.id, [calendarId, calendarB]));
     });
   });
+  it("cannot read or change another tenant's DRAWINGS; a set hangs off this tenant's job and party; a sheet hangs off this tenant's job, set and FILE; a number is once per set and a page once per set's file; the CHECKs; the sheets go with the set, with the file and with the job", async () => {
+    const docFor = (tenant: string, name: string) =>
+      withSystem(async (tx) => {
+        const r = await tx
+          .insert(schema.documents)
+          .values({
+            tenantId: tenant,
+            origin: "dms",
+            blobPathname: `docs/${tenant}/files/${STAMP}-${name}`,
+            fileName: name,
+            mimeType: "application/pdf",
+            sizeBytes: 10,
+            sha256: `${STAMP}-${tenant}-${name}`,
+            effectiveVisibility: "members",
+          })
+          .returning();
+        return r[0].id;
+      });
+    const docA = await docFor(tenantA, "set-a.pdf");
+    const docB = await docFor(tenantB, "set-b.pdf");
+    const setId = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobDrawingSets).values({ tenantId: tenantA, projectId: projectA, name: "Permit set", issuedOn: "2026-06-01", fromPartyId: clientA }).returning();
+      return r[0].id;
+    });
+    const sheetId = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobSheets).values({ tenantId: tenantA, projectId: projectA, setId, documentId: docA, pageNumber: 2, sheetNumber: "A-101", title: "First floor plan" }).returning();
+      return r[0].id;
+    });
+    const seen = await asOtherTenant(async (tx) => ({
+      sets: await tx.select().from(schema.jobDrawingSets).where(eq(schema.jobDrawingSets.id, setId)),
+      sheets: await tx.select().from(schema.jobSheets).where(eq(schema.jobSheets.id, sheetId)),
+      changed: await tx.update(schema.jobSheets).set({ sheetNumber: "THEIRS" }).where(eq(schema.jobSheets.id, sheetId)).returning(),
+      renamed: await tx.update(schema.jobDrawingSets).set({ name: "Theirs" }).where(eq(schema.jobDrawingSets.id, setId)).returning(),
+    }));
+    expect([seen.sets, seen.sheets, seen.changed, seen.renamed]).toEqual([[], [], [], []]);
+    expect(await asStaff((tx) => tx.select().from(schema.jobSheets).where(eq(schema.jobSheets.id, sheetId)))).toHaveLength(1);
+    expect(await asStaff((tx) => tx.select().from(schema.jobDrawingSets).where(eq(schema.jobDrawingSets.id, setId)))).toHaveLength(1);
+
+    // Tenant B's job, party, set or file under tenant A's row: unrepresentable.
+    const setB = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobDrawingSets).values({ tenantId: tenantB, projectId: projectB, name: "Theirs", issuedOn: "2026-06-01" }).returning();
+      return r[0].id;
+    });
+    const otherParty = await withSystem((tx) => seedParty(tx, tenantB, "Builder B's architect"));
+    await expect(withSystem((tx) => tx.insert(schema.jobDrawingSets).values({ tenantId: tenantA, projectId: projectB, name: "x", issuedOn: "2026-06-01" }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobDrawingSets).values({ tenantId: tenantA, projectId: projectA, name: "x", issuedOn: "2026-06-01", fromPartyId: otherParty }))).rejects.toThrow();
+    const base = { tenantId: tenantA, projectId: projectA, setId, documentId: docA, sheetNumber: "X-1" } as const;
+    await expect(withSystem((tx) => tx.insert(schema.jobSheets).values({ ...base, pageNumber: 9, setId: setB }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobSheets).values({ ...base, pageNumber: 9, documentId: docB }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobSheets).values({ ...base, pageNumber: 9, projectId: projectB }))).rejects.toThrow();
+    // One number per set; one page per set's file; the CHECKs.
+    await expect(withSystem((tx) => tx.insert(schema.jobSheets).values({ ...base, pageNumber: 3, sheetNumber: "A-101" }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobSheets).values({ ...base, pageNumber: 2, sheetNumber: "A-102" }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.update(schema.jobSheets).set({ pageNumber: 0 }).where(eq(schema.jobSheets.id, sheetId)))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.update(schema.jobSheets).set({ sheetNumber: "  " }).where(eq(schema.jobSheets.id, sheetId)))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.update(schema.jobDrawingSets).set({ name: "  " }).where(eq(schema.jobDrawingSets.id, setId)))).rejects.toThrow();
+    // The party is held: a set names it, so it cannot go.
+    await expect(withSystem((tx) => tx.delete(schema.parties).where(eq(schema.parties.id, clientA)))).rejects.toThrow();
+
+    // A file taken out of the cabinet takes its pages; a set removed takes its sheets; a job removed takes both.
+    const docA2 = await docFor(tenantA, "set-a-2.pdf");
+    const onDoc = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobSheets).values({ ...base, documentId: docA2, pageNumber: 1, sheetNumber: "S-201" }).returning();
+      return r[0].id;
+    });
+    await withSystem((tx) => tx.delete(schema.documents).where(eq(schema.documents.id, docA2)));
+    expect(await withSystem((tx) => tx.select().from(schema.jobSheets).where(eq(schema.jobSheets.id, onDoc)))).toEqual([]);
+    expect(await withSystem((tx) => tx.select().from(schema.jobSheets).where(eq(schema.jobSheets.id, sheetId)))).toHaveLength(1);
+    const scratch = await withSystem(async (tx) => {
+      const p = await tx.insert(schema.jobProjects).values({ tenantId: tenantA, entityId: entityA, number: `${STAMP}-DRW`, name: "Goes with the job" }).returning();
+      const set = await tx.insert(schema.jobDrawingSets).values({ tenantId: tenantA, projectId: p[0].id, name: "Scratch set", issuedOn: "2026-06-01" }).returning();
+      const sh = await tx.insert(schema.jobSheets).values({ tenantId: tenantA, projectId: p[0].id, setId: set[0].id, documentId: docA, pageNumber: 1, sheetNumber: "G-001" }).returning();
+      return { projectId: p[0].id, setId: set[0].id, sheetId: sh[0].id };
+    });
+    await withSystem((tx) => tx.delete(schema.jobProjects).where(eq(schema.jobProjects.id, scratch.projectId)));
+    expect(await withSystem((tx) => tx.select().from(schema.jobDrawingSets).where(eq(schema.jobDrawingSets.id, scratch.setId)))).toEqual([]);
+    expect(await withSystem((tx) => tx.select().from(schema.jobSheets).where(eq(schema.jobSheets.id, scratch.sheetId)))).toEqual([]);
+    await withSystem((tx) => tx.delete(schema.jobDrawingSets).where(eq(schema.jobDrawingSets.id, setId)));
+    expect(await withSystem((tx) => tx.select().from(schema.jobSheets).where(eq(schema.jobSheets.id, sheetId)))).toEqual([]);
+    await withSystem(async (tx) => {
+      await tx.delete(schema.jobDrawingSets).where(eq(schema.jobDrawingSets.id, setB));
+      await tx.delete(schema.documents).where(inArray(schema.documents.id, [docA, docB]));
+    });
+  });
 });

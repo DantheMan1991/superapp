@@ -154,7 +154,8 @@ export class JobsError extends Error {
       /** A phase named as its own ancestor's predecessor; the message names it. */
       | "PHASE_CYCLE"
       /** The business's Job schedule calendar does not exist yet, and only an owner may make it. */
-      | "SCHEDULE_NOT_MADE",
+      | "SCHEDULE_NOT_MADE"
+      | "SHEET_TAKEN",
     message: string,
   ) {
     super(message);

@@ -511,6 +511,8 @@ export async function registerAttachedFile(
     target: AttachmentTarget;
     folderId?: string | null;
     title?: string;
+    /** The cabinet's open taxonomy, when the pack knows what the file is: a drawing set's `drawing`. */
+    docKind?: string;
   },
 ): Promise<{ documentId: string; isPrimary: boolean }> {
   return registerAttachedUpload(
@@ -528,6 +530,7 @@ async function registerAttachedUpload(
     folderId?: string | null;
     title?: string;
     makePrimary?: boolean;
+    docKind?: string;
   },
   opts: { imagesOnly: boolean },
 ): Promise<{ documentId: string; isPrimary: boolean }> {
@@ -557,6 +560,7 @@ async function registerAttachedUpload(
         folderId,
         title: args.title ?? "",
         description: "",
+        docKind: args.docKind,
         // Through the SHARED extractor rather than hardcoded: it answers
         // `unsupported` for an image without opening a parser, and a second
         // opinion here is how the search page starts disagreeing with the

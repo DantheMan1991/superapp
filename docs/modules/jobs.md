@@ -13,6 +13,138 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-15 — Slice 9a: the drawings (`claude/drawings`, ADR 0072)
+
+The last pack the construction plan's four-flavour matrix gives four solid
+marks that had not been built: `job_drawing_sets` and `job_sheets`, a
+**Drawings** page per job (`/dashboard/m/jobs/[id]/drawings`) with the
+current set grouped by discipline, a sheet page
+(`/dashboard/m/jobs/[id]/drawings/[sheetId]`) that draws the page large,
+and a Drawings panel on the job's page.
+
+**THE FILE IS DOCUMENTS'.** A set is an *issue* of drawings — the permit
+set, ASI 3, addendum 2 — with a name, the date on the drawings and who
+issued it (a party). Its PDF is a cabinet document registered through the
+shared attach seam (`registerAttachedFile`, now taking a `docKind`, here
+`drawing`) and hung on the set through `document_attachments`
+(`DRAWING_SET_ENTITY = "job_drawing_set"`), the way a lien waiver's signed
+copy hangs on the waiver; or a PDF already in the cabinet, picked through
+the cabinet's own search. A sheet is one page of one of the set's files
+with the number the trade calls it by — normalised on write (`a-101` is
+`A-101`), once per set, a page once per set's file — a title and a
+revision mark. Nothing in the cabinet changed shape: `docKind` had been
+reserved for this since the DMS was built.
+
+**THE CURRENT SET IS DERIVED, NEVER STORED** (`drawings-math.ts`,
+`currentIssues`): for each number the job has ever had, the issue from the
+newest set — by `issued_on`, then by which set was made later — is
+current and the rest are superseded by it. Removing a bulletin makes the
+previous issue current again by the same arithmetic. `listSheets` returns
+every sheet in reading order — discipline by the US National CAD
+Standard's designators read off the number's first letter
+(`disciplineOf`, `DISCIPLINE_ORDER`: G, C, S, A, …, Other last), then the
+number naturally (`compareSheetNumbers`: A-2 before A-10, A1.2 before
+A1.10), then newest issue first — with `isCurrent`, `currentId` and how
+many issues the number has had. `drawingsSummary` is the panel's sentence.
+
+**THE BROWSER READS THE TITLE BLOCKS.** `components/pdf-reading.ts` reads a
+PDF where its bytes already are — the file just picked, or one fetch of a
+cabinet file — through the cabinet's own `loadPdfjs` (now exported from
+`pdf-canvas.tsx`, so the second reader configures the one worker): every
+page's text runs in viewport space, flipped so y grows upward, so a
+rotated landscape sheet keeps its corner where the eye sees it; and a
+JPEG thumbnail per page (up to 150). The pure rule `guessSheet` proposes
+the sheet number as the number-shaped line nearest the bottom-right
+corner — where every convention puts it, and where a cover sheet's index
+of forty numbers is not; a corner score under 0.9 is "no number found" —
+and the title as the largest other line in that corner that is not a
+label, a date or a scale, in sentence case. `A4` is a paper size and is
+never a sheet. The person corrects the table, ticks which pages are
+sheets, and `indexSheets` stores what was confirmed: shape and uniqueness
+checked in words (`SHEET_TAKEN`: *A-101 is on page 2 and page 7*; *A-101
+is already in this set, on another file's page 2*), the file proven to be
+the set's and a PDF, the file's earlier reading replaced whole.
+
+**THE SCREENS.** The Drawings page: the sentence (*42 sheets in the
+current set across 5 disciplines, from 3 issues; the newest is ASI 3,
+dated 2026-08-15; 4 sheets superseded*), *Add a set* — one dialog in three
+steps: the set, the file (*Add a file* uploads through the cabinet's
+presigned route; *From Documents* is the cabinet's search, PDFs only),
+the sheets (a row per page with the thumbnail, the tick, the number, the
+title and the revision, the hint saying *read off the title block*, *no
+number found* or *no text on the page*) — then **Current set** as cards
+grouped by discipline, **Sets** newest first with each file's name, a
+link to it and how many sheets it was read into (*not read yet*, *not a
+PDF*), the pencil (the set's words; *Read again* / *Read the pages*, *Let
+go* per file; *Add a file* for a set that came one file per sheet;
+*Remove*), and **Superseded** with what replaced each. The sheet page:
+`SheetViewer` draws the page on a canvas at the panel's width times a
+zoom (1× to 6×) in a box that scrolls, fetching the file once and
+re-rendering from the parsed document; the sheet before and after it in
+the current set; *The file*; *Edit* (the number, title, revision; *Not a
+sheet* takes the page back out); a plain amber note on a superseded issue
+with a link to the current one; **Issues of A-102** newest first.
+
+**WHO.** `member`, as the schedule is — the office indexes a set the day
+it arrives — and the two file doors ask the cabinet's `roleMayWrite` as
+well, so an accountant reads the set and does not upload into it.
+
+Migrations `0361_job_drawings.sql` (hand-reordered: the set's own unique
+index moved ahead of the sheet's key to it, as 0359 was) and
+`0362_job_drawings_rls.sql`, applied to dev and prod before the merge;
+`db:verify-rls` 222 tables on both, `db:verify-modules` 19/19 on both.
+Tests: `tests/jobs-drawings.test.ts` (the CHECK and unique mirrors, the
+hand-reorder, the cascades, normalising, the discipline and its order,
+natural sort, the number pattern against dates, scales and paper sizes,
+the current set and its tie-break, the summary, run-joining, the title
+block on a landscape page and on a vertical strip, no text, no number, the
+paper-size trap, sentence case), one more ops scenario in
+`tests/jobs-ops.test.ts` (the set, the file hung on it, every refusal in
+its words, the read, the reading order, an ASI superseding one sheet, a
+same-day reissue winning by creation, the summary and the sets list, a
+sheet renamed and normalised, a clash, a stale edit, a file read again
+replacing its sheets, a page taken out, a file let go of with the
+document kept, a set removed with the earlier issue current again, the
+expert as a member), one more isolation certification.
+
+**DRIVEN on the dev branch's Hilltop Farm, job 24-109, signed in as the
+owner, with a synthetic six-page permit set (landscape letter, a title
+block in the bottom-right corner, a cover sheet whose index lists every
+number in the middle of the page, one sheet with a vertical title strip)
+and a two-page ASI, both rendered by react-pdf.** In Node first, the
+reader run over the real pdf.js text of all eight pages got every number
+and title right — the cover's index ignored, the vertical strip read. In
+the browser: *Add a set* on the Drawings page — Permit set, dated
+2026-06-01, from a party, a note — *Next: the file*; *Add a file* took
+the PDF (the file input fed through a DataTransfer, since the pane has no
+file chooser), the presigned upload and the attach ran, *Reading page 6
+of 6…*, and the table came up with six thumbnails and *G-001 Cover
+sheet, A-101 First floor plan, A-102 Second floor plan, A-104 Roof plan,
+S-201 Foundation plan, E-101 Lighting plan*, each *read off the title
+block*. The cover unticked, *Save 5 sheets* → *5 sheets on the job*, and
+the page read *5 sheets in the current set across 3 disciplines, from 1
+issue* with the cards under STRUCTURAL, ARCHITECTURAL and ELECTRICAL in
+that order. A-102's page drew page 3 of the file with *A-101* and *A-104*
+either side; the zoom to 2× made the canvas 1674px wide inside an 839px
+box that scrolled. From the job's panel, *Add a set* again — ASI 1, dated
+2026-08-15 — the two-page file read as A-102 and A-104, revision *1*
+typed on both, saved; the panel caught up on its refresh to *5 sheets in
+the current set from 2 issues; newest ASI 1, dated 2026-08-15, 2
+superseded*, the cards carried *2 issues* and *rev 1* on A-102 and
+A-104, the Superseded panel listed the permit's two with *replaced by
+ASI 1 · 2026-08-15*, and the permit A-102's page showed the amber note
+with *Open the current A-102* and *Issues of A-102* (ASI 1 current, this
+one) and no prev/next. At 375px both pages kept to their width. **Found
+by driving, fixed, guarded by a test**: on *Read again*, the cover page
+that had been left out on purpose came back TICKED with its guess, so a
+careless save would have made it a sheet — a page absent from a re-read's
+prior index now stays out, hinted *left out before*
+(`tickedByDefault`); and a read still in flight when the dialog closed
+reopened it into the table, so the result is dropped when the dialog is
+no longer open. Not driven: *From Documents* on a set (the picker is the
+cabinet's own search, exercised in #578), *Let go* and *Remove* (the ops
+suite covers both), an expert's read-only view.
+
 ### 2026-09-15 — The schedule (`claude/job-schedule`, ADR 0071)
 
 The row the construction plan never had and every builder lives by:
@@ -2299,6 +2431,8 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_estimates` | The job priced before anybody signs (10, ADR 0069): a number unique per job, title, draft / sent / accepted / declined / superseded, sent / decided / valid-until dates, the three rates in ppm — markup on cost (the lines' default), overhead on the subtotal, profit on the subtotal plus overhead — notes, and the contract an accepted one became. | Cascade from the project; **no action to the contract**. CHECK: status on the list, every rate 0..10,000,000 ppm (`RATE_PPM_MAX`), number present. Nothing stores a total: `estimate-math.ts` computes them. Accepted, the rates and lines are fixed by the verb, not the database. Since 10b (ADR 0070) also `presentation` (CHECK lines / codes / sum) and the proposal's `scope`, `exclusions` and `terms` — the words fixed with the money, the presentation free. |
 | `job_estimate_lines` | One line of an estimate: cost code, description, unit, quantity in thousandths (1000 = one, a lump sum), unit cost, an optional markup of its own, an optional unit price that wins over any markup, notes, sort order. | Cascade from the estimate; **no action to the code**. CHECK: description present, quantity / unit cost / unit price ≥ 0, markup 0..10,000,000 ppm or null. Written by id (updated, inserted, removed when left out), so a line keeps its identity across an edit; nothing points at one. |
 | `job_party_documents` | What a subcontractor or supplier has on file with the business (11b, ADR 0068): the party, an open-taxonomy `kind` (format-checked; three suggested), title, issuer, number, issued and expires dates, a coverage limit, requested / received / void with the receipt date, notes. The scanned copy is a Documents attachment (`job_party_document`). | **No action to the party** — one with documents on file cannot be merged away. CHECK: the kind is a slug; received has its date, requested has none, void keeps what it had; limit ≥ 0. Standing (missing / expired / expiring / ok) is derived against today and the tenant's required list, never stored. |
+| `job_drawing_sets` | One issue of a job's drawings (ADR 0072): name, the date on the drawings (`issued_on`, which orders the issues), who issued it (a party), notes. Its PDFs are cabinet documents hung on it through `document_attachments` (`job_drawing_set`). | Cascade from the project; **no action to the party**. CHECK: name present. The current set is never stored — it is derived from the issues' dates. |
+| `job_sheets` | One page of one of a set's files with the number the trade calls it by, normalised on write, a title and a revision mark. | Cascade from the project, the set AND the document (a page of a file that is gone is nothing to open). UNIQUE (set, number) and (set, document, page). CHECK: number present, page ≥ 1. The discipline is read off the number, never stored. |
 | `job_phases` | A phase or milestone of a job's schedule (ADR 0071): the calendar item that holds its dates, name, kind, planned / underway / done, the predecessor and its lag, the party doing it, the cost code, notes, order. | Cascade from the project AND from its `schedule_items` row (a phase without its item is nothing); **no action to itself, the party and the code** (the verb re-points successors before a removal). One phase per item. CHECK: kind, status, lag within a year, not its own predecessor. The dates are NOT here — they are the item's. |
 | `job_lien_waivers` | A lien waiver as a RECORD (11a, ADR 0066): the claimant (any party), the job, the order and the billed application it covers, its kind (conditional/unconditional × progress/final), the through date, the amount, and whether it was requested or received. The signed copy is a Documents attachment (`job_lien_waiver`). | Cascade from the project and the order; **no action to the party and to the application** — who signed is held, and a named application stays. CHECK: received has its date, requested has none, void keeps what it had; amount ≥ 0. Nothing here says "outstanding": the gap is derived from the applications' bills at read time. |
 | `job_commitment_lines` | The money, one cost code at a time — the lines the order was placed with (`change_order_id` null) and each change order's, tagged with it (4b). | Cascade from the commitment and from the change; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative on an original line — a credit is a change order — and a change's line may be negative, the one exception in the CHECK. A line counts when it is original or its change is approved: `countedCommitmentLine`, one predicate for every roll-up. |
@@ -2330,6 +2464,13 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Key files & seams
 
+- `src/packs/jobs/drawings-ops.ts` + `drawings-math.ts` — the sets and sheets
+  (ADR 0072): the file is Documents' (`registerAttachedFile` with
+  `docKind: "drawing"`, `attachDocumentToRecord`), the pack keeps which page
+  is which sheet and which issue is newest; `currentIssues` derives the
+  current set, `guessSheet` reads a title block from pdf.js text, and
+  `components/pdf-reading.ts` runs pdf.js in the browser over the bytes it
+  already has.
 - `src/packs/jobs/ops.ts` — the write surface. Owner-only, and forced from below:
   `upsertDimensionMember` calls `requireOwnerRole`, so a staff-created project
   could not sync its cost object.
@@ -2408,6 +2549,13 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Decisions & gotchas
 
+- **[ADR 0072](../decisions/0072-a-drawing-set-is-an-issue-of-pages-in-documents-and-the-current-set-is-derived.md)** —
+  a drawing set is an issue of pages in Documents, a sheet is a page with a
+  number, and the current set is DERIVED as the newest issue of every number
+  — never a flag. The browser reads the title blocks (the number-shaped line
+  nearest the bottom-right corner); the server stores what was confirmed.
+  A sheet points at the document, not a version: replacing the file's bytes
+  in the cabinet changes what the sheet shows, and a reissue is a new set.
 - **[ADR 0071](../decisions/0071-a-jobs-schedule-is-its-phases-as-items-on-the-business-calendar-and-a-move-pushes-what-follows.md)** —
   a phase is a calendar item on the business's Job schedule; core owns the
   dates and the pack owns the order, the dependency, the trade and the
@@ -2571,6 +2719,16 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Open items
 
+- **A sheet is a page to look at (9a, ADR 0072).** Markups — clouds, arrows,
+  text and pins that raise a punch item where they sit — stored as vectors
+  over a sheet and revision (9b), a scale set on a sheet with lengths and
+  areas measured and pushed onto an estimate line as the takeoff (9c),
+  comparing two issues of a sheet by overlay, reading the cover sheet's
+  index to fill titles, and a per-job Drawings folder in the cabinet are
+  each a slice of their own once a real set has been read. A scanned set's
+  numbers are typed off the thumbnails. The "From Documents" door leaves a
+  picked file's `doc_kind` as it was; only an upload through the set is
+  filed as a `drawing`.
 - **The schedule is calendar days with one kind of dependency (ADR 0071).**
   Working-day calendars and holidays, a baseline to measure slip against,
   start-to-start dependencies, telling the trade (the phase's party has an

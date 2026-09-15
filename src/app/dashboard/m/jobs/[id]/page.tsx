@@ -4,7 +4,7 @@ import { ChevronLeft, Pencil } from "lucide-react";
 import { and, eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
-import { requireModuleEnabled } from "@/lib/modules";
+import { isModuleEnabled, requireModuleEnabled } from "@/lib/modules";
 import { labelFor } from "@/lib/packs/resolve";
 import { packContext } from "@/lib/packs/tenant-context";
 import { PageHeader } from "@/components/app/page-header";
@@ -44,6 +44,9 @@ import { listEstimates } from "@/packs/jobs/estimating-ops";
 import { NewEstimateDialog } from "@/packs/jobs/components/estimate-editor";
 import { listPhases, scheduleSummary } from "@/packs/jobs/schedule-ops";
 import { PhaseForm } from "@/packs/jobs/components/phase-form";
+import { drawingsSummary } from "@/packs/jobs/drawings-ops";
+import { AddDrawingSetDialog } from "@/packs/jobs/components/drawing-set-form";
+import { roleMayWrite } from "@/modules/documents/core/errors";
 import { todayInTimezone } from "@/lib/timezone";
 import { SelectionForm } from "@/packs/jobs/components/selection-form";
 import { BudgetEditor } from "@/packs/jobs/components/budget-editor";
@@ -128,6 +131,7 @@ export default async function ProjectPage({
         selections,
         estimates,
         phases,
+        drawings,
       ] = await Promise.all([
         tx
           .select({ name: schema.entities.name })
@@ -234,6 +238,7 @@ export default async function ProjectPage({
         selectionSummary(tx, ctx.tenant.id, project.id, new Date().toISOString().slice(0, 10)),
         listEstimates(tx, ctx.tenant.id, project.id),
         listPhases(tx, ctx.tenant.id, project.id, ctx.tenant.timezone, todayInTimezone(ctx.tenant.timezone)),
+        drawingsSummary(tx, ctx.tenant.id, project.id),
       ]);
       return {
         project,
@@ -265,6 +270,7 @@ export default async function ProjectPage({
         selections,
         estimates,
         phases,
+        drawings,
       };
     },
     { role: ctx.role },
@@ -289,6 +295,8 @@ export default async function ProjectPage({
   const isOwner = allowsWrite(ctx.role, "owner");
   /** The field is a chore: whoever is on the site logs the day and ticks the list. */
   const canLog = allowsWrite(ctx.role, "member");
+  const documentsOn = await isModuleEnabled(ctx.tenant.id, "documents");
+  const canFile = canLog && roleMayWrite(ctx.role);
   const symbol = ctx.tenant.currencySymbol;
   /**
    * Only signed and complete agreements count. See `VALUED_CONTRACT_STATUSES` —
@@ -1236,6 +1244,38 @@ export default async function ProjectPage({
                 data.selections.toRaiseCents !== 0
                   ? ` · ${formatMoneySign(data.selections.toRaiseCents, symbol)} approved and not yet raised as a change order`
                   : ""
+              }.`}
+        </p>
+      </Panel>
+
+      <Panel className="p-5">
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-heading text-sm font-medium tracking-heading">
+            Drawings
+          </h2>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/dashboard/m/jobs/${project.id}/drawings`}>All sheets</Link>
+            </Button>
+            {documentsOn && canFile && (
+              <AddDrawingSetDialog projectId={project.id} tenantId={ctx.tenant.id} parties={data.parties} today={todayInTimezone(ctx.tenant.timezone)} />
+            )}
+          </div>
+        </div>
+        <p className="mb-3 text-sm text-muted-foreground">
+          {/*
+            THE SET IN ONE SENTENCE (ADR 0072): every sheet is a page of a PDF
+            in Documents, and the current set is derived from the issues'
+            dates, never kept as a flag.
+          */}
+          {data.drawings.sets === 0
+            ? documentsOn
+              ? "No drawings yet. A set is an issue of the drawings — the permit set, ASI 3 — as a PDF; each page with a sheet number becomes a sheet, and the newest issue of every number is the current set."
+              : "Drawings need Documents switched on: a set is a PDF in the cabinet, read into sheets."
+            : `${data.drawings.sheets} ${data.drawings.sheets === 1 ? "sheet" : "sheets"} in the current set from ${data.drawings.sets} ${
+                data.drawings.sets === 1 ? "issue" : "issues"
+              }; newest ${data.drawings.latestSetName}, dated ${data.drawings.latestIssuedOn}${
+                data.drawings.superseded > 0 ? `, ${data.drawings.superseded} superseded` : ""
               }.`}
         </p>
       </Panel>

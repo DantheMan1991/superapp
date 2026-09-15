@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
 /** Loaded once per process, lazily — pdf.js is large and most pages never need it. */
 let pdfjs: typeof import("pdfjs-dist") | null = null;
 
-async function loadPdfjs(): Promise<typeof import("pdfjs-dist")> {
+export async function loadPdfjs(): Promise<typeof import("pdfjs-dist")> {
   if (pdfjs) return pdfjs;
   const lib = await import("pdfjs-dist");
   // The worker keeps parsing off the main thread; without it a large drawing

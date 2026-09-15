@@ -148,7 +148,9 @@ export class JobsError extends Error {
       /** A received lien waiver carries the date it arrived. */
       | "RECEIVED_DATE_REQUIRED"
       /** A selection's difference has been raised as a change order that still stands; the message names it. */
-      | "SELECTION_RAISED",
+      | "SELECTION_RAISED"
+      /** An accepted estimate's money is fixed; the message names it. */
+      | "ESTIMATE_ACCEPTED",
     message: string,
   ) {
     super(message);

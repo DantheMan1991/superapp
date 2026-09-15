@@ -1773,4 +1773,75 @@ d("jobs tables (RLS)", () => {
     expect(await withSystem((tx) => tx.select().from(schema.jobSelections).where(eq(schema.jobSelections.id, scratch.selectionId)))).toEqual([]);
     await withSystem((tx) => tx.delete(schema.jobSelections).where(eq(schema.jobSelections.id, otherSelection)));
   });
+
+  it("cannot read or change another tenant's ESTIMATES or their lines; an estimate hangs off this tenant's job and contract, a line off this tenant's estimate and code; a number is unique per job; every rate is capped and every amount floored; the lines go with the estimate and the estimates with the job", async () => {
+    const estimateId = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobEstimates)
+        .values({ tenantId: tenantA, projectId: projectA, contractId: contractA, number: "EST-ISO-1", title: "As drawn", markupPpm: 150_000, overheadPpm: 100_000, profitPpm: 100_000 })
+        .returning();
+      await tx.insert(schema.jobEstimateLines).values([
+        { tenantId: tenantA, estimateId: rows[0].id, costCodeId: codeA, description: "Slab", unit: "cy", quantityThousandths: 120_000, unitCostCents: 185_00, sortOrder: 10 },
+        { tenantId: tenantA, estimateId: rows[0].id, description: "Permit", unitCostCents: 1_500_00, markupPpm: 0, sortOrder: 20 },
+      ]);
+      return rows[0].id;
+    });
+    const seen = await asOtherTenant(async (tx) => ({
+      rows: await tx.select().from(schema.jobEstimates).where(eq(schema.jobEstimates.id, estimateId)),
+      lines: await tx.select().from(schema.jobEstimateLines).where(eq(schema.jobEstimateLines.estimateId, estimateId)),
+      changed: await tx.update(schema.jobEstimates).set({ markupPpm: 1 }).where(eq(schema.jobEstimates.id, estimateId)).returning(),
+    }));
+    expect(seen.rows).toEqual([]);
+    expect(seen.lines).toEqual([]);
+    expect(seen.changed).toEqual([]);
+    const mine = await asStaff((tx) => tx.select().from(schema.jobEstimateLines).where(eq(schema.jobEstimateLines.estimateId, estimateId)));
+    expect(mine).toHaveLength(2);
+
+    // Tenant B's job or contract under tenant A's estimate: unrepresentable. So is a second EST-ISO-1 on the job.
+    const base = { tenantId: tenantA, number: "EST-ISO-2" } as const;
+    await expect(withSystem((tx) => tx.insert(schema.jobEstimates).values({ ...base, projectId: projectB }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobEstimates).values({ ...base, projectId: projectA, contractId: contractB }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobEstimates).values({ ...base, projectId: projectA, number: "EST-ISO-1" }))).rejects.toThrow();
+    // A line under tenant B's estimate, or on tenant B's code: unrepresentable.
+    const otherCode = await withSystem(async (tx) => {
+      const r = await tx.select().from(schema.jobCostCodes).where(eq(schema.jobCostCodes.setId, setB));
+      return r[0].id;
+    });
+    const otherEstimate = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobEstimates).values({ tenantId: tenantB, projectId: projectB, number: "EST-B-1" }).returning();
+      return r[0].id;
+    });
+    await expect(
+      withSystem((tx) => tx.insert(schema.jobEstimateLines).values({ tenantId: tenantA, estimateId: otherEstimate, description: "x" })),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) => tx.insert(schema.jobEstimateLines).values({ tenantId: tenantA, estimateId, costCodeId: otherCode, description: "x" })),
+    ).rejects.toThrow();
+    // The CHECKs: a status off the list, a rate past 1,000%, a negative cost, quantity or price, a blank description.
+    await expect(withSystem((tx) => tx.update(schema.jobEstimates).set({ status: "won" }).where(eq(schema.jobEstimates.id, estimateId)))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.update(schema.jobEstimates).set({ overheadPpm: 10_000_001 }).where(eq(schema.jobEstimates.id, estimateId)))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.update(schema.jobEstimates).set({ profitPpm: -1 }).where(eq(schema.jobEstimates.id, estimateId)))).rejects.toThrow();
+    for (const bad of [
+      { description: "x", unitCostCents: -1 },
+      { description: "x", quantityThousandths: -1 },
+      { description: "x", unitPriceCents: -1 },
+      { description: "x", markupPpm: 10_000_001 },
+      { description: "   " },
+    ]) {
+      await expect(withSystem((tx) => tx.insert(schema.jobEstimateLines).values({ tenantId: tenantA, estimateId, ...bad }))).rejects.toThrow();
+    }
+    // The contract it became and the code are held; the lines go with the estimate; the estimates with the job.
+    await expect(withSystem((tx) => tx.delete(schema.jobContracts).where(eq(schema.jobContracts.id, contractA)))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.delete(schema.jobCostCodes).where(eq(schema.jobCostCodes.id, codeA)))).rejects.toThrow();
+    await withSystem((tx) => tx.delete(schema.jobEstimates).where(eq(schema.jobEstimates.id, estimateId)));
+    expect(await withSystem((tx) => tx.select().from(schema.jobEstimateLines).where(eq(schema.jobEstimateLines.estimateId, estimateId)))).toEqual([]);
+    const scratch = await withSystem(async (tx) => {
+      const p = await tx.insert(schema.jobProjects).values({ tenantId: tenantA, entityId: entityA, number: "casc-est", name: "est" }).returning();
+      const e = await tx.insert(schema.jobEstimates).values({ tenantId: tenantA, projectId: p[0].id, number: "Goes with the job" }).returning();
+      return { projectId: p[0].id, estimateId: e[0].id };
+    });
+    await withSystem((tx) => tx.delete(schema.jobProjects).where(eq(schema.jobProjects.id, scratch.projectId)));
+    expect(await withSystem((tx) => tx.select().from(schema.jobEstimates).where(eq(schema.jobEstimates.id, scratch.estimateId)))).toEqual([]);
+    await withSystem((tx) => tx.delete(schema.jobEstimates).where(eq(schema.jobEstimates.id, otherEstimate)));
+  });
 });

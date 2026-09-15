@@ -13,6 +13,123 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-15 — Slice 10: estimating (`claude/estimating`, ADR 0069)
+
+`job_estimates` and `job_estimate_lines`, an **Estimates** page per job
+(`/dashboard/m/jobs/[id]/estimates`) with a full-page editor per estimate
+(`/estimates/[estimateId]`), an Estimates panel on the job's page, and
+three owner verbs that make an estimate the money the pack already has —
+the front end of the job, which until now was a spreadsheet typed into
+the contract, the budget and the schedule of values three times over.
+
+**COST AND PRICE ARE TWO NUMBERS ON EVERY LINE.** A line is a cost code, a
+description, a quantity of a unit (blank is one — a lump sum), a **unit
+cost**, an optional **markup of its own** and an optional **unit price**.
+It sells at the markup on its cost — the line's or the estimate's default
+— unless a unit price is typed, which wins: that is how a unit-price bid
+is written. Below the lines the estimate carries **overhead** on the
+subtotal and **profit** on the subtotal plus overhead (the trade's "ten
+and ten"), each a rate up to 1,000% (`RATE_PPM_MAX`, CHECKed on every rate
+column), each rounded once. Nothing extended is stored: `estimate-math.ts`
+computes the line's cost and price, the six totals (cost, subtotal,
+overhead, profit, total, margin with its ppm) and the by-code split
+wherever they are shown, the change order's rule, and the markup is
+applied to the *extended* cost so a line typed whole and a line typed by
+the unit agree to the cent. A business that marks up its lines and stops,
+one that sells at cost and takes it all below, and one that does both are
+the same estimate. Several per job is ordinary — the number is unique per
+(tenant, project), `job_estimates_project_number_idx`, and the action
+names it — with draft / sent / accepted / declined / superseded.
+
+**ACCEPTING NAMES THE CONTRACT AND FIXES THE ESTIMATE.** `acceptEstimate`
+(owner) takes the contract on the job and the date: the estimate's total
+becomes the contract's value through `updateContract` — so a *signed*
+contract's value is refused with `VALUE_LOCKED` exactly as it is from the
+form, unless the total already equals it to the cent, when nothing is
+touched, or the signed contract has no value yet, when the total is entry
+(slice 4's one exception; the dev job's cost-plus agreement, worth nothing
+on paper, took its estimate that way) — the estimate keeps `contract_id`, and from then `updateEstimate`
+refuses its rates, its lines and any status but accepted or superseded
+(`ESTIMATE_ACCEPTED`); the title and the notes still move. A revision is a
+new estimate and the old one superseded. The other two acts are separate
+and deliberate, each an owner's: `applyEstimateToBudget` writes each
+code's **cost** as that code's original through `setBudgetLines` (lines
+with no code have nowhere to land and are returned as `uncodedCents` so
+the page says so); `applyEstimateToSchedule` writes one schedule line per
+estimate line at its **price** through `saveSovLines` — **with overhead and
+profit spread across the lines in proportion** (`scheduleFromEstimate`,
+largest-remainder rounding in `spreadCents`), so the schedule totals the
+contract sum the accept set, which a G703 requires and every draw is
+measured against; a line sold by the unit keeps its quantity with its unit
+price raised by the same share, so a unit-price contract still bills by
+the quantity, and the rounding lands on the last line priced as a sum. The
+first cut wrote the lines at their bare price and the schedule came out
+21% short of the contract on the test estimate — caught by reading the two
+numbers side by side, before anything was driven.
+
+**WRITING IS A MEMBER'S CHORE; MAKING IT MONEY IS AN OWNER'S.** The
+estimator is rarely the owner: create, edit, send, decline and supersede
+are member-wide, and the RLS is member-wide to match; accept, use as
+budget and use as schedule are owner verbs, the selections split. The
+editor is one client component (`estimate-editor.tsx`): the header and
+its rates, a lines grid whose cost and price columns compute as you type,
+the six figures, notes, Save — and, for an owner, the three dialogs, each
+saying what it will replace. `NewEstimateDialog` takes a number and a
+title and lands on the editor, because an estimate is too long for the
+pack's one-dialog habit. The lines are written by id — updated, inserted,
+removed when left out — the schedule of values' rule, so a line keeps its
+identity across an edit; the editor keys the row on it.
+
+**DRIVEN** on the dev branch's Hilltop Farm, job 24-109 (the cost-plus
+barn conversion, signed, worth nothing on paper): *New estimate* from the
+job's panel — EST-1, "Barn conversion, as drawn" — landed on the editor;
+15 / 10 / 10 typed, four lines — 120 cy of slab at $185 on 03 30 00, framing
+labour $40,000 at its own 10% on 06 10 00, 2 ton of rebar at $900 sold at
+$1,200 a ton (its markup box greyed the moment the price was typed), a
+$1,500 permit with no code — and the six figures computed as typed: cost
+$65,500.00, price $73,655.00, overhead $7,365.50, profit $8,102.05, total
+$89,122.55, margin $23,622.55 · 26.5%, the pure suite's numbers. Save, and
+the by-code panel appeared ($24,000 / $27,930, $40,000 / $44,000, no code
+$1,500 / $1,725). *Use as budget* — `Budget set on 2 codes — $1,500.00 on
+lines with no code left out` — and the job's cost table read Budget
+$64,000.00 by code. *Accept* onto the signed contract went through rather
+than refusing, because the contract had no value recorded: slice 4's one
+exception, entry not revision; the job's page then read *Worth $89,122.55*
+and the estimate's header named the contract, its rates and lines greyed,
+the Accept button gone. *Use as schedule of values* —
+`Schedule written: 4 lines, $89,122.55` — the contract sum to the cent,
+the cost-plus contract's page unmoved by it since that method bills cost.
+The list page and the panel sentence (*1 estimate: EST-1 $89,122.55
+(accepted).*) both read right. Two things found by driving: the dialogs'
+"$65,500.00in all" — JSX drops the space after an expression when the text
+continues on the next line, fixed with `{" "}` — and the signed-but-unvalued
+contract above, which was a rule, not a bug, and is now in the guide.
+
+Migrations `0356_estimates.sql` (hand-reordered like the eight before it:
+two new tables, the estimates' unique index moved ahead of the lines' key
+to it) and `0357_estimates_rls.sql`, applied to dev and prod before the
+merge; `db:verify-rls` **219 tables** on both, `db:verify-modules` 19/19.
+The pair was first generated as 0354/0355 on a branch cut before slice 11b
+merged, collided with that slice's numbers, and was regenerated on the
+rebased branch; the dev ledger's stamps were moved with
+`scripts/restamp-migration.ts` rather than the tables dropped. Tests: ten
+more pure (the status list mirrored, the four rate CHECKs at the code's
+cap and the floors, the unique number and the action naming its index,
+the four keys and the reordering; the arithmetic pinned — a rate half up,
+cost and price by markup or by unit price, the extended-cost markup, the
+six totals on the four lines the ops test uses and on nothing, by-code
+grouping, the rate parser, the spread and the schedule that totals the
+contract sum, with the all-unit case that cannot), one more ops (the shape
+refused four ways; staff draw up four lines and the figures come back to
+the cent; the duplicate number by name; an edit that keeps each line's id
+and adds one, stale and foreign-line refusals; staff cannot accept, the
+other job's contract, accept sets the value, the four things an accepted
+estimate refuses and the two it allows; budget by code with the uncoded
+cost said; the schedule with the spread and the unit line's raised price;
+the signed contract refusing a different total and accepting the same;
+supersede; the list newest first), one more isolation (the two tables,
+the four keys, the CHECKs, the unique number, the cascades and the holds).
+
 ### 2026-09-14 — Slice 8: selections and allowances (`claude/selections`, ADR 0067)
 
 `job_selections` and `job_selection_choices`, a **Selections** page per job
@@ -1879,6 +1996,8 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_sub_application_lines` | One line per subcontract line: previous, this period, stored. | Cascade from the application; **RESTRICT to the subcontract line** — a billed line cannot be replaced out from under its certificate. `this_period` may be negative; the total to date may not — on a DEDUCTIVE line (a change order's negative line) the floors flip: completed to less than nothing and never more, `scheduled_cents` kept equal to the line's amount by the sync while a draft (4b). |
 | `job_selections` | A decision the client owes (8, ADR 0067): name, room, cost code, the allowance the contract set aside, the date it is needed by, pending / selected / approved / cancelled, the date decided, and the change order its difference was raised as. | Cascade from the project; **no action to the contract, the change order and the code** (retired, never deleted). `allowance_cents` ≥ 0. The difference — chosen price less allowance — is computed, never stored; while the raised change order stands, the allowance and the choices are fixed (the verb). |
 | `job_selection_choices` | What is on offer for a selection, one row each: description, supplier, reference, a price by the unit (both or neither, ADR 0064's thousandths) or as a sum, `price_cents` the extended figure, and `is_selected` for the client's pick. | Cascade from the selection; no action to the party. **One chosen per selection**: a partial unique index on `(tenant, selection) where is_selected`. Price, quantity and unit price ≥ 0; the unit pair both or neither. Nothing points at a choice, so an edit replaces by id. |
+| `job_estimates` | The job priced before anybody signs (10, ADR 0069): a number unique per job, title, draft / sent / accepted / declined / superseded, sent / decided / valid-until dates, the three rates in ppm — markup on cost (the lines' default), overhead on the subtotal, profit on the subtotal plus overhead — notes, and the contract an accepted one became. | Cascade from the project; **no action to the contract**. CHECK: status on the list, every rate 0..10,000,000 ppm (`RATE_PPM_MAX`), number present. Nothing stores a total: `estimate-math.ts` computes them. Accepted, the rates and lines are fixed by the verb, not the database. |
+| `job_estimate_lines` | One line of an estimate: cost code, description, unit, quantity in thousandths (1000 = one, a lump sum), unit cost, an optional markup of its own, an optional unit price that wins over any markup, notes, sort order. | Cascade from the estimate; **no action to the code**. CHECK: description present, quantity / unit cost / unit price ≥ 0, markup 0..10,000,000 ppm or null. Written by id (updated, inserted, removed when left out), so a line keeps its identity across an edit; nothing points at one. |
 | `job_lien_waivers` | A lien waiver as a RECORD (11a, ADR 0066): the claimant (any party), the job, the order and the billed application it covers, its kind (conditional/unconditional × progress/final), the through date, the amount, and whether it was requested or received. The signed copy is a Documents attachment (`job_lien_waiver`). | Cascade from the project and the order; **no action to the party and to the application** — who signed is held, and a named application stays. CHECK: received has its date, requested has none, void keeps what it had; amount ≥ 0. Nothing here says "outstanding": the gap is derived from the applications' bills at read time. |
 | `job_commitment_lines` | The money, one cost code at a time — the lines the order was placed with (`change_order_id` null) and each change order's, tagged with it (4b). | Cascade from the commitment and from the change; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative on an original line — a credit is a change order — and a change's line may be negative, the one exception in the CHECK. A line counts when it is original or its change is approved: `countedCommitmentLine`, one predicate for every roll-up. |
 | `job_projects` | The spine. | FOUR composite FKs, each certified in `tests/isolation/jobs.test.ts`: company, division, client, cost code list. `delivery_method` is an open taxonomy (P1) with a **format check and no value check**, and is nullable. `metadata` is the P2 extension bag. |
@@ -1897,9 +2016,9 @@ hand-reordered like 0329) and `0335_job_billing.sql` / `0336_job_billing_rls.sql
 `wip_adjustment` to `journal_entry_source`, which nothing in the file uses)
 and `0341_cost_plus.sql` / `0342_cost_plus_rls.sql` (slice 5b; as generated,
 since the new table references existing ones only) and `0343_sub_billing.sql`
-/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) and `0350_lien_waivers.sql` / `0351_lien_waivers_rls.sql` (slice 11a; as generated, one new table referencing existing ones) and `0352_selections.sql` / `0353_selections_rls.sql` (slice 8; hand-reordered — two new tables, the selections' unique index ahead of the choices' key) follow the same rule —
+/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) and `0350_lien_waivers.sql` / `0351_lien_waivers_rls.sql` (slice 11a; as generated, one new table referencing existing ones) and `0352_selections.sql` / `0353_selections_rls.sql` (slice 8; hand-reordered — two new tables, the selections' unique index ahead of the choices' key) and `0356_estimates.sql` / `0357_estimates_rls.sql` (slice 10; hand-reordered — two new tables, the estimates' unique index ahead of the lines' key) follow the same rule —
 and from slice 3 the pair is `db:verify-rls` **and `db:verify-modules`**, after
-the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **216 tables**, all enabled, forced and with
+the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **219 tables**, all enabled, forced and with
 policies, on both.
 
 **0327 needed no hand-reordering, which confirms the diagnosis in 0325.** Both
@@ -1987,6 +2106,17 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Decisions & gotchas
 
+- **[ADR 0069](../decisions/0069-an-estimate-prices-the-job-before-anybody-signs-and-accepting-it-names-the-contract.md)** —
+  an estimate line carries COST and PRICE as two numbers (a markup on cost,
+  the line's or the estimate's, unless a unit price is typed, which wins);
+  overhead sits on the subtotal and profit on the subtotal plus overhead;
+  nothing extended is stored. Accepting names the contract and sets its
+  value through the ordinary verb (so a signed one refuses), and fixes the
+  estimate. Budget and schedule are two more deliberate acts, never
+  automatic on accept — and **the schedule an estimate writes totals the
+  contract sum**, overhead and profit spread across the lines, because a
+  schedule short of the contract under-bills every draw. A line sold by the
+  unit keeps its quantity with the unit price raised by the same share.
 - **[ADR 0056](../decisions/0056-a-delivery-method-belongs-to-the-project-not-the-tenant.md)** —
   the flavour of construction is a property of the PROJECT. A pack must never
   branch on `delivery_method`; it is data a project TEMPLATE reads, and a pack
@@ -2120,6 +2250,17 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Open items
 
+- **An estimate is lines, and nothing more yet (slice 10, ADR 0069).**
+  Assemblies — a named bundle of lines dropped in as one ("interior door,
+  prehung": slab, hardware, casing, labour) — a tenant-level unit cost book
+  that fills a line's cost from the last time it was priced, a takeoff
+  from the drawings, and the proposal as a printed document are each a
+  real thing the trade has and each a slice of its own; the first two want
+  a few real estimates typed before their shape is set. An estimate is not
+  attached to Documents (a scanned quote, a supplier's price sheet) — the
+  gallery seam is there and nothing on the estimate calls it yet. An
+  estimate on a schedule where every line is sold by the unit can miss the
+  contract sum by the rounding; the ops result says what was written.
 - ~~**No budget.**~~ — **closed 2026-09-14.** All four numbers exist: worth,
   planned, ordered, spent.
 - ~~**Nothing revises a budget or a contract value.**~~ — **closed 2026-09-14.**

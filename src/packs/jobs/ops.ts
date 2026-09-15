@@ -704,11 +704,13 @@ export async function listContracts(
  * is, which is the number an owner takes to a bank. `proposed`, `declined` and
  * `cancelled` are simply not summed.
  *
- * **A COUNT OF OUTSTANDING PROPOSALS IS DELIBERATELY NOT HERE.** It was, briefly,
- * and nothing read it: the job list shows a value, and the project page counts
- * its own contracts in memory. A field nothing reads is worse than an honest
- * absence — the standard this pack set one slice ago by refusing to add
- * `PackDefinition.dimensionTypes`. Add it the day a screen wants it.
+ * **`proposedCents` IS WHAT IS OUT FOR SIGNATURE, and it is here because a
+ * screen finally wants it.** This comment used to say a proposal count was
+ * deliberately absent and to add it the day something read it; the module home
+ * now does. A job with nothing signed used to render an em dash, which reads as
+ * "worth nothing" when the truth is usually "a proposal is out at $X" — a
+ * number somebody can chase. It is summed separately and never added to
+ * `valueCents`: a concept the client has not signed is still not money.
  *
  * TWO STATEMENTS FOR THE WHOLE LIST, grouped in the database rather than a query
  * per project — the reason `listProjectRows` reads the way it does.
@@ -728,6 +730,8 @@ export interface ProjectValue {
   /** The approved changes alone. Negative when deductions outweigh additions. */
   changesCents: number;
   signedCount: number;
+  /** Out for signature: summed over `proposed` alone, never part of `valueCents`. */
+  proposedCents: number;
 }
 
 export async function projectValues(
@@ -744,6 +748,9 @@ export async function projectValues(
         signedCount: sql<number>`count(*) filter (
           where ${schema.jobContracts.status} in ('signed', 'complete')
         )`.mapWith(Number),
+        proposedCents: sql<number>`coalesce(sum(${schema.jobContracts.valueCents}) filter (
+          where ${schema.jobContracts.status} = 'proposed'
+        ), 0)`.mapWith(Number),
       })
       .from(schema.jobContracts)
       .where(eq(schema.jobContracts.tenantId, tenantId))
@@ -778,6 +785,7 @@ export async function projectValues(
           valueCents: r.valueCents + changesCents,
           changesCents,
           signedCount: r.signedCount,
+          proposedCents: r.proposedCents,
         },
       ];
     }),

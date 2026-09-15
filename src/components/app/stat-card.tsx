@@ -49,7 +49,11 @@ export function StatCard({
       <p className="text-[13px] text-muted-foreground">{label}</p>
       <p
         className={cn(
-          "mt-1 font-heading text-2xl font-semibold tracking-heading tabular-nums",
+          // 24px fits a phone until the figure runs to seven digits, and a
+          // business with millions under contract is exactly who reads these:
+          // $2,103,622.55 needs 161px in a 134px half-width card. Steps up at
+          // `sm`, where the cards stop sharing a row on a 375px screen.
+          "mt-1 font-heading text-xl font-semibold tracking-heading tabular-nums sm:text-2xl",
           TONES[tone],
         )}
       >

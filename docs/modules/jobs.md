@@ -13,6 +13,81 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-15 — The list carries the money (`claude/jobs-redesign-list`)
+
+The module home used to be seven columns whose only figure was contract
+value, so the question an owner actually opens the screen with — *which job
+is in trouble* — could only be answered by opening each job in turn. Every
+figure needed to answer it was already computed; it was just on the WIP
+schedule, which is a month-end document rather than a daily one. Built from
+a Claude Design handoff (option `1b` of *Jobs Redesign*), which was itself
+drawn from this repo, so it is a refactor of the existing page and not a
+new one.
+
+The page is now a `<PageHeader>` with the pack's `HardHat` on its accent
+chip, four `<StatCard>`s (Under contract, Earned to date, Under-billed,
+Over-billed), `<FilterPills>` + `<ListSearch>` on one row, and a
+`<DataTable>` of six columns: the job, the customer and kind, complete ·
+cost to date with a bar, the revised contract, billed vs earned, and status.
+Nothing is a new primitive and no new token was added.
+
+**SIX STATEMENTS FOR THE WHOLE LIST, NOT SIX PER JOB** (`list-ops.ts`).
+`projectListEntries` batches `listProjectRows`, `projectValues`,
+`budgetByProject`, `actualByProject`, `billedByProject` and
+`ledgerTermsByProject` — every one of them grouped in the database and keyed
+by project id — so a list of sixty jobs costs the same number of round trips
+as a list of one. It deliberately does NOT call `wipSchedule`: that is
+scoped to one company and one period end and drops rows on purpose (a
+cancelled job, a job with nothing on it, a finished job whose billings have
+caught up), which are the right exclusions for a schedule a bank reads and
+the wrong ones for a list of what the business is building. The scope is
+`combined`, never `consolidated`: eliminating intercompany legs would
+quietly change what a job has cost depending on who paid the bill.
+
+**THE LIST NEVER PRINTS A ZERO IT CANNOT DEFEND** (`list-math.ts`,
+`ProjectValuation`). Three kinds of not-knowing, each a different next
+action, and each said rather than rounded to zero:
+
+- `unsigned` — nothing signed, so there is no value to be a percentage of.
+  The row reads **Nothing signed** and, where there is one, the proposed
+  figure, which is a number somebody can chase. A spec house accumulating
+  cost against no contract is a real state, not an error.
+- no estimate — `percentCompletePpm` already returns null, and the cell says
+  **Not started** or **No estimate** rather than 0%, which would read as "no
+  progress" when the truth is "nothing to measure against".
+- `by_hours` — a time-and-materials job earns its approved hours at their
+  bill rates (ADR 0062), and those hours are a query per job. The list shows
+  what it honestly has and sends the reader to the WIP schedule for earned.
+  **An approximate figure in a money column is worse than none.**
+
+Under-billed and over-billed are summed separately and never netted, as
+`wipTotals` has always done. The headline reads the whole book rather than
+the filtered rows, so it does not move when somebody clicks a pill, and a
+cancelled job is in no figure at all.
+
+**`projectValues` GAINED `proposedCents`, ON ITS OWN INVITATION.** Its
+comment had said a proposal count was deliberately absent and to add it the
+day a screen wanted one; this is that day. Summed over `proposed` alone and
+never added to `valueCents` — a concept the client has not signed is still
+not money. `ledgerTermsByProject` was made exported from `wip-ops.ts` for
+the same reason: without it a cost-plus job would be measured against a
+budget it was never sold against.
+
+**Two traps worth naming.** `TableCell` bakes in `whitespace-nowrap`, so a
+`max-w-*` on a cell caps the box while the text keeps running straight
+across the next column — capping a cell means `whitespace-normal` with it,
+or the money silently lands under the status badge. And `--accent-jobs`
+still does not exist, so the pack's accent falls through
+`var(--accent-jobs, var(--accent-brand))` to the same emerald
+`--accent-accounting` uses; the design flags it as a real decision and it is
+deliberately left alone here, because inventing a token is a change to every
+screen in the module rather than to this one.
+
+Driven on Hilltop Farm: four jobs covering all three valuations — a unit
+price job billed ahead with nothing spent, a time-and-materials job reading
+By hours, a cost-plus job at its guaranteed maximum, and a fixed-price job
+under-billed by $1.59m.
+
 ### 2026-09-15 — Slice 9a: the drawings (`claude/drawings`, ADR 0072)
 
 The last pack the construction plan's four-flavour matrix gives four solid

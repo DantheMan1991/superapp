@@ -54,7 +54,32 @@ address when there is one, the certificate's rule. A draft prints under
 DRAFT with *Not yet sent*; declined and superseded under those words;
 sent and accepted clean. Rendered on request, never stored.
 
-<!-- DRIVEN -->
+**DRIVEN AS FAR AS A SIGNED-OUT PANE ALLOWS.** The browser pane's Clerk
+session had expired and only the founder can sign it in, so the editor's
+Proposal block was not clicked; the PDF was made the other way round —
+a throwaway script (never committed) stubbing `server-only` through a
+tsconfig `paths` entry, calling the real `loadProposal` → `renderProposal`
+path against the dev branch's Hilltop Farm, EST-1 on 24-109 (accepted onto
+the cost-plus contract), its scope, three exclusions and three lines of
+terms written straight to the row. Three renders, read back through
+Documents' own PDF text extractor: line by line — *Hilltop Farm · Grass-fed
+since 1998 · PROPOSAL · Barn conversion, as drawn · Project 24-109 · Site 4
+Mill Lane · Proposal no. EST-1 · Date 2026-09-15 · Valid until 2026-10-15 ·
+To Tractor Supply Co* (the contract's counterparty, not the job's client,
+which it has none) *· From Hilltop Farm*, the scope, then **Slab, 4in, fibre
+mesh 120 cy 30,891.30 · Framing labour 53,240.00 · Rebar 2 ton 1,452.00
+2,904.00 · Permit 2,087.25 · Total 89,122.55** — the quantity column only on
+the two lines with one, the per-unit column only on the rebar, the contract
+sum to the cent — the three exclusions as three lines, the terms, *This
+proposal is valid until 2026-10-15*, the acceptance sentence and the two
+signature blocks on a second page; by cost code as a draft — **03 30 00 ·
+Cast-in-place concrete 33,795.30 · 06 10 00 · Rough carpentry 53,240.00 ·
+Other 2,087.25 · Total 89,122.55**, *Not yet sent*, DRAFT on both pages;
+one sum — *Price for the work described 89,122.55* and no table. Nothing
+on any of the three says cost, markup, overhead, profit or margin. The
+editor block, the Print button and the list's Proposal button await the
+founder's session; the actions they call are the estimate's own, tested
+in the ops suite.
 
 Migration `0358_proposal.sql` applied to dev and prod before the merge;
 `db:verify-rls` **219 tables** (none new) on both, `db:verify-modules`

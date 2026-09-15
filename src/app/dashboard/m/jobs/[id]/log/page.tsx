@@ -11,13 +11,14 @@ import { allowsWrite } from "@/lib/packs/authorize";
 import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
 import { Button } from "@/components/ui/button";
-import { attachmentsForRecord } from "@/modules/documents/attachments";
-import { isDisplayableImage } from "@/modules/documents/allowlist";
+import { attachmentsForRecord, splitAttachments } from "@/modules/documents/attachments";
 import { roleMayWrite } from "@/modules/documents/core/errors";
-import { RecordPhotos, type RecordPhoto } from "@/modules/documents/components/record-photos";
+import { RecordPhotos, type RecordFile, type RecordPhoto } from "@/modules/documents/components/record-photos";
 import { getProject } from "@/packs/jobs/ops";
 import { listDailyLogs } from "@/packs/jobs/field-ops";
 import {
+  attachLogDocumentAction,
+  attachLogFileAction,
   attachLogPhotoAction,
   detachLogPhotoAction,
   setLogPhotoPrimaryAction,
@@ -61,6 +62,7 @@ export default async function DailyLogPage({
         packContext(tx, ctx.tenant.id, ctx.tenant.industry, PACK),
       ]);
       const photos = new Map<string, RecordPhoto[]>();
+      const files = new Map<string, RecordFile[]>();
       if (documentsOn) {
         for (const day of days) {
           const attachments = await attachmentsForRecord(tx, ctx.tenant.id, {
@@ -68,21 +70,12 @@ export default async function DailyLogPage({
             entityType: DAILY_LOG_ENTITY,
             entityId: day.log.id,
           });
-          photos.set(
-            day.log.id,
-            attachments
-              .filter((a) => isDisplayableImage(a.document.mimeType))
-              .map((a) => ({
-                documentId: a.document.id,
-                fileName: a.document.fileName,
-                title: a.document.title ?? "",
-                mimeType: a.document.mimeType,
-                isPrimary: a.isPrimary,
-              })),
-          );
+          const split = splitAttachments(attachments);
+          photos.set(day.log.id, split.photos);
+          files.set(day.log.id, split.files);
         }
       }
-      return { project, days, parties, photos, labels: pack.labels };
+      return { project, days, parties, photos, files, labels: pack.labels };
     },
     { role: ctx.role },
   );
@@ -201,11 +194,14 @@ export default async function DailyLogPage({
                 entityId={day.log.id}
                 tenantId={ctx.tenant.id}
                 photos={data.photos.get(day.log.id) ?? []}
+                files={data.files.get(day.log.id) ?? []}
                 canEdit={canPhoto}
                 subject="day"
                 attachAction={attachLogPhotoAction}
                 setPrimaryAction={setLogPhotoPrimaryAction}
                 detachAction={detachLogPhotoAction}
+                attachFileAction={attachLogFileAction}
+                attachExistingAction={attachLogDocumentAction}
               />
             ) : (
               <p className="text-xs text-muted-foreground">

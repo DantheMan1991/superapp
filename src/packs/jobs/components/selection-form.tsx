@@ -22,8 +22,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { RecordPhotos, type RecordPhoto } from "@/modules/documents/components/record-photos";
+import { RecordPhotos, type RecordFile, type RecordPhoto } from "@/modules/documents/components/record-photos";
 import {
+  attachSelectionDocumentAction,
+  attachSelectionFileAction,
   attachSelectionPhotoAction,
   createSelectionAction,
   detachSelectionPhotoAction,
@@ -143,6 +145,7 @@ export function SelectionForm({
   tenantId,
   canPhoto,
   photos = [],
+  files = [],
   existing,
   trigger,
 }: {
@@ -154,6 +157,7 @@ export function SelectionForm({
   tenantId: string;
   canPhoto: boolean;
   photos?: RecordPhoto[];
+  files?: RecordFile[];
   existing?: EditableSelection;
   trigger?: ReactNode;
 }) {
@@ -568,11 +572,14 @@ export function SelectionForm({
                     entityId={existing.id}
                     tenantId={tenantId}
                     photos={photos}
+                    files={files}
                     canEdit={canPhoto}
                     subject="selection"
                     attachAction={attachSelectionPhotoAction}
                     setPrimaryAction={setSelectionPhotoPrimaryAction}
                     detachAction={detachSelectionPhotoAction}
+                    attachFileAction={attachSelectionFileAction}
+                    attachExistingAction={attachSelectionDocumentAction}
                   />
                 ) : (
                   <p className="text-xs text-muted-foreground">Photos need Documents switched on.</p>

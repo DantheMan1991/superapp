@@ -21,10 +21,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { attachmentsForRecord } from "@/modules/documents/attachments";
-import { isDisplayableImage } from "@/modules/documents/allowlist";
+import { attachmentsForRecord, splitAttachments } from "@/modules/documents/attachments";
 import { roleMayWrite } from "@/modules/documents/core/errors";
-import type { RecordPhoto } from "@/modules/documents/components/record-photos";
+import type { RecordFile, RecordPhoto } from "@/modules/documents/components/record-photos";
 import { listOpenWork } from "@/lib/work/entity-work";
 import { getProject, listContracts, listCostCodes } from "@/packs/jobs/ops";
 import { listSelections, summarise } from "@/packs/jobs/selections-ops";
@@ -85,6 +84,7 @@ export default async function SelectionsPage({ params }: { params: Promise<{ id:
         packContext(tx, ctx.tenant.id, ctx.tenant.industry, PACK),
       ]);
       const photos = new Map<string, RecordPhoto[]>();
+      const files = new Map<string, RecordFile[]>();
       if (documentsOn) {
         for (const r of rows) {
           const attachments = await attachmentsForRecord(tx, ctx.tenant.id, {
@@ -92,18 +92,9 @@ export default async function SelectionsPage({ params }: { params: Promise<{ id:
             entityType: SELECTION_ENTITY,
             entityId: r.selection.id,
           });
-          photos.set(
-            r.selection.id,
-            attachments
-              .filter((a) => isDisplayableImage(a.document.mimeType))
-              .map((a) => ({
-                documentId: a.document.id,
-                fileName: a.document.fileName,
-                title: a.document.title ?? "",
-                mimeType: a.document.mimeType,
-                isPrimary: a.isPrimary,
-              })),
-          );
+          const split = splitAttachments(attachments);
+          photos.set(r.selection.id, split.photos);
+          files.set(r.selection.id, split.files);
         }
       }
       /** Reminders open per selection, from Work's own read, filtered to this pack's links. */
@@ -115,7 +106,7 @@ export default async function SelectionsPage({ params }: { params: Promise<{ id:
           }
         }
       }
-      return { project, rows, contracts, codes, parties, photos, reminders, labels: pack.labels };
+      return { project, rows, contracts, codes, parties, photos, files, reminders, labels: pack.labels };
     },
     { role: ctx.role },
   );
@@ -146,6 +137,7 @@ export default async function SelectionsPage({ params }: { params: Promise<{ id:
       tenantId={ctx.tenant.id}
       canPhoto={canPhoto}
       photos={row ? (data.photos.get(row.selection.id) ?? []) : []}
+      files={row ? (data.files.get(row.selection.id) ?? []) : []}
       existing={
         row
           ? {
@@ -344,7 +336,7 @@ export default async function SelectionsPage({ params }: { params: Promise<{ id:
                         )}
                         {row.attachmentCount > 0 && (
                           <span className="block text-xs text-muted-foreground">
-                            {row.attachmentCount} {row.attachmentCount === 1 ? "photo" : "photos"}
+                            {row.attachmentCount} {row.attachmentCount === 1 ? "file" : "files"}
                           </span>
                         )}
                       </TableCell>

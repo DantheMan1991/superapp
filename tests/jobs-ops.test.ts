@@ -107,6 +107,20 @@ import {
   updateEstimate,
 } from "../src/packs/jobs/estimating-ops";
 import { createPhase, deletePhase, listPhases, scheduleSummary, updatePhase } from "../src/packs/jobs/schedule-ops";
+import {
+  createDrawingSet,
+  deleteDrawingSet,
+  deleteSheet,
+  detachSetFile,
+  drawingsSummary,
+  indexSheets,
+  listDrawingSets,
+  listSheets,
+  setTarget,
+  updateDrawingSet,
+  updateSheet,
+} from "../src/packs/jobs/drawings-ops";
+import { attachDocumentToRecord } from "../src/modules/documents/attachments";
 import { certificateInputFrom } from "../src/packs/jobs/certificate";
 import { loadInvoice, loadInvoiceLines } from "../src/modules/accounting/invoicing/invoices";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
@@ -4324,5 +4338,171 @@ d("jobs ops", () => {
     expect((await run((tx) => tx.select().from(schema.scheduleItems).where(eq(schema.scheduleItems.id, slab.itemId))))[0].cancelledAt).not.toBeNull();
     // An expert is a member in a pack and may keep the schedule; only the calendar itself is an owner's to make.
     expect((await run((tx) => createPhase(tx, { ...ctx, role: "expert" }, { projectId: project.id, name: "Punch walk", startOn: "2026-11-02" }, TZ))).name).toBe("Punch walk");
+  }, 120_000);
+  it("A JOB'S DRAWINGS are sets of pages in Documents: a set is an issue with a date and its files hang on it; a page read into a sheet carries its number, normalised, once per set; only a PDF the set holds is read; the newest issue of each number is the current set — by the date on the drawings, then by which set was made later — and older ones are superseded; a file read again replaces its sheets; a set removed lets go of its files and takes its sheets", async () => {
+    const entity = await newCompany("Drawings Co 1");
+    const { project, architect } = await run(async (tx) => ({
+      project: await createProject(tx, ctx, { entityId: entity, number: "OPS-DRW1", name: "Drawn" }),
+      architect: await seedVendor(tx, "Architect"),
+    }));
+    // The shape: a name, a real date.
+    await expect(run((tx) => createDrawingSet(tx, staffCtx, { projectId: project.id, name: " ", issuedOn: "2026-06-01" }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => createDrawingSet(tx, staffCtx, { projectId: project.id, name: "Permit set", issuedOn: "June" }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    const permit = await run((tx) => createDrawingSet(tx, staffCtx, { projectId: project.id, name: " Permit set ", issuedOn: "2026-06-01", fromPartyId: architect }));
+    expect([permit.name, permit.issuedOn, permit.fromPartyId, permit.version]).toEqual(["Permit set", "2026-06-01", architect, 1]);
+
+    // A file: a document row straight in (no blob storage here), hung on the set the way the attach action hangs it.
+    let docSeq = 0;
+    const newDoc = (name: string, mimeType = "application/pdf") =>
+      run(async (tx) => {
+        const rows = await tx
+          .insert(schema.documents)
+          .values({
+            tenantId,
+            origin: "dms",
+            blobPathname: `docs/${tenantId}/files/${STAMP}-${(docSeq += 1)}-${name}`,
+            fileName: name,
+            mimeType,
+            sizeBytes: 10,
+            sha256: `${STAMP}-sha-${docSeq}`,
+            effectiveVisibility: "members",
+          })
+          .returning();
+        return rows[0].id;
+      });
+    const attach = (setId: string, documentId: string) =>
+      run((tx) => attachDocumentToRecord(tx, { tenantId, userId: ctx.userId, role: "owner" }, { documentId, target: setTarget(setId), makePrimary: false }));
+    const index = (who: JobsCtx, setId: string, documentId: string, sheets: { pageNumber: number; sheetNumber: string; title?: string; revision?: string }[]) =>
+      run((tx) => indexSheets(tx, who, { setId, documentId, sheets }));
+
+    const permitPdf = await newDoc("permit-set.pdf");
+    // Not the set's file yet: refused. Not a PDF: refused.
+    await expect(index(staffCtx, permit.id, permitPdf, [{ pageNumber: 1, sheetNumber: "A-101" }])).rejects.toMatchObject({ code: "INVALID_VALUE", message: expect.stringContaining("not one of the set's") });
+    await attach(permit.id, permitPdf);
+    const photo = await newDoc("site.jpg", "image/jpeg");
+    await attach(permit.id, photo);
+    await expect(index(staffCtx, permit.id, photo, [{ pageNumber: 1, sheetNumber: "A-101" }])).rejects.toMatchObject({ code: "INVALID_VALUE", message: expect.stringContaining("only a PDF") });
+    // The same number twice in one file (whatever the case), a blank number, page 0, a page listed twice.
+    await expect(index(staffCtx, permit.id, permitPdf, [{ pageNumber: 1, sheetNumber: "A-101" }, { pageNumber: 2, sheetNumber: "a-101" }])).rejects.toMatchObject({ code: "SHEET_TAKEN", message: "A-101 is on page 1 and page 2" });
+    await expect(index(staffCtx, permit.id, permitPdf, [{ pageNumber: 1, sheetNumber: "  " }])).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(index(staffCtx, permit.id, permitPdf, [{ pageNumber: 0, sheetNumber: "A-101" }])).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(index(staffCtx, permit.id, permitPdf, [{ pageNumber: 1, sheetNumber: "A-101" }, { pageNumber: 1, sheetNumber: "A-102" }])).rejects.toMatchObject({ code: "INVALID_VALUE", message: "page 1 is listed twice" });
+
+    // Read: the cover on page 1 left out; four sheets; numbers normalised; titles and a revision mark kept.
+    const read = await index(staffCtx, permit.id, permitPdf, [
+      { pageNumber: 2, sheetNumber: " a-101 ", title: " FIRST FLOOR PLAN " },
+      { pageNumber: 3, sheetNumber: "A-102", title: "Second floor plan" },
+      { pageNumber: 4, sheetNumber: "S-201", title: "Foundation plan" },
+      { pageNumber: 5, sheetNumber: "E-101", title: "Lighting plan", revision: "0" },
+    ]);
+    expect(read.map((r) => [r.pageNumber, r.sheetNumber, r.title, r.revision, r.projectId, r.setId])).toEqual([
+      [2, "A-101", "FIRST FLOOR PLAN", "", project.id, permit.id],
+      [3, "A-102", "Second floor plan", "", project.id, permit.id],
+      [4, "S-201", "Foundation plan", "", project.id, permit.id],
+      [5, "E-101", "Lighting plan", "0", project.id, permit.id],
+    ]);
+    // A number the set already carries on ANOTHER of its files: refused, naming where it is.
+    const permitPdf2 = await newDoc("permit-set-part-2.pdf");
+    await attach(permit.id, permitPdf2);
+    await expect(index(staffCtx, permit.id, permitPdf2, [{ pageNumber: 1, sheetNumber: "a-101" }])).rejects.toMatchObject({ code: "SHEET_TAKEN", message: "A-101 is already in this set, on another file's page 2" });
+
+    // The list reads in the index page's order — structural before architectural, electrical after — every one current.
+    const rowsOf = () => run((tx) => listSheets(tx, tenantId, project.id));
+    let rows = await rowsOf();
+    expect(rows.map((r) => [r.sheet.sheetNumber, r.discipline, r.isCurrent, r.currentId, r.issues, r.setName, r.fileName])).toEqual([
+      ["S-201", "S", true, null, 1, "Permit set", "permit-set.pdf"],
+      ["A-101", "A", true, null, 1, "Permit set", "permit-set.pdf"],
+      ["A-102", "A", true, null, 1, "Permit set", "permit-set.pdf"],
+      ["E-101", "E", true, null, 1, "Permit set", "permit-set.pdf"],
+    ]);
+
+    // An ASI: A-102 again, and a new A-104. The permit's A-102 is superseded by it; the rest of the permit set stays current.
+    const asi = await run((tx) => createDrawingSet(tx, staffCtx, { projectId: project.id, name: "ASI 1", issuedOn: "2026-08-15" }));
+    const asiPdf = await newDoc("asi-1.pdf");
+    await attach(asi.id, asiPdf);
+    await index(staffCtx, asi.id, asiPdf, [{ pageNumber: 1, sheetNumber: "A-102", title: "Second floor plan", revision: "1" }, { pageNumber: 2, sheetNumber: "A-104", title: "Roof plan" }]);
+    rows = await rowsOf();
+    const asiA102 = rows.find((r) => r.sheet.sheetNumber === "A-102" && r.setName === "ASI 1")!;
+    expect(rows.map((r) => [r.sheet.sheetNumber, r.setName, r.isCurrent, r.currentId, r.issues])).toEqual([
+      ["S-201", "Permit set", true, null, 1],
+      ["A-101", "Permit set", true, null, 1],
+      ["A-102", "ASI 1", true, null, 2],
+      ["A-102", "Permit set", false, asiA102.sheet.id, 2],
+      ["A-104", "ASI 1", true, null, 1],
+      ["E-101", "Permit set", true, null, 1],
+    ]);
+    // Dated the same day and made later: the later-made set is the newer issue.
+    const reissue = await run((tx) => createDrawingSet(tx, staffCtx, { projectId: project.id, name: "ASI 1 reissued", issuedOn: "2026-08-15" }));
+    const reissuePdf = await newDoc("asi-1-reissued.pdf");
+    await attach(reissue.id, reissuePdf);
+    await index(staffCtx, reissue.id, reissuePdf, [{ pageNumber: 1, sheetNumber: "A-102", title: "Second floor plan", revision: "1a" }]);
+    rows = await rowsOf();
+    expect(rows.filter((r) => r.sheet.sheetNumber === "A-102").map((r) => [r.setName, r.isCurrent, r.issues])).toEqual([
+      ["ASI 1 reissued", true, 3],
+      ["ASI 1", false, 3],
+      ["Permit set", false, 3],
+    ]);
+    // The summary the panel says, and the sets newest first with their files and counts.
+    expect(await run((tx) => drawingsSummary(tx, tenantId, project.id))).toEqual({
+      sheets: 5,
+      sets: 3,
+      superseded: 2,
+      latestSetName: "ASI 1 reissued",
+      latestIssuedOn: "2026-08-15",
+      disciplines: ["S", "A", "E"],
+    });
+    const sets = await run((tx) => listDrawingSets(tx, tenantId, project.id));
+    expect(sets.map((s) => [s.set.name, s.sheets, s.fromPartyName, s.files.map((f) => [f.fileName, f.sheets])])).toEqual([
+      ["ASI 1 reissued", 1, null, [["asi-1-reissued.pdf", 1]]],
+      ["ASI 1", 2, null, [["asi-1.pdf", 2]]],
+      ["Permit set", 4, expect.stringContaining("Architect"), [["permit-set.pdf", 4], ["site.jpg", 0], ["permit-set-part-2.pdf", 0]]],
+    ]);
+
+    // A sheet's words: the number normalised; a clash within its set refused; a stale edit refused.
+    const a101 = rows.find((r) => r.sheet.sheetNumber === "A-101")!.sheet;
+    const renamed = await run((tx) => updateSheet(tx, staffCtx, a101.id, { sheetNumber: " a-103 ", title: "Third floor plan", version: a101.version }));
+    expect([renamed.sheetNumber, renamed.title, renamed.version]).toEqual(["A-103", "Third floor plan", 2]);
+    await expect(run((tx) => updateSheet(tx, staffCtx, a101.id, { title: "x", version: 1 }))).rejects.toMatchObject({ code: "STALE_VERSION" });
+    await expect(run((tx) => updateSheet(tx, staffCtx, a101.id, { sheetNumber: "s-201", version: 2 }))).rejects.toMatchObject({ code: "SHEET_TAKEN", message: "S-201 is already in this set, on page 4" });
+    // The set's words too.
+    const permit2 = await run((tx) => updateDrawingSet(tx, staffCtx, permit.id, { name: "Permit set (stamped)", notes: "Stamped by the county.", version: permit.version }));
+    expect([permit2.name, permit2.notes, permit2.issuedOn, permit2.version]).toEqual(["Permit set (stamped)", "Stamped by the county.", "2026-06-01", 2]);
+    await expect(run((tx) => updateDrawingSet(tx, staffCtx, permit.id, { name: "x", version: 1 }))).rejects.toMatchObject({ code: "STALE_VERSION" });
+
+    // A file read again replaces what it was read into: A-103 is A-101 again, E-101 (left out this time) is gone, S-201 keeps its number and gets a new id.
+    const s201Before = rows.find((r) => r.sheet.sheetNumber === "S-201")!.sheet.id;
+    await index(staffCtx, permit.id, permitPdf, [
+      { pageNumber: 2, sheetNumber: "A-101", title: "First floor plan" },
+      { pageNumber: 3, sheetNumber: "A-102", title: "Second floor plan" },
+      { pageNumber: 4, sheetNumber: "S-201", title: "Foundation plan" },
+    ]);
+    rows = await rowsOf();
+    expect(rows.map((r) => r.sheet.sheetNumber)).toEqual(["S-201", "A-101", "A-102", "A-102", "A-102", "A-104"]);
+    expect(rows.find((r) => r.sheet.sheetNumber === "S-201")!.sheet.id).not.toBe(s201Before);
+    // A page that was never a sheet, taken out; the file untouched.
+    await run((tx) => deleteSheet(tx, staffCtx, rows.find((r) => r.sheet.sheetNumber === "S-201")!.sheet.id));
+    expect((await rowsOf()).map((r) => r.sheet.sheetNumber)).toEqual(["A-101", "A-102", "A-102", "A-102", "A-104"]);
+    // A file let go of: its attachment goes, the document stays in the cabinet.
+    await run((tx) => detachSetFile(tx, staffCtx, permit.id, permitPdf2));
+    expect((await run((tx) => listDrawingSets(tx, tenantId, project.id))).find((s) => s.set.id === permit.id)!.files.map((f) => f.fileName)).toEqual(["permit-set.pdf", "site.jpg"]);
+    expect(await run((tx) => tx.select({ id: schema.documents.id }).from(schema.documents).where(eq(schema.documents.id, permitPdf2)))).toHaveLength(1);
+
+    // A set removed: its sheets go, its files are let go of and stay in the cabinet, and the issue before it is current again.
+    const gone = await run((tx) => deleteDrawingSet(tx, staffCtx, reissue.id));
+    expect(gone).toEqual({ sheets: 1 });
+    rows = await rowsOf();
+    expect(rows.filter((r) => r.sheet.sheetNumber === "A-102").map((r) => [r.setName, r.isCurrent, r.issues])).toEqual([
+      ["ASI 1", true, 2],
+      ["Permit set (stamped)", false, 2],
+    ]);
+    expect(await run((tx) => tx.select({ id: schema.documents.id }).from(schema.documents).where(eq(schema.documents.id, reissuePdf)))).toHaveLength(1);
+    expect(
+      await run((tx) =>
+        tx.select({ id: schema.documentAttachments.id }).from(schema.documentAttachments).where(and(eq(schema.documentAttachments.tenantId, tenantId), eq(schema.documentAttachments.entityId, reissue.id))),
+      ),
+    ).toEqual([]);
+    // An expert is a member in a pack and may keep the drawings; a set on a job that does not exist is refused.
+    expect((await run((tx) => createDrawingSet(tx, { ...ctx, role: "expert" }, { projectId: project.id, name: "Bid set", issuedOn: "2026-05-01" }))).name).toBe("Bid set");
+    await expect(run((tx) => createDrawingSet(tx, staffCtx, { projectId: "00000000-0000-0000-0000-000000000000", name: "Nowhere", issuedOn: "2026-05-01" }))).rejects.toMatchObject({ code: "NOT_FOUND" });
   }, 120_000);
 });

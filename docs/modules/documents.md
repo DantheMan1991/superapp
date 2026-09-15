@@ -10,6 +10,37 @@
 
 ## Build log
 
+### 2026-09-15 — The first industry layer on the cabinet: a drawing is a `drawing` (`claude/drawings`, ADR 0072)
+
+The `jobs` pack's drawings slice ([jobs.md](jobs.md), [ADR 0072](../decisions/0072-a-drawing-set-is-an-issue-of-pages-in-documents-and-the-current-set-is-derived.md))
+is the industry layer this dossier's first line promised — "construction
+drawings with mark-ups and measurements bolt on" — and it bolted on with two
+lines of change here and none to the schema:
+
+- **`registerAttachedFile` takes an optional `docKind`**, threaded through
+  `RegisterInput` into `createDmsDocument`'s insert (`""` when absent, as
+  every upload from the DMS's own screens is). A pack that knows what a
+  file IS says so at registration; the drawings slice files a set's PDF
+  as `drawing`. The column had been reserved for exactly this since the
+  DMS was built and nothing had written it.
+- **`loadPdfjs` is exported from `pdf-canvas.tsx`**, so the pack's two
+  readers of a PDF — the sheet viewer, and the title-block reader that
+  runs in the browser over the bytes the person just picked — use the one
+  lazily loaded module and the one worker rather than configuring a second.
+
+What the pack does with the cabinet, for the record: a set's PDF is an
+ordinary document hung on the set through `document_attachments`
+(`extension_slug` `jobs`, `entity_type` `job_drawing_set`), by upload
+through the presigned route or picked through `pickDocumentsAction`; a
+sheet is (document, page) in the pack's own table with a composite key to
+`documents` that CASCADES — a page of a file taken out of the cabinet is
+nothing to open. The file is fetched once through `/api/documents/[id]/file`
+and drawn by pdf.js onto a canvas, never framed, for the reason this
+dossier's viewer section gives. A sheet points at the document, not a
+version: replace the bytes here and the sheet shows the new bytes; the
+pack's guide says a reissue is a new set. Markups and measurements — the
+rest of that first line — are the pack's next two slices.
+
 ### 2026-09-15 — A record takes any file, uploaded or picked (`claude/record-files`)
 
 The gallery every pack shares (`RecordPhotos`) grows two doors beside *Add a

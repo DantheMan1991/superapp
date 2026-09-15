@@ -492,6 +492,45 @@ export const JOB_CALENDAR = {
 /** The item kind a phase writes; the calendar's open taxonomy. */
 export const PHASE_ITEM_KIND = "job_phase";
 
+// -------------------------------------------------------------------- drawings
+
+/** A set's files hang on the SET (Documents' attachments, ADR 0072); the sheets point at the file and the page. */
+export const DRAWING_SET_ENTITY = "job_drawing_set";
+/** What the cabinet's open taxonomy calls a set's file, so the DMS can show drawings as drawings one day. */
+export const DRAWING_DOC_KIND = "drawing";
+
+/**
+ * The discipline a sheet number's first letter names, by the convention the
+ * US National CAD Standard set and nearly every architect follows, used ONLY
+ * to group and order the current set: a sheet whose number starts with
+ * nothing the list knows groups under *Other*, and nothing refuses it.
+ */
+export const DISCIPLINE_LABELS: Readonly<Record<string, string>> = {
+  G: "General",
+  H: "Hazardous materials",
+  V: "Survey",
+  B: "Geotechnical",
+  C: "Civil",
+  L: "Landscape",
+  S: "Structural",
+  A: "Architectural",
+  I: "Interiors",
+  Q: "Equipment",
+  F: "Fire protection",
+  P: "Plumbing",
+  D: "Process",
+  M: "Mechanical",
+  E: "Electrical",
+  W: "Distributed energy",
+  T: "Telecommunications",
+  R: "Resource",
+  X: "Other disciplines",
+  Z: "Contractor and shop drawings",
+};
+/** The order the set is read in: the convention's own, general first, trades after. */
+export const DISCIPLINE_ORDER: readonly string[] = ["G", "H", "V", "B", "C", "L", "S", "A", "I", "Q", "F", "P", "D", "M", "E", "W", "T", "R", "X", "Z"];
+export const OTHER_DISCIPLINE = "Other";
+
 // ------------------------------------------------------------------ selections
 
 /**

@@ -144,6 +144,12 @@ export interface RegisterInput extends InspectedUpload {
   /** Already read from the bytes by the caller — see `text/extract.ts`. */
   extractedText: string;
   textExtraction: TextExtractionState;
+  /**
+   * The open taxonomy an industry layer names its files by (`drawing`), set
+   * at registration by the pack that knows what the file IS; absent means
+   * the cabinet's plain file, as every upload from the DMS's own screens is.
+   */
+  docKind?: string;
 }
 
 export interface RegisterResult {
@@ -203,6 +209,7 @@ export async function createDmsDocument(
       source: "upload",
       title: input.title,
       description: input.description,
+      docKind: input.docKind ?? "",
       uploadedByClerkUserId: ctx.userId,
       // The ACCOUNTING AI status, which stays 'skipped' — a filing-cabinet
       // upload is not a receipt and no model looks at it. Not to be confused

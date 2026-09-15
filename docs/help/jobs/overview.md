@@ -703,6 +703,68 @@ In the dialog, {button:Remove|ghost} then {button:Remove <phase>|destructive}. W
 
 Every phase is an all-day event named `<{{project|lower}} number> · <phase>` on the **Job schedule** calendar, which the business owns and everyone can see and change. Opening one there shows the {{project|lower}} it belongs to and opens it. Moving it there moves the phase here — but only this phase; the pushing of what follows happens when a phase is moved from the schedule page.
 
+## Drawings
+
+Anybody on the {{project|lower}} may keep them. On the {{project|lower}}'s page under **Drawings**, and on its own page — {button:All sheets|outline}. Drawings need Documents switched on: a set is a PDF in the cabinet.
+
+A **set** is one issue of the drawings — the permit set, the construction set, ASI 3, addendum 2 — with the date on the drawings. A **sheet** is one page of the set's PDF with the number the trade calls it by: `A-101`, `S-201`, `E-101`. **The current set is the newest issue of every sheet number**: when ASI 3 reissues A-102 and A-104, those two come from ASI 3 and every other sheet still comes from the set before, with nothing to move by hand. Older issues are kept as superseded.
+
+### The panel on the {{project|lower}}'s page
+
+One sentence: *38 sheets in the current set from 3 issues; newest ASI 3, dated 2026-08-15, 4 superseded.* — or *No drawings yet* and what a set is. {button:All sheets|outline} opens the page; {button:Add a set|primary} starts one here.
+
+### The page
+
+The sentence again at the top and {button:Add a set|primary}. Then three panels.
+
+**Current set** — a card per sheet, grouped by discipline in the order an index page lists them (general, civil, landscape, structural, architectural, interiors, … electrical, and *Other* for a number with no letter the convention knows). Each card: the sheet number, its title, the set it comes from and that set's date, `rev 2` when the sheet carries a revision mark, and `3 issues` when the number has been reissued. Click a card to open the sheet.
+
+**Sets** — newest issue first:
+
+| Column | What it is |
+| --- | --- |
+| `Set` | Its name, with its notes under it. |
+| `Dated` | The date on the drawings. This is what orders the issues, so a bulletin dated after the set it revises supersedes it. |
+| `From` | Who issued it, when you keep them as a party — the architect, the engineer. |
+| `Files` | Each PDF in the set: the name opens the file; beside it how many sheets it was read into, `not read yet` when nobody has, `not a PDF` for a file that has no pages to read. |
+| `Sheets` | How many sheets the set carries. |
+| the pencil | The set's own dialog, below. |
+
+**Superseded** — shown once any sheet has been reissued: each earlier issue with its set and date and `replaced by <set> · <date>`. Click the number to open it.
+
+### Adding a set
+
+{button:Add a set|primary} is one dialog in three steps.
+
+1. **The set** — `Set` (its name: `Permit set`, `ASI 3`), `Dated` (today unless you change it; type the date on the drawings), `From` (a party, or *Nobody in particular*), `Notes`. {button:Next: the file|primary} saves the set and moves on; the set exists from here, so closing the dialog keeps it and a file can be added later from its row.
+2. **The file** — {button:Add a file|outline} uploads a PDF from your computer or phone, up to 100MB; {button:From Documents|outline} searches the cabinet for a PDF already there — the set the architect emailed and Mail filed. Either way the pages are read in your browser: *Reading page 12 of 40…*.
+3. **The sheets** — one row per page:
+
+| Column | What it is |
+| --- | --- |
+| `Page` | The tick — ticked when the page is a sheet — a small picture of the page, the page number and why the row reads as it does: `read off the title block`, `no number found` (unticked; tick it and type the number if it is a sheet), `no text on the page` (a scanned set: read the number off the picture and type it). |
+| `Sheet` | The sheet number, read off the title block. Typed lower case is saved upper case. A number on two ticked pages is marked `Twice in this set.` and the save waits. |
+| `Title` | The title, read off the title block in sentence case. Fix it or leave it. |
+| `Rev` | The revision mark on the sheet, if it has one: `2`, `B`, `ASI-3`. |
+
+The line above the table counts the pages, the ticked rows and any ticked without a number. {button:Save 38 sheets|primary} stores what you confirmed — `38 sheets on the job` — and the page shows them. A page you leave unticked (the cover, a legend) is simply not a sheet.
+
+The reading is a rule, not a guess at meaning: the sheet number is the number-shaped text nearest the bottom-right corner of the page, where every title block puts it, and the title is the biggest other text in that corner that is not a label, a date or a scale. A set laid out unusually gets its numbers typed; the pictures are there for that.
+
+### A set's row
+
+The pencil opens the set: `Set`, `Dated`, `From`, `Notes` and {button:Save|primary}. Under **Files**, each PDF with {button:Read again|ghost} — or {button:Read the pages|ghost} for one never read — which reads the file again and shows the table with what was indexed before filled in where the page still exists; and {button:Let go|ghost}, which takes the file out of the set with its sheets, **leaving the file in Documents**. {button:Add a file|outline} and {button:From Documents|outline} add another PDF, for a set that came as one file per sheet: each file is read into its own pages.
+
+{button:Remove|ghost} then {button:Remove <set>|destructive} removes the set and its sheets; its files stay in Documents — `Set removed — its files stay in Documents`. Whatever the removed set had reissued becomes current again from the issue before it.
+
+### A sheet's page
+
+The sheet number and title, then the discipline, the set and its date, `rev 2`, and which page of which file it is. The page is drawn large in a panel that scrolls; {button:−|outline} and {button:+|outline} zoom from 1× to 6× — on a phone, 3× is a plan you can read. `Page 4 of the file · 2×` above the drawing says where you are.
+
+{button:← A-101|outline} and {button:A-103 →|outline} walk the current set in the index page's order (only on a current sheet). {button:The file|outline} downloads the whole PDF. {button:Edit|outline} opens `Sheet`, `Revision` and `Title` — {button:Save|primary} — and {button:Not a sheet|ghost} then {button:Take A-101 out|destructive} takes the page out of the set, leaving the file alone.
+
+A sheet that has been reissued shows **Issues of A-102** under the drawing: every set it came in, newest first, with `current` on the newest and `(this one)` on the one you are looking at. Opening an earlier issue shows a note above the drawing — *Superseded. This is the Permit set issue of A-102, dated 2026-06-01; the current one is from ASI 3, dated 2026-08-15* — with **Open the current A-102**.
+
 ## On site — the daily log, photos and the punch list
 
 Anyone on the team, not only owners: the field is a chore, and the person with the phone on the site is rarely the owner.
@@ -871,6 +933,7 @@ Worth knowing so you are not looking for it:
 - **A subcontractor's application does not print**, and neither does a change order on an order. They are the subcontractor's documents, prepared on their side; your own applications print from their row.
 - **A lien waiver is not generated.** The form itself is your state's or your lawyer's, not something Jobs prints; the signed one attaches as a photo, a file or from Documents.
 - **The schedule counts calendar days, and a phase waits only for the one it follows.** No working-day calendar or holidays yet, no start-to-start dependencies, no baseline to measure slip against, and nothing tells the trade — the phase names them, and the company calendar and the feed are how they hear. A schedule is typed per {{project|lower}}; a template that fills a new one is next.
+- **A drawing is a page to look at, not yet to draw on.** No clouds, arrows or pins on a sheet, no measuring, no overlay of one issue on another, and the cover sheet's index is not read to fill titles. A scanned set has no text to read numbers from; type them off the pictures. A sheet shows the file as it is in Documents today: replace the file's bytes there and the sheet shows the new bytes — a reissue is a new set, not a replaced file.
 - **An estimate is lines you type.** No assemblies (a bundle of lines dropped in as one), no unit cost book that remembers what concrete cost last time, no takeoff from the drawings. A supplier's quote cannot be attached to an estimate yet. The proposal prints but is not sent from here, and the client cannot accept it on a screen of their own — the signed page comes back the way it always has.
 - **A subcontractor out of standing is not stopped.** An order can be issued and a bill paid while a certificate is missing or expired; the Subcontractors page and the order's page say so in red, and the decision is yours. Which kinds are required is set in the module's configuration for now, not on a screen.
 - **The option book is per job.** The same selections with the same choices on every plan are entered on each job for now; a book that seeds a new job is next. Nothing here lets the client choose for themselves; the office records what they said.
@@ -895,6 +958,8 @@ Worth knowing so you are not looking for it:
 | Draw up selections, record the client's choice, remind them in Work | ● | ● | ● |
 | Raise a selection's difference as a change order | ● | | |
 | Add, move, mark done or remove a phase of the schedule | ● | ● | ● |
+| Add a set of drawings, read its pages into sheets, correct or remove a sheet | ● | ● | ● |
+| Upload a set's file, or attach one from Documents | ● | ● | |
 | Log a day on site, or add and tick a punch item | ● | ● | ● |
 | Add photos to a day | ● | ● | |
 | See the work in progress schedule | ● | ● | ● |

@@ -55,6 +55,18 @@ import {
 import { rateStringToPpm } from "./estimate-math";
 import { createPhase, deletePhase, updatePhase } from "./schedule-ops";
 import {
+  createDrawingSet,
+  deleteDrawingSet,
+  deleteSheet,
+  detachSetFile,
+  getDrawingSet,
+  getSheet,
+  indexSheets,
+  setTarget,
+  updateDrawingSet,
+  updateSheet,
+} from "./drawings-ops";
+import {
   approveSubApplication,
   createSubApplication,
   deleteSubApplication,
@@ -115,6 +127,7 @@ import {
   PACK,
   PROJECT_STATUSES,
   hoursToTenths,
+  DRAWING_DOC_KIND,
 } from "./vocabulary";
 
 /**
@@ -176,6 +189,8 @@ function toResult(err: unknown): { error: string } {
         };
       case "NUMBER_TAKEN":
         return { error: "That job number is already in use. Pick another." };
+      case "SHEET_TAKEN":
+        return { error: sentence(err.message) };
       case "NAME_TAKEN":
         return { error: "A list with that name already exists." };
       case "NO_LINES":
@@ -3256,6 +3271,234 @@ export async function deletePhaseAction(input: unknown) {
       { role: ctx.role, userId: ctx.userId },
     );
     revalidateSchedule(parsed.data.projectId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// ------------------------------------------------------------------ drawings
+
+/**
+ * A job's drawings (ADR 0072). The set and the sheets are the pack's
+ * (`member`, as the schedule is: the office indexes a set the day it
+ * arrives); the FILE is Documents', so the two attach doors ask the
+ * cabinet's rule as well, exactly as a day's photos do.
+ */
+function revalidateDrawings(projectId: string): void {
+  revalidatePath(`${BASE}/${projectId}`);
+  revalidatePath(`${BASE}/${projectId}/drawings`);
+  revalidatePath(`${BASE}/[id]/drawings/[sheetId]`, "page");
+}
+
+async function drawingsGate(): Promise<JobsCtx> {
+  const ctx = await gate();
+  if (!allowsWrite(ctx.role, "member")) throw new JobsError("FORBIDDEN", "cannot keep the drawings");
+  return ctx;
+}
+
+async function assertSet(ctx: JobsCtx, setId: string) {
+  const set = await withTenant(ctx.tenantId, (tx) => getDrawingSet(tx, ctx.tenantId, setId), { role: ctx.role });
+  if (!set) throw new JobsError("NOT_FOUND", `drawing set ${setId} not found`);
+  return set;
+}
+
+const drawingSetFields = {
+  name: z.string().min(1).max(200),
+  issuedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  fromPartyId: clearableUuid,
+  notes: z.string().max(4000).default(""),
+};
+
+export async function createDrawingSetAction(input: unknown) {
+  const parsed = z.object({ projectId: z.string().uuid(), ...drawingSetFields }).safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await drawingsGate();
+    const set = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const created = await createDrawingSet(tx, ctx, parsed.data);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "drawing_set.created",
+          targetType: "drawing_set",
+          targetId: created.id,
+          meta: { projectId: parsed.data.projectId },
+        });
+        return created;
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateDrawings(parsed.data.projectId);
+    return { ok: true as const, id: set.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function updateDrawingSetAction(input: unknown) {
+  const parsed = z
+    .object({ id: z.string().uuid(), projectId: z.string().uuid(), version: z.number().int().positive(), ...drawingSetFields })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await drawingsGate();
+    const { id, projectId, ...patch } = parsed.data;
+    await withTenant(ctx.tenantId, (tx) => updateDrawingSet(tx, ctx, id, patch), { role: ctx.role, userId: ctx.userId });
+    revalidateDrawings(projectId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function deleteDrawingSetAction(input: unknown) {
+  const parsed = z.object({ id: z.string().uuid(), projectId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  try {
+    const ctx = await drawingsGate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const gone = await deleteDrawingSet(tx, ctx, parsed.data.id);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "drawing_set.deleted",
+          targetType: "drawing_set",
+          targetId: parsed.data.id,
+          meta: { projectId: parsed.data.projectId, sheets: gone.sheets },
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateDrawings(parsed.data.projectId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** The set's PDF, uploaded: filed in the cabinet as a `drawing`, hung on the set. */
+export async function attachDrawingFileAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoInput.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    const set = await assertSet(ctx, parsed.data.entityId);
+    const result = await registerAttachedFile(
+      { tenantId: ctx.tenantId, userId: ctx.userId, role: ctx.role },
+      { pathname: parsed.data.pathname, target: setTarget(set.id), title: set.name, docKind: DRAWING_DOC_KIND },
+    );
+    revalidateDrawings(set.projectId);
+    return { ok: true as const, documentId: result.documentId };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** A PDF already in the cabinet — the set the architect emailed — hung on the set. */
+export async function attachDrawingDocumentAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = existingInput.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    const set = await assertSet(ctx, parsed.data.entityId);
+    await attachExisting(ctx, setTarget(set.id), parsed.data.documentId);
+    revalidateDrawings(set.projectId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function detachDrawingFileAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = existingInput.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    const set = await assertSet(ctx, parsed.data.entityId);
+    await withTenant(ctx.tenantId, (tx) => detachSetFile(tx, ctx, set.id, parsed.data.documentId), { role: ctx.role, userId: ctx.userId });
+    revalidateDrawings(set.projectId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const sheetPageSchema = z.object({
+  pageNumber: z.number().int().min(1),
+  sheetNumber: z.string().max(60),
+  title: z.string().max(300).default(""),
+  revision: z.string().max(40).default(""),
+});
+
+/** The file read into sheets, as the person confirmed it. */
+export async function indexSheetsAction(input: unknown) {
+  const parsed = z
+    .object({ setId: z.string().uuid(), documentId: z.string().uuid(), sheets: z.array(sheetPageSchema).max(2000) })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the sheets and try again." };
+  try {
+    const ctx = await drawingsGate();
+    const set = await assertSet(ctx, parsed.data.setId);
+    const rows = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const indexed = await indexSheets(tx, ctx, parsed.data);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "drawing_set.indexed",
+          targetType: "drawing_set",
+          targetId: set.id,
+          meta: { projectId: set.projectId, documentId: parsed.data.documentId, sheets: indexed.length },
+        });
+        return indexed;
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateDrawings(set.projectId);
+    return { ok: true as const, count: rows.length };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function updateSheetAction(input: unknown) {
+  const parsed = z
+    .object({
+      id: z.string().uuid(),
+      projectId: z.string().uuid(),
+      version: z.number().int().positive(),
+      sheetNumber: z.string().max(60),
+      title: z.string().max(300).default(""),
+      revision: z.string().max(40).default(""),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await drawingsGate();
+    const { id, projectId, ...patch } = parsed.data;
+    await withTenant(ctx.tenantId, (tx) => updateSheet(tx, ctx, id, patch), { role: ctx.role, userId: ctx.userId });
+    revalidateDrawings(projectId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function deleteSheetAction(input: unknown) {
+  const parsed = z.object({ id: z.string().uuid(), projectId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  try {
+    const ctx = await drawingsGate();
+    const sheet = await withTenant(ctx.tenantId, (tx) => getSheet(tx, ctx.tenantId, parsed.data.id), { role: ctx.role });
+    if (!sheet) throw new JobsError("NOT_FOUND", `sheet ${parsed.data.id} not found`);
+    await withTenant(ctx.tenantId, (tx) => deleteSheet(tx, ctx, parsed.data.id), { role: ctx.role, userId: ctx.userId });
+    revalidateDrawings(parsed.data.projectId);
     return { ok: true as const };
   } catch (err) {
     return toResult(err);

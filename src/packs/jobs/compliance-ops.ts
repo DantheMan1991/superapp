@@ -1,7 +1,7 @@
 import "server-only";
-import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
-import type { JobLienWaiver } from "@/db/schema";
+import type { JobLienWaiver, JobPartyDocument } from "@/db/schema";
 import { attachmentCounts } from "@/modules/documents/attachments";
 import { loadBill } from "@/modules/accounting/payables/bills";
 import {
@@ -12,12 +12,19 @@ import {
 import { JobsError, getProject, requireWrite, type JobsCtx } from "./ops";
 import {
   COMMITMENT_ENTITY,
+  COMMITTED_STATUSES,
+  EXPIRING_SOON_DAYS,
   LIEN_WAIVER_ENTITY,
   PACK,
+  PARTY_DOCUMENT_ENTITY,
+  PARTY_ENTITY,
   isFinalWaiver,
   isLienWaiverKind,
   isLienWaiverStatus,
+  isPartyDocumentKind,
+  isPartyDocumentStatus,
   isUnconditionalWaiver,
+  partyDocumentKindLabel,
 } from "./vocabulary";
 
 /**
@@ -83,7 +90,7 @@ function validateWaiverShape(input: Partial<LienWaiverInput>): void {
 function receiptDateFor(status: string, receivedOn: string | null): string | null {
   if (status === "received") {
     if (!receivedOn) {
-      throw new JobsError("RECEIVED_DATE_REQUIRED", "a received waiver needs the date it arrived");
+      throw new JobsError("RECEIVED_DATE_REQUIRED", "a received document needs the date it arrived");
     }
     return receivedOn;
   }
@@ -510,3 +517,336 @@ export async function lienWaiverIds(tx: Tx, tenantId: string, projectId: string)
   return rows.map((r) => r.id);
 }
 
+
+// -------------------------------------------------------------- party documents
+
+/**
+ * Party documents — slice 11b, ADR 0068: what a subcontractor or supplier
+ * has on file with the business, and whether it is current.
+ *
+ * PER PARTY, NOT PER JOB. A framer's certificate of insurance covers every
+ * job he is on; the row hangs off the party, and the page reads every party
+ * with an order on a live job. The KIND is the business's (an open taxonomy,
+ * format-checked, three suggested), the REQUIRED list is the tenant's config
+ * or the pack's default, and the only behaviour a kind carries is its expiry:
+ * a certificate past its date is as good as missing, one within a month is
+ * worth a sentence. Missing, expired and expiring are computed at read time,
+ * never stored — the waiver's rule, one level up.
+ */
+
+export interface PartyDocumentInput {
+  partyId: string;
+  kind: string;
+  title?: string;
+  reference?: string;
+  issuer?: string;
+  issuedOn?: string | null;
+  expiresOn?: string | null;
+  limitCents?: number | null;
+  status?: string;
+  requestedOn?: string | null;
+  receivedOn?: string | null;
+  notes?: string;
+}
+
+function validatePartyDocumentShape(input: Partial<PartyDocumentInput>): void {
+  if (input.kind !== undefined && !isPartyDocumentKind(input.kind)) {
+    throw new JobsError("INVALID_KIND", `invalid document kind: ${input.kind}`);
+  }
+  if (input.status !== undefined && !isPartyDocumentStatus(input.status)) {
+    throw new JobsError("INVALID_STATUS", `invalid status: ${input.status}`);
+  }
+  const limit = input.limitCents ?? null;
+  if (limit !== null && (!Number.isInteger(limit) || limit < 0)) {
+    throw new JobsError("INVALID_VALUE", "a coverage limit cannot be negative");
+  }
+}
+
+export async function createPartyDocument(
+  tx: Tx,
+  ctx: JobsCtx,
+  input: PartyDocumentInput,
+): Promise<JobPartyDocument> {
+  requireWrite(ctx, "member");
+  validatePartyDocumentShape(input);
+  const status = input.status ?? "received";
+  const rows = await tx
+    .insert(schema.jobPartyDocuments)
+    .values({
+      tenantId: ctx.tenantId,
+      partyId: input.partyId,
+      kind: input.kind,
+      title: input.title?.trim() ?? "",
+      reference: input.reference?.trim() ?? "",
+      issuer: input.issuer?.trim() ?? "",
+      issuedOn: input.issuedOn ?? null,
+      expiresOn: input.expiresOn ?? null,
+      limitCents: input.limitCents ?? null,
+      status,
+      requestedOn: input.requestedOn ?? null,
+      receivedOn: receiptDateFor(status, input.receivedOn ?? null),
+      notes: input.notes?.trim() ?? "",
+      createdByClerkUserId: ctx.userId,
+    })
+    .returning();
+  return rows[0];
+}
+
+/** One document, or null: the photo actions' check. */
+export async function getPartyDocument(tx: Tx, tenantId: string, id: string): Promise<JobPartyDocument | null> {
+  const rows = await tx
+    .select()
+    .from(schema.jobPartyDocuments)
+    .where(and(eq(schema.jobPartyDocuments.tenantId, tenantId), eq(schema.jobPartyDocuments.id, id)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** Change a document: everything but whose it is. Void is a status, not a delete. */
+export async function updatePartyDocument(
+  tx: Tx,
+  ctx: JobsCtx,
+  id: string,
+  input: Partial<Omit<PartyDocumentInput, "partyId">> & { version?: number },
+): Promise<JobPartyDocument> {
+  requireWrite(ctx, "member");
+  validatePartyDocumentShape(input);
+  const existing = await getPartyDocument(tx, ctx.tenantId, id);
+  if (!existing) throw new JobsError("NOT_FOUND", `party document ${id} not found`);
+  if (input.version !== undefined && input.version !== existing.version) {
+    throw new JobsError("STALE_VERSION", "document changed since loaded");
+  }
+  const status = input.status ?? existing.status;
+  const receivedOn = input.receivedOn !== undefined ? input.receivedOn : existing.receivedOn;
+  const patch: Record<string, unknown> = {
+    updatedAt: new Date(),
+    version: existing.version + 1,
+    status,
+    receivedOn: receiptDateFor(status, receivedOn),
+  };
+  if (input.kind !== undefined) patch.kind = input.kind;
+  if (input.title !== undefined) patch.title = input.title.trim();
+  if (input.reference !== undefined) patch.reference = input.reference.trim();
+  if (input.issuer !== undefined) patch.issuer = input.issuer.trim();
+  if (input.issuedOn !== undefined) patch.issuedOn = input.issuedOn;
+  if (input.expiresOn !== undefined) patch.expiresOn = input.expiresOn;
+  if (input.limitCents !== undefined) patch.limitCents = input.limitCents;
+  if (input.requestedOn !== undefined) patch.requestedOn = input.requestedOn;
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+  const rows = await tx
+    .update(schema.jobPartyDocuments)
+    .set(patch)
+    .where(and(eq(schema.jobPartyDocuments.tenantId, ctx.tenantId), eq(schema.jobPartyDocuments.id, id)))
+    .returning();
+  return rows[0];
+}
+
+export interface PartyDocumentRow {
+  document: JobPartyDocument;
+  /** Scanned copies attached through Documents. */
+  attachmentCount: number;
+}
+
+/** Every document of the given parties (or of every party), newest expiry first. */
+export async function listPartyDocuments(
+  tx: Tx,
+  tenantId: string,
+  partyIds?: readonly string[],
+): Promise<PartyDocumentRow[]> {
+  if (partyIds && partyIds.length === 0) return [];
+  const rows = await tx
+    .select()
+    .from(schema.jobPartyDocuments)
+    .where(
+      and(
+        eq(schema.jobPartyDocuments.tenantId, tenantId),
+        ...(partyIds ? [inArray(schema.jobPartyDocuments.partyId, [...partyIds])] : []),
+      ),
+    )
+    .orderBy(desc(schema.jobPartyDocuments.expiresOn), desc(schema.jobPartyDocuments.createdAt));
+  if (rows.length === 0) return [];
+  const counts = await attachmentCounts(
+    tx,
+    tenantId,
+    PARTY_DOCUMENT_ENTITY,
+    rows.map((r) => r.id),
+  );
+  return rows.map((document) => ({ document, attachmentCount: counts.get(document.id) ?? 0 }));
+}
+
+export type StandingState = "ok" | "expiring" | "expired" | "missing";
+
+export interface RequiredStanding {
+  kind: string;
+  state: StandingState;
+  /** The document that answers the kind — the one that runs longest — or null. */
+  document: JobPartyDocument | null;
+}
+
+export interface PartyStanding {
+  partyId: string;
+  partyName: string;
+  /** The live jobs the party has an issued or closed order on. */
+  projects: Array<{ id: string; number: string; name: string }>;
+  required: RequiredStanding[];
+  /** Everything else on file, received. */
+  others: JobPartyDocument[];
+  /** Every required kind is on file and not expired. Expiring still stands. */
+  good: boolean;
+}
+
+/** Whole days from `from` to `to`, both ISO dates; negative when `to` is earlier. */
+function daysUntil(from: string, to: string): number {
+  const [fy, fm, fd] = from.split("-").map(Number);
+  const [ty, tm, td] = to.split("-").map(Number);
+  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86_400_000);
+}
+
+/**
+ * THE STANDING RULE, pure: for each required kind, the received document
+ * that runs longest — one with no expiry beats any date — and its state
+ * against today. Missing, expired, expiring within `EXPIRING_SOON_DAYS`, or
+ * ok. Void and requested documents are not on file.
+ */
+export function standingFor(
+  documents: readonly JobPartyDocument[],
+  required: readonly string[],
+  asOf: string,
+): Pick<PartyStanding, "required" | "others" | "good"> {
+  const received = documents.filter((d) => d.status === "received");
+  const requiredRows: RequiredStanding[] = required.map((kind) => {
+    const mine = received.filter((d) => d.kind === kind);
+    if (mine.length === 0) return { kind, state: "missing", document: null };
+    const best = mine.reduce((a, b) =>
+      a.expiresOn === null ? a : b.expiresOn === null ? b : b.expiresOn > a.expiresOn ? b : a,
+    );
+    const state: StandingState =
+      best.expiresOn === null
+        ? "ok"
+        : best.expiresOn < asOf
+          ? "expired"
+          : daysUntil(asOf, best.expiresOn) <= EXPIRING_SOON_DAYS
+            ? "expiring"
+            : "ok";
+    return { kind, state, document: best };
+  });
+  return {
+    required: requiredRows,
+    others: received.filter((d) => !required.includes(d.kind)),
+    good: requiredRows.every((r) => r.state === "ok" || r.state === "expiring"),
+  };
+}
+
+/**
+ * EVERY PARTY WITH AN ORDER ON A LIVE JOB, and where each stands: the
+ * insurance audit's own view. Issued or closed orders on jobs that are not
+ * complete or cancelled; a draft order names nobody the business owes.
+ */
+export async function subcontractorStanding(
+  tx: Tx,
+  tenantId: string,
+  required: readonly string[],
+  asOf: string,
+): Promise<PartyStanding[]> {
+  const orders = await tx
+    .select({
+      partyId: schema.jobCommitments.partyId,
+      partyName: schema.parties.displayName,
+      projectId: schema.jobProjects.id,
+      projectNumber: schema.jobProjects.number,
+      projectName: schema.jobProjects.name,
+    })
+    .from(schema.jobCommitments)
+    .innerJoin(
+      schema.jobProjects,
+      and(
+        eq(schema.jobProjects.tenantId, schema.jobCommitments.tenantId),
+        eq(schema.jobProjects.id, schema.jobCommitments.projectId),
+      ),
+    )
+    .leftJoin(
+      schema.parties,
+      and(
+        eq(schema.parties.tenantId, schema.jobCommitments.tenantId),
+        eq(schema.parties.id, schema.jobCommitments.partyId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.jobCommitments.tenantId, tenantId),
+        inArray(schema.jobCommitments.status, [...COMMITTED_STATUSES]),
+        inArray(schema.jobProjects.status, ["planned", "active", "on_hold"]),
+      ),
+    )
+    .orderBy(asc(schema.parties.displayName), asc(schema.jobProjects.number));
+  if (orders.length === 0) return [];
+  const byParty = new Map<string, PartyStanding>();
+  for (const o of orders) {
+    const row = byParty.get(o.partyId) ?? {
+      partyId: o.partyId,
+      partyName: o.partyName ?? "—",
+      projects: [],
+      required: [],
+      others: [],
+      good: true,
+    };
+    if (!row.projects.some((p) => p.id === o.projectId)) {
+      row.projects.push({ id: o.projectId, number: o.projectNumber, name: o.projectName });
+    }
+    byParty.set(o.partyId, row);
+  }
+  const documents = await listPartyDocuments(tx, tenantId, [...byParty.keys()]);
+  for (const row of byParty.values()) {
+    const mine = documents.filter((d) => d.document.partyId === row.partyId).map((d) => d.document);
+    Object.assign(row, standingFor(mine, required, asOf));
+  }
+  return [...byParty.values()];
+}
+
+/** One party's standing, whatever it has on order — the commitment page's line. */
+export async function partyStanding(
+  tx: Tx,
+  tenantId: string,
+  partyId: string,
+  required: readonly string[],
+  asOf: string,
+): Promise<Pick<PartyStanding, "required" | "others" | "good">> {
+  const documents = await listPartyDocuments(tx, tenantId, [partyId]);
+  return standingFor(
+    documents.map((d) => d.document),
+    required,
+    asOf,
+  );
+}
+
+/**
+ * The chase, as a Work item linked to the PARTY — "Certificate of insurance
+ * from Pleasant Valley Feed Mill" — not to any one job, because the document
+ * is not any one job's.
+ */
+export async function askForPartyDocument(
+  tx: Tx,
+  ctx: JobsCtx,
+  input: { partyId: string; kind: string; dueOn?: string | null },
+): Promise<string> {
+  requireWrite(ctx, "member");
+  if (!isPartyDocumentKind(input.kind)) {
+    throw new JobsError("INVALID_KIND", `invalid document kind: ${input.kind}`);
+  }
+  const party = await tx
+    .select({ name: schema.parties.displayName })
+    .from(schema.parties)
+    .where(and(eq(schema.parties.tenantId, ctx.tenantId), eq(schema.parties.id, input.partyId)))
+    .limit(1);
+  if (party.length === 0) throw new JobsError("NOT_FOUND", `party ${input.partyId} not found`);
+  return createWorkForEntity(
+    tx,
+    { tenantId: ctx.tenantId, userId: ctx.userId },
+    { extensionSlug: PACK, entityType: PARTY_ENTITY, entityId: input.partyId },
+    {
+      title: `${partyDocumentKindLabel(input.kind)} from ${party[0].name}`,
+      notes: "",
+      dueOn: input.dueOn ?? null,
+    },
+  );
+}

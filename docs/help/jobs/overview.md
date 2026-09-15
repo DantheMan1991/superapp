@@ -415,7 +415,39 @@ Four figures sit at the top: **Subcontract value**, **Billed to date**, **Retain
 
 What can stop an approval, in its own words: `A purchase order is billed with an ordinary bill in Accounting. Applications are for subcontracts.` · `This contract already has a draft application. Finish that one first.` · `Nothing is due on this application, so there is nothing to invoice.` · `The chart of accounts is missing something: the chart has no 2120 Retainage Payable account` (the construction profile adds it) · Accounting's own refusals, such as a closed period. {button:Void|ghost} works on the latest billed application only and voids its bill too; Accounting refuses if the bill has been paid.
 
-On the {{project|lower}}'s page the Ordered table's `Billed` column reads what each subcontractor has billed and what is held from them.
+On the {{project|lower}}'s page the Ordered table's `Billed` column reads what each subcontractor has billed and what is held from them, and under it whether a lien waiver covers them.
+
+### Lien waivers
+
+Anybody on the job may record one. On the order's own page, under **Lien waivers**.
+
+A lien waiver is the document a subcontractor or supplier signs to give up its right to put a lien on the property for the work you have paid for. The owner and the bank want one from everybody paid before they fund the next draw, and paying without one is how a job ends up with a lien on it and the money paid twice. The words on the form are your state's or your lawyer's; what is kept here is **who signed, of which kind, through which date, for how much, and whether it arrived** — and a photo of the signed page.
+
+The panel's first line says what is on file: `Unconditional waiver on file through 2026-10-31; conditional through 2026-11-30.`, `No unconditional waiver on file.`, or `A final unconditional waiver is on file`. Under it, one sentence per gap:
+
+- `Application 2 (2026-10-31, $8,100.00) has been paid and no unconditional waiver covers it.` — in red. The bill in Accounting is paid, partly or wholly, and nothing unconditional on file runs that far.
+- `Application 2 (2026-10-31) is billed and no waiver covers it yet.` — not yet paid, and neither a conditional nor an unconditional waiver covers it.
+
+{button:Ask for it|outline} beside a gap adds an item to Work — `Lien waiver from Pleasant Valley Feed Mill: unconditional through 2026-10-31 (SC-24109-1)` — linked to the order, beside everything else the office has to do; the panel then reads `Being chased in Work: …` until it is ticked off there. It is not on the job's punch list, which is for the site.
+
+{button:Record waiver|primary}.
+
+1. **`On`** — the order, as text.
+2. **`From`** — who gives up the lien right. Filled in with the order's subcontractor or supplier; pick somebody else for a waiver from a supplier of theirs.
+3. **`Kind`** — `Conditional, progress`, `Unconditional, progress`, `Conditional, final` or `Unconditional, final`. A conditional waiver comes with the application and takes effect when the payment clears; an unconditional one is given after the money went out, and is the one the bank wants. A final one covers the whole job whatever its date.
+4. **`Through`** — required. The date the work is waived through.
+5. **`Amount`** — what the form states; leave it blank when it states none.
+6. **`Covers`** — a billed application on this order, or `Work through the date`. A draft cannot be named: a waiver covers a payment.
+7. **`Status`** — `Requested`, `Received` or `Void`. `Received` fills today into **`Received`**, which is required: `Give a received waiver the date it arrived.` **`Requested`** is the date you asked, optional.
+8. **`Signed by`**, **`Their reference`**, **`Notes`** (exceptions the form lists, disputed amounts).
+
+{button:Record waiver|primary} is greyed until the party and the through date are filled in. On success you see `Waiver recorded`. Open it again with the pencil to add a **Signed copy** — a photo of the signed page, from the camera or a file, through Documents (the same gallery a day on site uses; it needs Documents switched on).
+
+**When a waiver counts.** Only a **received** one. It covers an application when it names it in `Covers`, when it is a final one, or when its through date is on or after the application's period end. Setting one to `Void` stops it counting; a wrong form is voided and recorded again.
+
+**Reading the table.** `Kind` (with their reference under it) · `From` (with who signed) · `Through` · `Amount` (`—` when the form states none) · `Covers` · `Status` (with the received date, or `Asked <date>`) · `Signed copy` (how many photos). Every billed application in the table above says `Unconditional waiver on file`, `Conditional waiver on file`, `No waiver yet` or, in red, `Paid · no unconditional waiver`.
+
+A waiver on a **purchase order** is recorded the same way — suppliers have lien rights too — but the gaps are only worked out for subcontracts, whose applications the pack bills.
 
 ## On site — the daily log, photos and the punch list
 
@@ -583,6 +615,7 @@ Worth knowing so you are not looking for it:
 - **Time and materials has no rate card of its own.** Each person's rate comes from Time, or one rate on the contract covers everybody; a rate per trade (carpenter, labourer, foreman) or a rate negotiated for one customer is not a thing you can set yet.
 - **A cost-plus job on the work in progress schedule earns what it has cost plus its fee**, capped at its maximum, with no estimate asked for — when it is the job's only signed contract. A time-and-materials job earns its approved hours at their rates plus the rest of its cost marked up, the same way; one with hours nobody has priced shows `Hours on the job with no bill rate` and blocks the period until a rate is set. A job mixing methods is shown and left out, and a period with billings on one cannot post until it has a value.
 - **A subcontractor's application does not print**, and neither does a change order on an order. They are the subcontractor's documents, prepared on their side; your own applications print from their row.
+- **A lien waiver cannot be attached as a PDF, and is not generated.** The signed copy is a photo of the page; a PDF that came by email lives in Documents and cannot yet be pointed at from the waiver. The form itself is your state's or your lawyer's, not something Jobs prints.
 - **A back-charge is not a change order.** Money you deduct from a subcontractor's payment for something you paid on their behalf reduces the payment, not the scope; a deductive change order reduces the scope. Record a back-charge as a credit in Accounting for now.
 - **Nothing codes a bill for you.** Cost codes appear in Accounting wherever you tag a line, beside the job itself, and the `Spent` column reads what the bills carry. A line with the job and no code shows up as the uncoded note under the job cost table, not on a row.
 - **Nothing is ever deleted.** A contract you should not have added is set to `Cancelled` or `Declined`; a cost code is retired; a {{project|lower}} is cancelled. That is on purpose — a job's history is the point of keeping it.
@@ -597,6 +630,7 @@ Worth knowing so you are not looking for it:
 | Add, approve or change a change order | ● | | |
 | Set a schedule of values, or issue a pay application | ● | | |
 | Record or approve a subcontractor's application | ● | | |
+| Record a lien waiver, or ask for one in Work | ● | ● | ● |
 | Log a day on site, or add and tick a punch item | ● | ● | ● |
 | Add photos to a day | ● | ● | |
 | See the work in progress schedule | ● | ● | ● |

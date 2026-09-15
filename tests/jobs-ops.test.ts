@@ -70,6 +70,15 @@ import {
   voidSubApplication,
 } from "../src/packs/jobs/sub-billing-ops";
 import { loadBill, loadBillLines } from "../src/modules/accounting/payables/bills";
+import {
+  askForWaiver,
+  createLienWaiver,
+  listLienWaivers,
+  listWaiverWork,
+  updateLienWaiver,
+  waiverCoverage,
+  waiverGaps,
+} from "../src/packs/jobs/compliance-ops";
 import { certificateInputFrom } from "../src/packs/jobs/certificate";
 import { loadInvoice, loadInvoiceLines } from "../src/modules/accounting/invoicing/invoices";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
@@ -3609,5 +3618,153 @@ d("jobs ops", () => {
     [a3] = await run((tx) => listSubApplications(tx, tenantId, other.commitment.id));
     expect(a3.lines.map((l) => l.changeNumber)).toEqual([null, null]);
     // Three subcontracts, three applications, two bills: slow under a full-suite run.
+  }, 120_000);
+
+  // -------------------------------------------------------- lien waivers (11a)
+
+  it("A LIEN WAIVER is a record on the order: received ones cover applications by naming them or running past their period end, the gap is who was paid without one, and the chase is a Work item on the order", async () => {
+    const entity = await newCompany("Sub Co 5");
+    const { project, commitment, lines, party } = await run((tx) => subcontractJob(tx, entity, "OPS-LW1"));
+    const app1 = await run((tx) =>
+      createSubApplication(tx, ctx, { commitmentId: commitment.id, periodTo: "2026-09-30", retainagePpm: 100_000 }),
+    );
+    await run((tx) =>
+      updateSubApplication(tx, ctx, app1.id, {
+        lines: [{ commitmentLineId: lines[0].id, thisPeriodCents: 20_000_00, storedCents: 0 }],
+      }),
+    );
+    // A draft cannot be named: a waiver covers a payment.
+    await expect(
+      run((tx) =>
+        createLienWaiver(tx, ctx, {
+          projectId: project.id,
+          partyId: party,
+          commitmentId: commitment.id,
+          subApplicationId: app1.id,
+          kind: "conditional_progress",
+          throughDate: "2026-09-30",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE", message: expect.stringContaining("not billed") });
+    const first = await run((tx) => approveSubApplication(tx, ctx, app1.id, { billDate: "2026-10-01" }));
+
+    // Billed, unpaid, nothing on file: the softer gap.
+    let gaps = await run((tx) => waiverGaps(tx, tenantId, project.id));
+    expect(gaps.map((g) => [g.applicationNumber, g.paid, g.missing])).toEqual([[1, false, "conditional"]]);
+    // A received waiver needs its date; a requested one has none; staff may record one.
+    await expect(
+      run((tx) =>
+        createLienWaiver(tx, ctx, {
+          projectId: project.id,
+          partyId: party,
+          commitmentId: commitment.id,
+          kind: "conditional_progress",
+          throughDate: "2026-09-30",
+          status: "received",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "RECEIVED_DATE_REQUIRED" });
+    const conditional = await run((tx) =>
+      createLienWaiver(tx, staffCtx, {
+        projectId: project.id,
+        partyId: party,
+        commitmentId: commitment.id,
+        subApplicationId: app1.id,
+        kind: "conditional_progress",
+        throughDate: "2026-09-30",
+        amountCents: 18_000_00,
+        status: "requested",
+        requestedOn: "2026-10-01",
+      }),
+    );
+    expect(conditional.receivedOn).toBeNull();
+    // Requested is not on file.
+    gaps = await run((tx) => waiverGaps(tx, tenantId, project.id));
+    expect(gaps).toHaveLength(1);
+    await run((tx) =>
+      updateLienWaiver(tx, ctx, conditional.id, { status: "received", receivedOn: "2026-10-03", version: conditional.version }),
+    );
+    gaps = await run((tx) => waiverGaps(tx, tenantId, project.id));
+    expect(gaps).toEqual([]);
+    let coverage = (await run((tx) => waiverCoverage(tx, tenantId, project.id))).get(commitment.id);
+    expect(coverage).toMatchObject({ unconditionalThrough: null, conditionalThrough: "2026-09-30", finalOnFile: false });
+
+    // The bill is paid: the conditional waiver no longer answers; an unconditional one is missing.
+    await run((tx) =>
+      tx.update(schema.bills).set({ status: "paid" }).where(and(eq(schema.bills.tenantId, tenantId), eq(schema.bills.id, first.billId))),
+    );
+    gaps = await run((tx) => waiverGaps(tx, tenantId, project.id));
+    expect(gaps.map((g) => [g.applicationNumber, g.paid, g.missing, g.commitmentNumber])).toEqual([
+      [1, true, "unconditional", "SC-OPS-LW1"],
+    ]);
+    // The chase: a Work item on the ORDER, not on the job's punch list.
+    const itemId = await run((tx) =>
+      askForWaiver(tx, staffCtx, { commitmentId: commitment.id, missing: "unconditional", throughDate: "2026-09-30" }),
+    );
+    expect(itemId).toBeTruthy();
+    const chasing = await run((tx) => listWaiverWork(tx, tenantId, commitment.id));
+    expect(chasing.map((w) => w.title)).toEqual([
+      `Lien waiver from Framer OPS-LW1 ${vendorSeq}: unconditional through 2026-09-30 (SC-OPS-LW1)`,
+    ]);
+    expect((await run((tx) => listPunchItems(tx, tenantId, project.id))).map((p) => p.id)).not.toContain(itemId);
+
+    // An unconditional waiver through a LATER date covers it without naming it; a final one covers everything.
+    await run((tx) =>
+      createLienWaiver(tx, ctx, {
+        projectId: project.id,
+        partyId: party,
+        commitmentId: commitment.id,
+        kind: "unconditional_progress",
+        throughDate: "2026-10-31",
+        amountCents: 18_000_00,
+        status: "received",
+        receivedOn: "2026-11-02",
+        signedBy: "J. Miller",
+      }),
+    );
+    gaps = await run((tx) => waiverGaps(tx, tenantId, project.id));
+    expect(gaps).toEqual([]);
+    coverage = (await run((tx) => waiverCoverage(tx, tenantId, project.id))).get(commitment.id);
+    expect(coverage).toMatchObject({ unconditionalThrough: "2026-10-31", conditionalThrough: "2026-09-30", finalOnFile: false });
+    const listed = await run((tx) => listLienWaivers(tx, tenantId, project.id));
+    expect(listed.map((w) => [w.waiver.kind, w.waiver.throughDate, w.applicationNumber, w.attachmentCount, w.partyName])).toEqual([
+      ["unconditional_progress", "2026-10-31", null, 0, `Framer OPS-LW1 ${vendorSeq}`],
+      ["conditional_progress", "2026-09-30", 1, 0, `Framer OPS-LW1 ${vendorSeq}`],
+    ]);
+    // A void waiver stops counting; a final one on file ends the asking.
+    await run((tx) => updateLienWaiver(tx, ctx, listed[0].waiver.id, { status: "void" }));
+    gaps = await run((tx) => waiverGaps(tx, tenantId, project.id));
+    expect(gaps).toHaveLength(1);
+    await run((tx) =>
+      createLienWaiver(tx, ctx, {
+        projectId: project.id,
+        partyId: party,
+        commitmentId: commitment.id,
+        kind: "unconditional_final",
+        throughDate: "2026-09-01",
+        status: "received",
+        receivedOn: "2026-12-01",
+      }),
+    );
+    expect(await run((tx) => waiverGaps(tx, tenantId, project.id))).toEqual([]);
+    expect((await run((tx) => waiverCoverage(tx, tenantId, project.id))).get(commitment.id)?.finalOnFile).toBe(true);
+
+    // The links are checked: another job's order, another order's application, an unknown kind.
+    const other = await run((tx) => subcontractJob(tx, entity, "OPS-LW2"));
+    await expect(
+      run((tx) =>
+        createLienWaiver(tx, ctx, { projectId: project.id, partyId: party, commitmentId: other.commitment.id, kind: "conditional_final", throughDate: "2026-09-30" }),
+      ),
+    ).rejects.toMatchObject({ code: "WRONG_PROJECT" });
+    await expect(
+      run((tx) =>
+        createLienWaiver(tx, ctx, { projectId: other.project.id, partyId: party, commitmentId: other.commitment.id, subApplicationId: app1.id, kind: "conditional_final", throughDate: "2026-09-30" }),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE", message: expect.stringContaining("not on that order") });
+    await expect(
+      run((tx) =>
+        createLienWaiver(tx, ctx, { projectId: project.id, partyId: party, kind: "partial", throughDate: "2026-09-30" }),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_KIND" });
   }, 120_000);
 });

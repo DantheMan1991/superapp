@@ -143,8 +143,10 @@ export class JobsError extends Error {
       | "LINES_LOCKED"
       /** A change a subcontractor has billed against keeps its status and its lines. */
       | "CHANGE_BILLED"
-      /** The client's change order named is on another job. */
-      | "WRONG_PROJECT",
+      /** The client's change order named — or the order a waiver names — is on another job. */
+      | "WRONG_PROJECT"
+      /** A received lien waiver carries the date it arrived. */
+      | "RECEIVED_DATE_REQUIRED",
     message: string,
   ) {
     super(message);

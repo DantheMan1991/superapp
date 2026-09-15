@@ -26,6 +26,10 @@ import {
   PAY_APPLICATION_STATUS_LABELS,
   PROJECT_STATUSES,
   RETAINAGE_PPM_MAX,
+  RATE_PPM_MAX,
+  ESTIMATE_STATUSES,
+  ESTIMATE_STATUS_LABELS,
+  isEstimateStatus,
   STATUS_LABELS,
   ROLE_LABELS,
   VALUED_CONTRACT_STATUSES,
@@ -123,6 +127,16 @@ import {
   thousandthsToQuantityString,
   unitLineCents,
 } from "../src/packs/jobs/billing-math";
+import {
+  estimateByCode,
+  estimateTotals,
+  lineCostCents,
+  linePriceCents,
+  rateCents,
+  rateStringToPpm,
+  scheduleFromEstimate,
+  spreadCents,
+} from "../src/packs/jobs/estimate-math";
 import { GENERAL_COA } from "../src/modules/accounting/templates/general";
 import { packRegistry } from "../src/packs";
 import { describeProject, findProjects, type OpenProject } from "../src/packs/jobs/tell/find";
@@ -1187,6 +1201,168 @@ describe("selections", () => {
 
   it("names its attachment target, a slug Documents accepts", () => {
     expect(SELECTION_ENTITY).toMatch(/^[a-z][a-z0-9_]{0,62}$/);
+  });
+});
+
+// ---------------------------------------------------------------- estimates
+
+const ESTIMATES_SQL = readFileSync("drizzle/0356_estimates.sql", "utf8");
+
+describe("estimates", () => {
+  it("MIRRORS the status CHECK and labels every status", () => {
+    const m = ESTIMATES_SQL.match(/job_estimates_status_valid[^(]*(([^)]*))/);
+    expect(m, "constraint not found").not.toBeNull();
+    expect([...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]).sort()).toEqual([...ESTIMATE_STATUSES].sort());
+    for (const st of ESTIMATE_STATUSES) expect(ESTIMATE_STATUS_LABELS[st]).toBeTruthy();
+    expect(isEstimateStatus("sent")).toBe(true);
+    expect(isEstimateStatus("won")).toBe(false);
+  });
+
+  it("caps every rate at 1,000% in the database, the same number the code uses", () => {
+    expect(RATE_PPM_MAX).toBe(10_000_000);
+    for (const c of ["job_estimates_markup_range", "job_estimates_overhead_range", "job_estimates_profit_range", "job_estimate_lines_markup_range"]) {
+      expect(ESTIMATES_SQL, c).toMatch(new RegExp(c + "[^;]*<= " + RATE_PPM_MAX + "[)]"));
+    }
+    expect(ESTIMATES_SQL).toMatch(/job_estimate_lines_quantity_nonnegative/);
+    expect(ESTIMATES_SQL).toMatch(/job_estimate_lines_unit_cost_nonnegative/);
+    expect(ESTIMATES_SQL).toMatch(/job_estimate_lines_unit_price_nonnegative[^;]*is null or/);
+    expect(ESTIMATES_SQL).toMatch(/job_estimate_lines_description_present/);
+    expect(ESTIMATES_SQL).toMatch(/job_estimates_number_present/);
+  });
+
+  it("numbers estimates uniquely per job, and the action names the index", () => {
+    expect(ESTIMATES_SQL).toMatch(/CREATE UNIQUE INDEX "job_estimates_project_number_idx"[^;]*("tenant_id","project_id","number")/);
+    expect(readFileSync("src/packs/jobs/actions.ts", "utf8")).toContain('case "job_estimates_project_number_idx":');
+  });
+
+  it("hangs off the job (cascade) and names the contract it became (no action); the lines go with the estimate and hold their code", () => {
+    expect(ESTIMATES_SQL).toMatch(/job_estimates_project_fk[^;]*ON DELETE cascade/);
+    expect(ESTIMATES_SQL).toMatch(/job_estimates_contract_fk[^;]*REFERENCES "public"."job_contracts"[^;]*ON DELETE no action/);
+    expect(ESTIMATES_SQL).toMatch(/job_estimate_lines_estimate_fk[^;]*ON DELETE cascade/);
+    expect(ESTIMATES_SQL).toMatch(/job_estimate_lines_code_fk[^;]*REFERENCES "public"."job_cost_codes"[^;]*ON DELETE no action/);
+    // Hand-reordered: the estimates' unique index lands before the lines' key to it.
+    expect(ESTIMATES_SQL.indexOf('CREATE UNIQUE INDEX "job_estimates_tenant_id_id_idx"')).toBeLessThan(
+      ESTIMATES_SQL.indexOf('ADD CONSTRAINT "job_estimate_lines_estimate_fk"'),
+    );
+  });
+
+  describe("the arithmetic", () => {
+    const L = (quantityThousandths: number, unitCostCents: number, markupPpm: number | null = null, unitPriceCents: number | null = null) => ({
+      quantityThousandths,
+      unitCostCents,
+      markupPpm,
+      unitPriceCents,
+    });
+
+    it("applies a rate in integer math, half up, and never to nothing", () => {
+      expect(rateCents(10_000, 150_000)).toBe(1_500);
+      expect(rateCents(1, 500_000)).toBe(1);
+      expect(rateCents(1, 499_999)).toBe(0);
+      expect(rateCents(0, 150_000)).toBe(0);
+      expect(rateCents(-5, 150_000)).toBe(0);
+      expect(rateCents(5, 0)).toBe(0);
+    });
+
+    it("costs a line as quantity at the unit cost, and prices it by markup unless a unit price is typed", () => {
+      expect(lineCostCents(L(120_000, 185_00))).toBe(22_200_00);
+      expect(linePriceCents(L(120_000, 185_00), 150_000)).toBe(25_530_00); // the estimate's 15%
+      expect(linePriceCents(L(1_000, 40_000_00, 100_000), 150_000)).toBe(44_000_00); // the line's own 10% wins
+      expect(linePriceCents(L(2_000, 900_00, 150_000, 1_200_00), 150_000)).toBe(2_400_00); // a typed price wins over both
+      expect(linePriceCents(L(1_000, 1_500_00), 0)).toBe(1_500_00); // no markup: sold at cost
+    });
+
+    it("marks up the EXTENDED cost, so a line priced whole and a line priced by the unit agree to the cent", () => {
+      // 3 at $0.01 with 33% on: the unit marked up rounds to $0.01 and sells at $0.03; the extended cost of $0.03 marked up is $0.04.
+      expect(linePriceCents(L(3_000, 1, 330_000), 0)).toBe(4);
+      expect(linePriceCents(L(3_000, 1, 330_000), 0)).toBe(lineCostCents(L(3_000, 1)) + rateCents(3, 330_000));
+    });
+
+    it("puts overhead on the subtotal and profit on the subtotal plus overhead, each rounded once", () => {
+      const lines = [L(120_000, 185_00), L(1_000, 40_000_00, 100_000), L(2_000, 900_00, null, 1_200_00), L(1_000, 1_500_00)];
+      const t = estimateTotals(lines, { markupPpm: 150_000, overheadPpm: 100_000, profitPpm: 100_000 });
+      expect(t).toEqual({
+        costCents: 65_500_00,
+        subtotalCents: 73_655_00,
+        overheadCents: 7_365_50,
+        profitCents: 8_102_05,
+        totalCents: 89_122_55,
+        marginCents: 23_622_55,
+        marginPpm: Math.round((23_622_55 / 89_122_55) * 1_000_000),
+      });
+      // Nothing below the lines: the subtotal is the total.
+      expect(estimateTotals(lines, { markupPpm: 150_000, overheadPpm: 0, profitPpm: 0 })).toMatchObject({ totalCents: 73_655_00, marginCents: 8_155_00 });
+      // No lines: every figure is nothing, and there is no margin to speak of.
+      expect(estimateTotals([], { markupPpm: 150_000, overheadPpm: 100_000, profitPpm: 100_000 })).toEqual({
+        costCents: 0,
+        subtotalCents: 0,
+        overheadCents: 0,
+        profitCents: 0,
+        totalCents: 0,
+        marginCents: 0,
+        marginPpm: null,
+      });
+    });
+
+    it("groups cost and price by code, the no-code lines under null", () => {
+      const byCode = estimateByCode(
+        [
+          { ...L(120_000, 185_00), costCodeId: "a" },
+          { ...L(1_000, 40_000_00, 100_000), costCodeId: "b" },
+          { ...L(2_000, 900_00, null, 1_200_00), costCodeId: "a" },
+          { ...L(1_000, 1_500_00), costCodeId: null },
+        ],
+        150_000,
+      );
+      expect([...byCode.entries()]).toEqual([
+        ["a", { costCents: 24_000_00, priceCents: 27_930_00 }],
+        ["b", { costCents: 40_000_00, priceCents: 44_000_00 }],
+        [null, { costCents: 1_500_00, priceCents: 1_725_00 }],
+      ]);
+    });
+
+    it("spreads an amount across weights so the shares sum exactly, the leftover cents to the largest remainders", () => {
+      expect(spreadCents([10_00, 10_00, 10_00], 1_00)).toEqual([34, 33, 33]);
+      expect(spreadCents([25_530_00, 44_000_00, 2_400_00, 1_725_00], 15_467_55)).toEqual([5_361_30, 9_240_00, 504_00, 362_25]);
+      expect(spreadCents([0, 0], 5)).toEqual([0, 0]);
+      expect(spreadCents([1, 2], 0)).toEqual([0, 0]);
+      expect(spreadCents([], 5)).toEqual([]);
+    });
+
+    it("writes a schedule of values that TOTALS THE CONTRACT SUM: overhead and profit spread over the lines, a unit-priced line's unit price raised by the same share", () => {
+      const lines = [L(120_000, 185_00), L(1_000, 40_000_00, 100_000), L(2_000, 900_00, null, 1_200_00), L(1_000, 1_500_00)];
+      const schedule = scheduleFromEstimate(lines, { markupPpm: 150_000, overheadPpm: 100_000, profitPpm: 100_000 });
+      expect(schedule).toEqual([
+        { scheduledCents: 30_891_30, quantityThousandths: null, unitPriceCents: null },
+        { scheduledCents: 53_240_00, quantityThousandths: null, unitPriceCents: null },
+        { scheduledCents: 2_904_00, quantityThousandths: 2_000, unitPriceCents: 1_452_00 },
+        { scheduledCents: 2_087_25, quantityThousandths: null, unitPriceCents: null },
+      ]);
+      expect(schedule.reduce((sum, l) => sum + l.scheduledCents, 0)).toBe(89_122_55);
+      // Nothing below the lines: the schedule is the prices, untouched.
+      expect(scheduleFromEstimate(lines, { markupPpm: 150_000, overheadPpm: 0, profitPpm: 0 }).map((l) => l.scheduledCents)).toEqual([25_530_00, 44_000_00, 2_400_00, 1_725_00]);
+      // The rounding lands on the last line priced as a sum, so the total still holds.
+      const odd = scheduleFromEstimate([L(3_000, 0, null, 1), L(1_000, 10), L(1_000, 10)], { markupPpm: 0, overheadPpm: 210_000, profitPpm: 0 });
+      expect(odd.map((l) => l.scheduledCents)).toEqual([3, 12, 13]);
+      expect(odd.reduce((sum, l) => sum + l.scheduledCents, 0)).toBe(
+        estimateTotals([L(3_000, 0, null, 1), L(1_000, 10), L(1_000, 10)], { markupPpm: 0, overheadPpm: 210_000, profitPpm: 0 }).totalCents,
+      );
+      // Every line by the unit: nowhere for the rounding to land, and the schedule can miss the total by it.
+      const allUnit = scheduleFromEstimate([L(3_000, 0, null, 1), L(3_000, 0, null, 1)], { markupPpm: 0, overheadPpm: 210_000, profitPpm: 0 });
+      expect(allUnit.map((l) => [l.scheduledCents, l.unitPriceCents])).toEqual([[3, 1], [3, 1]]);
+      expect(allUnit.reduce((sum, l) => sum + l.scheduledCents, 0)).toBe(6);
+      expect(estimateTotals([L(3_000, 0, null, 1), L(3_000, 0, null, 1)], { markupPpm: 0, overheadPpm: 210_000, profitPpm: 0 }).totalCents).toBe(7);
+    });
+
+    it("reads a rate as typed — a percentage, up to 1,000, four places", () => {
+      expect(rateStringToPpm("10")).toBe(100_000);
+      expect(rateStringToPpm("12.5")).toBe(125_000);
+      expect(rateStringToPpm(" 0.25% ")).toBe(2_500);
+      expect(rateStringToPpm("1000")).toBe(10_000_000);
+      expect(rateStringToPpm("1000.01")).toBeNull();
+      expect(rateStringToPpm("-5")).toBeNull();
+      expect(rateStringToPpm("")).toBeNull();
+      expect(rateStringToPpm("ten")).toBeNull();
+    });
   });
 });
 

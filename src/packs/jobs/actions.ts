@@ -45,6 +45,15 @@ import {
   updateSelection,
 } from "./selections-ops";
 import {
+  acceptEstimate,
+  applyEstimateToBudget,
+  applyEstimateToSchedule,
+  createEstimate,
+  updateEstimate,
+  type EstimateLineInput,
+} from "./estimating-ops";
+import { rateStringToPpm } from "./estimate-math";
+import {
   approveSubApplication,
   createSubApplication,
   deleteSubApplication,
@@ -92,6 +101,7 @@ import {
   LIEN_WAIVER_STATUSES,
   SELECTION_ENTITY,
   SELECTION_STATUSES,
+  ESTIMATE_STATUSES,
   PARTY_DOCUMENT_ENTITY,
   PARTY_DOCUMENT_FORMAT,
   PARTY_DOCUMENT_STATUSES,
@@ -248,6 +258,8 @@ function toResult(err: unknown): { error: string } {
         return {
           error: `The difference on that selection has been raised: ${err.message}. Void the change order to re-price it.`,
         };
+      case "ESTIMATE_ACCEPTED":
+        return { error: `That estimate is fixed: ${err.message}.` };
     }
   }
   /**
@@ -294,6 +306,8 @@ function toResult(err: unknown): { error: string } {
       return { error: "That change order number is already used on this contract." };
     case "job_commitment_change_orders_commitment_number_idx":
       return { error: "That change order number is already used on this order." };
+    case "job_estimates_project_number_idx":
+      return { error: "That estimate number is already used on this job." };
   }
   console.error("jobs action failed", err);
   return { error: "Something went wrong. Try again." };
@@ -2521,6 +2535,248 @@ export async function detachSelectionPhotoAction(input: unknown) {
     );
     revalidatePath(`${BASE}/${projectId}/selections`);
     return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// -------------------------------------------------------------- estimates
+
+/** "10" → 100,000 ppm; blank → null; anything else refuses. Up to 1,000%. */
+const rateToPpm = z
+  .union([z.string(), z.number(), z.literal("")])
+  .optional()
+  .transform((v, ctx) => {
+    if (v === "" || v === undefined || v === null) return null;
+    const ppm = rateStringToPpm(String(v));
+    if (ppm === null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "not a rate" });
+      return z.NEVER;
+    }
+    return ppm;
+  });
+
+const estimateLineSchema = z.object({
+  id: optionalUuid,
+  costCodeId: optionalUuid,
+  description: z.string().trim().min(1).max(300),
+  unit: z.string().trim().max(20).optional(),
+  /** "320" → 320,000 thousandths; blank → one. */
+  quantity: quantityToThousandths,
+  unitCostCents: moneyToCents,
+  /** This line's markup; blank takes the estimate's default. */
+  markupPercent: rateToPpm,
+  /** An explicit price per unit; blank means priced by markup. */
+  unitPriceCents: moneyToCents,
+  notes: z.string().trim().max(1000).optional(),
+});
+
+const estimateSchema = z.object({
+  projectId: z.string().uuid(),
+  number: z.string().trim().min(1).max(40),
+  title: z.string().trim().max(200).optional(),
+  status: z.enum(ESTIMATE_STATUSES).optional(),
+  sentOn: optionalDate,
+  decidedOn: optionalDate,
+  validUntil: optionalDate,
+  markupPercent: rateToPpm,
+  overheadPercent: rateToPpm,
+  profitPercent: rateToPpm,
+  notes: z.string().trim().max(4000).optional(),
+  lines: z.array(estimateLineSchema).max(500).optional(),
+});
+
+/** A blank description is a blank row and is dropped; a blank quantity is one. */
+function estimateLines(
+  lines: z.infer<typeof estimateLineSchema>[] | undefined,
+): EstimateLineInput[] | undefined {
+  if (lines === undefined) return undefined;
+  return lines
+    .filter((l) => l.description.trim() !== "")
+    .map((l) => ({
+      id: l.id ?? undefined,
+      costCodeId: l.costCodeId,
+      description: l.description,
+      unit: l.unit,
+      quantityThousandths: l.quantity ?? 1000,
+      unitCostCents: l.unitCostCents ?? 0,
+      markupPpm: l.markupPercent,
+      unitPriceCents: l.unitPriceCents,
+      notes: l.notes,
+    }));
+}
+
+/** Writing an estimate is the estimator's chore; making it money is an owner's act, held by the verbs. */
+async function estimateGate(): Promise<JobsCtx> {
+  const ctx = await gate();
+  if (!allowsWrite(ctx.role, "member")) {
+    throw new JobsError("FORBIDDEN", "cannot write estimates");
+  }
+  return ctx;
+}
+
+function estimateFields(data: z.infer<typeof estimateSchema>) {
+  const { projectId, markupPercent, overheadPercent, profitPercent, lines, ...rest } = data;
+  return {
+    projectId,
+    fields: {
+      ...rest,
+      ...(markupPercent === undefined ? {} : { markupPpm: markupPercent ?? 0 }),
+      ...(overheadPercent === undefined ? {} : { overheadPpm: overheadPercent ?? 0 }),
+      ...(profitPercent === undefined ? {} : { profitPpm: profitPercent ?? 0 }),
+      ...(lines === undefined ? {} : { lines: estimateLines(lines) }),
+    },
+  };
+}
+
+export async function createEstimateAction(input: unknown) {
+  const parsed = estimateSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { projectId, fields } = estimateFields(parsed.data);
+  try {
+    const ctx = await estimateGate();
+    const estimate = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const created = await createEstimate(tx, ctx, { projectId, ...fields });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "estimate.created",
+          targetType: "estimate",
+          targetId: created.id,
+          /* Identifiers and shape only: the price is the bid. */
+          meta: { projectId: created.projectId, status: created.status, lineCount: fields.lines?.length ?? 0 },
+        });
+        return created;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath(`${BASE}/${projectId}/estimates`);
+    return { ok: true as const, estimateId: estimate.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function updateEstimateAction(input: unknown) {
+  const schema = estimateSchema
+    .partial()
+    .extend({
+      id: z.string().uuid(),
+      /** For revalidation only. */
+      projectId: z.string().uuid(),
+      version: z.number().int().positive().optional(),
+    });
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { id, version, number, ...rest } = parsed.data;
+  const { projectId, fields } = estimateFields({ ...rest, number: number ?? "" } as z.infer<typeof estimateSchema>);
+  // A blank number is "not sent", never "make it blank": the op leaves undefined alone.
+  const patch = number === undefined ? { ...fields, number: undefined } : fields;
+  try {
+    const ctx = await estimateGate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const row = await updateEstimate(tx, ctx, id, { ...patch, version });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "estimate.updated",
+          targetType: "estimate",
+          targetId: row.id,
+          meta: { projectId: row.projectId, status: row.status },
+        });
+        return row;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath(`${BASE}/${projectId}/estimates`);
+    revalidatePath(`${BASE}/${projectId}/estimates/${id}`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const acceptEstimateSchema = z.object({
+  projectId: z.string().uuid(),
+  id: z.string().uuid(),
+  contractId: z.string().uuid(),
+  decidedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  version: z.number().int().positive().optional(),
+});
+
+/** Accept onto a contract: an owner's act, and the contract's value follows. */
+export async function acceptEstimateAction(input: unknown) {
+  const parsed = acceptEstimateSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { projectId, id, ...fields } = parsed.data;
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const row = await acceptEstimate(tx, ctx, id, fields);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "estimate.accepted",
+          targetType: "estimate",
+          targetId: row.id,
+          meta: { projectId: row.projectId, contractId: row.contractId },
+        });
+        return row;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath(`${BASE}/${projectId}/estimates`);
+    revalidatePath(`${BASE}/${projectId}/estimates/${id}`);
+    revalidatePath(BASE);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const applyEstimateSchema = z.object({
+  projectId: z.string().uuid(),
+  id: z.string().uuid(),
+  contractId: optionalUuid,
+});
+
+export async function applyEstimateToBudgetAction(input: unknown) {
+  const parsed = applyEstimateSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  const { projectId, id } = parsed.data;
+  try {
+    const ctx = await gate();
+    const result = await withTenant(ctx.tenantId, (tx) => applyEstimateToBudget(tx, ctx, id), { role: ctx.role });
+    revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath(`${BASE}/${projectId}/estimates/${id}`);
+    return { ok: true as const, ...result };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function applyEstimateToScheduleAction(input: unknown) {
+  const parsed = applyEstimateSchema.safeParse(input);
+  if (!parsed.success || !parsed.data.contractId) return { error: "Pick the contract the schedule belongs to." };
+  const { projectId, id, contractId } = parsed.data;
+  try {
+    const ctx = await gate();
+    const result = await withTenant(ctx.tenantId, (tx) => applyEstimateToSchedule(tx, ctx, id, contractId), {
+      role: ctx.role,
+    });
+    revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath(`${BASE}/${projectId}/contracts/${contractId}`);
+    revalidatePath(`${BASE}/${projectId}/estimates/${id}`);
+    return { ok: true as const, ...result };
   } catch (err) {
     return toResult(err);
   }

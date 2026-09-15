@@ -45,6 +45,94 @@ Before you have added anything you see `No {{project|plural|lower}} yet`. Staff 
 
 `Cost codes` below it lists the codes this job is charged against, or a link to add some.
 
+## Estimates — pricing the {{project|lower}} before anybody signs
+
+Anybody on the {{project|lower}} may write an estimate; accepting one, or making it the budget or the schedule of values, is owners only. On the {{project|lower}}'s page under **Estimates**, on the **Estimates** page — {button:All estimates|outline} — and on each estimate's own page.
+
+An estimate is the {{project|lower}} priced, line by line: what each line will **cost** you and what you will **charge** for it, with overhead and profit below the lines, and the margin between. Several on one {{project|lower}} is ordinary — a bid gets revised, and a design phase is priced before the build — so each has a number of its own. When the client says yes, an owner **accepts** it onto a contract and its total becomes that contract's value; two more buttons make it the budget and the schedule of values, so nothing is typed twice.
+
+### The panel on the {{project|lower}}'s page
+
+One sentence: *2 estimates: EST-2 $89,122.55 (accepted) · EST-1 $84,300.00 (superseded).* — the three newest, with `· …` when there are more — or *Nothing priced yet* and what an estimate is. {button:All estimates|outline} opens the page; {button:New estimate|primary} opens the dialog below.
+
+### The list
+
+Newest first.
+
+| Column | What it is |
+| --- | --- |
+| `Number` | Yours — `EST-1`, `Q-2026-014`, whatever you use. Opens the estimate. |
+| `Title` | With the number of lines, `sent <date>` and `valid to <date>` under it. |
+| `Cost` | What the lines add up to at their unit costs. |
+| `Total` | Their price with overhead and profit on top — what the client is asked for. |
+| `Margin` | Total less cost, and the percentage of the total it is. |
+| `Status` | `Draft`, `Sent`, `Accepted`, `Declined` or `Superseded`, with the date decided under it. |
+| `Contract` | The agreement an accepted estimate became; opens it. |
+
+### Starting one
+
+{button:New estimate|primary}, on the panel or the list.
+
+1. **`Number`** — required, and different from the {{project|lower}}'s other estimates. `EST-1`.
+2. **`Title`** — `New home, as drawn`. Optional.
+
+{button:Start estimate|primary} stays greyed until the number is filled in; on success you see `Estimate started` and land on the estimate's page. `That estimate number is already used on this job.` if the number is taken.
+
+### The estimate's page
+
+The header shows the number, the title, the {{project|lower}}, the contract it became, and its status. Everything below is one form: nothing is saved until {button:Save|primary}, and `Estimate saved` confirms it.
+
+**The top block.**
+
+- **`Number`** and **`Title`**.
+- **`Status`** — `Draft`, `Sent`, `Declined` or `Superseded`. `Accepted` is not on the list: accepting is a button of its own, below. Picking `Sent` fills **`Sent`** with today; picking `Declined` fills **`Decided`**.
+- **`Sent`**, **`Valid until`**, **`Decided`** — dates, all optional.
+- **`Markup on cost, %`** — the rate every line sells at unless the line says otherwise. `15`.
+- **`Overhead, %`** — on the lines' price. `10`.
+- **`Profit, %`** — on the price plus overhead. `10`. Leave both at nothing if you price everything on the lines; leave the markup at nothing if you sell at cost and take it all below. Either way it is the same estimate, and the margin at the bottom is the same number.
+
+**Lines.** One row per thing you are pricing. {button:Add line|ghost} adds a row; the bin at the end of a row removes it (the last row stays).
+
+| Column | What it is |
+| --- | --- |
+| `Cost code` | Where the money lands in the budget, from the {{project|lower}}'s cost code list. `No code` is allowed and the line still prices; it is left out when the estimate becomes the budget. |
+| `Description` | Required; a row with none is ignored when you save. `Slab, 4in, fibre mesh`. |
+| `Qty` | Blank is one — a lump sum. `120`. |
+| `Unit` | `cy`, `sf`, `ea`, `ls` — yours. |
+| `Unit cost` | What one unit costs you. `185.00`. |
+| `Markup %` | This line's markup, if it differs from the estimate's; the estimate's rate shows greyed as the placeholder. Greyed out once a unit price is typed, because the price then does not come from a markup. |
+| `Unit price` | Type a price per unit and the line sells at quantity times that, whatever the markup — a unit-price bid. Blank reads `by markup`. |
+| `Cost` | Quantity at the unit cost, as you type. |
+| `Price` | Quantity at the unit price if there is one, else the cost plus its markup. |
+
+Cost and price are worked out as you type and never stored, so a line typed as 320 sf at $4.20 and a line typed as $1,344.00 agree to the cent.
+
+**The six figures.** `Cost` (every line at cost), `Price` (every line at its price), `Overhead`, `Profit`, `Total` (price plus overhead plus profit — what the client is asked for) and `Margin` (total less cost, with its percentage of the total).
+
+**`Notes`** — whatever the estimate should remember: the terms, the exclusions.
+
+What can stop a save: `Check the form and try again.` (a rate or a quantity that is not a number) · `That estimate number is already used on this job.` · `A markup must be between 0% and 1,000%.` · `A unit cost cannot be negative.` · `Somebody changed this while you had it open. Reload and try again.`
+
+### Accepting it
+
+The client said yes. {button:Accept|primary} (owners; greyed until the {{project|lower}} has a contract) asks for the **`Contract`** it priced and **`Accepted on`** (today). The estimate's total, as saved, becomes that contract's value; the estimate is marked `Accepted`, shows the contract in its header, and its rates and lines are fixed from here — shown, greyed, and not sent. `Estimate accepted`.
+
+A **signed** contract's value moves by change order, not by accepting an estimate: `That contract is signed, so its value changes with a change order.` — unless the estimate's total is already the contract's value to the cent, which is accepted and touches nothing, or the signed contract has **no value recorded yet** (a cost-plus agreement usually has none), in which case the estimate fills it in: entry, not revision. A contract on another {{project|lower}} is refused: `That is on another job: …`. Accepting twice, or changing an accepted estimate's rates, lines or status, is refused: `That estimate is fixed: estimate EST-1 was accepted; revise it as a new one.` To revise, start a new estimate and set this one to `Superseded` — the one status an accepted estimate can move to; the title and the notes still move too.
+
+### Making it the budget
+
+{button:Use as budget|outline} (owners). The dialog says the cost as saved and what happens: each cost code's **cost** on the estimate becomes that code's original budget on the {{project|lower}}, replacing what the code had, and lines with no cost code are left out. {button:Make it the budget|primary}. `Budget set on 2 codes — $1,500.00 on lines with no code left out`. From there the budget moves as it always does, by change order, and **Job cost** on the {{project|lower}}'s page reads it.
+
+### Making it the schedule of values
+
+{button:Use as schedule of values|outline} (owners; greyed until the {{project|lower}} has a contract). Pick the **`Contract`** and {button:Make it the schedule|primary}: one schedule line per estimate line at its **price**, with the overhead and profit spread across the lines in proportion so the schedule adds up to the estimate's total — the contract sum, which a pay application is measured against — replacing the contract's schedule and carrying each line's cost code. A line sold at a unit price keeps billing by the quantity, with its unit price raised by the same share. `Schedule written: 4 lines, $89,122.55`. The schedule is what a fixed-price or unit-price contract bills against; a cost-plus or time-and-materials contract bills its cost and leaves the schedule unread. A schedule line an application has already billed against cannot be removed, and the write is refused if the estimate would drop one — see **Billing a contract**. If you want overhead or your fee as a line of its own on the schedule, type it as a line of the estimate.
+
+Neither button is automatic on accepting: a {{project|lower}} budgeted at cost and billed on a schedule of milestones is written from the estimate for one and by hand for the other.
+
+### By cost code
+
+Under the editor, once the estimate has lines: each code's cost and price from the saved lines — the cost is what **Use as budget** writes, the price is what the job cost report will compare it with once the {{project|lower}} is billed. `No cost code` is the last row.
+
 ## Contracts
 
 A {{project|lower}} can have **several agreements over its life**, and that is the normal case rather than the exception. A custom home often runs a design agreement, then a drawings agreement, then the build — three contracts, one job, and **the first two may be the only two that ever happen** if the client sees the number and stops there.
@@ -709,6 +797,7 @@ Worth knowing so you are not looking for it:
 - **A cost-plus job on the work in progress schedule earns what it has cost plus its fee**, capped at its maximum, with no estimate asked for — when it is the job's only signed contract. A time-and-materials job earns its approved hours at their rates plus the rest of its cost marked up, the same way; one with hours nobody has priced shows `Hours on the job with no bill rate` and blocks the period until a rate is set. A job mixing methods is shown and left out, and a period with billings on one cannot post until it has a value.
 - **A subcontractor's application does not print**, and neither does a change order on an order. They are the subcontractor's documents, prepared on their side; your own applications print from their row.
 - **A lien waiver is not generated.** The form itself is your state's or your lawyer's, not something Jobs prints; the signed one attaches as a photo, a file or from Documents.
+- **An estimate is lines you type.** No assemblies (a bundle of lines dropped in as one), no unit cost book that remembers what concrete cost last time, no takeoff from the drawings, and the proposal does not print — send the client your own document for now. A supplier's quote cannot be attached to an estimate yet.
 - **A subcontractor out of standing is not stopped.** An order can be issued and a bill paid while a certificate is missing or expired; the Subcontractors page and the order's page say so in red, and the decision is yours. Which kinds are required is set in the module's configuration for now, not on a screen.
 - **The option book is per job.** The same selections with the same choices on every plan are entered on each job for now; a book that seeds a new job is next. Nothing here lets the client choose for themselves; the office records what they said.
 - **A back-charge is not a change order.** Money you deduct from a subcontractor's payment for something you paid on their behalf reduces the payment, not the scope; a deductive change order reduces the scope. Record a back-charge as a credit in Accounting for now.
@@ -727,6 +816,8 @@ Worth knowing so you are not looking for it:
 | Record or approve a subcontractor's application | ● | | |
 | Record a lien waiver, or ask for one in Work | ● | ● | ● |
 | Record a subcontractor's certificate or W-9, or ask for one in Work | ● | ● | ● |
+| Write, send, decline or supersede an estimate | ● | ● | ● |
+| Accept an estimate, or make it the budget or the schedule of values | ● | | |
 | Draw up selections, record the client's choice, remind them in Work | ● | ● | ● |
 | Raise a selection's difference as a change order | ● | | |
 | Log a day on site, or add and tick a punch item | ● | ● | ● |

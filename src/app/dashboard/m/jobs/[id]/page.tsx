@@ -40,6 +40,8 @@ import { listDailyLogs, listPunchItems } from "@/packs/jobs/field-ops";
 import { commitmentBilling } from "@/packs/jobs/sub-billing-ops";
 import { waiverCoverage, waiverGaps } from "@/packs/jobs/compliance-ops";
 import { selectionSummary } from "@/packs/jobs/selections-ops";
+import { listEstimates } from "@/packs/jobs/estimating-ops";
+import { NewEstimateDialog } from "@/packs/jobs/components/estimate-editor";
 import { SelectionForm } from "@/packs/jobs/components/selection-form";
 import { BudgetEditor } from "@/packs/jobs/components/budget-editor";
 import { ProjectForm } from "@/packs/jobs/components/project-form";
@@ -49,6 +51,8 @@ import {
   APPROVED_CHANGE_STATUSES,
   BILLING_METHOD_LABELS,
   CHANGE_ORDER_STATUS_LABELS,
+  ESTIMATE_STATUS_LABELS,
+  isEstimateStatus,
   COMMITMENT_KIND_LABELS,
   COMMITMENT_STATUS_LABELS,
   COMMITTED_STATUSES,
@@ -119,6 +123,7 @@ export default async function ProjectPage({
         waiverGapList,
         waiverCover,
         selections,
+        estimates,
       ] = await Promise.all([
         tx
           .select({ name: schema.entities.name })
@@ -223,6 +228,7 @@ export default async function ProjectPage({
         waiverGaps(tx, ctx.tenant.id, project.id),
         waiverCoverage(tx, ctx.tenant.id, project.id),
         selectionSummary(tx, ctx.tenant.id, project.id, new Date().toISOString().slice(0, 10)),
+        listEstimates(tx, ctx.tenant.id, project.id),
       ]);
       return {
         project,
@@ -252,6 +258,7 @@ export default async function ProjectPage({
         waiverGaps: waiverGapList,
         waiverCoverage: waiverCover,
         selections,
+        estimates,
       };
     },
     { role: ctx.role },
@@ -1143,6 +1150,37 @@ export default async function ProjectPage({
             </Table>
           </div>
         )}
+      </Panel>
+
+      <Panel className="p-5">
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-heading text-sm font-medium tracking-heading">
+            Estimates
+          </h2>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/dashboard/m/jobs/${project.id}/estimates`}>All estimates</Link>
+            </Button>
+            {canLog && <NewEstimateDialog projectId={project.id} />}
+          </div>
+        </div>
+        <p className="mb-3 text-sm text-muted-foreground">
+          {/*
+            THE FRONT END OF THE JOB (ADR 0069): what it was priced at before
+            anybody signed. Newest first; the accepted one is the contract's.
+          */}
+          {data.estimates.length === 0
+            ? "Nothing priced yet. An estimate is the job's cost and price line by line; accepted, it becomes the contract's value, the budget and the schedule of values."
+            : `${data.estimates.length} ${data.estimates.length === 1 ? "estimate" : "estimates"}: ${data.estimates
+                .slice(0, 3)
+                .map(
+                  (e) =>
+                    `${e.estimate.number} ${formatMoney(e.totals.totalCents, symbol)} (${
+                      isEstimateStatus(e.estimate.status) ? ESTIMATE_STATUS_LABELS[e.estimate.status].toLowerCase() : e.estimate.status
+                    })`,
+                )
+                .join(" · ")}${data.estimates.length > 3 ? " · …" : ""}.`}
+        </p>
       </Panel>
 
       <Panel className="p-5">

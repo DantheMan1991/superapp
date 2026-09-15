@@ -67,4 +67,5 @@ export * from "./jobs-wip";
 export * from "./jobs-sub-billing";
 export * from "./jobs-compliance";
 export * from "./jobs-selections";
+export * from "./jobs-estimates";
 export * from "./jobs-party-documents";

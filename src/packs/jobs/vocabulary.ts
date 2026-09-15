@@ -419,6 +419,33 @@ export function requiredPartyDocumentsFrom(config: unknown): string[] {
 /** A certificate this close to its date is worth a sentence before it is a gap. */
 export const EXPIRING_SOON_DAYS = 30;
 
+// ------------------------------------------------------------------ estimates
+
+/**
+ * Mirrors `job_estimates_status_valid`. Kept in sync by tests/jobs.test.ts.
+ *
+ * `draft` is being written; `sent` is in the client's hands; `accepted` is
+ * the one that became a contract; `declined` is the client saying no;
+ * `superseded` is a revision that replaced it.
+ */
+export const ESTIMATE_STATUSES = ["draft", "sent", "accepted", "declined", "superseded"] as const;
+export type EstimateStatus = (typeof ESTIMATE_STATUSES)[number];
+
+export const ESTIMATE_STATUS_LABELS: Record<EstimateStatus, string> = {
+  draft: "Draft",
+  sent: "Sent",
+  accepted: "Accepted",
+  declined: "Declined",
+  superseded: "Superseded",
+};
+
+export function isEstimateStatus(v: string): v is EstimateStatus {
+  return (ESTIMATE_STATUSES as readonly string[]).includes(v);
+}
+
+/** The most a markup, an overhead or a profit rate may be: 1,000% in ppm, which is a typo guard, not a policy. */
+export const RATE_PPM_MAX = 10_000_000;
+
 // ------------------------------------------------------------------ selections
 
 /**

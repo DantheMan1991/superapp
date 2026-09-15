@@ -12,6 +12,7 @@ import {
   createPayApplication,
   issuePayApplication,
   listPayApplications,
+  listSovLines,
   payApplicationCertificate,
   saveSovLines,
   updatePayApplication,
@@ -20,6 +21,7 @@ import {
   createCostCode,
   createCostCodeSet,
   createProject,
+  getContract,
   getDefaultCostCodeSet,
   listContracts,
   projectValues,
@@ -95,6 +97,14 @@ import {
   summarise,
   updateSelection,
 } from "../src/packs/jobs/selections-ops";
+import {
+  acceptEstimate,
+  applyEstimateToBudget,
+  applyEstimateToSchedule,
+  createEstimate,
+  listEstimates,
+  updateEstimate,
+} from "../src/packs/jobs/estimating-ops";
 import { certificateInputFrom } from "../src/packs/jobs/certificate";
 import { loadInvoice, loadInvoiceLines } from "../src/modules/accounting/invoicing/invoices";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
@@ -3925,6 +3935,149 @@ d("jobs ops", () => {
     rows = await rowsOf();
     expect(rows.map((r) => r.selection.name)).toEqual(["Master bath floor tile", "Front door hardware", "Mailbox"]);
     expect(summarise(rows)).toMatchObject({ count: 2, allowancesCents: 7_600_00, chosenCents: 7_100_00, differenceCents: -500_00, raisedCents: -500_00 });
+  }, 120_000);
+
+  it("AN ESTIMATE prices the job before anybody signs: cost and price on every line, overhead on the subtotal, profit on the subtotal plus overhead; a number is unique per job; lines keep their identity across an edit; accepted by an owner onto a contract it sets the contract's value and is fixed; used as budget it writes each code's cost; used as schedule it writes each line's price with overhead and profit spread so the schedule totals the contract sum; a signed contract's value is refused", async () => {
+    const entity = await newCompany("Est Co 1");
+    const { project, contract, codes, otherContract } = await run(async (tx) => {
+      await ensureBilling(tx);
+      const p = await createProject(tx, ctx, { entityId: entity, number: "OPS-EST1", name: "Priced" });
+      const set = (await getDefaultCostCodeSet(tx, tenantId)) ?? (await createCostCodeSet(tx, ctx, { name: "Est codes" }));
+      const a = await createCostCode(tx, ctx, { setId: set.id, code: "EST-03-30", name: "Concrete", sortOrder: 30 });
+      const b = await createCostCode(tx, ctx, { setId: set.id, code: "EST-06-10", name: "Framing", sortOrder: 40 });
+      const contract = await createContract(tx, ctx, { projectId: p.id, kind: "new_home", valueCents: 0 });
+      const other = await createProject(tx, ctx, { entityId: entity, number: "OPS-EST1-B", name: "Other" });
+      const otherContract = await createContract(tx, ctx, { projectId: other.id, kind: "new_home", valueCents: 1_00 });
+      return { project: p, contract, codes: { a, b }, otherContract };
+    });
+    // The shape is validated: a rate past 1,000%, a negative cost, a status off the list, a blank description.
+    await expect(run((tx) => createEstimate(tx, staffCtx, { projectId: project.id, number: "x", markupPpm: 10_000_001 }))).rejects.toMatchObject({
+      code: "INVALID_VALUE",
+      message: expect.stringContaining("1,000%"),
+    });
+    await expect(run((tx) => createEstimate(tx, staffCtx, { projectId: project.id, number: "x", lines: [{ description: "Slab", unitCostCents: -1 }] }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => createEstimate(tx, staffCtx, { projectId: project.id, number: "x", status: "won" }))).rejects.toMatchObject({ code: "INVALID_STATUS" });
+    await expect(run((tx) => createEstimate(tx, staffCtx, { projectId: project.id, number: "x", lines: [{ description: "  " }] }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+
+    // Staff draw it up: by the unit at the estimate's markup, a sum with its own markup, sold at a typed unit price, and a line with no code.
+    const est = await run((tx) =>
+      createEstimate(tx, staffCtx, {
+        projectId: project.id,
+        number: "EST-1",
+        title: "As drawn",
+        markupPpm: 150_000,
+        overheadPpm: 100_000,
+        profitPpm: 100_000,
+        lines: [
+          { costCodeId: codes.a.id, description: "Slab, 4in", unit: "cy", quantityThousandths: 120_000, unitCostCents: 185_00 },
+          { costCodeId: codes.b.id, description: "Framing labour", unitCostCents: 40_000_00, markupPpm: 100_000 },
+          { costCodeId: codes.a.id, description: "Rebar", unit: "ton", quantityThousandths: 2_000, unitCostCents: 900_00, unitPriceCents: 1_200_00 },
+          { description: "Permit", unitCostCents: 1_500_00 },
+        ],
+      }),
+    );
+    expect([est.status, est.number, est.version]).toEqual(["draft", "EST-1", 1]);
+    // The same number on the same job is refused by the index the action names.
+    const dup = await run((tx) => createEstimate(tx, staffCtx, { projectId: project.id, number: "EST-1" })).catch((e: unknown) => e);
+    expect(violatedUniqueIndex(dup)).toBe("job_estimates_project_number_idx");
+
+    const rowsOf = () => run((tx) => listEstimates(tx, tenantId, project.id));
+    let rows = await rowsOf();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].lines.map((l) => [l.description, l.costCents, l.priceCents, l.codeLabel])).toEqual([
+      ["Slab, 4in", 22_200_00, 25_530_00, "EST-03-30 · Concrete"],
+      ["Framing labour", 40_000_00, 44_000_00, "EST-06-10 · Framing"],
+      ["Rebar", 1_800_00, 2_400_00, "EST-03-30 · Concrete"],
+      ["Permit", 1_500_00, 1_725_00, null],
+    ]);
+    expect(rows[0].totals).toMatchObject({ costCents: 65_500_00, subtotalCents: 73_655_00, overheadCents: 7_365_50, profitCents: 8_102_05, totalCents: 89_122_55, marginCents: 23_622_55 });
+    expect(rows[0].byCode.map((c) => [c.codeLabel, c.costCents, c.priceCents])).toEqual([
+      ["EST-03-30 · Concrete", 24_000_00, 27_930_00],
+      ["EST-06-10 · Framing", 40_000_00, 44_000_00],
+      [null, 1_500_00, 1_725_00],
+    ]);
+    expect(rows[0].contract).toBeNull();
+
+    // An edit keeps each line's identity, adds one, and is refused stale or with a line that is not on this estimate.
+    const [slab, framing, rebar, permit] = rows[0].lines;
+    const asInput = (l: (typeof rows)[0]["lines"][number]) => ({
+      id: l.id,
+      costCodeId: l.costCodeId ?? undefined,
+      description: l.description,
+      unit: l.unit,
+      quantityThousandths: l.quantityThousandths,
+      unitCostCents: l.unitCostCents,
+      markupPpm: l.markupPpm ?? undefined,
+      unitPriceCents: l.unitPriceCents ?? undefined,
+    });
+    await run((tx) =>
+      updateEstimate(tx, staffCtx, est.id, {
+        version: 1,
+        lines: [{ ...asInput(slab), description: "Slab, 4in, fibre mesh" }, asInput(framing), asInput(rebar), asInput(permit), { description: "Dumpster", unitCostCents: 800_00 }],
+      }),
+    );
+    rows = await rowsOf();
+    expect(rows[0].lines.map((l) => l.id).slice(0, 4)).toEqual([slab.id, framing.id, rebar.id, permit.id]);
+    expect([rows[0].lines[0].description, rows[0].lines[4].description, rows[0].totals.costCents]).toEqual(["Slab, 4in, fibre mesh", "Dumpster", 66_300_00]);
+    await expect(run((tx) => updateEstimate(tx, staffCtx, est.id, { version: 1, title: "x" }))).rejects.toMatchObject({ code: "STALE_VERSION" });
+    await expect(
+      run((tx) => updateEstimate(tx, staffCtx, est.id, { lines: [{ id: "00000000-0000-0000-0000-000000000000", description: "x" }] })),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await run((tx) => updateEstimate(tx, staffCtx, est.id, { lines: rows[0].lines.slice(0, 4).map(asInput) }));
+    rows = await rowsOf();
+    expect([rows[0].lines.length, rows[0].totals.totalCents]).toEqual([4, 89_122_55]);
+
+    // Sent, then the client's yes: staff cannot accept; another job's contract is refused; an owner accepts onto the draft contract and its value follows.
+    await run((tx) => updateEstimate(tx, staffCtx, est.id, { status: "sent", sentOn: "2026-09-10" }));
+    await expect(run((tx) => acceptEstimate(tx, staffCtx, est.id, { contractId: contract.id, decidedOn: "2026-09-14" }))).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(run((tx) => acceptEstimate(tx, ctx, est.id, { contractId: otherContract.id, decidedOn: "2026-09-14" }))).rejects.toMatchObject({ code: "WRONG_PROJECT" });
+    const accepted = await run((tx) => acceptEstimate(tx, ctx, est.id, { contractId: contract.id, decidedOn: "2026-09-14" }));
+    expect([accepted.status, accepted.contractId, accepted.decidedOn]).toEqual(["accepted", contract.id, "2026-09-14"]);
+    expect((await run((tx) => getContract(tx, tenantId, contract.id)))?.valueCents).toBe(89_122_55);
+    rows = await rowsOf();
+    expect(rows[0].contract?.id).toBe(contract.id);
+    // Accepted: the money is fixed, the words still move, and accepting twice is refused.
+    await expect(run((tx) => updateEstimate(tx, ctx, est.id, { markupPpm: 200_000 }))).rejects.toMatchObject({ code: "ESTIMATE_ACCEPTED" });
+    await expect(run((tx) => updateEstimate(tx, ctx, est.id, { lines: [] }))).rejects.toMatchObject({ code: "ESTIMATE_ACCEPTED" });
+    await expect(run((tx) => updateEstimate(tx, ctx, est.id, { status: "sent" }))).rejects.toMatchObject({ code: "ESTIMATE_ACCEPTED" });
+    await expect(run((tx) => acceptEstimate(tx, ctx, est.id, { contractId: contract.id, decidedOn: "2026-09-15" }))).rejects.toMatchObject({ code: "ESTIMATE_ACCEPTED" });
+    const retitled = await run((tx) => updateEstimate(tx, staffCtx, est.id, { title: "As drawn, accepted", markupPpm: 150_000, notes: "Signed at the kitchen table" }));
+    expect([retitled.title, retitled.notes, retitled.status]).toEqual(["As drawn, accepted", "Signed at the kitchen table", "accepted"]);
+
+    // Use as budget: an owner's act; each code's cost becomes its original, the no-code cost is said and not written.
+    await expect(run((tx) => applyEstimateToBudget(tx, staffCtx, est.id))).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(await run((tx) => applyEstimateToBudget(tx, ctx, est.id))).toEqual({ codes: 2, budgetCents: 64_000_00, uncodedCents: 1_500_00 });
+    const budget = await run((tx) =>
+      tx.select().from(schema.jobBudgetLines).where(and(eq(schema.jobBudgetLines.tenantId, tenantId), eq(schema.jobBudgetLines.projectId, project.id))),
+    );
+    expect(budget.map((b) => [b.costCodeId, b.originalCents]).sort()).toEqual([[codes.a.id, 24_000_00], [codes.b.id, 40_000_00]].sort());
+
+    // Use as schedule of values: one line per estimate line at its price with overhead and profit spread across them, so the schedule totals the contract sum; the unit-priced line keeps its quantity with its unit price raised by the same share.
+    await expect(run((tx) => applyEstimateToSchedule(tx, staffCtx, est.id, contract.id))).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(run((tx) => applyEstimateToSchedule(tx, ctx, est.id, otherContract.id))).rejects.toMatchObject({ code: "WRONG_PROJECT" });
+    expect(await run((tx) => applyEstimateToSchedule(tx, ctx, est.id, contract.id))).toEqual({ lines: 4, scheduledCents: 89_122_55 });
+    const sov = await run((tx) => listSovLines(tx, tenantId, contract.id));
+    expect(sov.map((l) => [l.description, l.scheduledCents, l.costCodeId, l.unit, l.quantityThousandths, l.unitPriceCents])).toEqual([
+      ["Slab, 4in, fibre mesh", 30_891_30, codes.a.id, "cy", null, null],
+      ["Framing labour", 53_240_00, codes.b.id, "", null, null],
+      ["Rebar", 2_904_00, codes.a.id, "ton", 2_000, 1_452_00],
+      ["Permit", 2_087_25, null, "", null, null],
+    ]);
+
+    // A signed contract's value moves by change order: a second estimate with a different total is refused, one at the same total is accepted without touching it.
+    await run((tx) => updateContract(tx, ctx, contract.id, { status: "signed" }));
+    const revised = await run((tx) => createEstimate(tx, staffCtx, { projectId: project.id, number: "EST-2", lines: [{ description: "Everything", unitCostCents: 80_000_00 }] }));
+    await expect(run((tx) => acceptEstimate(tx, ctx, revised.id, { contractId: contract.id, decidedOn: "2026-09-15" }))).rejects.toMatchObject({ code: "VALUE_LOCKED" });
+    const same = await run((tx) => createEstimate(tx, staffCtx, { projectId: project.id, number: "EST-3", lines: [{ description: "Everything, as agreed", unitPriceCents: 89_122_55 }] }));
+    expect((await run((tx) => acceptEstimate(tx, ctx, same.id, { contractId: contract.id, decidedOn: "2026-09-15" }))).status).toBe("accepted");
+    // Superseding an accepted estimate is allowed: the words move, the money stays.
+    expect((await run((tx) => updateEstimate(tx, staffCtx, est.id, { status: "superseded" }))).status).toBe("superseded");
+    rows = await rowsOf();
+    expect(rows.map((r) => [r.estimate.number, r.estimate.status, r.totals.totalCents])).toEqual([
+      ["EST-3", "accepted", 89_122_55],
+      ["EST-2", "draft", 80_000_00],
+      ["EST-1", "superseded", 89_122_55],
+    ]);
   }, 120_000);
 
   // -------------------------------------------------------- party documents (11b)

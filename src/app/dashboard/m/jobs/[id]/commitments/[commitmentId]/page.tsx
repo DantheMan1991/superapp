@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { ChevronLeft, Pencil } from "lucide-react";
 import { withTenant } from "@/db";
@@ -20,7 +21,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getProject, listCommitments, listCostCodes } from "@/packs/jobs/ops";
+import {
+  getProject,
+  listChangeOrders,
+  listCommitmentChangeOrders,
+  listCommitments,
+  listCostCodes,
+} from "@/packs/jobs/ops";
 import {
   commitmentBilling,
   getCommitment,
@@ -28,14 +35,17 @@ import {
 } from "@/packs/jobs/sub-billing-ops";
 import { percentComplete, ppmToPercentString } from "@/packs/jobs/billing-math";
 import {
+  CHANGE_ORDER_STATUS_LABELS,
   COMMITMENT_KIND_LABELS,
   COMMITMENT_STATUS_LABELS,
   PACK,
   SUB_APPLICATION_STATUS_LABELS,
+  isChangeOrderStatus,
   isCommitmentKind,
   isCommitmentStatus,
   isSubApplicationStatus,
 } from "@/packs/jobs/vocabulary";
+import { CommitmentChangeForm } from "@/packs/jobs/components/commitment-change-form";
 import {
   NewPayApplication,
   PayApplicationEditor,
@@ -84,13 +94,15 @@ export default async function CommitmentPage({
       if (!project) return null;
       const commitment = await getCommitment(tx, ctx.tenant.id, commitmentId);
       if (!commitment || commitment.projectId !== project.id) return null;
-      const [rows, apps, codes, billing, pack] = await Promise.all([
+      const [rows, apps, codes, billing, changes, clientChanges, pack] = await Promise.all([
         listCommitments(tx, ctx.tenant.id, project.id),
         listSubApplications(tx, ctx.tenant.id, commitment.id),
         project.costCodeSetId
           ? listCostCodes(tx, ctx.tenant.id, project.costCodeSetId)
           : Promise.resolve([]),
         commitmentBilling(tx, ctx.tenant.id, project.id),
+        listCommitmentChangeOrders(tx, ctx.tenant.id, project.id),
+        listChangeOrders(tx, ctx.tenant.id, project.id),
         packContext(tx, ctx.tenant.id, ctx.tenant.industry, PACK),
       ]);
       const row = rows.find((r) => r.commitment.id === commitment.id) ?? null;
@@ -99,10 +111,15 @@ export default async function CommitmentPage({
         commitment,
         vendorName: row?.vendorName ?? "—",
         lines: row?.lines ?? [],
+        originalCents: row?.originalCents ?? 0,
+        changesCents: row?.changesCents ?? 0,
         totalCents: row?.totalCents ?? 0,
         apps,
         codes,
         billing: billing.get(commitment.id) ?? null,
+        /** This order's change orders, and the job's client-side ones a change may pass down. */
+        changes: changes.filter((c) => c.commitment.id === commitment.id),
+        clientChanges,
         labels: pack.labels,
       };
     },
@@ -110,7 +127,11 @@ export default async function CommitmentPage({
   );
   if (!data) notFound();
 
-  const { project, commitment, lines, apps } = data;
+  const { project, commitment, apps, changes } = data;
+  /** The schedule: the lines the order was placed with and its approved changes' — a proposed change's wait in the panel below. */
+  const lines = data.lines.filter((l) => l.counted);
+  const approvedChanges = changes.filter((c) => c.changeOrder.status === "approved").length;
+  const proposedChanges = changes.filter((c) => c.changeOrder.status === "proposed").length;
   const isOwner = allowsWrite(ctx.role, "owner");
   const symbol = ctx.tenant.currencySymbol;
   const projectWord = labelFor(data.labels, "project", "Project");
@@ -130,6 +151,29 @@ export default async function CommitmentPage({
     : lines.length === 0
       ? "The subcontract has no lines yet"
       : null;
+  const linesWord = `${lines.length} ${lines.length === 1 ? "line" : "lines"}`;
+  /** Original + approved changes, said under the value when a change has moved it. */
+  const valueNote =
+    data.changesCents === 0
+      ? linesWord
+      : `orig. ${formatMoney(data.originalCents, symbol)} · ${formatMoneySign(data.changesCents, symbol)} in approved changes · ${linesWord}`;
+  const commitmentLabel = `${commitment.number}${commitment.description ? ` · ${commitment.description}` : ""}`;
+  const changeForm = (existing?: Parameters<typeof CommitmentChangeForm>[0]["existing"], trigger?: ReactNode) => (
+    <CommitmentChangeForm
+      projectId={project.id}
+      commitmentId={commitment.id}
+      commitmentLabel={commitmentLabel}
+      changeOrders={data.clientChanges.map((c) => ({
+        id: c.changeOrder.id,
+        label: `${c.changeOrder.number} · ${c.changeOrder.title}`,
+      }))}
+      costCodes={data.codes
+        .filter((c) => c.isActive || existing?.lines.some((l) => l.costCodeId === c.id))
+        .map((c) => ({ id: c.id, label: `${c.code} · ${c.name}` }))}
+      existing={existing}
+      trigger={trigger}
+    />
+  );
 
   return (
     <div className="space-y-4">
@@ -161,12 +205,12 @@ export default async function CommitmentPage({
         {(
           subcontract
             ? ([
-                [`${kindWord} value`, formatMoney(data.totalCents, symbol), `${lines.length} ${lines.length === 1 ? "line" : "lines"}`],
+                [`${kindWord} value`, formatMoneySign(data.totalCents, symbol), valueNote],
                 ["Billed to date", formatMoney(billedCents, symbol), `${billed.length} ${billed.length === 1 ? "application" : "applications"}`],
                 ["Retainage held", formatMoney(retainageHeld, symbol), "what the business holds back"],
                 ["Balance to finish", formatMoneySign(balanceToFinish, symbol), null],
               ] as const)
-            : ([[`${kindWord} value`, formatMoney(data.totalCents, symbol), `${lines.length} ${lines.length === 1 ? "line" : "lines"}`]] as const)
+            : ([[`${kindWord} value`, formatMoneySign(data.totalCents, symbol), valueNote]] as const)
         ).map(([label, value, note]) => (
           <div key={label} className="rounded-lg bg-muted/40 px-3 py-2">
             <dt className="text-xs text-muted-foreground">{label}</dt>
@@ -180,8 +224,8 @@ export default async function CommitmentPage({
         <h2 className="mb-1 font-heading text-sm font-medium tracking-heading">Lines</h2>
         <p className="mb-3 text-sm text-muted-foreground">
           {subcontract
-            ? "The subcontract's lines are what its applications bill against — the schedule of values, written when the order was placed. Edited from the job's page."
-            : "What was ordered. A purchase order is billed with an ordinary bill in Accounting, coded to the job and the line's cost code."}
+            ? "The subcontract's lines are what its applications bill against — the schedule of values: the lines it was placed with, and the lines of every approved change order below. The original lines are edited from the job's page while the order is a draft; once it is issued, the order moves by change order."
+            : "What was ordered, and what approved change orders have added. A purchase order is billed with an ordinary bill in Accounting, coded to the job and the line's cost code."}
         </p>
         {lines.length === 0 ? (
           <p className="text-sm text-muted-foreground">No lines yet.</p>
@@ -210,9 +254,17 @@ export default async function CommitmentPage({
                       <TableCell className="text-xs">
                         {l.costCodeId ? (codeLabel.get(l.costCodeId) ?? "—") : "—"}
                       </TableCell>
-                      <TableCell>{l.description || "—"}</TableCell>
+                      <TableCell>
+                        {l.description || "—"}
+                        {l.change && (
+                          <span className="block text-xs text-muted-foreground">
+                            Added by {l.change.number}
+                          </span>
+                        )}
+                      </TableCell>
+                      {/* Signed: a change order's line may be a deduction. */}
                       <TableCell className="text-right tabular-nums">
-                        {formatMoney(l.amountCents, symbol)}
+                        {formatMoneySign(l.amountCents, symbol)}
                       </TableCell>
                       {subcontract && (
                         <TableCell className="text-right tabular-nums text-muted-foreground">
@@ -226,6 +278,113 @@ export default async function CommitmentPage({
             </Table>
           </div>
         )}
+      </Panel>
+
+      <Panel className="p-5">
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-heading text-sm font-medium tracking-heading">Change orders</h2>
+          {isOwner && changeForm()}
+        </div>
+        <p className="mb-3 text-sm text-muted-foreground">
+          {/*
+            THE PAYABLE SIDE OF original + approved changes = revised. A change
+            adds lines to this order; only an approved one moves what the job
+            has committed and reaches the subcontractor's next application.
+          */}
+          {changes.length === 0
+            ? `None yet. When the scope of this ${kindWord.toLowerCase()} moves — more work, less work, a price agreed after the fact — a change order records it as lines of its own, and only an approved one moves the numbers.`
+            : `${approvedChanges} approved, worth ${formatMoneySign(data.changesCents, symbol)} on the ${kindWord.toLowerCase()}${
+                proposedChanges > 0 ? `, with ${proposedChanges} still proposed` : ""
+              }.`}
+        </p>
+        {changes.length > 0 && (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Number</TableHead>
+                  <TableHead>Change</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="w-10" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {changes.map((row) => (
+                  <TableRow key={row.changeOrder.id}>
+                    <TableCell className="font-mono text-xs">{row.changeOrder.number}</TableCell>
+                    <TableCell className="font-medium">
+                      {row.changeOrder.title}
+                      {row.changeOrder.approvedOn && (
+                        <span className="block text-xs font-normal text-muted-foreground">
+                          Approved {row.changeOrder.approvedOn}
+                        </span>
+                      )}
+                      {row.passesDown && (
+                        <span className="block text-xs font-normal text-muted-foreground">
+                          Passes down {row.passesDown.number} · {row.passesDown.title}
+                        </span>
+                      )}
+                    </TableCell>
+                    {/* Signed: scope taken back is a negative number. */}
+                    <TableCell className="text-right tabular-nums">
+                      {row.lines.length === 0 ? "—" : formatMoneySign(row.amountCents, symbol)}
+                      {row.lines.length > 1 && (
+                        <span className="block text-xs text-muted-foreground">
+                          {row.lines.length} lines
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={row.changeOrder.status === "approved" ? "default" : "secondary"}>
+                        {isChangeOrderStatus(row.changeOrder.status)
+                          ? CHANGE_ORDER_STATUS_LABELS[row.changeOrder.status]
+                          : row.changeOrder.status}
+                      </Badge>
+                      {row.billed && (
+                        <span className="block text-xs text-muted-foreground">Billed against</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="w-10 text-right">
+                      {isOwner &&
+                        changeForm(
+                          {
+                            id: row.changeOrder.id,
+                            version: row.changeOrder.version,
+                            number: row.changeOrder.number,
+                            title: row.changeOrder.title,
+                            description: row.changeOrder.description,
+                            status: row.changeOrder.status,
+                            requestedOn: row.changeOrder.requestedOn,
+                            approvedOn: row.changeOrder.approvedOn,
+                            notes: row.changeOrder.notes,
+                            changeOrderId: row.changeOrder.changeOrderId,
+                            lines: row.lines.map((l) => ({
+                              costCodeId: l.costCodeId,
+                              description: l.description,
+                              amountCents: l.amountCents,
+                            })),
+                            billed: row.billed,
+                          },
+                          <Button variant="ghost" size="icon">
+                            <Pencil className="size-4" />
+                            <span className="sr-only">Edit {row.changeOrder.number}</span>
+                          </Button>,
+                        )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+        <p className="mt-3 text-xs text-muted-foreground">
+          An approved change&apos;s lines join the lines above and count on the
+          job at once. A line may be negative — scope taken back — and a change
+          with no lines is a change to the words or the dates. Once the
+          subcontractor has billed against a change, it stays approved and its
+          lines stay as they are.
+        </p>
       </Panel>
 
       {subcontract && (
@@ -330,9 +489,10 @@ export default async function CommitmentPage({
                                 previousCertificatesCents: row.totals.previousCertificatesCents,
                                 lines: row.lines.map((l) => ({
                                   sovLineId: l.commitmentLineId,
-                                  description:
+                                  description: `${l.changeNumber ? `${l.changeNumber} · ` : ""}${
                                     l.description ||
-                                    (l.costCodeId ? (codeLabel.get(l.costCodeId) ?? "Line") : "Line"),
+                                    (l.costCodeId ? (codeLabel.get(l.costCodeId) ?? "Line") : "Line")
+                                  }`,
                                   scheduledCents: l.commitmentAmountCents,
                                   previousCents: l.previousCents,
                                   thisPeriodCents: l.thisPeriodCents,

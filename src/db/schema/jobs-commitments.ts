@@ -34,6 +34,18 @@
  * commitment with nobody to pay is not a commitment**, it is a budget line; so
  * `party_id` is NOT NULL here, and that asymmetry is the point rather than an
  * oversight.
+ *
+ * ── A CHANGE ORDER ADDS LINES TO THE ORDER IT CHANGES (slice 4b, ADR 0065) ──
+ *
+ * `job_commitment_change_orders` is the payable-side twin of
+ * `job_change_orders`: a numbered, titled, dated document against ONE
+ * commitment, whose money is lines in `job_commitment_lines` tagged with
+ * `change_order_id`. The order's ORIGINAL lines carry null. Nothing is stored
+ * twice: what an order is worth now is original + approved changes, summed from
+ * the one table wherever it is shown, and a subcontractor's application bills a
+ * change's lines exactly as it bills the original ones — they are the same rows.
+ * A change may be DEDUCTIVE, a negative line: the only way a commitment line
+ * goes below zero, and the CHECK says so.
  */
 import { sql } from "drizzle-orm";
 import {
@@ -52,6 +64,7 @@ import {
 import { tenants } from "./platform";
 import { parties } from "./parties";
 import { jobProjects, jobCostCodes } from "./jobs";
+import { jobChangeOrders } from "./jobs-change-orders";
 
 export const jobCommitments = pgTable(
   "job_commitments",
@@ -125,6 +138,97 @@ export const jobCommitments = pgTable(
 );
 
 /**
+ * A change to ONE commitment: the payable-side twin of `job_change_orders`.
+ *
+ * A subcontract change order, a purchase-order revision, a deductive change
+ * and scope taken back are all this row: a number (as the business writes it,
+ * unique per commitment), a title, a status and — when approved — the date.
+ * Its MONEY is not here. It is the lines in `job_commitment_lines` that carry
+ * this row's id, so an approved change's lines ARE the subcontract's lines and
+ * a subcontractor's application bills them without a second schedule; a change
+ * with no lines is legitimate (a time extension, a re-worded scope).
+ *
+ * `change_order_id` is the CLIENT-SIDE change order this one passes down, if
+ * any — the owner's CO-3 that the electrician's SCO-1 is the electrical share
+ * of. Nullable, because a change to a subcontract need not have been asked for
+ * by the owner: a business absorbs plenty of its own. RESTRICT, so the link
+ * cannot dangle; neither side has a delete verb.
+ *
+ * The statuses and the approval-date rule are the client-side ones, on
+ * purpose: one vocabulary for "a change", read from `CHANGE_ORDER_STATUSES` by
+ * both tables' mirror tests.
+ */
+export const jobCommitmentChangeOrders = pgTable(
+  "job_commitment_change_orders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    commitmentId: uuid("commitment_id").notNull(),
+    /** The client's change order this one passes down, or null for a change of the business's own. */
+    changeOrderId: uuid("change_order_id"),
+    /** As the business numbers them: `SCO-1`, `PO-1042 R2`, `3`. Unique per commitment. */
+    number: text("number").notNull(),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    /** text + CHECK, the client-side list: proposed, approved, declined, void. */
+    status: text("status").notNull().default("proposed"),
+    requestedOn: date("requested_on", { mode: "string" }),
+    approvedOn: date("approved_on", { mode: "string" }),
+    notes: text("notes").notNull().default(""),
+    createdByClerkUserId: text("created_by_clerk_user_id"),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("job_commitment_change_orders_tenant_id_id_idx").on(t.tenantId, t.id),
+    /** Numbered per COMMITMENT: SCO-1 on the framer's subcontract and SCO-1 on the plumber's are two documents. */
+    uniqueIndex("job_commitment_change_orders_commitment_number_idx").on(
+      t.tenantId,
+      t.commitmentId,
+      t.number,
+    ),
+    index("job_commitment_change_orders_tenant_commitment_idx").on(t.tenantId, t.commitmentId),
+    index("job_commitment_change_orders_tenant_status_idx").on(t.tenantId, t.status),
+    /** A commitment's changes are part of it. */
+    foreignKey({
+      name: "job_commitment_change_orders_commitment_fk",
+      columns: [t.tenantId, t.commitmentId],
+      foreignColumns: [jobCommitments.tenantId, jobCommitments.id],
+    }).onDelete("cascade"),
+    /** RESTRICT: the client's change order a subcontract change passes down cannot go from under it. */
+    foreignKey({
+      name: "job_commitment_change_orders_change_order_fk",
+      columns: [t.tenantId, t.changeOrderId],
+      foreignColumns: [jobChangeOrders.tenantId, jobChangeOrders.id],
+    }),
+    check(
+      "job_commitment_change_orders_number_present",
+      sql`length(btrim(${t.number})) > 0`,
+    ),
+    check(
+      "job_commitment_change_orders_title_present",
+      sql`length(btrim(${t.title})) > 0`,
+    ),
+    check(
+      "job_commitment_change_orders_status_valid",
+      sql`${t.status} in ('proposed', 'approved', 'declined', 'void')`,
+    ),
+    /** Approved has a date and unapproved has none — the client-side rule, for the client-side reason. */
+    check(
+      "job_commitment_change_orders_approved_has_date",
+      sql`(${t.status} = 'approved') = (${t.approvedOn} is not null)`,
+    ),
+  ],
+);
+
+/**
  * One cost code's worth of a commitment.
  *
  * **THE COST CODE IS WHAT MAKES THIS WORTH STORING.** A committed total with no
@@ -145,8 +249,19 @@ export const jobCommitmentLines = pgTable(
      * the project's committed total and toward no code's.
      */
     costCodeId: uuid("cost_code_id"),
+    /**
+     * The change order that added this line, or null for a line the order was
+     * placed with. A change's lines count only while the change is approved —
+     * `countedCommitmentLine` in ops.ts — and a change that has been billed
+     * against keeps them for good.
+     */
+    changeOrderId: uuid("change_order_id"),
     description: text("description").notNull().default(""),
-    /** Committed amount in cents. Never negative: a credit is a change order. */
+    /**
+     * Committed amount in cents. Never negative on an ORIGINAL line — a credit
+     * is a change order — and a change order's line may be, because a
+     * deductive change is a negative line and not a separate concept (ADR 0065).
+     */
     amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
     sortOrder: integer("sort_order").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -164,6 +279,7 @@ export const jobCommitmentLines = pgTable(
       t.sortOrder,
     ),
     index("job_commitment_lines_tenant_code_idx").on(t.tenantId, t.costCodeId),
+    index("job_commitment_lines_tenant_change_idx").on(t.tenantId, t.changeOrderId),
     /** A commitment's lines are part of it. */
     foreignKey({
       name: "job_commitment_lines_commitment_fk",
@@ -180,9 +296,19 @@ export const jobCommitmentLines = pgTable(
       columns: [t.tenantId, t.costCodeId],
       foreignColumns: [jobCostCodes.tenantId, jobCostCodes.id],
     }),
-    check("job_commitment_lines_amount_nonnegative", sql`${t.amountCents} >= 0`),
+    /** A change's lines are part of the change; taking one back that has been billed against is refused by the sub-application line's RESTRICT. */
+    foreignKey({
+      name: "job_commitment_lines_change_order_fk",
+      columns: [t.tenantId, t.changeOrderId],
+      foreignColumns: [jobCommitmentChangeOrders.tenantId, jobCommitmentChangeOrders.id],
+    }).onDelete("cascade"),
+    check(
+      "job_commitment_lines_amount_nonnegative",
+      sql`${t.amountCents} >= 0 or ${t.changeOrderId} is not null`,
+    ),
   ],
 );
 
 export type JobCommitment = typeof jobCommitments.$inferSelect;
+export type JobCommitmentChangeOrder = typeof jobCommitmentChangeOrders.$inferSelect;
 export type JobCommitmentLine = typeof jobCommitmentLines.$inferSelect;

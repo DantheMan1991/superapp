@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../../src/db";
 import { d, seedParty } from "./_shared";
 
@@ -1407,6 +1407,173 @@ d("jobs tables (RLS)", () => {
     await withSystem((tx) => tx.delete(schema.jobSubApplications).where(eq(schema.jobSubApplications.id, appId)));
     const left = await withSystem((tx) =>
       tx.select().from(schema.jobSubApplicationLines).where(eq(schema.jobSubApplicationLines.subApplicationId, appId)),
+    );
+    expect(left).toEqual([]);
+  });
+
+  it("cannot read or change another tenant's SUBCONTRACT CHANGE ORDERS; a change hangs off this tenant's commitment and passes down this tenant's change order; approved needs a date; only a change's line may be negative; a deduction's application line runs backwards; the lines go with the change", async () => {
+    const changeId = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobCommitmentChangeOrders)
+        .values({
+          tenantId: tenantA,
+          commitmentId: commitmentA,
+          changeOrderId: changeOrderA,
+          number: "SCO-ISO-1",
+          title: "Garage trim dropped",
+          status: "approved",
+          approvedOn: "2026-09-14",
+        })
+        .returning();
+      // A DEDUCTIVE line: the one commitment line that may go below nothing.
+      await tx.insert(schema.jobCommitmentLines).values({
+        tenantId: tenantA,
+        commitmentId: commitmentA,
+        changeOrderId: rows[0].id,
+        costCodeId: codeA,
+        amountCents: -300_00,
+      });
+      return rows[0].id;
+    });
+    const seen = await asOtherTenant(async (tx) => ({
+      heads: await tx.select().from(schema.jobCommitmentChangeOrders).where(eq(schema.jobCommitmentChangeOrders.id, changeId)),
+      lines: await tx.select().from(schema.jobCommitmentLines).where(eq(schema.jobCommitmentLines.changeOrderId, changeId)),
+      changed: await tx
+        .update(schema.jobCommitmentChangeOrders)
+        .set({ title: "Theirs now" })
+        .where(eq(schema.jobCommitmentChangeOrders.id, changeId))
+        .returning(),
+    }));
+    expect(seen.heads).toEqual([]);
+    expect(seen.lines).toEqual([]);
+    expect(seen.changed).toEqual([]);
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.jobCommitmentChangeOrders).where(eq(schema.jobCommitmentChangeOrders.id, changeId)),
+    );
+    expect(mine).toHaveLength(1);
+
+    // Tenant B's commitment under tenant A's change, or tenant B's change order passed down: unrepresentable.
+    const other = await withSystem(async (tx) => {
+      const party = await seedParty(tx, tenantB, "Builder B's framer");
+      const [commitment] = await tx
+        .insert(schema.jobCommitments)
+        .values({ tenantId: tenantB, projectId: projectB, partyId: party, number: "SC-B-ISO" })
+        .returning();
+      const [changeOrder] = await tx
+        .insert(schema.jobChangeOrders)
+        .values({ tenantId: tenantB, contractId: contractB, number: "CO-B-ISO", title: "Theirs" })
+        .returning();
+      return { commitmentId: commitment.id, changeOrderId: changeOrder.id };
+    });
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobCommitmentChangeOrders).values({
+          tenantId: tenantA,
+          commitmentId: other.commitmentId,
+          number: "x-commitment",
+          title: "x",
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobCommitmentChangeOrders).values({
+          tenantId: tenantA,
+          commitmentId: commitmentA,
+          changeOrderId: other.changeOrderId,
+          number: "x-passes",
+          title: "x",
+        }),
+      ),
+    ).rejects.toThrow();
+    // A line's change is this tenant's, or nothing.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobCommitmentLines).values({
+          tenantId: tenantB,
+          commitmentId: other.commitmentId,
+          changeOrderId: changeId,
+          amountCents: 1,
+        }),
+      ),
+    ).rejects.toThrow();
+
+    // Approved needs a date and unapproved has none, both ways; numbered per commitment.
+    await expect(
+      withSystem((tx) =>
+        tx.update(schema.jobCommitmentChangeOrders).set({ status: "proposed" }).where(eq(schema.jobCommitmentChangeOrders.id, changeId)),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobCommitmentChangeOrders).values({ tenantId: tenantA, commitmentId: commitmentA, number: "SCO-ISO-2", title: "x", status: "approved" }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobCommitmentChangeOrders).values({ tenantId: tenantA, commitmentId: commitmentA, number: "SCO-ISO-1", title: "again" }),
+      ),
+    ).rejects.toThrow();
+    // Only a change's line may be negative.
+    await expect(
+      withSystem((tx) => tx.insert(schema.jobCommitmentLines).values({ tenantId: tenantA, commitmentId: commitmentA, amountCents: -1 })),
+    ).rejects.toThrow();
+
+    // A deduction's application line: completed to less than nothing and never more; a positive line's, the reverse.
+    const [deduction] = await withSystem((tx) =>
+      tx.select().from(schema.jobCommitmentLines).where(eq(schema.jobCommitmentLines.changeOrderId, changeId)),
+    );
+    const [positive] = await withSystem((tx) =>
+      tx
+        .select()
+        .from(schema.jobCommitmentLines)
+        .where(and(eq(schema.jobCommitmentLines.commitmentId, commitmentA), isNull(schema.jobCommitmentLines.changeOrderId))),
+    );
+    const appId = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobSubApplications)
+        .values({ tenantId: tenantA, commitmentId: commitmentA, number: 7, periodTo: "2026-11-30" })
+        .returning();
+      await tx.insert(schema.jobSubApplicationLines).values({
+        tenantId: tenantA,
+        subApplicationId: rows[0].id,
+        commitmentLineId: deduction.id,
+        scheduledCents: -300_00,
+        thisPeriodCents: -300_00,
+      });
+      return rows[0].id;
+    });
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.jobSubApplicationLines)
+          .set({ thisPeriodCents: 1_00 })
+          .where(eq(schema.jobSubApplicationLines.subApplicationId, appId)),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobSubApplicationLines).values({
+          tenantId: tenantA,
+          subApplicationId: appId,
+          commitmentLineId: positive.id,
+          scheduledCents: 4_200_00,
+          previousCents: -1_00,
+        }),
+      ),
+    ).rejects.toThrow();
+    // Billed against: the deduction's line is held, and so is the change's client change order.
+    await expect(
+      withSystem((tx) => tx.delete(schema.jobCommitmentLines).where(eq(schema.jobCommitmentLines.id, deduction.id))),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) => tx.delete(schema.jobChangeOrders).where(eq(schema.jobChangeOrders.id, changeOrderA))),
+    ).rejects.toThrow();
+    // Let the application go, then the change: its lines go with it.
+    await withSystem((tx) => tx.delete(schema.jobSubApplications).where(eq(schema.jobSubApplications.id, appId)));
+    await withSystem((tx) => tx.delete(schema.jobCommitmentChangeOrders).where(eq(schema.jobCommitmentChangeOrders.id, changeId)));
+    const left = await withSystem((tx) =>
+      tx.select().from(schema.jobCommitmentLines).where(eq(schema.jobCommitmentLines.changeOrderId, changeId)),
     );
     expect(left).toEqual([]);
   });

@@ -986,6 +986,67 @@ describe("subcontractor applications", () => {
   });
 });
 
+// ------------------------------------------- subcontract change orders (4b)
+
+/**
+ * A change order on a commitment (ADR 0065). The status list and the
+ * approval-date rule are the client-side ones, read from the new migration
+ * rather than trusted; the money is commitment lines, whose floor gained its
+ * one exception; and a subcontractor's application line on a deduction runs
+ * backwards, which the database floors on the line's own sign.
+ */
+const COMMITMENT_CHANGES_SQL = readFileSync("drizzle/0348_commitment_change_orders.sql", "utf8");
+
+describe("subcontract change orders", () => {
+  it("MIRRORS the client-side status CHECK: one vocabulary for a change", () => {
+    const m = COMMITMENT_CHANGES_SQL.match(/job_commitment_change_orders_status_valid[^(]*\(([^)]*)\)/);
+    expect(m, "constraint not found").not.toBeNull();
+    const inSql = [...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]);
+    expect(inSql.sort()).toEqual([...CHANGE_ORDER_STATUSES].sort());
+  });
+
+  it("makes the approval date part of BEING approved, and numbers per COMMITMENT", () => {
+    expect(COMMITMENT_CHANGES_SQL).toMatch(/job_commitment_change_orders_approved_has_date/);
+    expect(COMMITMENT_CHANGES_SQL).toMatch(
+      /= 'approved'\) = \("job_commitment_change_orders"."approved_on" is not null\)/,
+    );
+    expect(COMMITMENT_CHANGES_SQL).toMatch(
+      /job_commitment_change_orders_commitment_number_idx[^;]*\("tenant_id","commitment_id","number"\)/,
+    );
+  });
+
+  it("belongs to a COMMITMENT (cascade), passes down a client change order (RESTRICT), and its lines go with it", () => {
+    expect(COMMITMENT_CHANGES_SQL).toMatch(/job_commitment_change_orders_commitment_fk[^;]*ON DELETE cascade/);
+    expect(COMMITMENT_CHANGES_SQL).toMatch(
+      /job_commitment_change_orders_change_order_fk[^;]*REFERENCES "public"."job_change_orders"[^;]*ON DELETE no action/,
+    );
+    expect(COMMITMENT_CHANGES_SQL).toMatch(/job_commitment_lines_change_order_fk[^;]*ON DELETE cascade/);
+  });
+
+  it("keeps a commitment line's floor, with a change's line as the ONE exception", () => {
+    // A deductive change is a negative line; an original line is never one.
+    expect(COMMITMENT_CHANGES_SQL).toContain(
+      `"job_commitment_lines"."amount_cents" >= 0 or "job_commitment_lines"."change_order_id" is not null`,
+    );
+  });
+
+  it("floors a subcontractor's application line on its schedule's side of zero", () => {
+    expect(COMMITMENT_CHANGES_SQL).toContain(
+      `"job_sub_application_lines"."previous_cents" >= 0 or "job_sub_application_lines"."scheduled_cents" < 0`,
+    );
+    expect(COMMITMENT_CHANGES_SQL).toMatch(
+      /case when "job_sub_application_lines"."scheduled_cents" < 0 then [^;]* <= 0 else [^;]* >= 0 end/,
+    );
+  });
+
+  it("reads a deduction's percent complete like any other line's", () => {
+    expect(percentComplete(-2_000_00, -2_000_00)).toBe(100);
+    expect(percentComplete(-500_00, -2_000_00)).toBe(25);
+    expect(percentComplete(0, -2_000_00)).toBe(0);
+    expect(percentComplete(0, 0)).toBeNull();
+  });
+});
+
 // ------------------------------------------------------ time and materials
 
 describe("time and materials", () => {

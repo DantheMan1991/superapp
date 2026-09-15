@@ -48,6 +48,7 @@ import {
   CHANGE_ORDER_STATUS_LABELS,
   COMMITMENT_KIND_LABELS,
   COMMITMENT_STATUS_LABELS,
+  COMMITTED_STATUSES,
   CONTRACT_STATUS_LABELS,
   PACK,
   PROJECT_DIMENSION,
@@ -984,14 +985,24 @@ export default async function ProjectPage({
                     <TableCell>{row.vendorName}</TableCell>
                     <TableCell>
                       {row.commitment.description || "—"}
-                      {row.lines.length > 1 && (
+                      {row.lines.filter((l) => l.counted).length > 1 && (
                         <span className="block text-xs text-muted-foreground">
-                          {row.lines.length} lines
+                          {row.lines.filter((l) => l.counted).length} lines
                         </span>
                       )}
                     </TableCell>
+                    {/*
+                      ORIGINAL + APPROVED CHANGES, the contracts table's rule on
+                      the payable side: the sum an order is worth now, with the
+                      original under it when a change order has moved it.
+                    */}
                     <TableCell className="text-right tabular-nums">
-                      {formatMoney(row.totalCents, symbol)}
+                      {formatMoneySign(row.totalCents, symbol)}
+                      {row.changesCents !== 0 && (
+                        <span className="block text-xs text-muted-foreground">
+                          orig. {formatMoney(row.originalCents, symbol)}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {/*
@@ -1046,12 +1057,18 @@ export default async function ProjectPage({
                             status: row.commitment.status,
                             issuedOn: row.commitment.issuedOn,
                             notes: row.commitment.notes,
-                            lines: row.lines.map((l) => ({
-                              costCodeId: l.costCodeId,
-                              description: l.description,
-                              amountCents: l.amountCents,
-                            })),
+                            // The lines the order was placed with; a change's are the change's.
+                            lines: row.lines
+                              .filter((l) => l.change === null)
+                              .map((l) => ({
+                                costCodeId: l.costCodeId,
+                                description: l.description,
+                                amountCents: l.amountCents,
+                              })),
                           }}
+                          linesLocked={(COMMITTED_STATUSES as readonly string[]).includes(
+                            row.commitment.status,
+                          )}
                           trigger={
                             <Button variant="ghost" size="icon">
                               <Pencil className="size-4" />

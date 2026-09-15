@@ -36,6 +36,7 @@ import { LedgerError, friendlyMessage } from "@/modules/accounting/core";
 import {
   createChangeOrder,
   createCommitment,
+  createCommitmentChangeOrder,
   createContract,
   createCostCode,
   createCostCodeSet,
@@ -50,6 +51,7 @@ import {
   setDefaultCostCodeSet,
   updateChangeOrder,
   updateCommitment,
+  updateCommitmentChangeOrder,
   updatePayApplication,
   voidPayApplication,
   updateContract,
@@ -57,6 +59,7 @@ import {
   updateCostCodeSet,
   updateProject,
   type ChangeOrderLineInput,
+  type CommitmentChangeLineInput,
   type JobsCtx,
 } from "./ops";
 import {
@@ -95,6 +98,12 @@ async function gate(): Promise<JobsCtx> {
   };
 }
 
+/** "a fee must be between 0% and 100% of cost" → "A fee must be between 0% and 100% of cost." */
+function sentence(message: string): string {
+  const m = message.trim();
+  return m.charAt(0).toUpperCase() + m.slice(1) + (m.endsWith(".") ? "" : ".");
+}
+
 /** A JobsError as the flat shape every form here returns. */
 function toResult(err: unknown): { error: string } {
   if (err instanceof JobsError) {
@@ -114,7 +123,10 @@ function toResult(err: unknown): { error: string } {
       case "INVALID_BILLING_METHOD":
         return { error: "Pick how this contract is billed." };
       case "INVALID_VALUE":
-        return { error: "A contract value cannot be negative." };
+        // The verb's own sentence: every INVALID_VALUE in this pack is written for a
+        // person ("a deduction cannot be completed to more than nothing"), and one
+        // sentence for all of them was wrong for all but the first.
+        return { error: sentence(err.message) };
       case "INVALID_DELIVERY_METHOD":
         return {
           error:
@@ -190,6 +202,18 @@ function toResult(err: unknown): { error: string } {
         return {
           error: "A purchase order is billed with an ordinary bill in Accounting. Applications are for subcontracts.",
         };
+      case "LINES_LOCKED":
+        return {
+          error:
+            "That order has been issued or billed against, so its lines change with a change order on the order's page.",
+        };
+      case "CHANGE_BILLED":
+        return {
+          error:
+            "The subcontractor has billed against that change, so it stays approved and its lines stay as they are. Raise another change.",
+        };
+      case "WRONG_PROJECT":
+        return { error: "That client change order is on another job." };
     }
   }
   /**
@@ -234,6 +258,8 @@ function toResult(err: unknown): { error: string } {
       return { error: "That order number is already in use. Pick another." };
     case "job_change_orders_contract_number_idx":
       return { error: "That change order number is already used on this contract." };
+    case "job_commitment_change_orders_commitment_number_idx":
+      return { error: "That change order number is already used on this order." };
   }
   console.error("jobs action failed", err);
   return { error: "Something went wrong. Try again." };
@@ -739,6 +765,132 @@ export async function updateCommitmentAction(input: unknown) {
       { role: ctx.role },
     );
     if (projectId) revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath(BASE);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const commitmentChangeLineSchema = z.object({
+  costCodeId: optionalUuid,
+  description: z.string().trim().max(200).optional(),
+  /** Money as typed, cents at the boundary. `-2,000` is scope taken back. */
+  amountCents: moneyToCents,
+});
+
+const commitmentChangeSchema = z.object({
+  /** For revalidation only — the change hangs off the commitment. */
+  projectId: z.string().uuid(),
+  commitmentId: z.string().uuid(),
+  number: z.string().trim().min(1).max(40),
+  title: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(2000).optional(),
+  status: z.enum(CHANGE_ORDER_STATUSES).optional(),
+  requestedOn: optionalDate,
+  approvedOn: optionalDate,
+  notes: z.string().trim().max(2000).optional(),
+  /** The client's change order this one passes down; blank for a change of the business's own. */
+  changeOrderId: optionalUuid,
+  lines: z.array(commitmentChangeLineSchema).max(200).optional(),
+});
+
+/**
+ * A blank row moves nothing and is dropped, as on the order itself. Unlike a
+ * client-side change order's line, a code is NOT required: a subcontract's own
+ * lines may be uncoded, and a change to one follows the order it changes.
+ */
+function commitmentChangeLines(
+  lines:
+    | Array<{ costCodeId: string | null; description?: string; amountCents: number | null }>
+    | undefined,
+): CommitmentChangeLineInput[] | undefined {
+  if (lines === undefined) return undefined;
+  return lines
+    .filter((l) => l.amountCents !== null)
+    .map((l) => ({
+      costCodeId: l.costCodeId,
+      description: l.description,
+      amountCents: l.amountCents as number,
+    }));
+}
+
+export async function createCommitmentChangeOrderAction(input: unknown) {
+  const parsed = commitmentChangeSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { projectId, lines: rawLines, ...fields } = parsed.data;
+  const lines = commitmentChangeLines(rawLines);
+  try {
+    const ctx = await gate();
+    const change = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const created = await createCommitmentChangeOrder(tx, ctx, { ...fields, lines });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "commitment_change_order.created",
+          targetType: "commitment_change_order",
+          targetId: created.id,
+          /* Identifiers and shape only; the amount is not logged, for the
+             reason an order's is not. */
+          meta: {
+            commitmentId: created.commitmentId,
+            status: created.status,
+            lineCount: lines?.length ?? 0,
+          },
+        });
+        return created;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}/commitments/${fields.commitmentId}`);
+    revalidatePath(`${BASE}/${projectId}`);
+    revalidatePath(BASE);
+    return { ok: true as const, changeOrderId: change.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function updateCommitmentChangeOrderAction(input: unknown) {
+  const schema = commitmentChangeSchema
+    // The order a change is against does not change; see updateCommitmentChangeOrder.
+    .omit({ commitmentId: true })
+    .partial()
+    .extend({
+      id: z.string().uuid(),
+      version: z.number().int().positive().optional(),
+    });
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { id, projectId, lines: rawLines, ...patch } = parsed.data;
+  const lines = commitmentChangeLines(rawLines);
+  try {
+    const ctx = await gate();
+    const updated = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const row = await updateCommitmentChangeOrder(tx, ctx, id, {
+          ...patch,
+          ...(lines === undefined ? {} : { lines }),
+        });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "commitment_change_order.updated",
+          targetType: "commitment_change_order",
+          targetId: row.id,
+          meta: { commitmentId: row.commitmentId, status: row.status },
+        });
+        return row;
+      },
+      { role: ctx.role },
+    );
+    if (projectId) {
+      revalidatePath(`${BASE}/${projectId}/commitments/${updated.commitmentId}`);
+      revalidatePath(`${BASE}/${projectId}`);
+    }
     revalidatePath(BASE);
     return { ok: true as const };
   } catch (err) {

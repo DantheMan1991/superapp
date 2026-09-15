@@ -46,10 +46,16 @@ export function lineCompletedCents(line: {
   return line.previousCents + line.thisPeriodCents + line.storedCents;
 }
 
-/** Percent complete of a line, one decimal, or null when the line is worth nothing. */
+/**
+ * Percent complete of a line, one decimal, or null when the line is worth
+ * nothing. A DEDUCTIVE line — a subcontract change order's negative line (ADR
+ * 0065) — is a negative scheduled value completed to a negative figure, and
+ * the ratio is its percent like any other's.
+ */
 export function percentComplete(completedCents: number, scheduledCents: number): number | null {
-  if (scheduledCents <= 0) return null;
-  return Math.round((completedCents / scheduledCents) * 1000) / 10;
+  if (scheduledCents === 0) return null;
+  const pct = Math.round((completedCents / scheduledCents) * 1000) / 10;
+  return pct === 0 ? 0 : pct; // never −0: nothing done on a deduction is 0%, not "-0%"
 }
 
 /**

@@ -8,6 +8,7 @@ import {
   contractBilling,
   createChangeOrder,
   createCommitment,
+  createCommitmentChangeOrder,
   createPayApplication,
   issuePayApplication,
   listPayApplications,
@@ -26,10 +27,12 @@ import {
   jobCostReport,
   jobCostRows,
   listChangeOrders,
+  listCommitmentChangeOrders,
   listCommitments,
   setBudgetLines,
   updateChangeOrder,
   updateCommitment,
+  updateCommitmentChangeOrder,
   updateContract,
   updateCostCode,
   updateCostCodeSet,
@@ -584,7 +587,8 @@ d("jobs ops", () => {
         projectId: p.id,
         partyId: party,
         number: "PO-SWAP",
-        status: "issued",
+        // A DRAFT: an issued order's lines are locked since 4b (ADR 0065), and the change-order test says so.
+        status: "draft",
         lines: [{ amountCents: 1_00 }, { amountCents: 2_00 }, { amountCents: 3_00 }],
       });
       await updateCommitment(tx, ctx, c.id, {
@@ -3357,14 +3361,14 @@ d("jobs ops", () => {
       tx.update(schema.accounts).set({ isActive: true }).where(and(eq(schema.accounts.tenantId, tenantId), eq(schema.accounts.code, "2120"))),
     );
     const approved = await run((tx) => approveSubApplication(tx, ctx, app.id, { billDate: "2026-10-01" }));
-    // A billed subcontract line cannot be replaced out from under its certificate.
+    // A billed subcontract line cannot be replaced out from under its certificate — and since 4b the refusal has a name.
     await expect(
       run((tx) =>
         updateCommitment(tx, ctx, commitment.id, {
           lines: [{ costCodeId: lines[0].costCodeId, description: "Framing, rewritten", amountCents: 1 }],
         }),
       ),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject({ code: "LINES_LOCKED" });
     // Void: the latest only, and the bill goes with it.
     const second = await run((tx) => createSubApplication(tx, ctx, { commitmentId: commitment.id, periodTo: "2026-10-31" }));
     await run((tx) =>
@@ -3382,5 +3386,228 @@ d("jobs ops", () => {
     const summary = (await run((tx) => commitmentBilling(tx, tenantId, commitment.projectId))).get(commitment.id);
     expect(summary).toMatchObject({ billedCents: 9_500_00, retainageHeldCents: 500_00, billedCount: 1 });
     // Two subcontracts, four applications, two bills and a void: slow under a full-suite run.
+  }, 120_000);
+
+  // ------------------------------------------ subcontract change orders (4b)
+
+  it("A CHANGE ORDER ON A SUBCONTRACT adds lines the next application bills, counts only once approved, passes a client change down, runs a deduction backwards, and is fixed once billed against", async () => {
+    const entity = await newCompany("Sub Co 4");
+    const { project, commitment, lines, framing, finish } = await run((tx) => subcontractJob(tx, entity, "OPS-SC4"));
+    // Issued: the original lines are locked; the same lines sent back are not an edit, and the header is free.
+    await expect(
+      run((tx) =>
+        updateCommitment(tx, ctx, commitment.id, {
+          lines: [{ costCodeId: framing.id, description: "Framing labour", amountCents: 61_000_00 }],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "LINES_LOCKED" });
+    const noted = await run((tx) =>
+      updateCommitment(tx, ctx, commitment.id, {
+        notes: "sent 2026-09-01",
+        lines: [
+          { costCodeId: framing.id, description: "Framing labour", amountCents: 60_000_00 },
+          { costCodeId: finish.id, description: "Trim", amountCents: 20_000_00 },
+        ],
+      }),
+    );
+    expect(noted.notes).toBe("sent 2026-09-01");
+
+    // A client change order on this job, for the change to pass down — and one on another job it may not.
+    const { co, elsewhere } = await run(async (tx) => {
+      const contract = await createContract(tx, ctx, { projectId: project.id, kind: "new_home", valueCents: 300_000_00, status: "signed" });
+      const co = await createChangeOrder(tx, ctx, { contractId: contract.id, number: "CO-3", title: "Stair blocking", status: "approved", approvedOn: "2026-09-10", valueCents: 5_000_00 });
+      const other = await createProject(tx, ctx, { entityId: entity, number: "OPS-SC4-B", name: "Other house" });
+      const otherContract = await createContract(tx, ctx, { projectId: other.id, kind: "new_home", valueCents: 1_00, status: "signed" });
+      const elsewhere = await createChangeOrder(tx, ctx, { contractId: otherContract.id, number: "CO-1", title: "Elsewhere" });
+      return { co, elsewhere };
+    });
+    await expect(
+      run((tx) => createCommitmentChangeOrder(tx, ctx, { commitmentId: commitment.id, number: "SCO-0", title: "Wrong job", changeOrderId: elsewhere.id })),
+    ).rejects.toMatchObject({ code: "WRONG_PROJECT" });
+    await expect(
+      run((tx) => createCommitmentChangeOrder(tx, staffCtx, { commitmentId: commitment.id, number: "SCO-1", title: "Staff" })),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    // Proposed: recorded, and counted by nothing — not the order, not the job, not a draft application.
+    const sco1 = await run((tx) =>
+      createCommitmentChangeOrder(tx, ctx, {
+        commitmentId: commitment.id,
+        number: "SCO-1",
+        title: "Extra blocking at the stair",
+        changeOrderId: co.id,
+        lines: [{ costCodeId: framing.id, description: "Blocking", amountCents: 4_000_00 }],
+      }),
+    );
+    const rowOf = async () =>
+      (await run((tx) => listCommitments(tx, tenantId, project.id))).find((r) => r.commitment.id === commitment.id)!;
+    let row = await rowOf();
+    expect([row.originalCents, row.changesCents, row.totalCents]).toEqual([80_000_00, 0, 80_000_00]);
+    expect(row.lines.map((l) => [l.description, l.change?.number ?? null, l.counted])).toEqual([
+      ["Framing labour", null, true],
+      ["Trim", null, true],
+      ["Blocking", "SCO-1", false],
+    ]);
+    expect((await run((tx) => committedTotals(tx, tenantId))).byProject.get(project.id)).toBe(80_000_00);
+    const app1 = await run((tx) =>
+      createSubApplication(tx, ctx, { commitmentId: commitment.id, periodTo: "2026-09-30", retainagePpm: 100_000 }),
+    );
+    let [a1] = await run((tx) => listSubApplications(tx, tenantId, commitment.id));
+    expect(a1.lines).toHaveLength(2);
+
+    // Approved, with a date: the line joins the order, the job's committed cost by code, the report and the draft.
+    await expect(
+      run((tx) => updateCommitmentChangeOrder(tx, ctx, sco1.id, { status: "approved" })),
+    ).rejects.toMatchObject({ code: "APPROVAL_DATE_REQUIRED" });
+    await run((tx) =>
+      updateCommitmentChangeOrder(tx, ctx, sco1.id, { status: "approved", approvedOn: "2026-09-12", version: sco1.version }),
+    );
+    row = await rowOf();
+    expect([row.originalCents, row.changesCents, row.totalCents]).toEqual([80_000_00, 4_000_00, 84_000_00]);
+    const committed = await run((tx) => committedTotals(tx, tenantId));
+    expect(committed.byProject.get(project.id)).toBe(84_000_00);
+    expect(committed.byCostCode.get(framing.id)).toBe(64_000_00);
+    const report = await run((tx) => jobCostRows(tx, tenantId, project.id));
+    expect(report.find((r) => r.costCodeId === framing.id)?.committedCents).toBe(64_000_00);
+    let listed = await run((tx) => listCommitmentChangeOrders(tx, tenantId, project.id));
+    expect(listed.map((c) => [c.changeOrder.number, c.amountCents, c.passesDown?.number ?? null, c.billed])).toEqual([
+      ["SCO-1", 4_000_00, "CO-3", false],
+    ]);
+    // The open draft picks the line up on its next edit, after the original lines, with the change's number.
+    await run((tx) => updateSubApplication(tx, ctx, app1.id, { lines: [] }));
+    [a1] = await run((tx) => listSubApplications(tx, tenantId, commitment.id));
+    expect(a1.lines.map((l) => [l.description, l.changeNumber, l.commitmentAmountCents])).toEqual([
+      ["Framing labour", null, 60_000_00],
+      ["Trim", null, 20_000_00],
+      ["Blocking", "SCO-1", 4_000_00],
+    ]);
+
+    // Bill 2,000 of the change: the bill's line names the change, and the certificate froze the revised sum.
+    await run((tx) =>
+      updateSubApplication(tx, ctx, app1.id, {
+        lines: [{ commitmentLineId: a1.lines[2].commitmentLineId, thisPeriodCents: 2_000_00, storedCents: 0 }],
+      }),
+    );
+    const first = await run((tx) => approveSubApplication(tx, ctx, app1.id, { billDate: "2026-10-01" }));
+    const firstLines = await run((tx) => loadBillLines(tx, tenantId, first.billId));
+    expect(firstLines.map((l) => [l.description, l.amountCents])).toEqual([
+      ["Application 1 — SCO-1 · Blocking through 2026-09-30", 2_000_00],
+      ["Retainage held (10%)", -200_00],
+    ]);
+    expect(first.app.scheduledCents).toBe(84_000_00);
+    // Billed against: the status and the lines are fixed; the words are not.
+    listed = await run((tx) => listCommitmentChangeOrders(tx, tenantId, project.id));
+    expect(listed[0].billed).toBe(true);
+    await expect(
+      run((tx) => updateCommitmentChangeOrder(tx, ctx, sco1.id, { status: "proposed" })),
+    ).rejects.toMatchObject({ code: "CHANGE_BILLED" });
+    await expect(
+      run((tx) => updateCommitmentChangeOrder(tx, ctx, sco1.id, { lines: [] })),
+    ).rejects.toMatchObject({ code: "CHANGE_BILLED" });
+    const reworded = await run((tx) =>
+      updateCommitmentChangeOrder(tx, ctx, sco1.id, {
+        title: "Extra blocking, stair and landing",
+        lines: [{ costCodeId: framing.id, description: "Blocking", amountCents: 4_000_00 }],
+      }),
+    );
+    expect(reworded.title).toBe("Extra blocking, stair and landing");
+
+    // A DEDUCTIVE change is a negative line, and the application runs it backwards.
+    await run((tx) =>
+      createCommitmentChangeOrder(tx, ctx, {
+        commitmentId: commitment.id,
+        number: "SCO-2",
+        title: "Garage trim dropped",
+        status: "approved",
+        approvedOn: "2026-10-05",
+        lines: [{ costCodeId: finish.id, description: "Garage trim", amountCents: -2_000_00 }],
+      }),
+    );
+    row = await rowOf();
+    expect([row.changesCents, row.totalCents]).toEqual([2_000_00, 82_000_00]);
+    const app2 = await run((tx) => createSubApplication(tx, ctx, { commitmentId: commitment.id, periodTo: "2026-10-31" }));
+    let [, a2] = await run((tx) => listSubApplications(tx, tenantId, commitment.id));
+    const deduction = a2.lines.find((l) => l.changeNumber === "SCO-2")!;
+    expect([deduction.commitmentAmountCents, deduction.scheduledCents]).toEqual([-2_000_00, -2_000_00]);
+    await expect(
+      run((tx) =>
+        updateSubApplication(tx, ctx, app2.id, {
+          lines: [{ commitmentLineId: deduction.commitmentLineId, thisPeriodCents: 500_00, storedCents: 0 }],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE", message: expect.stringContaining("more than nothing") });
+    await expect(
+      run((tx) =>
+        updateSubApplication(tx, ctx, app2.id, {
+          lines: [{ commitmentLineId: deduction.commitmentLineId, thisPeriodCents: -2_000_00, storedCents: 1_00 }],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE", message: expect.stringContaining("stored") });
+    await run((tx) =>
+      updateSubApplication(tx, ctx, app2.id, {
+        lines: [
+          { commitmentLineId: lines[1].id, thisPeriodCents: 10_000_00, storedCents: 0 },
+          { commitmentLineId: deduction.commitmentLineId, thisPeriodCents: -2_000_00, storedCents: 0 },
+        ],
+      }),
+    );
+    [, a2] = await run((tx) => listSubApplications(tx, tenantId, commitment.id));
+    expect(a2.totals.completedToDateCents).toBe(10_000_00); // 2,000 + 10,000 − 2,000
+    const second = await run((tx) => approveSubApplication(tx, ctx, app2.id, { billDate: "2026-11-01" }));
+    const secondLines = await run((tx) => loadBillLines(tx, tenantId, second.billId));
+    expect(secondLines.map((l) => [l.description, l.amountCents])).toEqual([
+      ["Application 2 — Trim through 2026-10-31", 10_000_00],
+      ["Application 2 — SCO-2 · Garage trim through 2026-10-31", -2_000_00],
+      ["Retainage held (10%)", -800_00],
+    ]);
+    expect(second.app).toMatchObject({ scheduledCents: 82_000_00, completedToDateCents: 10_000_00, dueCents: 7_200_00 });
+
+    // Numbered per order: SCO-1 on another subcontract is fine; SCO-1 here again is the index speaking.
+    const other = await run((tx) => subcontractJob(tx, entity, "OPS-SC4-C"));
+    await run((tx) => createCommitmentChangeOrder(tx, ctx, { commitmentId: other.commitment.id, number: "SCO-1", title: "Theirs" }));
+    const dup = await run((tx) =>
+      createCommitmentChangeOrder(tx, ctx, { commitmentId: commitment.id, number: "SCO-1", title: "Again" }),
+    ).catch((e: unknown) => e);
+    expect(violatedUniqueIndex(dup)).toBe("job_commitment_change_orders_commitment_number_idx");
+
+    // A purchase order takes a change order too, and a DRAFT order's lines are still free.
+    const po = await run((tx) => subcontractJob(tx, entity, "OPS-SC4-P", "purchase_order"));
+    await run((tx) =>
+      createCommitmentChangeOrder(tx, ctx, {
+        commitmentId: po.commitment.id,
+        number: "R1",
+        title: "More lumber",
+        status: "approved",
+        approvedOn: "2026-09-20",
+        lines: [{ costCodeId: po.framing.id, amountCents: 500_00 }],
+      }),
+    );
+    expect((await run((tx) => committedTotals(tx, tenantId))).byProject.get(po.project.id)).toBe(80_500_00);
+    const draftOrder = await run((tx) =>
+      createCommitment(tx, ctx, { projectId: project.id, partyId: other.party, number: "PO-SC4-D", lines: [{ amountCents: 1_00 }] }),
+    );
+    const edited = await run((tx) =>
+      updateCommitment(tx, ctx, draftOrder.id, { lines: [{ amountCents: 2_00, description: "Fixed before sending" }] }),
+    );
+    expect(edited.version).toBe(2);
+
+    // A proposed change taken back: a draft's line on it goes with it, whatever was typed.
+    const sco3 = await run((tx) =>
+      createCommitmentChangeOrder(tx, ctx, {
+        commitmentId: other.commitment.id,
+        number: "SCO-2",
+        title: "Maybe",
+        status: "approved",
+        approvedOn: "2026-10-01",
+        lines: [{ costCodeId: other.framing.id, amountCents: 1_000_00 }],
+      }),
+    );
+    const app3 = await run((tx) => createSubApplication(tx, ctx, { commitmentId: other.commitment.id, periodTo: "2026-10-31" }));
+    let [a3] = await run((tx) => listSubApplications(tx, tenantId, other.commitment.id));
+    expect(a3.lines).toHaveLength(3);
+    await run((tx) => updateCommitmentChangeOrder(tx, ctx, sco3.id, { status: "declined" }));
+    await run((tx) => updateSubApplication(tx, ctx, app3.id, { lines: [] }));
+    [a3] = await run((tx) => listSubApplications(tx, tenantId, other.commitment.id));
+    expect(a3.lines.map((l) => l.changeNumber)).toEqual([null, null]);
+    // Three subcontracts, three applications, two bills: slow under a full-suite run.
   }, 120_000);
 });

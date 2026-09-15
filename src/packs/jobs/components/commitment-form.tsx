@@ -64,21 +64,30 @@ export interface EditableCommitment {
  * is the difference between a number and an answer. It is still optional,
  * because a business that has not built its chart yet has to be able to record
  * what it ordered.
+ *
+ * **AN ISSUED ORDER'S LINES ARE LOCKED (ADR 0065).** Once the order counts, its
+ * lines are the ORIGINAL half of *original + approved changes = revised*; they
+ * are shown as they are and not sent, and the way the order moves is a change
+ * order on its page. The action refuses behind the form's back.
  */
 export function CommitmentForm({
   projectId,
   parties,
   costCodes,
   existing,
+  linesLocked = false,
   trigger,
 }: {
   projectId: string;
   parties: Array<{ id: string; name: string }>;
   costCodes: Array<{ id: string; label: string }>;
   existing?: EditableCommitment;
+  /** The order is issued or closed: its lines change by change order, not here. */
+  linesLocked?: boolean;
   trigger?: ReactNode;
 }) {
   const editing = existing !== undefined;
+  const locked = editing && linesLocked;
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -99,7 +108,8 @@ export function CommitmentForm({
       : [{ costCodeId: NONE, description: "", amount: "" }],
   );
 
-  const ready = partyId !== "" && number.trim() !== "" && lines.some((l) => l.amount.trim() !== "");
+  const ready =
+    partyId !== "" && number.trim() !== "" && (locked || lines.some((l) => l.amount.trim() !== ""));
 
   function setLine(i: number, patch: Partial<LineDraft>) {
     setLines((prev) => prev.map((l, j) => (i === j ? { ...l, ...patch } : l)));
@@ -116,11 +126,16 @@ export function CommitmentForm({
         status,
         issuedOn,
         notes: notes.trim(),
-        lines: lines.map((l) => ({
-          costCodeId: l.costCodeId === NONE ? "" : l.costCodeId,
-          description: l.description.trim(),
-          amountCents: l.amount,
-        })),
+        // Locked lines are not sent: a status or a note may change, the money may not.
+        ...(locked
+          ? {}
+          : {
+              lines: lines.map((l) => ({
+                costCodeId: l.costCodeId === NONE ? "" : l.costCodeId,
+                description: l.description.trim(),
+                amountCents: l.amount,
+              })),
+            }),
       };
       const result = editing
         ? await updateCommitmentAction({
@@ -225,6 +240,28 @@ export function CommitmentForm({
               />
             </div>
 
+            {locked ? (
+              <div className="space-y-2 rounded-lg border border-border/60 p-3">
+                <Label>Lines</Label>
+                <ul className="space-y-1 text-sm">
+                  {lines.map((l, i) => (
+                    <li key={i} className="flex justify-between gap-3">
+                      <span className="truncate">
+                        {costCodes.find((c) => c.id === l.costCodeId)?.label ?? "No code"}
+                        {l.description && (
+                          <span className="text-muted-foreground"> · {l.description}</span>
+                        )}
+                      </span>
+                      <span className="shrink-0 tabular-nums">{l.amount}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-xs text-muted-foreground">
+                  Issued. The lines change with a change order, on the order&apos;s
+                  page.
+                </p>
+              </div>
+            ) : (
             <div className="space-y-2 rounded-lg border border-border/60 p-3">
               <div className="flex items-center justify-between">
                 <Label>Lines</Label>
@@ -292,6 +329,7 @@ export function CommitmentForm({
                 nothing.
               </p>
             </div>
+            )}
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">

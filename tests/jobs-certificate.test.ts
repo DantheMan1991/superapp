@@ -178,12 +178,12 @@ describe("the continuation sheet", () => {
   const m = buildCertificateModel(fixed);
 
   it("has a row per schedule line: scheduled, previous, this period, stored, to date, percent, balance", () => {
-    expect(m.continuation.rows).toEqual([
+    expect(m.continuation.rows).toMatchObject([
       { item: "1", description: "Foundation", scheduled: "30,000.00", previous: "30,000.00", thisPeriod: "0.00", stored: "0.00", toDate: "30,000.00", percent: "100%", balance: "0.00" },
       { item: "2", description: "Framing", scheduled: "50,000.00", previous: "10,000.00", thisPeriod: "20,000.00", stored: "5,000.00", toDate: "35,000.00", percent: "70%", balance: "15,000.00" },
       { item: "3", description: "Roof", scheduled: "24,000.00", previous: "0.00", thisPeriod: "0.00", stored: "0.00", toDate: "0.00", percent: "0%", balance: "24,000.00" },
     ]);
-    expect(m.continuation.total).toEqual({
+    expect(m.continuation.total).toMatchObject({
       item: "",
       description: "Totals",
       scheduled: "104,000.00",
@@ -261,6 +261,56 @@ describe("a cost-plus or time-and-materials certificate", () => {
     expect(m.labor.total).toMatchObject({ name: "Totals", hoursToDate: "14.5 h", thisPeriod: "880.00", toDate: "880.00" });
     expect(m.subtitle).toBe("Application 1 for hours at their rates and cost with a markup");
     expect(m.watermark).toBeNull();
+  });
+});
+
+describe("a unit-price certificate", () => {
+  const unit: CertificateInput = {
+    ...fixed,
+    method: "unit_price",
+    contractTitle: "Site work · Lane drainage",
+    originalCents: 50_000_00,
+    changeOrders: [],
+    previousPeriodTo: null,
+    totals: {
+      completedToDateCents: 20_806_25,
+      retainageCents: 2_080_63,
+      earnedLessRetainageCents: 18_725_62,
+      previousCertificatesCents: 0,
+      dueCents: 18_725_62,
+    },
+    lines: [
+      { description: "Excavation", scheduledCents: 18_000_00, previousCents: 0, thisPeriodCents: 10_800_00, storedCents: 0, unit: "cy", unitPriceCents: 18_00, quantityThousandths: 1_000_000, quantityPreviousThousandths: 0, quantityThisPeriodThousandths: 600_000 },
+      { description: "Pipe", scheduledCents: 25_000_00, previousCents: 0, thisPeriodCents: 10_006_25, storedCents: 0, unit: "lf", unitPriceCents: 12_50, quantityThousandths: 2_000_000, quantityPreviousThousandths: 0, quantityThisPeriodThousandths: 800_500 },
+    ],
+  };
+
+  it("prints the unit, the price and the quantities beside the money, and calls the schedule what it is", () => {
+    const m = buildCertificateModel(unit);
+    expect(m.continuation.unitPriced).toBe(true);
+    expect(m.subtitle).toBe("Application 2 against a schedule of unit prices");
+    expect(m.summary[0]).toMatchObject({ label: "Original contract sum", amount: "50,000.00" });
+    expect(m.continuation.rows[0]).toMatchObject({
+      unit: "cy",
+      unitPrice: "18.00",
+      estimatedQuantity: "1,000",
+      previousQuantity: "0",
+      thisPeriodQuantity: "600",
+      toDateQuantity: "600",
+      toDate: "10,800.00",
+      percent: "60%",
+      balance: "7,200.00",
+    });
+    expect(m.continuation.rows[1]).toMatchObject({ unit: "lf", unitPrice: "12.50", thisPeriodQuantity: "800.5", toDate: "10,006.25", percent: "40%" });
+    expect(m.continuation.total).toMatchObject({ unit: "", toDate: "20,806.25", scheduled: "43,000.00" });
+    // A lump-sum line on a fixed-price certificate carries none of it.
+    expect(buildCertificateModel(fixed).continuation.unitPriced).toBe(false);
+    expect(buildCertificateModel(fixed).continuation.rows[0].unit).toBe("");
+  });
+
+  it("renders with the unit columns", async () => {
+    const bytes = await renderCertificatePdf(unit);
+    expect(Buffer.from(bytes.slice(0, 5)).toString("latin1")).toBe("%PDF-");
   });
 });
 

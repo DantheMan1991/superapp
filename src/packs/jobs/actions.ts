@@ -15,7 +15,7 @@ import {
   setPrimaryAttachment,
 } from "@/modules/documents/attachments";
 import { roleMayWrite } from "@/modules/documents/core/errors";
-import { percentStringToPpm } from "./billing-math";
+import { percentStringToPpm, quantityStringToThousandths } from "./billing-math";
 import {
   addPunchItem,
   deleteDailyLog,
@@ -441,6 +441,20 @@ const moneyToCents = z
     const n = typeof v === "number" ? v : Number(String(v).replace(/[,\s$]/g, ""));
     if (!Number.isFinite(n)) return null;
     return Math.round(n * 100);
+  });
+
+/** "1,250.5" → 1,250,500 thousandths; blank → null; anything else refuses. May be negative on an application line. */
+const quantityToThousandths = z
+  .union([z.string(), z.number(), z.literal("")])
+  .optional()
+  .transform((v, ctx) => {
+    if (v === "" || v === undefined || v === null) return null;
+    const q = quantityStringToThousandths(String(v));
+    if (q === null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "a quantity must be a number" });
+      return z.NEVER;
+    }
+    return q;
   });
 
 /** "15" → 150_000 ppm; blank → null (no percentage fee); anything else refuses. */
@@ -967,6 +981,10 @@ const sovLineSchema = z.object({
   scheduledCents: moneyToCents,
   costCodeId: optionalUuid,
   changeOrderId: optionalUuid,
+  /** Unit price: the unit, the estimated quantity and the price per unit; blank on a lump-sum line. */
+  unit: z.string().trim().max(20).optional(),
+  quantity: quantityToThousandths,
+  unitPriceCents: moneyToCents,
 });
 
 const sovSchema = z.object({
@@ -989,6 +1007,9 @@ export async function saveSovAction(input: unknown) {
       scheduledCents: l.scheduledCents ?? 0,
       costCodeId: l.costCodeId,
       changeOrderId: l.changeOrderId,
+      unit: l.unit ?? "",
+      quantityThousandths: l.quantity,
+      unitPriceCents: l.unitPriceCents,
     }));
   try {
     const ctx = await gate();
@@ -1079,6 +1100,8 @@ const payApplicationLineSchema = z.object({
   /** May be negative: a correction of an earlier over-billing. */
   thisPeriodCents: signedMoneyToCents,
   storedCents: moneyToCents,
+  /** Unit price: the quantity completed this period; blank is none. May be negative. */
+  quantityThisPeriod: quantityToThousandths,
 });
 
 export async function updatePayApplicationAction(input: unknown) {
@@ -1139,6 +1162,7 @@ export async function updatePayApplicationAction(input: unknown) {
             sovLineId: l.sovLineId,
             thisPeriodCents: l.thisPeriodCents ?? 0,
             storedCents: l.storedCents ?? 0,
+            quantityThisPeriodThousandths: l.quantityThisPeriod ?? undefined,
           })),
           // A blank box on a cost line bills nothing this period.
           costLines: costLines?.map((l) => ({

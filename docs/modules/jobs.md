@@ -13,6 +13,100 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-14 — Slice 5f: unit price (`claude/unit-price`, ADR 0064)
+
+The sixth and last billing method, the one still "recorded and billed by
+nothing" — and it is the schedule of values with three more columns.
+Migration `0347_unit_price.sql` adds `unit`, `quantity_thousandths` and
+`unit_price_cents` to a schedule line (both or neither, a CHECK) and
+`quantity_previous_thousandths` / `quantity_this_period_thousandths` to an
+application line (their sum never below nothing, a CHECK); no new table,
+so no RLS migration.
+
+**A SCHEDULE LINE IS AN ITEM.** A unit, an estimated quantity kept in
+THOUSANDTHS — 1,250.500 cy is 1250500, the grain estimating works to, an
+integer so every sum is exact — and a price per unit; its scheduled value
+is the estimate at the price, computed by `saveSovLines` and never typed
+(`unitLineCents`, half up once per line). `unit_price` joins
+`FIXED_VALUE_METHODS`, so the contract page, the tiles, the applications,
+retainage, the void path and the printout are the fixed-price ones;
+`UNBILLED_METHODS` is empty and the pure test says so. The contract's value
+is the estimate the schedule adds up to, which unit price expects to be
+passed: a line's percent may exceed 100 and its balance go negative.
+
+**THE PERSON TYPES QUANTITIES.** An application line on a priced item
+carries the quantity completed before (carried by `syncDraftLines`) and the
+quantity this period; `updatePayApplication` prices the typed quantity at
+the line's price and ignores any money that arrived beside it (the ops test
+types `999` and gets `10,800.00`). A negative quantity corrects; below
+nothing to date is refused. Stored materials stay money. The editor
+(`pay-application-editor.tsx`, `unitPriced`) shows *Est. qty · Previous
+qty · This period qty · This period* with the price and the estimate under
+the item; the schedule editor (`sov-editor.tsx`, `unitPriced`) takes unit,
+quantity and price per row and shows the value. `PayApplicationLineRow`
+carries the line's unit, price and estimate from the join.
+
+**THE INVOICE READS ITEM BY ITEM.** *Application 1 — Excavation, 600 cy at
+18.00/cy through 2026-09-30*, one line per item with a quantity this
+period, and one line for whatever the certificate carries beyond the items
+(stored materials coming and going). The printout's continuation sheet
+(`certificate-model.ts` `unitPriced`, eleven columns) carries the unit,
+the price, the estimate and the three quantities beside the money.
+
+**WIP measures a unit-price job as a fixed-value one** — cost-to-cost
+against the estimate — and the output method (units installed over units
+estimated) is the open item [ADR 0064](../decisions/0064-a-unit-price-application-bills-quantities-at-the-schedules-prices.md) records.
+
+Migration `0347_unit_price.sql` applied to dev and prod before the merge;
+`db:verify-rls` 212 tables on both. Tests: three more pure (the columns
+and the four CHECKs, quantities in thousandths read and written and
+printed, a quantity at a price rounded once with a correction credited)
+and the method-group test now counting unit price among the schedule
+methods; one ops (three items worth their estimates at their prices, the
+typed money ignored, the four-line invoice, October's quantities carried
+past the estimate, a correction below nothing refused, the certificate
+read carrying the units); one isolation (both or neither, nothing below
+nothing, at the database); one certificate (the unit columns and a render).
+
+**DRIVEN ON THE DEV BRANCH, on 24-111 Lane drainage** (seeded by script: a
+signed `site_work` contract billed *Unit price*, value $50,000.00, and a
+schedule of three items — *Excavation 1,000 cy at $18.00*, *Drain pipe 2,000
+lf at $12.50*, *Catch basins 4 ea at $1,750.00*). The contract's page:
+**Contract value $50,000.00 · Scheduled $50,000.00**, a panel now titled
+*Schedule of unit prices* — *3 items, estimated at $50,000.00* — with
+**Unit · Est. qty · Unit price** columns before the cost code, and the
+applications intro saying *how many of each item were installed* (both
+wordings were fixed after the first render). *New application* → period
+to 2026-09-30, retainage 10 → *Application started*, the row **$0.00 · 10%
+held · Draft**. *Open* → *Application 1 — draft* with the unit-price grid:
+**Item ($18.00/cy · $18,000.00 estimated) · Est. qty 1,000 cy · Previous
+qty 0 · This period qty · This period · Stored · To date · %**. Typed
+`600`, `800.5` and `1` → live **$10,800.00 (60%) · $10,006.25 (40%) ·
+$1,750.00 (25%)**, the certificate **Completed and stored to date
+$22,556.25 · Retainage (10%) −$2,255.63 · Total earned less retainage
+$20,300.62 · Current payment due $20,300.62 · Balance to finish
+$27,443.75**. *Issue as invoice* → *Application 1 issued as an invoice*,
+tiles **Billed to date $20,300.62 · 1 issued · Retainage held $2,255.63 ·
+Balance to finish $27,443.75**, the schedule's *Complete* column **60% ·
+40% · 25%**, the row **Issued 2026-09-14 · $22,556.25 · $2,255.63 ·
+$20,300.62 · INV-0009 · Open**. In Accounting, **INV-0009** to Tractor
+Supply Co, due 2026-10-14, four lines to **4000 · Sales** and **1230**:
+*Application 1 — Excavation, 600 cy at 18.00/cy through 2026-09-30*
+10,800.00 · *Drain pipe, 800.5 lf at 12.50/lf* 10,006.25 · *Catch basins,
+1 ea at 1750.00/ea* 1,750.00 · *Retainage withheld (10%)* (2,255.63), total
+**20,300.62**. The printout, in Chrome's viewer embedded in the page: page two
+**CONTINUATION SHEET · NO. · ITEM · UNIT · PRICE · EST. QTY · PREVIOUS ·
+THIS PERIOD · TO DATE · AMOUNT · % · BALANCE**, *Excavation · cy · 18.00 ·
+1,000 · 0 · 600 · 600 · 10,800.00 · 60% · 7,200.00*, the pipe and the basins
+likewise, *Totals 22,556.25 · 45.1% · 27,443.75*. Page one found the
+slice's one real bug: **lines 1, 3 and 9 printed a dash** — the rows-to-model
+mapping took a maximum (null) for every method but fixed price, and unit
+price starts from its estimate. Fixed in `certificate.ts` and pinned in the
+ops test through `certificateInputFrom`. Not driven: a second application carrying
+quantities past the estimate, a correction, the schedule editor's unit
+boxes on screen — the first two are in the ops test, the third is the
+same dialog the drive seeded through.
+
 ### 2026-09-14 — Slice 5e: the printout (`claude/pay-application-printout`, ADR 0063)
 
 The last item on the billing slices' list: a pay application as the
@@ -1443,7 +1537,7 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_budget_lines` | What each cost code was PLANNED to cost. | One line per code per project, enforced by a unique index rather than by the action remembering — two would make every variance ambiguous. `cost_code_id` is NOT NULL, unlike a commitment line's: a budget without a code is a single number for the whole job, which is what this table exists to stop being the answer. `original_cents` is the ORIGINAL; revised is original plus approved change-order lines, computed by `jobCostRows` and never stored. RESTRICT to the code, so a budgeted code is retired and never deleted. |
 | `job_change_orders` | A change to ONE contract: its price to the client (`value_cents`), its status, and when it was approved. | Composite FK to the CONTRACT, **cascade** — never to the project, which is reachable through the contract and deliberately not duplicated. Number unique per `(tenant, contract)`. `value_cents` **may be negative** — the one money column in the pack without a floor; a deduction is a negative number, not a credit concept. `job_change_orders_approved_has_date` makes `(status = 'approved') = (approved_on is not null)` a database fact, both ways. |
 | `job_change_order_lines` | What the change costs, one cost code at a time — the budget side. | Cascade from the change order; **RESTRICT to the cost code**, the same rule as a commitment line and a budget line. `amount_cents` may be negative. Zero lines is legitimate: a pure price change. |
-| `job_sov_lines` | A contract's schedule of values: how the sum breaks down, by trade, phase or milestone. | Cascade from the contract. Optional cost code (RESTRICT) and the approved change order that added the line (cascade). `scheduled_cents` ≥ 0. Should sum to the revised contract value; the page says when it does not, a CHECK does not — a schedule is built before it is complete. |
+| `job_sov_lines` | A contract's schedule of values: how the sum breaks down, by trade, phase or milestone — or, on a unit-price contract, the items: a `unit`, an estimated `quantity_thousandths` and a `unit_price_cents`, both or neither (CHECK), the value being the one times the other, computed on save (5f). | Cascade from the contract. Optional cost code (RESTRICT) and the approved change order that added the line (cascade). `scheduled_cents` ≥ 0; quantity and price ≥ 0 when present. Should sum to the revised contract value; the page says when it does not, a CHECK does not — a schedule is built before it is complete. |
 | `job_pay_applications` | One draw against a contract: the G702 — or, on a cost-plus contract, the cost-plus certificate, with `cost_to_date_cents` and `fee_to_date_cents` frozen at issue beside the five totals (zero on a fixed-price application), and since 5d `labor_to_date_cents` (zero unless time and materials). | Numbered per contract, void ones included. `status` draft/issued/void — **no `paid`**, that is the invoice's word. `retainage_ppm` 0–1,000,000. Five totals FROZEN at issue. `invoice_id` RESTRICT to Accounting's `invoices`; CHECK `(status = 'draft') = (invoice_id is null)`, both ways. |
 | `job_daily_logs` | One report per project per day: weather, what happened. | Unique `(tenant, project, log_date)` — the whole design; `saveDailyLog` upserts and `appendNotes` adds a line. Cascade from the project. Photos hang on it through Documents' `document_attachments` (`entity_type = 'job_daily_log'`), detached when the day goes. |
 | `job_daily_log_crews` | Who was on site that day: a trade or a subcontractor, how many, hours each (tenths). | Cascade from the day; `party_id` RESTRICT to `parties`. CHECK `workers >= 0`, `hours_tenths >= 0`, and that a line names a trade OR a party. A HEADCOUNT, not a time entry — the two are not joined. |
@@ -1452,7 +1546,7 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_wip_lines` | One job on a schedule: the re-estimate typed for the period (`estimate_cents`, null = the budget), six figures FROZEN at posting (zero while a draft), and the `method` that measured them: `cost_to_cost`, `cost_plus` or `time_and_materials`. | Cascade from the period and from the project. `percent_complete_ppm` 0–1,000,000; `reason` is `''`, `no_value`, `no_estimate` or `no_rate` — why the job was left out of the entry. Over/under is not stored: it is earned − billed. |
 | `job_pay_application_costs` | One line of a COST-PLUS application per cost code (NULL = no code): the books' figure to date, what earlier applications billed, what this one bills. | Cascade from the application; **RESTRICT to the code**. Unique per `(application, code)`; the no-code line is kept single by the sync. `this_period_cents` may be less than the difference (a bill left out) or negative (a credit passed on). See ADR 0060. |
 | `job_pay_application_labor` | One line of a TIME-AND-MATERIALS application per person and rate: Time's approved worked minutes on the job at that rate as of the period end, what earlier applications billed of them, what this one bills, and the cents. | Cascade from the application; **RESTRICT to Time's `time_workers`** — a person with billed hours is deactivated, never deleted. Unique per `(application, worker, rate_cents)`; `rate_cents` NOT NULL with 0 meaning no rate found, so the key is never null. `minutes_to_date` ≥ 0; `this_period_minutes` may be negative (hours credited back). See ADR 0062. |
-| `job_pay_application_lines` | One line of the G703 per schedule line. | Cascade from the application; **RESTRICT to the schedule line** — billed lines are never removed. `previous` and `stored` ≥ 0; `this_period` may be NEGATIVE (a correction); CHECK that the three sum to ≥ 0. `scheduled_cents` frozen at issue. |
+| `job_pay_application_lines` | One line of the G703 per schedule line; on a unit-priced item, `quantity_previous_thousandths` (carried) and `quantity_this_period_thousandths` (typed, may be negative) beside the money, which is the quantity at the price (5f). | Cascade from the application; **RESTRICT to the schedule line** — billed lines are never removed. `previous` and `stored` ≥ 0; `this_period` may be NEGATIVE (a correction); CHECK that the three sum to ≥ 0, and that the two quantities do. `scheduled_cents` frozen at issue. |
 | `job_commitments` | What the business has ORDERED: a purchase order or a subcontract. | `party_id` is NOT NULL — a commitment with nobody to pay is a budget line, not a commitment. `kind` is a CHECK list of two because the two diverge in behaviour later. Number unique per tenant: a vendor quotes it back on the invoice. Cascade from the project. |
 | `job_sub_applications` | A subcontractor's application against a SUBCONTRACT: the G702 read from the other side of the table. | Numbered per commitment, void ones included. `status` draft/billed/void. `retainage_ppm` 0–1,000,000. Five totals FROZEN at approval. `bill_id` RESTRICT to Accounting's `bills`; CHECK `(status = 'draft') = (bill_id is null)`, both ways. Cascade from the commitment. See ADR 0061. |
 | `job_sub_application_lines` | One line per subcontract line: previous, this period, stored. | Cascade from the application; **RESTRICT to the subcontract line** — a billed line cannot be replaced out from under its certificate. `this_period` may be negative; the total to date may not. |
@@ -1473,7 +1567,7 @@ hand-reordered like 0329) and `0335_job_billing.sql` / `0336_job_billing_rls.sql
 `wip_adjustment` to `journal_entry_source`, which nothing in the file uses)
 and `0341_cost_plus.sql` / `0342_cost_plus_rls.sql` (slice 5b; as generated,
 since the new table references existing ones only) and `0343_sub_billing.sql`
-/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) follow the same rule —
+/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) follow the same rule —
 and from slice 3 the pair is `db:verify-rls` **and `db:verify-modules`**, after
 the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **212 tables**, all enabled, forced and with
 policies, on both.
@@ -1647,6 +1741,11 @@ ordering only bites when two new tables reference each other in one file.
   fixed-value methods get a schedule; cost plus a fee gets the books' cost;
   time and materials gets Time's hours and the books' cost without the
   wages; unit price gets a note. Never the kind.
+- **A unit-price application bills quantities at the schedule's prices, and
+  the schedule's value is an estimate** — [ADR 0064](../decisions/0064-a-unit-price-application-bills-quantities-at-the-schedules-prices.md). The schedule with three
+  more columns, both or neither; quantities in integer thousandths, typed by
+  the person, priced on save; the invoice item by item; the estimate may be
+  passed.
 - **A pay application's printout is rendered from the frozen certificate,
   in the shape everybody knows and in our own words** — [ADR 0063](../decisions/0063-a-pay-applications-printout-is-rendered-from-the-frozen-certificate.md). Never stored;
   drafts watermarked; the AIA's form, text and name reproduced nowhere; cost
@@ -1686,8 +1785,9 @@ ordering only bites when two new tables reference each other in one file.
   step, and it is Accounting's screen it would speak from.
 - ~~**Nothing bills.**~~ — **closed 2026-09-14** for fixed-price work: a
   schedule of values and pay applications, issued as invoices. ~~Cost-plus~~
-  **closed 2026-09-14 (slice 5b, ADR 0060)**. Still open from it: **unit
-  price** is recorded on the contract and billed by nothing; ~~T&M~~
+  **closed 2026-09-14 (slice 5b, ADR 0060)**. ~~Still open from it: **unit
+  price** is recorded on the contract and billed by nothing~~ **closed
+  2026-09-14 (slice 5f, ADR 0064): every method bills**; ~~T&M~~
   **closed 2026-09-14 (slice 5d, ADR 0062)**, cost-plus with Time's rate
   card in place of labour cost;
   ~~**retainage held FROM subcontractors**~~ **closed 2026-09-14 (slice 5c,
@@ -1781,7 +1881,9 @@ ordering only bites when two new tables reference each other in one file.
   cost plus (5b) and time and materials (5d) each brought their method. What
   remains: a **unit-price** job has no value to earn against, is shown with
   `No fixed contract value` and left out, and one with billings blocks the
-  period; units × price is its method, the day unit price bills.
+  period. **Since 5f a unit-price job has a value — the estimate — and is
+  measured cost-to-cost like a fixed-value one; the output method (units
+  installed over units estimated) is the better measure and not built.**
 - **Percent complete cannot be typed.** Cost-to-cost is the only method. A
   business that measures by units delivered or an engineer's estimate would
   need a second nullable column on the line (ADR 0059 leaves the door open);

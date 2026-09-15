@@ -430,14 +430,24 @@ export const FIXED_VALUE_METHODS: readonly BillingMethod[] = [
   "progress_draw",
   "schedule_of_values",
   "draw_schedule",
+  // Bills against a schedule too — of items with a unit, an estimated
+  // quantity and a price, the quantities installed being what an
+  // application says (slice 5f, ADR 0064). The contract's value is the
+  // estimate the schedule adds up to.
+  "unit_price",
 ];
+export const UNIT_PRICE_METHODS: readonly BillingMethod[] = ["unit_price"];
 export const COST_PLUS_METHODS: readonly BillingMethod[] = ["cost_plus_fee"];
 /** Cost plus with a rate card in place of labour cost (slice 5d, ADR 0062). */
 export const TIME_AND_MATERIALS_METHODS: readonly BillingMethod[] = ["time_and_materials"];
-export const UNBILLED_METHODS: readonly BillingMethod[] = ["unit_price"];
+/** Every method bills since slice 5f; kept so the grouping test can say so. */
+export const UNBILLED_METHODS: readonly BillingMethod[] = [];
 
 export function isCostPlusMethod(v: string): boolean {
   return (COST_PLUS_METHODS as readonly string[]).includes(v);
+}
+export function isUnitPriceMethod(v: string): boolean {
+  return (UNIT_PRICE_METHODS as readonly string[]).includes(v);
 }
 export function isTimeAndMaterialsMethod(v: string): boolean {
   return (TIME_AND_MATERIALS_METHODS as readonly string[]).includes(v);

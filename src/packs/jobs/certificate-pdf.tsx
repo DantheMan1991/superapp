@@ -102,6 +102,10 @@ const styles = StyleSheet.create({
   kDesc: { flex: 1, paddingRight: 6 },
   kNum: { width: 74, textAlign: "right" },
   kPct: { width: 40, textAlign: "right" },
+  // A unit-price sheet: quantities beside the money, in narrower columns.
+  uUnit: { width: 30 },
+  uNum: { width: 56, textAlign: "right" },
+  uMoney: { width: 66, textAlign: "right" },
   // Cost and labour tables.
   lName: { flex: 1, paddingRight: 6 },
   lNum: { width: 78, textAlign: "right" },
@@ -298,7 +302,43 @@ function continuationPage(m: CertificateModel): ReactElement {
     text(styles.caption, m.continuation.caption, "cc"),
   ];
 
-  if (m.continuation.rows.length > 0 && m.continuation.total) {
+  if (m.continuation.rows.length > 0 && m.continuation.total && m.continuation.unitPriced) {
+    const u = (r: CertificateModel["continuation"]["rows"][number], key: string, style: PdfStyle) =>
+      createElement(
+        View,
+        { key, style, wrap: false },
+        text(styles.kItem, r.item),
+        text(styles.kDesc, r.description),
+        text(styles.uUnit, r.unit),
+        text(styles.uNum, r.unitPrice),
+        text(styles.uNum, r.estimatedQuantity),
+        text(styles.uNum, r.previousQuantity),
+        text(styles.uNum, r.thisPeriodQuantity),
+        text(styles.uNum, r.toDateQuantity),
+        text(styles.uMoney, r.toDate),
+        text(styles.kPct, r.percent),
+        text(styles.uMoney, r.balance),
+      );
+    blocks.push(
+      createElement(
+        View,
+        { key: "uh", style: styles.tableHead },
+        text(styles.kItem, "NO."),
+        text(styles.kDesc, "ITEM"),
+        text(styles.uUnit, "UNIT"),
+        text(styles.uNum, "PRICE"),
+        text(styles.uNum, "EST. QTY"),
+        text(styles.uNum, "PREVIOUS"),
+        text(styles.uNum, "THIS PERIOD"),
+        text(styles.uNum, "TO DATE"),
+        text(styles.uMoney, "AMOUNT"),
+        text(styles.kPct, "%"),
+        text(styles.uMoney, "BALANCE"),
+      ),
+      ...m.continuation.rows.map((r, i) => u(r, `u${i}`, styles.row)),
+      u(m.continuation.total, "ut", styles.totalRow),
+    );
+  } else if (m.continuation.rows.length > 0 && m.continuation.total) {
     const k = (r: CertificateModel["continuation"]["rows"][number], key: string, style: PdfStyle) =>
       createElement(
         View,

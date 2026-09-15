@@ -36,6 +36,7 @@ import {
   timeEnabled,
 } from "@/packs/jobs/ops";
 import {
+  formatQuantity,
   minutesToHoursString,
   percentComplete,
   ppmToPercentString,
@@ -52,6 +53,7 @@ import {
   isCostPlusMethod,
   isFixedValueMethod,
   isTimeAndMaterialsMethod,
+  isUnitPriceMethod,
   isPayApplicationStatus,
   slugLabel,
 } from "@/packs/jobs/vocabulary";
@@ -186,6 +188,7 @@ export default async function ContractPage({
   const costPlus = isCostPlusMethod(contract.billingMethod);
   const tm = isTimeAndMaterialsMethod(contract.billingMethod);
   const ledgerBilled = billsTheLedger(contract.billingMethod);
+  const unitPriced = isUnitPriceMethod(contract.billingMethod);
   const fixedValue = isFixedValueMethod(contract.billingMethod);
   const terms = costPlusTerms(contract);
   const feeWords = [
@@ -482,17 +485,21 @@ export default async function ContractPage({
       <Panel className="p-5">
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-heading text-sm font-medium tracking-heading">
-            Schedule of values
+            {unitPriced ? "Schedule of unit prices" : "Schedule of values"}
           </h2>
           {isOwner && (
             <SovEditor
               projectId={project.id}
               contractId={contract.id}
               contractValueCents={revisedCents}
+              unitPriced={unitPriced}
               existing={sov.map((l) => ({
                 id: l.id,
                 description: l.description,
                 scheduledCents: l.scheduledCents,
+                unit: l.unit,
+                quantityThousandths: l.quantityThousandths,
+                unitPriceCents: l.unitPriceCents,
                 costCodeId: l.costCodeId,
                 changeOrderId: l.changeOrderId,
                 billed: billedSov.has(l.id),
@@ -510,8 +517,10 @@ export default async function ContractPage({
         </div>
         <p className="mb-3 text-sm text-muted-foreground">
           {sov.length === 0
-            ? "How the contract sum breaks down — by trade, by phase, or as milestones. Every application bills against these lines, so the schedule comes first."
-            : `${sov.length} ${sov.length === 1 ? "line" : "lines"}, scheduled at ${formatMoney(scheduledCents, symbol)}.`}
+            ? unitPriced
+              ? "The items the work is measured in — a unit, an estimated quantity and a price of each. Every application says how many were installed, so the schedule comes first."
+              : "How the contract sum breaks down — by trade, by phase, or as milestones. Every application bills against these lines, so the schedule comes first."
+            : `${sov.length} ${unitPriced ? (sov.length === 1 ? "item" : "items") : sov.length === 1 ? "line" : "lines"}, ${unitPriced ? "estimated" : "scheduled"} at ${formatMoney(scheduledCents, symbol)}.`}
         </p>
         {sov.length > 0 && (
           <div className="overflow-x-auto">
@@ -519,7 +528,14 @@ export default async function ContractPage({
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-8">#</TableHead>
-                  <TableHead>Line</TableHead>
+                  <TableHead>{unitPriced ? "Item" : "Line"}</TableHead>
+                  {unitPriced && (
+                    <>
+                      <TableHead>Unit</TableHead>
+                      <TableHead className="text-right">Est. qty</TableHead>
+                      <TableHead className="text-right">Unit price</TableHead>
+                    </>
+                  )}
                   <TableHead>Cost code</TableHead>
                   <TableHead>From</TableHead>
                   <TableHead className="text-right">Scheduled</TableHead>
@@ -537,6 +553,17 @@ export default async function ContractPage({
                     <TableRow key={l.id}>
                       <TableCell className="text-xs text-muted-foreground">{i + 1}</TableCell>
                       <TableCell className="font-medium">{l.description}</TableCell>
+                      {unitPriced && (
+                        <>
+                          <TableCell className="text-xs">{l.unit || "—"}</TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {l.quantityThousandths === null ? "—" : formatQuantity(l.quantityThousandths)}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {l.unitPriceCents === null ? "—" : formatMoney(l.unitPriceCents, symbol)}
+                          </TableCell>
+                        </>
+                      )}
                       <TableCell className="text-xs">
                         {l.costCodeId ? (codeLabel.get(l.costCodeId) ?? "—") : "—"}
                       </TableCell>
@@ -586,7 +613,9 @@ export default async function ContractPage({
               ? "Each application bills the hours Time has approved on the job to date at their rates, plus what the books carry on it with the markup, less what earlier applications billed; what is due is that, less retainage, less what was already certified. Issuing one posts it as an invoice."
               : costPlus
               ? "Each application bills what the books carry on the job to date, less what earlier applications billed, plus the fee; what is due is that, less retainage, less what was already certified. Issuing one posts it as an invoice."
-              : "Each application says how much of each schedule line is complete to date; what is due is that, less retainage, less what earlier applications already certified. Issuing one posts it as an invoice."
+              : unitPriced
+                ? "Each application says how many of each item were installed to date, at the item's price; what is due is that, less retainage, less what earlier applications already certified. Issuing one posts it as an invoice, item by item."
+                : "Each application says how much of each schedule line is complete to date; what is due is that, less retainage, less what earlier applications already certified. Issuing one posts it as an invoice."
             : `${issued.length} issued for ${formatMoney(billedCents, symbol)}${draft ? ", with a draft open" : ""}.`}
         </p>
         {apps.length > 0 && (
@@ -712,6 +741,7 @@ export default async function ContractPage({
                             projectId={project.id}
                             contractId={contract.id}
                             symbol={symbol}
+                            unitPriced={unitPriced}
                             app={{
                               id: row.app.id,
                               version: row.app.version,
@@ -727,6 +757,11 @@ export default async function ContractPage({
                                 previousCents: l.previousCents,
                                 thisPeriodCents: l.thisPeriodCents,
                                 storedCents: l.storedCents,
+                                unit: l.unit,
+                                unitPriceCents: l.unitPriceCents,
+                                quantityThousandths: l.sovQuantityThousandths,
+                                quantityPreviousThousandths: l.quantityPreviousThousandths,
+                                quantityThisPeriodThousandths: l.quantityThisPeriodThousandths,
                               })),
                             }}
                             trigger={

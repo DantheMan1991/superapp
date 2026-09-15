@@ -61,7 +61,7 @@ function verbs(mode: ApplicationMode, projectId: string, parentId: string) {
         periodTo: string;
         retainagePercent: string;
         notes: string;
-        lines: Array<{ lineId: string; thisPeriodCents: string; storedCents: string }>;
+        lines: Array<{ lineId: string; thisPeriodCents: string; storedCents: string; quantityThisPeriod?: string }>;
         version: number;
       }): Promise<ActionResult> =>
         updateSubApplicationAction({
@@ -116,7 +116,7 @@ function verbs(mode: ApplicationMode, projectId: string, parentId: string) {
       periodTo: string;
       retainagePercent: string;
       notes: string;
-      lines: Array<{ lineId: string; thisPeriodCents: string; storedCents: string }>;
+      lines: Array<{ lineId: string; thisPeriodCents: string; storedCents: string; quantityThisPeriod?: string }>;
       version: number;
     }): Promise<ActionResult> =>
       updatePayApplicationAction({
@@ -130,6 +130,7 @@ function verbs(mode: ApplicationMode, projectId: string, parentId: string) {
           sovLineId: l.lineId,
           thisPeriodCents: l.thisPeriodCents,
           storedCents: l.storedCents,
+          quantityThisPeriod: l.quantityThisPeriod,
         })),
         version: input.version,
       }),
@@ -148,8 +149,12 @@ function verbs(mode: ApplicationMode, projectId: string, parentId: string) {
   };
 }
 import {
+  formatQuantity,
   lineCompletedCents,
   payApplicationTotals,
+  quantityStringToThousandths,
+  thousandthsToQuantityString,
+  unitLineCents,
   percentComplete,
   percentStringToPpm,
   ppmToPercentString,
@@ -300,6 +305,16 @@ export function NewPayApplication({
   );
 }
 
+/** A unit-priced row's money this period is its quantity at its price; any other row's is what was typed. */
+function rowPeriodCents(
+  unitPriced: boolean,
+  r: { thisPeriod: string; qty: string; unitPriceCents?: number | null },
+): number {
+  return unitPriced && r.unitPriceCents != null
+    ? unitLineCents(quantityStringToThousandths(r.qty) ?? 0, r.unitPriceCents)
+    : toCents(r.thisPeriod);
+}
+
 export interface EditableApplication {
   id: string;
   version: number;
@@ -316,6 +331,12 @@ export interface EditableApplication {
     previousCents: number;
     thisPeriodCents: number;
     storedCents: number;
+    /** Unit price (ADR 0064): the line's unit, price and estimate, and the quantities; absent on a lump-sum line. */
+    unit?: string;
+    unitPriceCents?: number | null;
+    quantityThousandths?: number | null;
+    quantityPreviousThousandths?: number;
+    quantityThisPeriodThousandths?: number;
   }>;
 }
 
@@ -334,6 +355,7 @@ export function PayApplicationEditor({
   projectId,
   contractId,
   mode = "contract",
+  unitPriced = false,
   app,
   symbol,
   trigger,
@@ -342,6 +364,8 @@ export function PayApplicationEditor({
   /** The contract's id — or, in commitment mode, the subcontract's. */
   contractId: string;
   mode?: ApplicationMode;
+  /** Unit price: the person types QUANTITIES this period; the money is the quantity at the line's price. */
+  unitPriced?: boolean;
   app: EditableApplication;
   symbol: string | null;
   trigger?: ReactNode;
@@ -359,8 +383,11 @@ export function PayApplicationEditor({
       ...l,
       thisPeriod: l.thisPeriodCents === 0 ? "" : (l.thisPeriodCents / 100).toFixed(2),
       stored: l.storedCents === 0 ? "" : (l.storedCents / 100).toFixed(2),
+      qty: l.quantityThisPeriodThousandths ? thousandthsToQuantityString(l.quantityThisPeriodThousandths) : "",
     })),
   );
+  const periodCents = (r: { thisPeriod: string; qty: string; unitPriceCents?: number | null }) =>
+    rowPeriodCents(unitPriced, r);
 
   const ppm = percentStringToPpm(retainage) ?? 0;
   const totals = useMemo(
@@ -370,16 +397,16 @@ export function PayApplicationEditor({
           sovLineId: r.sovLineId,
           scheduledCents: r.scheduledCents,
           previousCents: r.previousCents,
-          thisPeriodCents: toCents(r.thisPeriod),
+          thisPeriodCents: rowPeriodCents(unitPriced, r),
           storedCents: toCents(r.stored),
         })),
         ppm,
         app.previousCertificatesCents,
       ),
-    [rows, ppm, app.previousCertificatesCents],
+    [rows, ppm, app.previousCertificatesCents, unitPriced],
   );
 
-  function setRow(i: number, patch: Partial<{ thisPeriod: string; stored: string }>) {
+  function setRow(i: number, patch: Partial<{ thisPeriod: string; stored: string; qty: string }>) {
     setRows((prev) => prev.map((r, j) => (i === j ? { ...r, ...patch } : r)));
   }
 
@@ -392,6 +419,7 @@ export function PayApplicationEditor({
       lineId: r.sovLineId,
       thisPeriodCents: r.thisPeriod,
       storedCents: r.stored,
+      ...(unitPriced ? { quantityThisPeriod: r.qty } : {}),
     })),
     version: app.version,
   });
@@ -493,10 +521,21 @@ export function PayApplicationEditor({
               <table className="w-full text-sm">
                 <thead className="bg-muted/40 text-xs text-muted-foreground">
                   <tr>
-                    <th className="px-2 py-1.5 text-left">Line</th>
-                    <th className="px-2 py-1.5 text-right">Scheduled</th>
-                    <th className="px-2 py-1.5 text-right">Previous</th>
-                    <th className="px-2 py-1.5 text-right">This period</th>
+                    <th className="px-2 py-1.5 text-left">{unitPriced ? "Item" : "Line"}</th>
+                    {unitPriced ? (
+                      <>
+                        <th className="px-2 py-1.5 text-right">Est. qty</th>
+                        <th className="px-2 py-1.5 text-right">Previous qty</th>
+                        <th className="px-2 py-1.5 text-right">This period qty</th>
+                        <th className="px-2 py-1.5 text-right">This period</th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="px-2 py-1.5 text-right">Scheduled</th>
+                        <th className="px-2 py-1.5 text-right">Previous</th>
+                        <th className="px-2 py-1.5 text-right">This period</th>
+                      </>
+                    )}
                     <th className="px-2 py-1.5 text-right">Stored</th>
                     <th className="px-2 py-1.5 text-right">To date</th>
                     <th className="px-2 py-1.5 text-right">%</th>
@@ -506,29 +545,63 @@ export function PayApplicationEditor({
                   {rows.map((r, i) => {
                     const completed = lineCompletedCents({
                       previousCents: r.previousCents,
-                      thisPeriodCents: toCents(r.thisPeriod),
+                      thisPeriodCents: periodCents(r),
                       storedCents: toCents(r.stored),
                     });
+                    const priced = unitPriced && r.unitPriceCents != null;
                     const pct = percentComplete(completed, r.scheduledCents);
                     return (
                       <tr key={r.sovLineId} className="border-t border-border/50">
-                        <td className="px-2 py-1">{r.description}</td>
-                        <td className="px-2 py-1 text-right tabular-nums">
-                          {money(r.scheduledCents, symbol)}
-                        </td>
-                        <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
-                          {money(r.previousCents, symbol)}
-                        </td>
                         <td className="px-2 py-1">
-                          <Input
-                            aria-label={`This period, ${r.description}`}
-                            value={r.thisPeriod}
-                            onChange={(e) => setRow(i, { thisPeriod: e.target.value })}
-                            placeholder="0.00"
-                            inputMode="decimal"
-                            className="h-8 w-28 text-right"
-                          />
+                          {r.description}
+                          {priced && (
+                            <span className="block text-xs text-muted-foreground">
+                              {money(r.unitPriceCents as number, symbol)}/{r.unit || "unit"} · {money(r.scheduledCents, symbol)} estimated
+                            </span>
+                          )}
                         </td>
+                        {priced ? (
+                          <>
+                            <td className="px-2 py-1 text-right tabular-nums">
+                              {formatQuantity(r.quantityThousandths ?? 0)} {r.unit}
+                            </td>
+                            <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
+                              {formatQuantity(r.quantityPreviousThousandths ?? 0)}
+                            </td>
+                            <td className="px-2 py-1">
+                              <Input
+                                aria-label={`Quantity this period, ${r.description}`}
+                                value={r.qty}
+                                onChange={(e) => setRow(i, { qty: e.target.value })}
+                                placeholder="0"
+                                inputMode="decimal"
+                                className="h-8 w-24 text-right"
+                              />
+                            </td>
+                            <td className="px-2 py-1 text-right tabular-nums">
+                              {money(periodCents(r), symbol)}
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="px-2 py-1 text-right tabular-nums">
+                              {money(r.scheduledCents, symbol)}
+                            </td>
+                            <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
+                              {money(r.previousCents, symbol)}
+                            </td>
+                            <td className="px-2 py-1">
+                              <Input
+                                aria-label={`This period, ${r.description}`}
+                                value={r.thisPeriod}
+                                onChange={(e) => setRow(i, { thisPeriod: e.target.value })}
+                                placeholder="0.00"
+                                inputMode="decimal"
+                                className="h-8 w-28 text-right"
+                              />
+                            </td>
+                          </>
+                        )}
                         <td className="px-2 py-1">
                           <Input
                             aria-label={`Stored, ${r.description}`}

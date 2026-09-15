@@ -1,6 +1,6 @@
 import { fitLogo, readableOnWhite, type HexColor } from "@/lib/brand/core";
 import { formatCentsSigned } from "@/lib/money";
-import { minutesToHoursString, percentComplete, ppmToPercentString } from "./billing-math";
+import { formatQuantity, minutesToHoursString, percentComplete, ppmToPercentString } from "./billing-math";
 
 /**
  * A PAY APPLICATION AS A PRINTABLE CERTIFICATE — pure, no database, no React
@@ -21,7 +21,7 @@ import { minutesToHoursString, percentComplete, ppmToPercentString } from "./bil
  * All money arrives as integer cents and leaves as a formatted string.
  */
 
-export type CertificateMethod = "fixed" | "cost_plus" | "time_and_materials";
+export type CertificateMethod = "fixed" | "unit_price" | "cost_plus" | "time_and_materials";
 
 export interface CertificateBrand {
   tagline: string;
@@ -73,6 +73,12 @@ export interface CertificateInput {
     previousCents: number;
     thisPeriodCents: number;
     storedCents: number;
+    /** Unit price (ADR 0064): the unit, the price, the estimate and the quantities; absent on a lump-sum line. */
+    unit?: string;
+    unitPriceCents?: number | null;
+    quantityThousandths?: number | null;
+    quantityPreviousThousandths?: number;
+    quantityThisPeriodThousandths?: number;
   }>;
   /** Cost plus and T&M: the books' cost by code. */
   costs: ReadonlyArray<{
@@ -113,6 +119,13 @@ export interface CertificateChangeSummary {
 export interface ContinuationRow {
   item: string;
   description: string;
+  /** Unit price only; "" on a lump-sum line. */
+  unit: string;
+  unitPrice: string;
+  estimatedQuantity: string;
+  previousQuantity: string;
+  thisPeriodQuantity: string;
+  toDateQuantity: string;
   scheduled: string;
   previous: string;
   thisPeriod: string;
@@ -160,6 +173,8 @@ export interface CertificateModel {
     title: string;
     /** Under the title: the period, the application, the rate. */
     caption: string;
+    /** Unit price: the sheet carries the unit columns. */
+    unitPriced: boolean;
     rows: ContinuationRow[];
     total: ContinuationRow | null;
   };
@@ -194,7 +209,8 @@ function splitLines(text: string): string[] {
 export function buildCertificateModel(input: CertificateInput): CertificateModel {
   const primary = input.brand?.primaryColor ?? null;
   const logo = input.brand?.logo ?? null;
-  const ledger = input.method !== "fixed";
+  const ledger = input.method === "cost_plus" || input.method === "time_and_materials";
+  const unitPriced = input.method === "unit_price";
   const tm = input.method === "time_and_materials";
   const draft = input.status === "draft";
   const feeWord = tm ? "markup" : "fee";
@@ -286,9 +302,18 @@ export function buildCertificateModel(input: CertificateInput): CertificateModel
   // ---- the continuation sheet
   const rows: ContinuationRow[] = input.lines.map((l, i) => {
     const toDate = l.previousCents + l.thisPeriodCents + l.storedCents;
+    const priced = l.unitPriceCents != null;
+    const previousQty = l.quantityPreviousThousandths ?? 0;
+    const thisQty = l.quantityThisPeriodThousandths ?? 0;
     return {
       item: String(i + 1),
       description: l.description,
+      unit: priced ? (l.unit ?? "") : "",
+      unitPrice: priced ? money(l.unitPriceCents as number) : "",
+      estimatedQuantity: priced ? formatQuantity(l.quantityThousandths ?? 0) : "",
+      previousQuantity: priced ? formatQuantity(previousQty) : "",
+      thisPeriodQuantity: priced ? formatQuantity(thisQty) : "",
+      toDateQuantity: priced ? formatQuantity(previousQty + thisQty) : "",
       scheduled: money(l.scheduledCents),
       previous: money(l.previousCents),
       thisPeriod: money(l.thisPeriodCents),
@@ -308,6 +333,12 @@ export function buildCertificateModel(input: CertificateInput): CertificateModel
       : {
           item: "",
           description: "Totals",
+          unit: "",
+          unitPrice: "",
+          estimatedQuantity: "",
+          previousQuantity: "",
+          thisPeriodQuantity: "",
+          toDateQuantity: "",
           scheduled: money(scheduledTotal),
           previous: money(sum((l) => l.previousCents)),
           thisPeriod: money(sum((l) => l.thisPeriodCents)),
@@ -359,7 +390,9 @@ export function buildCertificateModel(input: CertificateInput): CertificateModel
   const methodWords =
     input.method === "fixed"
       ? "against the schedule of values"
-      : tm
+      : unitPriced
+        ? "against a schedule of unit prices"
+        : tm
         ? "for hours at their rates and cost with a markup"
         : `for cost plus a ${feeWord}`;
   const facts: Array<[string, string]> = [
@@ -393,6 +426,7 @@ export function buildCertificateModel(input: CertificateInput): CertificateModel
     continuation: {
       title: "CONTINUATION SHEET",
       caption: `Application ${input.applicationNumber} · period to ${input.periodTo} · retainage ${ppmToPercentString(input.retainagePpm)}%`,
+      unitPriced,
       rows,
       total,
     },

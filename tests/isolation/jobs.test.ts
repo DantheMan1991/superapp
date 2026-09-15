@@ -1310,6 +1310,35 @@ d("jobs tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
+  // ---------------------------------------------------------- unit price (5f)
+
+  it("a unit-priced schedule line carries both a quantity and a price, or neither, and neither below nothing", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobSovLines).values({ tenantId: tenantA, contractId: contractA, description: "Half", scheduledCents: 0, quantityThousandths: 5_000 }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobSovLines).values({ tenantId: tenantA, contractId: contractA, description: "Negative", scheduledCents: 0, quantityThousandths: -1, unitPriceCents: 100 }),
+      ),
+    ).rejects.toThrow();
+    const [line] = await withSystem((tx) =>
+      tx
+        .insert(schema.jobSovLines)
+        .values({ tenantId: tenantA, contractId: contractA, description: "Excavation", scheduledCents: 18_000_00, unit: "cy", quantityThousandths: 1_000_000, unitPriceCents: 18_00 })
+        .returning(),
+    );
+    expect(line.unit).toBe("cy");
+    // A period's quantity may correct, but never past nothing to date.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobPayApplicationLines).values({ tenantId: tenantA, payApplicationId: payAppA, sovLineId: line.id, quantityPreviousThousandths: 1_000, quantityThisPeriodThousandths: -2_000 }),
+      ),
+    ).rejects.toThrow();
+    await withSystem((tx) => tx.delete(schema.jobSovLines).where(eq(schema.jobSovLines.id, line.id)));
+  });
+
   // ------------------------------------------ subcontractor applications (5c)
 
   it("cannot read or change another tenant's SUBCONTRACTOR APPLICATIONS or their lines; they hang off this tenant's commitment and its lines only", async () => {

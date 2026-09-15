@@ -177,6 +177,42 @@ export function hoursStringToMinutes(input: string): number | null {
   return Math.round(n * 60);
 }
 
+/**
+ * UNIT PRICE (ADR 0064). Quantities are kept in THOUSANDTHS — 1,250.500 cy is
+ * 1250500 — the grain estimating works to, and an integer so every sum is
+ * exact. A line's money is quantity × price ÷ 1000, rounded half up ONCE per
+ * line, sign-aware: a correction of −5 cy credits at the same price.
+ */
+export const QUANTITY_SCALE = 1000;
+
+export function unitLineCents(quantityThousandths: number, unitPriceCents: number): number {
+  if (!Number.isFinite(quantityThousandths) || !Number.isFinite(unitPriceCents)) return 0;
+  if (quantityThousandths === 0 || unitPriceCents <= 0) return 0;
+  const sign = quantityThousandths < 0 ? -1 : 1;
+  return sign * Math.floor((Math.abs(quantityThousandths) * unitPriceCents + QUANTITY_SCALE / 2) / QUANTITY_SCALE);
+}
+
+/** "1,250.5" → 1250500; "-5" → -5000; blank → 0; a fourth decimal rounds; anything else → null. */
+export function quantityStringToThousandths(input: string): number | null {
+  const t = input.trim();
+  if (t === "") return 0;
+  const n = Number(t.replace(/,/g, ""));
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n * QUANTITY_SCALE);
+}
+
+/** 1250500 → "1250.5", 4000 → "4", 333 → "0.333": what a box shows, no separators. */
+export function thousandthsToQuantityString(q: number): string {
+  const n = q / QUANTITY_SCALE;
+  if (Number.isInteger(n)) return String(n);
+  return n.toFixed(3).replace(/0+$/, "");
+}
+
+/** 1250500 → "1,250.5": what a page or a certificate prints. */
+export function formatQuantity(q: number): string {
+  return (q / QUANTITY_SCALE).toLocaleString("en-US", { maximumFractionDigits: 3 });
+}
+
 /** 750 → "12.5", 45 → "0.75", 0 → "0". At most two decimals; a third of an hour reads 0.33. */
 export function minutesToHoursString(minutes: number): string {
   const h = minutes / 60;

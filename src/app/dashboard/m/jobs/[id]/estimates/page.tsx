@@ -52,7 +52,6 @@ export default async function EstimatesPage({ params }: { params: Promise<{ id: 
   const canEdit = allowsWrite(ctx.role, "member");
   const symbol = ctx.tenant.currencySymbol;
   const projectWord = labelFor(data.labels, "project", "Project");
-  const estimateWord = labelFor(data.labels, "estimate", "Estimate");
 
   return (
     <div className="space-y-4">
@@ -63,7 +62,7 @@ export default async function EstimatesPage({ params }: { params: Promise<{ id: 
         <ChevronLeft className="size-4" /> {project.number} · {project.name}
       </Link>
       <PageHeader
-        title={`${estimateWord}s`}
+        title="Estimates"
         description={`${projectWord} ${project.number} · ${rows.length} ${rows.length === 1 ? "estimate" : "estimates"}`}
         actions={canEdit ? <NewEstimateDialog projectId={project.id} /> : null}
       />

@@ -368,7 +368,38 @@ A draft is written but not sent, so nobody is owed anything. `Closed` still coun
 
 ### Editing an order
 
-The pencil at the end of its row. **Changing the lines replaces all of them**, so what you see in the dialog is what you get. Changing only the status leaves the money alone. A subcontract that has been billed against refuses a change to its lines — the certificates point at them.
+The pencil at the end of its row. While the order is a **draft**, changing the lines replaces all of them, so what you see in the dialog is what you get; changing only the status leaves the money alone.
+
+Once the order is **issued** or **closed**, its lines are shown in the dialog but cannot be edited — `Issued. The lines change with a change order, on the order's page.` The rest of the dialog still works: the status, the issued date, who is paid, the notes. If a save does try to move locked lines, you see `That order has been issued or billed against, so its lines change with a change order on the order's page.` The same applies to a draft a subcontractor has already billed against.
+
+### Changing an order — subcontract change orders
+
+Owners only. On the order's own page (click its number in the **Ordered** table), under **Change orders**.
+
+When a subcontractor's scope moves — more work found behind a wall, scope the client dropped, a price agreed after the fact, or their share of one of the client's change orders — you record it as a change order **on the order**. It works for a purchase order too (a revision that adds lumber). The panel's line reads *original + approved changes*: only an **approved** change moves what the job has committed and reaches the subcontractor's next application.
+
+{button:Add change order|primary}.
+
+1. **`Against`** — the order, shown as text. A change order stays on the order it was raised against.
+2. **`Number`** — required. However you number them: `SCO-1`, `PO-1042 R2`, `3`. It has to be different from the other change orders **on the same order**; two orders may each have an `SCO-1`. You see `That change order number is already used on this order.` if it clashes.
+3. **`Title`** — required. `Extra blocking at the stair`.
+4. **`What changes`** — optional. The scope, as it will read on the subcontractor's application.
+5. **`Passes down`** — the client's change order this one is the subcontractor's share of, from the job's change orders, or `None — a change of our own`. It has to be on this job: `That client change order is on another job.`
+6. **`Requested`** — optional date.
+7. **Lines** — the money. Each line takes a `Cost code` (optional, `No code` is allowed, as on the order itself), an optional description and an `Amount`. {button:Add line|ghost} for more. **A line with no amount is ignored.** **Negative takes scope back**: `-2,000` is a deduction, not a separate form. No lines at all is fine — a time extension or a re-worded scope has none. `Typed` on the right adds the lines up as you go.
+8. **`Status`** — `Proposed`, `Approved`, `Declined` or `Void`, the same four as a client change order. Only an approved one moves anything.
+9. **`Approved on`** — appears when the status is `Approved`, fills in with today, and is required: `Give an approved change order the date it was approved.`
+10. **`Notes`**.
+
+{button:Add change order|primary} stays greyed until the number and title are filled in. On success you see `Change order added`.
+
+**What an approved change does.** Its lines join the order's **Lines** table at once, each marked `Added by SCO-1`, and the value at the top of the page reads the revised sum with `orig. $… · $… in approved changes` under it. On the {{project|lower}}'s page the **Ordered** table's `Amount` is the revised sum with `orig. $…` beneath, **Committed** and the job cost report's `Ordered` column move by the change's lines, by code, and the next subcontractor application picks the lines up — an open draft on its next save, a new one when it is made — after the original lines, with the change's number in front of the description. The bill that application becomes names the change on its line: `Application 2 — SCO-1 · Blocking through 2026-10-31`.
+
+**A deduction on the application.** A negative line is completed **to less than nothing**: type `-2,000` on it and `Completed` and `Payment due` go down by that much; nothing can be stored against it, and typing a positive figure on it is refused with `A deduction cannot be completed to more than nothing.`, and stored materials on it with `Nothing is stored against a deduction.` Its `%` reads like any other line's.
+
+**Reading the table.** `Number` · `Change` (the title, with `Approved <date>` and `Passes down CO-3 · …` under it) · `Amount` (the lines added up; a minus sign is a deduction; `—` with no lines) · `Status`. `Billed against` under the status means the subcontractor has billed one of its lines.
+
+**Editing one.** The pencil at the end of its row. Everything but which order it is against. Changing the lines replaces all of them, and removing every line is a real instruction. **Once the subcontractor has billed against it**, the status stays `Approved` and the lines are shown but not editable — `The subcontractor has billed against that change, so it stays approved and its lines stay as they are. Raise another change.` — while the title, the words, the dates and `Passes down` still change. Taking an unbilled change back to `Proposed` or `Declined` removes its lines from the open draft, whatever was typed on them.
 
 ### Billing a subcontractor, and holding retainage
 
@@ -376,7 +407,7 @@ Click an order's number in the **Ordered** table to open its own page. A purchas
 
 Four figures sit at the top: **Subcontract value**, **Billed to date**, **Retainage held** (what you are holding back from them) and **Balance to finish**. The `Complete` column on the lines reads from the latest billed application.
 
-{button:New application|primary} — greyed while a draft is open, or when the subcontract has no lines — takes `Period to`, `Retainage %` (what you hold back; it carries over from the last application) and `Notes`. {button:Open|outline} on the draft is the same grid as a pay application, one row per subcontract line: `Scheduled`, `Previous` (carried), `This period`, `Stored`, `To date`, `%`, with the certificate live underneath — *Completed and stored to date*, *Retainage*, *Total earned less retainage*, *Less previous certificates* and **Current payment due**. `Bill dated` is the date the bill will carry.
+{button:New application|primary} — greyed while a draft is open, or when the subcontract has no lines — takes `Period to`, `Retainage %` (what you hold back; it carries over from the last application) and `Notes`. {button:Open|outline} on the draft is the same grid as a pay application, one row per subcontract line — the lines it was placed with and every approved change order's, the latter with the change's number in front (`SCO-1 · Blocking`): `Scheduled`, `Previous` (carried), `This period`, `Stored`, `To date`, `%`, with the certificate live underneath — *Completed and stored to date*, *Retainage*, *Total earned less retainage*, *Less previous certificates* and **Current payment due**. `Bill dated` is the date the bill will carry.
 
 {button:Approve as bill|primary} posts an ordinary bill in Accounting to the subcontractor, on the {{project|lower}}'s company's books: a line for the work this period on each subcontract line, to Subcontractor Expense and **tagged with the job and the line's cost code** — so it lands on the job cost report's `Spent` column at once — and the retainage held this period as a negative line to `2120 Retainage Payable`. The ledger reads Dr expense (gross), Cr Retainage Payable (held), Cr Accounts Payable (net). The subcontractor's own invoice number, typed in `Their reference`, becomes the bill's number. The row shows `Billed`, the bill's number and whether it is `Open`, `Partly paid` or `Paid`; pay it from Accounting like any other bill.
 
@@ -551,7 +582,8 @@ Worth knowing so you are not looking for it:
 - **A unit-price job on the work in progress schedule is measured cost-to-cost against its estimate**, like a fixed-price job; units installed over units estimated is a better measure for this kind of work and is not built.
 - **Time and materials has no rate card of its own.** Each person's rate comes from Time, or one rate on the contract covers everybody; a rate per trade (carpenter, labourer, foreman) or a rate negotiated for one customer is not a thing you can set yet.
 - **A cost-plus job on the work in progress schedule earns what it has cost plus its fee**, capped at its maximum, with no estimate asked for — when it is the job's only signed contract. A time-and-materials job earns its approved hours at their rates plus the rest of its cost marked up, the same way; one with hours nobody has priced shows `Hours on the job with no bill rate` and blocks the period until a rate is set. A job mixing methods is shown and left out, and a period with billings on one cannot post until it has a value.
-- **A subcontractor's application does not print.** It is the subcontractor's document, prepared on their side; your own applications print from their row.
+- **A subcontractor's application does not print**, and neither does a change order on an order. They are the subcontractor's documents, prepared on their side; your own applications print from their row.
+- **A back-charge is not a change order.** Money you deduct from a subcontractor's payment for something you paid on their behalf reduces the payment, not the scope; a deductive change order reduces the scope. Record a back-charge as a credit in Accounting for now.
 - **Nothing codes a bill for you.** Cost codes appear in Accounting wherever you tag a line, beside the job itself, and the `Spent` column reads what the bills carry. A line with the job and no code shows up as the uncoded note under the job cost table, not on a row.
 - **Nothing is ever deleted.** A contract you should not have added is set to `Cancelled` or `Declined`; a cost code is retired; a {{project|lower}} is cancelled. That is on purpose — a job's history is the point of keeping it.
 

@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, inArray, lte, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
@@ -7,6 +7,7 @@ import type {
   JobChangeOrder,
   JobChangeOrderLine,
   JobCommitment,
+  JobCommitmentChangeOrder,
   JobCommitmentLine,
   JobContract,
   JobCostCode,
@@ -137,7 +138,13 @@ export class JobsError extends Error {
       /** Hours this period on a line with no bill rate; the message names the person (on WIP, the jobs). */
       | "NO_BILL_RATE"
       /** A contract's flat labour rate is fixed once an application has issued. */
-      | "RATE_LOCKED",
+      | "RATE_LOCKED"
+      /** An issued or billed order's lines change by change order, not by edit (ADR 0065). */
+      | "LINES_LOCKED"
+      /** A change a subcontractor has billed against keeps its status and its lines. */
+      | "CHANGE_BILLED"
+      /** The client's change order named is on another job. */
+      | "WRONG_PROJECT",
     message: string,
   ) {
     super(message);
@@ -1133,6 +1140,67 @@ function validateCommitmentShape(input: {
   }
 }
 
+/**
+ * THE ONE RULE FOR WHEN A COMMITMENT LINE'S MONEY COUNTS, as a SQL condition
+ * every roll-up shares (ADR 0065): the line was placed with the order — no
+ * change order — or the change order that added it is APPROVED. Needs
+ * `job_commitment_change_orders` LEFT-joined by the caller; `countsNow` is the
+ * same rule for rows already in memory, so a page and the SQL cannot disagree.
+ */
+function countedCommitmentLine() {
+  return or(
+    isNull(schema.jobCommitmentLines.changeOrderId),
+    inArray(schema.jobCommitmentChangeOrders.status, [...APPROVED_CHANGE_STATUSES]),
+  );
+}
+
+function countsNow(line: { changeOrderId: string | null }, changeStatus: string | null): boolean {
+  return (
+    line.changeOrderId === null ||
+    (changeStatus !== null && (APPROVED_CHANGE_STATUSES as readonly string[]).includes(changeStatus))
+  );
+}
+
+/** A left join every commitment-line roll-up shares: the change order that added the line, if any. */
+function joinCommitmentChange() {
+  return and(
+    eq(schema.jobCommitmentChangeOrders.tenantId, schema.jobCommitmentLines.tenantId),
+    eq(schema.jobCommitmentChangeOrders.id, schema.jobCommitmentLines.changeOrderId),
+  );
+}
+
+/** Whether a subcontractor's application has billed against any of the given lines. */
+async function commitmentLinesBilled(tx: Tx, tenantId: string, lineIds: string[]): Promise<boolean> {
+  if (lineIds.length === 0) return false;
+  const rows = await tx
+    .select({ id: schema.jobSubApplicationLines.id })
+    .from(schema.jobSubApplicationLines)
+    .where(
+      and(
+        eq(schema.jobSubApplicationLines.tenantId, tenantId),
+        inArray(schema.jobSubApplicationLines.commitmentLineId, lineIds),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
+/** The same lines, in the same order, with the same code, words and money. */
+function sameCommitmentLines(
+  existing: readonly Pick<JobCommitmentLine, "costCodeId" | "description" | "amountCents">[],
+  input: readonly { costCodeId?: string | null; description?: string; amountCents: number }[],
+): boolean {
+  return (
+    existing.length === input.length &&
+    existing.every(
+      (e, i) =>
+        e.costCodeId === (input[i].costCodeId ?? null) &&
+        e.description === (input[i].description?.trim() ?? "") &&
+        e.amountCents === input[i].amountCents,
+    )
+  );
+}
+
 export async function createCommitment(
   tx: Tx,
   ctx: JobsCtx,
@@ -1173,14 +1241,24 @@ export async function createCommitment(
 }
 
 /**
- * Change a commitment's header, and REPLACE its lines when any are given.
+ * Change a commitment's header, and REPLACE its ORIGINAL lines when any are
+ * given.
  *
  * **REPLACE, NOT MERGE**, and the choice is worth stating. A line-by-line patch
  * needs stable ids round-tripping through a form and a rule for what a missing
  * id means; replacing is one delete and one insert inside the transaction the
  * caller already holds, and it cannot leave behind a line nobody meant to keep.
- * The cost is that an edit rewrites rows that did not change, which matters to
- * nothing here: no other table points at a commitment line.
+ * The cost is that an edit rewrites rows that did not change, which is why the
+ * lines are compared first: the same lines sent back are not an edit.
+ *
+ * **AN ISSUED ORDER'S LINES ARE LOCKED (ADR 0065).** Once the order counts —
+ * issued or closed — its lines are the ORIGINAL half of *original + approved
+ * changes = revised*, and lines that can still be edited in place make that
+ * line meaningless; so are the lines of an order a subcontractor has billed
+ * against, whose certificates point at them. Either changes by a change order
+ * on the order, which is what the business does on paper. A draft's lines are
+ * free. The change orders' own lines are never touched here: they are the
+ * change's, edited through it.
  *
  * Omitting `lines` entirely leaves them alone, so a status change does not
  * disturb the money.
@@ -1234,33 +1312,72 @@ export async function updateCommitment(
     .returning();
 
   if (input.lines !== undefined) {
-    await tx
-      .delete(schema.jobCommitmentLines)
+    const original = await tx
+      .select()
+      .from(schema.jobCommitmentLines)
       .where(
         and(
           eq(schema.jobCommitmentLines.tenantId, ctx.tenantId),
           eq(schema.jobCommitmentLines.commitmentId, id),
+          isNull(schema.jobCommitmentLines.changeOrderId),
         ),
+      )
+      .orderBy(asc(schema.jobCommitmentLines.sortOrder), asc(schema.jobCommitmentLines.createdAt));
+    if (!sameCommitmentLines(original, input.lines)) {
+      if ((COMMITTED_STATUSES as readonly string[]).includes(existing[0].status)) {
+        throw new JobsError(
+          "LINES_LOCKED",
+          "an issued order's lines change by change order, not by edit",
+        );
+      }
+      if (await commitmentLinesBilled(tx, ctx.tenantId, original.map((l) => l.id))) {
+        throw new JobsError(
+          "LINES_LOCKED",
+          "a billed order's lines change by change order, not by edit",
+        );
+      }
+      await tx
+        .delete(schema.jobCommitmentLines)
+        .where(
+          and(
+            eq(schema.jobCommitmentLines.tenantId, ctx.tenantId),
+            eq(schema.jobCommitmentLines.commitmentId, id),
+            isNull(schema.jobCommitmentLines.changeOrderId),
+          ),
+        );
+      await tx.insert(schema.jobCommitmentLines).values(
+        input.lines.map((line, i) => ({
+          tenantId: ctx.tenantId,
+          commitmentId: id,
+          costCodeId: line.costCodeId ?? null,
+          description: line.description?.trim() ?? "",
+          amountCents: line.amountCents,
+          sortOrder: i * 10,
+        })),
       );
-    await tx.insert(schema.jobCommitmentLines).values(
-      input.lines.map((line, i) => ({
-        tenantId: ctx.tenantId,
-        commitmentId: id,
-        costCodeId: line.costCodeId ?? null,
-        description: line.description?.trim() ?? "",
-        amountCents: line.amountCents,
-        sortOrder: i * 10,
-      })),
-    );
+    }
   }
 
   return rows[0];
 }
 
+export interface CommitmentLineView extends JobCommitmentLine {
+  /** The change order that added the line, or null for a line the order was placed with. */
+  change: { id: string; number: string; status: string } | null;
+  /** Whether the line counts now: an original line, or a change's while it is approved. */
+  counted: boolean;
+}
+
 export interface CommitmentRow {
   commitment: JobCommitment;
   vendorName: string;
-  lines: JobCommitmentLine[];
+  /** Every line: the ones the order was placed with, then each change order's, in the order the changes were raised. */
+  lines: CommitmentLineView[];
+  /** The lines the order was placed with, summed. */
+  originalCents: number;
+  /** Approved changes, summed and signed. */
+  changesCents: number;
+  /** Original + approved changes: what the order is worth now. */
   totalCents: number;
 }
 
@@ -1291,28 +1408,59 @@ export async function listCommitments(
     .orderBy(asc(schema.jobCommitments.number));
   if (headers.length === 0) return [];
 
-  // One statement for every line on the page, not one per commitment.
-  const lines = await tx
-    .select()
-    .from(schema.jobCommitmentLines)
-    .where(
-      and(
-        eq(schema.jobCommitmentLines.tenantId, tenantId),
-        inArray(
-          schema.jobCommitmentLines.commitmentId,
-          headers.map((h) => h.commitment.id),
+  // One statement for every line on the page, not one per commitment — and
+  // one for the change orders, so each line can say which change added it.
+  const ids = headers.map((h) => h.commitment.id);
+  const [lines, changes] = await Promise.all([
+    tx
+      .select()
+      .from(schema.jobCommitmentLines)
+      .where(
+        and(
+          eq(schema.jobCommitmentLines.tenantId, tenantId),
+          inArray(schema.jobCommitmentLines.commitmentId, ids),
         ),
-      ),
-    )
-    .orderBy(asc(schema.jobCommitmentLines.sortOrder));
+      )
+      .orderBy(asc(schema.jobCommitmentLines.sortOrder), asc(schema.jobCommitmentLines.createdAt)),
+    tx
+      .select()
+      .from(schema.jobCommitmentChangeOrders)
+      .where(
+        and(
+          eq(schema.jobCommitmentChangeOrders.tenantId, tenantId),
+          inArray(schema.jobCommitmentChangeOrders.commitmentId, ids),
+        ),
+      )
+      .orderBy(asc(schema.jobCommitmentChangeOrders.createdAt), asc(schema.jobCommitmentChangeOrders.number)),
+  ]);
+  const changeById = new Map(changes.map((c) => [c.id, c]));
 
   return headers.map((h) => {
     const mine = lines.filter((l) => l.commitmentId === h.commitment.id);
+    // The original lines first, then each change's in the order the changes were raised.
+    const original = mine.filter((l) => l.changeOrderId === null);
+    const byChange = changes
+      .filter((c) => c.commitmentId === h.commitment.id)
+      .flatMap((c) => mine.filter((l) => l.changeOrderId === c.id));
+    const views: CommitmentLineView[] = [...original, ...byChange].map((l) => {
+      const change = l.changeOrderId ? (changeById.get(l.changeOrderId) ?? null) : null;
+      return {
+        ...l,
+        change: change ? { id: change.id, number: change.number, status: change.status } : null,
+        counted: countsNow(l, change?.status ?? null),
+      };
+    });
+    const originalCents = original.reduce((sum, l) => sum + l.amountCents, 0);
+    const changesCents = views
+      .filter((l) => l.change !== null && l.counted)
+      .reduce((sum, l) => sum + l.amountCents, 0);
     return {
       commitment: h.commitment,
       vendorName: h.vendorName ?? "—",
-      lines: mine,
-      totalCents: mine.reduce((sum, l) => sum + l.amountCents, 0),
+      lines: views,
+      originalCents,
+      changesCents,
+      totalCents: originalCents + changesCents,
     };
   });
 }
@@ -1349,10 +1497,12 @@ export async function committedTotals(
         eq(schema.jobCommitments.id, schema.jobCommitmentLines.commitmentId),
       ),
     )
+    .leftJoin(schema.jobCommitmentChangeOrders, joinCommitmentChange())
     .where(
       and(
         eq(schema.jobCommitmentLines.tenantId, tenantId),
         inArray(schema.jobCommitments.status, [...COMMITTED_STATUSES]),
+        countedCommitmentLine(),
       ),
     )
     .groupBy(schema.jobCommitments.projectId, schema.jobCommitmentLines.costCodeId);
@@ -1797,11 +1947,13 @@ export async function jobCostReport(
           eq(schema.jobCommitments.id, schema.jobCommitmentLines.commitmentId),
         ),
       )
+      .leftJoin(schema.jobCommitmentChangeOrders, joinCommitmentChange())
       .where(
         and(
           eq(schema.jobCommitmentLines.tenantId, tenantId),
           eq(schema.jobCommitments.projectId, projectId),
           inArray(schema.jobCommitments.status, [...COMMITTED_STATUSES]),
+          countedCommitmentLine(),
         ),
       )
       .groupBy(schema.jobCommitmentLines.costCodeId),
@@ -2233,6 +2385,451 @@ export async function listChangeOrders(
     };
   });
 }
+// -------------------------------------------------- commitment change orders
+
+/**
+ * A change to ONE commitment — the payable-side twin of a change order, and
+ * the way an issued or billed order's lines move (ADR 0065).
+ *
+ * The header is a document: number, title, status, dates, and the client's
+ * change order it passes down, if any. The MONEY is lines in
+ * `job_commitment_lines` tagged with the change, so an approved change's lines
+ * are the subcontract's lines: `committedTotals`, the job cost report, the
+ * order's page and a subcontractor's application all read one table through
+ * `countedCommitmentLine`, and nothing is stored twice. A line may be
+ * NEGATIVE — a deductive change is a negative line, not a credit concept.
+ *
+ * **A CHANGE A SUBCONTRACTOR HAS BILLED AGAINST IS FIXED.** Its certificate
+ * points at the lines and its money counts on the job; so once any of its
+ * lines carries a billed application line, the change stays approved and its
+ * lines stay as they are (`CHANGE_BILLED`), while its words may still change.
+ * The RESTRICT on the application line is the backstop.
+ */
+
+export interface CommitmentChangeLineInput {
+  costCodeId?: string | null;
+  description?: string;
+  /** May be negative: a deductive change is a negative line. */
+  amountCents: number;
+}
+
+export interface CommitmentChangeOrderInput {
+  commitmentId: string;
+  number: string;
+  title: string;
+  description?: string;
+  status?: string;
+  requestedOn?: string | null;
+  approvedOn?: string | null;
+  notes?: string;
+  /** The client's change order this one passes down, if any — on the same job. */
+  changeOrderId?: string | null;
+  /** Zero lines is legitimate: a change with no money, such as a time extension. */
+  lines?: CommitmentChangeLineInput[];
+}
+
+function validateCommitmentChangeShape(input: {
+  status?: string;
+  lines?: CommitmentChangeLineInput[];
+}): void {
+  if (input.status !== undefined && !isChangeOrderStatus(input.status)) {
+    throw new JobsError("INVALID_STATUS", `invalid status: ${input.status}`);
+  }
+  for (const line of input.lines ?? []) {
+    // No sign check, on purpose: scope taken back is a negative line.
+    if (!Number.isInteger(line.amountCents)) {
+      throw new JobsError("INVALID_VALUE", "a change order line must be whole cents");
+    }
+  }
+}
+
+/**
+ * The client's change order a subcontract change passes down has to be on the
+ * same job: passing the plumber's change down from another house's CO-3 would
+ * tie two jobs' paperwork together with nothing on either page saying so.
+ */
+async function assertChangeOnProject(
+  tx: Tx,
+  tenantId: string,
+  changeOrderId: string,
+  projectId: string,
+): Promise<void> {
+  const rows = await tx
+    .select({ projectId: schema.jobContracts.projectId })
+    .from(schema.jobChangeOrders)
+    .innerJoin(
+      schema.jobContracts,
+      and(
+        eq(schema.jobContracts.tenantId, schema.jobChangeOrders.tenantId),
+        eq(schema.jobContracts.id, schema.jobChangeOrders.contractId),
+      ),
+    )
+    .where(
+      and(eq(schema.jobChangeOrders.tenantId, tenantId), eq(schema.jobChangeOrders.id, changeOrderId)),
+    )
+    .limit(1);
+  if (rows.length === 0) {
+    throw new JobsError("NOT_FOUND", `change order ${changeOrderId} not found`);
+  }
+  if (rows[0].projectId !== projectId) {
+    throw new JobsError("WRONG_PROJECT", "the client's change order named is on another job");
+  }
+}
+
+async function loadCommitmentChange(
+  tx: Tx,
+  tenantId: string,
+  id: string,
+): Promise<JobCommitmentChangeOrder> {
+  const rows = await tx
+    .select()
+    .from(schema.jobCommitmentChangeOrders)
+    .where(
+      and(
+        eq(schema.jobCommitmentChangeOrders.tenantId, tenantId),
+        eq(schema.jobCommitmentChangeOrders.id, id),
+      ),
+    )
+    .limit(1);
+  if (rows.length === 0) throw new JobsError("NOT_FOUND", `change order ${id} not found`);
+  return rows[0];
+}
+
+async function commitmentChangeLines(tx: Tx, tenantId: string, id: string): Promise<JobCommitmentLine[]> {
+  return tx
+    .select()
+    .from(schema.jobCommitmentLines)
+    .where(
+      and(
+        eq(schema.jobCommitmentLines.tenantId, tenantId),
+        eq(schema.jobCommitmentLines.changeOrderId, id),
+      ),
+    )
+    .orderBy(asc(schema.jobCommitmentLines.sortOrder), asc(schema.jobCommitmentLines.createdAt));
+}
+
+/**
+ * Which of the given changes a subcontractor has BILLED against, by id: a line
+ * of the change is on an application that is no longer a draft (billed, or
+ * void — a voided certificate's lines are still rows the key holds). A DRAFT's
+ * line on a change does not fix it: a draft is live, follows the schedule, and
+ * is what `dropDraftLinesOn` clears out of the way before the change's lines
+ * are replaced.
+ */
+async function billedChanges(tx: Tx, tenantId: string, ids: string[]): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  const rows = await tx
+    .selectDistinct({ changeOrderId: schema.jobCommitmentLines.changeOrderId })
+    .from(schema.jobSubApplicationLines)
+    .innerJoin(
+      schema.jobCommitmentLines,
+      and(
+        eq(schema.jobCommitmentLines.tenantId, schema.jobSubApplicationLines.tenantId),
+        eq(schema.jobCommitmentLines.id, schema.jobSubApplicationLines.commitmentLineId),
+      ),
+    )
+    .innerJoin(
+      schema.jobSubApplications,
+      and(
+        eq(schema.jobSubApplications.tenantId, schema.jobSubApplicationLines.tenantId),
+        eq(schema.jobSubApplications.id, schema.jobSubApplicationLines.subApplicationId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.jobSubApplicationLines.tenantId, tenantId),
+        inArray(schema.jobCommitmentLines.changeOrderId, ids),
+        ne(schema.jobSubApplications.status, "draft"),
+      ),
+    );
+  return new Set(rows.map((r) => r.changeOrderId).filter((id): id is string => id !== null));
+}
+
+/**
+ * A DRAFT application's lines on the given commitment lines, removed — so the
+ * lines can be replaced under it. The draft's sync gives it a line for each
+ * new one on its next edit, carrying nothing typed on the old, because the old
+ * line no longer exists to carry.
+ */
+async function dropDraftLinesOn(tx: Tx, tenantId: string, lineIds: string[]): Promise<void> {
+  if (lineIds.length === 0) return;
+  const drafts = await tx
+    .select({ id: schema.jobSubApplicationLines.id })
+    .from(schema.jobSubApplicationLines)
+    .innerJoin(
+      schema.jobSubApplications,
+      and(
+        eq(schema.jobSubApplications.tenantId, schema.jobSubApplicationLines.tenantId),
+        eq(schema.jobSubApplications.id, schema.jobSubApplicationLines.subApplicationId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.jobSubApplicationLines.tenantId, tenantId),
+        inArray(schema.jobSubApplicationLines.commitmentLineId, lineIds),
+        eq(schema.jobSubApplications.status, "draft"),
+      ),
+    );
+  if (drafts.length === 0) return;
+  await tx.delete(schema.jobSubApplicationLines).where(
+    and(
+      eq(schema.jobSubApplicationLines.tenantId, tenantId),
+      inArray(
+        schema.jobSubApplicationLines.id,
+        drafts.map((d) => d.id),
+      ),
+    ),
+  );
+}
+
+export async function createCommitmentChangeOrder(
+  tx: Tx,
+  ctx: JobsCtx,
+  input: CommitmentChangeOrderInput,
+): Promise<JobCommitmentChangeOrder> {
+  requireWrite(ctx, "owner");
+  validateCommitmentChangeShape(input);
+  const commitment = await tx
+    .select({ id: schema.jobCommitments.id, projectId: schema.jobCommitments.projectId })
+    .from(schema.jobCommitments)
+    .where(
+      and(eq(schema.jobCommitments.tenantId, ctx.tenantId), eq(schema.jobCommitments.id, input.commitmentId)),
+    )
+    .limit(1);
+  if (commitment.length === 0) {
+    throw new JobsError("NOT_FOUND", `commitment ${input.commitmentId} not found`);
+  }
+  if (input.changeOrderId) {
+    await assertChangeOnProject(tx, ctx.tenantId, input.changeOrderId, commitment[0].projectId);
+  }
+  const status = input.status ?? "proposed";
+  const rows = await tx
+    .insert(schema.jobCommitmentChangeOrders)
+    .values({
+      tenantId: ctx.tenantId,
+      commitmentId: commitment[0].id,
+      changeOrderId: input.changeOrderId ?? null,
+      number: input.number.trim(),
+      title: input.title.trim(),
+      description: input.description?.trim() ?? "",
+      status,
+      requestedOn: input.requestedOn ?? null,
+      approvedOn: approvalDateFor(status, input.approvedOn ?? null),
+      notes: input.notes?.trim() ?? "",
+      createdByClerkUserId: ctx.userId,
+    })
+    .returning();
+  const change = rows[0];
+  if (input.lines && input.lines.length > 0) {
+    await tx.insert(schema.jobCommitmentLines).values(
+      input.lines.map((line, i) => ({
+        tenantId: ctx.tenantId,
+        commitmentId: commitment[0].id,
+        changeOrderId: change.id,
+        costCodeId: line.costCodeId ?? null,
+        description: line.description?.trim() ?? "",
+        amountCents: line.amountCents,
+        sortOrder: i * 10,
+      })),
+    );
+  }
+  return change;
+}
+
+/**
+ * Change a commitment change order's header, and REPLACE its lines when any
+ * are given — the client-side rule, for the client-side reason: the lines are
+ * one document somebody is editing in front of them, and an empty array is an
+ * instruction. The commitment it changes is not editable, as a change order's
+ * contract is not.
+ *
+ * Once a subcontractor has billed against it: the status stays approved and
+ * the lines stay as they are. Words, dates and the change it passes down may
+ * still change.
+ */
+export async function updateCommitmentChangeOrder(
+  tx: Tx,
+  ctx: JobsCtx,
+  id: string,
+  input: Partial<Omit<CommitmentChangeOrderInput, "commitmentId">> & { version?: number },
+): Promise<JobCommitmentChangeOrder> {
+  requireWrite(ctx, "owner");
+  validateCommitmentChangeShape(input);
+  const existing = await loadCommitmentChange(tx, ctx.tenantId, id);
+  if (input.version !== undefined && input.version !== existing.version) {
+    throw new JobsError("STALE_VERSION", "change order changed since loaded");
+  }
+  const billed = (await billedChanges(tx, ctx.tenantId, [id])).has(id);
+  const status = input.status ?? existing.status;
+  if (billed && status !== "approved") {
+    throw new JobsError("CHANGE_BILLED", "a change a subcontractor has billed against stays approved");
+  }
+  if (input.changeOrderId) {
+    const commitment = await tx
+      .select({ projectId: schema.jobCommitments.projectId })
+      .from(schema.jobCommitments)
+      .where(
+        and(
+          eq(schema.jobCommitments.tenantId, ctx.tenantId),
+          eq(schema.jobCommitments.id, existing.commitmentId),
+        ),
+      )
+      .limit(1);
+    await assertChangeOnProject(tx, ctx.tenantId, input.changeOrderId, commitment[0].projectId);
+  }
+  const approvedOn = input.approvedOn !== undefined ? input.approvedOn : existing.approvedOn;
+  const patch: Record<string, unknown> = {
+    updatedAt: new Date(),
+    version: existing.version + 1,
+    status,
+    approvedOn: approvalDateFor(status, approvedOn),
+  };
+  if (input.number !== undefined) patch.number = input.number.trim();
+  if (input.title !== undefined) patch.title = input.title.trim();
+  if (input.description !== undefined) patch.description = input.description.trim();
+  if (input.requestedOn !== undefined) patch.requestedOn = input.requestedOn;
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+  if (input.changeOrderId !== undefined) patch.changeOrderId = input.changeOrderId;
+  const rows = await tx
+    .update(schema.jobCommitmentChangeOrders)
+    .set(patch)
+    .where(
+      and(
+        eq(schema.jobCommitmentChangeOrders.tenantId, ctx.tenantId),
+        eq(schema.jobCommitmentChangeOrders.id, id),
+      ),
+    )
+    .returning();
+
+  if (input.lines !== undefined) {
+    const current = await commitmentChangeLines(tx, ctx.tenantId, id);
+    if (!sameCommitmentLines(current, input.lines)) {
+      if (billed) {
+        throw new JobsError("CHANGE_BILLED", "a change a subcontractor has billed against keeps its lines");
+      }
+      await dropDraftLinesOn(
+        tx,
+        ctx.tenantId,
+        current.map((l) => l.id),
+      );
+      await tx
+        .delete(schema.jobCommitmentLines)
+        .where(
+          and(
+            eq(schema.jobCommitmentLines.tenantId, ctx.tenantId),
+            eq(schema.jobCommitmentLines.changeOrderId, id),
+          ),
+        );
+      if (input.lines.length > 0) {
+        await tx.insert(schema.jobCommitmentLines).values(
+          input.lines.map((line, i) => ({
+            tenantId: ctx.tenantId,
+            commitmentId: existing.commitmentId,
+            changeOrderId: id,
+            costCodeId: line.costCodeId ?? null,
+            description: line.description?.trim() ?? "",
+            amountCents: line.amountCents,
+            sortOrder: i * 10,
+          })),
+        );
+      }
+    }
+  }
+  return rows[0];
+}
+
+export interface CommitmentChangeOrderRow {
+  changeOrder: JobCommitmentChangeOrder;
+  commitment: Pick<JobCommitment, "id" | "number" | "kind" | "status">;
+  /** The client's change order it passes down, or null for a change of the business's own. */
+  passesDown: { id: string; number: string; title: string } | null;
+  lines: JobCommitmentLine[];
+  /** The lines summed, signed: what the change moves the order by. */
+  amountCents: number;
+  /** A subcontractor has billed against one of its lines: its status and lines are fixed. */
+  billed: boolean;
+}
+
+/**
+ * Every change order on a project's commitments, in the order the commitments
+ * sit and the changes were raised, each with its lines, the client's change
+ * order it passes down, and whether it has been billed against.
+ */
+export async function listCommitmentChangeOrders(
+  tx: Tx,
+  tenantId: string,
+  projectId: string,
+): Promise<CommitmentChangeOrderRow[]> {
+  const heads = await tx
+    .select({
+      changeOrder: schema.jobCommitmentChangeOrders,
+      commitment: {
+        id: schema.jobCommitments.id,
+        number: schema.jobCommitments.number,
+        kind: schema.jobCommitments.kind,
+        status: schema.jobCommitments.status,
+      },
+      passesDown: {
+        id: schema.jobChangeOrders.id,
+        number: schema.jobChangeOrders.number,
+        title: schema.jobChangeOrders.title,
+      },
+    })
+    .from(schema.jobCommitmentChangeOrders)
+    .innerJoin(
+      schema.jobCommitments,
+      and(
+        eq(schema.jobCommitments.tenantId, schema.jobCommitmentChangeOrders.tenantId),
+        eq(schema.jobCommitments.id, schema.jobCommitmentChangeOrders.commitmentId),
+      ),
+    )
+    .leftJoin(
+      schema.jobChangeOrders,
+      and(
+        eq(schema.jobChangeOrders.tenantId, schema.jobCommitmentChangeOrders.tenantId),
+        eq(schema.jobChangeOrders.id, schema.jobCommitmentChangeOrders.changeOrderId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.jobCommitmentChangeOrders.tenantId, tenantId),
+        eq(schema.jobCommitments.projectId, projectId),
+      ),
+    )
+    .orderBy(
+      asc(schema.jobCommitments.number),
+      asc(schema.jobCommitmentChangeOrders.createdAt),
+      asc(schema.jobCommitmentChangeOrders.number),
+    );
+  if (heads.length === 0) return [];
+  const ids = heads.map((h) => h.changeOrder.id);
+  const [lines, billed] = await Promise.all([
+    tx
+      .select()
+      .from(schema.jobCommitmentLines)
+      .where(
+        and(
+          eq(schema.jobCommitmentLines.tenantId, tenantId),
+          inArray(schema.jobCommitmentLines.changeOrderId, ids),
+        ),
+      )
+      .orderBy(asc(schema.jobCommitmentLines.sortOrder), asc(schema.jobCommitmentLines.createdAt)),
+    billedChanges(tx, tenantId, ids),
+  ]);
+  return heads.map((h) => {
+    const own = lines.filter((l) => l.changeOrderId === h.changeOrder.id);
+    return {
+      changeOrder: h.changeOrder,
+      commitment: h.commitment,
+      passesDown: h.passesDown && h.passesDown.id ? h.passesDown : null,
+      lines: own,
+      amountCents: own.reduce((sum, l) => sum + l.amountCents, 0),
+      billed: billed.has(h.changeOrder.id),
+    };
+  });
+}
+
+
 // ------------------------------------------------------------------- billing
 
 export interface SovLineInput {

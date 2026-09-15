@@ -2437,6 +2437,20 @@
       "when": 1789432561558,
       "tag": "0347_unit_price",
       "breakpoints": true
+    },
+    {
+      "idx": 348,
+      "version": "7",
+      "when": 1789436879539,
+      "tag": "0348_commitment_change_orders",
+      "breakpoints": true
+    },
+    {
+      "idx": 349,
+      "version": "7",
+      "when": 1789436914408,
+      "tag": "0349_commitment_change_orders_rls",
+      "breakpoints": true
     }
   ]
 }

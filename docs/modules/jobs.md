@@ -13,6 +13,124 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-14 — Slice 4b: subcontract change orders (`claude/subcontract-change-orders`, ADR 0065)
+
+`job_commitment_change_orders`, a `change_order_id` tag on
+`job_commitment_lines`, a **Change orders** panel on every order's page, and
+the door 5c said was missing: **a billed subcontract can be changed** — by a
+change order on the order, which is what the trade does on paper.
+
+**THE PAYABLE SIDE OF original + approved changes = revised.** A change to a
+subcontract (or a purchase order — the verb does not care which) is its own
+row against ONE commitment: a number unique per order, a title, the
+client-side statuses and the client-side rule that approved has a date and
+nothing else does, and — when it is the subcontractor's share of one — the
+client's change order it **passes down**, RESTRICT and on the same job
+(`WRONG_PROJECT` otherwise). It is not a second kind of `job_change_orders`:
+that row has a price and a cost with a markup between them; a change to a
+subcontract has one number.
+
+**ITS MONEY IS THE ORDER'S LINES, TAGGED.** An order's original lines carry
+no tag; a change's lines carry the change's id, in the same table. Nothing
+is stored twice: what an order is worth now is original + approved changes,
+summed wherever it is shown through one predicate, `countedCommitmentLine`
+(the line is original, or its change is approved), which `listCommitments`,
+`committedTotals`, the job cost report's `Ordered` column and the
+subcontractor's schedule all read. So an approved change reaches the open
+draft application on its next edit — after the original lines, with the
+change's number in front (`SCO-1 · Blocking`) — and the bill's line names it:
+*Application 1 — SCO-1 · Blocking through 2026-09-30*. A change taken back
+takes its draft line with it, whatever was typed. The sync also keeps a
+draft line's `scheduled_cents` equal to the order's amount now, which the
+next paragraph needs.
+
+**A DEDUCTION IS A NEGATIVE LINE THAT RUNS BACKWARDS.** Scope taken back is
+`-2,000` on the change, the one way a commitment line goes below zero
+(`amount_cents >= 0 or change_order_id is not null`). On the subcontractor's
+application that line is completed to less than nothing and never more, and
+nothing is stored against it; the two floors on `job_sub_application_lines`
+flip on the sign of `scheduled_cents` (`case when … < 0 then … <= 0 else …
+>= 0 end`), and `percentComplete` reads a deduction's percent like any
+other's — `-2,000` of `-2,000` is 100%, and nothing done on it is `0`, not
+`-0`. The ops test bills 10,000 of trim and −2,000 of dropped garage trim on
+one application: three bill lines, retainage on the net.
+
+**AN ISSUED ORDER'S LINES ARE LOCKED, AS A SIGNED VALUE IS.** Once an order
+counts, its lines are the original half of the line every report reads, and
+so are a billed draft's; `updateCommitment` compares the lines sent with the
+lines it has and refuses `LINES_LOCKED` when they differ — the same lines
+sent back are not an edit, so a status or a note still saves — and the form
+shows the locked lines with *Issued. The lines change with a change order,
+on the order's page.* and does not send them. A change a subcontractor has
+billed against is fixed the same way: it stays approved and keeps its lines
+(`CHANGE_BILLED`), while its title, words, dates and what it passes down
+still change.
+
+**WHAT THE PAGES SAY.** The order's value tile reads the revised sum with
+*orig. $… · $… in approved changes* under it; its Lines table carries
+*Added by SCO-1* under a change's line and prints a deduction with its sign;
+the new Change orders panel lists number, change (with *Approved <date>* and
+*Passes down CO-3 · …*), amount, status and *Billed against*, with the
+dialog behind the pencil; the project's Ordered table prints the revised sum
+with *orig.* beneath and counts the lines that count. `toResult`'s
+`INVALID_VALUE` now hands on the verb's own sentence — *A deduction cannot
+be completed to more than nothing.* — instead of *A contract value cannot be
+negative.* for every refusal of that code, a wrong sentence four slices old.
+
+**DRIVEN ON THE DEV BRANCH, on 24-109's SC-24109-1** (the framing
+subcontract 5c billed at $13,500.00 with $1,500.00 held). The job's Ordered
+table: the pencil on the issued order opens the dialog with its one line
+shown, not editable — *06 10 00 · Rough carpentry 30000.00 · Issued. The
+lines change with a change order, on the order's page.* The order's page:
+*Add change order* → `SCO-1` *Extra blocking at the stair*, the scope in
+words, *Passes down* left at *None — a change of our own*, one line `06 10
+00 · Rough carpentry` *Blocking* `4000`, *Approved* (the date filled in
+with today) → *Change order added*, and the page read **Subcontract value
+$34,000.00 · orig. $30,000.00 · $4,000.00 in approved changes · 2 lines ·
+Balance to finish $19,000.00**, the Lines table **Blocking · Added by SCO-1
+· $4,000.00 · 0%**, the panel **1 approved, worth $4,000.00 on the
+subcontract**. *New application* → period to 2026-10-31, 10%, their ref.
+`FR-2042` → *Open*: the grid carried **SCO-1 · Blocking $4,000.00** under
+the original line; `5000` and `4000` priced live to **Completed
+$24,000.00 · Retainage −$2,400.00 · Less previous −$13,500.00 · Current
+payment due $8,100.00 · Balance to finish $10,000.00**, 66.7% and 100%.
+*Approve as bill* → **2 billed for $21,600.00**, the row *Billed · FR-2042 ·
+Open*, the change's status now *Billed against*; in Accounting the bill
+read **Application 2 — 06 10 00 · Rough carpentry through 2026-10-31 ·
+5100 · 5,000.00 · Application 2 — SCO-1 · Blocking through 2026-10-31 ·
+5100 · 4,000.00 · Retainage held (10%) · 2120 · (900.00) · total 8,100.00**.
+Back on the job: the Ordered table **SC-24109-1 · 2 lines · $34,000.00 /
+orig. $30,000.00 · $21,600.00 / $2,400.00 held**, *Committed $34,000.00*,
+and the job cost row `06 10 00` *Ordered $34,000.00*. **One thing driving
+showed**: the change read *Billed against* the moment the draft picked its
+line up, because "billed" had counted any application line, a draft's
+included — so a change with a draft on it could not have been taken back or
+re-lined, though the sync would have dropped the draft line anyway. Billed
+now means an application that is no longer a draft, and replacing a
+change's lines first clears any draft's lines on them (`dropDraftLinesOn`);
+the ops test's last act, a declined change leaving an open draft, is what
+caught it in the suite. Not driven: a deductive change and a purchase
+order's revision, both in the ops test.
+
+Migrations `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql`
+applied to dev and prod before the merge; `db:verify-rls` **213 tables** on
+both, `db:verify-modules` 19/19. As generated, no hand-reordering: the new
+table's unique index lands before the lines' key to it. Tests: six more pure
+(the status list mirrored, the date rule and per-order numbering, the three
+keys, the floor's one exception, the flipped floors, a deduction's percent),
+one more ops (the lock and the same-lines pass, the wrong job and staff
+refused, a proposed change counted by nothing, approval needing a date and
+moving the order, the job and the report, the draft picking the line up, the
+bill naming the change, billed-against fixed, the deduction billed
+backwards with both refusals, per-order numbering by the index, a purchase
+order's revision, a draft order's lines still free, a declined change
+leaving the draft), one more isolation (read, write, the two cross-tenant
+parents, a cross-tenant line, the date rule both ways, per-order numbering,
+the negative floor, the flipped application floors, RESTRICT on a billed
+deduction and on the client change it passes down, cascade); the 5c refusal
+now asserted by code.
+
+
 ### 2026-09-14 — Slice 5f: unit price (`claude/unit-price`, ADR 0064)
 
 The sixth and last billing method, the one still "recorded and billed by
@@ -1548,9 +1666,10 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_pay_application_labor` | One line of a TIME-AND-MATERIALS application per person and rate: Time's approved worked minutes on the job at that rate as of the period end, what earlier applications billed of them, what this one bills, and the cents. | Cascade from the application; **RESTRICT to Time's `time_workers`** — a person with billed hours is deactivated, never deleted. Unique per `(application, worker, rate_cents)`; `rate_cents` NOT NULL with 0 meaning no rate found, so the key is never null. `minutes_to_date` ≥ 0; `this_period_minutes` may be negative (hours credited back). See ADR 0062. |
 | `job_pay_application_lines` | One line of the G703 per schedule line; on a unit-priced item, `quantity_previous_thousandths` (carried) and `quantity_this_period_thousandths` (typed, may be negative) beside the money, which is the quantity at the price (5f). | Cascade from the application; **RESTRICT to the schedule line** — billed lines are never removed. `previous` and `stored` ≥ 0; `this_period` may be NEGATIVE (a correction); CHECK that the three sum to ≥ 0, and that the two quantities do. `scheduled_cents` frozen at issue. |
 | `job_commitments` | What the business has ORDERED: a purchase order or a subcontract. | `party_id` is NOT NULL — a commitment with nobody to pay is a budget line, not a commitment. `kind` is a CHECK list of two because the two diverge in behaviour later. Number unique per tenant: a vendor quotes it back on the invoice. Cascade from the project. |
+| `job_commitment_change_orders` | A change to ONE commitment — a subcontract change order or a purchase-order revision: number, title, the client-side statuses, the approval date, and the client's change order it passes down, if any (4b, ADR 0065). Its MONEY is the commitment lines tagged with it. | Cascade from the commitment; **RESTRICT to `job_change_orders`** — the client's change a sub change passes down cannot go from under it, and must be on the same job (the verb checks). Number unique per `(tenant, commitment)`. CHECK `(status = 'approved') = (approved_on is not null)`, both ways, as the client-side row. |
 | `job_sub_applications` | A subcontractor's application against a SUBCONTRACT: the G702 read from the other side of the table. | Numbered per commitment, void ones included. `status` draft/billed/void. `retainage_ppm` 0–1,000,000. Five totals FROZEN at approval. `bill_id` RESTRICT to Accounting's `bills`; CHECK `(status = 'draft') = (bill_id is null)`, both ways. Cascade from the commitment. See ADR 0061. |
-| `job_sub_application_lines` | One line per subcontract line: previous, this period, stored. | Cascade from the application; **RESTRICT to the subcontract line** — a billed line cannot be replaced out from under its certificate. `this_period` may be negative; the total to date may not. |
-| `job_commitment_lines` | The money, one cost code at a time. | Cascade from the commitment; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative — a credit is a change order. |
+| `job_sub_application_lines` | One line per subcontract line: previous, this period, stored. | Cascade from the application; **RESTRICT to the subcontract line** — a billed line cannot be replaced out from under its certificate. `this_period` may be negative; the total to date may not — on a DEDUCTIVE line (a change order's negative line) the floors flip: completed to less than nothing and never more, `scheduled_cents` kept equal to the line's amount by the sync while a draft (4b). |
+| `job_commitment_lines` | The money, one cost code at a time — the lines the order was placed with (`change_order_id` null) and each change order's, tagged with it (4b). | Cascade from the commitment and from the change; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative on an original line — a credit is a change order — and a change's line may be negative, the one exception in the CHECK. A line counts when it is original or its change is approved: `countedCommitmentLine`, one predicate for every roll-up. |
 | `job_projects` | The spine. | FOUR composite FKs, each certified in `tests/isolation/jobs.test.ts`: company, division, client, cost code list. `delivery_method` is an open taxonomy (P1) with a **format check and no value check**, and is nullable. `metadata` is the P2 extension bag. |
 
 Migrations `0325_jobs.sql` / `0326_jobs_rls.sql` (slice 0) and
@@ -1567,9 +1686,9 @@ hand-reordered like 0329) and `0335_job_billing.sql` / `0336_job_billing_rls.sql
 `wip_adjustment` to `journal_entry_source`, which nothing in the file uses)
 and `0341_cost_plus.sql` / `0342_cost_plus_rls.sql` (slice 5b; as generated,
 since the new table references existing ones only) and `0343_sub_billing.sql`
-/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) follow the same rule —
+/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) follow the same rule —
 and from slice 3 the pair is `db:verify-rls` **and `db:verify-modules`**, after
-the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **212 tables**, all enabled, forced and with
+the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **213 tables**, all enabled, forced and with
 policies, on both.
 
 **0327 needed no hand-reordering, which confirms the diagnosis in 0325.** Both
@@ -1741,6 +1860,13 @@ ordering only bites when two new tables reference each other in one file.
   fixed-value methods get a schedule; cost plus a fee gets the books' cost;
   time and materials gets Time's hours and the books' cost without the
   wages; unit price gets a note. Never the kind.
+- **A subcontract change order adds lines to the order it changes, and an
+  issued order's lines are locked** — [ADR 0065](../decisions/0065-a-subcontract-change-order-adds-lines-to-the-order-and-an-issued-orders-lines-are-locked.md).
+  Its own row against one commitment, the client-side statuses and date
+  rule, the client's change it passes down; its money is commitment lines
+  tagged with it, counted while approved through one predicate, billed by
+  the subcontractor's application as the same rows; a deduction is a
+  negative line that runs backwards; billed against means fixed.
 - **A unit-price application bills quantities at the schedule's prices, and
   the schedule's value is an estimate** — [ADR 0064](../decisions/0064-a-unit-price-application-bills-quantities-at-the-schedules-prices.md). The schedule with three
   more columns, both or neither; quantities in integer thousandths, typed by
@@ -1805,11 +1931,14 @@ ordering only bites when two new tables reference each other in one file.
 - **A signed certificate cannot be attached to its application.** The scan
   the owner returns belongs beside the row; Documents' attachments are the
   seam, as the daily log's photos are.
-- **A billed subcontract cannot be changed.** Its lines are held by RESTRICT
-  once an application has billed against them, so `updateCommitment`'s
-  replace-the-lines edit refuses. The honest fix is a change order's
-  payable-side twin — a subcontract change order that adds lines and revises
-  the sum — and nobody has asked yet.
+- ~~**A billed subcontract cannot be changed.**~~ — **closed 2026-09-14
+  (slice 4b, ADR 0065)**: a change order on the order adds lines the next
+  application bills, and an issued order's lines are locked the way a signed
+  value is. Still open from it: **a back-charge** — money deducted from a
+  subcontractor's payment for something the business paid on their behalf —
+  is not a change to the scope and is not built; it is a negative line on
+  the application with its own account, the day a GC asks. And **a change
+  order does not print**, as the subcontractor's application does not.
 - **Lien waivers** are the document a subcontractor signs to get the retainage
   released, and the next thing a GC's bookkeeper asks for once retainage is
   tracked. Work raised where it lives (extension-model §4b) when it comes.

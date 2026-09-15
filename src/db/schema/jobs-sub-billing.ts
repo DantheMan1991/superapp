@@ -33,6 +33,14 @@
  * application at a lower rate computes less retainage to date than the last
  * one held, the line to `2120` is positive, and the bill pays it out.
  *
+ * ── A DEDUCTIVE LINE RUNS BACKWARDS (ADR 0065) ──────────────────────────────
+ *
+ * Since a subcontract change order may add a NEGATIVE line — scope taken
+ * back — an application line on one is completed to LESS than nothing and
+ * never more: the two floors below flip on the sign of `scheduled_cents`,
+ * which the sync keeps equal to the subcontract line's amount while the
+ * application is a draft. Stored materials stay ≥ 0 on every line.
+ *
  * ── SUBCONTRACTS ONLY ───────────────────────────────────────────────────────
  *
  * A purchase order is billed with an ordinary bill in Accounting; retainage,
@@ -196,11 +204,15 @@ export const jobSubApplicationLines = pgTable(
       columns: [t.tenantId, t.commitmentLineId],
       foreignColumns: [jobCommitmentLines.tenantId, jobCommitmentLines.id],
     }),
-    check("job_sub_application_lines_previous_nonnegative", sql`${t.previousCents} >= 0`),
+    /** A line's floor is on its schedule's side of zero: see the file header. */
+    check(
+      "job_sub_application_lines_previous_nonnegative",
+      sql`${t.previousCents} >= 0 or ${t.scheduledCents} < 0`,
+    ),
     check("job_sub_application_lines_stored_nonnegative", sql`${t.storedCents} >= 0`),
     check(
       "job_sub_application_lines_completed_nonnegative",
-      sql`${t.previousCents} + ${t.thisPeriodCents} + ${t.storedCents} >= 0`,
+      sql`case when ${t.scheduledCents} < 0 then ${t.previousCents} + ${t.thisPeriodCents} + ${t.storedCents} <= 0 else ${t.previousCents} + ${t.thisPeriodCents} + ${t.storedCents} >= 0 end`,
     ),
   ],
 );

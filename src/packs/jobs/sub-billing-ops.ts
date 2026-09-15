@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type {
   JobCommitment,
@@ -23,6 +23,7 @@ import {
 } from "./billing-math";
 import { JobsError, accountByCode, getProject, requireWrite, type JobsCtx } from "./ops";
 import {
+  APPROVED_CHANGE_STATUSES,
   COST_CODE_DIMENSION,
   PROJECT_DIMENSION,
   RETAINAGE_PAYABLE_CODE,
@@ -51,6 +52,8 @@ export interface SubApplicationLineRow extends JobSubApplicationLine {
   codeLabel: string | null;
   /** The subcontract line's amount NOW; equals `scheduledCents` on a billed application. */
   commitmentAmountCents: number;
+  /** The change order that added the line — its number — or null for a line the order was placed with. */
+  changeNumber: string | null;
 }
 
 export interface SubApplicationRow {
@@ -85,17 +88,46 @@ export async function getCommitment(
   return rows[0] ?? null;
 }
 
+/** The change order that added a line, if any — the join every read of the schedule shares. */
+function joinChange() {
+  return and(
+    eq(schema.jobCommitmentChangeOrders.tenantId, schema.jobCommitmentLines.tenantId),
+    eq(schema.jobCommitmentChangeOrders.id, schema.jobCommitmentLines.changeOrderId),
+  );
+}
+
+/** The original lines first, then each change's in the order the changes were raised. */
+function scheduleOrder() {
+  return [
+    sql`${schema.jobCommitmentChangeOrders.createdAt} asc nulls first`,
+    asc(schema.jobCommitmentLines.sortOrder),
+    asc(schema.jobCommitmentLines.createdAt),
+  ];
+}
+
+/**
+ * THE SUBCONTRACT'S SCHEDULE: the lines it was placed with, and the lines of
+ * its APPROVED change orders (ADR 0065) — `countedCommitmentLine` in ops.ts,
+ * read here through the same join. A proposed change's lines are not yet the
+ * subcontractor's to bill.
+ */
 async function commitmentLines(tx: Tx, tenantId: string, commitmentId: string): Promise<JobCommitmentLine[]> {
-  return tx
-    .select()
+  const rows = await tx
+    .select({ line: schema.jobCommitmentLines })
     .from(schema.jobCommitmentLines)
+    .leftJoin(schema.jobCommitmentChangeOrders, joinChange())
     .where(
       and(
         eq(schema.jobCommitmentLines.tenantId, tenantId),
         eq(schema.jobCommitmentLines.commitmentId, commitmentId),
+        or(
+          isNull(schema.jobCommitmentLines.changeOrderId),
+          inArray(schema.jobCommitmentChangeOrders.status, [...APPROVED_CHANGE_STATUSES]),
+        ),
       ),
     )
-    .orderBy(asc(schema.jobCommitmentLines.sortOrder), asc(schema.jobCommitmentLines.createdAt));
+    .orderBy(...scheduleOrder());
+  return rows.map((r) => r.line);
 }
 
 /**
@@ -155,6 +187,7 @@ async function loadAppLines(
       sortOrder: schema.jobCommitmentLines.sortOrder,
       code: schema.jobCostCodes.code,
       codeName: schema.jobCostCodes.name,
+      changeNumber: schema.jobCommitmentChangeOrders.number,
     })
     .from(schema.jobSubApplicationLines)
     .innerJoin(
@@ -171,13 +204,14 @@ async function loadAppLines(
         eq(schema.jobCostCodes.id, schema.jobCommitmentLines.costCodeId),
       ),
     )
+    .leftJoin(schema.jobCommitmentChangeOrders, joinChange())
     .where(
       and(
         eq(schema.jobSubApplicationLines.tenantId, tenantId),
         inArray(schema.jobSubApplicationLines.subApplicationId, appIds),
       ),
     )
-    .orderBy(asc(schema.jobCommitmentLines.sortOrder), asc(schema.jobCommitmentLines.createdAt));
+    .orderBy(...scheduleOrder());
   for (const r of rows) {
     const list = out.get(r.line.subApplicationId) ?? [];
     list.push({
@@ -186,6 +220,7 @@ async function loadAppLines(
       costCodeId: r.costCodeId,
       codeLabel: r.code ? `${r.code} · ${r.codeName}` : null,
       commitmentAmountCents: r.commitmentAmountCents,
+      changeNumber: r.changeNumber ?? null,
     });
     out.set(r.line.subApplicationId, list);
   }
@@ -257,12 +292,23 @@ function validateRetainage(ppm: number): void {
  * what the last billed application completed on each — work only, never
  * stored materials. Called when a draft is made and again whenever it is
  * edited, so a subcontract that grew after the draft did reaches it.
+ *
+ * Two more things a change order made necessary (ADR 0065): a draft line
+ * whose change has stopped counting — approved when the draft was made, taken
+ * back since — is dropped, whatever was typed on it, because it is a draft's
+ * figure on a line the subcontractor may no longer bill; and every draft
+ * line's `scheduled_cents` is kept equal to the subcontract line's amount
+ * now, so the sign the database floors on is the line's own.
  */
 async function syncDraftLines(tx: Tx, tenantId: string, app: JobSubApplication): Promise<void> {
   const [lines, have, previous] = await Promise.all([
     commitmentLines(tx, tenantId, app.commitmentId),
     tx
-      .select({ commitmentLineId: schema.jobSubApplicationLines.commitmentLineId })
+      .select({
+        id: schema.jobSubApplicationLines.id,
+        commitmentLineId: schema.jobSubApplicationLines.commitmentLineId,
+        scheduledCents: schema.jobSubApplicationLines.scheduledCents,
+      })
       .from(schema.jobSubApplicationLines)
       .where(
         and(
@@ -272,6 +318,28 @@ async function syncDraftLines(tx: Tx, tenantId: string, app: JobSubApplication):
       ),
     lastBilledBefore(tx, tenantId, app.commitmentId, app.number),
   ]);
+  const amountOf = new Map(lines.map((l) => [l.id, l.amountCents]));
+  const stale = have.filter((h) => !amountOf.has(h.commitmentLineId));
+  if (stale.length > 0) {
+    await tx.delete(schema.jobSubApplicationLines).where(
+      and(
+        eq(schema.jobSubApplicationLines.tenantId, tenantId),
+        inArray(
+          schema.jobSubApplicationLines.id,
+          stale.map((h) => h.id),
+        ),
+      ),
+    );
+  }
+  for (const h of have) {
+    const now = amountOf.get(h.commitmentLineId);
+    if (now !== undefined && now !== h.scheduledCents) {
+      await tx
+        .update(schema.jobSubApplicationLines)
+        .set({ scheduledCents: now, updatedAt: new Date() })
+        .where(eq(schema.jobSubApplicationLines.id, h.id));
+    }
+  }
   const has = new Set(have.map((h) => h.commitmentLineId));
   const missing = lines.filter((l) => !has.has(l.id));
   if (missing.length === 0) return;
@@ -408,15 +476,7 @@ export async function updateSubApplication(
   await syncDraftLines(tx, ctx.tenantId, app);
 
   if (input.lines) {
-    const current = await tx
-      .select()
-      .from(schema.jobSubApplicationLines)
-      .where(
-        and(
-          eq(schema.jobSubApplicationLines.tenantId, ctx.tenantId),
-          eq(schema.jobSubApplicationLines.subApplicationId, id),
-        ),
-      );
+    const current = (await loadAppLines(tx, ctx.tenantId, [id])).get(id) ?? [];
     const byLine = new Map(current.map((l) => [l.commitmentLineId, l]));
     for (const line of input.lines) {
       const row = byLine.get(line.commitmentLineId);
@@ -427,8 +487,21 @@ export async function updateSubApplication(
       if (line.storedCents < 0) {
         throw new JobsError("INVALID_VALUE", "stored materials cannot be negative");
       }
-      if (row.previousCents + line.thisPeriodCents + line.storedCents < 0) {
-        throw new JobsError("INVALID_VALUE", "a line cannot be completed to less than nothing");
+      // A DEDUCTIVE line — a change order's negative line — runs backwards:
+      // completed to less than nothing and never more, and nothing is stored
+      // against it. The database's floors flip on the same sign.
+      const deductive = row.commitmentAmountCents < 0;
+      if (deductive && line.storedCents > 0) {
+        throw new JobsError("INVALID_VALUE", "nothing is stored against a deduction");
+      }
+      const toDate = row.previousCents + line.thisPeriodCents + line.storedCents;
+      if (deductive ? toDate > 0 : toDate < 0) {
+        throw new JobsError(
+          "INVALID_VALUE",
+          deductive
+            ? "a deduction cannot be completed to more than nothing"
+            : "a line cannot be completed to less than nothing",
+        );
       }
       await tx
         .update(schema.jobSubApplicationLines)
@@ -558,8 +631,9 @@ export async function approveSubApplication(
       const toDate = l.previousCents + l.thisPeriodCents + l.storedCents;
       const thisPeriod = toDate - (priorByLine.get(l.commitmentLineId) ?? 0);
       return {
-        // The line's own words, else its cost code — never "subcontract line" on a bill a bookkeeper reads.
-        description: `Application ${app.number} — ${l.description || l.codeLabel || "subcontract line"} through ${app.periodTo}`,
+        // The line's own words, else its cost code — never "subcontract line" on a
+        // bill a bookkeeper reads — and the change order that added it, by number.
+        description: `Application ${app.number} — ${l.changeNumber ? `${l.changeNumber} · ` : ""}${l.description || l.codeLabel || "subcontract line"} through ${app.periodTo}`,
         amountCents: thisPeriod,
         accountId: expenseAccountId,
         dimensionMemberIds: dimsFor(l.costCodeId),

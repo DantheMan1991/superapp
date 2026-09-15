@@ -13,6 +13,98 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-15 — Slice 11b: subcontractor documents (`claude/party-documents`, ADR 0068)
+
+`job_party_documents`, a **Subcontractors** page (`/dashboard/m/jobs/subcontractors`),
+a standing line on every order's page, and the rest of construction plan
+slice 11: the certificate of insurance and the day it runs out, the W-9, the
+licence, whatever else the business asks a subcontractor for.
+
+**PER PARTY, NOT PER JOB.** A framer's insurance covers every job he is on,
+so the row names the party and the page lists every party with an issued or
+closed order on a job that is not complete or cancelled — the insurance
+audit's own view — with the jobs beside the name. A draft order names nobody
+the business owes.
+
+**THE KIND IS THE BUSINESS'S; THE EXPIRY IS THE ONLY BEHAVIOUR.** `kind` is an
+open taxonomy with a format check, as a contract's is; the pack suggests
+three (`insurance_certificate`, `w9`, `license`) and labels them, and
+`partyDocumentKindLabel` spells anything else from its slug — the form's
+*Other…* takes a name and stores its slug. Which kinds are REQUIRED is
+`requiredPartyDocumentsFrom(config)`: the tenant's `requiredPartyDocuments`
+or the default of a certificate and a W-9, a value never a branch. The one
+thing the pack does with a kind is read `expires_on`.
+
+**STANDING IS DERIVED.** `standingFor` is pure and pinned in the pure suite:
+for each required kind, the received document that runs longest — no expiry
+beats any date — and its state against today: missing, expired, expiring
+within `EXPIRING_SOON_DAYS` (30), ok. Good standing is nothing required
+missing or expired; expiring still stands; requested and void are not on
+file. `subcontractorStanding` reads the parties on live orders and their
+documents once; `partyStanding` answers for one party on the order's page.
+Nothing blocks a payment or an order: the page says it in red, and the
+order's page in a line, and the person decides.
+
+**THE CHASE IS WORK ON THE PARTY** (`party` under this pack's slug, a
+namespace the CRM's `company` does not share): *Certificate of insurance
+from Pleasant Valley Feed Mill*, not on any job. Recording a document is a
+member's chore; the scanned page is the shared gallery on the row.
+`receiptDateFor` and its sentence now serve waivers and documents alike.
+
+**WHAT THE PAGES SAY.** Subcontractors: the required list in words, a row
+per party (name, the jobs, what is being chased), a column per required
+kind (*On file, expires …* / *Expires …* in bold / *Expired …* and *Not on
+file* in red, with the title, issuer and limit under it, the pencil and *Ask
+for it*), the other documents on file, a *Good standing* / *Not in good
+standing* badge and *Record document*. The dialog: from, kind (the required
+and suggested kinds, or *Other…* with a name), title, issued by, number,
+issued, expires (blank for one that does not run out), coverage limit,
+status (received fills the date), requested, notes, the gallery once it
+exists. The order's page: *Certificate of insurance expired 2026-09-01 · W-9
+on file · Subcontractors*, red where something is. The jobs list gains the
+*Subcontractors* button.
+
+**DRIVEN ON THE DEV BRANCH.** The new *Subcontractors* button on the jobs
+list opened the page on **2 with orders on live jobs · 2 not in good
+standing** — *Pleasant Valley Feed Mill* (24-109) and *Tractor Supply Co*
+(24-108), each *Not on file* in red under both required kinds with *Ask for
+it* beside. *Record document* on the feed mill → *Certificate of insurance*
+(the first required kind, already picked), *General liability*, *Erie
+Insurance*, `GL-4471`, issued `2025-09-01`, expires `2026-09-01`, limit
+`1000000`, *On file* with today filled in → *Document recorded* and the
+cell **Expired 2026-09-01 · General liability · Erie Insurance ·
+$1,000,000.00** in red with the pencil and *Ask for it* still there. *Ask
+for it* → *Added to Work* and **Being chased in Work: Certificate of
+insurance from Pleasant Valley Feed Mill** under the name. The renewal —
+`GL-4472`, issued `2026-09-10`, expires `2026-10-10` — answered instead:
+**Expires 2026-10-10** in bold, the button gone, still *Not in good
+standing* for want of the W-9. *Record document* → kind *W-9*, no expiry →
+**On file**, the badge **Good standing**, and the page's line **2 with
+orders on live jobs · 1 not in good standing · 1 expiring within a month**.
+The order's page, SC-24109-1: **Certificate of insurance expires 2026-10-10
+· W-9 on file · Subcontractors** under the title. One thing driving showed:
+with two required columns of state, sentence and buttons, the name column
+squeezed to *…ley Feed Mill* on a laptop width — given a minimum width.
+Not driven: *Other…* with a kind of the business's own, void, and the
+photo (the pane cannot supply a file); the first two are in the ops test.
+
+Migrations `0354_party_documents.sql` / `0355_party_documents_rls.sql`
+applied to dev and prod before the merge; `db:verify-rls` **217 tables** on
+both, `db:verify-modules` 19/19. As generated: one new table referencing
+`parties` only. Tests: four more pure (the kind format and the status list
+mirrored with the labels, the receipt-date CHECK, the floor and the held
+party, the required list from config or default, and the standing rule date
+by date — expired yesterday, the renewal answering, thirty days out
+expiring and thirty-one ok, requested and void not on file), one more ops
+(the page's rows for issued and closed orders on a live job and not a draft
+or a finished job; an unknown kind and a received document without its date
+refused; an expired certificate and a W-9; the chase on the party and not
+the punch list; the renewal answering and expiring; void and the old one
+answering again; a kind of the business's own beside the required ones and
+counting when the caller requires it; the list with attachment counts; a
+negative limit), one more isolation (read, write, another tenant's party,
+the kind format, the date rule both ways, the floor, the held party).
+
 ### 2026-09-14 — Slice 8: selections and allowances (`claude/selections`, ADR 0067)
 
 `job_selections` and `job_selection_choices`, a **Selections** page per job
@@ -1879,6 +1971,7 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_sub_application_lines` | One line per subcontract line: previous, this period, stored. | Cascade from the application; **RESTRICT to the subcontract line** — a billed line cannot be replaced out from under its certificate. `this_period` may be negative; the total to date may not — on a DEDUCTIVE line (a change order's negative line) the floors flip: completed to less than nothing and never more, `scheduled_cents` kept equal to the line's amount by the sync while a draft (4b). |
 | `job_selections` | A decision the client owes (8, ADR 0067): name, room, cost code, the allowance the contract set aside, the date it is needed by, pending / selected / approved / cancelled, the date decided, and the change order its difference was raised as. | Cascade from the project; **no action to the contract, the change order and the code** (retired, never deleted). `allowance_cents` ≥ 0. The difference — chosen price less allowance — is computed, never stored; while the raised change order stands, the allowance and the choices are fixed (the verb). |
 | `job_selection_choices` | What is on offer for a selection, one row each: description, supplier, reference, a price by the unit (both or neither, ADR 0064's thousandths) or as a sum, `price_cents` the extended figure, and `is_selected` for the client's pick. | Cascade from the selection; no action to the party. **One chosen per selection**: a partial unique index on `(tenant, selection) where is_selected`. Price, quantity and unit price ≥ 0; the unit pair both or neither. Nothing points at a choice, so an edit replaces by id. |
+| `job_party_documents` | What a subcontractor or supplier has on file with the business (11b, ADR 0068): the party, an open-taxonomy `kind` (format-checked; three suggested), title, issuer, number, issued and expires dates, a coverage limit, requested / received / void with the receipt date, notes. The scanned copy is a Documents attachment (`job_party_document`). | **No action to the party** — one with documents on file cannot be merged away. CHECK: the kind is a slug; received has its date, requested has none, void keeps what it had; limit ≥ 0. Standing (missing / expired / expiring / ok) is derived against today and the tenant's required list, never stored. |
 | `job_lien_waivers` | A lien waiver as a RECORD (11a, ADR 0066): the claimant (any party), the job, the order and the billed application it covers, its kind (conditional/unconditional × progress/final), the through date, the amount, and whether it was requested or received. The signed copy is a Documents attachment (`job_lien_waiver`). | Cascade from the project and the order; **no action to the party and to the application** — who signed is held, and a named application stays. CHECK: received has its date, requested has none, void keeps what it had; amount ≥ 0. Nothing here says "outstanding": the gap is derived from the applications' bills at read time. |
 | `job_commitment_lines` | The money, one cost code at a time — the lines the order was placed with (`change_order_id` null) and each change order's, tagged with it (4b). | Cascade from the commitment and from the change; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative on an original line — a credit is a change order — and a change's line may be negative, the one exception in the CHECK. A line counts when it is original or its change is approved: `countedCommitmentLine`, one predicate for every roll-up. |
 | `job_projects` | The spine. | FOUR composite FKs, each certified in `tests/isolation/jobs.test.ts`: company, division, client, cost code list. `delivery_method` is an open taxonomy (P1) with a **format check and no value check**, and is nullable. `metadata` is the P2 extension bag. |
@@ -1897,9 +1990,9 @@ hand-reordered like 0329) and `0335_job_billing.sql` / `0336_job_billing_rls.sql
 `wip_adjustment` to `journal_entry_source`, which nothing in the file uses)
 and `0341_cost_plus.sql` / `0342_cost_plus_rls.sql` (slice 5b; as generated,
 since the new table references existing ones only) and `0343_sub_billing.sql`
-/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) and `0350_lien_waivers.sql` / `0351_lien_waivers_rls.sql` (slice 11a; as generated, one new table referencing existing ones) and `0352_selections.sql` / `0353_selections_rls.sql` (slice 8; hand-reordered — two new tables, the selections' unique index ahead of the choices' key) follow the same rule —
+/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) and `0350_lien_waivers.sql` / `0351_lien_waivers_rls.sql` (slice 11a; as generated, one new table referencing existing ones) and `0352_selections.sql` / `0353_selections_rls.sql` (slice 8; hand-reordered — two new tables, the selections' unique index ahead of the choices' key) and `0354_party_documents.sql` / `0355_party_documents_rls.sql` (slice 11b; as generated) follow the same rule —
 and from slice 3 the pair is `db:verify-rls` **and `db:verify-modules`**, after
-the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **216 tables**, all enabled, forced and with
+the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **217 tables**, all enabled, forced and with
 policies, on both.
 
 **0327 needed no hand-reordering, which confirms the diagnosis in 0325.** Both
@@ -2071,6 +2164,12 @@ ordering only bites when two new tables reference each other in one file.
   fixed-value methods get a schedule; cost plus a fee gets the books' cost;
   time and materials gets Time's hours and the books' cost without the
   wages; unit price gets a note. Never the kind.
+- **A subcontractor's documents hang off the party, and the only behaviour
+  a kind carries is its expiry** — [ADR 0068](../decisions/0068-a-subcontractors-documents-hang-off-the-party-and-the-only-behaviour-a-kind-carries-is-its-expiry.md).
+  Per party; an open taxonomy of kinds with three suggested; the required
+  list a tenant config value with a default; standing derived against today
+  (missing, expired, expiring, ok); the chase Work on the party; nothing
+  blocks a payment.
 - **A selection is a decision with an allowance and priced choices, and its
   difference moves by change order** — [ADR 0067](../decisions/0067-a-selection-is-a-decision-with-an-allowance-and-priced-choices-and-its-difference-moves-by-change-order.md).
   One model for the option book and the allowance list; one chosen choice
@@ -2179,9 +2278,14 @@ ordering only bites when two new tables reference each other in one file.
   (`attachDocumentToRecord`) and no picker on a record; **the waiver is not
   generated** — the tenant's own state form through Documents' templates,
   filled with the row's facts, is the door; **a purchase order's waivers have
-  no gap rule**, because its bills are not tied to it; and **certificates of
-  insurance and W-9s**, the rest of plan slice 11, are a party-level record
-  with an expiry and wait for their own slice.
+  no gap rule**, because its bills are not tied to it; and ~~**certificates of insurance and W-9s**, the rest of plan slice 11, are a party-level record
+  with an expiry and wait for their own slice~~ — **closed 2026-09-15 (slice 11b,
+  ADR 0068)**. Still open from it: **nothing blocks** an order or a payment
+  while a sub is out of standing — a setting, the day a business asks; a
+  **per-coverage required list** (general liability, workers' comp, auto as
+  three rows) is the same model with a longer list; and **the required list
+  has no screen** — it is the pack config's `requiredPartyDocuments`, set by
+  a profile or by hand until a settings panel wants it.
   ~~`billing_method` is still read by no code~~ — the contract page and the
   application verbs read it since 5b.
 - **Time and materials has no rate card of its own.** Each person's rate is

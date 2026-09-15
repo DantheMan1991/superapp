@@ -26,10 +26,14 @@ import {
 } from "./field-ops";
 import { postWip, saveWipEstimate, unpostWip } from "./wip-ops";
 import {
+  askForPartyDocument,
   askForWaiver,
   createLienWaiver,
+  createPartyDocument,
   getLienWaiver,
+  getPartyDocument,
   updateLienWaiver,
+  updatePartyDocument,
 } from "./compliance-ops";
 import {
   createSelection,
@@ -86,6 +90,9 @@ import {
   LIEN_WAIVER_STATUSES,
   SELECTION_ENTITY,
   SELECTION_STATUSES,
+  PARTY_DOCUMENT_ENTITY,
+  PARTY_DOCUMENT_FORMAT,
+  PARTY_DOCUMENT_STATUSES,
   CONTRACT_ROLES,
   CONTRACT_STATUSES,
   DAILY_LOG_ENTITY,
@@ -234,7 +241,7 @@ function toResult(err: unknown): { error: string } {
       case "WRONG_PROJECT":
         return { error: `That is on another job: ${err.message}.` };
       case "RECEIVED_DATE_REQUIRED":
-        return { error: "Give a received waiver the date it arrived." };
+        return { error: "Give a received document the date it arrived." };
       case "SELECTION_RAISED":
         return {
           error: `The difference on that selection has been raised: ${err.message}. Void the change order to re-price it.`,
@@ -2511,6 +2518,186 @@ export async function detachSelectionPhotoAction(input: unknown) {
       { role: ctx.role },
     );
     revalidatePath(`${BASE}/${projectId}/selections`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// --------------------------------------------------------- party documents
+
+const SUBS_PATH = `${BASE}/subcontractors`;
+
+const partyDocumentSchema = z.object({
+  partyId: z.string().uuid(),
+  kind: z.string().regex(PARTY_DOCUMENT_FORMAT),
+  title: z.string().trim().max(200).optional(),
+  reference: z.string().trim().max(120).optional(),
+  issuer: z.string().trim().max(200).optional(),
+  issuedOn: optionalDate,
+  expiresOn: optionalDate,
+  /** The coverage limit as typed; blank when the form states none. */
+  limitCents: moneyToCents,
+  status: z.enum(PARTY_DOCUMENT_STATUSES).optional(),
+  requestedOn: optionalDate,
+  receivedOn: optionalDate,
+  notes: z.string().trim().max(2000).optional(),
+});
+
+export async function createPartyDocumentAction(input: unknown) {
+  const parsed = partyDocumentSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await waiverGate();
+    const created = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const row = await createPartyDocument(tx, ctx, parsed.data);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "party_document.created",
+          targetType: "party_document",
+          targetId: row.id,
+          meta: { partyId: row.partyId, kind: row.kind, status: row.status },
+        });
+        return row;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(SUBS_PATH);
+    revalidatePath(BASE);
+    return { ok: true as const, partyDocumentId: created.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function updatePartyDocumentAction(input: unknown) {
+  const schema = partyDocumentSchema
+    .omit({ partyId: true })
+    .partial()
+    .extend({ id: z.string().uuid(), version: z.number().int().positive().optional() });
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { id, ...patch } = parsed.data;
+  try {
+    const ctx = await waiverGate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const row = await updatePartyDocument(tx, ctx, id, patch);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "party_document.updated",
+          targetType: "party_document",
+          targetId: row.id,
+          meta: { partyId: row.partyId, kind: row.kind, status: row.status },
+        });
+        return row;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(SUBS_PATH);
+    revalidatePath(BASE);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const askForPartyDocumentSchema = z.object({
+  partyId: z.string().uuid(),
+  kind: z.string().regex(PARTY_DOCUMENT_FORMAT),
+  dueOn: optionalDate,
+});
+
+/** The chase, as a Work item linked to the party. */
+export async function askForPartyDocumentAction(input: unknown) {
+  const parsed = askForPartyDocumentSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  try {
+    const ctx = await waiverGate();
+    const itemId = await withTenant(ctx.tenantId, (tx) => askForPartyDocument(tx, ctx, parsed.data), {
+      role: ctx.role,
+    });
+    revalidatePath(SUBS_PATH);
+    return { ok: true as const, itemId };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** The scanned copy: photos on the document, through Documents. */
+const partyDocumentTarget = (entityId: string) => ({
+  extensionSlug: PACK,
+  entityType: PARTY_DOCUMENT_ENTITY,
+  entityId,
+});
+
+async function assertPartyDocument(ctx: JobsCtx, id: string): Promise<void> {
+  const row = await withTenant(ctx.tenantId, (tx) => getPartyDocument(tx, ctx.tenantId, id), { role: ctx.role });
+  if (!row) throw new JobsError("NOT_FOUND", `party document ${id} not found`);
+}
+
+export async function attachPartyDocumentPhotoAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoInput.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    await assertPartyDocument(ctx, parsed.data.entityId);
+    const result = await registerAttachedPhoto(
+      { tenantId: ctx.tenantId, userId: ctx.userId, role: ctx.role },
+      { pathname: parsed.data.pathname, target: partyDocumentTarget(parsed.data.entityId), title: "Subcontractor document" },
+    );
+    revalidatePath(SUBS_PATH);
+    return { ok: true as const, documentId: result.documentId };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function setPartyDocumentPhotoPrimaryAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoRef.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    await assertPartyDocument(ctx, parsed.data.entityId);
+    await withTenant(
+      ctx.tenantId,
+      (tx) =>
+        setPrimaryAttachment(
+          tx,
+          { tenantId: ctx.tenantId, userId: ctx.userId, role: ctx.role },
+          { documentId: parsed.data.documentId, target: partyDocumentTarget(parsed.data.entityId) },
+        ),
+      { role: ctx.role },
+    );
+    revalidatePath(SUBS_PATH);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function detachPartyDocumentPhotoAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoRef.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    await assertPartyDocument(ctx, parsed.data.entityId);
+    await withTenant(
+      ctx.tenantId,
+      (tx) =>
+        detachDocumentFromRecord(
+          tx,
+          { tenantId: ctx.tenantId, userId: ctx.userId, role: ctx.role },
+          { documentId: parsed.data.documentId, target: partyDocumentTarget(parsed.data.entityId) },
+        ),
+      { role: ctx.role },
+    );
+    revalidatePath(SUBS_PATH);
     return { ok: true as const };
   } catch (err) {
     return toResult(err);

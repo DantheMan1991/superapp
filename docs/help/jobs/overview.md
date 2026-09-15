@@ -449,6 +449,44 @@ The panel's first line says what is on file: `Unconditional waiver on file throu
 
 A waiver on a **purchase order** is recorded the same way — suppliers have lien rights too — but the gaps are only worked out for subcontracts, whose applications the pack bills.
 
+## Subcontractors — insurance, W-9s and the rest
+
+Anybody on the job may record a document. From the {{project|plural}} list, {button:Subcontractors|outline}; and one line at the top of every order's page.
+
+Before you pay a subcontractor or supplier, or let them on site, you collect their paperwork: a **certificate of insurance** that runs out on a date, a **W-9** that does not, a licence where the state wants one, whatever else your insurer or your lawyer asks for. This page lists **everybody with an issued or closed order on a job that is not complete or cancelled**, and where each stands. A document hangs off the subcontractor, not the job — one certificate covers every job they are on.
+
+### Reading the page
+
+The line under the title counts them: *5 with orders on live jobs · 1 not in good standing · 2 expiring within a month*. The sentence in the panel names what is required — `Certificate of insurance, W-9` unless your business has set its own list.
+
+| Column | What it is |
+| --- | --- |
+| `Subcontractor` | The name, the jobs they have orders on, and `Being chased in Work: …` when you have asked for something. |
+| One column per required kind | `On file, expires 2027-03-01` · `Expires 2026-10-10` (in bold, within a month) · `Expired 2026-09-01` or `Not on file` (in red), with the title, who issued it and the coverage limit under it; a pencil to open it and, when it is a gap, {button:Ask for it|outline}. |
+| `Other documents` | Everything else on file — a licence, a safety plan — with its expiry. |
+| The badge | `Good standing` when nothing required is missing or expired; `Not in good standing` otherwise. Expiring still stands. |
+
+{button:Ask for it|outline} adds an item to Work — `Certificate of insurance from Pleasant Valley Feed Mill` — linked to the subcontractor, beside everything else the office has to do. Nothing here stops an order or a payment; the page says it, and you decide.
+
+### Recording a document
+
+{button:Record document|outline} at the end of the row.
+
+1. **`From`** — the subcontractor, as text.
+2. **`Kind`** — the required kinds and the suggested ones (`Certificate of insurance`, `W-9`, `Licence`), or `Other…`, which shows **`What kind`** — type it as you say it (`Safety plan`); it is kept as a name of its own.
+3. **`Title`** — `General liability`, optional.
+4. **`Issued by`** and **`Number`** — the carrier or board, the policy or licence number.
+5. **`Issued`** and **`Expires`** — leave `Expires` blank for one that does not run out, such as a W-9. A certificate past its date is as good as missing.
+6. **`Coverage limit`** — what the certificate states, optional.
+7. **`Status`** — `On file` (fills **`Received`** with today, and the date is required: `Give a received document the date it arrived.`), `Requested` (with the date you asked), or `Void` for a wrong one.
+8. **`Notes`** — additional insured named, endorsements, what is missing.
+
+{button:Record document|primary} is greyed until a kind is set. On success you see `Document recorded`. Open it again with the pencil to add a **scanned copy** — a photo of the page, through Documents. A renewal is a second document of the same kind with the later date: the one that runs longest is the one that counts, so the old one can stay for the record.
+
+### On an order's page
+
+One line under the order's title: `Certificate of insurance expired 2026-09-01 · W-9 on file · Subcontractors` — red where something is missing or expired, with the link to the page.
+
 ## Selections and allowances
 
 Anybody on the job may draw up the list and record a choice; raising the money is owners only. On the {{project|lower}}'s page under **Selections**, and on its own page — {button:All selections|outline}.
@@ -671,6 +709,7 @@ Worth knowing so you are not looking for it:
 - **A cost-plus job on the work in progress schedule earns what it has cost plus its fee**, capped at its maximum, with no estimate asked for — when it is the job's only signed contract. A time-and-materials job earns its approved hours at their rates plus the rest of its cost marked up, the same way; one with hours nobody has priced shows `Hours on the job with no bill rate` and blocks the period until a rate is set. A job mixing methods is shown and left out, and a period with billings on one cannot post until it has a value.
 - **A subcontractor's application does not print**, and neither does a change order on an order. They are the subcontractor's documents, prepared on their side; your own applications print from their row.
 - **A lien waiver cannot be attached as a PDF, and is not generated.** The signed copy is a photo of the page; a PDF that came by email lives in Documents and cannot yet be pointed at from the waiver. The form itself is your state's or your lawyer's, not something Jobs prints.
+- **A subcontractor out of standing is not stopped.** An order can be issued and a bill paid while a certificate is missing or expired; the Subcontractors page and the order's page say so in red, and the decision is yours. Which kinds are required is set in the module's configuration for now, not on a screen.
 - **The option book is per job.** The same selections with the same choices on every plan are entered on each job for now; a book that seeds a new job is next. Nothing here lets the client choose for themselves; the office records what they said.
 - **A back-charge is not a change order.** Money you deduct from a subcontractor's payment for something you paid on their behalf reduces the payment, not the scope; a deductive change order reduces the scope. Record a back-charge as a credit in Accounting for now.
 - **Nothing codes a bill for you.** Cost codes appear in Accounting wherever you tag a line, beside the job itself, and the `Spent` column reads what the bills carry. A line with the job and no code shows up as the uncoded note under the job cost table, not on a row.
@@ -687,6 +726,7 @@ Worth knowing so you are not looking for it:
 | Set a schedule of values, or issue a pay application | ● | | |
 | Record or approve a subcontractor's application | ● | | |
 | Record a lien waiver, or ask for one in Work | ● | ● | ● |
+| Record a subcontractor's certificate or W-9, or ask for one in Work | ● | ● | ● |
 | Draw up selections, record the client's choice, remind them in Work | ● | ● | ● |
 | Raise a selection's difference as a change order | ● | | |
 | Log a day on site, or add and tick a punch item | ● | ● | ● |

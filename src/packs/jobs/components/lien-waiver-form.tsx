@@ -22,9 +22,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { RecordPhotos, type RecordPhoto } from "@/modules/documents/components/record-photos";
+import { RecordPhotos, type RecordFile, type RecordPhoto } from "@/modules/documents/components/record-photos";
 import {
   askForWaiverAction,
+  attachWaiverDocumentAction,
+  attachWaiverFileAction,
   attachWaiverPhotoAction,
   createLienWaiverAction,
   detachWaiverPhotoAction,
@@ -85,6 +87,7 @@ export function LienWaiverForm({
   tenantId,
   canPhoto,
   photos = [],
+  files = [],
   existing,
   trigger,
 }: {
@@ -100,6 +103,7 @@ export function LienWaiverForm({
   tenantId: string;
   canPhoto: boolean;
   photos?: RecordPhoto[];
+  files?: RecordFile[];
   existing?: EditableLienWaiver;
   trigger?: ReactNode;
 }) {
@@ -358,22 +362,25 @@ export function LienWaiverForm({
                     entityId={existing.id}
                     tenantId={tenantId}
                     photos={photos}
+                    files={files}
                     canEdit={canPhoto}
                     subject="waiver"
                     attachAction={attachWaiverPhotoAction}
                     setPrimaryAction={setWaiverPhotoPrimaryAction}
                     detachAction={detachWaiverPhotoAction}
+                    attachFileAction={attachWaiverFileAction}
+                    attachExistingAction={attachWaiverDocumentAction}
                   />
                 ) : (
                   <p className="text-xs text-muted-foreground">
-                    A photo of the signed page needs Documents switched on.
+                    The signed copy needs Documents switched on.
                   </p>
                 )}
               </div>
             )}
             {!editing && (
               <p className="text-xs text-muted-foreground">
-                Record it, then open it again to add a photo of the signed page.
+                Record it, then open it again to attach the signed copy — a photo, a file, or one already in Documents.
               </p>
             )}
           </div>

@@ -529,7 +529,7 @@ The panel's first line says what is on file: `Unconditional waiver on file throu
 7. **`Status`** — `Requested`, `Received` or `Void`. `Received` fills today into **`Received`**, which is required: `Give a received waiver the date it arrived.` **`Requested`** is the date you asked, optional.
 8. **`Signed by`**, **`Their reference`**, **`Notes`** (exceptions the form lists, disputed amounts).
 
-{button:Record waiver|primary} is greyed until the party and the through date are filled in. On success you see `Waiver recorded`. Open it again with the pencil to add a **Signed copy** — a photo of the signed page, from the camera or a file, through Documents (the same gallery a day on site uses; it needs Documents switched on).
+{button:Record waiver|primary} is greyed until the party and the through date are filled in. On success you see `Waiver recorded`. Open it again with the pencil to attach the **Signed copy** — three ways, all through Documents (it needs Documents switched on): {button:Add a photo|outline|image-plus} for a picture of the page (on a phone, {button:Take photo|outline|camera}), {button:Add a file|outline|paperclip} for the PDF that came back by email, or {button:From Documents|outline|folder-open} to pick a file already in your cabinet — type in `Search your files`, newest first, {button:Attach|outline} beside the one. Photos show as a gallery, files as a list with their kind and size, each opening in a new tab; the × beside either removes it from the waiver and leaves the file in Documents.
 
 **When a waiver counts.** Only a **received** one. It covers an application when it names it in `Covers`, when it is a final one, or when its through date is on or after the application's period end. Setting one to `Void` stops it counting; a wrong form is voided and recorded again.
 
@@ -569,7 +569,7 @@ The line under the title counts them: *5 with orders on live jobs · 1 not in go
 7. **`Status`** — `On file` (fills **`Received`** with today, and the date is required: `Give a received document the date it arrived.`), `Requested` (with the date you asked), or `Void` for a wrong one.
 8. **`Notes`** — additional insured named, endorsements, what is missing.
 
-{button:Record document|primary} is greyed until a kind is set. On success you see `Document recorded`. Open it again with the pencil to add a **scanned copy** — a photo of the page, through Documents. A renewal is a second document of the same kind with the later date: the one that runs longest is the one that counts, so the old one can stay for the record.
+{button:Record document|primary} is greyed until a kind is set. On success you see `Document recorded`. Open it again with the pencil to attach the **Scanned copy** — three ways, all through Documents (it needs Documents switched on): {button:Add a photo|outline|image-plus} for a picture of the page (on a phone, {button:Take photo|outline|camera}), {button:Add a file|outline|paperclip} for the PDF the broker sent, or {button:From Documents|outline|folder-open} to pick a file already in your cabinet — type in `Search your files`, newest first, {button:Attach|outline} beside the one. Photos show as a gallery, files as a list with their kind and size; the × beside either removes it from the document and leaves the file in Documents. A renewal is a second document of the same kind with the later date: the one that runs longest is the one that counts, so the old one can stay for the record.
 
 ### On an order's page
 
@@ -618,7 +618,7 @@ At the end of each row: {button:Raise overage|outline} or {button:Raise credit|o
 
 {button:Add selection|primary} stays greyed until the name is filled in. On success you see `Selection added`. What can stop a save: `Mark the choice the client made before calling the selection selected.` · `One choice is chosen, not two.` · `A choice priced by the unit needs both a quantity and a price per unit.` · `That is on another job: the contract named is on another job.`
 
-Open a selection again with the pencil to add **samples and spec sheets** — photos, through Documents, the same gallery a day on site uses.
+Open a selection again with the pencil to add **samples and spec sheets** — a photo of the sample, a PDF spec sheet with {button:Add a file|outline|paperclip}, or a file already in your cabinet with {button:From Documents|outline|folder-open}, the same gallery a day on site uses.
 
 ### Raising the difference
 
@@ -796,7 +796,7 @@ Worth knowing so you are not looking for it:
 - **Time and materials has no rate card of its own.** Each person's rate comes from Time, or one rate on the contract covers everybody; a rate per trade (carpenter, labourer, foreman) or a rate negotiated for one customer is not a thing you can set yet.
 - **A cost-plus job on the work in progress schedule earns what it has cost plus its fee**, capped at its maximum, with no estimate asked for — when it is the job's only signed contract. A time-and-materials job earns its approved hours at their rates plus the rest of its cost marked up, the same way; one with hours nobody has priced shows `Hours on the job with no bill rate` and blocks the period until a rate is set. A job mixing methods is shown and left out, and a period with billings on one cannot post until it has a value.
 - **A subcontractor's application does not print**, and neither does a change order on an order. They are the subcontractor's documents, prepared on their side; your own applications print from their row.
-- **A lien waiver cannot be attached as a PDF, and is not generated.** The signed copy is a photo of the page; a PDF that came by email lives in Documents and cannot yet be pointed at from the waiver. The form itself is your state's or your lawyer's, not something Jobs prints.
+- **A lien waiver is not generated.** The form itself is your state's or your lawyer's, not something Jobs prints; the signed one attaches as a photo, a file or from Documents.
 - **An estimate is lines you type.** No assemblies (a bundle of lines dropped in as one), no unit cost book that remembers what concrete cost last time, no takeoff from the drawings, and the proposal does not print — send the client your own document for now. A supplier's quote cannot be attached to an estimate yet.
 - **A subcontractor out of standing is not stopped.** An order can be issued and a bill paid while a certificate is missing or expired; the Subcontractors page and the order's page say so in red, and the decision is yours. Which kinds are required is set in the module's configuration for now, not on a screen.
 - **The option book is per job.** The same selections with the same choices on every plan are entered on each job for now; a book that seeds a new job is next. Nothing here lets the client choose for themselves; the office records what they said.

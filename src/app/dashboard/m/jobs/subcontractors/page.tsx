@@ -18,10 +18,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { attachmentsForRecord } from "@/modules/documents/attachments";
-import { isDisplayableImage } from "@/modules/documents/allowlist";
+import { attachmentsForRecord, splitAttachments } from "@/modules/documents/attachments";
 import { roleMayWrite } from "@/modules/documents/core/errors";
-import type { RecordPhoto } from "@/modules/documents/components/record-photos";
+import type { RecordFile, RecordPhoto } from "@/modules/documents/components/record-photos";
 import { listOpenWork } from "@/lib/work/entity-work";
 import { subcontractorStanding, type StandingState } from "@/packs/jobs/compliance-ops";
 import { AskForDocumentButton, PartyDocumentForm } from "@/packs/jobs/components/party-document-form";
@@ -75,6 +74,7 @@ export default async function SubcontractorsPage() {
         listOpenWork(tx, { tenantId: ctx.tenant.id }),
       ]);
       const photos = new Map<string, RecordPhoto[]>();
+      const files = new Map<string, RecordFile[]>();
       if (documentsOn) {
         const docs = rows.flatMap((r) => [...r.required.map((q) => q.document), ...r.others]).filter((d) => d !== null);
         for (const d of docs) {
@@ -83,18 +83,9 @@ export default async function SubcontractorsPage() {
             entityType: PARTY_DOCUMENT_ENTITY,
             entityId: d.id,
           });
-          photos.set(
-            d.id,
-            attachments
-              .filter((a) => isDisplayableImage(a.document.mimeType))
-              .map((a) => ({
-                documentId: a.document.id,
-                fileName: a.document.fileName,
-                title: a.document.title ?? "",
-                mimeType: a.document.mimeType,
-                isPrimary: a.isPrimary,
-              })),
-          );
+          const split = splitAttachments(attachments);
+          photos.set(d.id, split.photos);
+          files.set(d.id, split.files);
         }
       }
       /** Chases open per party, from Work's own read, filtered to this pack's party links. */
@@ -106,7 +97,7 @@ export default async function SubcontractorsPage() {
           }
         }
       }
-      return { rows, required, photos, chasing };
+      return { rows, required, photos, files, chasing };
     },
     { role: ctx.role },
   );
@@ -126,6 +117,7 @@ export default async function SubcontractorsPage() {
       tenantId={ctx.tenant.id}
       canPhoto={canPhoto}
       photos={existing ? (data.photos.get(existing.id) ?? []) : []}
+      files={existing ? (data.files.get(existing.id) ?? []) : []}
       existing={
         existing
           ? {
@@ -289,8 +281,8 @@ export default async function SubcontractorsPage() {
           A document is on file once it is received with its date; a requested
           one is not yet. <em>Ask for it</em>{" "}
           puts the chase in Work, linked to
-          the subcontractor. The scanned page attaches to the document once it
-          is recorded. Which kinds are required is the business&apos;s own list.
+          the subcontractor. The certificate attaches to the document once it is
+          recorded — a photo, a file, or one already in Documents. Which kinds are required is the business&apos;s own list.
         </p>
       </Panel>
     </div>

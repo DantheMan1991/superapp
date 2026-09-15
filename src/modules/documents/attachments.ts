@@ -8,6 +8,7 @@ import { createDmsDocument, inspectUploadedBlob } from "./ingest";
 import { extractDocumentText } from "./text/extract";
 import { folderNameKey } from "./core/tree";
 import { logAuditInTx } from "@/lib/audit";
+import type { RecordFile, RecordPhoto } from "./components/record-photos";
 
 /**
  * **A DOCUMENT ATTACHED TO A RECORD THAT IS NOT AN ACCOUNTING ONE** — a photo
@@ -279,6 +280,42 @@ export type AttachedDocument = {
   attachedAt: Date;
 };
 
+/**
+ * WHAT A GALLERY SHOWS, split the way it renders: the photos (any displayable
+ * image, picture first) and the other files (a PDF, a spreadsheet), each as
+ * the serialisable shape `RecordPhotos` takes. A page builds both from one
+ * `attachmentsForRecord` read.
+ */
+export function splitAttachments(
+  rows: readonly {
+    document: Pick<Document, "id" | "fileName" | "title" | "mimeType" | "sizeBytes">;
+    isPrimary: boolean;
+  }[],
+): { photos: RecordPhoto[]; files: RecordFile[] } {
+  const photos: RecordPhoto[] = [];
+  const files: RecordFile[] = [];
+  for (const r of rows) {
+    if (isDisplayableImage(r.document.mimeType)) {
+      photos.push({
+        documentId: r.document.id,
+        fileName: r.document.fileName,
+        title: r.document.title ?? "",
+        mimeType: r.document.mimeType,
+        isPrimary: r.isPrimary,
+      });
+    } else {
+      files.push({
+        documentId: r.document.id,
+        fileName: r.document.fileName,
+        title: r.document.title ?? "",
+        mimeType: r.document.mimeType,
+        sizeBytes: r.document.sizeBytes,
+      });
+    }
+  }
+  return { photos, files };
+}
+
 /** Everything attached to one record, profile picture first, then newest. */
 export async function attachmentsForRecord(
   tx: Tx,
@@ -457,11 +494,48 @@ export async function registerAttachedPhoto(
     makePrimary?: boolean;
   },
 ): Promise<{ documentId: string; isPrimary: boolean }> {
+  return registerAttachedUpload(ctx, args, { imagesOnly: true });
+}
+
+/**
+ * **UPLOAD ANY ALLOWED FILE AND HANG IT ON A RECORD** — the lien waiver that
+ * came back as a PDF, the certificate of insurance the carrier sent. The
+ * photo path with the image check off: the file is filed at the cabinet's
+ * root rather than under Photos (a PDF is not a photo), and it is never the
+ * record's picture, because a picture has to be an image.
+ */
+export async function registerAttachedFile(
+  ctx: { tenantId: string; userId: string; role: DocsRole },
+  args: {
+    pathname: string;
+    target: AttachmentTarget;
+    folderId?: string | null;
+    title?: string;
+  },
+): Promise<{ documentId: string; isPrimary: boolean }> {
+  return registerAttachedUpload(
+    ctx,
+    { ...args, folderId: args.folderId === undefined ? null : args.folderId, makePrimary: false },
+    { imagesOnly: false },
+  );
+}
+
+async function registerAttachedUpload(
+  ctx: { tenantId: string; userId: string; role: DocsRole },
+  args: {
+    pathname: string;
+    target: AttachmentTarget;
+    folderId?: string | null;
+    title?: string;
+    makePrimary?: boolean;
+  },
+  opts: { imagesOnly: boolean },
+): Promise<{ documentId: string; isPrimary: boolean }> {
   assertRoleMayWrite(ctx);
   // Blob inspection is network work and never holds a transaction open — the
   // same ordering `registerDocumentUploadAction` keeps and for the same reason.
   const inspected = await inspectUploadedBlob(ctx.tenantId, args.pathname);
-  if (!isDisplayableImage(inspected.mimeType)) {
+  if (opts.imagesOnly && !isDisplayableImage(inspected.mimeType)) {
     throw new DocsError("ATTACHMENT_NOT_AN_IMAGE", args.pathname);
   }
 

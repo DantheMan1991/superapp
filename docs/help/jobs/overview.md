@@ -75,11 +75,48 @@ If a filter or a search hides everything, the panel says so and offers `Show all
 
 ## A {{project|lower}}'s page
 
-`Details` lists everything above, plus one row worth understanding:
+Everything about one {{project|lower}}, in sections. The top of the page never changes as you move between them: it is the {{project|lower}}'s identity and its position, so you always know which job you are looking at and how it is doing.
+
+### The top of every section
+
+`‹ All {{project|plural|lower}}` goes back to the list.
+
+Then the {{project|lower}}'s name, with its number, address, {{customer|lower}} and kind of work on the line beneath, and on the right: {button:Edit|outline} (owners only) and a badge for the status — `Active`, `Planned`, `On hold`, `Complete` or `Cancelled`.
+
+### The five figures
+
+One strip, read left to right. It is the same arithmetic the list uses, so a figure here matches what you just saw on the list.
+
+- **`Contract`** — the revised value: signed and complete agreements, moved by approved change orders. `incl. $… in changes` underneath when changes have moved it, or just `revised` when they have not. A {{project|lower}} with nothing signed reads `Nothing signed`, and underneath either what is out for signature or `nothing out for signature`.
+- **`Committed`** — what you have ordered against the job, billed or not.
+- **`Actual cost`** — what it has cost, read from your books. Not typed in by anyone, which is why it agrees with your profit and loss.
+- **`Complete`** — how far along, with a bar. `Not started` when nothing has been spent, `No estimate` when money has gone out but there is no budget to measure it against, and `By hours` on a time-and-materials job, whose earned figure is worked out on **Work in progress** instead.
+- **`Billed vs earned`** — what has been invoiced, and underneath whether that is behind or ahead: `under-billed` in green, `over-billed` in red, `level with earned` when they match. A complete {{project|lower}} shows its gross profit instead, because the variance stops mattering once the job is done.
+
+### The sections
+
+A row of tabs under the figures. Whichever you are on is underlined and coloured.
+
+- **`Overview`** — the {{project|lower}}'s own details, and a look into each other section.
+- **`Contracts`** — the agreements, what each is worth now, and what has been billed against each.
+- **`Changes`** — every change order, and which ones have moved the contract.
+- **`Job cost`** — the budget by cost code against what is ordered and spent.
+- **`Ordered`** — what you have committed to subcontractors and suppliers.
+- **`Schedule`** — the phases on a calendar.
+- **`Selections`** — what the client still owes a decision on.
+- **`Field`** — the daily log and the punch list.
+- **`Drawings`** — the drawing sets and their sheets.
+- **`Estimates`** — pricing the job before anybody signs.
+
+Opening a record inside a section — a contract, an order — keeps that section's tab lit, so you can see where you are and get back with one click.
+
+### What is on Overview
+
+`Details` lists the {{customer|lower}}, company, division, kind of work, cost codes, start and end, plus one row worth understanding:
 
 - **`Charged to`** — the name this job appears under in your cost reports, which is its number and its name together. If it ever reads `Not a cost object — this should not happen; tell us`, tell us: it means the job was created but the thing that lets reports group by it was not, and costs put against it will not show up where you expect.
 
-`Cost codes` below it lists the codes this job is charged against, or a link to add some.
+Under it, a short panel for each of Estimates, Selections, Drawings, Schedule, On site, Punch list and Cost codes — a sentence or a few rows, the buttons to add something, and a link through to the full section.
 
 ## Estimates — pricing the {{project|lower}} before anybody signs
 
@@ -168,7 +205,7 @@ A **signed** contract's value moves by change order, not by accepting an estimat
 
 ### Making it the budget
 
-{button:Use as budget|outline} (owners). The dialog says the cost as saved and what happens: each cost code's **cost** on the estimate becomes that code's original budget on the {{project|lower}}, replacing what the code had, and lines with no cost code are left out. {button:Make it the budget|primary}. `Budget set on 2 codes — $1,500.00 on lines with no code left out`. From there the budget moves as it always does, by change order, and **Job cost** on the {{project|lower}}'s page reads it.
+{button:Use as budget|outline} (owners). The dialog says the cost as saved and what happens: each cost code's **cost** on the estimate becomes that code's original budget on the {{project|lower}}, replacing what the code had, and lines with no cost code are left out. {button:Make it the budget|primary}. `Budget set on 2 codes — $1,500.00 on lines with no code left out`. From there the budget moves as it always does, by change order, and the **Job cost** tab reads it.
 
 ### Making it the schedule of values
 
@@ -196,7 +233,7 @@ They are listed on the {{project|lower}}'s own page, numbered in the order you a
 
 ### Adding one
 
-{button:Add contract|primary} on the {{project|lower}}'s page.
+{button:Add contract|primary} on the **Contracts** tab.
 
 1. **`Kind`** — required. What sort of agreement it is. If your industry pack is set up you pick from a list; otherwise you type it, lowercase with underscores: `concept_design`, `new_home`, `aia`.
 2. **`Name`** — optional, for when the kind alone will not tell two apart.
@@ -293,7 +330,7 @@ The pencil at the end of its row. Everything except which contract it is against
 
 ## Billing a contract
 
-Owners only. Click a contract's kind in the **Contracts** table on the {{project|lower}}'s page to open the contract's own page: its **schedule of values** and the **pay applications** drawn against it.
+Owners only. Click a contract's kind in the table on the **Contracts** tab to open the contract's own page: its **schedule of values** and the **pay applications** drawn against it.
 
 What the page shows depends on the contract's **Billed by** setting. A fixed-price contract is billed in draws against a schedule of values; a **cost plus a fee** contract is billed as what the job has cost plus the fee, with nothing to set up (see *Cost plus a fee* below); a **time and materials** contract is billed as the hours Time has approved on the job at their rates, plus the rest of the cost with a markup (see *Time and materials* below); a **unit price** contract is billed by the quantities installed at the schedule's prices (see *Unit price* below).
 
@@ -474,7 +511,7 @@ A bill line can carry the job and no code. That money is real, it is in the job'
 
 ## What you have ordered
 
-Owners only to add. On the {{project|lower}}'s page, under **Ordered**.
+Owners only to add. On the **Ordered** tab.
 
 A purchase order or a subcontract is money the job **already owes**, whether or not the bill has arrived. That is the number a job cost report is missing when it looks fine and is not: you can be $400,000 into a $1.8m job and have already ordered $1.5m of it.
 
@@ -536,7 +573,7 @@ When a subcontractor's scope moves — more work found behind a wall, scope the 
 
 {button:Add change order|primary} stays greyed until the number and title are filled in. On success you see `Change order added`.
 
-**What an approved change does.** Its lines join the order's **Lines** table at once, each marked `Added by SCO-1`, and the value at the top of the page reads the revised sum with `orig. $… · $… in approved changes` under it. On the {{project|lower}}'s page the **Ordered** table's `Amount` is the revised sum with `orig. $…` beneath, **Committed** and the job cost report's `Ordered` column move by the change's lines, by code, and the next subcontractor application picks the lines up — an open draft on its next save, a new one when it is made — after the original lines, with the change's number in front of the description. The bill that application becomes names the change on its line: `Application 2 — SCO-1 · Blocking through 2026-10-31`.
+**What an approved change does.** Its lines join the order's **Lines** table at once, each marked `Added by SCO-1`, and the value at the top of the page reads the revised sum with `orig. $… · $… in approved changes` under it. On the **Ordered** tab the table's `Amount` is the revised sum with `orig. $…` beneath, **Committed** and the job cost report's `Ordered` column move by the change's lines, by code, and the next subcontractor application picks the lines up — an open draft on its next save, a new one when it is made — after the original lines, with the change's number in front of the description. The bill that application becomes names the change on its line: `Application 2 — SCO-1 · Blocking through 2026-10-31`.
 
 **A deduction on the application.** A negative line is completed **to less than nothing**: type `-2,000` on it and `Completed` and `Payment due` go down by that much; nothing can be stored against it, and typing a positive figure on it is refused with `A deduction cannot be completed to more than nothing.`, and stored materials on it with `Nothing is stored against a deduction.` Its `%` reads like any other line's.
 

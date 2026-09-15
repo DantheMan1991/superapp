@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, FileText, Layers } from "lucide-react";
+import { FileText, Layers } from "lucide-react";
 import { eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
@@ -83,9 +83,6 @@ export default async function DrawingsPage({ params }: { params: Promise<{ id: s
 
   return (
     <div className="space-y-4">
-      <Link href={`/dashboard/m/jobs/${project.id}`} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ChevronLeft className="size-4" /> {project.number} · {project.name}
-      </Link>
       <PageHeader
         title="Drawings"
         description={`${projectWord} ${project.number} · ${sentence}`}

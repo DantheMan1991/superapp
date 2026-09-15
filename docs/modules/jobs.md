@@ -13,6 +13,69 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-15 — The project page becomes a place with sections (`claude/jobs-project-page`)
+
+One job was **eleven `<Panel>`s stacked flat with no in-page navigation**, so
+reaching the job cost table meant scrolling past four other tables, and the five
+pages already split off (Schedule, Selections, Field, Estimates, Drawings) each
+redrew their own back link and their own `<PageHeader>` — five copies of the
+same six lines, already drifting. Jobs redesign `2a`, from the same Claude
+Design handoff as the list.
+
+**THE JOB'S IDENTITY IS NOW A LAYOUT** (`[id]/layout.tsx`): the back link, a
+`<PageHeader>` with the pack's `HardHat` and the job's coordinates (number ·
+address · client · kind), the **vitals strip**, and the section strip. It is a
+layout rather than a header each page draws so that the five figures do not
+move, reload or flicker as somebody goes from Job cost to Schedule to Field —
+they are the job's position, not one tab's content.
+
+**THE VITALS STRIP MEASURES THE SAME WAY THE LIST DOES.** `vitals-ops.ts` calls
+`measureProject`, the function the module home uses, so percent complete and
+billed-versus-earned on a job's page are the same numbers the list showed a
+click earlier. A page that re-derived them would eventually disagree, and the
+reader would have no way to tell which was lying. Contract · Committed · Actual
+cost · Complete · Billed vs earned, in one `rounded-xl` card whose `gap-px` over
+`bg-divider` makes the gaps themselves the hairlines.
+
+**FOUR PANELS BECAME ROUTES**, lifted unchanged: `/contracts`, `/changes`,
+`/cost`, `/ordered`. Overview keeps the job's own Details and a summary of each
+section that has a page of its own. Each new route reads only what its panel
+renders — the contracts, commitments, change orders, cost report and compliance
+reads moved out WITH their panels, so the Overview no longer pays for four
+tables nobody can see.
+
+**`contractSummary` (`contract-math.ts`) is why Contracts and Changes cannot
+disagree.** `valued`, `approvedByContract`, `revisedOf`, `signedValue`,
+`changesValue` and the three counts were inline in the old page, shared by being
+in one file. Two pages copying that derivation is exactly how the revised value
+on one screen starts differing from the other, so it is one pure function with
+`tests/jobs-contract-math.test.ts` on it.
+
+**Three traps, each of which cost a real failure here:**
+
+- **A lucide icon is a FUNCTION, and `CategoryStrip` is a client component.**
+  Building the tab array in the server layout threw *"Functions cannot be passed
+  directly to Client Components"* at render — and `tsc` accepted it (`icon?:
+  LucideIcon` is satisfied) and `npm run build` compiled it. The page only fails
+  when something renders it. Every other module's strip is a `"use client"` nav
+  component that builds its own array (`accounting-nav`, `crm-nav`,
+  `documents-nav`, `inventory-nav`, `livestock-nav`); `ProjectNav` now follows
+  that convention rather than inventing one.
+- **Overview must be `exact`.** `CategoryStrip` matches on a path prefix
+  otherwise, so the index route lights up on every tab at once. Everything else
+  WANTS the prefix match — a contract at `/contracts/<id>` keeps Contracts lit.
+- **Five is an odd number.** The strip's gaps are the divider showing through,
+  so at two and three columns the fifth cell left a hole that rendered as a grey
+  block rather than as nothing. The last cell spans the remainder until the row
+  fits it exactly.
+
+The design's own tab list was drawn before slice 9a landed and had **no
+Drawings**; implementing it verbatim would have hidden a shipped feature. Added.
+
+Driven on Hilltop Farm: all ten tabs render with the right section lit, the four
+new routes included, and a contract's own record page keeps Contracts lit
+underneath the job's header.
+
 ### 2026-09-15 — The list carries the money (`claude/jobs-redesign-list`)
 
 The module home used to be seven columns whose only figure was contract

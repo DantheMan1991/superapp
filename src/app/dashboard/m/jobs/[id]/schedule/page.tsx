@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { CalendarDays, ChevronLeft } from "lucide-react";
+import { CalendarDays } from "lucide-react";
 import { eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
@@ -94,12 +94,6 @@ export default async function SchedulePage({ params }: { params: Promise<{ id: s
 
   return (
     <div className="space-y-4">
-      <Link
-        href={`/dashboard/m/jobs/${project.id}`}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeft className="size-4" /> {project.number} · {project.name}
-      </Link>
       <PageHeader
         title="Schedule"
         description={`${projectWord} ${project.number} · ${sentence}`}

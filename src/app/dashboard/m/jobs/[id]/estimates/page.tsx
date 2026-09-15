@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, FileText } from "lucide-react";
+import { FileText } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -56,12 +56,6 @@ export default async function EstimatesPage({ params }: { params: Promise<{ id: 
 
   return (
     <div className="space-y-4">
-      <Link
-        href={`/dashboard/m/jobs/${project.id}`}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeft className="size-4" /> {project.number} · {project.name}
-      </Link>
       <PageHeader
         title="Estimates"
         description={`${projectWord} ${project.number} · ${rows.length} ${rows.length === 1 ? "estimate" : "estimates"}`}

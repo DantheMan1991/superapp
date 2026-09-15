@@ -1,6 +1,5 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, Pencil } from "lucide-react";
+import { Pencil } from "lucide-react";
 import { eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
@@ -88,12 +87,6 @@ export default async function DailyLogPage({
 
   return (
     <div className="space-y-4">
-      <Link
-        href={`/dashboard/m/jobs/${project.id}`}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeft className="size-4" /> {project.number} · {project.name}
-      </Link>
       <PageHeader
         title="Daily log"
         description={`${projectWord} ${project.number} · ${days.length} ${days.length === 1 ? "day" : "days"} on record`}

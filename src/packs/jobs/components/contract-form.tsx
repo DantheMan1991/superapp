@@ -337,10 +337,10 @@ export function ContractForm({
                   : isCostPlusMethod(billingMethod)
                     ? "Billed as what the job has cost, plus the fee below."
                     : isUnitPriceMethod(billingMethod)
-                    ? "Billed by the quantities installed at their unit prices, against a schedule of items on the contract's page. The value is the estimate the schedule adds up to."
+                      ? "Billed by the quantities installed at their unit prices, against a schedule of items on the contract's page. The value is the estimate the schedule adds up to."
                       : isFixedValueMethod(billingMethod)
-                      ? "Billed against a schedule of values on the contract's page."
-                    : "Recorded now; this method is not billed here yet."}
+                        ? "Billed against a schedule of values on the contract's page."
+                        : "Recorded now; this method is not billed here yet."}
               </p>
             </div>
 

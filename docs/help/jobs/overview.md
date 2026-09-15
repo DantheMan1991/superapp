@@ -258,6 +258,18 @@ What can stop an issue, beyond the cost-plus refusals: `Hours with no bill rate:
 - **The contract's rate for everybody is fixed once an application has issued**: the box greys with `Fixed once an application has issued`, and a save that changes it is refused in those words. A rate that changes over time is set in Time with its date, and each person's hours are billed at the rate in force on the day.
 - **One contract bills a job's books**, cost plus or time and materials; a second one starting an application is refused as for cost plus.
 
+### Printing an application
+
+{button:PDF|ghost} on any application's row — draft, issued or voided — opens it as a two-page PDF in a new tab, ready to print, sign and send.
+
+- **Page one, the certificate**: who it is from and to, the {{project|lower}}, the contract and its date, the application number, the period and the date issued; then the nine lines every owner and architect expects — original contract sum, net change by change orders, contract sum to date, total completed and stored to date, retainage, total earned less retainage, less previous certificates, **current payment due**, and balance to finish — a change-order summary (additions and deductions, approved before the last certificate and since), a certification sentence for you to sign and date, and an *Amount certified* line with a signature and date for the owner or architect.
+- **Page two, the continuation sheet**, sideways: a row per schedule line with its scheduled value, work from previous applications, this period, stored materials, the total to date, its percent, and the balance to finish, with totals.
+- A **cost plus a fee** or **time and materials** application prints on the same two pages with its own lines: the guaranteed maximum or not-to-exceed where the contract sum goes (`None` when there is none), *Cost plus fee to date* or *Labour, cost and markup to date* as line 4 with its parts under it, and on the continuation sheet the cost by code and, for time and materials, the hours by person and rate.
+- A draft prints with **DRAFT** across every page and *Not yet issued* as its date; a voided application prints with **VOID**. An issued one prints the figures it froze at issue, so it reads the same for as long as it exists.
+- The *To* block is the contract's {{customer|lower}} and, when they have been invoiced before, the postal address on their Accounting customer record; a {{customer|lower}} never billed prints as a name alone.
+
+The form itself, its wording and its name belong to the AIA and are not reproduced; a business that must file the AIA's own form copies these nine figures onto it.
+
 ### Voiding
 
 {button:Void|ghost} on the **latest issued** application only — every later one was computed from it. Accounting voids its invoice too, and refuses if a payment has been recorded against it (unapply the payment first). The next draft then certifies against the application before it.
@@ -519,7 +531,7 @@ Worth knowing so you are not looking for it:
 - **Unit price is not billed here yet.** Fixed price, progress draws, AIA applications and draw schedules bill against a schedule of values; cost plus a fee bills the books' cost; time and materials bills approved hours and the books' other cost. Unit price is recorded on the contract and the contract's page says so.
 - **Time and materials has no rate card of its own.** Each person's rate comes from Time, or one rate on the contract covers everybody; a rate per trade (carpenter, labourer, foreman) or a rate negotiated for one customer is not a thing you can set yet.
 - **A cost-plus job on the work in progress schedule earns what it has cost plus its fee**, capped at its maximum, with no estimate asked for — when it is the job's only signed contract. A time-and-materials job earns its approved hours at their rates plus the rest of its cost marked up, the same way; one with hours nobody has priced shows `Hours on the job with no bill rate` and blocks the period until a rate is set. A job mixing methods, and any unit-price job, is shown and left out, and a period with billings on one cannot post until it has a value.
-- **No printed application.** The certificate is on screen and its invoice is in Accounting; an AIA-style printout is coming.
+- **A subcontractor's application does not print.** It is the subcontractor's document, prepared on their side; your own applications print from their row.
 - **Nothing codes a bill for you.** Cost codes appear in Accounting wherever you tag a line, beside the job itself, and the `Spent` column reads what the bills carry. A line with the job and no code shows up as the uncoded note under the job cost table, not on a row.
 - **Nothing is ever deleted.** A contract you should not have added is set to `Cancelled` or `Declined`; a cost code is retired; a {{project|lower}} is cancelled. That is on purpose — a job's history is the point of keeping it.
 

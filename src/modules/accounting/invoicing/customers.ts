@@ -210,6 +210,23 @@ export async function dueDateFromCustomerTerms(
  * operator's clients, made a verb so nothing outside this module touches
  * `customers` directly.
  */
+/**
+ * The customer a party already is, or null — a READ, for a document that
+ * names the party (the jobs pack's certificate, ADR 0063) and must not make
+ * one just by being printed. `ensureCustomerForParty` below is the verb that
+ * makes one, at the moment something is billed.
+ */
+export async function customerForParty(
+  tx: Tx,
+  tenantId: string,
+  partyId: string,
+): Promise<Customer | null> {
+  const row = await tx.query.customers.findFirst({
+    where: and(eq(schema.customers.tenantId, tenantId), eq(schema.customers.partyId, partyId)),
+  });
+  return row ?? null;
+}
+
 export async function ensureCustomerForParty(
   tx: Tx,
   ctx: LedgerCtx,

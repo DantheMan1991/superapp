@@ -11,6 +11,7 @@ import {
   createPayApplication,
   issuePayApplication,
   listPayApplications,
+  payApplicationCertificate,
   saveSovLines,
   updatePayApplication,
   voidPayApplication,
@@ -2648,6 +2649,59 @@ d("jobs ops", () => {
     const mixed = await run((tx) => wipSchedule(tx, tenantId, { entityId: entity, periodEnd: "2026-09-30" }));
     expect(mixed.rows.find((r) => r.projectId === project.id)!.method).toBe("cost_to_cost");
   });
+
+  // -------------------------------------------------------- the printout (5e)
+
+  it("THE CERTIFICATE READ carries the application with its contract, project, row, last certificate, approved change orders and the party, and null for a stranger", async () => {
+    const { project, contract } = await run((tx) => billableContract(tx, "OPS-PR1", 100_000_00));
+    expect(project.number).toBe("OPS-PR1");
+    const [line] = await run((tx) =>
+      saveSovLines(tx, ctx, contract.id, [{ description: "Everything", scheduledCents: 100_000_00 }]),
+    );
+    await run(async (tx) => {
+      await createChangeOrder(tx, ctx, {
+        contractId: contract.id,
+        number: "CO-1",
+        title: "Deck",
+        status: "approved",
+        approvedOn: "2026-08-15",
+        valueCents: 5_000_00,
+      });
+      await createChangeOrder(tx, ctx, {
+        contractId: contract.id,
+        number: "CO-2",
+        title: "Pool",
+        status: "proposed",
+        valueCents: 60_000_00,
+      });
+    });
+    const first = await run((tx) =>
+      createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-08-31", retainagePpm: 100_000 }),
+    );
+    await run((tx) =>
+      updatePayApplication(tx, ctx, first.id, {
+        lines: [{ sovLineId: line.id, thisPeriodCents: 30_000_00, storedCents: 0 }],
+      }),
+    );
+    await run((tx) => issuePayApplication(tx, ctx, first.id, { issueDate: "2026-09-01" }));
+    const second = await run((tx) =>
+      createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-09-30" }),
+    );
+    const c = await run((tx) => payApplicationCertificate(tx, tenantId, second.id));
+    expect(c).not.toBeNull();
+    expect(c!.app.number).toBe(2);
+    expect(c!.contract.id).toBe(contract.id);
+    expect(c!.project.number).toBe("OPS-PR1");
+    expect(c!.previous?.periodTo).toBe("2026-08-31");
+    // Approved only, this contract only.
+    expect(c!.changeOrders.map((r) => r.changeOrder.title)).toEqual(["Deck"]);
+    expect(c!.row.lines.map((l) => [l.description, l.previousCents])).toEqual([["Everything", 30_000_00]]);
+    expect(c!.row.totals.previousCertificatesCents).toBe(27_000_00);
+    expect(c!.ownerName).toMatch(/^Owner OPS-PR1/);
+    // Invoiced once, so a customer exists, with no address: the name alone.
+    expect(c!.ownerAddress).toBe("");
+    expect(await run((tx) => payApplicationCertificate(tx, tenantId, crypto.randomUUID()))).toBeNull();
+  }, 120_000);
 
   // ------------------------------------------------ time and materials (5d)
 

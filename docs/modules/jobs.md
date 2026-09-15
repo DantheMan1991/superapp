@@ -13,6 +13,109 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-14 — Slice 5e: the printout (`claude/pay-application-printout`, ADR 0063)
+
+The last item on the billing slices' list: a pay application as the
+document an owner, an architect or a lender asks for. No migration, no new
+row — a *PDF* link on every application's row, a GET route, and three
+files in the pack that mirror Accounting's invoice PDF exactly:
+`certificate-model.ts` (pure: every word and figure on the two pages,
+table-tested), `certificate-pdf.tsx` (layout only, `@react-pdf/renderer`,
+the same NotoSans faces) and `certificate.ts` (from the pack's rows to the
+model's input, the brand and the bytes), with `payApplicationCertificate`
+in `ops.ts` reading the application, its contract and project, the row the
+contract page shows, the last issued application and the approved change
+orders in one go.
+
+**RENDERED FROM THE FROZEN CERTIFICATE, NEVER STORED** ([ADR 0063](../decisions/0063-a-pay-applications-printout-is-rendered-from-the-frozen-certificate.md)). An issued
+application prints the five totals and the line figures it wrote down at
+issue; a draft prints its live figures under a DRAFT watermark and *Not yet
+issued* as its date; a voided one prints under VOID. Nothing is saved — a
+file could only drift from the row, and the row cannot change.
+
+**THE SHAPE EVERYBODY KNOWS, IN OUR OWN WORDS.** Page one is portrait: the
+parties, the job, the contract and its date, the application number, the
+period and the date; the nine numbered lines — original contract sum, net
+change by change orders, contract sum to date, total completed and stored to
+date, retainage as a percent of line 4, total earned less retainage, less
+previous certificates, **current payment due**, balance to finish including
+retainage; a change-order summary with additions and deductions split at the
+last certificate's period end; a certification sentence of ours; two
+signature blocks, the owner's or architect's with an *Amount certified*
+line. Page two is LANDSCAPE, because a continuation sheet has nine columns:
+a row per schedule line — scheduled, previous, this period, stored, to date,
+percent, balance — and totals. The form, its text and its name are the
+AIA's and appear nowhere; the pure test scans the model for *AIA*, *G702*
+and *G703*.
+
+**COST PLUS AND T&M PRINT ON THE SAME TWO PAGES.** Line 1 is the guaranteed
+maximum or the not-to-exceed, *None* when there is none, and lines 3 and 9
+follow it; line 4 is *Cost plus fee to date* or *Labour, cost and markup to
+date* (*…, at the maximum* when the cap held), with its parts beneath it;
+the continuation sheet carries the books' cost by code and, on T&M, the
+hours by person and rate — the draft editor's rows, printed. Negative
+amounts — a deduction, a correction this period, a credit passed on — print
+in parentheses, the convention on a statement (`formatCentsSigned`).
+
+**THE PARTY'S ADDRESS IS ACCOUNTING'S.** The product keeps no postal address
+on a party (`party_contact_points` are email, phone and website); the one
+it keeps is the customer's, in Accounting, which is where the invoice reads
+it. The pack asked for a read: `customerForParty` in
+`invoicing/customers.ts`, the twin of `ensureCustomerForParty` that makes
+one — a certificate must not create a customer by being printed. A party
+never billed prints as a name alone.
+
+Tests: `tests/jobs-certificate.test.ts` — the nine lines of a fixed-value
+application, the change orders split at the last certificate and a net
+deduction in parentheses, the facts and the draft's *Not yet issued*, the
+signature blocks and the scan for the AIA's words, the continuation rows
+with their percent and balance and the totals, a correction in
+parentheses and an empty schedule's missing totals row, the cost-plus
+lines with the maximum and the parts of line 4 and *None* without a
+maximum, the T&M hours by person with a dash for no rate; and four renders
+to real PDF bytes (fixed, cost-plus draft, T&M, empty and branded), the way
+`invoice-pdf-render.test.ts` guards the fonts.
+
+**DRIVEN ON THE DEV BRANCH, all three shapes.** The browser pane treats a
+PDF response as a download and will not show it, so the three certificates
+were read in Chrome's viewer embedded in the page, and rendered to files by
+script as well. **24-108** (fixed price, one schedule line, one approved
+change order): page one under the farm's logo and green — *APPLICATION AND
+CERTIFICATE FOR PAYMENT · Application 1 against the schedule of values*,
+*Project 24-108 · Oak Row residence — phase 2 · Contract for New home ·
+Application no. 1 · Period to 2026-09-14 · Application date 2026-09-14*,
+*To Tractor Supply Co · From Hilltop Farm*, then **1 Original contract sum
+1,842,000.00 · 2 Net change by change orders 12,500.00 · 3 Contract sum to
+date 1,854,500.00 · 4 Total completed and stored to date 370,900.00 · 5
+Retainage (10% of line 4) 37,090.00 · 6 Total earned less retainage
+333,810.00 · 7 Less previous certificates 0.00 · 8 Current payment due
+333,810.00 · 9 Balance to finish, including retainage 1,520,690.00**, the
+change-order summary with the 12,500.00 under *Approved this period*, the
+certification sentence and the two signature blocks; page two, sideways,
+**1 · Contract sum · 1,854,500.00 · 0.00 · 370,900.00 · 0.00 · 370,900.00 ·
+20% · 1,483,600.00** with totals and the draft's note *Draw 1 — foundation
+and framing complete*. **24-109** (cost plus): *Application 1 for cost plus
+a fee*, **1 Guaranteed maximum 60,000.00 · 3 Guaranteed maximum to date
+60,000.00 · 4 Cost plus fee to date 45,597.50** with *Cost to date
+39,650.00* and *Fee to date (15% of cost) 5,947.50* beneath it, **5
+Retainage 4,559.75 · 8 Current payment due 41,037.75 · 9 Balance to the
+guaranteed maximum, including retainage 18,962.25**; page two *COST BY
+CODE*: **06 10 00 · Rough carpentry 39,650.00 · 0.00 · 39,650.00 ·
+39,650.00 / No cost code 850.00 · 0.00 · 0.00 · 0.00 / Totals 40,500.00 ·
+0.00 · 39,650.00 · 39,650.00**. **24-110** (time and materials):
+*Application 1 for hours at their rates and cost with a markup*, **1 Not to
+exceed None · 3 None · 4 Labour, cost and markup to date 2,244.00** with
+*Labour to date 880.00 · Cost to date, wages aside 1,240.00 · Markup to date
+(10% on cost) 124.00*, **8 Current payment due 2,244.00 · 9 —**; page two
+the cost line and *HOURS BY PERSON*: **danr.houser91 · 50.00/h · 2 h · 0 h ·
+2 h · 100.00 · 100.00 / Marta Quinn · 65.00/h · 12 h · 0 h · 12 h · 780.00 ·
+780.00**. One thing the render found: with line 4's three parts the T&M
+certificate ran to THREE pages — the signature blocks fell off page one —
+so page one's spacing was tightened until every shape counts two, which a
+script now checks. The address block prints the name alone: the farm's
+Tractor Supply Co customer row carries no address. The three PDFs were sent
+to the founder as files.
+
 ### 2026-09-14 — Slice 5d: time and materials (`claude/time-and-materials`, ADR 0062)
 
 The third way the market bills a job, and the one ADR 0060 closed with:
@@ -1449,6 +1552,11 @@ ordering only bites when two new tables reference each other in one file.
   the wages accounts from the rest without knowing the accrual's codes.
 - `src/app/dashboard/m/jobs/[id]/contracts/[contractId]/page.tsx` — one
   contract's billing: schedule above, applications below, five tiles on top.
+- `src/packs/jobs/certificate-model.ts` + `certificate-pdf.tsx` +
+  `certificate.ts`, and `src/app/api/jobs/applications/[id]/pdf/route.ts` —
+  a pay application as a PDF: the pure model (every word and figure), the
+  layout, the rows-to-model mapping with the brand, and the GET route. The
+  invoice PDF's split, file for file (ADR 0063).
 - `src/lib/db-errors.ts` — `violatedUniqueIndex`, the constraint name from
   `err.cause`. Every unique-index sentence in `actions.ts` goes through it,
   because matching on `err.message` never fired (slice 4 build log).
@@ -1539,6 +1647,10 @@ ordering only bites when two new tables reference each other in one file.
   fixed-value methods get a schedule; cost plus a fee gets the books' cost;
   time and materials gets Time's hours and the books' cost without the
   wages; unit price gets a note. Never the kind.
+- **A pay application's printout is rendered from the frozen certificate,
+  in the shape everybody knows and in our own words** — [ADR 0063](../decisions/0063-a-pay-applications-printout-is-rendered-from-the-frozen-certificate.md). Never stored;
+  drafts watermarked; the AIA's form, text and name reproduced nowhere; cost
+  plus and T&M on the same two pages with their own lines.
 - **A pay application is an ordinary invoice, and retainage is a negative
   line to a receivable** —
   [ADR 0058](../decisions/0058-a-pay-application-is-an-ordinary-invoice.md).
@@ -1579,7 +1691,20 @@ ordering only bites when two new tables reference each other in one file.
   **closed 2026-09-14 (slice 5d, ADR 0062)**, cost-plus with Time's rate
   card in place of labour cost;
   ~~**retainage held FROM subcontractors**~~ **closed 2026-09-14 (slice 5c,
-  ADR 0061)**; **the AIA-style printout** of a certificate.
+  ADR 0061)**; ~~**the AIA-style printout** of a certificate~~ **closed
+  2026-09-14 (slice 5e, ADR 0063)**.
+- **The certificate has no architect of record and no certified amount.**
+  The owner's or architect's block is signed with a pen and its *Amount
+  certified* line is blank: the pack records what was applied for. The day a
+  certified amount that differs must be kept, it is a column on the
+  application and a line on the next certificate; the architect's name is a
+  party on the contract. Nobody has asked.
+- **A subcontractor's application does not print**, being the
+  subcontractor's document. A business that prepares one on a
+  subcontractor's behalf wants this renderer in the commitment's mode.
+- **A signed certificate cannot be attached to its application.** The scan
+  the owner returns belongs beside the row; Documents' attachments are the
+  seam, as the daily log's photos are.
 - **A billed subcontract cannot be changed.** Its lines are held by RESTRICT
   once an application has billed against them, so `updateCommitment`'s
   replace-the-lines edit refuses. The honest fix is a change order's

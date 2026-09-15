@@ -3,6 +3,7 @@ import { accountingMailExtension } from "@/modules/accounting/mail/extension";
 import { crmMailExtension } from "@/modules/crm/mail/extension";
 import { documentsMailExtension } from "@/modules/documents/mail/extension";
 import { workEntityLinks } from "@/modules/work/links";
+import { jobsEntityLinks } from "@/packs/jobs/links";
 import type { EntityLinkProvider } from "./types";
 
 /**
@@ -51,6 +52,7 @@ export const entityLinkProviders: readonly EntityLinkProvider[] = [
   crmMailExtension,
   documentsMailExtension,
   workEntityLinks,
+  jobsEntityLinks,
 ];
 
 /** By slug, for turning a stored `extension_slug` back into code. */

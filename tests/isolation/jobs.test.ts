@@ -1880,4 +1880,82 @@ d("jobs tables (RLS)", () => {
     await expect(withSystem((tx) => tx.delete(schema.parties).where(eq(schema.parties.id, clientA)))).rejects.toThrow();
     await withSystem((tx) => tx.delete(schema.jobPartyDocuments).where(eq(schema.jobPartyDocuments.id, docId)));
   });
+
+  it("cannot read or change another tenant's PHASES; a phase hangs off this tenant's job, item, party and code and follows this tenant's phase; the item is one phase's; the kind, the status and the lag are checked; the phases go with the job and with the item", async () => {
+    const calendarId = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.scheduleCalendars).values({ tenantId: tenantA, ownerClerkUserId: null, name: "Job schedule", kind: "job_schedule", extensionSlug: "jobs", extensionKey: "schedule" }).returning();
+      return r[0].id;
+    });
+    const itemFor = async (tenant: string, calendar: string, title: string) =>
+      withSystem(async (tx) => {
+        const r = await tx
+          .insert(schema.scheduleItems)
+          .values({ tenantId: tenant, calendarId: calendar, title, startsAt: new Date("2026-09-14T04:00:00Z"), endsAt: new Date("2026-09-19T04:00:00Z"), allDay: true, timeZone: "America/New_York", kind: "job_phase", createdByClerkUserId: "" })
+          .returning();
+        return r[0].id;
+      });
+    const itemA = await itemFor(tenantA, calendarId, "casc · Site work");
+    const phaseId = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobPhases).values({ tenantId: tenantA, projectId: projectA, itemId: itemA, name: "Site work", partyId: clientA, costCodeId: codeA }).returning();
+      return r[0].id;
+    });
+    const seen = await asOtherTenant(async (tx) => ({
+      rows: await tx.select().from(schema.jobPhases).where(eq(schema.jobPhases.id, phaseId)),
+      changed: await tx.update(schema.jobPhases).set({ name: "Theirs" }).where(eq(schema.jobPhases.id, phaseId)).returning(),
+    }));
+    expect(seen.rows).toEqual([]);
+    expect(seen.changed).toEqual([]);
+    expect(await asStaff((tx) => tx.select().from(schema.jobPhases).where(eq(schema.jobPhases.id, phaseId)))).toHaveLength(1);
+
+    // Tenant B's job, item, party, code or phase under tenant A's row: unrepresentable.
+    const calendarB = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.scheduleCalendars).values({ tenantId: tenantB, ownerClerkUserId: null, name: "Job schedule", kind: "job_schedule", extensionSlug: "jobs", extensionKey: "schedule" }).returning();
+      return r[0].id;
+    });
+    const itemB = await itemFor(tenantB, calendarB, "theirs");
+    const itemA2 = await itemFor(tenantA, calendarId, "casc · Slab");
+    const otherCode = await withSystem(async (tx) => (await tx.select().from(schema.jobCostCodes).where(eq(schema.jobCostCodes.setId, setB)))[0].id);
+    const otherParty = await withSystem((tx) => seedParty(tx, tenantB, "Builder B's framer"));
+    const base = { tenantId: tenantA, name: "x" } as const;
+    await expect(withSystem((tx) => tx.insert(schema.jobPhases).values({ ...base, projectId: projectB, itemId: itemA2 }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobPhases).values({ ...base, projectId: projectA, itemId: itemB }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobPhases).values({ ...base, projectId: projectA, itemId: itemA2, partyId: otherParty }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobPhases).values({ ...base, projectId: projectA, itemId: itemA2, costCodeId: otherCode }))).rejects.toThrow();
+    const phaseB = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobPhases).values({ tenantId: tenantB, projectId: projectB, itemId: itemB, name: "Theirs" }).returning();
+      return r[0].id;
+    });
+    await expect(withSystem((tx) => tx.insert(schema.jobPhases).values({ ...base, projectId: projectA, itemId: itemA2, predecessorId: phaseB }))).rejects.toThrow();
+    // One phase per item; the CHECKs.
+    await expect(withSystem((tx) => tx.insert(schema.jobPhases).values({ ...base, projectId: projectA, itemId: itemA }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.update(schema.jobPhases).set({ kind: "task" }).where(eq(schema.jobPhases.id, phaseId)))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.update(schema.jobPhases).set({ status: "late" }).where(eq(schema.jobPhases.id, phaseId)))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.update(schema.jobPhases).set({ lagDays: 366 }).where(eq(schema.jobPhases.id, phaseId)))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.update(schema.jobPhases).set({ predecessorId: phaseId }).where(eq(schema.jobPhases.id, phaseId)))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.update(schema.jobPhases).set({ name: "  " }).where(eq(schema.jobPhases.id, phaseId)))).rejects.toThrow();
+    // A predecessor, the party and the code are held; the phase goes with its item and with its job.
+    const slabId = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobPhases).values({ ...base, name: "Slab", projectId: projectA, itemId: itemA2, predecessorId: phaseId }).returning();
+      return r[0].id;
+    });
+    await expect(withSystem((tx) => tx.delete(schema.jobPhases).where(eq(schema.jobPhases.id, phaseId)))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.delete(schema.jobCostCodes).where(eq(schema.jobCostCodes.id, codeA)))).rejects.toThrow();
+    await withSystem((tx) => tx.delete(schema.scheduleItems).where(eq(schema.scheduleItems.id, itemA2)));
+    expect(await withSystem((tx) => tx.select().from(schema.jobPhases).where(eq(schema.jobPhases.id, slabId)))).toEqual([]);
+    const scratch = await withSystem(async (tx) => {
+      const p = await tx.insert(schema.jobProjects).values({ tenantId: tenantA, entityId: entityA, number: "casc-ph", name: "ph" }).returning();
+      const item = await tx
+        .insert(schema.scheduleItems)
+        .values({ tenantId: tenantA, calendarId, title: "casc-ph · x", startsAt: new Date("2026-09-14T04:00:00Z"), endsAt: new Date("2026-09-15T04:00:00Z"), allDay: true, timeZone: "America/New_York", createdByClerkUserId: "" })
+        .returning();
+      const ph = await tx.insert(schema.jobPhases).values({ tenantId: tenantA, projectId: p[0].id, itemId: item[0].id, name: "Goes with the job" }).returning();
+      return { projectId: p[0].id, phaseId: ph[0].id, itemId: item[0].id };
+    });
+    await withSystem((tx) => tx.delete(schema.jobProjects).where(eq(schema.jobProjects.id, scratch.projectId)));
+    expect(await withSystem((tx) => tx.select().from(schema.jobPhases).where(eq(schema.jobPhases.id, scratch.phaseId)))).toEqual([]);
+    await withSystem(async (tx) => {
+      await tx.delete(schema.scheduleItems).where(inArray(schema.scheduleItems.id, [itemA, itemB, scratch.itemId]));
+      await tx.delete(schema.scheduleCalendars).where(inArray(schema.scheduleCalendars.id, [calendarId, calendarB]));
+    });
+  });
 });

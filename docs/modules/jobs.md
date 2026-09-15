@@ -13,6 +13,113 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-15 — The schedule (`claude/job-schedule`, ADR 0071)
+
+The row the construction plan never had and every builder lives by:
+`job_phases`, a **Schedule** page per job (`/dashboard/m/jobs/[id]/schedule`)
+with a timeline, a Schedule panel on the job's page, and every phase on the
+company calendar and the phone feed — because a phase IS a calendar item.
+
+**CORE OWNS THE DATES.** A phase is an all-day item on a business-owned
+*Job schedule* calendar (`JOB_CALENDAR`: slug `jobs`, key `schedule`,
+violet), made once per business through the managed-calendar seam
+Marketing's Bookings calendar uses — generalised for its second layer:
+`ensureExtensionCalendar` / `findExtensionCalendarId` in
+`src/lib/schedule/managed-calendars.ts`, Marketing's two functions now
+delegating — shared with everyone at write, titled *24-109 · Framing*, kind
+`job_phase`, and linked to the project through `schedule_item_links`. The
+first and last day are the item's `starts_at`/`ends_at` in the tenant's
+zone and nowhere else; the pack writes them through `createItem` /
+`updateItem` / `cancelItem` of the scheduling module and reads them back
+with `dateInTimezone`. Nothing in `src/modules/scheduling/` changed, which
+is what that module's dossier said would be true of the first trade pack.
+
+**THE PACK OWNS WHAT A CALENDAR DOES NOT KNOW.** `job_phases` is one row per
+item: name, phase or milestone, planned / underway / done, the predecessor
+and its lag in days, the party doing it, the cost code, notes, order.
+`schedule-ops.ts`: `ensureJobCalendar` (the calendar is made by an OWNER —
+the scheduling module's write policy on a business-owned calendar — on the
+first phase or the first owner opening the schedule page; a staff member
+before that gets `SCHEDULE_NOT_MADE` and a sentence saying whom to ask),
+`createPhase` (member; refuses a start before the
+predecessor allows, with the day it may), `updatePhase` (refuses a loop
+with `PHASE_CYCLE`, a self-predecessor, another job's phase; keeps the
+length when only the start moves; then **pushes what follows**), `deletePhase`
+(successors follow what it followed; the item is cancelled, the module's
+convention), `listPhases` (soonest first, with the predecessor, the
+earliest start, the party, the code, *overdue* and *late to start* as of
+today), `scheduleSummary`. The arithmetic is pure in `schedule-math.ts`:
+inclusive days, `earliestStart`, `wouldCycle`, `cascade` (finish-to-start,
+successors pushed forward keeping their length, never pulled earlier, each
+reported once at its final dates), `summarise`, `weeksCovering`.
+
+**A PROJECT IS NOW SOMETHING THE PLATFORM CAN POINT AT.** `src/packs/jobs/links.ts`
+is an `EntityLinkProvider` (slug `jobs`, type `project`) in
+`src/lib/entity-links/registry.ts` — the first layer beneath the core
+modules to contribute one — so the phase items resolve to "24-109 · Miller
+barn conversion" with a link on the calendar, and an email or a work item
+can be attached to a project from the same picker.
+
+**THE PAGE.** A table with a timeline column: Sunday-first weeks across the
+span (or today's week when the job has none), eight points to a day, a
+bar per phase (planned muted, underway primary, done green, overdue
+ringed red), a rotated square for a milestone, a red line for today; the
+phase with its predecessor and lag and code under it, who, the dates,
+the days, the status. `PhaseForm` adds and edits: name, kind, the dates
+(a milestone has one), *Follows* with the lag and a live line saying the
+day it may start or that it cannot, who, the cost code, the status,
+notes, and Remove (armed by a second click). The toast counts the phases
+that moved with a save. The job's page panel says *N phases from … to …:
+done, underway, next, overdue*.
+
+**DRIVEN on the dev branch's Hilltop Farm, job 24-109, signed in as the
+owner.** *Add phase* on the job's panel — Site work, 2026-09-14 to 09-18 —
+made the business's Job schedule calendar and the first item, and the
+panel read *1 phase from 2026-09-14 to 2026-09-18: 0 done*. On the
+schedule page: Slab after Site work, with the live line *May start from
+2026-09-19, the day after Site work*; Framing after Slab with two days' lag
+(*May start from 2026-09-28, the day after Slab plus 2 days*) and the feed
+mill as its crew; Roof after Framing; Frame inspection as a milestone
+after Roof, the Ends box gone the moment Milestone was picked. The
+timeline drew five rows with Sunday-first weeks, the bars, the diamond and
+today's red line, and *not started* under Site work. The slab slipped a
+week through the pencil — *Phase saved — 3 later phases moved with it* —
+and the page read Framing 10-05 to 10-23, Roof 10-24 to 10-28, the
+inspection 10-29: the ops suite's arithmetic to the day. The company
+calendar's week view carried *24-109 · Site work* across Monday to Friday
+in the calendar's violet. At 375px the page kept to its width and the
+table scrolled inside its panel. Three things found by driving, all
+fixed: the add dialog is one instance reused for every add and kept the
+last phase's crew for the next (Roof and the inspection inherited the
+feed mill — every field now resets); the date cells wrapped (kept on one
+line); and the page body scrolled sideways, because a pencil button's
+screen-reader label is absolutely positioned and escaped the timeline's
+scroll container — the Table component's wrapper is `relative` for
+exactly this, and the timeline's now is too. Not driven: the phone feed
+(the same query the week view reads) and a staff member's first phase
+before the calendar exists (the ops suite covers the refusal).
+
+Migrations `0359_job_phases.sql` (hand-reordered: a table that references
+ITSELF needs its unique index before the constraint that points back at
+it) and `0360_job_phases_rls.sql`, applied to dev and prod before the
+merge; `db:verify-rls` **220 tables** on both, `db:verify-modules` 19/19.
+Tests: `tests/jobs-schedule.test.ts` (the two CHECKs mirrored, the keys
+and the reordering, the calendar's names; inclusive days, the earliest
+start and the overlap, the weeks; a loop both ways, the push with every
+length kept, nothing pulled earlier, a successor moved only as far as it
+must, one pushed by two ancestors reported once; the sentence), one more
+ops (the shape refused five ways; the chain laid out and a too-early
+start refused with the day; the calendar made once and shared with
+everyone, the item all-day and titled and linked; the list read back
+through the zone with a milestone one day; a loop, a self-predecessor and
+another job's phase refused; the slab slipping a week and the three
+behind it moving; overdue and late-to-start as of a day; the item's
+instant at New York midnight; a stale version; a rename reaching the
+item's title; pulling back leaving successors; done clearing overdue;
+removing re-pointing and cancelling; an accountant refused), one more
+isolation (the table, its five keys, the one-item rule, the CHECKs, the
+holds, the two cascades).
+
 ### 2026-09-15 — Slice 10b: the proposal (`claude/proposal`, ADR 0070)
 
 An estimate as the document the client is sent: four columns on
@@ -2192,6 +2299,7 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_estimates` | The job priced before anybody signs (10, ADR 0069): a number unique per job, title, draft / sent / accepted / declined / superseded, sent / decided / valid-until dates, the three rates in ppm — markup on cost (the lines' default), overhead on the subtotal, profit on the subtotal plus overhead — notes, and the contract an accepted one became. | Cascade from the project; **no action to the contract**. CHECK: status on the list, every rate 0..10,000,000 ppm (`RATE_PPM_MAX`), number present. Nothing stores a total: `estimate-math.ts` computes them. Accepted, the rates and lines are fixed by the verb, not the database. Since 10b (ADR 0070) also `presentation` (CHECK lines / codes / sum) and the proposal's `scope`, `exclusions` and `terms` — the words fixed with the money, the presentation free. |
 | `job_estimate_lines` | One line of an estimate: cost code, description, unit, quantity in thousandths (1000 = one, a lump sum), unit cost, an optional markup of its own, an optional unit price that wins over any markup, notes, sort order. | Cascade from the estimate; **no action to the code**. CHECK: description present, quantity / unit cost / unit price ≥ 0, markup 0..10,000,000 ppm or null. Written by id (updated, inserted, removed when left out), so a line keeps its identity across an edit; nothing points at one. |
 | `job_party_documents` | What a subcontractor or supplier has on file with the business (11b, ADR 0068): the party, an open-taxonomy `kind` (format-checked; three suggested), title, issuer, number, issued and expires dates, a coverage limit, requested / received / void with the receipt date, notes. The scanned copy is a Documents attachment (`job_party_document`). | **No action to the party** — one with documents on file cannot be merged away. CHECK: the kind is a slug; received has its date, requested has none, void keeps what it had; limit ≥ 0. Standing (missing / expired / expiring / ok) is derived against today and the tenant's required list, never stored. |
+| `job_phases` | A phase or milestone of a job's schedule (ADR 0071): the calendar item that holds its dates, name, kind, planned / underway / done, the predecessor and its lag, the party doing it, the cost code, notes, order. | Cascade from the project AND from its `schedule_items` row (a phase without its item is nothing); **no action to itself, the party and the code** (the verb re-points successors before a removal). One phase per item. CHECK: kind, status, lag within a year, not its own predecessor. The dates are NOT here — they are the item's. |
 | `job_lien_waivers` | A lien waiver as a RECORD (11a, ADR 0066): the claimant (any party), the job, the order and the billed application it covers, its kind (conditional/unconditional × progress/final), the through date, the amount, and whether it was requested or received. The signed copy is a Documents attachment (`job_lien_waiver`). | Cascade from the project and the order; **no action to the party and to the application** — who signed is held, and a named application stays. CHECK: received has its date, requested has none, void keeps what it had; amount ≥ 0. Nothing here says "outstanding": the gap is derived from the applications' bills at read time. |
 | `job_commitment_lines` | The money, one cost code at a time — the lines the order was placed with (`change_order_id` null) and each change order's, tagged with it (4b). | Cascade from the commitment and from the change; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative on an original line — a credit is a change order — and a change's line may be negative, the one exception in the CHECK. A line counts when it is original or its change is approved: `countedCommitmentLine`, one predicate for every roll-up. |
 | `job_projects` | The spine. | FOUR composite FKs, each certified in `tests/isolation/jobs.test.ts`: company, division, client, cost code list. `delivery_method` is an open taxonomy (P1) with a **format check and no value check**, and is nullable. `metadata` is the P2 extension bag. |
@@ -2210,9 +2318,9 @@ hand-reordered like 0329) and `0335_job_billing.sql` / `0336_job_billing_rls.sql
 `wip_adjustment` to `journal_entry_source`, which nothing in the file uses)
 and `0341_cost_plus.sql` / `0342_cost_plus_rls.sql` (slice 5b; as generated,
 since the new table references existing ones only) and `0343_sub_billing.sql`
-/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) and `0350_lien_waivers.sql` / `0351_lien_waivers_rls.sql` (slice 11a; as generated, one new table referencing existing ones) and `0352_selections.sql` / `0353_selections_rls.sql` (slice 8; hand-reordered — two new tables, the selections' unique index ahead of the choices' key) and `0354_party_documents.sql` / `0355_party_documents_rls.sql` (slice 11b; as generated) and `0356_estimates.sql` / `0357_estimates_rls.sql` (slice 10; hand-reordered — two new tables, the estimates' unique index ahead of the lines' key) and `0358_proposal.sql` (slice 10b; four columns and a CHECK on `job_estimates`, so no RLS migration) follow the same rule —
+/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) and `0350_lien_waivers.sql` / `0351_lien_waivers_rls.sql` (slice 11a; as generated, one new table referencing existing ones) and `0352_selections.sql` / `0353_selections_rls.sql` (slice 8; hand-reordered — two new tables, the selections' unique index ahead of the choices' key) and `0354_party_documents.sql` / `0355_party_documents_rls.sql` (slice 11b; as generated) and `0356_estimates.sql` / `0357_estimates_rls.sql` (slice 10; hand-reordered — two new tables, the estimates' unique index ahead of the lines' key) and `0358_proposal.sql` (slice 10b; four columns and a CHECK on `job_estimates`, so no RLS migration) and `0359_job_phases.sql` / `0360_job_phases_rls.sql` (the schedule; hand-reordered — a self-referencing key needs the table's own unique index first) follow the same rule —
 and from slice 3 the pair is `db:verify-rls` **and `db:verify-modules`**, after
-the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **219 tables**, all enabled, forced and with
+the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **220 tables**, all enabled, forced and with
 policies, on both.
 
 **0327 needed no hand-reordering, which confirms the diagnosis in 0325.** Both
@@ -2300,6 +2408,12 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Decisions & gotchas
 
+- **[ADR 0071](../decisions/0071-a-jobs-schedule-is-its-phases-as-items-on-the-business-calendar-and-a-move-pushes-what-follows.md)** —
+  a phase is a calendar item on the business's Job schedule; core owns the
+  dates and the pack owns the order, the dependency, the trade and the
+  status. Finish-to-start with a lag; a move pushes what follows and never
+  pulls anything earlier. A self-referencing table needs its unique index
+  hand-moved ahead of its own key in the migration.
 - **[ADR 0070](../decisions/0070-a-proposal-is-the-estimate-at-its-price-and-its-words-are-fixed-with-the-money.md)** —
   the proposal is the estimate printed at its PRICE: overhead and profit
   spread into the lines (the schedule's spread), cost and markup never on
@@ -2457,6 +2571,13 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Open items
 
+- **The schedule is calendar days with one kind of dependency (ADR 0071).**
+  Working-day calendars and holidays, a baseline to measure slip against,
+  start-to-start dependencies, telling the trade (the phase's party has an
+  email; the digest and Mail are the seams), weather days from the daily
+  log, and a template that seeds a new job's phases are each a slice of
+  their own once a real job has run against this one. The Gantt is a table
+  with bars; nothing drags.
 - **The proposal prints; it is not sent, and the client cannot accept it on
   a screen of their own (10b, ADR 0070).** Mail's seam is there for the
   sending when somebody asks; a client portal is a decision of its own.

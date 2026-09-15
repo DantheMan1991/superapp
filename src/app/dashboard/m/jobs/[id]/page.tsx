@@ -42,6 +42,9 @@ import { waiverCoverage, waiverGaps } from "@/packs/jobs/compliance-ops";
 import { selectionSummary } from "@/packs/jobs/selections-ops";
 import { listEstimates } from "@/packs/jobs/estimating-ops";
 import { NewEstimateDialog } from "@/packs/jobs/components/estimate-editor";
+import { listPhases, scheduleSummary } from "@/packs/jobs/schedule-ops";
+import { PhaseForm } from "@/packs/jobs/components/phase-form";
+import { todayInTimezone } from "@/lib/timezone";
 import { SelectionForm } from "@/packs/jobs/components/selection-form";
 import { BudgetEditor } from "@/packs/jobs/components/budget-editor";
 import { ProjectForm } from "@/packs/jobs/components/project-form";
@@ -124,6 +127,7 @@ export default async function ProjectPage({
         waiverCover,
         selections,
         estimates,
+        phases,
       ] = await Promise.all([
         tx
           .select({ name: schema.entities.name })
@@ -229,6 +233,7 @@ export default async function ProjectPage({
         waiverCoverage(tx, ctx.tenant.id, project.id),
         selectionSummary(tx, ctx.tenant.id, project.id, new Date().toISOString().slice(0, 10)),
         listEstimates(tx, ctx.tenant.id, project.id),
+        listPhases(tx, ctx.tenant.id, project.id, ctx.tenant.timezone, todayInTimezone(ctx.tenant.timezone)),
       ]);
       return {
         project,
@@ -259,6 +264,7 @@ export default async function ProjectPage({
         waiverCoverage: waiverCover,
         selections,
         estimates,
+        phases,
       };
     },
     { role: ctx.role },
@@ -1231,6 +1237,45 @@ export default async function ProjectPage({
                   ? ` · ${formatMoneySign(data.selections.toRaiseCents, symbol)} approved and not yet raised as a change order`
                   : ""
               }.`}
+        </p>
+      </Panel>
+
+      <Panel className="p-5">
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-heading text-sm font-medium tracking-heading">
+            Schedule
+          </h2>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/dashboard/m/jobs/${project.id}/schedule`}>All phases</Link>
+            </Button>
+            {canLog && (
+              <PhaseForm
+                projectId={project.id}
+                parties={data.parties}
+                codes={data.codes.filter((c) => c.isActive).map((c) => ({ id: c.id, label: `${c.code} · ${c.name}` }))}
+                others={data.phases.map((r) => ({ id: r.phase.id, name: r.phase.name, endOn: r.endOn }))}
+              />
+            )}
+          </div>
+        </div>
+        <p className="mb-3 text-sm text-muted-foreground">
+          {/*
+            WHEN, in one sentence (ADR 0071): the phases are calendar items on
+            the business's Job schedule; the pack sums them here.
+          */}
+          {(() => {
+            const today = todayInTimezone(ctx.tenant.timezone);
+            const sum = scheduleSummary(data.phases, today);
+            if (sum.count === 0) {
+              return "No phases yet. A schedule is the job's phases in order — site work, foundation, framing, roof — each with the days it takes and the trade doing it.";
+            }
+            const current = data.phases.filter((r) => r.phase.status === "underway").map((r) => r.phase.name);
+            const next = data.phases.find((r) => r.phase.status === "planned" && r.startOn >= today);
+            return `${sum.count} ${sum.count === 1 ? "phase" : "phases"} from ${sum.startOn} to ${sum.endOn}: ${sum.done} done${
+              current.length > 0 ? `, underway: ${current.join(", ")}` : ""
+            }${next ? `, next ${next.phase.name} on ${next.startOn}` : ""}${sum.overdue > 0 ? `, ${sum.overdue} overdue` : ""}.`;
+          })()}
         </p>
       </Panel>
 

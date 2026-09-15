@@ -21,6 +21,60 @@ import { listRange, type ScheduleRangeItem } from "./range";
  */
 const EXTENSION_SLUG = "marketing";
 
+/** What any layer needs to say to provision a business calendar of its own (the jobs pack's Job schedule, ADR 0071). */
+export interface ExtensionCalendarSpec {
+  extensionSlug: string;
+  extensionKey: string;
+  name: string;
+  kind: string;
+  color: string;
+}
+
+export async function findExtensionCalendarId(
+  tx: Tx,
+  tenantId: string,
+  extensionSlug: string,
+  extensionKey: string,
+): Promise<string | null> {
+  const [row] = await tx
+    .select({ id: schema.scheduleCalendars.id })
+    .from(schema.scheduleCalendars)
+    .where(
+      and(
+        eq(schema.scheduleCalendars.tenantId, tenantId),
+        eq(schema.scheduleCalendars.extensionSlug, extensionSlug),
+        eq(schema.scheduleCalendars.extensionKey, extensionKey),
+      ),
+    );
+  return row?.id ?? null;
+}
+
+/** Made once through the managed unique index, shared with everyone at `write`; the business owns it. */
+export async function ensureExtensionCalendar(tx: Tx, tenantId: string, spec: ExtensionCalendarSpec): Promise<string> {
+  await tx
+    .insert(schema.scheduleCalendars)
+    .values({
+      tenantId,
+      ownerClerkUserId: null,
+      name: spec.name,
+      color: spec.color,
+      kind: spec.kind,
+      extensionSlug: spec.extensionSlug,
+      extensionKey: spec.extensionKey,
+    })
+    .onConflictDoNothing();
+  const id = await findExtensionCalendarId(tx, tenantId, spec.extensionSlug, spec.extensionKey);
+  if (!id) throw new Error(`${spec.name} calendar not created`);
+  await tx
+    .insert(schema.scheduleShares)
+    .values({ tenantId, calendarId: id, granteeClerkUserId: "", access: "write" })
+    .onConflictDoUpdate({
+      target: [schema.scheduleShares.tenantId, schema.scheduleShares.calendarId, schema.scheduleShares.granteeClerkUserId],
+      set: { access: "write", updatedAt: new Date() },
+    });
+  return id;
+}
+
 export const MANAGED_CALENDARS = {
   bookings: { extensionKey: "bookings", name: "Bookings", kind: "bookings", color: "green" },
   events: { extensionKey: "events", name: "Events", kind: "events", color: "amber" },
@@ -33,17 +87,7 @@ export async function findManagedCalendarId(
   tenantId: string,
   key: ManagedCalendarKey,
 ): Promise<string | null> {
-  const [row] = await tx
-    .select({ id: schema.scheduleCalendars.id })
-    .from(schema.scheduleCalendars)
-    .where(
-      and(
-        eq(schema.scheduleCalendars.tenantId, tenantId),
-        eq(schema.scheduleCalendars.extensionSlug, EXTENSION_SLUG),
-        eq(schema.scheduleCalendars.extensionKey, MANAGED_CALENDARS[key].extensionKey),
-      ),
-    );
-  return row?.id ?? null;
+  return findExtensionCalendarId(tx, tenantId, EXTENSION_SLUG, MANAGED_CALENDARS[key].extensionKey);
 }
 
 /** Made once, shared with everyone at `write`; an OWNER's context, since the business owns it. */
@@ -52,29 +96,7 @@ export async function ensureManagedCalendar(
   tenantId: string,
   key: ManagedCalendarKey,
 ): Promise<string> {
-  const spec = MANAGED_CALENDARS[key];
-  await tx
-    .insert(schema.scheduleCalendars)
-    .values({
-      tenantId,
-      ownerClerkUserId: null,
-      name: spec.name,
-      color: spec.color,
-      kind: spec.kind,
-      extensionSlug: EXTENSION_SLUG,
-      extensionKey: spec.extensionKey,
-    })
-    .onConflictDoNothing();
-  const id = await findManagedCalendarId(tx, tenantId, key);
-  if (!id) throw new Error(`${spec.name} calendar not created`);
-  await tx
-    .insert(schema.scheduleShares)
-    .values({ tenantId, calendarId: id, granteeClerkUserId: "", access: "write" })
-    .onConflictDoUpdate({
-      target: [schema.scheduleShares.tenantId, schema.scheduleShares.calendarId, schema.scheduleShares.granteeClerkUserId],
-      set: { access: "write", updatedAt: new Date() },
-    });
-  return id;
+  return ensureExtensionCalendar(tx, tenantId, { extensionSlug: EXTENSION_SLUG, ...MANAGED_CALENDARS[key] });
 }
 
 /** What is on one calendar between two instants, occurrences expanded, cancelled ones gone, soonest first. */

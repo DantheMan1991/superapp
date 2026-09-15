@@ -150,7 +150,11 @@ export class JobsError extends Error {
       /** A selection's difference has been raised as a change order that still stands; the message names it. */
       | "SELECTION_RAISED"
       /** An accepted estimate's money is fixed; the message names it. */
-      | "ESTIMATE_ACCEPTED",
+      | "ESTIMATE_ACCEPTED"
+      /** A phase named as its own ancestor's predecessor; the message names it. */
+      | "PHASE_CYCLE"
+      /** The business's Job schedule calendar does not exist yet, and only an owner may make it. */
+      | "SCHEDULE_NOT_MADE",
     message: string,
   ) {
     super(message);

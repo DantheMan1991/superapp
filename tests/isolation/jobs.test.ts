@@ -1773,4 +1773,39 @@ d("jobs tables (RLS)", () => {
     expect(await withSystem((tx) => tx.select().from(schema.jobSelections).where(eq(schema.jobSelections.id, scratch.selectionId)))).toEqual([]);
     await withSystem((tx) => tx.delete(schema.jobSelections).where(eq(schema.jobSelections.id, otherSelection)));
   });
+
+  it("cannot read or change another tenant's PARTY DOCUMENTS; a document hangs off this tenant's party; the kind is a slug, received has its date, the limit has a floor, and the party is held", async () => {
+    const docId = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobPartyDocuments)
+        .values({ tenantId: tenantA, partyId: clientA, kind: "insurance_certificate", expiresOn: "2027-01-01", receivedOn: "2026-09-15" })
+        .returning();
+      return rows[0].id;
+    });
+    const seen = await asOtherTenant(async (tx) => ({
+      rows: await tx.select().from(schema.jobPartyDocuments).where(eq(schema.jobPartyDocuments.id, docId)),
+      changed: await tx.update(schema.jobPartyDocuments).set({ status: "void" }).where(eq(schema.jobPartyDocuments.id, docId)).returning(),
+    }));
+    expect(seen.rows).toEqual([]);
+    expect(seen.changed).toEqual([]);
+    expect(await asStaff((tx) => tx.select().from(schema.jobPartyDocuments).where(eq(schema.jobPartyDocuments.id, docId)))).toHaveLength(1);
+    const otherParty = await withSystem((tx) => seedParty(tx, tenantB, "Builder B's framer"));
+    await expect(
+      withSystem((tx) => tx.insert(schema.jobPartyDocuments).values({ tenantId: tenantA, partyId: otherParty, kind: "w9", receivedOn: "2026-09-15" })),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) => tx.insert(schema.jobPartyDocuments).values({ tenantId: tenantA, partyId: clientA, kind: "W-9", receivedOn: "2026-09-15" })),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) => tx.insert(schema.jobPartyDocuments).values({ tenantId: tenantA, partyId: clientA, kind: "w9", status: "received" })),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) => tx.insert(schema.jobPartyDocuments).values({ tenantId: tenantA, partyId: clientA, kind: "w9", status: "requested", receivedOn: "2026-09-15" })),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) => tx.insert(schema.jobPartyDocuments).values({ tenantId: tenantA, partyId: clientA, kind: "license", limitCents: -1, receivedOn: "2026-09-15" })),
+    ).rejects.toThrow();
+    await expect(withSystem((tx) => tx.delete(schema.parties).where(eq(schema.parties.id, clientA)))).rejects.toThrow();
+    await withSystem((tx) => tx.delete(schema.jobPartyDocuments).where(eq(schema.jobPartyDocuments.id, docId)));
+  });
 });

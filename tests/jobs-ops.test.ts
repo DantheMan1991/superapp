@@ -71,14 +71,21 @@ import {
 } from "../src/packs/jobs/sub-billing-ops";
 import { loadBill, loadBillLines } from "../src/modules/accounting/payables/bills";
 import {
+  askForPartyDocument,
   askForWaiver,
   createLienWaiver,
+  createPartyDocument,
   listLienWaivers,
+  listPartyDocuments,
   listWaiverWork,
+  partyStanding,
+  subcontractorStanding,
   updateLienWaiver,
+  updatePartyDocument,
   waiverCoverage,
   waiverGaps,
 } from "../src/packs/jobs/compliance-ops";
+import { listOpenWork } from "../src/lib/work/entity-work";
 import {
   createSelection,
   listSelectionWork,
@@ -3918,5 +3925,99 @@ d("jobs ops", () => {
     rows = await rowsOf();
     expect(rows.map((r) => r.selection.name)).toEqual(["Master bath floor tile", "Front door hardware", "Mailbox"]);
     expect(summarise(rows)).toMatchObject({ count: 2, allowancesCents: 7_600_00, chosenCents: 7_100_00, differenceCents: -500_00, raisedCents: -500_00 });
+  }, 120_000);
+
+  // -------------------------------------------------------- party documents (11b)
+
+  it("A SUBCONTRACTOR'S DOCUMENTS hang off the party: the standing page lists everybody with an order on a live job, a certificate past its date is a gap, the chase is Work on the party, and a kind is whatever the business names", async () => {
+    const entity = await newCompany("Doc Co 1");
+    const { framer, live, done } = await run(async (tx) => {
+      const live = await createProject(tx, ctx, { entityId: entity, number: "OPS-PD1", name: "Live" });
+      const done = await createProject(tx, ctx, { entityId: entity, number: "OPS-PD1-D", name: "Done", status: "complete" });
+      const framer = await seedVendor(tx, "Doc Framer");
+      const plumber = await seedVendor(tx, "Doc Plumber");
+      const nobody = await seedVendor(tx, "Doc Draft Only");
+      await createCommitment(tx, ctx, { projectId: live.id, partyId: framer, kind: "subcontract", number: "SC-PD1-F", status: "issued", lines: [{ amountCents: 1_00 }] });
+      await createCommitment(tx, ctx, { projectId: live.id, partyId: plumber, kind: "subcontract", number: "SC-PD1-P", status: "closed", lines: [{ amountCents: 1_00 }] });
+      // A draft names nobody the business owes; a finished job is off the list.
+      await createCommitment(tx, ctx, { projectId: live.id, partyId: nobody, number: "PO-PD1-N", status: "draft", lines: [{ amountCents: 1_00 }] });
+      await createCommitment(tx, ctx, { projectId: done.id, partyId: nobody, number: "PO-PD1-D", status: "issued", lines: [{ amountCents: 1_00 }] });
+      return { framer, plumber, live, done };
+    });
+    const required = ["insurance_certificate", "w9"];
+    let rows = await run((tx) => subcontractorStanding(tx, tenantId, required, "2026-09-15"));
+    const mine = rows.filter((r) => r.projects.some((p) => p.id === live.id));
+    expect(mine.map((r) => [r.partyName.replace(/ \d+$/, ""), r.projects.map((p) => p.number), r.good])).toEqual([
+      ["Doc Framer", ["OPS-PD1"], false],
+      ["Doc Plumber", ["OPS-PD1"], false],
+    ]);
+    expect(rows.some((r) => r.projects.some((p) => p.id === done.id))).toBe(false);
+    expect(mine[0].required.map((q) => q.state)).toEqual(["missing", "missing"]);
+
+    // Staff record the framer's certificate (expired) and W-9; an unknown kind is refused; received needs its date.
+    await expect(
+      run((tx) => createPartyDocument(tx, staffCtx, { partyId: framer, kind: "W-9" })),
+    ).rejects.toMatchObject({ code: "INVALID_KIND" });
+    await expect(
+      run((tx) => createPartyDocument(tx, staffCtx, { partyId: framer, kind: "w9", receivedOn: null })),
+    ).rejects.toMatchObject({ code: "RECEIVED_DATE_REQUIRED" });
+    const oldCert = await run((tx) =>
+      createPartyDocument(tx, staffCtx, {
+        partyId: framer,
+        kind: "insurance_certificate",
+        title: "General liability",
+        issuer: "Erie",
+        reference: "GL-1",
+        expiresOn: "2026-09-01",
+        limitCents: 1_000_000_00,
+        receivedOn: "2025-09-05",
+      }),
+    );
+    await run((tx) => createPartyDocument(tx, staffCtx, { partyId: framer, kind: "w9", receivedOn: "2025-09-05" }));
+    let standing = await run((tx) => partyStanding(tx, tenantId, framer, required, "2026-09-15"));
+    expect(standing.required.map((q) => [q.kind, q.state, q.document?.id ?? null])).toEqual([
+      ["insurance_certificate", "expired", oldCert.id],
+      ["w9", "ok", expect.any(String)],
+    ]);
+    expect(standing.good).toBe(false);
+    // The chase is Work on the PARTY, not on any job.
+    const itemId = await run((tx) => askForPartyDocument(tx, staffCtx, { partyId: framer, kind: "insurance_certificate" }));
+    const open = await run((tx) => listOpenWork(tx, { tenantId }));
+    const item = open.find((w) => w.id === itemId)!;
+    expect(item.title).toMatch(/^Certificate of insurance from Doc Framer \d+$/);
+    expect(item.links).toEqual([{ entityType: "party", entityId: framer }]);
+    expect((await run((tx) => listPunchItems(tx, tenantId, live.id))).map((p) => p.id)).not.toContain(itemId);
+    // The renewal arrives: the longer-running one answers, and within a month it is expiring, not a gap.
+    const renewal = await run((tx) =>
+      createPartyDocument(tx, ctx, { partyId: framer, kind: "insurance_certificate", title: "General liability", issuer: "Erie", reference: "GL-2", expiresOn: "2026-10-10", receivedOn: "2026-09-14" }),
+    );
+    standing = await run((tx) => partyStanding(tx, tenantId, framer, required, "2026-09-15"));
+    expect(standing.required[0]).toMatchObject({ state: "expiring", document: { id: renewal.id } });
+    expect(standing.good).toBe(true);
+    // Void the renewal: the expired one answers again.
+    await run((tx) => updatePartyDocument(tx, ctx, renewal.id, { status: "void", version: renewal.version }));
+    standing = await run((tx) => partyStanding(tx, tenantId, framer, required, "2026-09-15"));
+    expect(standing.required[0].state).toBe("expired");
+    // A kind of the business's own is listed beside the required ones, and the required list is the caller's.
+    await run((tx) => createPartyDocument(tx, ctx, { partyId: framer, kind: "safety_plan", title: "Site safety plan", receivedOn: "2026-09-10" }));
+    standing = await run((tx) => partyStanding(tx, tenantId, framer, required, "2026-09-15"));
+    expect(standing.others.map((d) => d.kind)).toEqual(["safety_plan"]);
+    expect((await run((tx) => partyStanding(tx, tenantId, framer, ["safety_plan"], "2026-09-15"))).good).toBe(true);
+    // The page's rows carry the same, and the list per party counts attachments.
+    rows = await run((tx) => subcontractorStanding(tx, tenantId, required, "2026-09-15"));
+    expect(rows.find((r) => r.partyId === framer)?.required.map((q) => q.state)).toEqual(["expired", "ok"]);
+    const listed = await run((tx) => listPartyDocuments(tx, tenantId, [framer]));
+    expect(listed.map((d) => [d.document.kind, d.document.status, d.attachmentCount]).sort()).toEqual(
+      [
+        ["insurance_certificate", "received", 0],
+        ["insurance_certificate", "void", 0],
+        ["safety_plan", "received", 0],
+        ["w9", "received", 0],
+      ].sort(),
+    );
+    // A negative limit is refused.
+    await expect(
+      run((tx) => createPartyDocument(tx, ctx, { partyId: framer, kind: "license", limitCents: -1, receivedOn: "2026-09-15" })),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE" });
   }, 120_000);
 });

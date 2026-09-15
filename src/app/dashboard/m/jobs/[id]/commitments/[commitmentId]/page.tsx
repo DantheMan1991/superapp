@@ -55,11 +55,14 @@ import {
   isLienWaiverStatus,
   isSubApplicationStatus,
   isUnconditionalWaiver,
+  partyDocumentKindLabel,
+  requiredPartyDocumentsFrom,
 } from "@/packs/jobs/vocabulary";
 import { CommitmentChangeForm } from "@/packs/jobs/components/commitment-change-form";
 import {
   listLienWaivers,
   listWaiverWork,
+  partyStanding,
   waiverCoverage,
   waiverGaps,
 } from "@/packs/jobs/compliance-ops";
@@ -136,6 +139,14 @@ export default async function CommitmentPage({
         ]);
       const row = rows.find((r) => r.commitment.id === commitment.id) ?? null;
       const waivers = allWaivers.filter((w) => w.waiver.commitmentId === commitment.id);
+      // Where this order's party stands on the documents the business requires (ADR 0068).
+      const standing = await partyStanding(
+        tx,
+        ctx.tenant.id,
+        commitment.partyId,
+        requiredPartyDocumentsFrom(pack.config),
+        new Date().toISOString().slice(0, 10),
+      );
       // The signed copies, Documents' rows: the same gallery a daily log's photos use.
       const photos = new Map<string, RecordPhoto[]>();
       const files = new Map<string, RecordFile[]>();
@@ -172,6 +183,7 @@ export default async function CommitmentPage({
         parties,
         photos,
         files,
+        standing,
         labels: pack.labels,
       };
     },
@@ -295,6 +307,36 @@ export default async function CommitmentPage({
           </Badge>
         }
       />
+
+      {/*
+        WHERE THE PARTY STANDS on the documents the business requires — a
+        certificate past its date is as good as missing (ADR 0068). One line,
+        red when something is, and the page it is fixed on.
+      */}
+      <p className="text-sm text-muted-foreground">
+        {data.standing.required.map((q, i) => {
+          const text =
+            q.state === "missing"
+              ? `${partyDocumentKindLabel(q.kind)} not on file`
+              : q.state === "expired"
+                ? `${partyDocumentKindLabel(q.kind)} expired ${q.document?.expiresOn}`
+                : q.state === "expiring"
+                  ? `${partyDocumentKindLabel(q.kind)} expires ${q.document?.expiresOn}`
+                  : `${partyDocumentKindLabel(q.kind)} on file${q.document?.expiresOn ? ` to ${q.document.expiresOn}` : ""}`;
+          return (
+            <span key={q.kind}>
+              {i > 0 && " · "}
+              <span className={q.state === "missing" || q.state === "expired" ? "text-destructive" : undefined}>
+                {text}
+              </span>
+            </span>
+          );
+        })}
+        {" · "}
+        <Link href="/dashboard/m/jobs/subcontractors" className="underline underline-offset-2">
+          Subcontractors
+        </Link>
+      </p>
 
       {/*
         THE FOUR NUMBERS OF WHAT A SUBCONTRACTOR IS OWED: the subcontract's

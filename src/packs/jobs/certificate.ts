@@ -9,7 +9,7 @@ import { ppmToPercentString } from "./billing-math";
 import type { CertificateBrand, CertificateInput, CertificateMethod } from "./certificate-model";
 import { renderCertificatePdf } from "./certificate-pdf";
 import { costPlusTerms, payApplicationCertificate, type CertificateData } from "./ops";
-import { billsTheLedger, isTimeAndMaterialsMethod, slugLabel } from "./vocabulary";
+import { billsTheLedger, isTimeAndMaterialsMethod, isUnitPriceMethod, slugLabel } from "./vocabulary";
 
 /**
  * From the rows the pack holds to the words the certificate prints (slice
@@ -26,7 +26,9 @@ export function certificateInputFrom(
     ? "time_and_materials"
     : billsTheLedger(contract.billingMethod)
       ? "cost_plus"
-      : "fixed";
+      : isUnitPriceMethod(contract.billingMethod)
+        ? "unit_price"
+        : "fixed";
   const terms = costPlusTerms(contract);
   const feeWords = [
     terms.feePpm ? `${ppmToPercentString(terms.feePpm)}% ${tm ? "on" : "of"} cost` : null,
@@ -45,7 +47,9 @@ export function certificateInputFrom(
     contractTitle: `${slugLabel(contract.kind)}${contract.name ? ` · ${contract.name}` : ""}`,
     contractSignedOn: contract.signedOn,
     method,
-    originalCents: method === "fixed" ? contract.valueCents : terms.gmaxCents,
+    // A unit-price contract's value is its estimate — the sum the certificate
+    // starts from — and only the two ledger methods start from a maximum.
+    originalCents: method === "fixed" || method === "unit_price" ? contract.valueCents : terms.gmaxCents,
     retainagePpm: app.retainagePpm,
     applicationNumber: app.number,
     periodTo: app.periodTo,
@@ -81,6 +85,11 @@ export function certificateInputFrom(
       previousCents: l.previousCents,
       thisPeriodCents: l.thisPeriodCents,
       storedCents: l.storedCents,
+      unit: l.unit,
+      unitPriceCents: l.unitPriceCents,
+      quantityThousandths: l.sovQuantityThousandths,
+      quantityPreviousThousandths: l.quantityPreviousThousandths,
+      quantityThisPeriodThousandths: l.quantityThisPeriodThousandths,
     })),
     costs: row.costs.map((c) => ({
       label: c.code ? `${c.code} · ${c.name}` : "No cost code",

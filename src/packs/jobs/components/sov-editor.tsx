@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { saveSovAction } from "../actions";
+import { quantityStringToThousandths, thousandthsToQuantityString, unitLineCents } from "../billing-math";
 
 const NONE = "__none__";
 
@@ -29,9 +30,24 @@ interface LineDraft {
   id?: string;
   description: string;
   amount: string;
+  /** Unit price: the unit, the estimated quantity and the price per unit, as typed. */
+  unit: string;
+  quantity: string;
+  unitPrice: string;
   costCodeId: string;
   changeOrderId: string;
   billed: boolean;
+}
+
+function toCents(input: string): number {
+  const n = Number(input.replace(/[,\s$]/g, ""));
+  return Number.isFinite(n) && input.trim() !== "" ? Math.round(n * 100) : 0;
+}
+
+/** What a unit line is worth: its estimate at its price, live as the boxes change. */
+function unitAmountCents(line: LineDraft): number {
+  const qty = quantityStringToThousandths(line.quantity) ?? 0;
+  return unitLineCents(qty, toCents(line.unitPrice));
 }
 
 /**
@@ -51,11 +67,17 @@ interface LineDraft {
  * **"ONE LINE FOR THE WHOLE CONTRACT"** is the monthly progress draw: a
  * fixed-price home billed on percent complete of the whole sum needs no
  * breakdown, and the button gives it one line worth the contract.
+ *
+ * **ON A UNIT-PRICE CONTRACT (ADR 0064) a line is an item**: a unit, an
+ * estimated quantity and a price per unit, and its value is the one times the
+ * other — shown, never typed. The schedule's sum is the contract's estimate;
+ * the quantities installed are what each application says.
  */
 export function SovEditor({
   projectId,
   contractId,
   contractValueCents,
+  unitPriced = false,
   existing,
   costCodes,
   changeOrders,
@@ -64,10 +86,15 @@ export function SovEditor({
   projectId: string;
   contractId: string;
   contractValueCents: number | null;
+  /** Unit price: every line carries a unit, a quantity and a price. */
+  unitPriced?: boolean;
   existing: Array<{
     id: string;
     description: string;
     scheduledCents: number;
+    unit?: string;
+    quantityThousandths?: number | null;
+    unitPriceCents?: number | null;
     costCodeId: string | null;
     changeOrderId: string | null;
     billed: boolean;
@@ -82,6 +109,9 @@ export function SovEditor({
   const blank = (): LineDraft => ({
     description: "",
     amount: "",
+    unit: "",
+    quantity: "",
+    unitPrice: "",
     costCodeId: NONE,
     changeOrderId: NONE,
     billed: false,
@@ -92,6 +122,9 @@ export function SovEditor({
           id: l.id,
           description: l.description,
           amount: (l.scheduledCents / 100).toFixed(2),
+          unit: l.unit ?? "",
+          quantity: l.quantityThousandths != null ? thousandthsToQuantityString(l.quantityThousandths) : "",
+          unitPrice: l.unitPriceCents != null ? (l.unitPriceCents / 100).toFixed(2) : "",
           costCodeId: l.costCodeId ?? NONE,
           changeOrderId: l.changeOrderId ?? NONE,
           billed: l.billed,
@@ -99,10 +132,8 @@ export function SovEditor({
       : [blank()],
   );
 
-  const total = lines.reduce((sum, l) => {
-    const n = Number(l.amount.replace(/[,\s$]/g, ""));
-    return Number.isFinite(n) && l.amount.trim() !== "" ? sum + Math.round(n * 100) : sum;
-  }, 0);
+  const lineCents = (l: LineDraft) => (unitPriced ? unitAmountCents(l) : toCents(l.amount));
+  const total = lines.reduce((sum, l) => sum + lineCents(l), 0);
   const gap = contractValueCents === null ? null : contractValueCents - total;
   const money = (c: number) =>
     `${symbol ?? ""}${(c / 100).toLocaleString(undefined, {
@@ -122,9 +153,12 @@ export function SovEditor({
         lines: lines.map((l) => ({
           id: l.id ?? "",
           description: l.description.trim(),
-          scheduledCents: l.amount,
+          scheduledCents: unitPriced ? "" : l.amount,
           costCodeId: l.costCodeId === NONE ? "" : l.costCodeId,
           changeOrderId: l.changeOrderId === NONE ? "" : l.changeOrderId,
+          ...(unitPriced
+            ? { unit: l.unit.trim(), quantity: l.quantity, unitPriceCents: l.unitPrice }
+            : {}),
         })),
       });
       if ("error" in result) {
@@ -144,16 +178,18 @@ export function SovEditor({
         {existing.length === 0 ? "Set up the schedule" : "Edit schedule"}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
-            <DialogTitle>Schedule of values</DialogTitle>
+            <DialogTitle>{unitPriced ? "Schedule of unit prices" : "Schedule of values"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              How the contract sum breaks down — by trade, by phase, or as
-              milestones. Each application says how much of each line is done.
+              {unitPriced
+                ? "The items the work is measured in — a unit, how many you estimate, and the price of each. Each application says how many were installed; the value is the estimate at the price."
+                : "How the contract sum breaks down — by trade, by phase, or as milestones. Each application says how much of each line is done."}
             </p>
-            {lines.length === 1 &&
+            {!unitPriced &&
+              lines.length === 1 &&
               lines[0].description === "" &&
               lines[0].amount === "" &&
               contractValueCents !== null && (
@@ -176,26 +212,31 @@ export function SovEditor({
               )}
             <div className="space-y-2 rounded-lg border border-border/60 p-3">
               <div className="flex items-center justify-between">
-                <Label>Lines</Label>
+                <Label>{unitPriced ? "Items" : "Lines"}</Label>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   onClick={() => setLines((prev) => [...prev, blank()])}
                 >
-                  <Plus className="mr-1.5 size-4" /> Add line
+                  <Plus className="mr-1.5 size-4" /> {unitPriced ? "Add item" : "Add line"}
                 </Button>
               </div>
               {lines.map((line, i) => (
                 <div
                   key={line.id ?? `new-${i}`}
-                  className="grid gap-2 sm:grid-cols-[1.4fr_1fr_1fr_7rem_2rem]"
+                  className={
+                    "grid gap-2 " +
+                    (unitPriced
+                      ? "sm:grid-cols-[1.3fr_1fr_1fr_4rem_5rem_5.5rem_6rem_2rem]"
+                      : "sm:grid-cols-[1.4fr_1fr_1fr_7rem_2rem]")
+                  }
                 >
                   <Input
                     aria-label={`Description, line ${i + 1}`}
                     value={line.description}
                     onChange={(e) => setLine(i, { description: e.target.value })}
-                    placeholder="Foundation"
+                    placeholder={unitPriced ? "Excavation" : "Foundation"}
                     maxLength={300}
                   />
                   <Select
@@ -230,14 +271,45 @@ export function SovEditor({
                       ))}
                     </SelectContent>
                   </Select>
-                  <Input
-                    aria-label={`Scheduled value, line ${i + 1}`}
-                    value={line.amount}
-                    onChange={(e) => setLine(i, { amount: e.target.value })}
-                    placeholder="0.00"
-                    inputMode="decimal"
-                    className="text-right"
-                  />
+                  {unitPriced ? (
+                    <>
+                      <Input
+                        aria-label={`Unit, line ${i + 1}`}
+                        value={line.unit}
+                        onChange={(e) => setLine(i, { unit: e.target.value })}
+                        placeholder="cy"
+                        maxLength={20}
+                      />
+                      <Input
+                        aria-label={`Estimated quantity, line ${i + 1}`}
+                        value={line.quantity}
+                        onChange={(e) => setLine(i, { quantity: e.target.value })}
+                        placeholder="0"
+                        inputMode="decimal"
+                        className="text-right"
+                      />
+                      <Input
+                        aria-label={`Unit price, line ${i + 1}`}
+                        value={line.unitPrice}
+                        onChange={(e) => setLine(i, { unitPrice: e.target.value })}
+                        placeholder="0.00"
+                        inputMode="decimal"
+                        className="text-right"
+                      />
+                      <span className="self-center text-right text-sm tabular-nums" aria-label={`Value, line ${i + 1}`}>
+                        {money(unitAmountCents(line))}
+                      </span>
+                    </>
+                  ) : (
+                    <Input
+                      aria-label={`Scheduled value, line ${i + 1}`}
+                      value={line.amount}
+                      onChange={(e) => setLine(i, { amount: e.target.value })}
+                      placeholder="0.00"
+                      inputMode="decimal"
+                      className="text-right"
+                    />
+                  )}
                   <Button
                     type="button"
                     variant="ghost"
@@ -253,8 +325,9 @@ export function SovEditor({
               ))}
               <div className="flex items-start justify-between gap-4 border-t border-border/60 pt-2 text-sm">
                 <span className="text-xs text-muted-foreground">
-                  A row with no description is ignored. A line that has been
-                  billed can change its value but cannot be removed.
+                  {unitPriced
+                    ? "A row with no description is ignored. An item that has been billed can change its quantity and price but cannot be removed."
+                    : "A row with no description is ignored. A line that has been billed can change its value but cannot be removed."}
                 </span>
                 <span className="shrink-0 text-right tabular-nums">
                   <span className="font-medium">{money(total)}</span>

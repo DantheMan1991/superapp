@@ -57,7 +57,9 @@ import {
   isCostPlusMethod,
   isFixedValueMethod,
   TIME_AND_MATERIALS_METHODS,
+  UNIT_PRICE_METHODS,
   billsTheLedger,
+  isUnitPriceMethod,
   isTimeAndMaterialsMethod,
   RETAINAGE_PAYABLE_CODE,
   SUBCONTRACT_EXPENSE_CODES,
@@ -88,6 +90,10 @@ import {
   hoursStringToMinutes,
   laborLineCents,
   minutesToHoursString,
+  formatQuantity,
+  quantityStringToThousandths,
+  thousandthsToQuantityString,
+  unitLineCents,
 } from "../src/packs/jobs/billing-math";
 import { GENERAL_COA } from "../src/modules/accounting/templates/general";
 import { packRegistry } from "../src/packs";
@@ -780,6 +786,7 @@ describe("work in progress", () => {
  */
 const COST_PLUS_SQL = readFileSync("drizzle/0341_cost_plus.sql", "utf8");
 const TM_SQL = readFileSync("drizzle/0345_time_and_materials.sql", "utf8");
+const UNIT_PRICE_SQL = readFileSync("drizzle/0347_unit_price.sql", "utf8");
 
 describe("cost plus a fee", () => {
   it("adds the three terms to the contract, nullable, with their floors", () => {
@@ -816,6 +823,7 @@ describe("cost plus a fee", () => {
   });
 
   it("sorts every billing method into exactly one group", () => {
+    // Unit price is a schedule method AND its own group: the schedule has units, so both lists name it.
     const all = [
       ...FIXED_VALUE_METHODS,
       ...COST_PLUS_METHODS,
@@ -827,11 +835,16 @@ describe("cost plus a fee", () => {
     expect(billsTheLedger("time_and_materials")).toBe(true);
     expect(billsTheLedger("cost_plus_fee")).toBe(true);
     expect(billsTheLedger("unit_price")).toBe(false);
-    expect(UNBILLED_METHODS).toEqual(["unit_price"]);
+    // Every method bills since 5f.
+    expect(UNBILLED_METHODS).toEqual([]);
+    expect(UNIT_PRICE_METHODS).toEqual(["unit_price"]);
+    expect(isUnitPriceMethod("unit_price")).toBe(true);
+    expect(isFixedValueMethod("unit_price")).toBe(true);
     expect(isCostPlusMethod("cost_plus_fee")).toBe(true);
     expect(isCostPlusMethod("fixed_price")).toBe(false);
     expect(isFixedValueMethod("draw_schedule")).toBe(true);
-    expect(isFixedValueMethod("unit_price")).toBe(false);
+    // Unit price bills against a schedule too, since 5f.
+    expect(isFixedValueMethod("unit_price")).toBe(true);
   });
 
   describe("the certificate arithmetic", () => {
@@ -1086,5 +1099,51 @@ describe("time and materials", () => {
     }
     // The construction chart's job-cost accounts are NOT of it: they are marked up.
     expect(CONSTRUCTION_COA.accounts.find((a) => a.code === "5200")?.subtype).not.toBe("payroll_expense");
+  });
+});
+
+// --------------------------------------------------------------- unit price
+
+describe("unit price", () => {
+  it("adds the unit, the estimate and the price to a schedule line, both or neither, and quantities to an application line", () => {
+    expect(UNIT_PRICE_SQL).toMatch(/"job_sov_lines" ADD COLUMN "unit" text DEFAULT '' NOT NULL/);
+    expect(UNIT_PRICE_SQL).toMatch(/"job_sov_lines" ADD COLUMN "quantity_thousandths" bigint;/);
+    expect(UNIT_PRICE_SQL).toMatch(/"job_sov_lines" ADD COLUMN "unit_price_cents" bigint;/);
+    expect(UNIT_PRICE_SQL).toContain(
+      `CHECK (("job_sov_lines"."quantity_thousandths" is null) = ("job_sov_lines"."unit_price_cents" is null))`,
+    );
+    expect(UNIT_PRICE_SQL).toMatch(/job_sov_lines_quantity_nonnegative/);
+    expect(UNIT_PRICE_SQL).toMatch(/job_sov_lines_unit_price_nonnegative/);
+    expect(UNIT_PRICE_SQL).toMatch(/"job_pay_application_lines" ADD COLUMN "quantity_previous_thousandths" bigint DEFAULT 0 NOT NULL/);
+    expect(UNIT_PRICE_SQL).toMatch(/"job_pay_application_lines" ADD COLUMN "quantity_this_period_thousandths" bigint DEFAULT 0 NOT NULL/);
+    // A period's quantity may be negative; the quantity to date may not.
+    expect(UNIT_PRICE_SQL).toContain(
+      `CHECK ("job_pay_application_lines"."quantity_previous_thousandths" + "job_pay_application_lines"."quantity_this_period_thousandths" >= 0)`,
+    );
+  });
+
+  it("keeps quantities in thousandths, reads them the way a person types them, and prints them with separators", () => {
+    expect(quantityStringToThousandths("1,250.5")).toBe(1_250_500);
+    expect(quantityStringToThousandths("4")).toBe(4_000);
+    expect(quantityStringToThousandths("-5")).toBe(-5_000);
+    expect(quantityStringToThousandths("")).toBe(0);
+    expect(quantityStringToThousandths("0.0004")).toBe(0); // a fourth decimal rounds away
+    expect(quantityStringToThousandths("ten")).toBeNull();
+    expect(thousandthsToQuantityString(1_250_500)).toBe("1250.5");
+    expect(thousandthsToQuantityString(4_000)).toBe("4");
+    expect(thousandthsToQuantityString(333)).toBe("0.333");
+    expect(formatQuantity(1_250_500)).toBe("1,250.5");
+  });
+
+  it("prices a quantity at a unit price, rounded once per line, and credits a correction at the same price", () => {
+    expect(unitLineCents(600_000, 18_00)).toBe(10_800_00); // 600 cy at 18.00
+    expect(unitLineCents(800_500, 12_50)).toBe(10_006_25); // 800.5 lf at 12.50
+    expect(unitLineCents(1_000, 1_750_00)).toBe(1_750_00); // one each
+    expect(unitLineCents(333, 100)).toBe(33); // 0.333 at 1.00 = 33.3 cents
+    expect(unitLineCents(500, 100)).toBe(50); // 0.5 at 1.00
+    expect(unitLineCents(1, 500)).toBe(1); // 0.001 at 5.00 = half a cent, half up
+    expect(unitLineCents(1, 400)).toBe(0); // 0.4 of a cent rounds to nothing
+    expect(unitLineCents(-5_000, 18_00)).toBe(-90_00);
+    expect(unitLineCents(600_000, 0)).toBe(0);
   });
 });

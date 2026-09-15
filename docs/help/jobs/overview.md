@@ -152,7 +152,7 @@ The pencil at the end of its row. Everything except which contract it is against
 
 Owners only. Click a contract's kind in the **Contracts** table on the {{project|lower}}'s page to open the contract's own page: its **schedule of values** and the **pay applications** drawn against it.
 
-What the page shows depends on the contract's **Billed by** setting. A fixed-price contract is billed in draws against a schedule of values; a **cost plus a fee** contract is billed as what the job has cost plus the fee, with nothing to set up (see *Cost plus a fee* below); a **time and materials** contract is billed as the hours Time has approved on the job at their rates, plus the rest of the cost with a markup (see *Time and materials* below); unit price is recorded and not billed here yet, and the page says so.
+What the page shows depends on the contract's **Billed by** setting. A fixed-price contract is billed in draws against a schedule of values; a **cost plus a fee** contract is billed as what the job has cost plus the fee, with nothing to set up (see *Cost plus a fee* below); a **time and materials** contract is billed as the hours Time has approved on the job at their rates, plus the rest of the cost with a markup (see *Time and materials* below); a **unit price** contract is billed by the quantities installed at the schedule's prices (see *Unit price* below).
 
 A fixed-price contract is billed in draws. The schedule breaks the contract sum into lines — by trade, by phase, or as milestones — and each application says how much of each line is complete to date. What is due is that, less the retainage held back, less what earlier applications already certified. **Issuing an application makes it an ordinary invoice** in Accounting, so it ages, gets chased and gets paid like any other.
 
@@ -257,6 +257,26 @@ What can stop an issue, beyond the cost-plus refusals: `Hours with no bill rate:
 - **A timesheet approved late** simply shows as more hours to date than billed, and the next application picks them up — to date, never by window, like a late bill.
 - **The contract's rate for everybody is fixed once an application has issued**: the box greys with `Fixed once an application has issued`, and a save that changes it is refused in those words. A rate that changes over time is set in Time with its date, and each person's hours are billed at the rate in force on the day.
 - **One contract bills a job's books**, cost plus or time and materials; a second one starting an application is refused as for cost plus.
+
+### Unit price
+
+Choose `Unit price` as the contract's **Billed by**. The contract's **Value** is the estimate: what the schedule adds up to, which the work is expected to pass or fall short of. The contract's page then shows a **Schedule of unit prices** where the schedule of values would be.
+
+{button:Set up the schedule|outline} takes one row per item: a **description**, the optional cost code and change order, the **unit** (`cy`, `lf`, `ea`, `ton` — whatever you measure in), the **estimated quantity** (up to three decimals) and the **unit price**. The value beside the row is the estimate at the price; it is shown, never typed. Everything else — saving replaces the schedule, a billed item cannot be removed but its quantity and price can change, the total against the contract — is as for a schedule of values.
+
+{button:New application|primary} works as for a fixed-price contract. {button:Open|outline} on the draft shows one row per item:
+
+| Column | What it is |
+| --- | --- |
+| `Item` | The description, with the price per unit and the estimated value under it. |
+| `Est. qty` | The estimated quantity, in its unit. |
+| `Previous qty` | The quantity billed on earlier applications. Carried, not typed. |
+| `This period qty` | **What you type**: the quantity installed this period. May be negative to correct an earlier count. |
+| `This period` | That quantity at the item's price, worked out as you type. |
+| `Stored` | Materials on site, as money, exactly as on a schedule of values. |
+| `To date` and `%` | The money to date and its share of the estimate. Past the estimate the percent passes 100 and the balance goes negative, which is what unit price is for. |
+
+{button:Issue as invoice|primary} posts an invoice with **a line per item** — `Excavation, 600 cy at 18.00/cy through 2026-09-30` — and, when stored materials change, one line for that; then retainage as on any application. The printout's continuation sheet carries the unit, the price, the estimate and the quantities beside the money.
 
 ### Printing an application
 
@@ -434,7 +454,7 @@ The total row adds each column and says how many jobs were measured and how many
 A row may carry a badge saying why it is left out of the entry:
 
 - `No budget and no estimate to measure cost against` — the job has value or cost but nothing to divide by. Type an estimate here, or set a budget on the job's page. **Until you do, the period cannot post**: a schedule missing a job is exactly what a bank would not accept, so nothing posts quietly around it.
-- `No fixed contract value to earn against` — a unit-price job, a job mixing billing methods, or a signed contract with no value yet. It is shown and left out. If it also has billings, the period cannot post, because those billings cannot be measured this way. A job whose only signed contract is cost plus a fee or time and materials is measured its own way and never shows this.
+- `No fixed contract value to earn against` — a job mixing billing methods, or a signed contract with no value yet (a unit-price job's value is its estimate, and counts). It is shown and left out. If it also has billings, the period cannot post, because those billings cannot be measured this way. A job whose only signed contract is cost plus a fee or time and materials is measured its own way and never shows this.
 - `Hours on the job with no bill rate — set one in Time, or one rate on the contract` — a time-and-materials job with approved hours for somebody who has no `Charged out at` rate in Time and no rate for everybody on the contract. Shown and left out, and the period cannot post until the rate is set. Only owners can see rates, so somebody who is not an owner sees this on every time-and-materials job with hours; the posted schedule is the owner's and reads the same for everybody.
 
 ### The estimate
@@ -528,9 +548,9 @@ Worth knowing so you are not looking for it:
 
 - **A change order cannot be moved to another contract.** Raise it again on the right one and set the wrong one to `Void`.
 - **The daily log is not a timecard.** Who was on site is a headcount for the record; your own people's hours for wages are in Time, and the two are not joined.
-- **Unit price is not billed here yet.** Fixed price, progress draws, AIA applications and draw schedules bill against a schedule of values; cost plus a fee bills the books' cost; time and materials bills approved hours and the books' other cost. Unit price is recorded on the contract and the contract's page says so.
+- **A unit-price job on the work in progress schedule is measured cost-to-cost against its estimate**, like a fixed-price job; units installed over units estimated is a better measure for this kind of work and is not built.
 - **Time and materials has no rate card of its own.** Each person's rate comes from Time, or one rate on the contract covers everybody; a rate per trade (carpenter, labourer, foreman) or a rate negotiated for one customer is not a thing you can set yet.
-- **A cost-plus job on the work in progress schedule earns what it has cost plus its fee**, capped at its maximum, with no estimate asked for — when it is the job's only signed contract. A time-and-materials job earns its approved hours at their rates plus the rest of its cost marked up, the same way; one with hours nobody has priced shows `Hours on the job with no bill rate` and blocks the period until a rate is set. A job mixing methods, and any unit-price job, is shown and left out, and a period with billings on one cannot post until it has a value.
+- **A cost-plus job on the work in progress schedule earns what it has cost plus its fee**, capped at its maximum, with no estimate asked for — when it is the job's only signed contract. A time-and-materials job earns its approved hours at their rates plus the rest of its cost marked up, the same way; one with hours nobody has priced shows `Hours on the job with no bill rate` and blocks the period until a rate is set. A job mixing methods is shown and left out, and a period with billings on one cannot post until it has a value.
 - **A subcontractor's application does not print.** It is the subcontractor's document, prepared on their side; your own applications print from their row.
 - **Nothing codes a bill for you.** Cost codes appear in Accounting wherever you tag a line, beside the job itself, and the `Spent` column reads what the bills carry. A line with the job and no code shows up as the uncoded note under the job cost table, not on a row.
 - **Nothing is ever deleted.** A contract you should not have added is set to `Cancelled` or `Declined`; a cost code is retired; a {{project|lower}} is cancelled. That is on purpose — a job's history is the point of keeping it.

@@ -67,6 +67,7 @@ import {
   voidSubApplication,
 } from "../src/packs/jobs/sub-billing-ops";
 import { loadBill, loadBillLines } from "../src/modules/accounting/payables/bills";
+import { certificateInputFrom } from "../src/packs/jobs/certificate";
 import { loadInvoice, loadInvoiceLines } from "../src/modules/accounting/invoicing/invoices";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import { CONSTRUCTION_COA } from "../src/industries/construction/accounts";
@@ -2649,6 +2650,124 @@ d("jobs ops", () => {
     const mixed = await run((tx) => wipSchedule(tx, tenantId, { entityId: entity, periodEnd: "2026-09-30" }));
     expect(mixed.rows.find((r) => r.projectId === project.id)!.method).toBe("cost_to_cost");
   });
+
+  // ---------------------------------------------------------- unit price (5f)
+
+  it("UNIT PRICE: items are worth their estimates at their prices, an application bills quantities at those prices, the invoice reads item by item, and the next application carries quantities forward past the estimate", async () => {
+    const { project, contract } = await run(async (tx) => {
+      await ensureBilling(tx);
+      const p = await createProject(tx, ctx, { entityId, number: "OPS-UP1", name: "Lane drainage" });
+      const party = await seedVendor(tx, "Owner OPS-UP1");
+      const c = await createContract(tx, ctx, {
+        projectId: p.id,
+        kind: "site_work",
+        counterpartyPartyId: party,
+        billingMethod: "unit_price",
+        valueCents: 50_000_00,
+        status: "signed",
+      });
+      return { project: p, contract: c };
+    });
+    expect(project.number).toBe("OPS-UP1");
+    const sov = await run((tx) =>
+      saveSovLines(tx, ctx, contract.id, [
+        { description: "Excavation", scheduledCents: 1, unit: "cy", quantityThousandths: 1_000_000, unitPriceCents: 18_00 },
+        { description: "Pipe", scheduledCents: 0, unit: "lf", quantityThousandths: 2_000_000, unitPriceCents: 12_50 },
+        { description: "Manholes", scheduledCents: 0, unit: "ea", quantityThousandths: 4_000, unitPriceCents: 1_750_00 },
+      ]),
+    );
+    // The typed value is ignored: an item is worth its estimate at its price.
+    expect(sov.map((l) => [l.description, l.unit, l.scheduledCents])).toEqual([
+      ["Excavation", "cy", 18_000_00],
+      ["Pipe", "lf", 25_000_00],
+      ["Manholes", "ea", 7_000_00],
+    ]);
+    // Both or neither.
+    await expect(
+      run((tx) =>
+        saveSovLines(tx, ctx, contract.id, [
+          { description: "Half", scheduledCents: 0, unit: "cy", quantityThousandths: 5_000, unitPriceCents: null },
+        ]),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE" });
+
+    const app = await run((tx) =>
+      createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-09-30", retainagePpm: 100_000 }),
+    );
+    await run((tx) =>
+      updatePayApplication(tx, ctx, app.id, {
+        lines: [
+          // Money typed on a unit line is ignored: the quantity at the price is the money.
+          { sovLineId: sov[0].id, thisPeriodCents: 999, storedCents: 0, quantityThisPeriodThousandths: 600_000 },
+          { sovLineId: sov[1].id, thisPeriodCents: 0, storedCents: 0, quantityThisPeriodThousandths: 800_500 },
+          { sovLineId: sov[2].id, thisPeriodCents: 0, storedCents: 0, quantityThisPeriodThousandths: 1_000 },
+        ],
+      }),
+    );
+    const [row] = await run((tx) => listPayApplications(tx, tenantId, contract.id));
+    expect(row.lines.map((l) => [l.description, l.quantityThisPeriodThousandths, l.thisPeriodCents])).toEqual([
+      ["Excavation", 600_000, 10_800_00],
+      ["Pipe", 800_500, 10_006_25],
+      ["Manholes", 1_000, 1_750_00],
+    ]);
+    expect(row.totals).toMatchObject({
+      completedToDateCents: 22_556_25,
+      retainageCents: 2_255_63,
+      dueCents: 20_300_62,
+    });
+
+    const issued = await run((tx) => issuePayApplication(tx, ctx, app.id, { issueDate: "2026-10-01" }));
+    const lines = await run(async (tx) =>
+      loadInvoiceLines(tx, tenantId, (await loadInvoice(tx, tenantId, issued.invoiceId)).id),
+    );
+    // A unit-price invoice reads like one: a line per item with the quantity at its price.
+    expect(lines.map((l) => [l.amountCents, l.description])).toEqual([
+      [10_800_00, "Application 1 — Excavation, 600 cy at 18.00/cy through 2026-09-30"],
+      [10_006_25, "Application 1 — Pipe, 800.5 lf at 12.50/lf through 2026-09-30"],
+      [1_750_00, "Application 1 — Manholes, 1 ea at 1750.00/ea through 2026-09-30"],
+      [-2_255_63, "Retainage withheld (10%)"],
+    ]);
+
+    // October: 500 cy more — past the 1,000 estimated, which unit price expects — and the quantities carry.
+    const second = await run((tx) =>
+      createPayApplication(tx, ctx, { contractId: contract.id, periodTo: "2026-10-31" }),
+    );
+    await run((tx) =>
+      updatePayApplication(tx, ctx, second.id, {
+        lines: [{ sovLineId: sov[0].id, thisPeriodCents: 0, storedCents: 0, quantityThisPeriodThousandths: 500_000 }],
+      }),
+    );
+    const rows = await run((tx) => listPayApplications(tx, tenantId, contract.id));
+    const ex = rows[1].lines.find((l) => l.description === "Excavation")!;
+    expect([ex.quantityPreviousThousandths, ex.quantityThisPeriodThousandths, ex.previousCents, ex.thisPeriodCents]).toEqual([
+      600_000,
+      500_000,
+      10_800_00,
+      9_000_00,
+    ]);
+    expect(rows[1].totals.completedToDateCents).toBe(31_556_25);
+    // A correction below nothing is refused.
+    await expect(
+      run((tx) =>
+        updatePayApplication(tx, ctx, second.id, {
+          lines: [{ sovLineId: sov[2].id, thisPeriodCents: 0, storedCents: 0, quantityThisPeriodThousandths: -2_000 }],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    // The certificate carries the units.
+    const c = await run((tx) => payApplicationCertificate(tx, tenantId, second.id));
+    expect(c!.row.lines.map((l) => [l.unit, l.unitPriceCents, l.sovQuantityThousandths])).toEqual([
+      ["cy", 18_00, 1_000_000],
+      ["lf", 12_50, 2_000_000],
+      ["ea", 1_750_00, 4_000],
+    ]);
+    // And the certificate starts from the ESTIMATE, not from a maximum it does not have —
+    // the drive found lines 1, 3 and 9 printing a dash.
+    const input = certificateInputFrom(c!, { businessName: "Ops Builder LLC", tagline: "", primaryColor: null, logo: null });
+    expect(input.method).toBe("unit_price");
+    expect(input.originalCents).toBe(50_000_00);
+    expect(input.lines[0]).toMatchObject({ unit: "cy", unitPriceCents: 18_00, quantityThousandths: 1_000_000, quantityPreviousThousandths: 600_000, quantityThisPeriodThousandths: 500_000 });
+  }, 120_000);
 
   // -------------------------------------------------------- the printout (5e)
 

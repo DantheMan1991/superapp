@@ -36,6 +36,8 @@ import {
   laborLineCents,
   minutesToHoursString,
   payApplicationTotals,
+  thousandthsToQuantityString,
+  unitLineCents,
   ppmToPercentString,
   type CostLineFigures,
   type CostPlusTerms,
@@ -2237,9 +2239,14 @@ export interface SovLineInput {
   /** Present when editing a line that exists; absent for a new one. */
   id?: string;
   description: string;
+  /** Ignored on a unit-priced line, whose value is quantity × price. */
   scheduledCents: number;
   costCodeId?: string | null;
   changeOrderId?: string | null;
+  /** Unit price (ADR 0064): the unit, the estimated quantity in thousandths and the price per unit — both or neither. */
+  unit?: string;
+  quantityThousandths?: number | null;
+  unitPriceCents?: number | null;
 }
 
 export async function listSovLines(
@@ -2297,6 +2304,17 @@ export async function saveSovLines(
     if (!Number.isInteger(line.scheduledCents) || line.scheduledCents < 0) {
       throw new JobsError("INVALID_VALUE", "a scheduled value cannot be negative");
     }
+    const qty = line.quantityThousandths ?? null;
+    const price = line.unitPriceCents ?? null;
+    if ((qty === null) !== (price === null)) {
+      throw new JobsError("INVALID_VALUE", "a unit-priced line needs both a quantity and a price per unit");
+    }
+    if (qty !== null && (!Number.isInteger(qty) || qty < 0)) {
+      throw new JobsError("INVALID_VALUE", "a quantity cannot be negative");
+    }
+    if (price !== null && (!Number.isInteger(price) || price < 0)) {
+      throw new JobsError("INVALID_VALUE", "a unit price cannot be negative");
+    }
   }
 
   const existing = await listSovLines(tx, ctx.tenantId, contractId);
@@ -2335,9 +2353,15 @@ export async function saveSovLines(
   }
 
   for (const [i, line] of lines.entries()) {
+    const qty = line.quantityThousandths ?? null;
+    const price = line.unitPriceCents ?? null;
     const values = {
       description: line.description.trim(),
-      scheduledCents: line.scheduledCents,
+      // A unit line is worth its estimate at its price; nothing typed overrides that.
+      scheduledCents: qty !== null && price !== null ? unitLineCents(qty, price) : line.scheduledCents,
+      unit: line.unit?.trim() ?? "",
+      quantityThousandths: qty,
+      unitPriceCents: price,
       costCodeId: line.costCodeId ?? null,
       changeOrderId: line.changeOrderId ?? null,
       sortOrder: (i + 1) * 10,
@@ -2364,6 +2388,10 @@ export interface PayApplicationLineRow extends JobPayApplicationLine {
   description: string;
   /** The schedule line's value NOW; equals `scheduledCents` on an issued application. */
   sovScheduledCents: number;
+  /** Unit price: the line's unit, price per unit and estimated quantity; nulls on a lump-sum line. */
+  unit: string;
+  unitPriceCents: number | null;
+  sovQuantityThousandths: number | null;
 }
 
 /** A cost line with its code's label, or null labels for the no-code line. */
@@ -2449,6 +2477,9 @@ async function loadAppLines(
       description: schema.jobSovLines.description,
       sovScheduledCents: schema.jobSovLines.scheduledCents,
       sovSortOrder: schema.jobSovLines.sortOrder,
+      unit: schema.jobSovLines.unit,
+      unitPriceCents: schema.jobSovLines.unitPriceCents,
+      sovQuantityThousandths: schema.jobSovLines.quantityThousandths,
     })
     .from(schema.jobPayApplicationLines)
     .innerJoin(
@@ -2467,7 +2498,14 @@ async function loadAppLines(
     .orderBy(asc(schema.jobSovLines.sortOrder), asc(schema.jobSovLines.createdAt));
   for (const r of rows) {
     const list = out.get(r.line.payApplicationId) ?? [];
-    list.push({ ...r.line, description: r.description, sovScheduledCents: r.sovScheduledCents });
+    list.push({
+      ...r.line,
+      description: r.description,
+      sovScheduledCents: r.sovScheduledCents,
+      unit: r.unit,
+      unitPriceCents: r.unitPriceCents,
+      sovQuantityThousandths: r.sovQuantityThousandths,
+    });
     out.set(r.line.payApplicationId, list);
   }
   return out;
@@ -3049,6 +3087,7 @@ async function syncDraftLines(
   if (missing.length === 0) return;
 
   const carried = new Map<string, number>();
+  const carriedQuantity = new Map<string, number>();
   if (previous) {
     const prior = await tx
       .select()
@@ -3059,7 +3098,10 @@ async function syncDraftLines(
           eq(schema.jobPayApplicationLines.payApplicationId, previous.id),
         ),
       );
-    for (const p of prior) carried.set(p.sovLineId, p.previousCents + p.thisPeriodCents);
+    for (const p of prior) {
+      carried.set(p.sovLineId, p.previousCents + p.thisPeriodCents);
+      carriedQuantity.set(p.sovLineId, p.quantityPreviousThousandths + p.quantityThisPeriodThousandths);
+    }
   }
   await tx.insert(schema.jobPayApplicationLines).values(
     missing.map((s) => ({
@@ -3070,6 +3112,7 @@ async function syncDraftLines(
       previousCents: carried.get(s.id) ?? 0,
       thisPeriodCents: 0,
       storedCents: 0,
+      quantityPreviousThousandths: carriedQuantity.get(s.id) ?? 0,
     })),
   );
 }
@@ -3157,8 +3200,11 @@ async function loadPayApplication(
 
 export interface PayApplicationLineInput {
   sovLineId: string;
+  /** Ignored on a unit-priced line when a quantity is given: the money is the quantity at the line's price. */
   thisPeriodCents: number;
   storedCents: number;
+  /** Unit price: the quantity completed this period, thousandths; may be negative. */
+  quantityThisPeriodThousandths?: number;
 }
 
 /** What a cost-plus draft bills on one code this period. Null code = the no-code line. */
@@ -3273,6 +3319,9 @@ export async function updatePayApplication(
         ),
       );
     const bySov = new Map(current.map((l) => [l.sovLineId, l]));
+    const priced = new Map(
+      (await listSovLines(tx, ctx.tenantId, app.contractId)).map((sov) => [sov.id, sov.unitPriceCents]),
+    );
     for (const line of input.lines) {
       const row = bySov.get(line.sovLineId);
       if (!row) throw new JobsError("NOT_FOUND", `schedule line ${line.sovLineId} is not on this application`);
@@ -3282,7 +3331,22 @@ export async function updatePayApplication(
       if (line.storedCents < 0) {
         throw new JobsError("INVALID_VALUE", "stored materials cannot be negative");
       }
-      if (row.previousCents + line.thisPeriodCents + line.storedCents < 0) {
+      // A unit-priced line is billed by QUANTITY: what was typed is the
+      // quantity, and the money is that quantity at the line's price (ADR 0064).
+      let thisPeriodCents = line.thisPeriodCents;
+      let quantityThisPeriodThousandths = row.quantityThisPeriodThousandths;
+      const unitPriceCents = priced.get(line.sovLineId) ?? null;
+      if (unitPriceCents !== null && line.quantityThisPeriodThousandths !== undefined) {
+        if (!Number.isInteger(line.quantityThisPeriodThousandths)) {
+          throw new JobsError("INVALID_VALUE", "a quantity must be whole thousandths");
+        }
+        if (row.quantityPreviousThousandths + line.quantityThisPeriodThousandths < 0) {
+          throw new JobsError("INVALID_VALUE", "a line's quantity to date cannot go below nothing");
+        }
+        quantityThisPeriodThousandths = line.quantityThisPeriodThousandths;
+        thisPeriodCents = unitLineCents(quantityThisPeriodThousandths, unitPriceCents);
+      }
+      if (row.previousCents + thisPeriodCents + line.storedCents < 0) {
         throw new JobsError(
           "INVALID_VALUE",
           "a line cannot be completed to less than nothing",
@@ -3291,7 +3355,8 @@ export async function updatePayApplication(
       await tx
         .update(schema.jobPayApplicationLines)
         .set({
-          thisPeriodCents: line.thisPeriodCents,
+          thisPeriodCents,
+          quantityThisPeriodThousandths,
           storedCents: line.storedCents,
           updatedAt: new Date(),
         })
@@ -3464,7 +3529,27 @@ export async function issuePayApplication(
     }
     totals = payApplicationTotals(figuresOf(lines, true), app.retainagePpm, certifiedCents(previous));
     const grossThisPeriod = totals.completedToDateCents - (previous?.completedToDateCents ?? 0);
-    if (grossThisPeriod !== 0) {
+    if (lines.some((l) => l.unitPriceCents !== null)) {
+      // A unit-price invoice reads like a unit-price invoice: a line per item
+      // with the quantity this period at its price, and whatever the
+      // certificate carries beyond the items (stored materials coming and
+      // going) as one line of its own.
+      let itemised = 0;
+      for (const l of lines) {
+        if (l.unitPriceCents === null || l.quantityThisPeriodThousandths === 0) continue;
+        gross.push({
+          description: `Application ${app.number} — ${l.description}, ${thousandthsToQuantityString(l.quantityThisPeriodThousandths)} ${l.unit || "units"} at ${(l.unitPriceCents / 100).toFixed(2)}${l.unit ? `/${l.unit}` : ""} through ${app.periodTo}`,
+          cents: l.thisPeriodCents,
+        });
+        itemised += l.thisPeriodCents;
+      }
+      if (grossThisPeriod - itemised !== 0) {
+        gross.push({
+          description: `Application ${app.number} — stored materials and other work through ${app.periodTo}`,
+          cents: grossThisPeriod - itemised,
+        });
+      }
+    } else if (grossThisPeriod !== 0) {
       gross.push({
         description: `Application ${app.number} — work completed and stored through ${app.periodTo}`,
         cents: grossThisPeriod,

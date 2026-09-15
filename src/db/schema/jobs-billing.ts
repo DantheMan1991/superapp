@@ -77,6 +77,17 @@ export const jobSovLines = pgTable(
     sortOrder: integer("sort_order").notNull().default(0),
     description: text("description").notNull(),
     scheduledCents: bigint("scheduled_cents", { mode: "number" }).notNull(),
+    /**
+     * UNIT PRICE (slice 5f, ADR 0064): a line measured in units — "cy", "lf",
+     * "ea", "ton" — with an ESTIMATED quantity (thousandths: 1,250.500 cy is
+     * 1250500) and a price per unit. Both or neither: a lump-sum line has
+     * nulls and a typed value; a unit line's `scheduled_cents` is quantity ×
+     * price, computed on save and never typed. Quantities installed are what
+     * an application bills, at the line's price, and may pass the estimate.
+     */
+    unit: text("unit").notNull().default(""),
+    quantityThousandths: bigint("quantity_thousandths", { mode: "number" }),
+    unitPriceCents: bigint("unit_price_cents", { mode: "number" }),
     /** The trade this line is, when the schedule is by trade. Optional: a draw milestone is not a trade. */
     costCodeId: uuid("cost_code_id"),
     /** Set when an approved change order put this line on the schedule. */
@@ -110,6 +121,19 @@ export const jobSovLines = pgTable(
     }).onDelete("cascade"),
     check("job_sov_lines_description_present", sql`length(btrim(${t.description})) > 0`),
     check("job_sov_lines_scheduled_nonnegative", sql`${t.scheduledCents} >= 0`),
+    check(
+      "job_sov_lines_quantity_nonnegative",
+      sql`${t.quantityThousandths} is null or ${t.quantityThousandths} >= 0`,
+    ),
+    check(
+      "job_sov_lines_unit_price_nonnegative",
+      sql`${t.unitPriceCents} is null or ${t.unitPriceCents} >= 0`,
+    ),
+    /** A unit line has a quantity AND a price; a lump-sum line has neither. */
+    check(
+      "job_sov_lines_unit_pair",
+      sql`(${t.quantityThousandths} is null) = (${t.unitPriceCents} is null)`,
+    ),
   ],
 );
 
@@ -240,6 +264,18 @@ export const jobPayApplicationLines = pgTable(
     previousCents: bigint("previous_cents", { mode: "number" }).notNull().default(0),
     thisPeriodCents: bigint("this_period_cents", { mode: "number" }).notNull().default(0),
     storedCents: bigint("stored_cents", { mode: "number" }).notNull().default(0),
+    /** Unit price: the quantity completed on earlier applications, thousandths. Carried, never typed. */
+    quantityPreviousThousandths: bigint("quantity_previous_thousandths", { mode: "number" })
+      .notNull()
+      .default(0),
+    /**
+     * Unit price: the quantity completed this period, thousandths; may be
+     * negative to correct an earlier one. `this_period_cents` is it at the
+     * schedule line's price, computed on save — the person types quantities.
+     */
+    quantityThisPeriodThousandths: bigint("quantity_this_period_thousandths", { mode: "number" })
+      .notNull()
+      .default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -271,6 +307,10 @@ export const jobPayApplicationLines = pgTable(
     check(
       "job_pay_application_lines_completed_nonnegative",
       sql`${t.previousCents} + ${t.thisPeriodCents} + ${t.storedCents} >= 0`,
+    ),
+    check(
+      "job_pay_application_lines_quantity_nonnegative",
+      sql`${t.quantityPreviousThousandths} + ${t.quantityThisPeriodThousandths} >= 0`,
     ),
   ],
 );

@@ -21,6 +21,41 @@ tokens and gets its own pass later.
 
 ## Build log
 
+### 2026-09-15 — `jobs` gets its own accent, and the rail had two wrong ones (`claude/jobs-accent`)
+
+- **`--accent-jobs: oklch(0.52 0.13 155)`**, in all three blocks. The pack had
+  shared accounting's emerald since it shipped, because
+  `var(--accent-jobs, var(--accent-brand))` falls through rather than failing.
+  Both of the wheel's widest remaining gaps (30°) sit either side of 170; this
+  splits the lower one. **155 rather than 185 because of who else is in the
+  rail** — 155's neighbour is `land` (140), a farm pack a construction tenant
+  never installs, where 185's would have been `scheduling` (200), a core tool
+  every tenant has and which `jobs` sits beside all day. Chroma 0.13 lifts it
+  above land's 0.12 and accounting's 0.11 for the tenant that runs both.
+
+- **`tests/module-accents.test.ts` is the test `icon-registry.ts` asked for.**
+  That file says in its own header: *"There is still no test that would catch
+  it: the fix is to add the key in the same commit as the pack."* Adding it in
+  the same commit is precisely the discipline that had already failed twice.
+  The suite now asserts that every registered module and pack names an icon the
+  registry resolves, that every slug defines `--accent-<slug>` in all three
+  blocks (or is on an explicit, justified list of slugs that knowingly share the
+  brand accent — currently just `professional-services`), and that no two hues
+  sit closer than 15°.
+
+- **IT FOUND A LIVE BUG ON ITS FIRST RUN.** In `[data-sidebar-surface]`,
+  `--accent-hello` carried **320** — marketing's purple, pasted and renamed but
+  never re-valued — and `--accent-marketing` was absent entirely. So on the navy
+  rail Marketing fell through to brand emerald and Hello rendered Marketing's
+  purple. Every other accent there mirrors its `.dark` twin; these two now do
+  too. Neither `tsc`, lint, the build nor any existing test could see it, and
+  nothing in the product complains when an accent falls back.
+
+- The hue-spacing paragraph under **Decisions & gotchas** said the tightest gap
+  was 20°. It had been 15° since `time` landed at 335 on 2026-09-12 — the entry
+  that added it said so, and the paragraph was never updated. Corrected, and the
+  test now asserts the spacing from `globals.css` rather than from a sentence.
+
 ### 2026-09-12 — Time wears the design system (`claude/time-wears-the-design-system`)
 
 A module built over three slices without anybody checking it against this file.
@@ -348,16 +383,26 @@ a muddy khaki; 118 is greener, in gamut, and 5.15:1. All 84 pairs (14 accents ×
 4.5:1, minimum **4.74:1**, and that minimum is pre-existing `documents`, not one
 of the new seven.
 
-**Hue spacing is now the constraint, and it is worth knowing before an eighth
-pack.** Sorted, the fourteen read 15 · 35 · 55 · 75 · 118 · 140 · 170 · 200 ·
-222 · 245 · 268 · 295 · 320 · 350. The tightest gaps are 20° — the same minimum
-the core seven already had — and all three of them fall in the orange region
-(`retail` 15, `work` 35, `production` 55, `documents` 75) where hue is least
-discriminable. Those four are never adjacent in the rail, since `work` and
-`documents` sit in the core group; if it ever reads badly, drop `retail`'s
-chroma rather than moving its hue. **A fifteenth module has no comfortable gap
-left** — at that point vary chroma, or accept that two distant modules share a
-hue.
+**Hue spacing is the constraint, and the number in this paragraph has been
+wrong twice.** Sorted, the seventeen now read 15 · 35 · 55 · 75 · 95 · 118 ·
+140 · 155 · 170 · 200 · 222 · 245 · 268 · 295 · 320 · 335 · 350.
+
+**The tightest gap is 15°, not 20°.** It became 15° when `time` took 335
+between marketing (320) and livestock (350) — that entry said so at the time
+and this paragraph was not updated, which is the whole reason
+`tests/module-accents.test.ts` now asserts the spacing from the file instead of
+from a sentence. `jobs` at 155 sits at the same 15° from land (140) and
+accounting (170).
+
+The orange region (`retail` 15, `work` 35, `production` 55, `documents` 75) is
+where hue is least discriminable, and those four are never adjacent in the rail
+since `work` and `documents` sit in the core group; if it ever reads badly, drop
+`retail`'s chroma rather than moving its hue. **There is no comfortable gap left
+at all** — a new module now means varying chroma, accepting that two distant
+modules share a hue, or moving something. Pick the neighbour a tenant will not
+have installed: `jobs` went to 155 rather than 185 because 155's neighbour is a
+farm pack a construction tenant never installs, where 185's would have been
+`scheduling`, a core tool every tenant has.
 
 `Map` is imported as `MapIcon`. A bare `Map` import shadows the global `Map`
 constructor for the whole module, which is a trap in a file whose entire job is

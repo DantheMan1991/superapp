@@ -476,7 +476,7 @@ The form itself, its wording and its name belong to the AIA and are not reproduc
 
 ## Job cost — what it was meant to cost
 
-Owners only to set. On the {{project|lower}}'s page, under **Job cost**.
+Owners only to set. The **Job cost** tab.
 
 A budget here is **per cost code**, never one number for the whole job. That is deliberate: "the job is $40,000 over" tells you something has gone wrong and nothing about what to do; "the framing is $40,000 over" is a decision you can act on.
 
@@ -499,15 +499,24 @@ A budget here is **per cost code**, never one number for the whole job. That is 
 | `Budget` | What you planned for that code, revised by approved change orders, with `orig. $…` underneath when one moved it. |
 | `Ordered` | What you have committed on **this job** against it — issued and closed orders only. |
 | `Spent` | What your books have been billed for it on **this job** — every bill, timecard or journal line tagged with the job and this code. Another job's spend on the same code is never here. |
-| `Left` | Budget minus the **greater** of ordered and spent — what the code will cost at least. Ordered but not yet billed is still owed; billed beyond what was ordered has already happened; adding the two would count one dollar twice. **Negative and red means that trade is over.** |
+| `Of budget` | How much of that budget is already spoken for, with a bar. Measured on the **greater** of ordered and spent — the same figure `Left` subtracts — so the percentage and the figure beside it can never disagree. **The number is not capped:** a code at `159.1%` says so, because knowing how far over it is matters. The bar stops at full, since a bar cannot be longer than its track. A code with no budget reads `no budget` rather than `0%`. |
+| `Left` | Budget minus the **greater** of ordered and spent — what the code will cost at least. Ordered but not yet billed is still owed; billed beyond what was ordered has already happened; adding the two would count one dollar twice. **Negative and red means that trade is over**, and the whole row takes a faint red wash. |
 
 A code you have ordered against or spent against but never budgeted appears with a `Not budgeted` badge. That row is usually the one worth looking at. A code that was never budgeted but has an approved change order against it appears without the badge, budgeted at the change.
 
-The line above the table reads *"Budget $… against $… ordered and $… spent"*, and adds *"after $… in approved changes"* when there are any. Ordered and spent there are over budgeted codes only, so the headline compares like with like.
+### Narrowing it, and the row at the bottom
+
+`All codes`, `Over budget` and `Not budgeted` above the table, each with its count — and `Over budget` only ever means a code that **had** a budget and has gone past it. A code with nothing budgeted cannot be over one, however much is on it; it is under `Not budgeted`.
+
+**Two totals, and they are answering different questions.**
+
+The line above the table reads *"Budget $… against $… ordered and $… spent"*, and adds *"after $… in approved changes"* when there are any. That describes the whole {{project|lower}} and **does not change when you click a filter** — it is the job's position, not the view's.
+
+The row at the bottom of the table totals **what is on screen**. Filter to `Over budget` and it tells you what those codes alone are over by. It says how many codes it covers — `2 budgeted codes` — and, when any are left out, `· 1 not budgeted, left out`. Codes with no budget are in neither total: adding them would compare a spend against a budget that does not exist.
 
 ### Spend with no cost code
 
-A bill line can carry the job and no code. That money is real, it is in the job's `Actual cost` in the panel below, and no row of this table can hold it — so the note under the table says how much: *"$3,000.00 has been spent on this job with no cost code on the line."* Fix it where it happened: open the bill in Accounting and put the code on the line. The `Spent` column is only ever as good as the coding on the bills.
+A bill line can carry the job and no code. That money is real, it is in the job's `Actual cost` in the strip at the top of the page, and no row of this table can hold it — so the note under the table says how much: *"$3,000.00 has been spent on this job with no cost code on the line."* Fix it where it happened: open the bill in Accounting and put the code on the line. The `Spent` column is only ever as good as the coding on the bills.
 
 ## What you have ordered
 
@@ -743,7 +752,7 @@ The sentence again at the top, {button:Company calendar|outline} to Scheduling, 
 | `Starts` / `Ends` | First and last day, inclusive. `not started` in red under a planned phase whose first day has passed. A milestone has no end. |
 | `Days` | Calendar days from first to last. |
 | `Status` | `Planned`, `Underway` or `Done`, with `overdue` in red under a phase past its last day and not done. |
-| The timeline | Sunday-first weeks across the whole schedule, a bar per phase (grey planned, dark underway, green done, a red ring when overdue), a diamond for a milestone, a red line for today. Hover a bar for its dates. |
+| The timeline | Sunday-first weeks across the whole schedule, a bar per phase (grey planned, dark underway, green done, a red ring when overdue), a diamond for a milestone, a red line for today. Hover a bar for its dates. A **legend** above the grid names each of those, so the colours do not have to be guessed. |
 
 At the end of each row: the pencil.
 
@@ -844,7 +853,11 @@ Anyone on the team, not only owners: the field is a chore, and the person with t
 
 ### The daily log
 
-One report per {{project|lower}} per day. On the {{project|lower}}'s page, under **On site**, {button:Log today|primary}; or {button:All days|outline} for the full record, where every day has its own panel.
+One report per {{project|lower}} per day. On the **Field** tab, {button:Log today|primary}; every day has its own panel, newest first. A short **On site** panel on `Overview` shows the last few days and links here.
+
+The Field tab is two columns on a wide screen: the log on the left, the **punch list** and **This month** on the right. On a phone they stack with the log first — that is the one being written on site.
+
+**`This month`** counts the calendar month so far: `Days logged`, `Man-hours` and `Photos`. A day is counted once however many times it was added to. There is no *days lost to weather* figure, and that is deliberate: `Weather` is free text, so nothing in your record says a day was lost rather than wet.
 
 1. **`Day`** — today unless you change it. **Logging a day that already has a report edits that report** rather than making a second one, so two people logging the same day end up with one.
 2. **`Weather`** — free text: `Clear, 78°`, `Rain after two`.

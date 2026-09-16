@@ -13,6 +13,68 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-15 — The four tabs, restyled in their new homes (`claude/jobs-tabs`)
+
+Jobs redesign `3a`–`3d`, the last step of the handoff's own order after the
+list (`1b`) and the section strip (`2a`). Each tab keeps its arithmetic and
+gains the shape the design drew for it.
+
+**`3a` Job cost.** An **Of budget** column with a bar, filter pills (All codes ·
+Over budget · Not budgeted) as search params, and a totals row.
+
+- **The bar measures `projectedCents`** — the greater of ordered and spent, the
+  same figure `Left` subtracts — so the bar and the number beside it can never
+  tell different stories.
+- **The figure is not capped; the bar is.** A code 159% through its budget is
+  exactly the row somebody needs to see, and flattening it to 100% would hide
+  the size of the problem. `barWidthPercent` clamps the track, `ofBudgetPpm`
+  does not clamp the truth.
+- **A code with no budget is not 0% full.** It reads `no budget`, it cannot
+  match the Over-budget pill however much sits on it, and it is in no total —
+  one predicate, three places.
+- **TWO TOTALS, ANSWERING DIFFERENT QUESTIONS.** The sentence above the table
+  describes the JOB and does not move when a pill is clicked, the same rule the
+  module home's stat cards follow. The row under the table belongs to the TABLE
+  and totals what is on screen: a footer summing rows the reader cannot see is
+  a footer that lies. This was wrong first time round and caught by driving it.
+
+**`3b` Schedule.** A legend above the grid, and `bg-emerald-500/80` — a
+hardcoded Tailwind colour that had shipped with the slice and did not move with
+the theme — became **`bg-success`**. A bar is a FILL, which is exactly what
+`--success` is; its `-foreground` twin is the dark one for drawing with.
+
+**The week-label bug the design named does not exist here.** The handoff calls
+out that the week header must be `box-sizing: border-box` at exactly `WEEK_PX`
+or the header and the bars drift apart. Measured in the browser: seven labels,
+56px each, `border-box`, and the gridlines land on identical screen positions
+(983 · 1039 · 1095 · 1151). That was a bug in the MOCK, which the design session
+fixed there; the repo was always right. `blocked` is likewise not implemented —
+the design asks for a warning ring on blocked bars and the pack has no blocked
+state, so none was invented.
+
+**`3c` Selections.** The five figures were a hand-rolled `<dl>` of
+`rounded-lg bg-muted/40` boxes; they are `<StatCard>`s now, with Over tinted
+destructive and Under success. The table moved into `<DataTable>` with a real
+`<EmptyState>`. Row washes are `bg-destructive/5` for overdue and `bg-warning/5`
+for approved-and-unraised — **attention, not disablement**: the hover wash is
+`bg-muted/60`, so a muted row loses its own hover feedback and reads as switched
+off.
+
+**`3d` Field.** Two columns: the log on the left, the punch list and a
+**This month** panel on the right. They are two different jobs — the log is a
+diary somebody adds to at the end of a day, the punch list is something ticked
+while walking the site — and on a phone the log comes first, because that is the
+one being written on site. The month figures are derived from the days already
+loaded, calendar month to date on the tenant's own clock.
+
+**Days lost to weather is deliberately absent.** The design asks for it, but
+`weather` on a daily log is free text — "Rain, 8°C" — and nothing in the model
+says a day was LOST. A figure guessed from a string would be wrong on the day
+somebody typed "rain in the morning, worked through". It needs a field first.
+
+Each tab's heading is now an `<h2>` with its own actions rather than a second
+`<PageHeader>`, since the job's identity is the layout's (`2a`).
+
 ### 2026-09-15 — The project page becomes a place with sections (`claude/jobs-project-page`)
 
 One job was **eleven `<Panel>`s stacked flat with no in-page navigation**, so

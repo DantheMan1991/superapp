@@ -4,11 +4,14 @@ import { eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { isModuleEnabled, requireModuleEnabled } from "@/lib/modules";
-import { labelFor } from "@/lib/packs/resolve";
 import { packContext } from "@/lib/packs/tenant-context";
 import { allowsWrite } from "@/lib/packs/authorize";
-import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
+import { EmptyState } from "@/components/app/empty-state";
+import { PunchList } from "@/packs/jobs/components/punch-list";
+import { listPunchItems } from "@/packs/jobs/field-ops";
+import { HardHat } from "lucide-react";
+import { todayInTimezone } from "@/lib/timezone";
 import { Button } from "@/components/ui/button";
 import { attachmentsForRecord, splitAttachments } from "@/modules/documents/attachments";
 import { roleMayWrite } from "@/modules/documents/core/errors";
@@ -51,8 +54,9 @@ export default async function DailyLogPage({
     async (tx) => {
       const project = await getProject(tx, ctx.tenant.id, id);
       if (!project) return null;
-      const [days, parties, pack] = await Promise.all([
+      const [days, punch, parties, pack] = await Promise.all([
         listDailyLogs(tx, ctx.tenant.id, project.id),
+        listPunchItems(tx, ctx.tenant.id, project.id),
         tx
           .select({ id: schema.parties.id, name: schema.parties.displayName })
           .from(schema.parties)
@@ -74,7 +78,7 @@ export default async function DailyLogPage({
           files.set(day.log.id, split.files);
         }
       }
-      return { project, days, parties, photos, files, labels: pack.labels };
+      return { project, days, punch, parties, photos, files, labels: pack.labels };
     },
     { role: ctx.role },
   );
@@ -83,24 +87,48 @@ export default async function DailyLogPage({
   const { project, days } = data;
   const canLog = allowsWrite(ctx.role, "member");
   const canPhoto = canLog && roleMayWrite(ctx.role);
-  const projectWord = labelFor(data.labels, "project", "Project");
+  /**
+   * THIS MONTH, derived from the days already loaded — no second read and
+   * nothing stored. Calendar month to date, on the tenant's own clock, because
+   * "this month" on a site means the month the site is in.
+   */
+  const monthPrefix = todayInTimezone(ctx.tenant.timezone).slice(0, 7);
+  const thisMonth = days.filter((d) => d.log.logDate.startsWith(monthPrefix));
+  const monthly = {
+    days: thisMonth.length,
+    manHoursTenths: thisMonth.reduce((n, d) => n + d.manHoursTenths, 0),
+    photos: thisMonth.reduce((n, d) => n + d.photoCount, 0),
+  };
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="Daily log"
-        description={`${projectWord} ${project.number} · ${days.length} ${days.length === 1 ? "day" : "days"} on record`}
-        actions={canLog ? <DailyLogForm projectId={project.id} parties={data.parties} /> : null}
-      />
-
-      {days.length === 0 && (
-        <Panel className="p-5">
-          <p className="text-sm text-muted-foreground">
-            No days logged yet. A day&apos;s report is the weather, what
-            happened, who was on site and the photos — one per day, and
-            saying it again adds to the same day.
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="font-heading text-lg font-semibold tracking-heading">Field</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            {`${days.length} ${days.length === 1 ? "day" : "days"} on record`}
+            {monthly.days > 0 &&
+              ` · ${monthly.days} this month, ${tenthsToHours(monthly.manHoursTenths)} man-hours`}
           </p>
-        </Panel>
+        </div>
+        {canLog ? <DailyLogForm projectId={project.id} parties={data.parties} /> : null}
+      </div>
+
+      {/*
+        TWO COLUMNS, because they are two different jobs: the log is a diary
+        somebody adds to at the end of a day, the punch list is a list somebody
+        ticks while walking the site. Stacked on a phone, where the log comes
+        first — that is the one being written on site.
+      */}
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="space-y-4">
+      {days.length === 0 && (
+        <EmptyState
+          icon={<HardHat />}
+          title="No days logged yet"
+          description="A day's report is the weather, what happened, who was on site and the photos — one per day, and saying it again adds to the same day."
+          action={canLog ? <DailyLogForm projectId={project.id} parties={data.parties} /> : null}
+        />
       )}
 
       {days.map((day) => (
@@ -204,6 +232,64 @@ export default async function DailyLogPage({
           </div>
         </Panel>
       ))}
+        </div>
+
+        <div className="space-y-4">
+          <Panel className="p-5">
+            <h3 className="mb-3 font-heading text-sm font-medium tracking-heading">
+              Punch list
+            </h3>
+            {/*
+              The same component the Overview shows. A punch item is a Work
+              item linked to the job, so both places are reading one list, not
+              two that can disagree.
+            */}
+            <PunchList
+              projectId={project.id}
+              canEdit={canLog}
+              items={data.punch.map((p) => ({
+                id: p.id,
+                title: p.title,
+                notes: p.notes,
+                dueOn: p.dueOn,
+                done: p.completedAt !== null,
+              }))}
+            />
+          </Panel>
+
+          <Panel className="p-5">
+            <h3 className="font-heading text-sm font-medium tracking-heading">
+              This month
+            </h3>
+            <dl className="mt-3 space-y-2">
+              {(
+                [
+                  ["Days logged", String(monthly.days)],
+                  ["Man-hours", tenthsToHours(monthly.manHoursTenths)],
+                  ["Photos", String(monthly.photos)],
+                ] as const
+              ).map(([label, value]) => (
+                <div key={label} className="flex justify-between gap-4">
+                  <dt className="text-sm text-muted-foreground">{label}</dt>
+                  <dd className="text-sm font-medium tabular-nums">{value}</dd>
+                </div>
+              ))}
+            </dl>
+            {/*
+              DAYS LOST TO WEATHER IS NOT HERE, and that is deliberate. The
+              design asked for it, but `weather` on a daily log is free text —
+              "Rain, 8°C" — and nothing in the model says a day was LOST. A
+              figure guessed from a string would be wrong on the day somebody
+              typed "rain in the morning, worked through". It needs a field
+              first.
+            */}
+            <p className="mt-3 text-xs text-muted-foreground">
+              Since the 1st. A day is counted once, however many times it was
+              added to.
+            </p>
+          </Panel>
+        </div>
+      </div>
     </div>
   );
 }

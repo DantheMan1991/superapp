@@ -39,7 +39,7 @@ export function ProjectVitalsStrip({
   return (
     <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-divider shadow-elevation-1 sm:grid-cols-3 lg:grid-cols-5">
       <Cell
-        label="Contract"
+        label="Contract, revised"
         value={
           vitals.signedCount > 0 ? (
             formatMoneySign(vitals.contractCents, symbol)
@@ -100,42 +100,70 @@ export function ProjectVitalsStrip({
         )}
       </Cell>
 
+      {/*
+        THE VARIANCE IS THE FIGURE, not what has been billed.
+        "Billed vs earned" asks which way the job is out, and $278,000 billed
+        does not answer it — $23,444 under-billed does. What has been invoiced
+        is the small print underneath, where a supporting number belongs.
+      */}
       <Cell
         className="col-span-2 lg:col-span-1"
         label="Billed vs earned"
-        value={formatMoney(vitals.billedCents, symbol)}
-        note={
+        valueTone={
+          !measured || complete
+            ? "default"
+            : measured.overBilledCents > 0
+              ? "destructive"
+              : measured.underBilledCents > 0
+                ? "success"
+                : "default"
+        }
+        value={
           measured ? (
             complete ? (
               /* Once a job is done the variance is spent; what it made is not. */
-              `${formatMoneySign(measured.grossProfitToDateCents, symbol)} gross profit`
-            ) : measured.underBilledCents > 0 ? (
-              <span className="text-success-foreground">
-                {formatMoney(measured.underBilledCents, symbol)} under-billed
-              </span>
+              formatMoneySign(measured.grossProfitToDateCents, symbol)
             ) : measured.overBilledCents > 0 ? (
-              <span className="text-destructive">
-                {formatMoney(measured.overBilledCents, symbol)} over-billed
-              </span>
+              formatMoney(measured.overBilledCents, symbol)
+            ) : measured.underBilledCents > 0 ? (
+              formatMoney(measured.underBilledCents, symbol)
             ) : (
-              "level with earned"
+              formatMoney(0, symbol)
             )
-          ) : vitals.valuation.kind === "by_hours" ? (
-            "earned on the WIP schedule"
           ) : (
-            "nothing earned against it yet"
+            <span className="text-muted-foreground">—</span>
           )
+        }
+        note={
+          measured
+            ? complete
+              ? `gross profit · ${formatMoney(vitals.billedCents, symbol)} billed`
+              : measured.overBilledCents > 0
+                ? `over-billed · ${formatMoney(vitals.billedCents, symbol)} billed`
+                : measured.underBilledCents > 0
+                  ? `under-billed · ${formatMoney(vitals.billedCents, symbol)} billed`
+                  : `level with earned · ${formatMoney(vitals.billedCents, symbol)} billed`
+            : vitals.valuation.kind === "by_hours"
+              ? `earned on the WIP schedule · ${formatMoney(vitals.billedCents, symbol)} billed`
+              : `nothing earned yet · ${formatMoney(vitals.billedCents, symbol)} billed`
         }
       />
     </div>
   );
 }
 
+const VALUE_TONES = {
+  default: "",
+  success: "text-success-foreground",
+  destructive: "text-destructive",
+} as const;
+
 function Cell({
   label,
   value,
   note,
   noteTone = "default",
+  valueTone = "default",
   className,
   children,
 }: {
@@ -143,13 +171,19 @@ function Cell({
   value: React.ReactNode;
   note: React.ReactNode;
   noteTone?: "default" | "warning";
+  valueTone?: keyof typeof VALUE_TONES;
   className?: string;
   children?: React.ReactNode;
 }) {
   return (
     <div className={cn("bg-card p-4", className)}>
       <p className="text-[13px] text-muted-foreground">{label}</p>
-      <p className="mt-1 font-heading text-xl font-semibold tracking-heading tabular-nums">
+      <p
+        className={cn(
+          "mt-1 font-heading text-xl font-semibold tracking-heading tabular-nums",
+          VALUE_TONES[valueTone],
+        )}
+      >
         {value}
       </p>
       <p

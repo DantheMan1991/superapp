@@ -183,6 +183,19 @@ export async function JobsModule({
    */
   const word = (n: number) =>
     n === 1 ? projectWord.toLowerCase() : projectPlural.toLowerCase();
+  /**
+   * THE ONE JOB BILLED AHEAD, BY NAME. "One is billed ahead" makes the reader
+   * hunt the table for which; naming it and the amount turns the sentence into
+   * the thing they came for. Only when there is exactly one — with several, the
+   * count is the useful shape and the rows carry the detail.
+   */
+  const overBilledOne =
+    summary.overBilledJobs === 1
+      ? entries.find(
+          (e) =>
+            e.valuation.kind === "measured" && e.valuation.figures.overBilledCents > 0,
+        )
+      : undefined;
   const needle = term.toLowerCase();
   const visible = entries.filter((e) => {
     if (!matchesFilter(e.row.project.status, filter)) return false;
@@ -236,8 +249,11 @@ export async function JobsModule({
                 <>
                   {" "}
                   <span className="text-destructive">
-                    {summary.overBilledJobs === 1
-                      ? "One is billed ahead of what it has earned."
+                    {overBilledOne && overBilledOne.valuation.kind === "measured"
+                      ? `${formatMoney(
+                          overBilledOne.valuation.figures.overBilledCents,
+                          symbol,
+                        )} billed ahead of the work on ${overBilledOne.row.project.name}.`
                       : `${summary.overBilledJobs} are billed ahead of what they have earned.`}
                   </span>
                 </>

@@ -46,6 +46,20 @@ Every {{project|lower}} you have, and what each one is worth, has cost and has b
 
 The line under the page title says how many {{project|plural|lower}} are underway, and adds a sentence in red when any of them are billed ahead of what they have earned.
 
+### Two views
+
+`Table` and `Board`, top right. The choice goes in the address, so a refresh keeps it and you can send somebody the view you are looking at. Switching keeps whatever filter and search you had.
+
+**Board** shows the same {{project|plural|lower}} as cards in three columns — `On site`, `Coming up` and `Stalled & closed` — each with a count. A cancelled {{project|lower}} sits under the last of those rather than disappearing.
+
+Each card carries the number and name, the {{customer|lower}} and how it is billed, a ring with percent complete, the contract and whether it is under- or over-billed, the next thing on its schedule (in red when that date has passed), and a chip for anything needing somebody:
+
+- **`Billed ahead`** — invoiced past what it has earned.
+- **`N selections overdue`**, or **`N to choose`** when none are past their date yet.
+- **`N certificates lapsing`** — a subcontractor you have ordered from on this {{project|lower}} has a certificate expired or expiring within 30 days. Only subcontractors with an order on this job count.
+
+A finished {{project|lower}} has no ring and sits greyed: there is nothing left to do on it.
+
 ### Narrowing the list
 
 `All`, `Active`, `Planned`, `On hold`, `Complete` — and `Cancelled` only when you have some. Each carries its own count, and clicking one puts it in the address, so a filtered list survives a refresh and can be sent to somebody. The four figures at the top do **not** change when you filter: they describe the whole business, not the rows on screen.

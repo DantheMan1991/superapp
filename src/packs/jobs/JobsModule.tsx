@@ -25,7 +25,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { listCostCodeSets } from "./ops";
-import { projectListEntries, type ProjectListEntry } from "./list-ops";
+import { boardExtras, projectListEntries, type ProjectListEntry } from "./list-ops";
+import { ProjectBoard } from "./components/project-board";
+import { todayInTimezone } from "@/lib/timezone";
 import {
   LIST_FILTERS,
   LIST_FILTER_LABELS,
@@ -33,6 +35,8 @@ import {
   barPercent,
   filterCounts,
   isListFilterKey,
+  isListView,
+  type ListView,
   matchesFilter,
   summariseList,
 } from "./list-math";
@@ -85,8 +89,9 @@ export async function JobsModule({
   const filter: ListFilterKey = isListFilterKey(raw) ? raw : "all";
   const rawTerm = searchParams.q;
   const term = (typeof rawTerm === "string" ? rawTerm : "").trim();
+  const view: ListView = isListView(searchParams.v) ? searchParams.v : "table";
 
-  const { entries, entities, parties, enterprises, sets, labels, config } =
+  const { entries, extras, entities, parties, enterprises, sets, labels, config } =
     await withTenant(
       ctx.tenant.id,
       async (tx) => {
@@ -117,8 +122,24 @@ export async function JobsModule({
             listCostCodeSets(tx, ctx.tenant.id),
             packContext(tx, ctx.tenant.id, ctx.tenant.industry, PACK),
           ]);
+        /*
+         * ONLY THE BOARD PAYS FOR THIS. The table shows none of it, and three
+         * more statements on every visit to a list that does not use them is a
+         * cost for nothing.
+         */
+        const extras =
+          view === "board"
+            ? await boardExtras(
+                tx,
+                ctx.tenant.id,
+                entries.map((e) => e.row.project.id),
+                ctx.tenant.timezone,
+                todayInTimezone(ctx.tenant.timezone),
+              )
+            : new Map();
         return {
           entries,
+          extras,
           entities,
           parties,
           enterprises,
@@ -170,9 +191,13 @@ export async function JobsModule({
       .some((v) => (v ?? "").toLowerCase().includes(needle));
   });
 
-  function href(next: ListFilterKey): string {
+  /** Every link keeps the other two choices, so nothing resets what you set. */
+  function href(next: { filter?: ListFilterKey; view?: ListView }): string {
     const p = new URLSearchParams();
-    if (next !== "all") p.set("f", next);
+    const f = next.filter ?? filter;
+    const v = next.view ?? view;
+    if (f !== "all") p.set("f", f);
+    if (v !== "table") p.set("v", v);
     if (term) p.set("q", term);
     const query = p.toString();
     return query ? `/dashboard/m/jobs?${query}` : "/dashboard/m/jobs";
@@ -294,13 +319,55 @@ export async function JobsModule({
               ).map((key) => ({
                 key,
                 label: LIST_FILTER_LABELS[key],
-                href: href(key),
+                href: href({ filter: key }),
                 count: counts[key],
               }))}
             />
-            <ListSearch placeholder={`Search ${projectWord.toLowerCase()}, ${clientWord.toLowerCase()} or address`} />
+            <div className="flex flex-wrap items-center gap-3">
+              <ListSearch placeholder={`Search ${projectWord.toLowerCase()}, ${clientWord.toLowerCase()} or address`} />
+              {/*
+                A SEGMENTED PILL, and a pair of links rather than a control: the
+                view is a search param like the filter beside it, so it survives
+                a refresh and can be sent to somebody. Nothing here needs
+                JavaScript.
+              */}
+              <div
+                className="inline-flex shrink-0 rounded-full bg-muted p-0.5"
+                role="group"
+                aria-label="View"
+              >
+                {(
+                  [
+                    ["table", "Table"],
+                    ["board", "Board"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <Link
+                    key={key}
+                    href={href({ view: key })}
+                    aria-current={view === key ? "page" : undefined}
+                    className={cn(
+                      "rounded-full px-3 py-1 text-sm font-medium transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                      view === key
+                        ? "bg-card text-foreground shadow-elevation-1"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {label}
+                  </Link>
+                ))}
+              </div>
+            </div>
           </div>
 
+          {view === "board" ? (
+            <ProjectBoard
+              entries={visible}
+              extras={extras}
+              symbol={symbol}
+              clientWord={clientWord}
+            />
+          ) : (
           <DataTable
             isEmpty={visible.length === 0}
             empty={
@@ -318,7 +385,7 @@ export async function JobsModule({
                 }
                 action={
                   <Button variant="outline" size="sm" asChild>
-                    <Link href="/dashboard/m/jobs">Show all</Link>
+                    <Link href={href({ filter: "all" })}>Show all</Link>
                   </Button>
                 }
               />
@@ -346,6 +413,7 @@ export async function JobsModule({
               </TableBody>
             </Table>
           </DataTable>
+          )}
         </>
       )}
     </div>

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
-import { ChevronLeft, Pencil } from "lucide-react";
+import { ChevronLeft, FileText, Pencil } from "lucide-react";
 import { eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
@@ -300,11 +300,18 @@ export default async function CommitmentPage({
         title={`${commitment.number}${commitment.description ? ` · ${commitment.description}` : ""}`}
         description={`${kindWord} · ${data.vendorName} · ${projectWord} ${project.number}`}
         actions={
-          <Badge variant={commitment.status === "issued" ? "default" : "secondary"}>
-            {isCommitmentStatus(commitment.status)
-              ? COMMITMENT_STATUS_LABELS[commitment.status]
-              : commitment.status}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <a href={`/api/jobs/commitments/${commitment.id}/pdf`} target="_blank" rel="noopener noreferrer">
+                <FileText className="mr-1.5 size-4" /> {commitment.kind === "subcontract" ? "Print subcontract" : "Print order"}
+              </a>
+            </Button>
+            <Badge variant={commitment.status === "issued" ? "default" : "secondary"}>
+              {isCommitmentStatus(commitment.status)
+                ? COMMITMENT_STATUS_LABELS[commitment.status]
+                : commitment.status}
+            </Badge>
+          </div>
         }
       />
 

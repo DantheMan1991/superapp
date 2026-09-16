@@ -124,6 +124,8 @@ import {
 import { attachDocumentToRecord } from "../src/modules/documents/attachments";
 import { addMarkup, deleteMarkup, listMarkups, markupCounts, updateMarkup } from "../src/packs/jobs/markups-ops";
 import { clearSheetScale, measurementOf, pushTakeoff, scaleOf, setSheetScale, unpushTakeoff } from "../src/packs/jobs/takeoff-ops";
+import { loadChangeOrderPaper, loadOrderPaper } from "../src/packs/jobs/paper";
+import { buildChangeOrderPaper, buildOrderPaper } from "../src/packs/jobs/paper-model";
 import { certificateInputFrom } from "../src/packs/jobs/certificate";
 import { loadInvoice, loadInvoiceLines } from "../src/modules/accounting/invoicing/invoices";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
@@ -4748,5 +4750,89 @@ d("jobs ops", () => {
     expect(again.map((s) => s.pageNumber)).toEqual([3]);
     expect(await run((tx) => getSheet(tx, tenantId, sheet.id))).toBeNull();
     expect(await run((tx) => listMarkups(tx, tenantId, sheet.id))).toEqual([]);
+  }, 120_000);
+  it("PAPER FOR THE OUTSIDE: the change order loads with its contract's signed value, the approved changes on that contract and the client; the order loads as placed with its changes, its codes and the vendor's address from the books; a missing one is null", async () => {
+    const entity = await newCompany("Paper Co 1");
+    const { project, client, framer, code } = await run(async (tx) => {
+      const p = await createProject(tx, ctx, { entityId: entity, number: "OPS-PAP1", name: "Papered", address: "4 Mill Lane" });
+      const set = (await getDefaultCostCodeSet(tx, tenantId)) ?? (await createCostCodeSet(tx, ctx, { name: "Paper codes" }));
+      const code = await createCostCode(tx, ctx, { setId: set.id, code: "PAP-06-10", name: "Rough carpentry", sortOrder: 60 });
+      const client = await seedVendor(tx, "Oak Row Owner");
+      const framer = await seedVendor(tx, "Framing crew");
+      await tx.insert(schema.vendors).values({ tenantId, partyId: framer, name: "Framing crew", address: "PO Box 12\nGambier, OH 43022" });
+      return { project: p, client, framer, code };
+    });
+    const contract = await run((tx) => createContract(tx, ctx, { projectId: project.id, kind: "construction", name: "Main house", role: "prime", counterpartyPartyId: client, valueCents: 400_000_00, status: "signed", signedOn: "2026-02-01" }));
+    const approved = await run((tx) => createChangeOrder(tx, ctx, { contractId: contract.id, number: "CO-1", title: "Covered porch", status: "approved", approvedOn: "2026-03-01", valueCents: 4_000_00 }));
+    const proposed = await run((tx) => createChangeOrder(tx, ctx, { contractId: contract.id, number: "CO-2", title: "Dormer", description: "A shed dormer over bedroom 1.", requestedOn: "2026-04-05", valueCents: 2_250_00 }));
+
+    // The change order: the contract's value, its approved changes, the client by name, and the sum before and after by the pure model.
+    const coPaper = await run((tx) => loadChangeOrderPaper(tx, tenantId, proposed.id));
+    expect(coPaper).not.toBeNull();
+    const coInput = coPaper!.data.input;
+    expect([coInput.projectNumber, coInput.projectAddress, coInput.contractLabel, coInput.contractValueCents, coInput.toName, coInput.toAddress, coInput.number, coInput.status, coInput.valueCents]).toEqual([
+      "OPS-PAP1",
+      "4 Mill Lane",
+      "Construction · Main house",
+      400_000_00,
+      expect.stringContaining("Oak Row Owner"),
+      "",
+      "CO-2",
+      "proposed",
+      2_250_00,
+    ]);
+    expect(coInput.approvedChanges.map((c) => [c.id, c.valueCents, c.approvedOn])).toEqual([[approved.id, 4_000_00, "2026-03-01"]]);
+    expect(buildChangeOrderPaper({ ...coInput, businessName: coPaper!.brand.businessName }).sums.map((s) => s.amount)).toEqual(["404,000.00", "+2,250.00", "406,250.00"]);
+    const approvedPaper = await run((tx) => loadChangeOrderPaper(tx, tenantId, approved.id));
+    expect(buildChangeOrderPaper({ ...approvedPaper!.data.input, businessName: "B" }).sums.map((s) => s.amount)).toEqual(["400,000.00", "+4,000.00", "404,000.00"]);
+    expect(coPaper!.data.number).toBe("CO-2");
+    expect(coPaper!.brand.businessName.length).toBeGreaterThan(0);
+
+    // The order: the lines as placed with their codes, a change on it with its lines tagged, the vendor's address from the books.
+    const order = await run((tx) =>
+      createCommitment(tx, ctx, {
+        projectId: project.id,
+        partyId: framer,
+        kind: "subcontract",
+        number: "SC-PAP1",
+        description: "Framing labour",
+        status: "issued",
+        issuedOn: "2026-05-01",
+        notes: "Net 30 from an approved application.",
+        lines: [
+          { costCodeId: code.id, description: "First floor framing", amountCents: 18_000_00 },
+          { costCodeId: code.id, description: "Second floor framing", amountCents: 14_000_00 },
+        ],
+      }),
+    );
+    const change = await run((tx) => createCommitmentChangeOrder(tx, ctx, { commitmentId: order.id, number: "SCO-1", title: "Dormer framing", lines: [{ costCodeId: code.id, description: "Dormer framing", amountCents: 1_800_00 }] }));
+    await run((tx) => updateCommitmentChangeOrder(tx, ctx, change.id, { status: "approved", approvedOn: "2026-05-20", version: change.version }));
+    const orderPaper = await run((tx) => loadOrderPaper(tx, tenantId, order.id));
+    expect(orderPaper).not.toBeNull();
+    const oi = orderPaper!.data.input;
+    expect([oi.vendorName, oi.vendorAddress, oi.kind, oi.number, oi.description, oi.status, oi.issuedOn, oi.notes]).toEqual([
+      expect.stringContaining("Framing crew"),
+      "PO Box 12\nGambier, OH 43022",
+      "subcontract",
+      "SC-PAP1",
+      "Framing labour",
+      "issued",
+      "2026-05-01",
+      "Net 30 from an approved application.",
+    ]);
+    expect(oi.lines.map((l) => [l.description, l.codeLabel, l.amountCents, l.change?.number ?? null])).toEqual([
+      ["First floor framing", "PAP-06-10 · Rough carpentry", 18_000_00, null],
+      ["Second floor framing", "PAP-06-10 · Rough carpentry", 14_000_00, null],
+      ["Dormer framing", "PAP-06-10 · Rough carpentry", 1_800_00, "SCO-1"],
+    ]);
+    expect(oi.changes.map((c) => [c.number, c.title, c.status, c.approvedOn, c.amountCents])).toEqual([["SCO-1", "Dormer framing", "approved", "2026-05-20", 1_800_00]]);
+    const om = buildOrderPaper({ ...oi, businessName: "B" });
+    expect(om.table?.rows.map((r) => r[0])).toEqual(["First floor framing", "Second floor framing"]);
+    expect(om.sums.map((s) => s.amount)).toEqual(["32,000.00", "+1,800.00", "33,800.00"]);
+    expect(orderPaper!.data.kind).toBe("subcontract");
+
+    // Nothing to print for an id that is not there.
+    expect(await run((tx) => loadChangeOrderPaper(tx, tenantId, "00000000-0000-0000-0000-000000000000"))).toBeNull();
+    expect(await run((tx) => loadOrderPaper(tx, tenantId, "00000000-0000-0000-0000-000000000000"))).toBeNull();
   }, 120_000);
 });

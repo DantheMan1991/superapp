@@ -13,6 +13,93 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-16 — Paper for the outside: the change order and the order print (`claude/paper`, ADR 0075)
+
+The two documents every builder hands to somebody to sign, which did not
+print: the client's change order and the issued purchase order or
+subcontract. Two GET routes (`/api/jobs/change-orders/[id]/pdf`,
+`/api/jobs/commitments/[id]/pdf`), a Print icon on every row of the
+Changes and Ordered tabs, and a *Print subcontract* / *Print order* button
+on the order's page.
+
+**ONE LAYOUT, TWO MODELS.** `paper-model.ts` is pure: a `PaperModel` —
+title, facts, the two parties, sections, a table when there are lines, the
+money in one block, a closing the page never splits from its signature
+lines, a watermark — built by `buildChangeOrderPaper` and
+`buildOrderPaper`; `paper-pdf.tsx` lays it out in the proposal's own
+styles with `createElement`, as every PDF in the product is. `paper.ts`
+(`server-only`) loads the rows in one transaction and fetches the logo's
+bytes afterwards, as `proposal.ts` does. The money prints in the house
+style — no currency symbol, as the proposal and the certificate print it —
+with a sign on what moves a sum (`signedMoney`: *+2,500.00*, *−800.00*).
+
+**THE CHANGE ORDER SHOWS ITS PRICE, NEVER ITS COST.** Its lines by cost
+code are the budget side and print nowhere; a pure test scans the model
+for *cost*, *markup*, *overhead*, *profit*, *margin* and *code*. The client
+sees the change described, its price, and the contract sum before and
+after: `contractSumBefore` reads the ladder — for an approved change, the
+contract's signed value plus the approved changes that came before it by
+the day approved then by which was raised first; for one not yet
+approved, the signed value plus every approved change. A contract with no
+signed value prints the change alone. PROPOSED, DECLINED and VOID
+watermark; an approved one carries the day it was approved in its closing
+sentence and a signature block for each side.
+
+**THE ORDER PRINTS AS PLACED, WITH ITS CHANGES BENEATH IT.** The table is
+the lines the order was placed with — with a cost-code column only when a
+line has one, the codes resolved by the lines' own ids rather than the
+job's code set, so an order on a job without a set still prints them —
+and *Order as placed*; every change order on the order is a line under
+CHANGE ORDERS ON THIS ORDER with its amount and where it stands; the sums
+count only the approved ones. The order's notes print as TERMS. A
+subcontract carries two signature blocks and *Accepted for <the
+subcontractor>*; a purchase order the business's alone. DRAFT and
+CANCELLED watermark. The vendor's address is the books' vendor record's
+(`schema.vendors` by party), the client's the customer record's, as the
+proposal reads it.
+
+**WHO.** Any member may print, as with the proposal: the figures are the
+ones the tabs already show. No new table, no migration.
+
+Tests: `tests/jobs-paper.test.ts` (the ladder across three approved
+changes on the same day and across days, the sum for a proposed and a
+declined change, a contract with no value, the change order's every word
+and figure, PROPOSED / DECLINED / VOID, a deduction signed, no client and
+no site, the cost-word scan, the order as placed with its codes and its
+changes beneath it, a purchase order with one signature and no code
+column, DRAFT and CANCELLED, and both documents rendered to `%PDF-` bytes
+with and without a brand); one more ops scenario in `tests/jobs-ops.test.ts`
+(the change order loaded with its contract's value, the approved changes
+on that contract and the client, the ladder from the rows; the order
+loaded as placed with its change, its codes by id and the vendor's address
+from the books; a missing id null).
+
+**DRIVEN on the dev branch's Hilltop Farm, signed in as the owner, the
+PDFs fetched from the routes and embedded in the pane (it will not show a
+PDF response on its own).** 24-108's Changes tab carried a Print icon on
+each of its two approved change orders; CO-2's paper came back
+`application/pdf`, inline, `change-order-CO-2-24-108.pdf`, 135 KB: the
+Hilltop Farm logo and tagline, CHANGE ORDER · *CO-2 · Master bath tile:
+allowance overage*, the project and site, the contract *New home*, the
+change order number, *Requested —*, *Approved 2026-09-14*, TO *Tractor
+Supply Co* (the contract's counterparty on that dev job), FROM Hilltop
+Farm, THE CHANGE in one paragraph, *Contract sum before this change
+1,854,500.00 · This change +2,500.00 · Contract sum after this change
+1,857,000.00* — the ladder through CO-1's 12,500 approved the same day —
+the approved-on sentence and the two signature blocks. 24-109's
+subcontract SC-24109-1 came back `subcontract-SC-24109-1-24-109.pdf`:
+SUBCONTRACT · *SC-24109-1 · Framing labour*, issued 2026-09-05,
+SUBCONTRACTOR *Pleasant Valley Feed Mill* by name alone (the books hold no
+address for it), THE ORDER with its one line under *06 10 00 · Rough
+carpentry* at 30,000.00 and *Order as placed 30,000.00*, CHANGE ORDERS ON
+THIS ORDER *SCO-1 · Extra blocking at the stair: +4,000.00 (approved
+2026-09-14)*, *Order as placed 30,000.00 · Approved changes +4,000.00 ·
+Subcontract total 34,000.00*, the acceptance sentence and the two blocks.
+Not driven: a proposed change order and a draft order (the watermarks are
+table-tested), a purchase order (one signature, table-tested), the Print
+button on the order's page beyond its markup (the route it opens is the
+one driven).
+
 ### 2026-09-16 — Slice 9c: the takeoff (`claude/takeoff`, ADR 0074)
 
 The third of the drawings slices and the estimating open item that had been
@@ -3066,6 +3153,11 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Key files & seams
 
+- `src/packs/jobs/paper.ts` + `paper-model.ts` + `paper-pdf.tsx` — the client's
+  change order and the issued order as PDFs (ADR 0075): two pure model
+  builders, one layout in the proposal's styles, two loaders that read the
+  rows in one transaction; the routes under `src/app/api/jobs/change-orders`
+  and `src/app/api/jobs/commitments`.
 - `src/packs/jobs/takeoff-ops.ts` + `takeoff-math.ts` — the scale and the takeoff
   (ADR 0074): `setSheetScale` from a known dimension or a standard,
   `measure` through the scale (pure, shared with the viewer), `pushTakeoff`
@@ -3160,6 +3252,12 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Decisions & gotchas
 
+- **[ADR 0075](../decisions/0075-a-change-order-and-an-order-print-from-their-rows-the-change-order-at-its-price-with-the-contract-sum-either-side-the-order-with-its-changes-beneath-it.md)** —
+  the change order prints at its PRICE with the contract sum before and
+  after it, read as a ladder through the approved changes; the order prints
+  as placed with its changes beneath it and only the approved ones in the
+  total; both from the live rows, which are locked once they stand; one
+  layout, two pure models. The money prints in the house style, no symbol.
 - **[ADR 0074](../decisions/0074-a-measurement-is-a-markup-with-a-quantity-the-scale-is-the-sheets-and-a-takeoff-is-a-quantity-pushed-onto-an-estimate-line.md)** —
   the scale is the sheet's, as page points per unit with the page's size
   beside it; a measurement is a markup with points whose quantity is
@@ -3424,8 +3522,11 @@ ordering only bites when two new tables reference each other in one file.
   value is. Still open from it: **a back-charge** — money deducted from a
   subcontractor's payment for something the business paid on their behalf —
   is not a change to the scope and is not built; it is a negative line on
-  the application with its own account, the day a GC asks. And **a change
-  order does not print**, as the subcontractor's application does not.
+  the application with its own account, the day a GC asks. ~~And **a change
+  order does not print**~~ — **closed 2026-09-16 (ADR 0075)**: the order prints
+  as placed with its changes beneath it, and the client's change order
+  prints at its price; the subcontractor's application still does not,
+  being theirs.
 - ~~**Lien waivers** are the document a subcontractor signs to get the retainage
   released, and the next thing a GC's bookkeeper asks for once retainage is
   tracked.~~ — **closed 2026-09-14 (slice 11a, ADR 0066)** as a record with

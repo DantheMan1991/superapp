@@ -247,7 +247,7 @@ They are listed on the {{project|lower}}'s own page, numbered in the order you a
 
 ### Adding one
 
-{button:Add contract|primary} on the **Contracts** tab.
+{button:Add contract|primary} on the **Contracts** tab. Before there are any, the tab explains what an agreement is and offers the same button.
 
 1. **`Kind`** — required. What sort of agreement it is. If your industry pack is set up you pick from a list; otherwise you type it, lowercase with underscores: `concept_design`, `new_home`, `aia`.
 2. **`Name`** — optional, for when the kind alone will not tell two apart.
@@ -262,6 +262,8 @@ They are listed on the {{project|lower}}'s own page, numbered in the order you a
 {button:Add contract|primary} stays greyed until the kind is filled in. Every field resets afterwards, so adding a second agreement does not quietly inherit the first one's status.
 
 ### Status, and what counts as money
+
+Status chips read the same way on every screen in {{project|plural|lower}}: **green** means it is real and counts (a signed contract, an issued order, an accepted estimate, an active {{project|lower}}); **blue** means it is going the right way but is not there yet (a planned {{project|lower}}, an estimate you have sent); **amber** means somebody has to act (a proposal out for signature, a draft nobody has issued, a {{project|lower}} on hold); **grey** means it is over, one way or another.
 
 | Status | Counts toward the job's value |
 | --- | :-: |

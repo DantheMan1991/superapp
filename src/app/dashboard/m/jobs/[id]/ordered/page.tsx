@@ -6,8 +6,10 @@ import { schema, withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { allowsWrite } from "@/lib/packs/authorize";
-import { Panel } from "@/components/app/panel";
-import { Badge } from "@/components/ui/badge";
+import { DataTable } from "@/components/app/data-table";
+import { EmptyState } from "@/components/app/empty-state";
+import { StatusBadge, type StatusTone } from "@/packs/jobs/components/status-badge";
+import { ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -116,51 +118,38 @@ export default async function OrderedPage({
   const { signedValue } = contractSummary(contracts, data.changeOrders);
 
   return (
-    <>
-      <Panel className="p-5">
-        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="font-heading text-sm font-medium tracking-heading">
-            Ordered
-          </h2>
-          {isOwner && (
-            <CommitmentForm
-              projectId={project.id}
-              parties={data.parties}
-              costCodes={data.codes.map((c) => ({
-                id: c.id,
-                label: `${c.code} · ${c.name}`,
-              }))}
-            />
-          )}
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="font-heading text-lg font-semibold tracking-heading">Ordered</h2>
+          <p className="mt-0.5 max-w-2xl text-sm text-muted-foreground">
+            {/*
+              COMMITTED IS NOT ACTUAL, and the difference is the point of this
+              page: a job can look healthy on what the ledger has been billed
+              right up until you notice what it has already promised. Both
+              figures are in the strip above — this page is the detail under
+              them, so it does not repeat them as boxes of their own.
+            */}
+            {/*
+              Nothing when the list is empty — the empty state below says what
+              an order is, and saying it twice on one screen reads as a stutter.
+            */}
+            {commitments.length > 0 &&
+              `${formatMoney(committedCents, symbol)} committed against ${formatMoney(signedValue, symbol)} of contract, and ${formatMoney(actualCents, symbol)} of it billed to the books so far.`}
+          </p>
         </div>
-        {/*
-          THE THREE NUMBERS A BUILDER ACTUALLY LOOKS AT, side by side. Committed
-          is what has been ordered whether or not the invoice has arrived; actual
-          is what the ledger has been billed. A job can look healthy on actual
-          alone right up until you notice what it has already promised, which is
-          the mistake this panel exists to make impossible.
-        */}
-        <dl className="mb-3 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-lg bg-muted/40 px-3 py-2">
-            <dt className="text-xs text-muted-foreground">Contract value</dt>
-            <dd className="text-base font-medium tabular-nums">
-              {formatMoney(signedValue, symbol)}
-            </dd>
-          </div>
-          <div className="rounded-lg bg-muted/40 px-3 py-2">
-            <dt className="text-xs text-muted-foreground">Committed</dt>
-            <dd className="text-base font-medium tabular-nums">
-              {formatMoney(committedCents, symbol)}
-            </dd>
-          </div>
-          <div className="rounded-lg bg-muted/40 px-3 py-2">
-            <dt className="text-xs text-muted-foreground">Actual cost</dt>
-            <dd className="text-base font-medium tabular-nums">
-              {formatMoney(actualCents, symbol)}
-            </dd>
-          </div>
-        </dl>
-        <p className="mb-3 text-xs text-muted-foreground">
+        {isOwner && (
+          <CommitmentForm
+            projectId={project.id}
+            parties={data.parties}
+            costCodes={data.codes.map((c) => ({
+              id: c.id,
+              label: `${c.code} · ${c.name}`,
+            }))}
+          />
+        )}
+      </div>
+        <p className="text-xs text-muted-foreground">
           What this job has EARNED against what it has billed is on the{" "}
           <Link href="/dashboard/m/jobs/wip" className="underline">
             work in progress schedule
@@ -196,13 +185,28 @@ export default async function OrderedPage({
             );
           })()}
 
-        {commitments.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Nothing ordered yet. Purchase orders and subcontracts recorded here
-            are what the job already owes, before any bill arrives.
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
+      <DataTable
+        isEmpty={commitments.length === 0}
+        empty={
+          <EmptyState
+            icon={<ShoppingCart />}
+            title="Nothing ordered yet"
+            description="Purchase orders and subcontracts recorded here are what the job already owes, before any bill arrives."
+            action={
+              isOwner ? (
+                <CommitmentForm
+                  projectId={project.id}
+                  parties={data.parties}
+                  costCodes={data.codes.map((c) => ({
+                    id: c.id,
+                    label: `${c.code} · ${c.name}`,
+                  }))}
+                />
+              ) : null
+            }
+          />
+        }
+      >
             <Table>
               <TableHeader>
                 <TableRow>
@@ -294,15 +298,11 @@ export default async function OrderedPage({
                       })()}
                     </TableCell>
                     <TableCell>
-                      <Badge
-                        variant={
-                          row.commitment.status === "issued" ? "default" : "secondary"
-                        }
-                      >
+                      <StatusBadge tone={COMMITMENT_TONES[row.commitment.status] ?? "quiet"}>
                         {isCommitmentStatus(row.commitment.status)
                           ? COMMITMENT_STATUS_LABELS[row.commitment.status]
                           : row.commitment.status}
-                      </Badge>
+                      </StatusBadge>
                     </TableCell>
                     <TableCell className="w-10 text-right">
                       {isOwner && (
@@ -350,9 +350,18 @@ export default async function OrderedPage({
                 ))}
               </TableBody>
             </Table>
-          </div>
-        )}
-      </Panel>
-    </>
+      </DataTable>
+    </div>
   );
 }
+
+/**
+ * An order's status as a tone. `issued` and `closed` are real commitments and
+ * count toward committed cost; a `draft` is waiting on somebody to issue it.
+ */
+const COMMITMENT_TONES: Record<string, StatusTone> = {
+  issued: "good",
+  closed: "good",
+  draft: "pending",
+  cancelled: "quiet",
+};

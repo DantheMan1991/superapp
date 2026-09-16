@@ -8,8 +8,10 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { allowsWrite } from "@/lib/packs/authorize";
 import { labelFor } from "@/lib/packs/resolve";
 import { packContext } from "@/lib/packs/tenant-context";
-import { Panel } from "@/components/app/panel";
-import { Badge } from "@/components/ui/badge";
+import { DataTable } from "@/components/app/data-table";
+import { EmptyState } from "@/components/app/empty-state";
+import { StatusBadge, type StatusTone } from "@/packs/jobs/components/status-badge";
+import { FileSignature } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -92,39 +94,60 @@ export default async function ContractsPage({
   const partyName = new Map(data.parties.map((p) => [p.id, p.name]));
 
   return (
-    <>
-      <Panel className="p-5">
-        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="font-heading text-sm font-medium tracking-heading">
-            Contracts
-          </h2>
-          {isOwner && (
-            <ContractForm
-              projectId={project.id}
-              parties={data.parties}
-              contractKinds={contractKindsFrom(data.config)}
-              clientWord={clientWord}
-            />
-          )}
-        </div>
-        <p className="mb-3 text-sm text-muted-foreground">
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="font-heading text-lg font-semibold tracking-heading">Contracts</h2>
           {/*
-           * THE SENTENCE THAT STOPS A PROPOSAL BEING READ AS MONEY. A concept
-           * the client has not signed is not revenue, and a total that quietly
-           * included it would be the number an owner takes to a bank.
-           */}
-          {contracts.length === 0
-            ? "No agreements yet. A job can have several — a design agreement, then drawings, then the build."
-            : `Worth ${formatMoneySign(signedValue, symbol)} across ${signedCount} signed ${
+            THE SENTENCE THAT STOPS A PROPOSAL BEING READ AS MONEY. A concept
+            the client has not signed is not revenue, and a total that quietly
+            included it would be the number an owner takes to a bank.
+
+            Nothing when the list is empty: the empty state below says what an
+            agreement is, and saying it twice on one screen reads as a stutter.
+          */}
+          {contracts.length > 0 && (
+            <p className="mt-0.5 max-w-2xl text-sm text-muted-foreground">
+              {`Worth ${formatMoneySign(signedValue, symbol)} across ${signedCount} signed ${
                 signedCount === 1 ? "agreement" : "agreements"
               }${
                 changesValue !== 0
                   ? `, including ${formatMoneySign(changesValue, symbol)} in approved changes`
                   : ""
               }${proposedCount > 0 ? `, with ${proposedCount} still proposed` : ""}.`}
-        </p>
-        {contracts.length > 0 && (
-          <div className="overflow-x-auto">
+            </p>
+          )}
+        </div>
+        {isOwner && (
+          <ContractForm
+            projectId={project.id}
+            parties={data.parties}
+            contractKinds={contractKindsFrom(data.config)}
+            clientWord={clientWord}
+          />
+        )}
+      </div>
+
+      <DataTable
+        isEmpty={contracts.length === 0}
+        empty={
+          <EmptyState
+            icon={<FileSignature />}
+            title="No agreements yet"
+            description="A job can have several — a design agreement, then drawings, then the build. Only signed and complete ones count toward what the job is worth."
+            action={
+              isOwner ? (
+                <ContractForm
+                  projectId={project.id}
+                  parties={data.parties}
+                  contractKinds={contractKindsFrom(data.config)}
+                  clientWord={clientWord}
+                />
+              ) : null
+            }
+          />
+        }
+      >
             <Table>
               <TableHeader>
                 <TableRow>
@@ -212,13 +235,11 @@ export default async function ContractsPage({
                       })()}
                     </TableCell>
                     <TableCell>
-                      <Badge
-                        variant={c.status === "signed" ? "default" : "secondary"}
-                      >
+                      <StatusBadge tone={CONTRACT_TONES[c.status] ?? "quiet"}>
                         {isContractStatus(c.status)
                           ? CONTRACT_STATUS_LABELS[c.status]
                           : c.status}
-                      </Badge>
+                      </StatusBadge>
                     </TableCell>
                     <TableCell className="w-10 text-right">
                       {isOwner && (
@@ -260,9 +281,20 @@ export default async function ContractsPage({
                 ))}
               </TableBody>
             </Table>
-          </div>
-        )}
-      </Panel>
-    </>
+      </DataTable>
+    </div>
   );
 }
+
+/**
+ * What each contract status MEANS, which is what the chip is coloured by.
+ * `signed` and `complete` are money; `proposed` is somebody else's move;
+ * the rest are over. See `StatusBadge` for why this is a tone and not a colour.
+ */
+const CONTRACT_TONES: Record<string, StatusTone> = {
+  signed: "good",
+  complete: "good",
+  proposed: "pending",
+  declined: "quiet",
+  cancelled: "quiet",
+};

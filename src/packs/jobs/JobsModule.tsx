@@ -13,7 +13,6 @@ import { FilterPills } from "@/components/app/filter-pills";
 import { DataTable } from "@/components/app/data-table";
 import { LinkRow } from "@/components/app/link-row";
 import { ListSearch } from "@/components/app/list-search";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -27,6 +26,7 @@ import {
 import { listCostCodeSets } from "./ops";
 import { boardExtras, projectListEntries, type ProjectListEntry } from "./list-ops";
 import { ProjectBoard } from "./components/project-board";
+import { StatusBadge, projectStatusTone } from "./components/status-badge";
 import { todayInTimezone } from "@/lib/timezone";
 import {
   LIST_FILTERS,
@@ -420,22 +420,6 @@ export async function JobsModule({
   );
 }
 
-/**
- * The status chip's tone.
- *
- * A PALE TINT AND DARK TEXT, never a saturated fill — `globals.css` explains
- * the split at length: `--success` is a fill at oklch(0.62), `--success-
- * foreground` its legible twin at oklch(0.45), and a chip that used the fill
- * for text would fail contrast on the card behind it.
- */
-const STATUS_TONE: Record<string, string> = {
-  active: "bg-success/15 text-success-foreground",
-  planned: "bg-primary/10 text-primary",
-  on_hold: "bg-warning/15 text-warning-foreground",
-  complete: "bg-muted text-muted-foreground",
-  cancelled: "bg-muted text-subtle-foreground",
-};
-
 function ProjectRowCells({
   entry,
   symbol,
@@ -581,14 +565,11 @@ function ProjectRowCells({
       </TableCell>
 
       <TableCell>
-        <Badge
-          variant="secondary"
-          className={STATUS_TONE[project.status] ?? "bg-muted text-muted-foreground"}
-        >
+        <StatusBadge tone={projectStatusTone(project.status)}>
           {isProjectStatus(project.status)
             ? STATUS_LABELS[project.status]
             : project.status}
-        </Badge>
+        </StatusBadge>
         {overBilled && !complete && (
           <span className="mt-1 block text-xs text-destructive">Billed ahead</span>
         )}

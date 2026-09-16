@@ -10,13 +10,13 @@ import { labelFor } from "@/lib/packs/resolve";
 import { packContext } from "@/lib/packs/tenant-context";
 import { allowsWrite } from "@/lib/packs/authorize";
 import { PageHeader } from "@/components/app/page-header";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { listCostCodeSets } from "@/packs/jobs/ops";
 import { projectVitals } from "@/packs/jobs/vitals-ops";
 import { ProjectVitalsStrip } from "@/packs/jobs/components/project-vitals";
 import { ProjectForm } from "@/packs/jobs/components/project-form";
 import { ProjectNav } from "@/packs/jobs/components/project-nav";
+import { StatusBadge, projectStatusTone } from "@/packs/jobs/components/status-badge";
 import {
   PACK,
   STATUS_LABELS,
@@ -49,14 +49,6 @@ import {
  * legible twin, so a chip is a pale tint with dark text. `globals.css` sets out
  * the measured reason.
  */
-const STATUS_TONE: Record<string, string> = {
-  active: "bg-success/15 text-success-foreground",
-  planned: "bg-primary/10 text-primary",
-  on_hold: "bg-warning/15 text-warning-foreground",
-  complete: "bg-muted text-muted-foreground",
-  cancelled: "bg-muted text-subtle-foreground",
-};
-
 export default async function ProjectLayout({
   children,
   params,
@@ -169,14 +161,11 @@ export default async function ProjectLayout({
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {editProject}
-            <Badge
-              variant="secondary"
-              className={STATUS_TONE[project.status] ?? "bg-muted text-muted-foreground"}
-            >
+            <StatusBadge tone={projectStatusTone(project.status)}>
               {isProjectStatus(project.status)
                 ? STATUS_LABELS[project.status]
                 : project.status}
-            </Badge>
+            </StatusBadge>
           </div>
         }
       />

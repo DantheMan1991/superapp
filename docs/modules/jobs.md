@@ -13,6 +13,44 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-15 — The three tabs the design never drew (`claude/jobs-remaining-tabs`)
+
+Contracts, Ordered and Estimates reached their own routes in `2a` as panels
+lifted unchanged, and the handoff has no drawing for them — so they stayed in
+the old shape while the four beside them were restyled. This brings them to the
+pattern the others now establish, without inventing anything the design did not
+imply: a section `<h2>` with its actions, a sentence, a `<DataTable>` with a
+real `<EmptyState>`, and tinted status chips.
+
+**`StatusBadge` — ONE COMPONENT FOR A RULE THAT KEPT BREAKING.** `globals.css`
+says a status chip is a pale tint plus dark text, never a saturated fill, and
+`Badge`'s own `variant="default"` is `bg-primary text-primary-foreground`.
+**Five screens had reached for it** to mark the good status — a signed
+contract, an issued order, an accepted estimate, an active job in the list and
+again in the job header — plus two near-identical `STATUS_TONE` maps for the
+last two. `components/status-badge.tsx` states the rule once and the screens map
+their own vocabulary onto a TONE, because only the screen knows what its words
+mean: `signed`, `issued` and `accepted` are three words for the same fact.
+
+`info` is a separate tone from `pending` on purpose. A planned job and an
+estimate that has been sent are going the right way; amber would read as a
+problem where there is none.
+
+**THE ORDERED TAB WAS SHOWING THE VITALS STRIP TWICE.** It carried a
+hand-rolled `<dl>` of Contract value · Committed · Actual cost, in
+`rounded-lg bg-muted/40` boxes — three figures that have sat in the strip
+directly above it since `2a` put the strip in the layout. The duplication was
+invisible while the panel lived on a page with no strip. Removed; the sentence
+says what the relationship between them is instead, which is the thing the boxes
+could not.
+
+**And the heading and the empty state were saying the same thing twice.** Both
+Contracts and Ordered explained what an agreement or an order IS — once in the
+description under the heading, once in the empty state below it. The heading now
+counts and the empty state explains, so neither stutters.
+
+Driven on Hilltop Farm across all three, empty and populated.
+
 ### 2026-09-15 — The board, and the last designed slice (`claude/jobs-board`, jobs redesign 1c)
 
 The module home gets a second view: the same jobs as cards, grouped by what is

@@ -2291,7 +2291,7 @@ d("jobs tables (RLS)", () => {
   });
 
   it("cannot read or change another tenant's BACK-CHARGES; one hangs off this tenant's order, code, warranty claim and application; a number is once per order and positive, the money more than nothing, the words present, a dropped one off every application; a code, a claim or a DRAFT application gone sets that key null and nothing else; the back-charges go with the order", async () => {
-    const { mine, theirs, codeX, claimX, appX, claimB, codeB, partyB } = await withSystem(async (tx) => {
+    const { mine, theirs, codeX, claimX, appX, claimB, codeB } = await withSystem(async (tx) => {
       const partyB = await seedParty(tx, tenantB, "Their sub");
       const commitments = await tx
         .insert(schema.jobCommitments)
@@ -2386,6 +2386,99 @@ d("jobs tables (RLS)", () => {
     await withSystem(async (tx) => {
       await tx.delete(schema.jobCommitments).where(eq(schema.jobCommitments.id, theirs));
       await tx.delete(schema.jobWarrantyClaims).where(eq(schema.jobWarrantyClaims.id, claimB));
+      await tx.delete(schema.jobCostCodes).where(eq(schema.jobCostCodes.id, codeB));
+    });
+  });
+
+  it("cannot read or change another tenant's BONDS or BONDING LINE; a bond hangs off this tenant's job, contract, surety and code and a line off this tenant's company; the kind's format, the money, the dates and the limits are checked; one line per company; a contract or a code gone sets that key null and nothing else; the bonds go with the job", async () => {
+    const { mine, theirs, contractX, codeX, suretyB, contractB, codeB } = await withSystem(async (tx) => {
+      const suretyB = await seedParty(tx, tenantB, "Their surety");
+      const codes = await tx
+        .insert(schema.jobCostCodes)
+        .values([
+          { tenantId: tenantA, setId: setA, code: "7770", name: "Bonds" },
+          { tenantId: tenantB, setId: setB, code: "7771", name: "Theirs" },
+        ])
+        .returning();
+      const jobs = await tx
+        .insert(schema.jobProjects)
+        .values({ tenantId: tenantA, entityId: entityA, number: `${STAMP}-BOND`, name: "Bonded" })
+        .returning();
+      const contracts = await tx
+        .insert(schema.jobContracts)
+        .values([
+          { tenantId: tenantA, projectId: jobs[0].id, kind: "new_home", valueCents: 100_000 },
+          { tenantId: tenantB, projectId: projectB, kind: "new_home", valueCents: 100_000 },
+        ])
+        .returning();
+      return { mine: jobs[0].id, theirs: projectB, contractX: contracts[0].id, contractB: contracts[1].id, codeX: codes[0].id, codeB: codes[1].id, suretyB };
+    });
+    const base = { tenantId: tenantA, projectId: mine, kind: "performance", penalSumCents: 100_000, status: "issued", effectiveOn: "2026-03-01" } as const;
+    const id = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobBonds).values({ ...base, contractId: contractX, costCodeId: codeX, suretyPartyId: clientA }).returning();
+      return r[0].id;
+    });
+    const seen = await asOtherTenant(async (tx) => ({
+      rows: await tx.select().from(schema.jobBonds).where(eq(schema.jobBonds.id, id)),
+      changed: await tx.update(schema.jobBonds).set({ penalSumCents: 1 }).where(eq(schema.jobBonds.id, id)).returning(),
+    }));
+    expect([seen.rows, seen.changed]).toEqual([[], []]);
+    expect(await asStaff((tx) => tx.select().from(schema.jobBonds).where(eq(schema.jobBonds.id, id)))).toHaveLength(1);
+
+    // Tenant B's job, contract, code or surety under tenant A's row: unrepresentable.
+    const insert = (values: Partial<typeof schema.jobBonds.$inferInsert>) =>
+      withSystem((tx) => tx.insert(schema.jobBonds).values({ ...base, ...values }));
+    await expect(insert({ projectId: theirs })).rejects.toThrow();
+    await expect(insert({ contractId: contractB })).rejects.toThrow();
+    await expect(insert({ costCodeId: codeB })).rejects.toThrow();
+    await expect(insert({ suretyPartyId: suretyB })).rejects.toThrow();
+
+    // The CHECKs.
+    await expect(insert({ kind: "Performance" })).rejects.toThrow();
+    await expect(insert({ kind: "" })).rejects.toThrow();
+    await expect(insert({ penalSumCents: 0 })).rejects.toThrow();
+    await expect(insert({ premiumCents: -1 })).rejects.toThrow();
+    await expect(insert({ status: "active" })).rejects.toThrow();
+    // In force with no day it took effect, released with no release, and an expiry before the start.
+    await expect(insert({ status: "issued", effectiveOn: null })).rejects.toThrow();
+    await expect(insert({ status: "released", releasedOn: null })).rejects.toThrow();
+    await expect(insert({ status: "issued", releasedOn: "2026-04-01" })).rejects.toThrow();
+    await expect(insert({ expiresOn: "2026-02-01" })).rejects.toThrow();
+    // Asked for, with no dates at all: the ordinary start.
+    await withSystem((tx) => tx.insert(schema.jobBonds).values({ ...base, status: "requested", effectiveOn: null }));
+
+    // THE LINE: one per company, the limits positive, and single inside aggregate.
+    const lineInsert = (values: Partial<typeof schema.jobBondingLines.$inferInsert>) =>
+      withSystem((tx) => tx.insert(schema.jobBondingLines).values({ tenantId: tenantA, entityId: entityA, ...values }));
+    await expect(lineInsert({ singleJobLimitCents: 0 })).rejects.toThrow();
+    await expect(lineInsert({ aggregateLimitCents: 0 })).rejects.toThrow();
+    await expect(lineInsert({ singleJobLimitCents: 600_000, aggregateLimitCents: 500_000 })).rejects.toThrow();
+    await lineInsert({ singleJobLimitCents: 100_000, aggregateLimitCents: 500_000 });
+    await expect(lineInsert({ aggregateLimitCents: 900_000 })).rejects.toThrow();
+    // Tenant B's company under tenant A's line: unrepresentable, and their line is theirs.
+    await expect(withSystem((tx) => tx.insert(schema.jobBondingLines).values({ tenantId: tenantA, entityId: entityB }))).rejects.toThrow();
+    const theirLine = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobBondingLines).values({ tenantId: tenantB, entityId: entityB, aggregateLimitCents: 1 }).returning();
+      return r[0].id;
+    });
+    expect(await asStaff((tx) => tx.select().from(schema.jobBondingLines).where(eq(schema.jobBondingLines.id, theirLine)))).toEqual([]);
+
+    // The contract and the code gone: each key null, the money and the tenant untouched.
+    await withSystem(async (tx) => {
+      await tx.delete(schema.jobContracts).where(eq(schema.jobContracts.id, contractX));
+      await tx.delete(schema.jobCostCodes).where(eq(schema.jobCostCodes.id, codeX));
+    });
+    const after = await withSystem((tx) => tx.select().from(schema.jobBonds).where(eq(schema.jobBonds.id, id)));
+    expect(after).toHaveLength(1);
+    expect([after[0].contractId, after[0].costCodeId, after[0].penalSumCents, after[0].tenantId]).toEqual([null, null, 100_000, tenantA]);
+
+    // The bonds go with the job.
+    await withSystem((tx) => tx.delete(schema.jobProjects).where(eq(schema.jobProjects.id, mine)));
+    expect(await withSystem((tx) => tx.select().from(schema.jobBonds).where(eq(schema.jobBonds.projectId, mine)))).toEqual([]);
+    await withSystem(async (tx) => {
+      await tx.delete(schema.jobBondingLines).where(eq(schema.jobBondingLines.tenantId, tenantA));
+      await tx.delete(schema.jobBondingLines).where(eq(schema.jobBondingLines.id, theirLine));
+      await tx.delete(schema.jobContracts).where(eq(schema.jobContracts.id, contractB));
       await tx.delete(schema.jobCostCodes).where(eq(schema.jobCostCodes.id, codeB));
     });
   });

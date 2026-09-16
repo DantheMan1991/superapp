@@ -27,9 +27,16 @@ import {
   getProject,
   listChangeOrders,
   listContracts,
+  listCostCodes,
 } from "@/packs/jobs/ops";
 import { contractSummary } from "@/packs/jobs/contract-math";
 import { ContractForm } from "@/packs/jobs/components/contract-form";
+import { Panel } from "@/components/app/panel";
+import { todayInTimezone } from "@/lib/timezone";
+import { listBonds } from "@/packs/jobs/bonding-ops";
+import { bondsSentence } from "@/packs/jobs/bonding-math";
+import { BondDialog, BondStatusDialog } from "@/packs/jobs/components/bond-form";
+import { BOND_STANDING_LABELS, type BondStanding, type BondStatus } from "@/packs/jobs/vocabulary";
 import {
   BILLING_METHOD_LABELS,
   CONTRACT_STATUS_LABELS,
@@ -60,10 +67,12 @@ export default async function ContractsPage({
     async (tx) => {
       const project = await getProject(tx, ctx.tenant.id, id);
       if (!project) return null;
-      const [contracts, changeOrders, billing, parties, pack] = await Promise.all([
+      const [contracts, changeOrders, billing, bonds, codes, parties, pack] = await Promise.all([
         listContracts(tx, ctx.tenant.id, project.id),
         listChangeOrders(tx, ctx.tenant.id, project.id),
         contractBilling(tx, ctx.tenant.id, project.id),
+        listBonds(tx, ctx.tenant.id, project.id, todayInTimezone(ctx.tenant.timezone)),
+        project.costCodeSetId ? listCostCodes(tx, ctx.tenant.id, project.costCodeSetId) : Promise.resolve([]),
         tx
           .select({ id: schema.parties.id, name: schema.parties.displayName })
           .from(schema.parties)
@@ -77,6 +86,8 @@ export default async function ContractsPage({
         changeOrders,
         billing,
         parties,
+        bonds,
+        codes,
         labels: pack.labels,
         config: pack.config,
       };
@@ -92,6 +103,13 @@ export default async function ContractsPage({
   const { revisedOf, approvedByContract, signedValue, changesValue, signedCount, proposedCount } =
     contractSummary(contracts, changeOrders);
   const partyName = new Map(data.parties.map((p) => [p.id, p.name]));
+  const today = todayInTimezone(ctx.tenant.timezone);
+  /** What a bond picks from: this job's codes for the premium, and its own contracts (ADR 0078). */
+  const bondCodes = data.codes.map((c) => ({ id: c.id, label: `${c.code} · ${c.name}` }));
+  const bondContracts = contracts.map((c) => ({
+    id: c.id,
+    label: [slugLabel(c.kind), c.name].filter((x) => x !== "").join(" · "),
+  }));
 
   return (
     <div className="space-y-4">
@@ -282,6 +300,120 @@ export default async function ContractsPage({
               </TableBody>
             </Table>
       </DataTable>
+
+      <Panel className="p-5">
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-heading text-sm font-medium tracking-heading">Bonds</h2>
+          {isOwner && (
+            <BondDialog
+              projectId={project.id}
+              parties={data.parties}
+              codes={bondCodes}
+              contracts={bondContracts}
+            />
+          )}
+        </div>
+        {/*
+          ON THE JOB, NAMING A CONTRACT WHEN THERE IS ONE (ADR 0078): a bid
+          bond exists before any contract does. What the pack does with a bond
+          is read its expiry and count the job ONCE against the surety's line,
+          however many bonds it carries — see the Bonding page.
+        */}
+        <p className="mb-3 text-sm text-muted-foreground">
+          {data.bonds.length === 0
+            ? "No bonds on this job. Record the performance and payment bonds your surety writes, and a bid bond before there is a contract; what they tie up shows on the Bonding page."
+            : bondsSentence(data.bonds.map((b) => b.standing))}
+        </p>
+        {data.bonds.length > 0 && (
+          <div className="relative w-full min-w-0 overflow-x-auto">
+            <table className="w-full min-w-[52rem] text-sm">
+              <thead className="text-xs text-muted-foreground">
+                <tr>
+                  <th className="min-w-[10rem] px-2 py-1.5 text-left">Bond</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 text-left">Surety</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 text-right">Covers</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 text-right">Premium</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 text-left">Dates</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 text-left">Standing</th>
+                  <th className="w-28 px-2 py-1.5"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.bonds.map((row) => {
+                  const b = row.bond;
+                  return (
+                    <tr key={b.id} className="border-t align-top">
+                      <td className="min-w-[10rem] px-2 py-1.5">
+                        <span className="font-medium">{slugLabel(b.kind)}</span>
+                        {b.number && <span className="block text-xs text-muted-foreground">{b.number}</span>}
+                        {row.contractLabel && <span className="block text-xs text-muted-foreground">{row.contractLabel}</span>}
+                        {b.notes && <span className="block text-xs text-muted-foreground">{b.notes}</span>}
+                      </td>
+                      <td className="px-2 py-1.5">{row.suretyName ?? <span className="text-muted-foreground">—</span>}</td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{formatMoney(b.penalSumCents, symbol)}</td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">
+                        {b.premiumCents === null ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : (
+                          <>
+                            {formatMoney(b.premiumCents, symbol)}
+                            {row.codeLabel && <span className="block text-xs font-normal text-muted-foreground">{row.codeLabel}</span>}
+                          </>
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap px-2 py-1.5">
+                        {b.effectiveOn ?? <span className="text-muted-foreground">Not in force</span>}
+                        {b.expiresOn && <span className="block text-xs text-muted-foreground">to {b.expiresOn}</span>}
+                        {b.releasedOn && <span className="block text-xs text-muted-foreground">released {b.releasedOn}</span>}
+                      </td>
+                      <td className="whitespace-nowrap px-2 py-1.5">
+                        <StatusBadge tone={BOND_TONES[row.standing]}>{BOND_STANDING_LABELS[row.standing]}</StatusBadge>
+                      </td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-right">
+                        {isOwner && (
+                          <div className="flex items-center justify-end gap-0.5">
+                            <BondStatusDialog
+                              projectId={project.id}
+                              today={today}
+                              bond={{ id: b.id, kind: b.kind, status: b.status as BondStatus, effectiveOn: b.effectiveOn, releasedOn: b.releasedOn }}
+                            />
+                            <BondDialog
+                              key={`${b.id}:${b.version}`}
+                              projectId={project.id}
+                              parties={data.parties}
+                              codes={bondCodes}
+                              contracts={bondContracts}
+                              existing={{
+                                id: b.id,
+                                version: b.version,
+                                kind: b.kind,
+                                number: b.number,
+                                suretyPartyId: b.suretyPartyId,
+                                penalSum: (b.penalSumCents / 100).toFixed(2),
+                                premium: b.premiumCents === null ? "" : (b.premiumCents / 100).toFixed(2),
+                                costCodeId: b.costCodeId,
+                                contractId: b.contractId,
+                                effectiveOn: b.effectiveOn,
+                                expiresOn: b.expiresOn,
+                                notes: b.notes,
+                                status: b.status as BondStatus,
+                              }}
+                            />
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="mt-3 text-xs text-muted-foreground">
+          The premium is recorded here and billed in Accounting like any other invoice; the cost code is where it lands on this job. A bond still in
+          force ties up the surety&apos;s line, and releasing it gives that back.
+        </p>
+      </Panel>
     </div>
   );
 }
@@ -291,6 +423,16 @@ export default async function ContractsPage({
  * `signed` and `complete` are money; `proposed` is somebody else's move;
  * the rest are over. See `StatusBadge` for why this is a tone and not a colour.
  */
+/** A bond's standing, in the tones the pack's other chips use. */
+const BOND_TONES: Record<BondStanding, StatusTone> = {
+  requested: "pending",
+  active: "good",
+  expiring: "pending",
+  expired: "bad",
+  released: "quiet",
+  void: "quiet",
+};
+
 const CONTRACT_TONES: Record<string, StatusTone> = {
   signed: "good",
   complete: "good",

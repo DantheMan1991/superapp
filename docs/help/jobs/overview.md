@@ -1087,6 +1087,74 @@ At the end of each row:
 
 The line under the heading counts them: *2 open claims on 2 {{project|plural|lower}} · 3 {{project|plural|lower}} under warranty, 1 ending within 60 days.*
 
+## Bonding — what your surety will back
+
+Two screens. The record of each bond lives on its {{project|lower}}'s Contracts tab. **Can I bid this one** is answered on the Bonding page, reached with {button:Bonding|outline} at the top of the {{project|plural|lower}} list.
+
+Owners only, both of them. A bond is a term of the agreement, the way a contract's value is.
+
+### Bonds on a {{project|lower}}
+
+The `Bonds` panel sits under the contracts. The line above it counts them — *2 bonds: 1 ending soon, 1 in force.*
+
+{button:Record a bond|outline} opens the form:
+
+| Field | What to put |
+| --- | --- |
+| `Kind` | `performance`, `payment`, `bid`, `maintenance` and `subdivision` are offered, and anything else lowercase with underscores is accepted. What you post differs by state and by who is asking. |
+| `Bond number` | The surety's own, in whatever form they write it. |
+| `What it covers` | The penal sum. Usually the contract sum on a performance bond. |
+| `Premium` | What the bond cost you. Recorded here, never posted: the surety's invoice is an ordinary bill in Accounting. |
+| `Surety` | The surety company, from your parties. |
+| `Against the contract` | Which agreement it bonds. A bid bond has none yet, which is the point of it. |
+| `Took effect` | Leave blank while you have only asked for it. Filling it in puts the bond in force. |
+| `Runs out` | Many bonds have none and are released instead. |
+| `Premium's cost code` | Where the premium belongs on this job. |
+
+#### The table
+
+| Column | What it is |
+| --- | --- |
+| `Bond` | The kind, with the bond number, the contract it names and your notes underneath. |
+| `Surety` | Who wrote it. |
+| `Covers` | The penal sum. |
+| `Premium` | What it cost, with the cost code underneath. |
+| `Dates` | When it took effect, when it runs out, when it was released. |
+| `Standing` | `Asked for`, `In force`, `Ending soon` (within a month), `Expired`, `Released` or `Dropped`. Worked out from the status and the expiry against today — nothing here is typed. |
+
+{button:Standing|outline} moves a bond along. Issued needs the day it took effect; released needs that and the day it was released. **Releasing is what gives its share of your line back.** Dropping one you never got leaves the record. The pencil edits everything else.
+
+### The Bonding page
+
+The sentence at the top is the whole answer: *43,525.05 of bonded work on hand across 1 {{project|lower}}, leaving 4,956,474.95 of the 5,000,000.00 your surety backs.* When you have not recorded your limits it says so and tells you to.
+
+#### `Your line`
+
+Per company, because a surety underwrites a legal entity. If you run more than one, the buttons above the panel switch between them.
+
+{button:Set the line|outline} takes the two numbers off your surety's letter: the biggest `Single job` they will bond, and the `Aggregate` work they will back at once. Either can be left blank; half a line is worth more than none. A single-job limit above the aggregate is refused as the typo it is: *A single-job limit cannot be more than the aggregate.*
+
+The four figures:
+
+- `Single job` and `Aggregate` — what you typed.
+- `Work on hand` — what your bonded {{project|plural|lower}} still have to build.
+- `Left on the line` — the aggregate less that, in red once you are past it.
+
+#### `What is tying it up`
+
+One row per bonded {{project|lower}}, biggest first, with its contract, what has been billed, the work on hand, and every bond still holding it.
+
+**Two things about this table are deliberate and worth knowing:**
+
+- **Work on hand is backlog, not contract value.** It is the contract less what you have billed. A surety is exposed to what is left to build, so a job billed to the end ties up nothing even while its bond is open.
+- **A {{project|lower}} counts once, however many bonds it carries.** Performance and payment bonds come as a pair on the same contract. Counting both would report twice the exposure on every properly bonded job.
+
+A bond ties up the line **from the day you ask for it**, because the job is going ahead either way. Released, expired and dropped bonds let their {{project|lower}} go. A cancelled {{project|lower}} ties up nothing.
+
+#### `Worth a look`
+
+Bonds ending soon, past their date, or still only asked for. An expired bond has quietly let its {{project|lower}} go on the line above, which may be right or may mean nobody renewed it.
+
 ## On site — the daily log, photos and the punch list
 
 Anyone on the team, not only owners: the field is a chore, and the person with the phone on the site is rarely the owner.
@@ -1294,6 +1362,8 @@ Worth knowing so you are not looking for it:
 | Log a day on site, or add and tick a punch item | ● | ● | ● |
 | Record a warranty claim, schedule it, decide it, tick it done | ● | ● | ● |
 | Set a {{project|lower}}'s warranty period, or remove a claim | ● | | |
+| Record or change a bond, or set the bonding line | ● | | |
+| See the bonding page and what is tying up the line | ● | ● | ● |
 | Add photos to a day | ● | ● | |
 | See the work in progress schedule | ● | ● | ● |
 | Type an estimate, post or unpost a work in progress period | ● | | |

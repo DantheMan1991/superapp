@@ -69,6 +69,7 @@ import {
 import { addMarkup, deleteMarkup, updateMarkup } from "./markups-ops";
 import { decideClaim, deleteClaim, recordClaim, scheduleClaim, setClaimDone, setWarrantyPeriod, updateClaim } from "./warranty-ops";
 import { raiseBackCharge, setBackChargeApplication, setBackChargeVoid, updateBackCharge } from "./back-charges-ops";
+import { recordBond, setBondStatus, setBondingLine, updateBond } from "./bonding-ops";
 import { clearSheetScale, pushTakeoff, setSheetScale, unpushTakeoff } from "./takeoff-ops";
 import {
   approveSubApplication,
@@ -136,6 +137,7 @@ import {
   MARKUP_KINDS,
   MARKUP_TEXT_MAX,
   SCALE_UNITS,
+  BOND_STATUSES,
   WARRANTY_DECISIONS,
 } from "./vocabulary";
 
@@ -4095,6 +4097,186 @@ export async function setBackChargeApplicationAction(input: unknown) {
       { role: ctx.role, userId: ctx.userId },
     );
     revalidateBackCharges(projectId, commitmentId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// --------------------------------------------------------------------- bonding
+
+/** The job's Contracts tab, where a bond lives, and the capacity screen across jobs. */
+function revalidateBonding(projectId: string | null): void {
+  if (projectId) {
+    revalidatePath(`${BASE}/${projectId}/contracts`);
+    revalidatePath(`${BASE}/${projectId}`);
+  }
+  revalidatePath(`${BASE}/bonding`);
+}
+
+const bondFields = {
+  kind: z.string().trim().min(1).max(63),
+  number: z.string().trim().max(100).optional(),
+  suretyPartyId: z.string().uuid().nullable().optional(),
+  penalSum: z.string().trim().min(1),
+  premium: z.string().trim().optional(),
+  costCodeId: z.string().uuid().nullable().optional(),
+  contractId: z.string().uuid().nullable().optional(),
+  effectiveOn: optionalDate,
+  expiresOn: optionalDate,
+  notes: z.string().trim().max(4000).optional(),
+};
+
+/** "12,500" and "12500.00" both work; a blank premium is nothing at all, not zero. */
+function bondMoney(penalSum: string, premium: string | undefined): { penalSumCents: number; premiumCents: number | null } | null {
+  const penalSumCents = parseMoneyToCents(penalSum);
+  if (penalSumCents === null || penalSumCents <= 0) return null;
+  const raw = (premium ?? "").trim();
+  if (raw === "") return { penalSumCents, premiumCents: null };
+  const premiumCents = parseMoneyToCents(raw);
+  if (premiumCents === null) return null;
+  return { penalSumCents, premiumCents };
+}
+
+export async function recordBondAction(input: unknown) {
+  const parsed = z.object({ projectId: z.string().uuid(), ...bondFields }).safeParse(input);
+  if (!parsed.success) return { error: "Say what kind of bond it is and what it covers." };
+  const { projectId, penalSum, premium, ...rest } = parsed.data;
+  const money = bondMoney(penalSum, premium);
+  if (!money) return { error: "What a bond covers is an amount, like 250000 or 250,000.00." };
+  try {
+    const ctx = await gate();
+    const created = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const row = await recordBond(tx, ctx, projectId, { ...rest, ...money });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "bond.recorded",
+          targetType: "bond",
+          targetId: row.id,
+          meta: { projectId, kind: row.kind },
+        });
+        return row;
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateBonding(projectId);
+    return { ok: true as const, id: created.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function updateBondAction(input: unknown) {
+  const parsed = z
+    .object({ projectId: z.string().uuid(), id: z.string().uuid(), version: z.number().int().positive(), ...bondFields })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Say what kind of bond it is and what it covers." };
+  const { projectId, id, version, penalSum, premium, ...rest } = parsed.data;
+  const money = bondMoney(penalSum, premium);
+  if (!money) return { error: "What a bond covers is an amount, like 250000 or 250,000.00." };
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        await updateBond(tx, ctx, id, { ...rest, ...money }, version);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "bond.updated",
+          targetType: "bond",
+          targetId: id,
+          meta: { projectId },
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateBonding(projectId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function setBondStatusAction(input: unknown) {
+  const parsed = z
+    .object({
+      projectId: z.string().uuid(),
+      id: z.string().uuid(),
+      status: z.enum(BOND_STATUSES),
+      effectiveOn: optionalDate,
+      releasedOn: optionalDate,
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { projectId, id, ...rest } = parsed.data;
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        await setBondStatus(tx, ctx, id, rest);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: `bond.${rest.status}`,
+          targetType: "bond",
+          targetId: id,
+          meta: { projectId },
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateBonding(projectId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** The surety's letter, in two numbers. Either may be blank; both blank clears the line. */
+export async function setBondingLineAction(input: unknown) {
+  const parsed = z
+    .object({
+      entityId: z.string().uuid(),
+      singleJobLimit: z.string().trim(),
+      aggregateLimit: z.string().trim(),
+      suretyPartyId: z.string().uuid().nullable().optional(),
+      notes: z.string().trim().max(4000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { entityId, singleJobLimit, aggregateLimit, ...rest } = parsed.data;
+  const limit = (raw: string): number | null | "bad" => {
+    if (raw === "") return null;
+    const cents = parseMoneyToCents(raw);
+    return cents === null || cents <= 0 ? "bad" : cents;
+  };
+  const single = limit(singleJobLimit);
+  const aggregate = limit(aggregateLimit);
+  if (single === "bad" || aggregate === "bad") {
+    return { error: "A limit is an amount, like 5000000 or 5,000,000.00, or blank." };
+  }
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        await setBondingLine(tx, ctx, entityId, { ...rest, singleJobLimitCents: single, aggregateLimitCents: aggregate });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "bonding_line.set",
+          targetType: "entity",
+          targetId: entityId,
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateBonding(null);
     return { ok: true as const };
   } catch (err) {
     return toResult(err);

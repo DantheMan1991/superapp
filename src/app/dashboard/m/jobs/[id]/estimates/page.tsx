@@ -4,13 +4,12 @@ import { FileText } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
-import { labelFor } from "@/lib/packs/resolve";
 import { packContext } from "@/lib/packs/tenant-context";
 import { allowsWrite } from "@/lib/packs/authorize";
 import { formatMoney, formatMoneySign } from "@/lib/money";
-import { PageHeader } from "@/components/app/page-header";
-import { Panel } from "@/components/app/panel";
-import { Badge } from "@/components/ui/badge";
+import { DataTable } from "@/components/app/data-table";
+import { EmptyState } from "@/components/app/empty-state";
+import { StatusBadge, type StatusTone } from "@/packs/jobs/components/status-badge";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -52,25 +51,30 @@ export default async function EstimatesPage({ params }: { params: Promise<{ id: 
   const { project, rows } = data;
   const canEdit = allowsWrite(ctx.role, "member");
   const symbol = ctx.tenant.currencySymbol;
-  const projectWord = labelFor(data.labels, "project", "Project");
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="Estimates"
-        description={`${projectWord} ${project.number} · ${rows.length} ${rows.length === 1 ? "estimate" : "estimates"}`}
-        actions={canEdit ? <NewEstimateDialog projectId={project.id} /> : null}
-      />
-
-      <Panel className="p-5">
-        {rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No estimates yet. An estimate is the job priced before anybody signs — lines of cost and price by cost
-            code, with overhead and profit below — and, accepted, it becomes the contract&apos;s value, the budget
-            and the schedule of values.
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="font-heading text-lg font-semibold tracking-heading">Estimates</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            {`${rows.length} ${rows.length === 1 ? "estimate" : "estimates"}`}
           </p>
-        ) : (
-          <div className="overflow-x-auto">
+        </div>
+        {canEdit ? <NewEstimateDialog projectId={project.id} /> : null}
+      </div>
+
+      <DataTable
+        isEmpty={rows.length === 0}
+        empty={
+          <EmptyState
+            icon={<FileText />}
+            title="No estimates yet"
+            description="An estimate is the job priced before anybody signs — lines of cost and price by cost code, with overhead and profit below — and, accepted, it becomes the contract's value, the budget and the schedule of values."
+            action={canEdit ? <NewEstimateDialog projectId={project.id} /> : null}
+          />
+        }
+      >
             <Table>
               <TableHeader>
                 <TableRow>
@@ -116,11 +120,11 @@ export default async function EstimatesPage({ params }: { params: Promise<{ id: 
                       )}
                     </TableCell>
                     <TableCell>
-                      <Badge variant={row.estimate.status === "accepted" ? "default" : "secondary"}>
+                      <StatusBadge tone={ESTIMATE_TONES[row.estimate.status] ?? "quiet"}>
                         {isEstimateStatus(row.estimate.status)
                           ? ESTIMATE_STATUS_LABELS[row.estimate.status]
                           : row.estimate.status}
-                      </Badge>
+                      </StatusBadge>
                       {row.estimate.decidedOn && (
                         <span className="block text-xs text-muted-foreground">{row.estimate.decidedOn}</span>
                       )}
@@ -149,14 +153,26 @@ export default async function EstimatesPage({ params }: { params: Promise<{ id: 
                 ))}
               </TableBody>
             </Table>
-          </div>
-        )}
-        <p className="mt-3 text-xs text-muted-foreground">
+      </DataTable>
+
+        <p className="text-xs text-muted-foreground">
           Cost is what the lines add up to at their unit costs; total is their price with overhead and profit on
           top; margin is the difference. Several estimates on one job is ordinary — a bid is revised, and a design
           phase is priced before the build.
         </p>
-      </Panel>
     </div>
   );
 }
+
+/**
+ * An estimate's status as a tone. `accepted` is the one that became money;
+ * `sent` is out with the client and going the right way, so it is `info` and
+ * not amber; `draft` is still yours to finish.
+ */
+const ESTIMATE_TONES: Record<string, StatusTone> = {
+  accepted: "good",
+  sent: "info",
+  draft: "pending",
+  declined: "quiet",
+  superseded: "quiet",
+};

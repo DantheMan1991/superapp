@@ -222,9 +222,15 @@
    * through and every pack was the same emerald as accounting — in the rail,
    * in the page-header chip and in the active strip underline.
    *
-   * Hues sit in the gaps the core seven leave. Sorted, all fourteen now read
-   * 15 · 35 · 55 · 75 · 118 · 140 · 170 · 200 · 222 · 245 · 268 · 295 · 320 ·
-   * 350, whose tightest gap is 20° — the same minimum the core set already had.
+   * Hues sit in the gaps the core tools leave. Sorted, the seventeen now read
+   * 15 · 35 · 55 · 75 · 95 · 118 · 140 · 155 · 170 · 200 · 222 · 245 · 268 ·
+   * 295 · 320 · 335 · 350.
+   *
+   * **The tightest gap is 15°, not the 20° this note used to claim** — and it
+   * was already 15° before `jobs` arrived, because marketing, time and
+   * livestock sit at 320 · 335 · 350. The line was written when there were
+   * fourteen hues and never updated as `hello` (95) and `time` (335) landed.
+   * Count them from the file before trusting a number in a comment.
    *
    * `crops` is the one that is not where you would guess. It was pitched at 105
    * to sit between documents and land, and measured 4.40:1 on `--background`:
@@ -238,6 +244,20 @@
   --accent-livestock: oklch(0.52 0.14 350);
   --accent-production: oklch(0.55 0.12 55);
   --accent-retail: oklch(0.54 0.13 15);
+
+  /**
+   * `jobs` — added 2026-09-15, on the founder's call, having shared
+   * accounting's emerald since the pack shipped. Both of the wheel's widest
+   * remaining gaps (30°) sit either side of 170, so this splits the lower one.
+   *
+   * 155 rather than 185 because of WHO ELSE IS IN THE RAIL. Its neighbours are
+   * land (140), a farm pack a construction tenant never installs, and
+   * accounting (170); 185's would have been scheduling (200), a core tool every
+   * tenant has and which `jobs` sits beside all day. Chroma 0.13 lifts it above
+   * both land's 0.12 and accounting's 0.11, so it still reads as its own green
+   * on the tenant that does run both.
+   */
+  --accent-jobs: oklch(0.52 0.13 155);
 
   --sidebar: oklch(0.25 0.06 265);
   --sidebar-foreground: oklch(0.93 0.008 265);
@@ -318,6 +338,7 @@
   --accent-livestock: oklch(0.74 0.14 350);
   --accent-production: oklch(0.78 0.12 55);
   --accent-retail: oklch(0.74 0.13 15);
+  --accent-jobs: oklch(0.76 0.14 155);
   --chart-1: oklch(0.6 0.1 265);
   --chart-2: oklch(0.67 0.12 170);
   --chart-3: oklch(0.68 0.14 150);
@@ -348,7 +369,16 @@
   --accent-scheduling: oklch(0.72 0.1 200);
   --accent-work: oklch(0.72 0.15 35);
   --accent-time: oklch(0.74 0.14 335);
-  --accent-hello: oklch(0.72 0.13 320);
+  /*
+   * These two were ONE line until 2026-09-15, and it was the wrong one: the
+   * rail carried `--accent-hello` at hue 320 — marketing's purple, pasted and
+   * renamed but never re-valued — and no `--accent-marketing` at all. So on the
+   * navy rail Marketing fell through to brand emerald and Hello rendered
+   * Marketing's purple. Found by `tests/module-accents.test.ts` on its first
+   * run. Every accent here mirrors its `.dark` twin; these two now do too.
+   */
+  --accent-marketing: oklch(0.72 0.13 320);
+  --accent-hello: oklch(0.8 0.12 95);
   /* The packs. This block is the one that gets forgotten — the rail is dark in
      BOTH themes, so a pack missing here inherits its `:root` value and goes
      muddy on the navy rather than failing loudly. */
@@ -359,6 +389,7 @@
   --accent-livestock: oklch(0.74 0.14 350);
   --accent-production: oklch(0.78 0.12 55);
   --accent-retail: oklch(0.74 0.13 15);
+  --accent-jobs: oklch(0.76 0.14 155);
 }
 
 @layer base {

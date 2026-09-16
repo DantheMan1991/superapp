@@ -105,16 +105,16 @@ export default async function WarrantyAcrossJobsPage() {
           <p className="text-sm text-muted-foreground">No open claims.</p>
         ) : (
           <div className="relative w-full min-w-0 overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[64rem] text-sm">
               <thead className="text-xs text-muted-foreground">
                 <tr>
-                  <th className="px-2 py-1.5 text-left">{projectWordCap}</th>
-                  <th className="px-2 py-1.5 text-left">No.</th>
-                  <th className="px-2 py-1.5 text-left">What</th>
-                  <th className="px-2 py-1.5 text-left">Reported</th>
-                  <th className="px-2 py-1.5 text-left">Trade</th>
-                  <th className="px-2 py-1.5 text-left">Standing</th>
-                  <th className="px-2 py-1.5 text-left">Decision</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 text-left">{projectWordCap}</th>
+                  <th className="w-10 px-2 py-1.5 text-left">No.</th>
+                  <th className="min-w-[18rem] px-2 py-1.5 text-left">What</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 text-left">Reported</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 text-left">Trade</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 text-left">Standing</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 text-left">Decision</th>
                 </tr>
               </thead>
               <tbody>
@@ -130,7 +130,7 @@ export default async function WarrantyAcrossJobsPage() {
                         <p className="text-xs text-muted-foreground">{row.projectName}</p>
                       </td>
                       <td className="px-2 py-1.5 tabular-nums">{c.number}</td>
-                      <td className="px-2 py-1.5">
+                      <td className="min-w-[18rem] px-2 py-1.5">
                         {c.title}
                         {c.location && <p className="text-xs text-muted-foreground">{c.location}</p>}
                       </td>

@@ -2289,4 +2289,104 @@ d("jobs tables (RLS)", () => {
       await tx.delete(schema.jobCostCodes).where(eq(schema.jobCostCodes.id, codeB));
     });
   });
+
+  it("cannot read or change another tenant's BACK-CHARGES; one hangs off this tenant's order, code, warranty claim and application; a number is once per order and positive, the money more than nothing, the words present, a dropped one off every application; a code, a claim or a DRAFT application gone sets that key null and nothing else; the back-charges go with the order", async () => {
+    const { mine, theirs, codeX, claimX, appX, claimB, codeB, partyB } = await withSystem(async (tx) => {
+      const partyB = await seedParty(tx, tenantB, "Their sub");
+      const commitments = await tx
+        .insert(schema.jobCommitments)
+        .values([
+          { tenantId: tenantA, projectId: projectA, partyId: clientA, number: `${STAMP}-BC-A`, kind: "subcontract", status: "issued" },
+          { tenantId: tenantB, projectId: projectB, partyId: partyB, number: `${STAMP}-BC-B`, kind: "subcontract", status: "issued" },
+        ])
+        .returning();
+      const codes = await tx
+        .insert(schema.jobCostCodes)
+        .values([
+          { tenantId: tenantA, setId: setA, code: "8880", name: "Cleaning" },
+          { tenantId: tenantB, setId: setB, code: "8881", name: "Theirs" },
+        ])
+        .returning();
+      const claims = await tx
+        .insert(schema.jobWarrantyClaims)
+        .values([
+          { tenantId: tenantA, projectId: projectA, number: 90, title: "Mine", reportedOn: "2026-09-10" },
+          { tenantId: tenantB, projectId: projectB, number: 91, title: "Theirs", reportedOn: "2026-09-10" },
+        ])
+        .returning();
+      const apps = await tx
+        .insert(schema.jobSubApplications)
+        .values([
+          { tenantId: tenantA, commitmentId: commitments[0].id, number: 1, periodTo: "2026-09-30" },
+          { tenantId: tenantB, commitmentId: commitments[1].id, number: 1, periodTo: "2026-09-30" },
+        ])
+        .returning();
+      return {
+        mine: commitments[0].id,
+        theirs: commitments[1].id,
+        codeX: codes[0].id,
+        codeB: codes[1].id,
+        claimX: claims[0].id,
+        claimB: claims[1].id,
+        appX: apps[0].id,
+        appB: apps[1].id,
+        partyB,
+      };
+    });
+    const base = { tenantId: tenantA, commitmentId: mine, number: 1, description: "Cleaned up", amountCents: 80_000, incurredOn: "2026-09-20" } as const;
+    const id = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobBackCharges).values({ ...base, costCodeId: codeX, warrantyClaimId: claimX, subApplicationId: appX }).returning();
+      return r[0].id;
+    });
+    const seen = await asOtherTenant(async (tx) => ({
+      rows: await tx.select().from(schema.jobBackCharges).where(eq(schema.jobBackCharges.id, id)),
+      changed: await tx.update(schema.jobBackCharges).set({ amountCents: 1 }).where(eq(schema.jobBackCharges.id, id)).returning(),
+    }));
+    expect([seen.rows, seen.changed]).toEqual([[], []]);
+    expect(await asStaff((tx) => tx.select().from(schema.jobBackCharges).where(eq(schema.jobBackCharges.id, id)))).toHaveLength(1);
+
+    // Tenant B's order, code, claim or application under tenant A's row: unrepresentable.
+    const insert = (values: Partial<typeof schema.jobBackCharges.$inferInsert>) =>
+      withSystem((tx) => tx.insert(schema.jobBackCharges).values({ ...base, number: 7, ...values }));
+    await expect(insert({ commitmentId: theirs })).rejects.toThrow();
+    await expect(insert({ costCodeId: codeB })).rejects.toThrow();
+    await expect(insert({ warrantyClaimId: claimB })).rejects.toThrow();
+
+    // The CHECKs and the unique number.
+    await expect(insert({ number: 0 })).rejects.toThrow();
+    await expect(insert({ number: 1 })).rejects.toThrow();
+    await expect(insert({ amountCents: 0 })).rejects.toThrow();
+    await expect(insert({ amountCents: -1 })).rejects.toThrow();
+    await expect(insert({ description: "   " })).rejects.toThrow();
+    await expect(insert({ description: "x".repeat(301) })).rejects.toThrow();
+    await expect(insert({ status: "deducted" })).rejects.toThrow();
+    // A dropped back-charge riding an application is the one state the table refuses outright.
+    await expect(insert({ status: "void", subApplicationId: appX })).rejects.toThrow();
+    await withSystem((tx) => tx.insert(schema.jobBackCharges).values({ ...base, number: 2, status: "void" }));
+
+    // The code, the claim and the DRAFT application gone: each key null, the money and the tenant untouched.
+    await withSystem(async (tx) => {
+      await tx.delete(schema.jobCostCodes).where(eq(schema.jobCostCodes.id, codeX));
+      await tx.delete(schema.jobWarrantyClaims).where(eq(schema.jobWarrantyClaims.id, claimX));
+      await tx.delete(schema.jobSubApplications).where(eq(schema.jobSubApplications.id, appX));
+    });
+    const after = await withSystem((tx) => tx.select().from(schema.jobBackCharges).where(eq(schema.jobBackCharges.id, id)));
+    expect(after).toHaveLength(1);
+    expect([after[0].costCodeId, after[0].warrantyClaimId, after[0].subApplicationId, after[0].amountCents, after[0].tenantId]).toEqual([
+      null,
+      null,
+      null,
+      80_000,
+      tenantA,
+    ]);
+
+    // The back-charges go with the order.
+    await withSystem((tx) => tx.delete(schema.jobCommitments).where(eq(schema.jobCommitments.id, mine)));
+    expect(await withSystem((tx) => tx.select().from(schema.jobBackCharges).where(eq(schema.jobBackCharges.commitmentId, mine)))).toEqual([]);
+    await withSystem(async (tx) => {
+      await tx.delete(schema.jobCommitments).where(eq(schema.jobCommitments.id, theirs));
+      await tx.delete(schema.jobWarrantyClaims).where(eq(schema.jobWarrantyClaims.id, claimB));
+      await tx.delete(schema.jobCostCodes).where(eq(schema.jobCostCodes.id, codeB));
+    });
+  });
 });

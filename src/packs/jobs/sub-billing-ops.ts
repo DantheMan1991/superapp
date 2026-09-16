@@ -2,6 +2,7 @@ import "server-only";
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type {
+  JobBackCharge,
   JobCommitment,
   JobCommitmentLine,
   JobSubApplication,
@@ -22,6 +23,8 @@ import {
   type PayLineFigures,
 } from "./billing-math";
 import { JobsError, accountByCode, getProject, requireWrite, type JobsCtx } from "./ops";
+import { backChargesOn, freeBackChargesFrom } from "./back-charges-ops";
+import { backChargeBillDescription, backChargesExceedMessage, netDueCents } from "./back-charges-math";
 import {
   APPROVED_CHANGE_STATUSES,
   COST_CODE_DIMENSION,
@@ -62,6 +65,14 @@ export interface SubApplicationRow {
   totals: PayApplicationTotals;
   /** The bill a billed application became, in Accounting's own words. */
   bill: { id: string; billNumber: string; status: string; totalCents: number } | null;
+  /**
+   * The back-charges riding on this application (ADR 0077). They come off the
+   * BOTTOM: `totals` is the certificate and is untouched by them, and
+   * `netDueCents` is what the subcontractor is actually paid.
+   */
+  backCharges: JobBackCharge[];
+  backChargesCents: number;
+  netDueCents: number;
 }
 
 async function loadCommitment(tx: Tx, tenantId: string, id: string): Promise<JobCommitment> {
@@ -253,6 +264,29 @@ export async function listSubApplications(
     tenantId,
     apps.map((a) => a.id),
   );
+  // Every application's back-charges in one pass, keyed by the application.
+  const byApp = new Map<string, JobBackCharge[]>();
+  if (apps.length > 0) {
+    const charges = await tx
+      .select()
+      .from(schema.jobBackCharges)
+      .where(
+        and(
+          eq(schema.jobBackCharges.tenantId, tenantId),
+          eq(schema.jobBackCharges.status, "open"),
+          inArray(
+            schema.jobBackCharges.subApplicationId,
+            apps.map((a) => a.id),
+          ),
+        ),
+      )
+      .orderBy(asc(schema.jobBackCharges.number));
+    for (const c of charges) {
+      const list = byApp.get(c.subApplicationId!) ?? [];
+      list.push(c);
+      byApp.set(c.subApplicationId!, list);
+    }
+  }
   const out: SubApplicationRow[] = [];
   for (const app of apps) {
     const lines = linesByApp.get(app.id) ?? [];
@@ -276,7 +310,9 @@ export async function listSubApplications(
       const b = await loadBill(tx, tenantId, app.billId);
       bill = { id: b.id, billNumber: b.billNumber, status: b.status, totalCents: b.totalCents };
     }
-    out.push({ app, lines, totals, bill });
+    const backCharges = byApp.get(app.id) ?? [];
+    const backChargesCents = backCharges.reduce((total, b) => total + b.amountCents, 0);
+    out.push({ app, lines, totals, bill, backCharges, backChargesCents, netDueCents: netDueCents(totals.dueCents, backChargesCents) });
   }
   return out;
 }
@@ -570,6 +606,17 @@ export async function approveSubApplication(
   if (totals.dueCents <= 0) {
     throw new JobsError("NOTHING_DUE", "nothing is due on this application");
   }
+  // What is being kept back from this payment (ADR 0077). It never touches the
+  // certificate above — `certifiedCents` stays gross, so the next application
+  // does not hand the money back — and it cannot take the payment to nothing.
+  const backCharges = await backChargesOn(tx, ctx.tenantId, app.id);
+  const backChargesCents = backCharges.reduce((total, b) => total + b.amountCents, 0);
+  if (backChargesCents > 0 && netDueCents(totals.dueCents, backChargesCents) <= 0) {
+    throw new JobsError(
+      "BACK_CHARGES_EXCEED",
+      backChargesExceedMessage(totals.dueCents, backChargesCents, backCharges.length),
+    );
+  }
   const retainageThisPeriod = totals.retainageCents - (previous?.retainageCents ?? 0);
 
   const commitment = await loadCommitment(tx, ctx.tenantId, app.commitmentId);
@@ -648,6 +695,18 @@ export async function approveSubApplication(
       dimensionMemberIds: dimsFor(null),
     });
   }
+  // Each back-charge as its own negative line, against the subcontract expense
+  // account and tagged with the job AND the code the cost landed on — so the
+  // job cost report's spend on that code nets out, which is the figure a
+  // builder reads. One line each, never one lump: the bill has to say what for.
+  for (const charge of backCharges) {
+    billLines.push({
+      description: backChargeBillDescription(charge.number, charge.description, app.number),
+      amountCents: -charge.amountCents,
+      accountId: expenseAccountId,
+      dimensionMemberIds: dimsFor(charge.costCodeId),
+    });
+  }
 
   const draft = await createBillDraft(tx, ctx, {
     entityId: project.entityId,
@@ -715,6 +774,9 @@ export async function voidSubApplication(
       await voidBill(tx, ctx, { billId: bill.id, expectedVersion: bill.version });
     }
   }
+  // The bill is void, so the deduction has been unwound: the back-charges it
+  // carried are owed again and free for the next application (ADR 0077).
+  await freeBackChargesFrom(tx, ctx.tenantId, app.id);
   const rows = await tx
     .update(schema.jobSubApplications)
     .set({ status: "void", version: app.version + 1, updatedAt: new Date() })

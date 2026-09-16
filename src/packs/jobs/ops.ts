@@ -133,6 +133,8 @@ export class JobsError extends Error {
       | "NOT_LATEST_PERIOD"
       /** A job's cost can be billed by one cost-plus contract; a second would bill it twice. */
       | "ONE_COST_PLUS"
+      /** The back-charges on an application come to as much as it does or more (ADR 0077). */
+      | "BACK_CHARGES_EXCEED"
       /** A subcontractor's application is against a SUBCONTRACT; a purchase order is billed with an ordinary bill. */
       | "NOT_SUBCONTRACT"
       /** Hours this period on a line with no bill rate; the message names the person (on WIP, the jobs). */

@@ -670,6 +670,62 @@ What can stop an approval, in its own words: `A purchase order is billed with an
 
 On the {{project|lower}}'s page the Ordered table's `Billed` column reads what each subcontractor has billed and what is held from them, and under it whether a lien waiver covers them.
 
+### Back-charges — money you spent that was theirs
+
+Owners only, and subcontracts only. When you pay for something that was the subcontractor's to pay for — the cleanup they skipped, the lift you rented because theirs never arrived, the fix your own crew made good — you record it here and it comes off their next application.
+
+**A back-charge is not a change order.** The subcontract still says what they agreed to do for what money; a deductive change order would quietly rewrite that. This is money kept back from a payment, and the order's total is untouched.
+
+The line under the heading says where things stand — *1,450.00 charged back: 250.00 on the draft application, 800.00 not yet deducted, 400.00 already deducted.* — or *Nothing charged back on this order.*
+
+#### Raising one
+
+{button:Raise a back-charge|outline}. The dialog:
+
+| Field | What to put |
+| --- | --- |
+| `What you paid for` | In your own words. It goes on their bill, so write what you would want to read back. Required. |
+| `Amount` | What you spent. `800` and `1,200.50` both work. Always a positive number: a back-charge only runs one way. |
+| `Spent on` | The day the money went out. |
+| `Cost code it landed on` | The code the cost was charged to on this job. The deduction goes back to that code, so the job cost report nets out. |
+| `From a warranty claim` | The claim this came from, when it came from one — the list is this {{project|lower}}'s claims. The claim's row then says what has been charged back to the trade. |
+| `Notes` | What you told them and when. |
+
+{button:Raise|primary} gives it the next number on the order and leaves it `Not yet deducted`.
+
+#### The table
+
+| Column | What it is |
+| --- | --- |
+| `#` | Its number on this order. |
+| `What you paid for` | With the warranty claim it came from, your notes, and the reason if it was dropped. |
+| `Spent` | The day the money went out. |
+| `Cost code` | The code it will be credited back to. |
+| `Amount` | What is being kept back. Struck through once dropped. |
+| `Standing` | `Not yet deducted`, `On the draft`, `Deducted`, or `Dropped`. Worked out from the application it is riding — nothing here is typed. |
+
+At the end of each row, while it has not been deducted:
+
+- {button:Deduct on 2|outline} puts it on the open draft application. Only shows when a draft exists; if there is none, raise one first and the button appears.
+- {button:Take off|outline} takes it back off the draft.
+- **The pencil** edits it.
+- **The circle-slash** drops it, after asking why — *They came back and did it.* It stays on the order as a record, because they will ask, and comes off whatever draft it was riding. {button:Charge it again|outline} puts it back.
+
+**Once it has been deducted on a billed application it is fixed**: no edit, no drop, no moving it. Void that application and it is owed again, free for the next one.
+
+#### What it does to the payment
+
+On the applications table, the `Payment due` figure becomes what they are actually paid, with the arithmetic underneath: *9,000.00 less 250.00 charged back*.
+
+Approving the application posts the back-charge as **its own negative line on the bill**, described *Back-charge 1 — Cleaned the site after them (application 1)*, against your subcontractor expense account and tagged with the job and the cost code. So:
+
+- Their bill, and what you owe them, is lower by that much.
+- The job's spend on that cost code drops by the same amount, which is what you want: you paid 800 for the cleanup and recovered 800, so the job's net cost for it is nothing.
+
+**The certificate above it does not move.** Completed to date, retainage and *less previous certificates* are all about the work, and the work is the same whoever paid for it. That is deliberate: if a back-charge came off the certificate, the next application would quietly hand the money back.
+
+If the back-charges riding on an application come to as much as it does or more, approving refuses: *2 back-charges come to 1,250.00 against a payment of 500.00. Take some of them off this application and deduct them on a later one.* Nothing is posted; take one off and it goes through.
+
 ### Lien waivers
 
 Anybody on the job may record one. On the order's own page, under **Lien waivers**.
@@ -1223,6 +1279,7 @@ Worth knowing so you are not looking for it:
 | Set a schedule of values, or issue a pay application | ● | | |
 | Record or approve a subcontractor's application | ● | | |
 | Record a lien waiver, or ask for one in Work | ● | ● | ● |
+| Raise, change, drop or deduct a back-charge | ● | | |
 | Record a subcontractor's certificate or W-9, or ask for one in Work | ● | ● | ● |
 | Write, send, decline or supersede an estimate, or print its proposal | ● | ● | ● |
 | Print a change order, a purchase order or a subcontract | ● | ● | ● |

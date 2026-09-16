@@ -531,6 +531,32 @@ export const DISCIPLINE_LABELS: Readonly<Record<string, string>> = {
 export const DISCIPLINE_ORDER: readonly string[] = ["G", "H", "V", "B", "C", "L", "S", "A", "I", "Q", "F", "P", "D", "M", "E", "W", "T", "R", "X", "Z"];
 export const OTHER_DISCIPLINE = "Other";
 
+// ---------------------------------------------------------------- back-charges
+
+/** Mirrors `job_back_charges_status_valid`. Kept in sync by tests/jobs-back-charges.test.ts. */
+export const BACK_CHARGE_STATUSES = ["open", "void"] as const;
+export type BackChargeStatus = (typeof BACK_CHARGE_STATUSES)[number];
+export function isBackChargeStatus(v: string): v is BackChargeStatus {
+  return (BACK_CHARGE_STATUSES as readonly string[]).includes(v);
+}
+
+/**
+ * Where a back-charge stands, DERIVED (`backChargeStanding`, ADR 0077):
+ * void by its own status; otherwise by the application it sits on — none is
+ * open, a draft is on that application, a billed one is deducted and final.
+ * Never stored, so the deduction and the bill are one fact.
+ */
+export const BACK_CHARGE_STANDINGS = ["open", "on_application", "deducted", "void"] as const;
+export type BackChargeStanding = (typeof BACK_CHARGE_STANDINGS)[number];
+export const BACK_CHARGE_STANDING_LABELS: Record<BackChargeStanding, string> = {
+  open: "Not yet deducted",
+  on_application: "On the draft",
+  deducted: "Deducted",
+  void: "Dropped",
+};
+
+export const BACK_CHARGE_DESCRIPTION_MAX = 300;
+
 // -------------------------------------------------------------------- warranty
 
 /** A claim is what a Work item is linked to (ADR 0076), so the digest and the Work module say which call it is. */

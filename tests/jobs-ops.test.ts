@@ -101,6 +101,15 @@ import {
   waiverCoverage,
   waiverGaps,
 } from "../src/packs/jobs/compliance-ops";
+import {
+  getBackCharge,
+  listBackCharges,
+  listBackChargesForProject,
+  raiseBackCharge,
+  setBackChargeApplication,
+  setBackChargeVoid,
+  updateBackCharge,
+} from "../src/packs/jobs/back-charges-ops";
 import { listOpenWork, listWorkForEntity } from "../src/lib/work/entity-work";
 import {
   createSelection,
@@ -4964,4 +4973,145 @@ d("jobs ops", () => {
     expect(await withSystem((tx) => tx.select({ id: schema.workItems.id }).from(schema.workItems).where(eq(schema.workItems.id, twoWorkId)))).toHaveLength(1);
     expect(await run((tx) => listWorkForEntity(tx, { tenantId }, { entityType: WARRANTY_CLAIM_ENTITY, entityId: two.id }))).toEqual([]);
   }, 120_000);
+
+  it("BACK-CHARGES (ADR 0077): money the business spent that was the subcontractor's, kept back from their next application — owner-only and subcontracts only, numbered per order, citing a cost code and the warranty claim it came from; deducted on a draft it becomes its own negative line on that bill against the code the cost landed on, so the job cost report nets out; the certificate above it stays GROSS so the next application does not hand it back; more than the payment refuses by name; a deducted one is fixed; voiding the application owes it again; dropped and charged again", async () => {
+    const entity = await newCompany("Back Co 1");
+    const { project, commitment, lines, framing, party } = await run((tx) => subcontractJob(tx, entity, "OPS-BC1"));
+    const po = await run((tx) => subcontractJob(tx, entity, "OPS-BC2", "purchase_order"));
+    const other = await run((tx) => subcontractJob(tx, entity, "OPS-BC3"));
+    const claim = await run((tx) =>
+      recordClaim(tx, ctx, project.id, { title: "Drip at the hose bib", reportedOn: "2026-09-10", partyId: party }),
+    );
+    const otherClaim = await run((tx) => recordClaim(tx, ctx, other.project.id, { title: "Somebody else's call", reportedOn: "2026-09-10" }));
+    const base = { description: "Cleaned the site after them", amountCents: 800_00, incurredOn: "2026-09-20" };
+
+    // Owner-only, subcontracts only, and every field checked in words.
+    await expect(run((tx) => raiseBackCharge(tx, staffCtx, commitment.id, base))).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(run((tx) => raiseBackCharge(tx, ctx, po.commitment.id, base))).rejects.toMatchObject({ code: "INVALID_KIND" });
+    await expect(run((tx) => raiseBackCharge(tx, ctx, commitment.id, { ...base, description: "  " }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => raiseBackCharge(tx, ctx, commitment.id, { ...base, amountCents: 0 }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => raiseBackCharge(tx, ctx, commitment.id, { ...base, amountCents: -100 }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => raiseBackCharge(tx, ctx, commitment.id, { ...base, incurredOn: "last week" }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(
+      run((tx) => raiseBackCharge(tx, ctx, commitment.id, { ...base, costCodeId: "00000000-0000-0000-0000-000000000000" })),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    // A claim from ANOTHER job cannot be cited: the money would point at somebody else's call.
+    await expect(run((tx) => raiseBackCharge(tx, ctx, commitment.id, { ...base, warrantyClaimId: otherClaim.id }))).rejects.toMatchObject({
+      code: "INVALID_VALUE",
+    });
+
+    const one = await run((tx) => raiseBackCharge(tx, ctx, commitment.id, { ...base, costCodeId: framing.id, warrantyClaimId: claim.id }));
+    const two = await run((tx) => raiseBackCharge(tx, ctx, commitment.id, { description: "Rubbish skip", amountCents: 250_00, incurredOn: "2026-09-22" }));
+    expect([one.number, two.number, one.status, one.subApplicationId]).toEqual([1, 2, "open", null]);
+    let rows = await run((tx) => listBackCharges(tx, tenantId, commitment.id));
+    expect(rows.map((r) => [r.backCharge.number, r.standing, r.codeLabel, r.claimNumber])).toEqual([
+      [1, "open", `S-OPS-BC1-06 · Framing`, claim.number],
+      [2, "open", null, null],
+    ]);
+
+    // Application 1: 30,000 of the framing line, 10% held — 27,000 due before anything is kept back.
+    const app = await run((tx) => createSubApplication(tx, ctx, { commitmentId: commitment.id, periodTo: "2026-09-30", retainagePpm: 100_000 }));
+    await run((tx) =>
+      updateSubApplication(tx, ctx, app.id, { lines: [{ commitmentLineId: lines[0].id, thisPeriodCents: 30_000_00, storedCents: 0 }] }),
+    );
+
+    // Put one on the draft. Another order's application, and a billed one, both refuse.
+    const otherApp = await run((tx) => createSubApplication(tx, ctx, { commitmentId: other.commitment.id, periodTo: "2026-09-30" }));
+    await expect(run((tx) => setBackChargeApplication(tx, ctx, one.id, otherApp.id))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => setBackChargeApplication(tx, staffCtx, one.id, app.id))).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await run((tx) => setBackChargeApplication(tx, ctx, one.id, app.id));
+    rows = await run((tx) => listBackCharges(tx, tenantId, commitment.id));
+    expect(rows.map((r) => [r.backCharge.number, r.standing, r.applicationNumber])).toEqual([
+      [1, "on_application", 1],
+      [2, "open", null],
+    ]);
+    const [draftRow] = await run((tx) => listSubApplications(tx, tenantId, commitment.id));
+    expect([draftRow.totals.dueCents, draftRow.backChargesCents, draftRow.netDueCents]).toEqual([27_000_00, 800_00, 26_200_00]);
+
+    // Approved: the bill carries the work, the retainage AND the back-charge as its own negative line.
+    const approved = await run((tx) => approveSubApplication(tx, ctx, app.id, { billDate: "2026-10-01" }));
+    // THE STORED FIGURE STAYS GROSS — this is what stops the deduction being taken twice.
+    expect(approved.app.dueCents).toBe(27_000_00);
+    const { bill, billLines, entryLines, accounts } = await run(async (tx) => {
+      const bill = await loadBill(tx, tenantId, approved.billId);
+      return {
+        bill,
+        billLines: await loadBillLines(tx, tenantId, bill.id),
+        entryLines: await tx.select().from(schema.journalLines).where(eq(schema.journalLines.entryId, bill.journalEntryId!)),
+        accounts: await tx
+          .select({ id: schema.accounts.id, code: schema.accounts.code })
+          .from(schema.accounts)
+          .where(eq(schema.accounts.tenantId, tenantId)),
+      };
+    });
+    const codeOf = new Map(accounts.map((a) => [a.id, a.code]));
+    expect(bill.totalCents).toBe(26_200_00);
+    expect(billLines.map((l) => [codeOf.get(l.accountId!), l.amountCents, l.description])).toEqual([
+      ["5100", 30_000_00, "Application 1 — Framing labour through 2026-09-30"],
+      ["2120", -3_000_00, "Retainage held (10%)"],
+      ["5100", -800_00, "Back-charge 1 — Cleaned the site after them (application 1)"],
+    ]);
+    const net = new Map<string | undefined, number>();
+    for (const l of entryLines) net.set(codeOf.get(l.accountId), (net.get(codeOf.get(l.accountId)) ?? 0) + l.amountCents);
+    expect([net.get("5100"), net.get("2120"), net.get("2000")]).toEqual([29_200_00, -3_000_00, -26_200_00]);
+    // The job cost report nets the recovery against the code the cost landed on.
+    const report = await run((tx) => jobCostReport(tx, tenantId, project.id));
+    expect(report.rows.find((r) => r.costCodeId === framing.id)?.actualCents).toBe(29_200_00);
+
+    // Deducted, and therefore history: it cannot be changed, moved or dropped.
+    const deducted = (await run((tx) => listBackCharges(tx, tenantId, commitment.id))).find((r) => r.backCharge.number === 1)!;
+    expect(deducted.standing).toBe("deducted");
+    const fresh = (await run((tx) => getBackCharge(tx, tenantId, one.id)))!;
+    await expect(run((tx) => updateBackCharge(tx, ctx, one.id, { amountCents: 900_00 }, fresh.version))).rejects.toMatchObject({
+      code: "INVALID_STATUS",
+    });
+    await expect(run((tx) => setBackChargeVoid(tx, ctx, one.id, true, "changed my mind"))).rejects.toMatchObject({ code: "INVALID_STATUS" });
+    await expect(run((tx) => setBackChargeApplication(tx, ctx, one.id, null))).rejects.toMatchObject({ code: "INVALID_STATUS" });
+
+    // Application 2: "less previous certificates" reads the GROSS certified, so the 800 is not handed back.
+    const second = await run((tx) => createSubApplication(tx, ctx, { commitmentId: commitment.id, periodTo: "2026-10-31" }));
+    await run((tx) =>
+      updateSubApplication(tx, ctx, second.id, { lines: [{ commitmentLineId: lines[0].id, thisPeriodCents: 10_000_00, storedCents: 0 }] }),
+    );
+    const [, secondRow] = await run((tx) => listSubApplications(tx, tenantId, commitment.id));
+    expect([secondRow.totals.previousCertificatesCents, secondRow.totals.dueCents]).toEqual([27_000_00, 9_000_00]);
+
+    // More than the payment refuses BY NAME, and says what to do about it.
+    const three = await run((tx) => raiseBackCharge(tx, ctx, commitment.id, { description: "Rented a lift for them", amountCents: 9_000_00, incurredOn: "2026-10-20" }));
+    await run((tx) => setBackChargeApplication(tx, ctx, three.id, second.id));
+    await expect(run((tx) => approveSubApplication(tx, ctx, second.id, { billDate: "2026-11-01" }))).rejects.toMatchObject({
+      code: "BACK_CHARGES_EXCEED",
+    });
+    await run((tx) => setBackChargeApplication(tx, ctx, three.id, null));
+    await run((tx) => setBackChargeApplication(tx, ctx, two.id, second.id));
+    const secondApproved = await run((tx) => approveSubApplication(tx, ctx, second.id, { billDate: "2026-11-01" }));
+    expect((await run((tx) => loadBill(tx, tenantId, secondApproved.billId))).totalCents).toBe(8_750_00);
+
+    // Voided: the bill is unwound, so what it carried is owed again — and only what it carried.
+    await run((tx) => voidSubApplication(tx, ctx, second.id));
+    rows = await run((tx) => listBackCharges(tx, tenantId, commitment.id));
+    expect(rows.map((r) => [r.backCharge.number, r.standing, r.backCharge.subApplicationId === null])).toEqual([
+      [1, "deducted", false],
+      [2, "open", true],
+      [3, "open", true],
+    ]);
+
+    // Dropped with a reason, and charged again.
+    const dropped = await run((tx) => setBackChargeVoid(tx, ctx, three.id, true, "They paid for the lift themselves."));
+    expect([dropped.status, dropped.voidReason, dropped.subApplicationId]).toEqual(["void", "They paid for the lift themselves.", null]);
+    await expect(run((tx) => setBackChargeApplication(tx, ctx, three.id, second.id))).rejects.toMatchObject({ code: "INVALID_STATUS" });
+    expect((await run((tx) => setBackChargeVoid(tx, ctx, three.id, false))).status).toBe("open");
+
+    // Across the job, the claim's money is findable from the warranty side.
+    const forProject = await run((tx) => listBackChargesForProject(tx, tenantId, project.id));
+    expect(forProject.filter((r) => r.backCharge.warrantyClaimId === claim.id).map((r) => [r.backCharge.number, r.standing])).toEqual([[1, "deducted"]]);
+    // A code retired leaves the back-charge standing, with its money and its tenant: the key
+    // SETS NULL rather than holding the code, because this is a payment record and not a budget line.
+    const spareSet = (await run((tx) => getDefaultCostCodeSet(tx, tenantId)))!;
+    const spare = await run((tx) => createCostCode(tx, ctx, { setId: spareSet.id, code: "S-OPS-BC1-99", name: "Temporary", sortOrder: 99 }));
+    const four = await run((tx) => raiseBackCharge(tx, ctx, commitment.id, { description: "Skip hire", amountCents: 120_00, incurredOn: "2026-10-25", costCodeId: spare.id }));
+    await withSystem((tx) => tx.delete(schema.jobCostCodes).where(eq(schema.jobCostCodes.id, spare.id)));
+    const survivor = (await run((tx) => getBackCharge(tx, tenantId, four.id)))!;
+    expect([survivor.costCodeId, survivor.amountCents, survivor.tenantId]).toEqual([null, 120_00, tenantId]);
+  }, 180_000);
 });

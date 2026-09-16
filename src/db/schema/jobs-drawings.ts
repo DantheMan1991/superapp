@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, date, foreignKey, index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { check, date, doublePrecision, foreignKey, index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { documents } from "./documents";
 import { jobProjects } from "./jobs";
 import { parties } from "./parties";
@@ -80,6 +80,20 @@ export const jobSheets = pgTable(
     title: text("title").notNull().default(""),
     /** The title block's own revision mark, when there is one: "2", "B", "ASI-3". */
     revision: text("revision").notNull().default(""),
+    /**
+     * THE SCALE IS THE SHEET'S (ADR 0074): page points per unit of the
+     * world, set from a known dimension or a standard scale, with the page's
+     * size in points at the time — so the server can turn a measurement's
+     * fractions into feet without opening the PDF. Null until somebody sets
+     * it; a count needs no scale, a length or an area does.
+     */
+    scalePointsPerUnit: doublePrecision("scale_points_per_unit"),
+    /** 'ft' or 'm'; '' while there is no scale. `SCALE_UNITS`. */
+    scaleUnit: text("scale_unit").notNull().default(""),
+    pageWidthPt: doublePrecision("page_width_pt"),
+    pageHeightPt: doublePrecision("page_height_pt"),
+    scaleSetByClerkUserId: text("scale_set_by_clerk_user_id"),
+    scaleSetAt: timestamp("scale_set_at", { withTimezone: true }),
     createdByClerkUserId: text("created_by_clerk_user_id"),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -111,6 +125,13 @@ export const jobSheets = pgTable(
     }).onDelete("cascade"),
     check("job_sheets_number_present", sql`length(btrim(${t.sheetNumber})) > 0`),
     check("job_sheets_page_positive", sql`${t.pageNumber} >= 1`),
+    check("job_sheets_scale_positive", sql`${t.scalePointsPerUnit} is null or ${t.scalePointsPerUnit} > 0`),
+    check("job_sheets_scale_unit_valid", sql`${t.scaleUnit} in ('', 'ft', 'm')`),
+    check(
+      "job_sheets_scale_whole",
+      // coalesce, because a CHECK that evaluates to NULL passes: `null > 0` is not false, it is unknown (found by the isolation suite).
+      sql`(${t.scalePointsPerUnit} is null and ${t.scaleUnit} = '') or (${t.scalePointsPerUnit} is not null and ${t.scaleUnit} <> '' and coalesce(${t.pageWidthPt}, 0) > 0 and coalesce(${t.pageHeightPt}, 0) > 0)`,
+    ),
   ],
 );
 

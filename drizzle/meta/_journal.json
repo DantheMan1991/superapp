@@ -2556,6 +2556,20 @@
       "when": 1789526413214,
       "tag": "0364_job_sheet_markups_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 365,
+      "version": "7",
+      "when": 1789555983766,
+      "tag": "0365_job_takeoff",
+      "breakpoints": true
+    },
+    {
+      "idx": 366,
+      "version": "7",
+      "when": 1789556946742,
+      "tag": "0366_job_sheets_scale_whole",
+      "breakpoints": true
     }
   ]
 }

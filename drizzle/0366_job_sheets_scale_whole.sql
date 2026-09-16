@@ -1,0 +1,2 @@
+ALTER TABLE "job_sheets" DROP CONSTRAINT "job_sheets_scale_whole";--> statement-breakpoint
+ALTER TABLE "job_sheets" ADD CONSTRAINT "job_sheets_scale_whole" CHECK (("job_sheets"."scale_points_per_unit" is null and "job_sheets"."scale_unit" = '') or ("job_sheets"."scale_points_per_unit" is not null and "job_sheets"."scale_unit" <> '' and coalesce("job_sheets"."page_width_pt", 0) > 0 and coalesce("job_sheets"."page_height_pt", 0) > 0));

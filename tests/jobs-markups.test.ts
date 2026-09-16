@@ -31,10 +31,12 @@ import {
  */
 
 const SQL = readFileSync("drizzle/0363_job_sheet_markups.sql", "utf8");
+/** The kind list was widened by the takeoff (0365, ADR 0074); the mirror reads the CHECK as it stands now. */
+const SQL_KINDS = readFileSync("drizzle/0365_job_takeoff.sql", "utf8");
 
 describe("the database agrees with the words", () => {
   it("MIRRORS the kind and colour CHECKs, and labels every value", () => {
-    const kinds = SQL.match(/job_sheet_markups_kind_valid[^(]*\(([^)]*)\)/);
+    const kinds = SQL_KINDS.match(/job_sheet_markups_kind_valid" CHECK \([^)]*\(([^)]*)\)/);
     const colors = SQL.match(/job_sheet_markups_color_valid[^(]*\(([^)]*)\)/);
     expect(kinds, "kind constraint").not.toBeNull();
     expect(colors, "colour constraint").not.toBeNull();
@@ -109,7 +111,7 @@ describe("a cloud", () => {
     expect(arcs).toHaveLength(cloudArcCount(100, 50, 10));
     expect(arcs).toHaveLength(2 * 10 + 2 * 5);
     // Every arc lands on the rectangle's edge, and the walk returns to the start.
-    const ends = arcs.map((a) => a.replace(/s*Zs*$/, "").trim().split(" ").slice(-2).map(Number));
+    const ends = arcs.map((a) => a.replace(/\s*Z\s*$/, "").trim().split(" ").slice(-2).map(Number));
     for (const [x, y] of ends) {
       const onEdge = Math.abs(y - 20) < 1e-6 || Math.abs(y - 70) < 1e-6 || Math.abs(x - 10) < 1e-6 || Math.abs(x - 110) < 1e-6;
       expect(onEdge, `${x},${y}`).toBe(true);
@@ -169,9 +171,11 @@ describe("the list", () => {
 
   it("summarises by kind, with the pins still open on the punch list counted apart", () => {
     const s = summariseMarkups(rows);
-    expect(s).toEqual({ count: 7, byKind: { cloud: 1, arrow: 1, text: 1, pin: 3 }, openPins: 1, settledPins: 2 });
+    expect(s).toEqual({ count: 7, byKind: { cloud: 1, arrow: 1, text: 1, pin: 3, length: 0, area: 0, count: 0 }, openPins: 1, settledPins: 2 });
     expect(markupSentence(s)).toBe("1 cloud, 1 arrow, 1 note, 3 pins; 1 pin is still open on the punch list.");
     expect(markupSentence(summariseMarkups([]))).toBe("Nothing drawn on this issue.");
     expect(markupSentence(summariseMarkups([m("c1", "cloud", "2026-09-15"), m("c2", "cloud", "2026-09-15")]))).toBe("2 clouds.");
+    // A length is not a pin (found by driving: the sentence once read "1 pin, 1 pin").
+    expect(markupSentence(summariseMarkups([m("l1", "length", "2026-09-16"), m("a1", "area", "2026-09-16"), m("a2", "area", "2026-09-16"), m("n1", "count", "2026-09-16")]))).toBe("1 length, 2 areas, 1 count.");
   });
 });

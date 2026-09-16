@@ -67,6 +67,7 @@ import {
   updateSheet,
 } from "./drawings-ops";
 import { addMarkup, deleteMarkup, updateMarkup } from "./markups-ops";
+import { clearSheetScale, pushTakeoff, setSheetScale, unpushTakeoff } from "./takeoff-ops";
 import {
   approveSubApplication,
   createSubApplication,
@@ -132,6 +133,7 @@ import {
   MARKUP_COLORS,
   MARKUP_KINDS,
   MARKUP_TEXT_MAX,
+  SCALE_UNITS,
 } from "./vocabulary";
 
 /**
@@ -3524,7 +3526,11 @@ function revalidateSheet(projectId: string, sheetId: string): void {
   revalidatePath("/dashboard/m/work");
 }
 
-const markupGeometry = z.record(z.string().max(4), z.number());
+/** A cloud, an arrow, a note or a pin is a few numbers; a length, an area or a count is a list of points (ADR 0074). */
+const markupGeometry = z.union([
+  z.object({ points: z.array(z.object({ x: z.number(), y: z.number() })).max(500) }),
+  z.record(z.string().max(4), z.number()),
+]);
 
 export async function addMarkupAction(input: unknown) {
   const parsed = z
@@ -3602,6 +3608,124 @@ export async function deleteMarkupAction(input: unknown) {
   try {
     const ctx = await drawingsGate();
     await withTenant(ctx.tenantId, (tx) => deleteMarkup(tx, ctx, parsed.data.id), { role: ctx.role, userId: ctx.userId });
+    revalidateSheet(parsed.data.projectId, parsed.data.sheetId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// ------------------------------------------------------------------- takeoff
+
+/**
+ * The takeoff (ADR 0074): the scale is the sheet's, a measurement is a markup
+ * with points, and a push puts a quantity onto an estimate line. `member`, as
+ * the drawings and the markups are; the estimate's accepted lock is asked in
+ * the ops.
+ */
+const pagePoint = z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) });
+
+export async function setSheetScaleAction(input: unknown) {
+  const parsed = z
+    .object({
+      sheetId: z.string().uuid(),
+      projectId: z.string().uuid(),
+      pageWidthPt: z.number().positive(),
+      pageHeightPt: z.number().positive(),
+      scale: z.union([
+        z.object({ by: z.literal("known"), a: pagePoint, b: pagePoint, length: z.number().positive(), unit: z.enum(SCALE_UNITS) }),
+        z.object({ by: z.literal("standard"), key: z.string().min(1).max(40) }),
+      ]),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the scale and try again." };
+  try {
+    const ctx = await drawingsGate();
+    const { sheetId, projectId, pageWidthPt, pageHeightPt, scale } = parsed.data;
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const sheet = await setSheetScale(tx, ctx, sheetId, { ...scale, pageWidthPt, pageHeightPt });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "sheet.scaled",
+          targetType: "sheet",
+          targetId: sheetId,
+          meta: { projectId, by: scale.by, pointsPerUnit: sheet.scalePointsPerUnit, unit: sheet.scaleUnit },
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateSheet(projectId, sheetId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function clearSheetScaleAction(input: unknown) {
+  const parsed = z.object({ sheetId: z.string().uuid(), projectId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  try {
+    const ctx = await drawingsGate();
+    await withTenant(ctx.tenantId, (tx) => clearSheetScale(tx, ctx, parsed.data.sheetId), { role: ctx.role, userId: ctx.userId });
+    revalidateSheet(parsed.data.projectId, parsed.data.sheetId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function pushTakeoffAction(input: unknown) {
+  const parsed = z
+    .object({
+      sheetId: z.string().uuid(),
+      projectId: z.string().uuid(),
+      estimateId: z.string().uuid(),
+      markupIds: z.array(z.string().uuid()).min(1).max(200),
+      lineId: clearableUuid,
+      newLine: z
+        .object({ description: z.string().max(300), costCodeId: clearableUuid, unit: z.string().max(20).default("") })
+        .nullable()
+        .default(null),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the takeoff and try again." };
+  try {
+    const ctx = await drawingsGate();
+    const { sheetId, projectId, estimateId, markupIds, lineId, newLine } = parsed.data;
+    const result = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const pushed = await pushTakeoff(tx, ctx, { estimateId, markupIds, lineId, newLine });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "takeoff.pushed",
+          targetType: "estimate_line",
+          targetId: pushed.lineId,
+          meta: { projectId, estimateId, sheetId, markups: markupIds.length, kind: pushed.kind, quantityThousandths: pushed.quantityThousandths, unit: pushed.unit },
+        });
+        return pushed;
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateSheet(projectId, sheetId);
+    revalidatePath(`${BASE}/${projectId}/estimates`);
+    revalidatePath(`${BASE}/${projectId}/estimates/${estimateId}`);
+    return { ok: true as const, lineId: result.lineId, quantityThousandths: result.quantityThousandths, unit: result.unit };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function unpushTakeoffAction(input: unknown) {
+  const parsed = z.object({ id: z.string().uuid(), sheetId: z.string().uuid(), projectId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  try {
+    const ctx = await drawingsGate();
+    await withTenant(ctx.tenantId, (tx) => unpushTakeoff(tx, ctx, parsed.data.id), { role: ctx.role, userId: ctx.userId });
     revalidateSheet(parsed.data.projectId, parsed.data.sheetId);
     return { ok: true as const };
   } catch (err) {

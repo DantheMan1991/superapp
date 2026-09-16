@@ -13,6 +13,116 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-16 — Slice 9c: the takeoff (`claude/takeoff`, ADR 0074)
+
+The third of the drawings slices and the estimating open item that had been
+there since its first day: a scale on the sheet, a length, an area and a
+count measured on it, and a quantity pushed onto an estimate line.
+
+**THE SCALE IS THE SHEET'S.** `job_sheets` grows `scale_points_per_unit`,
+`scale_unit` (ft or m), `page_width_pt` / `page_height_pt` and who set it
+when. A measurement is fractions of the page (ADR 0073) and fractions of a
+landscape page are not the same length across as down, so the four numbers
+together let the server measure without opening the PDF and the viewer
+measure the same way (`takeoff-math.ts`: `scaleFromKnownLength`,
+`scaleFromStandard`, `measure`, `formatMeasure`). Set from **two taps on a
+dimension the drawing states** and the length typed — right on a half-size
+plot — or from a standard scale (`STANDARD_SCALES`: the architect's
+fractions, the engineer's `1" = 20'`, the metric ratios) which the dialog
+says is only right when the PDF is the sheet's own size; shown afterwards
+as the standard it matches (`matchingStandard`). Set again, every length
+and area on the sheet corrects at once, because none stores a quantity.
+
+**A MEASUREMENT IS A MARKUP WITH POINTS.** `MARKUP_KINDS` grows `length`,
+`area` and `count` (`MEASURE_KINDS`), geometry `{points: [...]}` parsed by
+`parsePoints` (two points for a length, three for an area, one tap for a
+count, at most 500), the length as a polyline in page points, the area by
+the shoelace either way round, the count as the taps. A count needs no
+scale; a length or an area without one reads *needs the scale*. The
+viewer's three tools tap point by point with the quantity live beside the
+last tap and in the tool line, *Finish* saves (Enter as well), *Start
+over* clears; on the sheet a length carries its feet at its middle, an
+area its square feet at its centroid over a tinted fill, a count `×N`
+beside the first tap.
+
+**A PUSH IS A STATEMENT, NOT AN INCREMENT.** `pushTakeoff` in
+`takeoff-ops.ts` puts one kind of thing — two floors add up, a floor and a
+wall do not (`sumMeasurements`) — onto an existing line or a new one, in
+the unit the trade prices by (`takeoffUnitFor`: `lf`, `sf`, `ea`; `m`,
+`m2`), as thousandths; the line's quantity BECOMES the total, an accepted
+estimate refuses (`ESTIMATE_ACCEPTED`), a line of another estimate or a
+measurement of another job refuses. Each measurement remembers the line
+(`estimate_line_id`, the column-list `ON DELETE SET NULL ("estimate_line_id")`
+hand-edited into 0365 as 0363's punch-item key was) and what it pushed
+(`pushed_quantity_thousandths`), so the list's chip reads *→ EST-2 ·
+Flooring, kitchen · 59.026 sf* and adds *measured since* when the drawing
+has moved on by more than half a percent; a measurement left out of a
+later push to the same line no longer stands behind it; *Unpush* lets go
+without touching the line. `listMarkups` joins the line and its estimate
+so the chip reads the line as it is now. The *Takeoff* dialog lists the
+sheet's other measurements of the same kind to add up, the job's draft and
+sent estimates, their lines or *A new line* with a description and cost
+code, and says what goes on the line before it does.
+
+**A RE-READ KEEPS THE SHEET'S ROW.** 9a's `indexSheets` replaced a file's
+sheet rows on every re-read — harmless then, and since 9b a way to erase
+every markup on the file. It now updates the row of a page read again,
+inserts a page new to the reading and deletes only a page left out, so a
+sheet's id, its markups and its scale survive a corrected index. The 9a
+line "a sheet's id is not a thing anything else holds on to" is retired.
+
+**WHO.** `member`, as the drawings and the markups are.
+
+Migrations `0365_job_takeoff.sql` (the scale columns, the widened kind
+CHECK, the line key hand-edited to the column-list SET NULL) and
+`0366_job_sheets_scale_whole.sql` — the whole-scale CHECK re-stated with
+`coalesce`, because **a CHECK that evaluates to NULL passes**: `null > 0`
+let a scale with no page size through, and the isolation suite said so.
+Both applied to dev and prod before the merge; `db:verify-rls` 223 tables
+on both, `db:verify-modules` 19/19 on both. Tests:
+`tests/jobs-takeoff.test.ts` (the CHECK and key mirrors including the
+coalesce, the standard scales as points per unit, a known dimension across
+and down the page, every shape refusal in words, a length along two walls,
+an area by the shoelace either way round and a triangle half of it, a
+count, the formats, the line's unit, thousandths never negative, the sum
+rule and its refusals), one more ops scenario in `tests/jobs-ops.test.ts`
+(the count before any scale, the scale from a known dimension and its
+refusals, the quantities, a push onto a new line and onto the baseboard
+line, two areas added up, a floor and a wall refused, a count as each, a
+later push dropping a measurement, every refusal, unpush, a line taken off
+leaving the measurement, the accepted estimate refusing, the scale set
+again and cleared, and the re-read keeping the row, its scale and its
+markups while a page left out loses its row), one more isolation
+certification (the scale CHECKs with the null case, the line key held to
+the tenant, the measuring kinds, the null on the line's clearing).
+
+**DRIVEN on the dev branch's Hilltop Farm, job 24-109, sheet A-101 of the
+permit set 9a uploaded, signed in as the owner, on this tree's own server.**
+*Set the scale* → *Tap a known dimension* → two taps on the sheet's frame,
+756 points apart, *42* feet typed → the button read *1/4" = 1'-0"*: the
+taps landed within a hair of the frame and the scale matched the standard
+to the point. *Length*, three taps along an L → *3 points · 11.4 ft* live
+in the tool line → *Finish* → *11.4 ft* at the line's middle on the sheet
+and in the list with its *Takeoff*. *Area*, four taps around the room
+dimensions → *4 points · 59 sq ft* → the tinted polygon with *59 sq ft* at
+its centroid. *Count*, three taps → *×3*. The sentence read *1 cloud, 1
+arrow, 1 note, 1 pin, 1 length, 1 area, 1 count.* *Takeoff* on the area:
+*59 sq ft goes on the line as 59.026 sf*, EST-2 (draft) preselected, *A
+new line*, *Flooring, kitchen* typed, *Add the line* → the row's chip *→
+EST-2 · Flooring, kitchen · 59.026 sf*, and EST-2's editor held the line
+with *Flooring, kitchen*, *59.026*, *sf*. At 375px the page kept to its
+width with all seven shapes and their quantities. **Found by driving,
+fixed, guarded by a test**: the summary sentence called a length "a pin"
+(*1 pin, 1 pin*) — the kinds are now named by a table; and the takeoff
+dialog's first words ran together (*An areaonto*), the JSX-swallowed
+space again. **Found by the isolation suite, fixed by a second
+migration**: the whole-scale CHECK passed a scale with no page size,
+because a CHECK that evaluates to NULL passes. Not driven: *Enter* to
+finish a measurement (the pane's Return did not reach it; *Finish* did),
+a push onto an existing line, two measurements added up, *Unpush*, the
+standard-scale path and *Clear the scale* (the ops suite covers all five),
+and the pinch.
+
 ### 2026-09-15 — Slice 9b: markups on a sheet (`claude/markups`, ADR 0073)
 
 The reason a crew opens a plan app: `job_sheet_markups`, and the sheet page
@@ -2923,8 +3033,8 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_estimate_lines` | One line of an estimate: cost code, description, unit, quantity in thousandths (1000 = one, a lump sum), unit cost, an optional markup of its own, an optional unit price that wins over any markup, notes, sort order. | Cascade from the estimate; **no action to the code**. CHECK: description present, quantity / unit cost / unit price ≥ 0, markup 0..10,000,000 ppm or null. Written by id (updated, inserted, removed when left out), so a line keeps its identity across an edit; nothing points at one. |
 | `job_party_documents` | What a subcontractor or supplier has on file with the business (11b, ADR 0068): the party, an open-taxonomy `kind` (format-checked; three suggested), title, issuer, number, issued and expires dates, a coverage limit, requested / received / void with the receipt date, notes. The scanned copy is a Documents attachment (`job_party_document`). | **No action to the party** — one with documents on file cannot be merged away. CHECK: the kind is a slug; received has its date, requested has none, void keeps what it had; limit ≥ 0. Standing (missing / expired / expiring / ok) is derived against today and the tenant's required list, never stored. |
 | `job_drawing_sets` | One issue of a job's drawings (ADR 0072): name, the date on the drawings (`issued_on`, which orders the issues), who issued it (a party), notes. Its PDFs are cabinet documents hung on it through `document_attachments` (`job_drawing_set`). | Cascade from the project; **no action to the party**. CHECK: name present. The current set is never stored — it is derived from the issues' dates. |
-| `job_sheets` | One page of one of a set's files with the number the trade calls it by, normalised on write, a title and a revision mark. | Cascade from the project, the set AND the document (a page of a file that is gone is nothing to open). UNIQUE (set, number) and (set, document, page). CHECK: number present, page ≥ 1. The discipline is read off the number, never stored. |
-| `job_sheet_markups` | A cloud, an arrow, a note or a pin on ONE issue of a sheet (ADR 0073): the shape as fractions of the page (`geometry` jsonb), a colour from the five, words for a note or a pin, and the punch item a pin raised while it exists (`work_item_id`). | Cascade from the project and from the sheet; **SET NULL (column-list form) from `work_items`** — a punch item cleared leaves the pin as a note. CHECK: kind, colour, words present for a note or a pin, words ≤ 2,000, geometry an object. |
+| `job_sheets` | One page of one of a set's files with the number the trade calls it by, normalised on write, a title and a revision mark; **and its scale** (ADR 0074): page points per foot or metre with the page's size in points beside it, so a measurement's fractions become feet without the PDF. | Cascade from the project, the set AND the document (a page of a file that is gone is nothing to open). UNIQUE (set, number) and (set, document, page). CHECK: number present, page ≥ 1. The discipline is read off the number, never stored. |
+| `job_sheet_markups` | A cloud, an arrow, a note or a pin on ONE issue of a sheet (ADR 0073): the shape as fractions of the page (`geometry` jsonb), a colour from the five, words for a note or a pin, and the punch item a pin raised while it exists (`work_item_id`); **and a length, an area or a count** (ADR 0074): `{points}`, its quantity derived through the sheet's scale, the estimate line it was pushed onto while the line exists (`estimate_line_id`) and what it pushed. | Cascade from the project and from the sheet; **SET NULL (column-list form) from `work_items` and from `job_estimate_lines`** — a punch item cleared leaves the pin as a note, a line taken off leaves the measurement. CHECK: kind (seven), colour, words present for a note or a pin, words ≤ 2,000, geometry an object. |
 | `job_phases` | A phase or milestone of a job's schedule (ADR 0071): the calendar item that holds its dates, name, kind, planned / underway / done, the predecessor and its lag, the party doing it, the cost code, notes, order. | Cascade from the project AND from its `schedule_items` row (a phase without its item is nothing); **no action to itself, the party and the code** (the verb re-points successors before a removal). One phase per item. CHECK: kind, status, lag within a year, not its own predecessor. The dates are NOT here — they are the item's. |
 | `job_lien_waivers` | A lien waiver as a RECORD (11a, ADR 0066): the claimant (any party), the job, the order and the billed application it covers, its kind (conditional/unconditional × progress/final), the through date, the amount, and whether it was requested or received. The signed copy is a Documents attachment (`job_lien_waiver`). | Cascade from the project and the order; **no action to the party and to the application** — who signed is held, and a named application stays. CHECK: received has its date, requested has none, void keeps what it had; amount ≥ 0. Nothing here says "outstanding": the gap is derived from the applications' bills at read time. |
 | `job_commitment_lines` | The money, one cost code at a time — the lines the order was placed with (`change_order_id` null) and each change order's, tagged with it (4b). | Cascade from the commitment and from the change; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative on an original line — a credit is a change order — and a change's line may be negative, the one exception in the CHECK. A line counts when it is original or its change is approved: `countedCommitmentLine`, one predicate for every roll-up. |
@@ -2956,6 +3066,10 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Key files & seams
 
+- `src/packs/jobs/takeoff-ops.ts` + `takeoff-math.ts` — the scale and the takeoff
+  (ADR 0074): `setSheetScale` from a known dimension or a standard,
+  `measure` through the scale (pure, shared with the viewer), `pushTakeoff`
+  onto an estimate line as a statement of the total.
 - `src/packs/jobs/markups-ops.ts` + `markups-math.ts` + `components/sheet-viewer.tsx`
   — markups (ADR 0073): the shape checked once in `parseGeometry` on both
   sides, the revision cloud as `cloudPath`, a pin's punch item through the
@@ -3046,6 +3160,12 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Decisions & gotchas
 
+- **[ADR 0074](../decisions/0074-a-measurement-is-a-markup-with-a-quantity-the-scale-is-the-sheets-and-a-takeoff-is-a-quantity-pushed-onto-an-estimate-line.md)** —
+  the scale is the sheet's, as page points per unit with the page's size
+  beside it; a measurement is a markup with points whose quantity is
+  derived every time; a push STATES an estimate line's quantity and never
+  adds; a re-read keeps a sheet's row. A CHECK that evaluates to NULL
+  passes — `coalesce` the nullable columns it compares.
 - **[ADR 0073](../decisions/0073-a-markup-is-a-vector-on-a-sheets-issue-and-a-pin-is-a-punch-item-where-it-sits.md)** —
   a markup is a vector in fractions of the page over one issue of a sheet,
   the PDF untouched; a pin is a punch item where it sits, the ordinary Work
@@ -3221,15 +3341,17 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Open items
 
-- **A sheet is a page to look at and draw on (9a, 9b; ADRs 0072, 0073).**
-  ~~Markups~~ shipped as 9b. Still each a slice of its own: a scale set on a
-  sheet with lengths and areas measured and pushed onto an estimate line as
-  the takeoff (9c), comparing two issues of a sheet by overlay, reading the
-  cover sheet's index to fill titles, a per-job Drawings folder in the
-  cabinet; and from the markups, moving or resizing a shape after the fact
-  (today: rub it out and draw again), a freehand pen, carrying markups onto
-  a reissue by choice, a markup on a photo, burning markups into a PDF to
-  send, and telling the pinned trade (the digest and Mail are the seams). A scanned set's
+- **A sheet is a page to look at, draw on and measure (9a–9c; ADRs 0072–0074).**
+  ~~Markups~~ shipped as 9b, ~~the takeoff~~ as 9c. Still each a slice of its
+  own: comparing two issues of a sheet by overlay, reading the cover sheet's
+  index to fill titles, a per-job Drawings folder in the cabinet; from the
+  markups, moving or resizing a shape after the fact (today: rub it out and
+  draw again), a freehand pen, carrying markups onto a reissue by choice, a
+  markup on a photo, burning markups into a PDF to send, telling the pinned
+  trade (the digest and Mail are the seams); and from the takeoff, a scale
+  read from the PDF's own metadata, an opening deducted from an area, a
+  volume, a running total across sheets, and the reverse link from an
+  estimate line back to the sheets that fed it. A scanned set's
   numbers are typed off the thumbnails. The "From Documents" door leaves a
   picked file's `doc_kind` as it was; only an upload through the set is
   filed as a `drawing`.
@@ -3246,10 +3368,10 @@ ordering only bites when two new tables reference each other in one file.
 - **An estimate is lines, and nothing more yet (slice 10, ADR 0069).**
   Assemblies — a named bundle of lines dropped in as one ("interior door,
   prehung": slab, hardware, casing, labour) — a tenant-level unit cost book
-  that fills a line's cost from the last time it was priced, and a takeoff
-  from the drawings are each a real thing the trade has and each a slice
+  that fills a line's cost from the last time it was priced ~~and a takeoff
+  from the drawings~~ are each a real thing the trade has and each a slice
   of its own; the first two want a few real estimates typed before their
-  shape is set. ~~The proposal as a printed document~~ shipped as 10b. An estimate is not
+  shape is set. **The takeoff shipped as drawings 9c, 2026-09-16 (ADR 0074).** ~~The proposal as a printed document~~ shipped as 10b. An estimate is not
   attached to Documents (a scanned quote, a supplier's price sheet) — the
   gallery seam is there and nothing on the estimate calls it yet. An
   estimate on a schedule where every line is sold by the unit can miss the

@@ -3,29 +3,73 @@
 import { useEffect, useMemo, useRef, useState, useTransition, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, Cloud, Hand, Loader2, MapPin, Maximize, Minus, MoveUpRight, Pencil, Plus, Trash2, Type } from "lucide-react";
+import {
+  ArrowRightToLine,
+  Check,
+  Cloud,
+  Hand,
+  Hash,
+  Loader2,
+  MapPin,
+  Maximize,
+  Minus,
+  MoveUpRight,
+  Pencil,
+  Plus,
+  Ruler,
+  Square,
+  Trash2,
+  Type,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { loadPdfjs } from "@/modules/documents/components/pdf-canvas";
-import { addMarkupAction, deleteMarkupAction, setPunchDoneAction, updateMarkupAction } from "../actions";
-import { MIN_EXTENT, arrowHead, clampFraction, cloudPath, markupSentence, normaliseBox, pinNumbers, summariseMarkups } from "../markups-math";
-import { MARKUP_COLORS, MARKUP_COLOR_HEX, MARKUP_COLOR_LABELS, MARKUP_KIND_LABELS, type MarkupColor, type MarkupKind } from "../vocabulary";
+import {
+  addMarkupAction,
+  clearSheetScaleAction,
+  deleteMarkupAction,
+  pushTakeoffAction,
+  setPunchDoneAction,
+  setSheetScaleAction,
+  unpushTakeoffAction,
+  updateMarkupAction,
+} from "../actions";
+import { thousandthsToQuantityString } from "../billing-math";
+import { MIN_EXTENT, MIN_POINTS, arrowHead, clampFraction, cloudPath, markupSentence, normaliseBox, pinNumbers, summariseMarkups, type PointGeometry } from "../markups-math";
+import { STANDARD_SCALES, formatMeasure, matchingStandard, measure, takeoffUnitFor, toThousandths, type Measurement, type SheetScale } from "../takeoff-math";
+import {
+  MARKUP_COLORS,
+  MARKUP_COLOR_HEX,
+  MARKUP_COLOR_LABELS,
+  MARKUP_KIND_LABELS,
+  MEASURE_POINTS_MAX,
+  SCALE_UNITS,
+  isMeasureKind,
+  type MarkupColor,
+  type MarkupKind,
+  type MeasureKind,
+  type ScaleUnit,
+} from "../vocabulary";
 import { StatusBadge } from "./status-badge";
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 8;
 /** The canvas is drawn at device resolution up to this many pixels; past it the sharpness gives way to memory. */
 const PIXEL_CAP = 24_000_000;
+const NONE = "__none__";
+const NEW_LINE = "__new__";
 
 export interface MarkupView {
   id: string;
   kind: MarkupKind;
   color: MarkupColor;
-  geometry: Record<string, number>;
+  geometry: Record<string, unknown>;
   text: string;
   version: number;
   /** The day it was drawn, in the tenant's zone. */
@@ -33,9 +77,20 @@ export interface MarkupView {
   createdBy: string;
   workItemId: string | null;
   punch: { title: string; done: boolean; dueOn: string | null } | null;
+  /** The estimate line a measurement was pushed onto, as it stands now (ADR 0074). */
+  takeoff: { estimateId: string; estimateNumber: string; estimateStatus: string; lineDescription: string; lineUnit: string; lineQuantityThousandths: number } | null;
+  pushedQuantityThousandths: number | null;
 }
 
-type Tool = "select" | MarkupKind;
+export interface EstimateOption {
+  id: string;
+  number: string;
+  title: string;
+  status: string;
+  lines: Array<{ id: string; description: string; unit: string; quantityThousandths: number }>;
+}
+
+type Tool = "select" | MarkupKind | "calibrate";
 
 interface Draft {
   kind: "cloud" | "arrow";
@@ -45,17 +100,34 @@ interface Draft {
   by: number;
 }
 
+interface PointsDraft {
+  kind: MeasureKind | "calibrate";
+  points: PointGeometry[];
+}
+
+function pointsOf(m: MarkupView): PointGeometry[] {
+  const list = (m.geometry as { points?: unknown }).points;
+  return Array.isArray(list) ? (list as PointGeometry[]) : [];
+}
+
+function measurementOf(m: MarkupView, scale: SheetScale | null): Measurement | null {
+  if (!isMeasureKind(m.kind)) return null;
+  const points = pointsOf(m);
+  if (points.length < MIN_POINTS[m.kind]) return null;
+  return measure(m.kind, { points }, scale);
+}
+
 /**
- * One sheet, large, and what is drawn on it (ADR 0073). The page is drawn by
- * pdf.js onto a canvas — the cabinet's trick, a stored PDF is never framed —
- * and the markups are an SVG laid over it in the page's own units, so a
- * cloud is the same cloud at every zoom. Coordinates leave here as fractions
- * of the page and come back the same way.
+ * One sheet, large, and what is drawn on it (ADRs 0073, 0074). The page is
+ * drawn by pdf.js onto a canvas — the cabinet's trick, a stored PDF is never
+ * framed — and the markups are an SVG laid over it in the page's own units,
+ * so a cloud is the same cloud at every zoom. Coordinates leave here as
+ * fractions of the page and come back the same way.
  *
- * The file is fetched ONCE and kept; zooming re-renders the page from the
- * parsed document. Two fingers pinch, one finger or the mouse drags the
- * sheet about, the wheel with ctrl zooms, and a tool turns the same drag
- * into a cloud or an arrow.
+ * The measuring tools read through the sheet's scale: a length, an area
+ * and a count, each a list of points, each with its quantity beside it on
+ * the sheet and in the list, and a *Takeoff* that puts the quantity onto
+ * an estimate line.
  */
 export function SheetViewer({
   url,
@@ -65,6 +137,9 @@ export function SheetViewer({
   projectId,
   markups,
   canEdit,
+  scale,
+  estimates,
+  codes,
 }: {
   url: string;
   page: number;
@@ -73,6 +148,9 @@ export function SheetViewer({
   projectId: string;
   markups: MarkupView[];
   canEdit: boolean;
+  scale: SheetScale | null;
+  estimates: EstimateOption[];
+  codes: Array<{ id: string; label: string }>;
 }) {
   const router = useRouter();
   const boxRef = useRef<HTMLDivElement>(null);
@@ -89,9 +167,13 @@ export function SheetViewer({
   const [tool, setTool] = useState<Tool>("select");
   const [color, setColor] = useState<MarkupColor>("red");
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [pointsDraft, setPointsDraft] = useState<PointsDraft | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pending, setPending] = useState<{ kind: "text" | "pin"; x: number; y: number } | null>(null);
   const [editing, setEditing] = useState<MarkupView | null>(null);
+  const [scaleOpen, setScaleOpen] = useState(false);
+  const [calibration, setCalibration] = useState<{ a: PointGeometry; b: PointGeometry } | null>(null);
+  const [takeoffFor, setTakeoffFor] = useState<MarkupView | null>(null);
   const [saving, startTransition] = useTransition();
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pan = useRef<{ startX: number; startY: number; scrollLeft: number; scrollTop: number; moved: boolean } | null>(null);
@@ -101,9 +183,9 @@ export function SheetViewer({
   useEffect(() => {
     const node = boxRef.current;
     if (!node) return;
-    const measure = () => setBoxWidth(Math.max(0, node.clientWidth - 2));
-    measure();
-    const observer = new ResizeObserver(measure);
+    const measureBox = () => setBoxWidth(Math.max(0, node.clientWidth - 2));
+    measureBox();
+    const observer = new ResizeObserver(measureBox);
     observer.observe(node);
     return () => observer.disconnect();
   }, []);
@@ -155,8 +237,8 @@ export function SheetViewer({
         if (!canvas) return;
         const base = pdfPage.getViewport({ scale: 1 });
         setPageSize({ w: base.width, h: base.height });
-        const scale = (boxWidth * zoom) / base.width;
-        const viewport = pdfPage.getViewport({ scale });
+        const scaleTo = (boxWidth * zoom) / base.width;
+        const viewport = pdfPage.getViewport({ scale: scaleTo });
         const ratio = Math.min(window.devicePixelRatio || 1, 2, Math.sqrt(PIXEL_CAP / (viewport.width * viewport.height)));
         canvas.width = Math.floor(viewport.width * ratio);
         canvas.height = Math.floor(viewport.height * ratio);
@@ -211,6 +293,7 @@ export function SheetViewer({
       if (e.key === "Escape") {
         setTool("select");
         setDraft(null);
+        setPointsDraft(null);
         setSelectedId(null);
       }
     };
@@ -231,6 +314,8 @@ export function SheetViewer({
   );
   const numbers = useMemo(() => pinNumbers(likes), [likes]);
   const summary = useMemo(() => summariseMarkups(likes), [likes]);
+  const measurements = useMemo(() => new Map(markups.map((m) => [m.id, measurementOf(m, scale)])), [markups, scale]);
+  const scaleLabel = scale ? (matchingStandard(scale)?.label ?? `${scale.pointsPerUnit.toFixed(2)} pt per ${scale.unit}`) : null;
 
   function toFraction(e: ReactPointerEvent): { x: number; y: number } {
     const rect = svgRef.current?.getBoundingClientRect();
@@ -238,13 +323,23 @@ export function SheetViewer({
     return { x: clampFraction((e.clientX - rect.left) / rect.width), y: clampFraction((e.clientY - rect.top) / rect.height) };
   }
 
+  function centreOf(m: MarkupView): { x: number; y: number } {
+    const g = m.geometry as Record<string, number>;
+    if (m.kind === "cloud") return { x: g.x + g.w / 2, y: g.y + g.h / 2 };
+    if (m.kind === "arrow") return { x: (g.x1 + g.x2) / 2, y: (g.y1 + g.y2) / 2 };
+    if (isMeasureKind(m.kind)) {
+      const pts = pointsOf(m);
+      if (pts.length === 0) return { x: 0.5, y: 0.5 };
+      return { x: pts.reduce((s, p) => s + p.x, 0) / pts.length, y: pts.reduce((s, p) => s + p.y, 0) / pts.length };
+    }
+    return { x: g.x, y: g.y };
+  }
+
   function scrollTo(m: MarkupView) {
     const box = boxRef.current;
     if (!box || cssW === 0) return;
-    const g = m.geometry;
-    const cx = m.kind === "cloud" ? g.x + g.w / 2 : m.kind === "arrow" ? (g.x1 + g.x2) / 2 : g.x;
-    const cy = m.kind === "cloud" ? g.y + g.h / 2 : m.kind === "arrow" ? (g.y1 + g.y2) / 2 : g.y;
-    box.scrollTo({ left: cx * cssW - box.clientWidth / 2, top: cy * cssH - box.clientHeight / 2, behavior: "smooth" });
+    const c = centreOf(m);
+    box.scrollTo({ left: c.x * cssW - box.clientWidth / 2, top: c.y * cssH - box.clientHeight / 2, behavior: "smooth" });
   }
 
   // --- pointers: pinch, pan, draw ---------------------------------------
@@ -275,8 +370,19 @@ export function SheetViewer({
     const f = toFraction(e);
     if (tool === "cloud" || tool === "arrow") {
       setDraft({ kind: tool, ax: f.x, ay: f.y, bx: f.x, by: f.y });
-    } else {
+    } else if (tool === "text" || tool === "pin") {
       setPending({ kind: tool, x: f.x, y: f.y });
+    } else {
+      // A measurement or a calibration: every tap is a point; Finish (or Enter) closes it.
+      const next = pointsDraft && pointsDraft.kind === tool ? [...pointsDraft.points, f] : [f];
+      if (next.length > MEASURE_POINTS_MAX) return;
+      if (tool === "calibrate" && next.length === 2) {
+        setPointsDraft(null);
+        setCalibration({ a: next[0], b: next[1] });
+        setTool("select");
+        return;
+      }
+      setPointsDraft({ kind: tool, points: next });
     }
   }
 
@@ -343,7 +449,26 @@ export function SheetViewer({
     }
   }
 
-  function submit(input: { kind: MarkupKind; geometry: Record<string, number>; text?: string; raise?: boolean; dueOn?: string }) {
+  function finishPoints() {
+    if (!pointsDraft || pointsDraft.kind === "calibrate") return;
+    const kind = pointsDraft.kind;
+    if (pointsDraft.points.length < MIN_POINTS[kind]) return;
+    const points = pointsDraft.points;
+    setPointsDraft(null);
+    submit({ kind, geometry: { points } });
+  }
+
+  useEffect(() => {
+    if (!pointsDraft) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Enter") finishPoints();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pointsDraft]);
+
+  function submit(input: { kind: MarkupKind; geometry: Record<string, unknown>; text?: string; raise?: boolean; dueOn?: string }) {
     startTransition(async () => {
       const result = await addMarkupAction({ sheetId, projectId, color, ...input });
       if ("error" in result) {
@@ -360,6 +485,11 @@ export function SheetViewer({
 
   const cursor = !canEdit || tool === "select" ? "grab" : "crosshair";
   const selected = markups.find((m) => m.id === selectedId) ?? null;
+  const draftMeasure =
+    pointsDraft && pointsDraft.kind !== "calibrate" && pointsDraft.points.length >= MIN_POINTS[pointsDraft.kind]
+      ? measure(pointsDraft.kind, { points: pointsDraft.points }, scale)
+      : null;
+  const needsScale = (tool === "length" || tool === "area") && !scale;
 
   return (
     <div className="space-y-3">
@@ -382,6 +512,20 @@ export function SheetViewer({
               <MapPin className="size-4" />
             </ToolButton>
             <span className="mx-1 h-5 w-px bg-border" />
+            <ToolButton active={tool === "length"} onClick={() => setTool("length")} label="Length">
+              <Ruler className="size-4" />
+            </ToolButton>
+            <ToolButton active={tool === "area"} onClick={() => setTool("area")} label="Area">
+              <Square className="size-4" />
+            </ToolButton>
+            <ToolButton active={tool === "count"} onClick={() => setTool("count")} label="Count">
+              <Hash className="size-4" />
+            </ToolButton>
+            <Button type="button" variant={scale ? "outline" : "secondary"} size="sm" className="h-8 px-2" onClick={() => setScaleOpen(true)} title="The sheet's scale">
+              <ArrowRightToLine className="size-4" />
+              <span className="ml-1">{scaleLabel ?? "Set the scale"}</span>
+            </Button>
+            <span className="mx-1 h-5 w-px bg-border" />
             {MARKUP_COLORS.map((c) => (
               <button
                 key={c}
@@ -395,7 +539,9 @@ export function SheetViewer({
             ))}
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">Drag to move about; pinch or ctrl+wheel to zoom.</p>
+          <p className="text-xs text-muted-foreground">
+            Drag to move about; pinch or ctrl+wheel to zoom.{scaleLabel ? ` Scale ${scaleLabel}.` : ""}
+          </p>
         )}
         <div className="flex items-center gap-1">
           <span className="mr-1 text-xs text-muted-foreground">
@@ -416,16 +562,42 @@ export function SheetViewer({
         </div>
       </div>
       {canEdit && tool !== "select" && (
-        <p className="text-xs text-muted-foreground">
-          {tool === "cloud"
-            ? "Drag a box around what changed."
-            : tool === "arrow"
-              ? "Drag from where the arrow starts to what it points at."
-              : tool === "text"
-                ? "Tap where the note goes."
-                : "Tap where the problem is; the pin goes on the punch list."}{" "}
-          Esc goes back to moving about.
-        </p>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span>
+            {tool === "cloud"
+              ? "Drag a box around what changed."
+              : tool === "arrow"
+                ? "Drag from where the arrow starts to what it points at."
+                : tool === "text"
+                  ? "Tap where the note goes."
+                  : tool === "pin"
+                    ? "Tap where the problem is; the pin goes on the punch list."
+                    : tool === "calibrate"
+                      ? "Tap the two ends of a dimension the drawing states."
+                      : needsScale
+                        ? "Set the sheet's scale first; a count needs none."
+                        : tool === "length"
+                          ? "Tap along the wall, corner by corner, then Finish."
+                          : tool === "area"
+                            ? "Tap around the room, corner by corner, then Finish."
+                            : "Tap each one to count it, then Finish."}{" "}
+            Esc goes back to moving about.
+          </span>
+          {pointsDraft && pointsDraft.kind !== "calibrate" && (
+            <span className="flex items-center gap-1">
+              <span className="font-medium text-foreground">
+                {pointsDraft.points.length} {pointsDraft.points.length === 1 ? "point" : "points"}
+                {draftMeasure ? ` · ${formatMeasure(draftMeasure)}` : ""}
+              </span>
+              <Button type="button" size="sm" className="h-7" onClick={finishPoints} disabled={saving || pointsDraft.points.length < MIN_POINTS[pointsDraft.kind]}>
+                <Check className="mr-1 size-3.5" /> Finish
+              </Button>
+              <Button type="button" variant="ghost" size="sm" className="h-7" onClick={() => setPointsDraft(null)}>
+                <X className="mr-1 size-3.5" /> Start over
+              </Button>
+            </span>
+          )}
+        </div>
       )}
 
       <div ref={boxRef} className="relative max-h-[75vh] w-full min-w-0 overflow-auto rounded-md border bg-secondary/30" style={{ touchAction: "none" }}>
@@ -455,9 +627,10 @@ export function SheetViewer({
               aria-label={`Markups on ${label}`}
             >
               {markups.map((m) => (
-                <Shape key={m.id} markup={m} W={W} H={H} unit={unit} number={numbers.get(m.id)} selected={m.id === selectedId} />
+                <Shape key={m.id} markup={m} W={W} H={H} unit={unit} number={numbers.get(m.id)} selected={m.id === selectedId} measurement={measurements.get(m.id) ?? null} />
               ))}
               {draft && <DraftShape draft={draft} color={color} W={W} H={H} unit={unit} />}
+              {pointsDraft && <PointsDraftShape draft={pointsDraft} color={color} W={W} H={H} unit={unit} measurement={draftMeasure} />}
             </svg>
           )}
         </div>
@@ -470,7 +643,9 @@ export function SheetViewer({
         </div>
         {markups.length === 0 ? (
           <p className="text-xs text-muted-foreground">
-            {canEdit ? "Pick a tool above and draw on the sheet. A pin puts what needs doing on the job's punch list." : "Nothing drawn on this issue."}
+            {canEdit
+              ? "Pick a tool above and draw on the sheet. A pin puts what needs doing on the job's punch list; a length, an area or a count is a quantity for the estimate."
+              : "Nothing drawn on this issue."}
           </p>
         ) : (
           <ul className="divide-y rounded-md border text-sm">
@@ -479,21 +654,24 @@ export function SheetViewer({
                 key={m.id}
                 markup={m}
                 number={numbers.get(m.id)}
+                measurement={measurements.get(m.id) ?? null}
                 selected={m.id === selectedId}
                 canEdit={canEdit}
                 busy={saving}
                 projectId={projectId}
                 sheetId={sheetId}
+                hasEstimates={estimates.length > 0}
                 onSelect={() => {
                   setSelectedId(m.id);
                   scrollTo(m);
                 }}
                 onEdit={() => setEditing(m)}
+                onTakeoff={() => setTakeoffFor(m)}
               />
             ))}
           </ul>
         )}
-        {selected && <p className="mt-1 text-xs text-muted-foreground">Selected: {describe(selected, numbers.get(selected.id))}. Esc clears.</p>}
+        {selected && <p className="mt-1 text-xs text-muted-foreground">Selected: {describe(selected, numbers.get(selected.id), measurements.get(selected.id) ?? null)}. Esc clears.</p>}
       </div>
 
       <PointDialog
@@ -504,13 +682,46 @@ export function SheetViewer({
         onSave={(text, raise, dueOn) => pending && submit({ kind: pending.kind, geometry: { x: pending.x, y: pending.y }, text, raise, dueOn })}
       />
       <EditDialog markup={editing} projectId={projectId} sheetId={sheetId} onClose={() => setEditing(null)} />
+      <ScaleDialog
+        open={scaleOpen}
+        scale={scale}
+        scaleLabel={scaleLabel}
+        pageSize={pageSize}
+        projectId={projectId}
+        sheetId={sheetId}
+        onClose={() => setScaleOpen(false)}
+        onCalibrate={() => {
+          setScaleOpen(false);
+          setPointsDraft(null);
+          setTool("calibrate");
+        }}
+      />
+      <KnownLengthDialog
+        calibration={calibration}
+        pageSize={pageSize}
+        projectId={projectId}
+        sheetId={sheetId}
+        onClose={() => setCalibration(null)}
+      />
+      <TakeoffDialog
+        markup={takeoffFor}
+        markups={markups}
+        measurements={measurements}
+        scale={scale}
+        estimates={estimates}
+        codes={codes}
+        projectId={projectId}
+        sheetId={sheetId}
+        onClose={() => setTakeoffFor(null)}
+      />
     </div>
   );
 }
 
-function describe(m: MarkupView, number: number | undefined): string {
+function describe(m: MarkupView, number: number | undefined, measurement: Measurement | null): string {
   if (m.kind === "pin") return `pin ${number ?? ""} · ${m.text}`;
   if (m.kind === "text") return `note · ${m.text}`;
+  if (isMeasureKind(m.kind)) return `${MARKUP_KIND_LABELS[m.kind].toLowerCase()}${measurement ? ` · ${formatMeasure(measurement)}` : ""}${m.text ? ` · ${m.text}` : ""}`;
   return `${MARKUP_KIND_LABELS[m.kind].toLowerCase()} in ${MARKUP_COLOR_LABELS[m.color].toLowerCase()}`;
 }
 
@@ -523,21 +734,40 @@ function ToolButton({ active, onClick, label, children }: { active: boolean; onC
   );
 }
 
+/** A label on the sheet with a white halo, in screen-sized type whatever the zoom. */
+function Halo({ x, y, unit, hex, children, anchor = "middle" }: { x: number; y: number; unit: number; hex: string; children: ReactNode; anchor?: "middle" | "start" }) {
+  return (
+    <text x={x} y={y} fontSize={12 * unit} fontFamily="system-ui, sans-serif" fontWeight={700} fill={hex} stroke="white" strokeWidth={3.5 * unit} paintOrder="stroke" textAnchor={anchor} dominantBaseline="central">
+      {children}
+    </text>
+  );
+}
+
 /** A markup in the page's units. Strokes keep two screen pixels at any zoom. */
-function Shape({ markup: m, W, H, unit, number, selected }: { markup: MarkupView; W: number; H: number; unit: number; number?: number; selected: boolean }) {
+function Shape({
+  markup: m,
+  W,
+  H,
+  unit,
+  number,
+  selected,
+  measurement,
+}: {
+  markup: MarkupView;
+  W: number;
+  H: number;
+  unit: number;
+  number?: number;
+  selected: boolean;
+  measurement: Measurement | null;
+}) {
   const hex = MARKUP_COLOR_HEX[m.color];
-  const g = m.geometry;
+  const g = m.geometry as Record<string, number>;
+  const stroke = selected ? 3.5 : 2;
   if (m.kind === "cloud") {
     return (
       <g data-markup={m.id} style={{ cursor: "pointer" }}>
-        <path
-          d={cloudPath(g.x * W, g.y * H, g.w * W, g.h * H, 14 * unit)}
-          fill="none"
-          stroke={hex}
-          strokeWidth={selected ? 3.5 : 2}
-          vectorEffect="non-scaling-stroke"
-          strokeLinejoin="round"
-        />
+        <path d={cloudPath(g.x * W, g.y * H, g.w * W, g.h * H, 14 * unit)} fill="none" stroke={hex} strokeWidth={stroke} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
         <rect x={g.x * W} y={g.y * H} width={g.w * W} height={g.h * H} fill="transparent" />
       </g>
     );
@@ -546,7 +776,7 @@ function Shape({ markup: m, W, H, unit, number, selected }: { markup: MarkupView
     const [hx1, hy1, hx2, hy2] = arrowHead(g.x1 * W, g.y1 * H, g.x2 * W, g.y2 * H, 12 * unit);
     return (
       <g data-markup={m.id} style={{ cursor: "pointer" }}>
-        <line x1={g.x1 * W} y1={g.y1 * H} x2={g.x2 * W} y2={g.y2 * H} stroke={hex} strokeWidth={selected ? 3.5 : 2} vectorEffect="non-scaling-stroke" strokeLinecap="round" />
+        <line x1={g.x1 * W} y1={g.y1 * H} x2={g.x2 * W} y2={g.y2 * H} stroke={hex} strokeWidth={stroke} vectorEffect="non-scaling-stroke" strokeLinecap="round" />
         <polygon points={`${g.x2 * W},${g.y2 * H} ${hx1},${hy1} ${hx2},${hy2}`} fill={hex} />
         <line x1={g.x1 * W} y1={g.y1 * H} x2={g.x2 * W} y2={g.y2 * H} stroke="transparent" strokeWidth={12} vectorEffect="non-scaling-stroke" />
       </g>
@@ -572,13 +802,65 @@ function Shape({ markup: m, W, H, unit, number, selected }: { markup: MarkupView
       </g>
     );
   }
-  const done = m.punch?.done ?? false;
+  if (m.kind === "pin") {
+    const done = m.punch?.done ?? false;
+    return (
+      <g data-markup={m.id} style={{ cursor: "pointer" }} opacity={done ? 0.55 : 1}>
+        <circle cx={g.x * W} cy={g.y * H} r={11 * unit} fill={hex} stroke="white" strokeWidth={selected ? 3 : 1.5} vectorEffect="non-scaling-stroke" />
+        <text x={g.x * W} y={g.y * H} fontSize={11 * unit} fontFamily="system-ui, sans-serif" fontWeight={700} fill="white" textAnchor="middle" dominantBaseline="central">
+          {done ? "✓" : (number ?? "")}
+        </text>
+      </g>
+    );
+  }
+  const pts = pointsOf(m);
+  if (pts.length === 0) return null;
+  const label = measurement ? formatMeasure(measurement) : "needs the scale";
+  const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+  const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+  if (m.kind === "length") {
+    const d = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x * W} ${p.y * H}`).join(" ");
+    const mid = pts[Math.floor((pts.length - 1) / 2)];
+    const nxt = pts[Math.min(pts.length - 1, Math.floor((pts.length - 1) / 2) + 1)];
+    return (
+      <g data-markup={m.id} style={{ cursor: "pointer" }}>
+        <path d={d} fill="none" stroke={hex} strokeWidth={stroke} vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
+        <path d={d} fill="none" stroke="transparent" strokeWidth={12} vectorEffect="non-scaling-stroke" />
+        {pts.map((p, i) => (
+          <circle key={i} cx={p.x * W} cy={p.y * H} r={3 * unit} fill={hex} />
+        ))}
+        <Halo x={((mid.x + nxt.x) / 2) * W} y={((mid.y + nxt.y) / 2) * H - 9 * unit} unit={unit} hex={hex}>
+          {label}
+        </Halo>
+      </g>
+    );
+  }
+  if (m.kind === "area") {
+    const d = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x * W} ${p.y * H}`).join(" ") + " Z";
+    return (
+      <g data-markup={m.id} style={{ cursor: "pointer" }}>
+        <path d={d} fill={hex} fillOpacity={selected ? 0.25 : 0.15} stroke={hex} strokeWidth={stroke} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+        {pts.map((p, i) => (
+          <circle key={i} cx={p.x * W} cy={p.y * H} r={3 * unit} fill={hex} />
+        ))}
+        <Halo x={cx * W} y={cy * H} unit={unit} hex={hex}>
+          {label}
+        </Halo>
+      </g>
+    );
+  }
   return (
-    <g data-markup={m.id} style={{ cursor: "pointer" }} opacity={done ? 0.55 : 1}>
-      <circle cx={g.x * W} cy={g.y * H} r={11 * unit} fill={hex} stroke="white" strokeWidth={selected ? 3 : 1.5} vectorEffect="non-scaling-stroke" />
-      <text x={g.x * W} y={g.y * H} fontSize={11 * unit} fontFamily="system-ui, sans-serif" fontWeight={700} fill="white" textAnchor="middle" dominantBaseline="central">
-        {done ? "✓" : (number ?? "")}
-      </text>
+    <g data-markup={m.id} style={{ cursor: "pointer" }}>
+      {pts.map((p, i) => (
+        <g key={i}>
+          <circle cx={p.x * W} cy={p.y * H} r={7 * unit} fill={hex} fillOpacity={0.25} stroke={hex} strokeWidth={stroke} vectorEffect="non-scaling-stroke" />
+          <circle cx={p.x * W} cy={p.y * H} r={1.5 * unit} fill={hex} />
+        </g>
+      ))}
+      <Halo x={pts[0].x * W + 10 * unit} y={pts[0].y * H - 10 * unit} unit={unit} hex={hex} anchor="start">
+        {label}
+        {m.text ? ` ${m.text}` : ""}
+      </Halo>
     </g>
   );
 }
@@ -608,31 +890,62 @@ function DraftShape({ draft, color, W, H, unit }: { draft: Draft; color: MarkupC
   );
 }
 
+/** The points tapped so far, the line or the ring between them, the quantity so far. */
+function PointsDraftShape({ draft, color, W, H, unit, measurement }: { draft: PointsDraft; color: MarkupColor; W: number; H: number; unit: number; measurement: Measurement | null }) {
+  const hex = draft.kind === "calibrate" ? "#111827" : MARKUP_COLOR_HEX[color];
+  const pts = draft.points;
+  const d = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x * W} ${p.y * H}`).join(" ") + (draft.kind === "area" && pts.length >= 3 ? " Z" : "");
+  return (
+    <g pointerEvents="none">
+      {pts.length >= 2 && draft.kind !== "count" && (
+        <path d={d} fill={draft.kind === "area" ? hex : "none"} fillOpacity={0.1} stroke={hex} strokeWidth={2} strokeDasharray="4 3" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+      )}
+      {pts.map((p, i) => (
+        <circle key={i} cx={p.x * W} cy={p.y * H} r={(draft.kind === "count" ? 7 : 4) * unit} fill={hex} fillOpacity={draft.kind === "count" ? 0.35 : 1} stroke={hex} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+      ))}
+      {measurement && pts.length > 0 && (
+        <Halo x={pts[pts.length - 1].x * W + 10 * unit} y={pts[pts.length - 1].y * H - 10 * unit} unit={unit} hex={hex} anchor="start">
+          {formatMeasure(measurement)}
+        </Halo>
+      )}
+    </g>
+  );
+}
+
 function MarkupRowView({
   markup: m,
   number,
+  measurement,
   selected,
   canEdit,
   busy,
   projectId,
   sheetId,
+  hasEstimates,
   onSelect,
   onEdit,
+  onTakeoff,
 }: {
   markup: MarkupView;
   number?: number;
+  measurement: Measurement | null;
   selected: boolean;
   canEdit: boolean;
   busy: boolean;
   projectId: string;
   sheetId: string;
+  hasEstimates: boolean;
   onSelect: () => void;
   onEdit: () => void;
+  onTakeoff: () => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [armed, setArmed] = useState(false);
   const hex = MARKUP_COLOR_HEX[m.color];
+  const measuring = isMeasureKind(m.kind);
+  const drifted =
+    measuring && m.takeoff && m.pushedQuantityThousandths !== null && measurement !== null && Math.abs(toThousandths(measurement.quantity) - m.pushedQuantityThousandths) > Math.max(5, m.pushedQuantityThousandths * 0.005);
 
   function toggleDone(done: boolean) {
     const itemId = m.workItemId;
@@ -660,16 +973,38 @@ function MarkupRowView({
     });
   }
 
+  function unpush() {
+    startTransition(async () => {
+      const result = await unpushTakeoffAction({ id: m.id, sheetId, projectId });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("The line keeps its quantity; this measurement no longer stands behind it");
+      router.refresh();
+    });
+  }
+
   return (
     <li className={`flex flex-wrap items-center gap-2 px-3 py-2 ${selected ? "bg-secondary/60" : ""}`}>
       <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-2 text-left">
         <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ backgroundColor: hex }}>
-          {m.kind === "pin" ? (number ?? "") : m.kind === "cloud" ? "◌" : m.kind === "arrow" ? "→" : "A"}
+          {m.kind === "pin" ? (number ?? "") : m.kind === "cloud" ? "◌" : m.kind === "arrow" ? "→" : m.kind === "text" ? "A" : m.kind === "length" ? "L" : m.kind === "area" ? "▱" : "#"}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate">{m.text || MARKUP_KIND_LABELS[m.kind]}</span>
+          <span className="block truncate">
+            {measuring ? (
+              <>
+                <span className="font-medium tabular-nums">{measurement ? formatMeasure(measurement) : "needs the scale"}</span>
+                {m.text ? ` · ${m.text}` : ""}
+              </>
+            ) : (
+              m.text || MARKUP_KIND_LABELS[m.kind]
+            )}
+          </span>
           <span className="block text-xs text-muted-foreground">
             {MARKUP_KIND_LABELS[m.kind]}
+            {measuring ? ` · ${pointsOf(m).length} ${pointsOf(m).length === 1 ? "point" : "points"}` : ""}
             {m.createdBy ? ` · ${m.createdBy}` : ""} · {m.createdOn}
           </span>
         </span>
@@ -687,8 +1022,30 @@ function MarkupRowView({
         ) : (
           <StatusBadge tone="quiet">{m.workItemId ? "Punch item gone" : "Marker only"}</StatusBadge>
         ))}
+      {measuring &&
+        (m.takeoff ? (
+          <span className="flex items-center gap-1">
+            <StatusBadge tone={drifted ? "pending" : "good"}>
+              {`→ ${m.takeoff.estimateNumber} · ${m.takeoff.lineDescription} · ${thousandthsToQuantityString(m.takeoff.lineQuantityThousandths)} ${m.takeoff.lineUnit}`}
+              {drifted ? " · measured since" : ""}
+            </StatusBadge>
+            {canEdit && (
+              <Button type="button" variant="ghost" size="icon" className="size-7" onClick={unpush} disabled={pending || busy} title="No longer stands behind the line">
+                <X className="size-3.5" />
+                <span className="sr-only">Unpush</span>
+              </Button>
+            )}
+          </span>
+        ) : m.pushedQuantityThousandths !== null ? (
+          <StatusBadge tone="quiet">Line gone</StatusBadge>
+        ) : null)}
       {canEdit && (
         <span className="flex items-center gap-1">
+          {measuring && (
+            <Button type="button" variant="outline" size="sm" className="h-7" onClick={onTakeoff} disabled={pending || busy || !measurement || !hasEstimates} title={!hasEstimates ? "Start an estimate first" : !measurement ? "Set the scale first" : "Onto an estimate line"}>
+              <ArrowRightToLine className="mr-1 size-3.5" /> Takeoff
+            </Button>
+          )}
           <Button type="button" variant="ghost" size="icon" className="size-7" onClick={onEdit} disabled={pending || busy}>
             <Pencil className="size-3.5" />
             <span className="sr-only">Edit</span>
@@ -840,6 +1197,7 @@ function EditDialog({ markup, projectId, sheetId, onClose }: { markup: MarkupVie
           {markup?.kind === "pin" && markup.workItemId && (
             <DialogDescription>The pin&apos;s own words. Its punch item is edited on the job&apos;s punch list or in Work.</DialogDescription>
           )}
+          {markup && isMeasureKind(markup.kind) && <DialogDescription>A name for the measurement — the room, the wall — and its colour. The points stay where they are.</DialogDescription>}
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1.5">
@@ -871,4 +1229,393 @@ function EditDialog({ markup, projectId, sheetId, onClose }: { markup: MarkupVie
       </DialogContent>
     </Dialog>
   );
+}
+
+/** The sheet's scale: from a dimension the drawing states, or from the title block. */
+function ScaleDialog({
+  open,
+  scale,
+  scaleLabel,
+  pageSize,
+  projectId,
+  sheetId,
+  onClose,
+  onCalibrate,
+}: {
+  open: boolean;
+  scale: SheetScale | null;
+  scaleLabel: string | null;
+  pageSize: { w: number; h: number } | null;
+  projectId: string;
+  sheetId: string;
+  onClose: () => void;
+  onCalibrate: () => void;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [key, setKey] = useState<string>(NONE);
+
+  function saveStandard() {
+    if (!pageSize || key === NONE) return;
+    startTransition(async () => {
+      const result = await setSheetScaleAction({ sheetId, projectId, pageWidthPt: pageSize.w, pageHeightPt: pageSize.h, scale: { by: "standard", key } });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Scale set — every length and area on the sheet reads through it");
+      onClose();
+      router.refresh();
+    });
+  }
+
+  function clear() {
+    startTransition(async () => {
+      const result = await clearSheetScaleAction({ sheetId, projectId });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Scale cleared");
+      onClose();
+      router.refresh();
+    });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>The sheet&apos;s scale</DialogTitle>
+          <DialogDescription>
+            {scaleLabel ? `Set to ${scaleLabel}. ` : "Not set. "}
+            Every length and area on this sheet reads through it; a count needs none.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <p className="text-sm font-medium">From a dimension the drawing states</p>
+            <p className="text-xs text-muted-foreground">The honest way, right on a half-size plot too: tap the two ends of a dimension, then type what it says.</p>
+            <Button type="button" variant="outline" size="sm" onClick={onCalibrate} disabled={pending || !pageSize}>
+              <Ruler className="mr-1.5 size-4" /> Tap a known dimension
+            </Button>
+          </div>
+          <div className="space-y-1.5">
+            <p className="text-sm font-medium">From the title block</p>
+            <p className="text-xs text-muted-foreground">Only right when the PDF is the sheet&apos;s own size — a 24×36 set printed at 24×36.</p>
+            <div className="flex items-center gap-2">
+              <Select value={key} onValueChange={setKey}>
+                <SelectTrigger className="w-52">
+                  <SelectValue placeholder="Pick a scale" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>Pick a scale</SelectItem>
+                  {STANDARD_SCALES.map((s) => (
+                    <SelectItem key={s.key} value={s.key}>
+                      {s.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button type="button" size="sm" onClick={saveStandard} disabled={pending || key === NONE || !pageSize}>
+                {pending ? "Saving…" : "Use it"}
+              </Button>
+            </div>
+          </div>
+          {pageSize && (
+            <p className="text-xs text-muted-foreground">
+              This page is {(pageSize.w / 72).toFixed(1)} × {(pageSize.h / 72).toFixed(1)} inches.
+            </p>
+          )}
+        </div>
+        <DialogFooter className="flex-row items-center justify-between sm:justify-between">
+          {scale ? (
+            <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={clear} disabled={pending}>
+              Clear the scale
+            </Button>
+          ) : (
+            <span />
+          )}
+          <Button type="button" variant="outline" size="sm" onClick={onClose}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** After the two taps: what the drawing says the dimension is. */
+function KnownLengthDialog({
+  calibration,
+  pageSize,
+  projectId,
+  sheetId,
+  onClose,
+}: {
+  calibration: { a: PointGeometry; b: PointGeometry } | null;
+  pageSize: { w: number; h: number } | null;
+  projectId: string;
+  sheetId: string;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [length, setLength] = useState("");
+  const [unit, setUnit] = useState<ScaleUnit>("ft");
+  const value = Number.parseFloat(length);
+
+  function save() {
+    if (!calibration || !pageSize || !(value > 0)) return;
+    startTransition(async () => {
+      const result = await setSheetScaleAction({
+        sheetId,
+        projectId,
+        pageWidthPt: pageSize.w,
+        pageHeightPt: pageSize.h,
+        scale: { by: "known", a: calibration.a, b: calibration.b, length: value, unit },
+      });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Scale set — every length and area on the sheet reads through it");
+      setLength("");
+      onClose();
+      router.refresh();
+    });
+  }
+
+  return (
+    <Dialog open={calibration !== null} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>The dimension you tapped</DialogTitle>
+          <DialogDescription>What the drawing says it is, end to end.</DialogDescription>
+        </DialogHeader>
+        <div className="flex items-end gap-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="cal-length">Length</Label>
+            <Input id="cal-length" value={length} onChange={(e) => setLength(e.target.value)} inputMode="decimal" placeholder="24.5" className="w-32" autoFocus />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="cal-unit">Unit</Label>
+            <Select value={unit} onValueChange={(v) => setUnit(v as ScaleUnit)}>
+              <SelectTrigger className="w-28" id="cal-unit">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SCALE_UNITS.map((u) => (
+                  <SelectItem key={u} value={u}>
+                    {u === "ft" ? "feet" : "metres"}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">Feet as a decimal: 24&apos;-6&quot; is 24.5.</p>
+        <DialogFooter>
+          <Button onClick={save} disabled={pending || !(value > 0)}>
+            {pending ? "Saving…" : "Set the scale"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** A measurement, or several of one kind, onto an estimate line. */
+function TakeoffDialog({
+  markup,
+  markups,
+  measurements,
+  scale,
+  estimates,
+  codes,
+  projectId,
+  sheetId,
+  onClose,
+}: {
+  markup: MarkupView | null;
+  markups: MarkupView[];
+  measurements: Map<string, Measurement | null>;
+  scale: SheetScale | null;
+  estimates: EstimateOption[];
+  codes: Array<{ id: string; label: string }>;
+  projectId: string;
+  sheetId: string;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [estimateId, setEstimateId] = useState<string>(estimates[0]?.id ?? NONE);
+  const [lineId, setLineId] = useState<string>(NEW_LINE);
+  const [description, setDescription] = useState("");
+  const [costCodeId, setCostCodeId] = useState<string>(NONE);
+  const [included, setIncluded] = useState<Set<string>>(new Set());
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  if (markup && loadedFor !== markup.id) {
+    setLoadedFor(markup.id);
+    setIncluded(new Set([markup.id]));
+    setDescription(markup.text || MARKUP_KIND_LABELS[markup.kind]);
+    setEstimateId(markup.takeoff?.estimateId ?? estimates[0]?.id ?? NONE);
+    setLineId(markup.takeoff ? findLineId(estimates, markup.takeoff.estimateId, markup.takeoff.lineDescription) : NEW_LINE);
+  }
+  const kind = markup && isMeasureKind(markup.kind) ? markup.kind : null;
+  const siblings = kind ? markups.filter((m) => m.kind === kind && measurements.get(m.id)) : [];
+  const chosen = siblings.filter((m) => included.has(m.id));
+  const total = chosen.reduce((s, m) => s + (measurements.get(m.id)?.quantity ?? 0), 0);
+  const unitWord = chosen[0] ? (measurements.get(chosen[0].id)?.unit ?? "") : "";
+  const estimate = estimates.find((e) => e.id === estimateId) ?? null;
+  const lineUnit = kind ? takeoffUnitFor(kind, scale?.unit ?? "") : "";
+
+  function push() {
+    if (!markup || !kind || !estimate || chosen.length === 0) return;
+    startTransition(async () => {
+      const result = await pushTakeoffAction({
+        sheetId,
+        projectId,
+        estimateId: estimate.id,
+        markupIds: chosen.map((m) => m.id),
+        lineId: lineId === NEW_LINE ? "" : lineId,
+        newLine: lineId === NEW_LINE ? { description: description.trim(), costCodeId: costCodeId === NONE ? "" : costCodeId, unit: lineUnit } : null,
+      });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(`${thousandthsToQuantityString(result.quantityThousandths)} ${result.unit} onto ${estimate.number}`);
+      setLoadedFor(null);
+      onClose();
+      router.refresh();
+    });
+  }
+
+  return (
+    <Dialog
+      open={markup !== null}
+      onOpenChange={(next) => {
+        if (!next) {
+          onClose();
+          setLoadedFor(null);
+        }
+      }}
+    >
+      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Takeoff</DialogTitle>
+          <DialogDescription>
+            {kind === "count" ? "A count" : kind === "length" ? "A length" : "An area"}{" "}
+            onto an estimate line. The line&apos;s quantity becomes the total; its unit price does the rest.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          {siblings.length > 1 && (
+            <div className="space-y-1.5">
+              <Label>Measurements to add up</Label>
+              <ul className="max-h-40 space-y-1 overflow-y-auto rounded-md border p-2 text-sm">
+                {siblings.map((m) => (
+                  <li key={m.id}>
+                    <label className="flex items-center gap-2">
+                      <Checkbox
+                        checked={included.has(m.id)}
+                        onCheckedChange={(v) => {
+                          const next = new Set(included);
+                          if (v === true) next.add(m.id);
+                          else next.delete(m.id);
+                          setIncluded(next);
+                        }}
+                      />
+                      <span className="tabular-nums">{formatMeasure(measurements.get(m.id)!)}</span>
+                      <span className="text-muted-foreground">{m.text || MARKUP_KIND_LABELS[m.kind]}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <p className="text-sm">
+            <span className="font-medium tabular-nums">{formatMeasure({ quantity: total, unit: unitWord })}</span>
+            <span className="text-muted-foreground"> goes on the line as </span>
+            <span className="font-medium tabular-nums">
+              {thousandthsToQuantityString(toThousandths(total))} {lineUnit}
+            </span>
+          </p>
+          <div className="space-y-1.5">
+            <Label htmlFor="to-estimate">Estimate</Label>
+            <Select
+              value={estimateId}
+              onValueChange={(v) => {
+                setEstimateId(v);
+                setLineId(NEW_LINE);
+              }}
+            >
+              <SelectTrigger className="w-full" id="to-estimate">
+                <SelectValue placeholder="Pick an estimate" />
+              </SelectTrigger>
+              <SelectContent>
+                {estimates.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {e.number}
+                    {e.title ? ` · ${e.title}` : ""} · {e.status}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="to-line">Line</Label>
+            <Select value={lineId} onValueChange={setLineId}>
+              <SelectTrigger className="w-full" id="to-line">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NEW_LINE}>A new line</SelectItem>
+                {(estimate?.lines ?? []).map((l) => (
+                  <SelectItem key={l.id} value={l.id}>
+                    {l.description} · {thousandthsToQuantityString(l.quantityThousandths)} {l.unit}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {lineId === NEW_LINE && (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="to-description">The new line</Label>
+                <Input id="to-description" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={300} placeholder="Flooring, kitchen" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="to-code">Cost code</Label>
+                <Select value={costCodeId} onValueChange={setCostCodeId}>
+                  <SelectTrigger className="w-full" id="to-code">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE}>No code</SelectItem>
+                    {codes.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
+          )}
+        </div>
+        <DialogFooter>
+          <Button onClick={push} disabled={pending || !estimate || chosen.length === 0 || (lineId === NEW_LINE && description.trim() === "")}>
+            {pending ? "Pushing…" : lineId === NEW_LINE ? "Add the line" : "Set the quantity"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function findLineId(estimates: EstimateOption[], estimateId: string, description: string): string {
+  const line = estimates.find((e) => e.id === estimateId)?.lines.find((l) => l.description === description);
+  return line?.id ?? NEW_LINE;
 }

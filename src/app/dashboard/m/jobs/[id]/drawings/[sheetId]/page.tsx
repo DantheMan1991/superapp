@@ -10,10 +10,12 @@ import { dateInTimezone } from "@/lib/timezone";
 import { Panel } from "@/components/app/panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { getProject } from "@/packs/jobs/ops";
 import { getSheet, listSheets } from "@/packs/jobs/drawings-ops";
 import { disciplineLabel } from "@/packs/jobs/drawings-math";
 import { listMarkups, markupCounts } from "@/packs/jobs/markups-ops";
+import { scaleOf } from "@/packs/jobs/takeoff-ops";
+import { listEstimates } from "@/packs/jobs/estimating-ops";
+import { getProject as getProjectRow, listCostCodes } from "@/packs/jobs/ops";
 import { SheetViewer, type MarkupView } from "@/packs/jobs/components/sheet-viewer";
 import { isMarkupColor, isMarkupKind } from "@/packs/jobs/vocabulary";
 import { SheetForm } from "@/packs/jobs/components/sheet-form";
@@ -33,18 +35,20 @@ export default async function SheetPage({ params }: { params: Promise<{ id: stri
   const data = await withTenant(
     ctx.tenant.id,
     async (tx) => {
-      const project = await getProject(tx, ctx.tenant.id, id);
+      const project = await getProjectRow(tx, ctx.tenant.id, id);
       if (!project) return null;
       const sheet = await getSheet(tx, ctx.tenant.id, sheetId);
       if (!sheet || sheet.projectId !== project.id) return null;
       const sheets = await listSheets(tx, ctx.tenant.id, project.id);
       const issueIds = sheets.filter((s) => s.sheet.sheetNumber === sheet.sheetNumber).map((s) => s.sheet.id);
-      const [markups, members, counts] = await Promise.all([
+      const [markups, members, counts, estimates, codes] = await Promise.all([
         listMarkups(tx, ctx.tenant.id, sheet.id),
         listAssignableMembers(tx, ctx.tenant.id),
         markupCounts(tx, ctx.tenant.id, issueIds),
+        listEstimates(tx, ctx.tenant.id, project.id),
+        project.costCodeSetId ? listCostCodes(tx, ctx.tenant.id, project.costCodeSetId) : Promise.resolve([]),
       ]);
-      return { project, sheet, sheets, markups, members, counts };
+      return { project, sheet, sheets, markups, members, counts, estimates, codes };
     },
     { role: ctx.role },
   );
@@ -72,16 +76,29 @@ export default async function SheetPage({ params }: { params: Promise<{ id: stri
         id: r.markup.id,
         kind: r.markup.kind,
         color: r.markup.color,
-        geometry: r.markup.geometry as Record<string, number>,
+        geometry: r.markup.geometry as Record<string, unknown>,
         text: r.markup.text,
         version: r.markup.version,
         createdOn: dateInTimezone(r.markup.createdAt, ctx.tenant.timezone),
         createdBy: r.markup.createdByClerkUserId ? (names.get(r.markup.createdByClerkUserId) ?? "") : "",
         workItemId: r.markup.workItemId,
         punch: r.punch,
+        takeoff: r.takeoff,
+        pushedQuantityThousandths: r.markup.pushedQuantityThousandths,
       },
     ];
   });
+  // The estimates a quantity may go onto: an accepted one is the agreement, a declined or superseded one is history.
+  const openEstimates = data.estimates
+    .filter((e) => e.estimate.status === "draft" || e.estimate.status === "sent")
+    .map((e) => ({
+      id: e.estimate.id,
+      number: e.estimate.number,
+      title: e.estimate.title,
+      status: e.estimate.status,
+      lines: e.lines.map((l) => ({ id: l.id, description: l.description, unit: l.unit, quantityThousandths: l.quantityThousandths })),
+    }));
+  const codeOptions = data.codes.filter((c) => c.isActive).map((c) => ({ id: c.id, label: `${c.code} · ${c.name}` }));
 
   return (
     <div className="space-y-4">
@@ -157,7 +174,18 @@ export default async function SheetPage({ params }: { params: Promise<{ id: stri
       )}
 
       <Panel className="p-5">
-        <SheetViewer url={url} page={sheet.pageNumber} label={label} sheetId={sheet.id} projectId={project.id} markups={markups} canEdit={canEdit} />
+        <SheetViewer
+          url={url}
+          page={sheet.pageNumber}
+          label={label}
+          sheetId={sheet.id}
+          projectId={project.id}
+          markups={markups}
+          canEdit={canEdit}
+          scale={scaleOf(sheet)}
+          estimates={openEstimates}
+          codes={codeOptions}
+        />
       </Panel>
 
       {issues.length > 1 && (

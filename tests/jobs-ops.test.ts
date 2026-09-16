@@ -1685,7 +1685,7 @@ d("jobs ops", () => {
     // What has been billed over the whole contract equals its value.
     const billing = await run((tx) => contractBilling(tx, tenantId, first.app.contractId));
     void billing;
-  });
+  }, 120_000);
 
   it("refuses to issue when nothing is due, when nobody is named, or when the chart lacks 1230", async () => {
     const { contract } = await run((tx) => billableContract(tx, "OPS-S6"));
@@ -2047,7 +2047,7 @@ d("jobs ops", () => {
     // Another company's schedule does not see these jobs at all.
     const other = await run((tx) => wipSchedule(tx, tenantId, { entityId, periodEnd: "2026-09-30" }));
     expect(other.rows.some((r) => r.projectId === a.project.id)).toBe(false);
-  });
+  }, 120_000);
 
   it("POSTING writes the adjustment and its reversal the next day, tagged with the job, and freezes the schedule", async () => {
     const entity = await newCompany("WIP Co 2");
@@ -2149,7 +2149,7 @@ d("jobs ops", () => {
     expect((await run((tx) => listWipPeriods(tx, tenantId, entity))).map((p) => p.periodEnd)).toEqual([
       "2026-10-31",
     ]);
-  });
+  }, 120_000);
 
   it("an estimate typed for the period replaces the budget for THAT period, and can turn an under-billing into an over-billing", async () => {
     const entity = await newCompany("WIP Co 3");
@@ -2205,7 +2205,7 @@ d("jobs ops", () => {
     const frozen = await run((tx) => wipSchedule(tx, tenantId, { entityId: entity, periodEnd: "2026-09-30" }));
     expect(frozen.rows[0]).toMatchObject({ estimateCents: 200_000_00 });
     expect(frozen.rows[0].figures.overBilledCents).toBe(10_000_00);
-  });
+  }, 120_000);
 
   it("refuses what it cannot measure or must not do: no estimate, billings without a value, nothing to post, a period behind the last, a chart without the account", async () => {
     // No budget and no estimate — named.

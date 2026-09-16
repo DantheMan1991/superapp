@@ -51,6 +51,28 @@ open item while every test passes.
 
 ## Build log
 
+### 2026-09-16 — Four scenarios that were timing the machine, not the code (branch `claude/agitated-sinoussi-5cc252`)
+
+**A test at the default timeout is measuring the machine's spare capacity.**
+Four `tests/jobs-ops.test.ts` scenarios — the WIP schedule, its posting, an
+estimate typed for the period, and the next application releasing retainage —
+failed with *"Test timed out in 30000ms"* on two full-suite runs and passed
+every time they were run alone. The schedule read 29.0s by itself. Nothing was
+wrong with them: `testTimeout: 30_000` is a global, and a scenario that builds a
+company, a job, a contract, a schedule and a posted period spends all of it on
+round trips to Neon, so whether it passes depends on what else holds the
+machine at that moment.
+
+**The fix is the one twenty scenarios in the same file already use**: an
+explicit `}, 120_000)` on the `it`. That is the file's only timeout value, and
+four times the solo cost of the slowest of these. No assertion moved.
+
+The general point for anything added here: **the 30s default is not a budget
+these suites fit inside.** It was chosen for pure tests. A db-backed scenario
+that sets up a whole job is tens of seconds of latency on a good day, and the
+honest thing is to declare what it costs rather than let a green run depend on
+an idle laptop.
+
 ### 2026-08-23 — A third job, for the thing CI cannot check (branch `claude/the-migration-that-never-ran`)
 
 **THE PIPELINE WAS GREEN AND THE PAGE WAS DOWN, and both were correct.** #251

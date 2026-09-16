@@ -2570,6 +2570,20 @@
       "when": 1789556946742,
       "tag": "0366_job_sheets_scale_whole",
       "breakpoints": true
+    },
+    {
+      "idx": 367,
+      "version": "7",
+      "when": 1789577737510,
+      "tag": "0367_job_warranty",
+      "breakpoints": true
+    },
+    {
+      "idx": 368,
+      "version": "7",
+      "when": 1789577760019,
+      "tag": "0368_job_warranty_claims_rls",
+      "breakpoints": true
     }
   ]
 }

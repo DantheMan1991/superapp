@@ -2214,4 +2214,79 @@ d("jobs tables (RLS)", () => {
       await tx.delete(schema.documents).where(eq(schema.documents.id, docA));
     });
   });
+
+  it("cannot read or change another tenant's WARRANTY CLAIMS; a claim hangs off this tenant's job, party, code and work item; a number is once per job and positive, the words present, the decision checked and dated; a work item cleared or a code removed sets the key null and nothing else; the claims go with the job; the job's months are whole", async () => {
+    // A work item of each tenant, through the pack's own verb so the list is provisioned as it would be.
+    const workA = await asOwner((tx) => addPunchItem(tx, { tenantId: tenantA, userId: OWNER, role: "owner" }, projectA, { title: "Tenant A's claim work" }));
+    const workB = await asOtherTenant((tx) => addPunchItem(tx, { tenantId: tenantB, userId: OTHER, role: "owner" }, projectB, { title: "Tenant B's claim work" }));
+    const { partyB, codeB, codeX, jobX } = await withSystem(async (tx) => {
+      const partyB = await seedParty(tx, tenantB, "Their owner");
+      const codes = await tx
+        .insert(schema.jobCostCodes)
+        .values([
+          { tenantId: tenantB, setId: setB, code: "9999", name: "Theirs" },
+          { tenantId: tenantA, setId: setA, code: "9998", name: "Warranty work" },
+        ])
+        .returning();
+      const jobs = await tx
+        .insert(schema.jobProjects)
+        .values({ tenantId: tenantA, entityId: entityA, number: `${STAMP}-WAR`, name: "Warranty job" })
+        .returning();
+      return { partyB, codeB: codes[0].id, codeX: codes[1].id, jobX: jobs[0].id };
+    });
+    const base = { tenantId: tenantA, projectId: jobX, number: 1, title: "Drip", reportedOn: "2026-09-10" } as const;
+    const claimId = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobWarrantyClaims).values({ ...base, partyId: clientA, costCodeId: codeX, workItemId: workA }).returning();
+      return r[0].id;
+    });
+    const seen = await asOtherTenant(async (tx) => ({
+      rows: await tx.select().from(schema.jobWarrantyClaims).where(eq(schema.jobWarrantyClaims.id, claimId)),
+      changed: await tx.update(schema.jobWarrantyClaims).set({ title: "Theirs" }).where(eq(schema.jobWarrantyClaims.id, claimId)).returning(),
+    }));
+    expect([seen.rows, seen.changed]).toEqual([[], []]);
+    expect(await asStaff((tx) => tx.select().from(schema.jobWarrantyClaims).where(eq(schema.jobWarrantyClaims.id, claimId)))).toHaveLength(1);
+
+    // Tenant B's job, party, code or work item under tenant A's row: unrepresentable.
+    const insert = (values: Partial<typeof schema.jobWarrantyClaims.$inferInsert>) =>
+      withSystem((tx) => tx.insert(schema.jobWarrantyClaims).values({ ...base, number: 7, ...values }));
+    await expect(insert({ projectId: projectB })).rejects.toThrow();
+    await expect(insert({ partyId: partyB })).rejects.toThrow();
+    await expect(insert({ costCodeId: codeB })).rejects.toThrow();
+    await expect(insert({ workItemId: workB })).rejects.toThrow();
+
+    // The CHECKs and the unique number.
+    await expect(insert({ number: 0 })).rejects.toThrow();
+    await expect(insert({ number: 1 })).rejects.toThrow();
+    await expect(insert({ title: "   " })).rejects.toThrow();
+    await expect(insert({ title: "x".repeat(301) })).rejects.toThrow();
+    await expect(insert({ decision: "maybe", decidedOn: "2026-09-11" })).rejects.toThrow();
+    await expect(insert({ decision: "covered", decidedOn: null })).rejects.toThrow();
+    await expect(insert({ decision: "pending", decidedOn: "2026-09-11" })).rejects.toThrow();
+    await expect(insert({ decisionNote: "n".repeat(2001), decision: "covered", decidedOn: "2026-09-11" })).rejects.toThrow();
+    await withSystem((tx) => tx.insert(schema.jobWarrantyClaims).values({ ...base, number: 2, decision: "not_covered", decidedOn: "2026-09-11" }));
+
+    // The job's months: whole, from 1 to 1,200, and null passes.
+    const setMonths = (months: number | null) => withSystem((tx) => tx.update(schema.jobProjects).set({ warrantyMonths: months }).where(eq(schema.jobProjects.id, jobX)));
+    await expect(setMonths(0)).rejects.toThrow();
+    await expect(setMonths(1201)).rejects.toThrow();
+    await setMonths(12);
+    await setMonths(null);
+
+    // A work item cleared, a code removed: each key null, the row and its tenant untouched.
+    await withSystem(async (tx) => {
+      await tx.delete(schema.workItems).where(eq(schema.workItems.id, workA));
+      await tx.delete(schema.jobCostCodes).where(eq(schema.jobCostCodes.id, codeX));
+    });
+    const after = await withSystem((tx) => tx.select().from(schema.jobWarrantyClaims).where(eq(schema.jobWarrantyClaims.id, claimId)));
+    expect(after).toHaveLength(1);
+    expect([after[0].workItemId, after[0].costCodeId, after[0].partyId, after[0].title, after[0].tenantId]).toEqual([null, null, clientA, "Drip", tenantA]);
+
+    // The claims go with the job.
+    await withSystem((tx) => tx.delete(schema.jobProjects).where(eq(schema.jobProjects.id, jobX)));
+    expect(await withSystem((tx) => tx.select().from(schema.jobWarrantyClaims).where(eq(schema.jobWarrantyClaims.projectId, jobX)))).toEqual([]);
+    await withSystem(async (tx) => {
+      await tx.delete(schema.workItems).where(eq(schema.workItems.id, workB));
+      await tx.delete(schema.jobCostCodes).where(eq(schema.jobCostCodes.id, codeB));
+    });
+  });
 });

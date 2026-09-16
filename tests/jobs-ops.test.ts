@@ -44,7 +44,21 @@ import {
 import {
   COST_CODE_DIMENSION,
   PROJECT_DIMENSION,
+  WARRANTY_CLAIM_ENTITY,
 } from "../src/packs/jobs/vocabulary";
+import {
+  decideClaim,
+  deleteClaim,
+  getClaim,
+  listClaims,
+  listClaimsAcrossJobs,
+  listWarrantyPeriods,
+  recordClaim,
+  scheduleClaim,
+  setClaimDone,
+  setWarrantyPeriod,
+  updateClaim,
+} from "../src/packs/jobs/warranty-ops";
 import { getBalances, listDimensionMembers, postEntry } from "../src/modules/accounting/core";
 import { violatedUniqueIndex } from "../src/lib/db-errors";
 import {
@@ -87,7 +101,7 @@ import {
   waiverCoverage,
   waiverGaps,
 } from "../src/packs/jobs/compliance-ops";
-import { listOpenWork } from "../src/lib/work/entity-work";
+import { listOpenWork, listWorkForEntity } from "../src/lib/work/entity-work";
 import {
   createSelection,
   listSelectionWork,
@@ -4834,5 +4848,120 @@ d("jobs ops", () => {
     // Nothing to print for an id that is not there.
     expect(await run((tx) => loadChangeOrderPaper(tx, tenantId, "00000000-0000-0000-0000-000000000000"))).toBeNull();
     expect(await run((tx) => loadOrderPaper(tx, tenantId, "00000000-0000-0000-0000-000000000000"))).toBeNull();
+  }, 120_000);
+
+  it("WARRANTY (ADR 0076): the period is the job's — whole months from substantial completion, owner-set, the expiry derived; a claim is recorded by any member with the next number and raises a Work item linked to the claim, not the punch list, with the day to look by; where it stands is read from the decision and the work; outside the period is said, never refused; not covered closes the work; an edit follows into the work item's title; a work item cleared from Work leaves the claim open and a tick raises it again; the lists across jobs; an owner removes a claim and its work item stays", async () => {
+    const entity = await newCompany("Warranty Co 1");
+    const { project, plumber, code } = await run(async (tx) => {
+      const p = await createProject(tx, ctx, { entityId: entity, number: "WAR-1", name: "Warranted", address: "9 Elm St" });
+      const set = (await getDefaultCostCodeSet(tx, tenantId)) ?? (await createCostCodeSet(tx, ctx, { name: "Warranty codes" }));
+      const code = await createCostCode(tx, ctx, { setId: set.id, code: "WAR-01", name: "Warranty work", sortOrder: 990 });
+      const plumber = await seedVendor(tx, "Plumber");
+      return { project: p, plumber, code };
+    });
+    const staffRun = <T>(fn: (tx: Tx) => Promise<T>) => withTenant(tenantId, fn, { role: "staff", userId: staffCtx.userId });
+
+    // The period: owner-only, whole months from 1 to 1,200, a real date; the expiry derived.
+    await expect(staffRun((tx) => setWarrantyPeriod(tx, staffCtx, project.id, { warrantyMonths: 12, substantialCompletionOn: "2026-06-30" }))).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(run((tx) => setWarrantyPeriod(tx, ctx, project.id, { warrantyMonths: 0, substantialCompletionOn: "2026-06-30" }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => setWarrantyPeriod(tx, ctx, project.id, { warrantyMonths: 1201, substantialCompletionOn: "2026-06-30" }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => setWarrantyPeriod(tx, ctx, project.id, { warrantyMonths: 12, substantialCompletionOn: "June 30" }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    const withPeriod = await run((tx) => setWarrantyPeriod(tx, ctx, project.id, { warrantyMonths: 12, substantialCompletionOn: "2026-06-30" }));
+    expect([withPeriod.warrantyMonths, withPeriod.substantialCompletionOn, withPeriod.version]).toEqual([12, "2026-06-30", project.version + 1]);
+    expect((await run((tx) => listWarrantyPeriods(tx, tenantId))).filter((r) => r.projectId === project.id).map((r) => r.expiresOn)).toEqual(["2027-06-30"]);
+
+    // A claim, recorded by staff: the next number, the work raised at once and linked to the CLAIM.
+    const one = await staffRun((tx) =>
+      recordClaim(tx, staffCtx, project.id, {
+        title: "Drip under the sink",
+        location: "Kitchen",
+        reportedOn: "2026-09-10",
+        reportedBy: "The owner",
+        partyId: plumber,
+        costCodeId: code.id,
+        notes: "Slow drip at the trap.",
+        dueOn: "2026-09-15",
+      }),
+    );
+    expect([one.number, one.decision, one.decidedOn, one.workItemId === null]).toEqual([1, "pending", null, false]);
+    const work = await run((tx) => listWorkForEntity(tx, { tenantId }, { entityType: WARRANTY_CLAIM_ENTITY, entityId: one.id }));
+    expect(work.map((w) => [w.id, w.title, w.dueOn, w.completedAt])).toEqual([[one.workItemId, "Warranty claim 1 on WAR-1: Drip under the sink", "2026-09-15", null]]);
+    expect(work[0].notes).toBe("Where: Kitchen\nReported 2026-09-10 by The owner\nSlow drip at the trap.");
+    expect((await run((tx) => listPunchItems(tx, tenantId, project.id))).map((p) => p.id)).not.toContain(one.workItemId);
+
+    // Bad inputs, in words.
+    await expect(run((tx) => recordClaim(tx, ctx, project.id, { title: "  ", reportedOn: "2026-09-10" }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => recordClaim(tx, ctx, project.id, { title: "x", reportedOn: "yesterday" }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => recordClaim(tx, ctx, project.id, { title: "x", reportedOn: "2026-09-10", partyId: "00000000-0000-0000-0000-000000000000" }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => recordClaim(tx, ctx, project.id, { title: "x", reportedOn: "2026-09-10", costCodeId: "00000000-0000-0000-0000-000000000000" }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+
+    // The list: scheduled by its date, inside the period, the trade and the code by name.
+    const byNumber = async () => new Map((await run((tx) => listClaims(tx, tenantId, withPeriod))).map((r) => [r.claim.number, r]));
+    let rows = await run((tx) => listClaims(tx, tenantId, withPeriod));
+    expect(rows.map((r) => [r.claim.number, r.standing, r.withinWarranty, r.codeLabel])).toEqual([[1, "scheduled", true, "WAR-01 Warranty work"]]);
+    expect(rows[0].partyName).toContain("Plumber");
+
+    // A second claim, after the period: recorded, and said. Newest first.
+    const two = await run((tx) => recordClaim(tx, ctx, project.id, { title: "Deck board cupped", reportedOn: "2027-08-01" }));
+    rows = await run((tx) => listClaims(tx, tenantId, withPeriod));
+    expect(rows.map((r) => [r.claim.number, r.standing, r.withinWarranty])).toEqual([
+      [2, "open", false],
+      [1, "scheduled", true],
+    ]);
+
+    // Scheduling is the work item's date; clearing it makes the claim open again.
+    await run((tx) => scheduleClaim(tx, ctx, two.id, "2027-08-05"));
+    expect([(await byNumber()).get(2)!.standing, (await byNumber()).get(2)!.work!.dueOn]).toEqual(["scheduled", "2027-08-05"]);
+    await run((tx) => scheduleClaim(tx, ctx, two.id, null));
+    expect((await byNumber()).get(2)!.standing).toBe("open");
+
+    // Ticking done is the work item's state, and the date is kept when it is reopened.
+    await run((tx) => setClaimDone(tx, ctx, one.id, true));
+    expect([(await byNumber()).get(1)!.standing, (await byNumber()).get(1)!.work!.completedAt === null]).toEqual(["done", false]);
+    await run((tx) => setClaimDone(tx, ctx, one.id, false));
+    expect([(await byNumber()).get(1)!.standing, (await byNumber()).get(1)!.work!.dueOn]).toEqual(["scheduled", "2026-09-15"]);
+
+    // The decision: not covered carries its day and reason and closes the work; back to undecided clears the day and the work stays closed.
+    await expect(run((tx) => decideClaim(tx, ctx, two.id, { decision: "maybe", decidedOn: "2027-08-02" }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => decideClaim(tx, ctx, two.id, { decision: "not_covered" }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    const declined = await run((tx) => decideClaim(tx, ctx, two.id, { decision: "not_covered", note: "Cupping from sprinkler overspray.", decidedOn: "2027-08-02" }));
+    expect([declined.decision, declined.decidedOn, declined.decisionNote]).toEqual(["not_covered", "2027-08-02", "Cupping from sprinkler overspray."]);
+    const twoRow = (await byNumber()).get(2)!;
+    expect([twoRow.standing, twoRow.work!.completedAt === null]).toEqual(["not_covered", false]);
+    const undecided = await run((tx) => decideClaim(tx, ctx, two.id, { decision: "pending" }));
+    expect([undecided.decision, undecided.decidedOn]).toEqual(["pending", null]);
+    expect((await byNumber()).get(2)!.standing).toBe("done");
+    const covered = await run((tx) => decideClaim(tx, ctx, two.id, { decision: "covered", decidedOn: "2027-08-03", note: "Goodwill." }));
+    expect([covered.decision, covered.decidedOn, covered.decisionNote]).toEqual(["covered", "2027-08-03", "Goodwill."]);
+
+    // An edit follows into the work item's title; a stale version refuses.
+    const fresh = (await run((tx) => getClaim(tx, tenantId, one.id)))!;
+    await expect(run((tx) => updateClaim(tx, ctx, one.id, { title: "Drip under the kitchen sink" }, fresh.version - 1))).rejects.toMatchObject({ code: "STALE_VERSION" });
+    const edited = await run((tx) => updateClaim(tx, ctx, one.id, { title: "Drip under the kitchen sink", partyId: null }, fresh.version));
+    expect([edited.title, edited.partyId, edited.version]).toEqual(["Drip under the kitchen sink", null, fresh.version + 1]);
+    expect((await run((tx) => listWorkForEntity(tx, { tenantId }, { entityType: WARRANTY_CLAIM_ENTITY, entityId: one.id })))[0].title).toBe("Warranty claim 1 on WAR-1: Drip under the kitchen sink");
+
+    // A work item cleared from Work: the key is null, the claim stays and reads open; a tick raises the work again and completes it.
+    await withSystem((tx) => tx.delete(schema.workItems).where(eq(schema.workItems.id, one.workItemId!)));
+    let oneRow = (await byNumber()).get(1)!;
+    expect([oneRow.claim.workItemId, oneRow.work, oneRow.standing]).toEqual([null, null, "open"]);
+    await run((tx) => setClaimDone(tx, ctx, one.id, true));
+    oneRow = (await byNumber()).get(1)!;
+    expect([oneRow.claim.workItemId === null, oneRow.standing]).toEqual([false, "done"]);
+
+    // Across jobs: both claims with the job's number, newest reported first.
+    const across = (await run((tx) => listClaimsAcrossJobs(tx, tenantId))).filter((r) => r.projectId === project.id);
+    expect(across.map((r) => [r.claim.number, r.projectNumber, r.withinWarranty])).toEqual([
+      [2, "WAR-1", false],
+      [1, "WAR-1", true],
+    ]);
+
+    // Removing a claim is an owner's; the work item stays, unlinked.
+    await expect(staffRun((tx) => deleteClaim(tx, staffCtx, two.id))).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const twoWorkId = (await byNumber()).get(2)!.claim.workItemId!;
+    await run((tx) => deleteClaim(tx, ctx, two.id));
+    expect(await run((tx) => getClaim(tx, tenantId, two.id))).toBeNull();
+    expect(await withSystem((tx) => tx.select({ id: schema.workItems.id }).from(schema.workItems).where(eq(schema.workItems.id, twoWorkId)))).toHaveLength(1);
+    expect(await run((tx) => listWorkForEntity(tx, { tenantId }, { entityType: WARRANTY_CLAIM_ENTITY, entityId: two.id }))).toEqual([]);
   }, 120_000);
 });

@@ -531,6 +531,40 @@ export const DISCIPLINE_LABELS: Readonly<Record<string, string>> = {
 export const DISCIPLINE_ORDER: readonly string[] = ["G", "H", "V", "B", "C", "L", "S", "A", "I", "Q", "F", "P", "D", "M", "E", "W", "T", "R", "X", "Z"];
 export const OTHER_DISCIPLINE = "Other";
 
+// -------------------------------------------------------------------- warranty
+
+/** A claim is what a Work item is linked to (ADR 0076), so the digest and the Work module say which call it is. */
+export const WARRANTY_CLAIM_ENTITY = "job_warranty_claim";
+
+/** Mirrors `job_warranty_claims_decision_valid`. Kept in sync by tests/jobs-warranty.test.ts. */
+export const WARRANTY_DECISIONS = ["pending", "covered", "not_covered"] as const;
+export type WarrantyDecision = (typeof WARRANTY_DECISIONS)[number];
+export const WARRANTY_DECISION_LABELS: Record<WarrantyDecision, string> = {
+  pending: "Undecided",
+  covered: "Covered",
+  not_covered: "Not covered",
+};
+export function isWarrantyDecision(v: string): v is WarrantyDecision {
+  return (WARRANTY_DECISIONS as readonly string[]).includes(v);
+}
+
+/**
+ * Where a claim stands, DERIVED (`claimStanding`): not covered by the
+ * decision; otherwise done, scheduled or open by the Work item it raised.
+ * Never stored, so the tick in Work and the tick on the claim are one fact.
+ */
+export const CLAIM_STANDINGS = ["open", "scheduled", "done", "not_covered"] as const;
+export type ClaimStanding = (typeof CLAIM_STANDINGS)[number];
+export const CLAIM_STANDING_LABELS: Record<ClaimStanding, string> = {
+  open: "Open",
+  scheduled: "Scheduled",
+  done: "Done",
+  not_covered: "Not covered",
+};
+
+/** Mirrors `job_projects_warranty_months_whole`: a hundred years is the most a form accepts. */
+export const WARRANTY_MONTHS_MAX = 1200;
+
 // --------------------------------------------------------------------- markups
 
 /** Mirrors `job_sheet_markups_kind_valid`. Kept in sync by tests/jobs-markups.test.ts. The last three MEASURE (ADR 0074). */

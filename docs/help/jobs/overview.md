@@ -365,6 +365,18 @@ The line above the table adds up the approved ones: *"2 approved, worth $12,500.
 
 The pencil at the end of its row. Everything except which contract it is against. **Changing the lines replaces all of them**, so what you see in the dialog is what you get — and removing every line is a real instruction, not a mistake, because a change order with no lines is a legitimate thing to be.
 
+### Printing a change order
+
+Every row on the Changes tab has a print icon beside the pencil; anybody on the team may use it. It opens the change order as a one-page PDF in a new tab, under your logo and colour where the brand kit has them:
+
+- **CHANGE ORDER** and its number and title; the {{project|lower}}, the site, the contract it changes, the number, `Requested` and either `Approved` with the date or `Status`.
+- **To** the contract's counterparty — the client — with their address from Accounting when they have been billed before; **From** your business.
+- **The change**, as you described it.
+- **Contract sum before this change**, **This change** (signed, so a deduction reads `−800.00`), **Contract sum after this change**. Before is the contract's signed value plus the approved changes that came before this one, so a stack of approved changes prints as a ladder whose last line is the revised contract sum on the {{project|lower}}'s page. For a change not yet approved, before is the sum as it stands today. A contract with no signed value prints the change alone.
+- A signature block for the client and one for you. A proposed change carries a **PROPOSED** watermark and asks for the signature; an approved one says when it was approved; declined and void say so across the page.
+
+The client never sees the change's cost lines or their cost codes: those are what the change is expected to cost you, and they stay on the tab. The document is rendered when you open it, never stored, so a proposed change's paper changes whenever the change does.
+
 ## Billing a contract
 
 Owners only. Click a contract's kind in the table on the **Contracts** tab to open the contract's own page: its **schedule of values** and the **pay applications** drawn against it.
@@ -597,6 +609,20 @@ A draft is written but not sent, so nobody is owed anything. `Closed` still coun
 The pencil at the end of its row. While the order is a **draft**, changing the lines replaces all of them, so what you see in the dialog is what you get; changing only the status leaves the money alone.
 
 Once the order is **issued** or **closed**, its lines are shown in the dialog but cannot be edited — `Issued. The lines change with a change order, on the order's page.` The rest of the dialog still works: the status, the issued date, who is paid, the notes. If a save does try to move locked lines, you see `That order has been issued or billed against, so its lines change with a change order on the order's page.` The same applies to a draft a subcontractor has already billed against.
+
+### Printing an order
+
+The print icon on an order's row on the Ordered tab, or {button:Print order|outline} / {button:Print subcontract|outline} on the order's page. Anybody on the team may print. The PDF:
+
+- **PURCHASE ORDER** or **SUBCONTRACT**, the number and description; the {{project|lower}}, the site, the order number and `Issued` (or *Not yet issued*).
+- **Vendor** or **Subcontractor** with their address from Accounting when the books hold one; **From** your business.
+- **The order**: the lines the order was placed with, each with its cost code when any line has one, and **Order as placed**.
+- **Change orders on this order**: every change on the order, with its amount and where it stands — `approved 2026-05-20`, `proposed`, `declined`, `void`.
+- **Order as placed**, **Approved changes**, and the **Purchase order total** or **Subcontract total**, which counts only the approved changes.
+- **Terms**: the order's notes, paragraph by paragraph.
+- A subcontract carries a signature block for the subcontractor and one for you; a purchase order carries yours. A draft order prints **DRAFT** across the page, a cancelled one **CANCELLED**.
+
+An issued order's lines are locked, so what prints is what was agreed; a draft's paper changes whenever the draft does.
 
 ### Changing an order — subcontract change orders
 
@@ -1102,7 +1128,7 @@ Worth knowing so you are not looking for it:
 - **A unit-price job on the work in progress schedule is measured cost-to-cost against its estimate**, like a fixed-price job; units installed over units estimated is a better measure for this kind of work and is not built.
 - **Time and materials has no rate card of its own.** Each person's rate comes from Time, or one rate on the contract covers everybody; a rate per trade (carpenter, labourer, foreman) or a rate negotiated for one customer is not a thing you can set yet.
 - **A cost-plus job on the work in progress schedule earns what it has cost plus its fee**, capped at its maximum, with no estimate asked for — when it is the job's only signed contract. A time-and-materials job earns its approved hours at their rates plus the rest of its cost marked up, the same way; one with hours nobody has priced shows `Hours on the job with no bill rate` and blocks the period until a rate is set. A job mixing methods is shown and left out, and a period with billings on one cannot post until it has a value.
-- **A subcontractor's application does not print**, and neither does a change order on an order. They are the subcontractor's documents, prepared on their side; your own applications print from their row.
+- **A subcontractor's application does not print.** It is the subcontractor's document, prepared on their side; your own applications, change orders and orders print from their rows.
 - **A lien waiver is not generated.** The form itself is your state's or your lawyer's, not something Jobs prints; the signed one attaches as a photo, a file or from Documents.
 - **The schedule counts calendar days, and a phase waits only for the one it follows.** No working-day calendar or holidays yet, no start-to-start dependencies, no baseline to measure slip against, and nothing tells the trade — the phase names them, and the company calendar and the feed are how they hear. A schedule is typed per {{project|lower}}; a template that fills a new one is next.
 - **A markup is drawn once.** A cloud, an arrow, a note, a pin or a measurement cannot be moved or resized after the fact — rub it out and draw it again — there is no freehand pen, nothing carries a markup onto a reissued sheet, and a marked-up sheet is not printed or sent with its markups on it. No overlay of one issue on another, and the cover sheet's index is not read to fill titles.
@@ -1127,6 +1153,7 @@ Worth knowing so you are not looking for it:
 | Record a lien waiver, or ask for one in Work | ● | ● | ● |
 | Record a subcontractor's certificate or W-9, or ask for one in Work | ● | ● | ● |
 | Write, send, decline or supersede an estimate, or print its proposal | ● | ● | ● |
+| Print a change order, a purchase order or a subcontract | ● | ● | ● |
 | Accept an estimate, or make it the budget or the schedule of values | ● | | |
 | Draw up selections, record the client's choice, remind them in Work | ● | ● | ● |
 | Raise a selection's difference as a change order | ● | | |

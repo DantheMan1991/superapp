@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { Pencil } from "lucide-react";
+import { FileText, Pencil } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -174,7 +174,13 @@ export default async function ChangesPage({
                           : row.changeOrder.status}
                       </Badge>
                     </TableCell>
-                    <TableCell className="w-10 text-right">
+                    <TableCell className="w-24 whitespace-nowrap text-right">
+                      <Button variant="ghost" size="icon" asChild>
+                        <a href={`/api/jobs/change-orders/${row.changeOrder.id}/pdf`} target="_blank" rel="noopener noreferrer">
+                          <FileText className="size-4" />
+                          <span className="sr-only">Print {row.changeOrder.number}</span>
+                        </a>
+                      </Button>
                       {isOwner && (
                         <ChangeOrderForm
                           projectId={project.id}

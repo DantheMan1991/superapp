@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Pencil } from "lucide-react";
+import { FileText, Pencil } from "lucide-react";
 import { eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
@@ -304,7 +304,13 @@ export default async function OrderedPage({
                           : row.commitment.status}
                       </StatusBadge>
                     </TableCell>
-                    <TableCell className="w-10 text-right">
+                    <TableCell className="w-24 whitespace-nowrap text-right">
+                      <Button variant="ghost" size="icon" asChild>
+                        <a href={`/api/jobs/commitments/${row.commitment.id}/pdf`} target="_blank" rel="noopener noreferrer">
+                          <FileText className="size-4" />
+                          <span className="sr-only">Print {row.commitment.number}</span>
+                        </a>
+                      </Button>
                       {isOwner && (
                         <CommitmentForm
                           projectId={project.id}

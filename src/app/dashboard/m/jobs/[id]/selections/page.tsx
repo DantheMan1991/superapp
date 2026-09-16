@@ -1,15 +1,16 @@
 import { notFound } from "next/navigation";
-import { Pencil } from "lucide-react";
+import { Palette, Pencil } from "lucide-react";
 import { eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { isModuleEnabled, requireModuleEnabled } from "@/lib/modules";
-import { labelFor } from "@/lib/packs/resolve";
 import { packContext } from "@/lib/packs/tenant-context";
 import { allowsWrite } from "@/lib/packs/authorize";
 import { formatMoney, formatMoneySign } from "@/lib/money";
-import { PageHeader } from "@/components/app/page-header";
-import { Panel } from "@/components/app/panel";
+import { StatCard } from "@/components/app/stat-card";
+import { DataTable } from "@/components/app/data-table";
+import { EmptyState } from "@/components/app/empty-state";
+import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -117,7 +118,6 @@ export default async function SelectionsPage({ params }: { params: Promise<{ id:
   const canSelect = allowsWrite(ctx.role, "member");
   const canPhoto = canSelect && roleMayWrite(ctx.role);
   const symbol = ctx.tenant.currencySymbol;
-  const projectWord = labelFor(data.labels, "project", "Project");
   const contractOptions = data.contracts.map((c) => ({
     id: c.id,
     label: `${slugLabel(c.kind)}${c.name ? ` · ${c.name}` : ""}`,
@@ -180,11 +180,18 @@ export default async function SelectionsPage({ params }: { params: Promise<{ id:
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="Selections"
-        description={`${projectWord} ${project.number} · ${summary.count} ${summary.count === 1 ? "selection" : "selections"}, ${summary.pending} pending${summary.overdue > 0 ? `, ${summary.overdue} overdue` : ""}`}
-        actions={canSelect ? form() : null}
-      />
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="font-heading text-lg font-semibold tracking-heading">Selections</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            {`${summary.count} ${summary.count === 1 ? "selection" : "selections"}, ${summary.pending} pending`}
+            {summary.overdue > 0 && (
+              <span className="text-destructive">{`, ${summary.overdue} overdue`}</span>
+            )}
+          </p>
+        </div>
+        {canSelect ? form() : null}
+      </div>
 
       {/*
         THE FIVE NUMBERS A CUSTOM BUILDER WATCHES: what the contract set aside,
@@ -192,38 +199,56 @@ export default async function SelectionsPage({ params }: { params: Promise<{ id:
         yet raised, and what has been raised. Computed from the rows; nothing
         here is stored (ADR 0067).
       */}
-      <dl className="grid gap-3 sm:grid-cols-5">
-        {(
-          [
-            ["Allowances", formatMoney(summary.allowancesCents, symbol), `${summary.count} ${summary.count === 1 ? "selection" : "selections"}`],
-            ["Chosen", formatMoney(summary.chosenCents, symbol), `${summary.count - summary.pending} decided`],
-            [
-              summary.differenceCents >= 0 ? "Over" : "Under",
-              formatMoney(Math.abs(summary.differenceCents), symbol),
-              "chosen less allowances",
-            ],
-            ["To raise", formatMoneySign(summary.toRaiseCents, symbol), "approved, not yet a change order"],
-            ["Raised", formatMoneySign(summary.raisedCents, symbol), "as change orders"],
-          ] as const
-        ).map(([label, value, note]) => (
-          <div key={label} className="rounded-lg bg-muted/40 px-3 py-2">
-            <dt className="text-xs text-muted-foreground">{label}</dt>
-            <dd className="text-base font-medium tabular-nums">{value}</dd>
-            <dd className="text-xs text-muted-foreground">{note}</dd>
-          </div>
-        ))}
-      </dl>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <StatCard
+          label="Allowances"
+          value={formatMoney(summary.allowancesCents, symbol)}
+          footnote={`${summary.count} ${summary.count === 1 ? "selection" : "selections"}`}
+        />
+        <StatCard
+          label="Chosen"
+          value={formatMoney(summary.chosenCents, symbol)}
+          footnote={`${summary.count - summary.pending} decided`}
+        />
+        <StatCard
+          label={summary.differenceCents >= 0 ? "Over" : "Under"}
+          value={formatMoney(Math.abs(summary.differenceCents), symbol)}
+          /* Over the allowances is money the client owes; under is money back. */
+          tone={
+            summary.differenceCents > 0
+              ? "destructive"
+              : summary.differenceCents < 0
+                ? "success"
+                : "default"
+          }
+          footnote="chosen less allowances"
+        />
+        <StatCard
+          label="To raise"
+          value={formatMoneySign(summary.toRaiseCents, symbol)}
+          /* Approved and not yet a change order: money agreed and not billed. */
+          tone={summary.toRaiseCents !== 0 ? "accent" : "default"}
+          footnote="approved, not yet a change order"
+        />
+        <StatCard
+          className="col-span-2 sm:col-span-1"
+          label="Raised"
+          value={formatMoneySign(summary.raisedCents, symbol)}
+          footnote="as change orders"
+        />
+      </div>
 
-      <Panel className="p-5">
-        {rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Nothing to choose yet. A selection is a decision the client owes — the
-            tile, the countertops, the front door — with what the contract set
-            aside for it and the date it is needed by. List what is on offer under
-            it, mark what they pick, and raise the difference as a change order.
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
+      <DataTable
+        isEmpty={rows.length === 0}
+        empty={
+          <EmptyState
+            icon={<Palette />}
+            title="Nothing to choose yet"
+            description="A selection is a decision the client owes — the tile, the countertops, the front door — with what the contract set aside for it and the date it is needed by. List what is on offer under it, mark what they pick, and raise the difference as a change order."
+            action={canSelect ? form() : null}
+          />
+        }
+      >
             <Table>
               <TableHeader>
                 <TableRow>
@@ -249,7 +274,21 @@ export default async function SelectionsPage({ params }: { params: Promise<{ id:
                     !row.changeOrder &&
                     s.contractId !== null;
                   return (
-                    <TableRow key={s.id} className={s.status === "cancelled" ? "opacity-60" : undefined}>
+                    <TableRow
+                      key={s.id}
+                      className={cn(
+                        /*
+                         * Attention, not disablement — the hover wash is
+                         * `bg-muted/60`, so a muted row loses its own hover
+                         * feedback. Overdue is the client holding the job up;
+                         * approved-and-unraised is money agreed that nobody has
+                         * billed yet. Two different next actions, two tints.
+                         */
+                        row.overdue && s.status !== "cancelled" && "bg-destructive/5",
+                        canRaise && "bg-warning/5",
+                        s.status === "cancelled" && "opacity-60",
+                      )}
+                    >
                       <TableCell className="font-medium">
                         {s.name}
                         {(s.location || row.codeLabel || row.contract) && (
@@ -355,9 +394,9 @@ export default async function SelectionsPage({ params }: { params: Promise<{ id:
                 })}
               </TableBody>
             </Table>
-          </div>
-        )}
-        <p className="mt-3 text-xs text-muted-foreground">
+      </DataTable>
+
+        <p className="text-xs text-muted-foreground">
           The difference is the chosen price less the allowance, and only a
           selected or approved selection counts. Once a selection is approved,
           the difference is raised as a change order on its contract — the
@@ -365,7 +404,6 @@ export default async function SelectionsPage({ params }: { params: Promise<{ id:
           remembers which, so it cannot be raised twice. A pending selection
           past its date is overdue; <em>Remind</em> puts it in Work.
         </p>
-      </Panel>
     </div>
   );
 }

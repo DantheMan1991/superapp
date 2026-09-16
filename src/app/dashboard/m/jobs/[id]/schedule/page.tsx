@@ -5,11 +5,9 @@ import { eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
-import { labelFor } from "@/lib/packs/resolve";
 import { packContext } from "@/lib/packs/tenant-context";
 import { allowsWrite } from "@/lib/packs/authorize";
 import { todayInTimezone } from "@/lib/timezone";
-import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -71,7 +69,6 @@ export default async function SchedulePage({ params }: { params: Promise<{ id: s
 
   const { project, rows } = data;
   const canEdit = allowsWrite(ctx.role, "member");
-  const projectWord = labelFor(data.labels, "project", "Project");
   const summary = scheduleSummary(rows, today);
   const codeOptions = data.codes.filter((c) => c.isActive).map((c) => ({ id: c.id, label: `${c.code} · ${c.name}` }));
   const others = rows.map((r) => ({ id: r.phase.id, name: r.phase.name, endOn: r.endOn }));
@@ -94,10 +91,11 @@ export default async function SchedulePage({ params }: { params: Promise<{ id: s
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="Schedule"
-        description={`${projectWord} ${project.number} · ${sentence}`}
-        actions={
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="font-heading text-lg font-semibold tracking-heading">Schedule</h2>
+          <p className="mt-0.5 max-w-2xl text-sm text-muted-foreground">{sentence}</p>
+        </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" asChild>
               <Link href="/dashboard/m/scheduling">
@@ -106,8 +104,36 @@ export default async function SchedulePage({ params }: { params: Promise<{ id: s
             </Button>
             {canEdit && <PhaseForm projectId={project.id} parties={data.parties} codes={codeOptions} others={others} />}
           </div>
-        }
-      />
+      </div>
+
+      {/*
+        A LEGEND, because the grid is the only place in the product where colour
+        carries meaning on its own. Every tone here is the one the bars use, so
+        the swatch and the bar cannot drift apart.
+      */}
+      {rows.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-4 rounded-sm bg-success" /> Done
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-4 rounded-sm bg-primary" /> Underway
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-4 rounded-sm bg-muted-foreground/35" /> Planned
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-4 rounded-sm bg-muted-foreground/35 ring-2 ring-destructive" />
+            Overdue
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block size-2.5 rotate-45 bg-muted-foreground/35" /> Milestone
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-3 w-0 border-l-2 border-destructive/70" /> Today
+          </span>
+        </div>
+      )}
 
       <Panel className="p-5">
         {rows.length === 0 ? (
@@ -140,9 +166,16 @@ export default async function SchedulePage({ params }: { params: Promise<{ id: s
                   const left = daysBetween(origin, r.startOn) * DAY_PX;
                   const width = r.durationDays * DAY_PX;
                   const milestone = r.phase.kind === "milestone";
+                  /*
+                   * `bg-success`, not `bg-emerald-500/80`. A bar is a FILL, and
+                   * `--success` is the fill token — its `-foreground` twin is
+                   * the dark one for drawing glyphs and text with. The
+                   * hardcoded emerald had shipped since the slice landed and
+                   * did not move with the theme.
+                   */
                   const tone =
                     r.phase.status === "done"
-                      ? "bg-emerald-500/80"
+                      ? "bg-success"
                       : r.phase.status === "underway"
                         ? "bg-primary"
                         : "bg-muted-foreground/35";

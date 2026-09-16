@@ -13,6 +13,106 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-16 — Back-charges: money that was theirs, kept back from their next application (`claude/back-charges`, ADR 0077)
+
+The open item [ADR 0065](../decisions/0065-a-subcontract-change-order-is-the-orders-own-lines-tagged-with-it.md)
+left behind, which the warranty slice made urgent: a claim names the
+trade held responsible, and the next question is how the money comes
+back off them. A Back-charges panel on every subcontract's page; one
+table, `job_back_charges` (migrations 0369/0370, live on dev and prod,
+225 tables verified).
+
+**NOT A CHANGE ORDER, WHICH IS WHY IT IS ITS OWN TABLE.** A deductive
+change order would restate what the subcontractor agreed to do for what
+money. A back-charge leaves the order alone and keeps money back from a
+payment: what was paid for, how much, when, the cost code the money
+landed on, and the warranty claim it came from when it came from one,
+numbered per order and always positive. `raiseBackCharge`,
+`updateBackCharge`, `setBackChargeVoid` (drop with a reason, or charge it
+again), `setBackChargeApplication` (put it on the draft, or take it off)
+— all owner-only, as every verb on a subcontract's money already is, and
+subcontracts only, because a purchase order has no application for a
+deduction to ride on.
+
+**THE CERTIFICATE ABOVE IT STAYS GROSS, AND THAT IS THE WHOLE TRICK.**
+`job_sub_applications.due_cents` still stores the gross payment due and
+`certifiedCents` is untouched, so the next application's *less previous
+certificates* reads what was certified for the WORK. Netting a
+back-charge into the certificate would deduct it twice — once on its own
+application and again by leaving that much apparently still due — and the
+ops scenario pins it: application 1 certifies 27,000 with 800 charged
+back, application 2's previous certificates read 27,000 and its payment
+due is 9,000, not 9,800.
+
+**ONE NEGATIVE LINE EACH ON THE BILL.** Approving the application adds a
+line per back-charge: negative, against the subcontract expense account,
+tagged with the job AND the code the cost landed on, described
+*Back-charge 1 — Cleaned the site after them (application 1)*. So the job
+cost report's spend on that code nets out — 30,000 billed less 800
+recovered reads 29,200 — which is the figure a builder actually reads.
+Voiding the application voids the bill and frees what it carried
+(`freeBackChargesFrom`); a draft deleted frees them through the
+column-list SET NULL.
+
+**WHERE IT STANDS IS DERIVED** (`backChargeStanding`): void by its own
+status, else open / on the draft / deducted by the application it rides.
+A deducted one is history: no edit, no drop, no moving it.
+
+**MORE THAN THE PAYMENT REFUSES, BY NAME.** `BACK_CHARGES_EXCEED` is a
+new code whose message carries both figures and the answer — *2
+back-charges come to 1,250.00 against a payment of 500.00. Take some of
+them off this application and deduct them on a later one.*
+
+Three FKs SET NULL in the column-list form (cost code, warranty claim,
+sub application); the order cascades. A CHECK refuses the one impossible
+state, a dropped back-charge still sitting on an application.
+
+Also here: the applications table's `Payment due` is now what the
+subcontractor is actually paid, with *9,000.00 less 250.00 charged back*
+underneath; and a warranty claim's row says what has been charged back to
+the trade and whether it has been taken yet.
+
+Tests: `tests/jobs-back-charges.test.ts` (the status CHECK, the money and
+words rules, all three column-list SET NULLs, the standing including a
+voided application reading open again, the totals by standing, the net,
+the sentences and the two messages); one ops scenario in
+`tests/jobs-ops.test.ts` (owner-only, subcontracts only, every field
+refused in words, a claim from another job refused, the numbering, the
+deduction on a draft and the refusals around it, the bill's three lines
+and the ledger netting 29,200 / −3,000 / −26,200, the job cost report,
+the gross certificate on application 2, `BACK_CHARGES_EXCEED` at the
+boundary, a deducted one immovable, the void freeing what it carried and
+only that, dropped and charged again, the claim found from the job, and a
+code retired leaving the money); one isolation block in
+`tests/isolation/jobs.test.ts`.
+
+**DRIVEN on the dev branch's Hilltop Farm, signed in as the owner, end to
+end from the warranty claim to the bill.** On 24-109's framing subcontract
+SC-24109-1 (Pleasant Valley Feed Mill, $34,000 with one approved change),
+*Raise a back-charge* took *Cleaned the site after them*, 800.00, spent
+2026-09-20, against `06 10 00 · Rough carpentry` and citing warranty claim
+1 (*Drip under the kitchen sink*) — the claim picker offered only that
+job's two claims. With no draft open the panel read *800.00 charged back:
+800.00 waiting for an application to come off*, and no Deduct button was
+there to press. Application 3 (period to 2026-11-30, 10% retainage, ref.
+FR-2043) was started, *Deduct on 3* toasted *Back-charge 1 comes off
+application 3*, and the panel turned to *800.00 not yet deducted* with the
+row on the draft. The draft's certificate read completed and stored
+34,000.00, retainage −3,400.00, earned less retainage 30,600.00, less
+previous certificates −21,600.00, **current payment due 9,000.00**.
+Approving it posted bill FR-2043 for **8,200.00** with three lines a
+bookkeeper can read: *Application 3 — 06 10 00 · Rough carpentry through
+2026-11-30* to `5100` 10,000.00, *Retainage held (10%)* to `2120`
+(1,000.00), and ***Back-charge 1 — Cleaned the site after them
+(application 3)*** to `5100` **(800.00)**. The applications table then read
+*8,200.00* with *9,000.00 less 800.00 charged back* underneath; the
+back-charge turned `Deducted · Application 3` with its edit, drop and take-off
+buttons gone; the job's Actual cost moved 64,500.00 → 73,700.00 (10,000 of
+work less the 800 recovered); and the claim's row on the Warranty tab now
+says *$800.00 charged back to the trade*. Not driven: dropping one and
+charging it again, `BACK_CHARGES_EXCEED`, and voiding an application to
+free what it carried — all three are in the ops scenario.
+
 ### 2026-09-16 — Slice 13a: warranty (`claude/warranty`, ADR 0076)
 
 The last row of the construction plan, the half of it every builder in the
@@ -3221,6 +3321,7 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_sheets` | One page of one of a set's files with the number the trade calls it by, normalised on write, a title and a revision mark; **and its scale** (ADR 0074): page points per foot or metre with the page's size in points beside it, so a measurement's fractions become feet without the PDF. | Cascade from the project, the set AND the document (a page of a file that is gone is nothing to open). UNIQUE (set, number) and (set, document, page). CHECK: number present, page ≥ 1. The discipline is read off the number, never stored. |
 | `job_sheet_markups` | A cloud, an arrow, a note or a pin on ONE issue of a sheet (ADR 0073): the shape as fractions of the page (`geometry` jsonb), a colour from the five, words for a note or a pin, and the punch item a pin raised while it exists (`work_item_id`); **and a length, an area or a count** (ADR 0074): `{points}`, its quantity derived through the sheet's scale, the estimate line it was pushed onto while the line exists (`estimate_line_id`) and what it pushed. | Cascade from the project and from the sheet; **SET NULL (column-list form) from `work_items` and from `job_estimate_lines`** — a punch item cleared leaves the pin as a note, a line taken off leaves the measurement. CHECK: kind (seven), colour, words present for a note or a pin, words ≤ 2,000, geometry an object. |
 | `job_warranty_claims` | The call after the job is done (ADR 0076): a number per job, what and where, reported when and by whom, the trade responsible (a party), the cost code the fix is charged under, the decision — pending / covered / not_covered — with its day and reason, and the Work item raised for it while it exists (`work_item_id`). | Cascade from the project; **SET NULL (column-list form) from `work_items` and from `job_cost_codes`**; no `onDelete` to the party (the CRM merge rule). UNIQUE (project, number). CHECK: number > 0, title present and ≤ 300, decision in the three, `(decision = 'pending') = (decided_on is null)`, every text bounded. The project's months: `coalesce(months, 1) between 1 and 1200`. Standing is never stored. |
+| `job_back_charges` | Money the business spent that was the subcontractor's (ADR 0077), kept back from their next application: a number per order, what was paid for, the amount (always > 0), the day it went out, the cost code it landed on, the warranty claim it came from, and the application it rides while it rides one. | Cascade from the commitment; **SET NULL (column-list form) from `job_cost_codes`, `job_warranty_claims` AND `job_sub_applications`**. UNIQUE (commitment, number). CHECK: number > 0, amount > 0, description present and ≤ 300, status in (`open`, `void`), and `void` implies no application — the one impossible state. Where it stands is never stored. |
 | `job_phases` | A phase or milestone of a job's schedule (ADR 0071): the calendar item that holds its dates, name, kind, planned / underway / done, the predecessor and its lag, the party doing it, the cost code, notes, order. | Cascade from the project AND from its `schedule_items` row (a phase without its item is nothing); **no action to itself, the party and the code** (the verb re-points successors before a removal). One phase per item. CHECK: kind, status, lag within a year, not its own predecessor. The dates are NOT here — they are the item's. |
 | `job_lien_waivers` | A lien waiver as a RECORD (11a, ADR 0066): the claimant (any party), the job, the order and the billed application it covers, its kind (conditional/unconditional × progress/final), the through date, the amount, and whether it was requested or received. The signed copy is a Documents attachment (`job_lien_waiver`). | Cascade from the project and the order; **no action to the party and to the application** — who signed is held, and a named application stays. CHECK: received has its date, requested has none, void keeps what it had; amount ≥ 0. Nothing here says "outstanding": the gap is derived from the applications' bills at read time. |
 | `job_commitment_lines` | The money, one cost code at a time — the lines the order was placed with (`change_order_id` null) and each change order's, tagged with it (4b). | Cascade from the commitment and from the change; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative on an original line — a credit is a change order — and a change's line may be negative, the one exception in the CHECK. A line counts when it is original or its change is approved: `countedCommitmentLine`, one predicate for every roll-up. |
@@ -3252,6 +3353,13 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Key files & seams
 
+- `src/packs/jobs/back-charges-ops.ts` + `back-charges-math.ts` +
+  `components/back-charge-form.tsx` — back-charges (ADR 0077): a record on
+  the ORDER, never a deductive change order; the standing derived from the
+  application it rides (`backChargeStanding`), the deduction added to that
+  application's bill by `approveSubApplication` as one negative line each,
+  and the certificate above it deliberately gross so the next application
+  does not hand the money back.
 - `src/packs/jobs/warranty-ops.ts` + `warranty-math.ts` + `components/warranty-forms.tsx`
   — the warranty (ADR 0076): the period's arithmetic pure (`addMonths`,
   `warrantyExpiresOn`, `warrantyStanding`, `withinWarranty`,
@@ -3357,6 +3465,13 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Decisions & gotchas
 
+- **[ADR 0077](../decisions/0077-a-back-charge-is-money-the-business-spent-that-was-the-subcontractors-kept-back-from-their-next-application-and-never-a-change-to-the-order.md)** —
+  a back-charge is a record on the order and never a deductive change
+  order; it comes off the BOTTOM of an application, so `due_cents` and
+  `certifiedCents` stay gross and the deduction cannot be taken twice; it
+  reaches the books once, as its own negative line against the code the
+  cost landed on, so the job cost report nets out; more than the payment
+  refuses by name rather than making a negative bill.
 - **[ADR 0076](../decisions/0076-a-warranty-claim-is-the-record-of-a-call-its-work-is-a-work-item-the-period-is-the-jobs-and-a-claim-outside-it-is-said-never-refused.md)** —
   a warranty claim is the record of a call and its work is a Work item
   linked to the CLAIM (so the punch list stays the punch list and Work says
@@ -3552,11 +3667,17 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Open items
 
+- **A back-charge is one order's, and settles in one go.** Telling the
+  subcontractor by Mail, charging one against a supplier's purchase order,
+  splitting one across two applications and disputing one as a state of its
+  own are not built (ADR 0077): a disputed back-charge is dropped with the
+  reason and charged again if it survives the argument.
 - **A warranty is one period per job.** The 1-2-10 tiers some builders
-  carry, a per-contract warranty, telling the owner by Mail and the
-  back-charge to the responsible trade (still open from ADR 0065; a claim
-  now names the trade, which is the first half of it) are not built; a
-  manufacturer's warranty on a product is a document in the cabinet.
+  carry, a per-contract warranty and telling the owner by Mail are not
+  built; a manufacturer's warranty on a product is a document in the
+  cabinet. ~~The back-charge to the responsible trade~~ **closed
+  2026-09-16 (ADR 0077)**: a claim names the trade and the cost comes off
+  that trade's next application.
 - **A sheet is a page to look at, draw on and measure (9a–9c; ADRs 0072–0074).**
   ~~Markups~~ shipped as 9b, ~~the takeoff~~ as 9c. Still each a slice of its
   own: comparing two issues of a sheet by overlay, reading the cover sheet's
@@ -3637,10 +3758,10 @@ ordering only bites when two new tables reference each other in one file.
 - ~~**A billed subcontract cannot be changed.**~~ — **closed 2026-09-14
   (slice 4b, ADR 0065)**: a change order on the order adds lines the next
   application bills, and an issued order's lines are locked the way a signed
-  value is. Still open from it: **a back-charge** — money deducted from a
-  subcontractor's payment for something the business paid on their behalf —
-  is not a change to the scope and is not built; it is a negative line on
-  the application with its own account, the day a GC asks. ~~And **a change
+  value is. ~~Still open from it: **a back-charge**~~ — **closed 2026-09-16
+  (ADR 0077)**: money the business spent that was the subcontractor's is a
+  record on the order, not a change to the scope, and rides an application
+  as its own negative line. ~~And **a change
   order does not print**~~ — **closed 2026-09-16 (ADR 0075)**: the order prints
   as placed with its changes beneath it, and the client's change order
   prints at its price; the subcontractor's application still does not,

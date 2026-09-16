@@ -101,7 +101,13 @@ export const jobSubApplications = pgTable(
     previousCertificatesCents: bigint("previous_certificates_cents", { mode: "number" })
       .notNull()
       .default(0),
-    /** Current payment due — what the bill was approved for. */
+    /**
+     * Current payment due, GROSS OF BACK-CHARGES: what the certificate says
+     * is due for the work this period. The bill is for this less whatever
+     * back-charges rode on the application (ADR 0077), which are their own
+     * rows; keeping this figure gross is what stops the next application's
+     * "less previous certificates" from handing a deduction back.
+     */
     dueCents: bigint("due_cents", { mode: "number" }).notNull().default(0),
     /** The Accounting bill this application became at approval. */
     billId: uuid("bill_id"),

@@ -67,6 +67,17 @@ import {
   waiverGaps,
 } from "@/packs/jobs/compliance-ops";
 import { AskForWaiverButton, LienWaiverForm } from "@/packs/jobs/components/lien-waiver-form";
+import { listBackCharges } from "@/packs/jobs/back-charges-ops";
+import { backChargeSentence, backChargeTotals } from "@/packs/jobs/back-charges-math";
+import { listClaims } from "@/packs/jobs/warranty-ops";
+import {
+  BackChargeDialog,
+  DeductBackChargeButton,
+  VoidBackChargeButton,
+} from "@/packs/jobs/components/back-charge-form";
+import { StatusBadge, type StatusTone } from "@/packs/jobs/components/status-badge";
+import { BACK_CHARGE_STANDING_LABELS, type BackChargeStanding } from "@/packs/jobs/vocabulary";
+import { todayInTimezone } from "@/lib/timezone";
 import {
   NewPayApplication,
   PayApplicationEditor,
@@ -99,6 +110,14 @@ function billWord(status: string): string {
  * bill (ADR 0061). A purchase order has no applications: it is billed with a
  * bill in Accounting, because retainage attaches to bought labour.
  */
+/** A back-charge's standing, in the tones the pack's other chips use. */
+const BACK_CHARGE_TONES: Record<BackChargeStanding, StatusTone> = {
+  open: "pending",
+  on_application: "info",
+  deducted: "good",
+  void: "quiet",
+};
+
 export default async function CommitmentPage({
   params,
 }: {
@@ -116,7 +135,7 @@ export default async function CommitmentPage({
       if (!project) return null;
       const commitment = await getCommitment(tx, ctx.tenant.id, commitmentId);
       if (!commitment || commitment.projectId !== project.id) return null;
-      const [rows, apps, codes, billing, changes, clientChanges, allWaivers, coverage, gaps, chasing, parties, pack] =
+      const [rows, apps, codes, billing, changes, clientChanges, allWaivers, coverage, gaps, chasing, backCharges, claims, parties, pack] =
         await Promise.all([
           listCommitments(tx, ctx.tenant.id, project.id),
           listSubApplications(tx, ctx.tenant.id, commitment.id),
@@ -130,6 +149,8 @@ export default async function CommitmentPage({
           waiverCoverage(tx, ctx.tenant.id, project.id),
           waiverGaps(tx, ctx.tenant.id, project.id),
           listWaiverWork(tx, ctx.tenant.id, commitment.id),
+          listBackCharges(tx, ctx.tenant.id, commitment.id),
+          listClaims(tx, ctx.tenant.id, project),
           tx
             .select({ id: schema.parties.id, name: schema.parties.displayName })
             .from(schema.parties)
@@ -180,6 +201,8 @@ export default async function CommitmentPage({
         coverage: coverage.get(commitment.id) ?? null,
         gaps: gaps.filter((g) => g.commitmentId === commitment.id),
         chasing,
+        backCharges,
+        claims,
         parties,
         photos,
         files,
@@ -225,6 +248,13 @@ export default async function CommitmentPage({
   /** Recording a waiver is a chore; a photo of the signed page follows Documents' own rule. */
   const canWaiver = allowsWrite(ctx.role, "member");
   const canPhoto = canWaiver && roleMayWrite(ctx.role);
+  const today = todayInTimezone(ctx.tenant.timezone);
+  /** The job's cost codes and its warranty claims, as a back-charge picks them (ADR 0077). */
+  const backChargeCodes = data.codes.map((c) => ({ id: c.id, label: `${c.code} · ${c.name}` }));
+  const claimOptions = data.claims.map((c) => ({
+    id: c.claim.id,
+    label: `${c.claim.number} · ${c.claim.title}`,
+  }));
   const gapFor = new Map(data.gaps.map((g) => [g.subApplicationId, g]));
   /** Whether a RECEIVED waiver of the kind covers the application: names it, is final, or runs through its period end. */
   const onFile = (app: { id: string; periodTo: string }, unconditional: boolean) =>
@@ -600,7 +630,12 @@ export default async function CommitmentPage({
                           {formatMoney(row.totals.retainageCents, symbol)}
                         </TableCell>
                         <TableCell className="text-right tabular-nums font-medium">
-                          {formatMoneySign(row.totals.dueCents, symbol)}
+                          {/* What they are actually paid: the certificate less whatever back-charges ride on it (ADR 0077). */}
+                          {formatMoneySign(row.backChargesCents > 0 ? row.netDueCents : row.totals.dueCents, symbol)}
+                          {row.backChargesCents > 0 && (
+                            <span className="block text-xs font-normal text-muted-foreground">
+                              {formatMoneySign(row.totals.dueCents, symbol)} less {formatMoney(row.backChargesCents, symbol)} charged back</span>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Badge variant={row.app.status === "billed" ? "default" : "secondary"}>
@@ -697,6 +732,152 @@ export default async function CommitmentPage({
             all. Approving posts the bill to the job and each line&apos;s cost
             code, so it lands on the job cost report. Only the latest billed
             application can be voided.
+          </p>
+        </Panel>
+      )}
+
+
+      {subcontract && (
+        <Panel className="p-5">
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-heading text-sm font-medium tracking-heading">Back-charges</h2>
+            {isOwner && (
+              <BackChargeDialog
+                projectId={project.id}
+                commitmentId={commitment.id}
+                today={today}
+                codes={backChargeCodes}
+                claims={claimOptions}
+              />
+            )}
+          </div>
+          {/*
+            NOT A CHANGE ORDER (ADR 0077): the order still says what they agreed
+            to do for what money. A back-charge is money the business spent that
+            was theirs, kept back from the next application — a negative line on
+            that bill against the code the cost landed on, so the job cost
+            report nets out.
+          */}
+          <p className="mb-3 text-sm text-muted-foreground">
+            {data.backCharges.length === 0
+              ? "Nothing charged back. When you pay for something that was theirs — the cleanup they skipped, the fix your crew made good — record it here and it comes off their next application."
+              : backChargeSentence(
+                  backChargeTotals(data.backCharges.map((b) => ({ amountCents: b.backCharge.amountCents, standing: b.standing }))),
+                  draft !== null,
+                )}
+          </p>
+          {data.backCharges.length > 0 && (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-8">#</TableHead>
+                    <TableHead>What you paid for</TableHead>
+                    <TableHead>Spent</TableHead>
+                    <TableHead>Cost code</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead>Standing</TableHead>
+                    <TableHead className="w-40" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.backCharges.map((row) => {
+                    const b = row.backCharge;
+                    const settled = row.standing === "deducted";
+                    return (
+                      <TableRow key={b.id}>
+                        <TableCell className="text-xs text-muted-foreground">{b.number}</TableCell>
+                        <TableCell>
+                          <span className={settled || row.standing === "void" ? "text-muted-foreground" : ""}>{b.description}</span>
+                          {row.claimNumber !== null && (
+                            <span className="block text-xs text-muted-foreground">
+                              From warranty claim {row.claimNumber}
+                              {row.claimTitle ? ` · ${row.claimTitle}` : ""}
+                            </span>
+                          )}
+                          {b.notes && <span className="block text-xs text-muted-foreground">{b.notes}</span>}
+                          {row.standing === "void" && b.voidReason && (
+                            <span className="block text-xs text-muted-foreground">Dropped: {b.voidReason}</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">{b.incurredOn}</TableCell>
+                        <TableCell>{row.codeLabel ?? <span className="text-muted-foreground">—</span>}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          <span className={row.standing === "void" ? "text-muted-foreground line-through" : ""}>
+                            {formatMoney(b.amountCents, symbol)}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge tone={BACK_CHARGE_TONES[row.standing]}>{BACK_CHARGE_STANDING_LABELS[row.standing]}</StatusBadge>
+                          {row.applicationNumber !== null && (
+                            <span className="block text-xs text-muted-foreground">Application {row.applicationNumber}</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {isOwner && !settled && (
+                            <div className="flex items-center justify-end gap-0.5">
+                              {row.standing === "open" && draft && (
+                                <DeductBackChargeButton
+                                  projectId={project.id}
+                                  commitmentId={commitment.id}
+                                  id={b.id}
+                                  number={b.number}
+                                  subApplicationId={draft.app.id}
+                                  applicationNumber={draft.app.number}
+                                />
+                              )}
+                              {row.standing === "on_application" && (
+                                <DeductBackChargeButton
+                                  projectId={project.id}
+                                  commitmentId={commitment.id}
+                                  id={b.id}
+                                  number={b.number}
+                                  subApplicationId={null}
+                                  applicationNumber={row.applicationNumber}
+                                />
+                              )}
+                              {row.standing !== "void" && (
+                                <BackChargeDialog
+                                  key={`${b.id}:${b.version}`}
+                                  projectId={project.id}
+                                  commitmentId={commitment.id}
+                                  today={today}
+                                  codes={backChargeCodes}
+                                  claims={claimOptions}
+                                  existing={{
+                                    id: b.id,
+                                    version: b.version,
+                                    number: b.number,
+                                    description: b.description,
+                                    amount: (b.amountCents / 100).toFixed(2),
+                                    incurredOn: b.incurredOn,
+                                    costCodeId: b.costCodeId,
+                                    warrantyClaimId: b.warrantyClaimId,
+                                    notes: b.notes,
+                                  }}
+                                />
+                              )}
+                              <VoidBackChargeButton
+                                projectId={project.id}
+                                commitmentId={commitment.id}
+                                id={b.id}
+                                number={b.number}
+                                isVoid={row.standing === "void"}
+                              />
+                            </div>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+          <p className="mt-3 text-xs text-muted-foreground">
+            A back-charge does not change the subcontract: the order still says what they agreed to do for what money. It comes off the bottom of an
+            application as its own line on the bill, against the cost code the money landed on. One deducted on a billed application is fixed; void
+            that application and it is owed again.
           </p>
         </Panel>
       )}

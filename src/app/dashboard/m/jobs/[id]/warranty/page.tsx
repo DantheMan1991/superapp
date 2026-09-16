@@ -12,6 +12,7 @@ import { Panel } from "@/components/app/panel";
 import { StatusBadge, type StatusTone } from "@/packs/jobs/components/status-badge";
 import { getDefaultCostCodeSet, getProject, jobCostRows, listCommitments, listCostCodes } from "@/packs/jobs/ops";
 import { listClaims, type ClaimRow } from "@/packs/jobs/warranty-ops";
+import { listBackChargesForProject } from "@/packs/jobs/back-charges-ops";
 import { claimsSentence, monthsWord, periodSentence, summariseClaims, warrantyStanding, type WarrantyState } from "@/packs/jobs/warranty-math";
 import {
   ClaimDecisionDialog,
@@ -80,8 +81,9 @@ export default async function WarrantyPage({ params }: { params: Promise<{ id: s
       const project = await getProject(tx, ctx.tenant.id, id);
       if (!project) return null;
       const setId = project.costCodeSetId ?? (await getDefaultCostCodeSet(tx, ctx.tenant.id))?.id ?? null;
-      const [claims, parties, orders, codes, pack] = await Promise.all([
+      const [claims, backCharges, parties, orders, codes, pack] = await Promise.all([
         listClaims(tx, ctx.tenant.id, project),
+        listBackChargesForProject(tx, ctx.tenant.id, project.id),
         tx
           .select({ id: schema.parties.id, name: schema.parties.displayName })
           .from(schema.parties)
@@ -94,7 +96,7 @@ export default async function WarrantyPage({ params }: { params: Promise<{ id: s
       // The job cost report is read only when a claim names a code: it is the heavier query on the page.
       const codeIds = new Set(claims.map((c) => c.claim.costCodeId).filter((x): x is string => x !== null));
       const costRows = codeIds.size > 0 ? (await jobCostRows(tx, ctx.tenant.id, project.id)).filter((r) => codeIds.has(r.costCodeId)) : [];
-      return { project, claims, parties, orders, codes, costRows, labels: pack.labels };
+      return { project, claims, backCharges, parties, orders, codes, costRows, labels: pack.labels };
     },
     { role: ctx.role },
   );
@@ -113,6 +115,17 @@ export default async function WarrantyPage({ params }: { params: Promise<{ id: s
     .sort((a, b) => Number(b.onJob) - Number(a.onJob) || a.name.localeCompare(b.name));
   const codeOptions = data.codes.map((c) => ({ id: c.id, label: `${c.code} ${c.name}` }));
   const spentCents = data.costRows.reduce((s, r) => s + r.actualCents, 0);
+  /** What has been charged back to the trade for each claim (ADR 0077), by claim. */
+  const chargedBack = new Map<string, { amountCents: number; deducted: boolean }>();
+  for (const b of data.backCharges) {
+    const claimId = b.backCharge.warrantyClaimId;
+    if (!claimId || b.standing === "void") continue;
+    const seen = chargedBack.get(claimId) ?? { amountCents: 0, deducted: true };
+    chargedBack.set(claimId, {
+      amountCents: seen.amountCents + b.backCharge.amountCents,
+      deducted: seen.deducted && b.standing === "deducted",
+    });
+  }
   const sorted = [...claims].sort(byAttention);
 
   return (
@@ -179,16 +192,16 @@ export default async function WarrantyPage({ params }: { params: Promise<{ id: s
           </p>
         ) : (
           <div className="relative w-full min-w-0 overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[64rem] text-sm">
               <thead className="text-xs text-muted-foreground">
                 <tr>
-                  <th className="px-2 py-1.5 text-left">No.</th>
-                  <th className="px-2 py-1.5 text-left">What</th>
-                  <th className="px-2 py-1.5 text-left">Reported</th>
-                  <th className="px-2 py-1.5 text-left">Trade</th>
-                  <th className="px-2 py-1.5 text-left">Cost code</th>
-                  <th className="px-2 py-1.5 text-left">Standing</th>
-                  <th className="px-2 py-1.5 text-left">Decision</th>
+                  <th className="w-10 px-2 py-1.5 text-left">No.</th>
+                  <th className="min-w-[18rem] px-2 py-1.5 text-left">What</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 text-left">Reported</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 text-left">Trade</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 text-left">Cost code</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 text-left">Standing</th>
+                  <th className="min-w-[12rem] px-2 py-1.5 text-left">Decision</th>
                   <th className="px-2 py-1.5"></th>
                 </tr>
               </thead>
@@ -204,19 +217,29 @@ export default async function WarrantyPage({ params }: { params: Promise<{ id: s
                           <span>{c.number}</span>
                         </div>
                       </td>
-                      <td className="px-2 py-1.5">
+                      <td className="min-w-[18rem] px-2 py-1.5">
                         <span className={row.standing === "done" || row.standing === "not_covered" ? "text-muted-foreground" : "font-medium"}>{c.title}</span>
                         {(c.location || c.notes) && (
                           <p className="mt-0.5 text-xs text-muted-foreground">{[c.location || null, c.notes || null].filter(Boolean).join(" · ")}</p>
                         )}
+                        {(() => {
+                          const back = chargedBack.get(c.id);
+                          if (!back) return null;
+                          return (
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              {formatMoney(back.amountCents, symbol)} charged back to the trade
+                              {back.deducted ? "" : ", not yet deducted"}
+                            </p>
+                          );
+                        })()}
                       </td>
                       <td className="whitespace-nowrap px-2 py-1.5">
                         {c.reportedOn}
                         {c.reportedBy && <p className="text-xs text-muted-foreground">by {c.reportedBy}</p>}
                         {row.withinWarranty === false && <p className="text-xs text-destructive">Outside the warranty period</p>}
                       </td>
-                      <td className="px-2 py-1.5">{row.partyName ?? <span className="text-muted-foreground">—</span>}</td>
-                      <td className="px-2 py-1.5">{row.codeLabel ?? <span className="text-muted-foreground">—</span>}</td>
+                      <td className="min-w-[8rem] px-2 py-1.5">{row.partyName ?? <span className="text-muted-foreground">—</span>}</td>
+                      <td className="whitespace-nowrap px-2 py-1.5">{row.codeLabel ?? <span className="text-muted-foreground">—</span>}</td>
                       <td className="px-2 py-1.5">
                         <StatusBadge tone={STANDING_TONES[row.standing]}>{CLAIM_STANDING_LABELS[row.standing]}</StatusBadge>
                         {row.work?.dueOn && row.standing === "scheduled" && <p className="mt-0.5 text-xs text-muted-foreground">{row.work.dueOn}</p>}

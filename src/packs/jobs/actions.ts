@@ -68,6 +68,7 @@ import {
 } from "./drawings-ops";
 import { addMarkup, deleteMarkup, updateMarkup } from "./markups-ops";
 import { decideClaim, deleteClaim, recordClaim, scheduleClaim, setClaimDone, setWarrantyPeriod, updateClaim } from "./warranty-ops";
+import { raiseBackCharge, setBackChargeApplication, setBackChargeVoid, updateBackCharge } from "./back-charges-ops";
 import { clearSheetScale, pushTakeoff, setSheetScale, unpushTakeoff } from "./takeoff-ops";
 import {
   approveSubApplication,
@@ -221,6 +222,9 @@ function toResult(err: unknown): { error: string } {
         };
       case "ONE_DRAFT":
         return { error: "This contract already has a draft application. Finish that one first." };
+      case "BACK_CHARGES_EXCEED":
+        // The verb's own sentence: it names the two figures and what to do.
+        return { error: sentence(err.message) };
       case "NOTHING_DUE":
         return { error: "Nothing is due on this application, so there is nothing to invoice." };
       case "COUNTERPARTY_REQUIRED":
@@ -3931,6 +3935,166 @@ export async function deleteClaimAction(input: unknown) {
       { role: ctx.role, userId: ctx.userId },
     );
     revalidateWarranty(parsed.data.projectId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// -------------------------------------------------------------- back-charges
+
+/** The order's page, the job's Warranty tab (a claim says when it was charged back), and the job cost report. */
+function revalidateBackCharges(projectId: string, commitmentId: string): void {
+  revalidatePath(`${BASE}/${projectId}/commitments/${commitmentId}`);
+  revalidatePath(`${BASE}/${projectId}/warranty`);
+  revalidatePath(`${BASE}/${projectId}/ordered`);
+  revalidatePath(`${BASE}/${projectId}/cost`);
+}
+
+const backChargeFields = {
+  description: z.string().trim().min(1).max(300),
+  amount: z.string().trim().min(1),
+  incurredOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  costCodeId: z.string().uuid().nullable().optional(),
+  warrantyClaimId: z.string().uuid().nullable().optional(),
+  notes: z.string().trim().max(4000).optional(),
+};
+
+/** "800" and "1,200.50" both work; anything else is refused before the verb sees it. */
+function backChargeCents(amount: string): number | null {
+  return parseMoneyToCents(amount);
+}
+
+export async function raiseBackChargeAction(input: unknown) {
+  const parsed = z
+    .object({ projectId: z.string().uuid(), commitmentId: z.string().uuid(), ...backChargeFields })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Say what was paid for, how much, and when." };
+  const { projectId, commitmentId, amount, ...rest } = parsed.data;
+  const amountCents = backChargeCents(amount);
+  if (amountCents === null || amountCents <= 0) {
+    return { error: "A back-charge is an amount of more than nothing, like 800 or 1,200.50." };
+  }
+  try {
+    const ctx = await gate();
+    const created = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const row = await raiseBackCharge(tx, ctx, commitmentId, { ...rest, amountCents });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "back_charge.raised",
+          targetType: "back_charge",
+          targetId: row.id,
+          meta: { projectId, commitmentId, number: row.number },
+        });
+        return row;
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateBackCharges(projectId, commitmentId);
+    return { ok: true as const, id: created.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function updateBackChargeAction(input: unknown) {
+  const parsed = z
+    .object({
+      projectId: z.string().uuid(),
+      commitmentId: z.string().uuid(),
+      id: z.string().uuid(),
+      version: z.number().int().positive(),
+      ...backChargeFields,
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Say what was paid for, how much, and when." };
+  const { projectId, commitmentId, id, version, amount, ...patch } = parsed.data;
+  const amountCents = backChargeCents(amount);
+  if (amountCents === null || amountCents <= 0) {
+    return { error: "A back-charge is an amount of more than nothing, like 800 or 1,200.50." };
+  }
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        await updateBackCharge(tx, ctx, id, { ...patch, amountCents }, version);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "back_charge.updated",
+          targetType: "back_charge",
+          targetId: id,
+          meta: { projectId, commitmentId },
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateBackCharges(projectId, commitmentId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function setBackChargeVoidAction(input: unknown) {
+  const parsed = z
+    .object({
+      projectId: z.string().uuid(),
+      commitmentId: z.string().uuid(),
+      id: z.string().uuid(),
+      isVoid: z.boolean(),
+      reason: z.string().trim().max(2000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { projectId, commitmentId, id, isVoid, reason } = parsed.data;
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        await setBackChargeVoid(tx, ctx, id, isVoid, reason);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: isVoid ? "back_charge.dropped" : "back_charge.reopened",
+          targetType: "back_charge",
+          targetId: id,
+          meta: { projectId, commitmentId },
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateBackCharges(projectId, commitmentId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function setBackChargeApplicationAction(input: unknown) {
+  const parsed = z
+    .object({
+      projectId: z.string().uuid(),
+      commitmentId: z.string().uuid(),
+      id: z.string().uuid(),
+      subApplicationId: z.string().uuid().nullable(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { projectId, commitmentId, id, subApplicationId } = parsed.data;
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      (tx) => setBackChargeApplication(tx, ctx, id, subApplicationId),
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateBackCharges(projectId, commitmentId);
     return { ok: true as const };
   } catch (err) {
     return toResult(err);

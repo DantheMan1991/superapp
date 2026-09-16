@@ -110,6 +110,15 @@ import {
   setBackChargeVoid,
   updateBackCharge,
 } from "../src/packs/jobs/back-charges-ops";
+import {
+  bondingView,
+  getBond,
+  listBonds,
+  recordBond,
+  setBondStatus,
+  setBondingLine,
+  updateBond,
+} from "../src/packs/jobs/bonding-ops";
 import { listOpenWork, listWorkForEntity } from "../src/lib/work/entity-work";
 import {
   createSelection,
@@ -5113,5 +5122,151 @@ d("jobs ops", () => {
     await withSystem((tx) => tx.delete(schema.jobCostCodes).where(eq(schema.jobCostCodes.id, spare.id)));
     const survivor = (await run((tx) => getBackCharge(tx, tenantId, four.id)))!;
     expect([survivor.costCodeId, survivor.amountCents, survivor.tenantId]).toEqual([null, 120_00, tenantId]);
+  }, 180_000);
+
+  it("BONDING (ADR 0078): a bond is recorded on the job and names a contract when there is one, owner-only, with the kind an open taxonomy and every date checked; a job COUNTS ONCE against the surety's line however many bonds it carries; the line is per company and refuses a single-job limit above the aggregate; releasing, expiring and cancelling each give the capacity back; a contract gone leaves the bond on the job", async () => {
+    const entity = await newCompany("Bond Co 1");
+    const other = await newCompany("Bond Co 2");
+    const today = "2026-09-16";
+    const { project, contract, code, surety, elsewhere, elsewhereContract } = await run(async (tx) => {
+      await ensureBilling(tx);
+      const p = await createProject(tx, ctx, { entityId: entity, number: "OPS-BOND1", name: "Bonded" });
+      const set = (await getDefaultCostCodeSet(tx, tenantId)) ?? (await createCostCodeSet(tx, ctx, { name: "Bond codes" }));
+      const code = await createCostCode(tx, ctx, { setId: set.id, code: "B-OPS-01", name: "Bonds and insurance", sortOrder: 5 });
+      const surety = await seedVendor(tx, "Travelers");
+      const owner = await seedVendor(tx, "Bond owner");
+      const c = await createContract(tx, ctx, {
+        projectId: p.id,
+        kind: "new_home",
+        counterpartyPartyId: owner,
+        valueCents: 900_000_00,
+        status: "signed",
+      });
+      const e = await createProject(tx, ctx, { entityId: other, number: "OPS-BOND2", name: "Somebody else's" });
+      const ec = await createContract(tx, ctx, { projectId: e.id, kind: "new_home", valueCents: 100_000_00, status: "signed" });
+      return { project: p, contract: c, code, surety, elsewhere: e, elsewhereContract: ec };
+    });
+    const base = { kind: "performance", penalSumCents: 900_000_00, effectiveOn: "2026-03-01" };
+
+    // Owner-only, and every field checked in words.
+    await expect(run((tx) => recordBond(tx, staffCtx, project.id, base))).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(run((tx) => recordBond(tx, ctx, project.id, { ...base, kind: "Performance Bond" }))).rejects.toMatchObject({ code: "INVALID_KIND" });
+    await expect(run((tx) => recordBond(tx, ctx, project.id, { ...base, penalSumCents: 0 }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => recordBond(tx, ctx, project.id, { ...base, premiumCents: -1 }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => recordBond(tx, ctx, project.id, { ...base, effectiveOn: "March" }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(
+      run((tx) => recordBond(tx, ctx, project.id, { ...base, expiresOn: "2026-02-01" })),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    // Another job's contract cannot be the obligation.
+    await expect(
+      run((tx) => recordBond(tx, ctx, project.id, { ...base, contractId: elsewhereContract.id })),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE" });
+
+    // A bid bond comes BEFORE the contract, so it names none and starts asked for.
+    const bid = await run((tx) => recordBond(tx, ctx, project.id, { kind: "bid", penalSumCents: 45_000_00 }));
+    expect([bid.status, bid.effectiveOn, bid.contractId]).toEqual(["requested", null, null]);
+    // The pair a surety writes together, both against the one contract.
+    const performance = await run((tx) =>
+      recordBond(tx, ctx, project.id, {
+        ...base,
+        contractId: contract.id,
+        suretyPartyId: surety,
+        premiumCents: 13_500_00,
+        costCodeId: code.id,
+        number: "SUR-4471082",
+        expiresOn: "2027-03-01",
+      }),
+    );
+    const payment = await run((tx) => recordBond(tx, ctx, project.id, { ...base, kind: "payment", contractId: contract.id, suretyPartyId: surety }));
+    expect([performance.status, performance.kind, payment.kind]).toEqual(["issued", "performance", "payment"]);
+    // An open taxonomy: what a residential developer posts with the municipality is a kind too.
+    const subdivision = await run((tx) => recordBond(tx, ctx, project.id, { kind: "site_improvement", penalSumCents: 60_000_00 }));
+    expect(subdivision.kind).toBe("site_improvement");
+
+    const rows = await run((tx) => listBonds(tx, tenantId, project.id, today));
+    expect(rows.map((r) => [r.bond.kind, r.standing])).toEqual([
+      ["bid", "requested"],
+      ["performance", "active"],
+      ["payment", "active"],
+      ["site_improvement", "requested"],
+    ]);
+    expect([rows[1].suretyName, rows[1].codeLabel, rows[1].contractLabel]).toEqual([
+      expect.stringContaining("Travelers"),
+      "B-OPS-01 · Bonds and insurance",
+      // The kind reads the way the contracts table does, not as its slug.
+      "New home",
+    ]);
+
+    // THE LINE. Owner-only, and a single-job limit above the aggregate is a typo.
+    await expect(
+      run((tx) => setBondingLine(tx, staffCtx, entity, { singleJobLimitCents: 1_500_000_00, aggregateLimitCents: 5_000_000_00 })),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      run((tx) => setBondingLine(tx, ctx, entity, { singleJobLimitCents: 6_000_000_00, aggregateLimitCents: 5_000_000_00 })),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => setBondingLine(tx, ctx, entity, { singleJobLimitCents: 0, aggregateLimitCents: null }))).rejects.toMatchObject({
+      code: "INVALID_VALUE",
+    });
+    const line = await run((tx) => setBondingLine(tx, ctx, entity, { singleJobLimitCents: 1_500_000_00, aggregateLimitCents: 5_000_000_00 }));
+    expect([line.singleJobLimitCents, line.aggregateLimitCents, line.version]).toEqual([1_500_000_00, 5_000_000_00, 1]);
+    // One row per company: setting it again is the same row.
+    const again = await run((tx) => setBondingLine(tx, ctx, entity, { singleJobLimitCents: 1_500_000_00, aggregateLimitCents: 6_000_000_00 }));
+    expect([again.id, again.version, again.aggregateLimitCents]).toEqual([line.id, 2, 6_000_000_00]);
+
+    // THE POINT: four bonds on one job, and the job counts ONCE.
+    let view = await run((tx) => bondingView(tx, tenantId, entity, today));
+    expect([view.capacity.jobCount, view.capacity.usedCents, view.capacity.availableCents, view.capacity.over]).toEqual([
+      1,
+      900_000_00,
+      5_100_000_00,
+      false,
+    ]);
+    expect(view.jobs[0].bonds).toHaveLength(4);
+    expect([view.jobs[0].number, view.jobs[0].contractCents, view.jobs[0].backlogCents]).toEqual(["OPS-BOND1", 900_000_00, 900_000_00]);
+    // The other company's job is nowhere near this line.
+    expect((await run((tx) => bondingView(tx, tenantId, other, today))).capacity.usedCents).toBe(0);
+
+    // The standing verbs, and the dates each needs.
+    await expect(run((tx) => setBondStatus(tx, ctx, bid.id, { status: "issued" }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => setBondStatus(tx, ctx, performance.id, { status: "released" }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(
+      run((tx) => setBondStatus(tx, ctx, performance.id, { status: "released", releasedOn: "2026-01-01" })),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => setBondStatus(tx, ctx, bid.id, { status: "finished" }))).rejects.toMatchObject({ code: "INVALID_STATUS" });
+    await run((tx) => setBondStatus(tx, ctx, bid.id, { status: "void" }));
+    await run((tx) => setBondStatus(tx, ctx, subdivision.id, { status: "void" }));
+    await run((tx) => setBondStatus(tx, ctx, performance.id, { status: "released", releasedOn: "2026-09-10" }));
+
+    // One bond released, the other still in force: the job is STILL on the line, once.
+    view = await run((tx) => bondingView(tx, tenantId, entity, today));
+    expect([view.capacity.jobCount, view.capacity.usedCents]).toEqual([1, 900_000_00]);
+    expect(view.jobs[0].bonds.map((b) => b.bond.kind)).toEqual(["payment"]);
+
+    // The last one released: the job drops off, and so does the exposure.
+    await run((tx) => setBondStatus(tx, ctx, payment.id, { status: "released", releasedOn: "2026-09-11" }));
+    view = await run((tx) => bondingView(tx, tenantId, entity, today));
+    expect([view.capacity.jobCount, view.capacity.usedCents, view.capacity.availableCents]).toEqual([0, 0, 6_000_000_00]);
+
+    // An EXPIRED bond lets go the same way, and says so on the list.
+    const expired = await run((tx) =>
+      recordBond(tx, ctx, project.id, { kind: "maintenance", penalSumCents: 90_000_00, effectiveOn: "2025-09-01", expiresOn: "2026-09-01" }),
+    );
+    view = await run((tx) => bondingView(tx, tenantId, entity, today));
+    expect([view.capacity.usedCents, view.attention.map((a) => a.row.standing)]).toEqual([0, ["expired"]]);
+    await run((tx) => setBondStatus(tx, ctx, expired.id, { status: "issued", effectiveOn: "2026-09-01" }));
+    await run((tx) => updateBond(tx, ctx, expired.id, { kind: "maintenance", penalSumCents: 90_000_00, effectiveOn: "2026-09-01", expiresOn: "2026-10-10" }, 2));
+    view = await run((tx) => bondingView(tx, tenantId, entity, today));
+    expect([view.capacity.usedCents, view.attention.map((a) => a.row.standing)]).toEqual([900_000_00, ["expiring"]]);
+
+    // A CANCELLED job ties up nothing: the surety's exposure went with it.
+    await run((tx) => updateProject(tx, ctx, project.id, { status: "cancelled" }));
+    expect((await run((tx) => bondingView(tx, tenantId, entity, today))).capacity.usedCents).toBe(0);
+    await run((tx) => updateProject(tx, ctx, project.id, { status: "active" }));
+
+    // A contract gone leaves the bond on the job, which is where the surety thinks it is.
+    await withSystem((tx) => tx.delete(schema.jobContracts).where(eq(schema.jobContracts.id, contract.id)));
+    const survivor = (await run((tx) => getBond(tx, tenantId, payment.id)))!;
+    expect([survivor.contractId, survivor.penalSumCents, survivor.tenantId]).toEqual([null, 900_000_00, tenantId]);
+    await withSystem((tx) => tx.delete(schema.jobProjects).where(eq(schema.jobProjects.id, elsewhere.id)));
   }, 180_000);
 });

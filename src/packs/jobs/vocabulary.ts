@@ -531,6 +531,54 @@ export const DISCIPLINE_LABELS: Readonly<Record<string, string>> = {
 export const DISCIPLINE_ORDER: readonly string[] = ["G", "H", "V", "B", "C", "L", "S", "A", "I", "Q", "F", "P", "D", "M", "E", "W", "T", "R", "X", "Z"];
 export const OTHER_DISCIPLINE = "Other";
 
+// -------------------------------------------------------------------- bonding
+
+/**
+ * Mirrors `job_bonds_kind_format`. An OPEN taxonomy, as a contract's kind
+ * is: bid, performance, payment and maintenance are the four everybody
+ * writes, a residential developer posts a subdivision bond with the
+ * municipality, and a pack that enumerated them would be guessing at
+ * somebody's state (ADR 0078).
+ */
+export const BOND_KIND_FORMAT = /^[a-z][a-z0-9_]{0,62}$/;
+export function isBondKind(v: string): boolean {
+  return BOND_KIND_FORMAT.test(v);
+}
+/** What the pack offers on the form. Nothing refuses a kind that is not here. */
+export const SUGGESTED_BOND_KINDS = ["bid", "performance", "payment", "maintenance", "subdivision"] as const;
+
+/** Mirrors `job_bonds_status_valid`. Kept in sync by tests/jobs-bonding.test.ts. */
+export const BOND_STATUSES = ["requested", "issued", "released", "void"] as const;
+export type BondStatus = (typeof BOND_STATUSES)[number];
+export const BOND_STATUS_LABELS: Record<BondStatus, string> = {
+  requested: "Asked for",
+  issued: "Issued",
+  released: "Released",
+  void: "Dropped",
+};
+export function isBondStatus(v: string): v is BondStatus {
+  return (BOND_STATUSES as readonly string[]).includes(v);
+}
+
+/**
+ * Where a bond stands, DERIVED (`bondStanding`): its status, and for one in
+ * force the expiry against today. Never stored, so a bond does not go stale
+ * sitting in a table the way a paper certificate does in a drawer.
+ */
+export const BOND_STANDINGS = ["requested", "active", "expiring", "expired", "released", "void"] as const;
+export type BondStanding = (typeof BOND_STANDINGS)[number];
+export const BOND_STANDING_LABELS: Record<BondStanding, string> = {
+  requested: "Asked for",
+  active: "In force",
+  expiring: "Ending soon",
+  expired: "Expired",
+  released: "Released",
+  void: "Dropped",
+};
+
+/** A bond still in force ties up capacity; every other standing has let it go. */
+export const BONDED_STANDINGS: readonly BondStanding[] = ["requested", "active", "expiring"];
+
 // ---------------------------------------------------------------- back-charges
 
 /** Mirrors `job_back_charges_status_valid`. Kept in sync by tests/jobs-back-charges.test.ts. */

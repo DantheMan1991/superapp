@@ -13,6 +13,88 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-16 — Bonding: the record on the job, the capacity across them (`claude/bonding`, ADR 0078)
+
+The second half of the construction plan's last row, and the half any
+contractor who touches public, institutional or developer work lives
+with. Two tables (`job_bonds`, `job_bonding_lines`; migrations 0371/0372,
+live on dev and prod, 227 tables verified), a Bonds panel on the job's
+Contracts tab, and a Bonding page across jobs at
+`/dashboard/m/jobs/bonding` beside Warranty and Subcontractors.
+
+**THE RECORD IS THE EASY HALF.** A bond hangs off the PROJECT and names
+`contract_id` when it has one, because a bid bond exists before any
+contract does — two nullable parents and a CHECK to keep them honest
+would have bought nothing. Kind, surety (a party), penal sum, premium,
+the cost code the premium belongs on, effective and expiry dates, and a
+status of `requested` / `issued` / `released` / `void`. The kind is an
+OPEN taxonomy with a format check, as a contract's is: bid, performance,
+payment, maintenance and subdivision are suggested, and
+`site_improvement` is accepted because a residential developer posts one.
+The premium is recorded and never posted — the surety's invoice is an
+ordinary bill in Accounting.
+
+**THE CAPACITY IS WHAT THE SCREEN EXISTS FOR.** *Can I bid this one* is
+the question, and neither number that answers it is anywhere in the
+books: the single-job and aggregate limits come off the surety's letter,
+so `job_bonding_lines` holds them, ONE ROW PER COMPANY (the axis the WIP
+schedule is picked on, because a surety underwrites a legal entity).
+Either may be blank. Nothing tenant-facing writes `tenant_modules.config`,
+which is why this is a table and not a config value like the required
+party-document list.
+
+**A JOB COUNTS ONCE, HOWEVER MANY BONDS IT CARRIES.** Performance and
+payment bonds are issued as a pair on the same contract, and a surety
+backs the WORK. Summing per bond would report twice the exposure on every
+properly bonded job — the most plausible bug in the slice, so it has its
+own invariant in `bonding-math.ts`, its own test name, and the bonds are
+folded per job before the arithmetic sees them. **Used is BACKLOG**, the
+contract less what has been billed, floored at nothing: a job billed to
+the end ties up nothing even while its bond is open. Both figures already
+existed (`projectValues`, `billedByProject`).
+
+**A BOND TIES UP THE LINE FROM THE DAY IT IS ASKED FOR** — the job is
+going ahead either way, and a contractor who waited for the paper would
+bid over the line. `requested`, `active` and `expiring` hold it;
+`released`, `expired` and `void` let it go, and so does cancelling the
+job. `wouldFit` and `fitSentence` answer the bid question in a line, and
+say `unknown` rather than yes when no limit has been recorded.
+
+Two bugs the tests and the drive caught: the *worth a look* list was
+built inside the capacity branch, so an **expired bond on a job with
+nothing else on it was invisible** — which is exactly the job you want to
+hear about; and the bond's contract label printed the raw slug
+(`cost_plus_build`) where the contracts table above it prints
+*Cost plus build*.
+
+Tests: `tests/jobs-bonding.test.ts` (13 pure: the status CHECK and the
+kind FORMAT mirrored, the money, dates and limit CHECKs, both column-list
+SET NULLs, every standing against today including the expiring edge, what
+ties up capacity, backlog floored at nothing, a job counted once, what is
+left unknown until an aggregate is typed, the four fit verdicts and every
+sentence); one ops scenario in `tests/jobs-ops.test.ts`; one isolation
+block in `tests/isolation/jobs.test.ts`.
+
+**DRIVEN on the dev branch's Hilltop Farm, signed in as the owner.** The
+Bonding page opened empty and said so. *Set the line* took 1,500,000 and
+5,000,000 and the header turned to *0.00 of bonded work on hand across 0
+projects, leaving 5,000,000.00 of the 5,000,000.00 your surety backs.* On
+24-109's Contracts tab, *Record a bond* took a performance bond —
+SUR-4471082, 89,122.55, premium 1,337.00, against *Cost plus build ·
+Barn conversion*, effective 2026-03-01 to 2026-10-10 — which read
+`Ending soon` (24 days out, inside the month). A payment bond for the
+same sum on the same contract made it *2 bonds: 1 ending soon, 1 in
+force.* The Bonding page then read **43,525.05 of bonded work on hand
+across 1 project** — the contract 89,122.55 less 45,597.50 billed,
+**counted once for two bonds** — leaving 4,956,474.95, with both bonds
+listed against the one row and the performance bond under *Worth a look*.
+Releasing the performance bond left the job on the line at the same
+figure, held by the payment bond alone, and the panel read *2 bonds: 1
+released, 1 in force.* At 375 px the four figures stack and the body does
+not scroll sideways. Not driven: a bid bond with no contract, dropping
+one, an expired bond, the multi-company switcher (Hilltop Farm has one),
+and `wouldFit` — all in the tests.
+
 ### 2026-09-16 — Back-charges: money that was theirs, kept back from their next application (`claude/back-charges`, ADR 0077)
 
 The open item [ADR 0065](../decisions/0065-a-subcontract-change-order-is-the-orders-own-lines-tagged-with-it.md)
@@ -3322,6 +3404,8 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_sheet_markups` | A cloud, an arrow, a note or a pin on ONE issue of a sheet (ADR 0073): the shape as fractions of the page (`geometry` jsonb), a colour from the five, words for a note or a pin, and the punch item a pin raised while it exists (`work_item_id`); **and a length, an area or a count** (ADR 0074): `{points}`, its quantity derived through the sheet's scale, the estimate line it was pushed onto while the line exists (`estimate_line_id`) and what it pushed. | Cascade from the project and from the sheet; **SET NULL (column-list form) from `work_items` and from `job_estimate_lines`** — a punch item cleared leaves the pin as a note, a line taken off leaves the measurement. CHECK: kind (seven), colour, words present for a note or a pin, words ≤ 2,000, geometry an object. |
 | `job_warranty_claims` | The call after the job is done (ADR 0076): a number per job, what and where, reported when and by whom, the trade responsible (a party), the cost code the fix is charged under, the decision — pending / covered / not_covered — with its day and reason, and the Work item raised for it while it exists (`work_item_id`). | Cascade from the project; **SET NULL (column-list form) from `work_items` and from `job_cost_codes`**; no `onDelete` to the party (the CRM merge rule). UNIQUE (project, number). CHECK: number > 0, title present and ≤ 300, decision in the three, `(decision = 'pending') = (decided_on is null)`, every text bounded. The project's months: `coalesce(months, 1) between 1 and 1200`. Standing is never stored. |
 | `job_back_charges` | Money the business spent that was the subcontractor's (ADR 0077), kept back from their next application: a number per order, what was paid for, the amount (always > 0), the day it went out, the cost code it landed on, the warranty claim it came from, and the application it rides while it rides one. | Cascade from the commitment; **SET NULL (column-list form) from `job_cost_codes`, `job_warranty_claims` AND `job_sub_applications`**. UNIQUE (commitment, number). CHECK: number > 0, amount > 0, description present and ≤ 300, status in (`open`, `void`), and `void` implies no application — the one impossible state. Where it stands is never stored. |
+| `job_bonds` | A surety bond (ADR 0078): the kind (OPEN taxonomy, format-checked), the surety (a party), the penal sum, the premium and the code it belongs on, the contract it names when there is one, effective / expiry / released dates, and `requested` \| `issued` \| `released` \| `void`. | Cascade from the project; **SET NULL (column-list form) from `job_contracts` and `job_cost_codes`**; no `onDelete` to the party. CHECK: kind format, penal sum > 0, `coalesce(premium, 0) >= 0`, a bond in force carries its effective date, `(status = 'released') = (released_on is not null)`, expiry not before effective. Where it stands is never stored. |
+| `job_bonding_lines` | What one company's surety will back: the single-job and aggregate limits off the letter, and the surety. **One row per company** — a surety underwrites a legal entity. | Composite FK to `entities` (no `onDelete`) and to `parties`. UNIQUE (tenant, entity). CHECK: each limit positive when set (`coalesce` guarded), and a single-job limit never above the aggregate. |
 | `job_phases` | A phase or milestone of a job's schedule (ADR 0071): the calendar item that holds its dates, name, kind, planned / underway / done, the predecessor and its lag, the party doing it, the cost code, notes, order. | Cascade from the project AND from its `schedule_items` row (a phase without its item is nothing); **no action to itself, the party and the code** (the verb re-points successors before a removal). One phase per item. CHECK: kind, status, lag within a year, not its own predecessor. The dates are NOT here — they are the item's. |
 | `job_lien_waivers` | A lien waiver as a RECORD (11a, ADR 0066): the claimant (any party), the job, the order and the billed application it covers, its kind (conditional/unconditional × progress/final), the through date, the amount, and whether it was requested or received. The signed copy is a Documents attachment (`job_lien_waiver`). | Cascade from the project and the order; **no action to the party and to the application** — who signed is held, and a named application stays. CHECK: received has its date, requested has none, void keeps what it had; amount ≥ 0. Nothing here says "outstanding": the gap is derived from the applications' bills at read time. |
 | `job_commitment_lines` | The money, one cost code at a time — the lines the order was placed with (`change_order_id` null) and each change order's, tagged with it (4b). | Cascade from the commitment and from the change; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative on an original line — a credit is a change order — and a change's line may be negative, the one exception in the CHECK. A line counts when it is original or its change is approved: `countedCommitmentLine`, one predicate for every roll-up. |
@@ -3353,6 +3437,13 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Key files & seams
 
+- `src/packs/jobs/bonding-ops.ts` + `bonding-math.ts` +
+  `components/bond-form.tsx` — surety bonds and the line behind them
+  (ADR 0078): the bond on the JOB naming a contract when there is one,
+  the standing derived against today, and `bondingView` folding a job's
+  bonds into ONE entry before `bondingCapacity` — because performance and
+  payment come as a pair and counting both doubles the exposure. The
+  capacity screen is `app/dashboard/m/jobs/bonding`.
 - `src/packs/jobs/back-charges-ops.ts` + `back-charges-math.ts` +
   `components/back-charge-form.tsx` — back-charges (ADR 0077): a record on
   the ORDER, never a deductive change order; the standing derived from the
@@ -3465,6 +3556,14 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Decisions & gotchas
 
+- **[ADR 0078](../decisions/0078-a-bond-is-recorded-on-the-job-and-a-job-counts-once-against-the-suretys-line.md)** —
+  a bond is recorded on the JOB and names a contract when there is one (a
+  bid bond has none); a job counts ONCE against the surety's line however
+  many bonds it carries; what is used is BACKLOG, not contract value; a
+  bond ties up the line from the day it is asked for and lets go when
+  released, expired or dropped; the limits are a row per company because
+  nothing tenant-facing writes pack config; the kind is an open taxonomy
+  and the premium is recorded, never posted.
 - **[ADR 0077](../decisions/0077-a-back-charge-is-money-the-business-spent-that-was-the-subcontractors-kept-back-from-their-next-application-and-never-a-change-to-the-order.md)** —
   a back-charge is a record on the order and never a deductive change
   order; it comes off the BOTTOM of an application, so `due_cents` and
@@ -3667,6 +3766,12 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Open items
 
+- **A bond is a record, not a document, and the line is one surety's.**
+  Printing a bond, attaching the surety's paper to the row (Documents'
+  attachments are the seam), capacity as a percentage of working capital,
+  the surety's rate schedule and consent of surety are not built (ADR
+  0078). A bond the business requires FROM a subcontractor is the party
+  document slice's job, which already lists a bond as a kind.
 - **A back-charge is one order's, and settles in one go.** Telling the
   subcontractor by Mail, charging one against a supplier's purchase order,
   splitting one across two applications and disputing one as a state of its

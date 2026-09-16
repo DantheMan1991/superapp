@@ -73,4 +73,5 @@ export * from "./jobs-drawings";
 export * from "./jobs-markups";
 export * from "./jobs-warranty";
 export * from "./jobs-back-charges";
+export * from "./jobs-bonding";
 export * from "./jobs-party-documents";

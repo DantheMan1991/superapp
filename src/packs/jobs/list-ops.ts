@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lte, ne, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import {
   type ProjectRow,
@@ -11,6 +11,8 @@ import {
 import { ledgerTermsByProject } from "./wip-ops";
 import { VALUED_CONTRACT_STATUSES } from "./vocabulary";
 import { type ProjectValuation, measureProject } from "./list-math";
+import { addDays, dateInTimezone } from "@/lib/timezone";
+import { COMMITTED_STATUSES, EXPIRING_SOON_DAYS } from "./vocabulary";
 
 /**
  * Everything the module home puts on a row, read for the whole list at once.
@@ -137,4 +139,149 @@ export async function projectListEntries(
       }),
     };
   });
+}
+
+/**
+ * What the CARD view needs on top of a row, for every project at once.
+ *
+ * ── THREE STATEMENTS FOR THE WHOLE BOARD ────────────────────────────────────
+ *
+ * The table view needs none of this; the board shows what is coming up on each
+ * job and what needs attention, and the obvious way to build it — call
+ * `listPhases`, `selectionSummary` and the certificate reads per card — is
+ * three queries per project. Sixty jobs would be a hundred and eighty round
+ * trips to draw one screen. Each read below is grouped in the database and
+ * keyed by project id, the same rule `projectListEntries` follows.
+ */
+export interface BoardExtras {
+  /** The soonest phase that is not done. Past its date is still what is next — it is late. */
+  nextItem: { name: string; startOn: string; isMilestone: boolean; late: boolean } | null;
+  pendingSelections: number;
+  /** Pending and past the date the client was asked for. */
+  overdueSelections: number;
+  /**
+   * Certificates on this job's subcontractors that have expired or are about
+   * to. A job's parties are the ones it has actually ORDERED from: a party in
+   * the address book with a lapsed certificate is not this job's problem.
+   */
+  lapsedCertificates: number;
+}
+
+export async function boardExtras(
+  tx: Tx,
+  tenantId: string,
+  projectIds: readonly string[],
+  timeZone: string,
+  today: string,
+): Promise<Map<string, BoardExtras>> {
+  const out = new Map<string, BoardExtras>();
+  for (const id of projectIds) {
+    out.set(id, {
+      nextItem: null,
+      pendingSelections: 0,
+      overdueSelections: 0,
+      lapsedCertificates: 0,
+    });
+  }
+  if (projectIds.length === 0) return out;
+
+  const soon = addDays(today, EXPIRING_SOON_DAYS);
+  const ids = [...projectIds];
+
+  const [phases, selections, certificates] = await Promise.all([
+    /*
+     * A phase's dates live on the scheduling module's calendar item, never on
+     * the phase row (ADR 0071), so the date comes through the join. Ordered
+     * soonest first and taken one per project below — one statement rather
+     * than a `DISTINCT ON` this query planner would have to be talked into.
+     */
+    tx
+      .select({
+        projectId: schema.jobPhases.projectId,
+        name: schema.jobPhases.name,
+        kind: schema.jobPhases.kind,
+        startsAt: schema.scheduleItems.startsAt,
+      })
+      .from(schema.jobPhases)
+      .innerJoin(schema.scheduleItems, eq(schema.scheduleItems.id, schema.jobPhases.itemId))
+      .where(
+        and(
+          eq(schema.jobPhases.tenantId, tenantId),
+          inArray(schema.jobPhases.projectId, ids),
+          ne(schema.jobPhases.status, "done"),
+          isNull(schema.scheduleItems.cancelledAt),
+        ),
+      )
+      .orderBy(asc(schema.scheduleItems.startsAt)),
+
+    tx
+      .select({
+        projectId: schema.jobSelections.projectId,
+        pending: sql<number>`count(*)`.mapWith(Number),
+        overdue: sql<number>`count(*) filter (
+          where ${schema.jobSelections.neededBy} is not null
+            and ${schema.jobSelections.neededBy} < ${today}
+        )`.mapWith(Number),
+      })
+      .from(schema.jobSelections)
+      .where(
+        and(
+          eq(schema.jobSelections.tenantId, tenantId),
+          inArray(schema.jobSelections.projectId, ids),
+          eq(schema.jobSelections.status, "pending"),
+        ),
+      )
+      .groupBy(schema.jobSelections.projectId),
+
+    /*
+     * DISTINCT, because one subcontractor can hold several orders on the same
+     * job and a lapsed certificate is one problem, not one per order.
+     */
+    tx
+      .selectDistinct({
+        projectId: schema.jobCommitments.projectId,
+        documentId: schema.jobPartyDocuments.id,
+      })
+      .from(schema.jobCommitments)
+      .innerJoin(
+        schema.jobPartyDocuments,
+        and(
+          eq(schema.jobPartyDocuments.tenantId, schema.jobCommitments.tenantId),
+          eq(schema.jobPartyDocuments.partyId, schema.jobCommitments.partyId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.jobCommitments.tenantId, tenantId),
+          inArray(schema.jobCommitments.projectId, ids),
+          inArray(schema.jobCommitments.status, [...COMMITTED_STATUSES]),
+          lte(schema.jobPartyDocuments.expiresOn, soon),
+        ),
+      ),
+  ]);
+
+  for (const row of phases) {
+    const entry = out.get(row.projectId);
+    // Ordered soonest first, so the first one seen is the next one.
+    if (!entry || entry.nextItem) continue;
+    const startOn = dateInTimezone(row.startsAt, timeZone);
+    entry.nextItem = {
+      name: row.name,
+      startOn,
+      isMilestone: row.kind === "milestone",
+      late: startOn < today,
+    };
+  }
+  for (const row of selections) {
+    const entry = out.get(row.projectId);
+    if (!entry) continue;
+    entry.pendingSelections = row.pending;
+    entry.overdueSelections = row.overdue;
+  }
+  for (const row of certificates) {
+    const entry = out.get(row.projectId);
+    if (!entry) continue;
+    entry.lapsedCertificates += 1;
+  }
+  return out;
 }

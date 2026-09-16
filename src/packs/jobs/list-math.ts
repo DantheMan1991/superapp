@@ -214,3 +214,46 @@ export function barPercent(ppm: number | null): number {
   if (ppm === null || ppm <= 0) return 0;
   return Math.min(100, ppm / 10_000);
 }
+
+/**
+ * THE BOARD'S THREE COLUMNS, which are not the same cut as the pills.
+ *
+ * The pills are a status filter; the board answers "what is happening on site",
+ * so it collapses five statuses into three questions: is it running, is it
+ * coming, or is it neither. On hold sits with complete rather than with active
+ * because a stalled job needs the same thing a finished one does — somebody to
+ * decide it is over or start it again — and `cancelled` joins them rather than
+ * vanishing, because a job that disappears from a view is the one nobody
+ * notices (the same reason the list keeps cancelled under All).
+ */
+export const BOARD_GROUPS = ["on_site", "coming_up", "closed"] as const;
+
+export type BoardGroupKey = (typeof BOARD_GROUPS)[number];
+
+export const BOARD_GROUP_LABELS: Record<BoardGroupKey, string> = {
+  on_site: "On site",
+  coming_up: "Coming up",
+  closed: "Stalled & closed",
+};
+
+/** The dot beside a column heading. A FILL, so the fill tokens are right here. */
+export const BOARD_GROUP_TONES: Record<BoardGroupKey, string> = {
+  on_site: "bg-success",
+  coming_up: "bg-primary",
+  closed: "bg-muted-foreground/40",
+};
+
+export function boardGroupFor(status: string): BoardGroupKey {
+  if (status === "active") return "on_site";
+  if (status === "planned") return "coming_up";
+  return "closed";
+}
+
+/** Which view the module home is showing. A search param, so a refresh keeps it. */
+export const LIST_VIEWS = ["table", "board"] as const;
+
+export type ListView = (typeof LIST_VIEWS)[number];
+
+export function isListView(value: unknown): value is ListView {
+  return typeof value === "string" && (LIST_VIEWS as readonly string[]).includes(value);
+}

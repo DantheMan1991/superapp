@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  BOARD_GROUPS,
   LIST_FILTERS,
+  boardGroupFor,
+  isListView,
   barPercent,
   filterCounts,
   filterKeyFor,
@@ -194,5 +197,40 @@ describe("barPercent", () => {
     expect(barPercent(WIP_PPM)).toBe(100);
     // percentCompletePpm caps already; the bar refuses to overrun regardless.
     expect(barPercent(WIP_PPM * 3)).toBe(100);
+  });
+});
+
+describe("the board's three columns", () => {
+  it("collapses five statuses into three questions", () => {
+    expect(boardGroupFor("active")).toBe("on_site");
+    expect(boardGroupFor("planned")).toBe("coming_up");
+    expect(boardGroupFor("on_hold")).toBe("closed");
+    expect(boardGroupFor("complete")).toBe("closed");
+  });
+
+  it("keeps a cancelled job on the board rather than dropping it", () => {
+    // A job that disappears from a view is the one nobody notices — the same
+    // reason the table keeps cancelled under All.
+    expect(boardGroupFor("cancelled")).toBe("closed");
+  });
+
+  it("puts an unrecognised status somewhere rather than nowhere", () => {
+    const group = boardGroupFor("something_else");
+    expect(BOARD_GROUPS).toContain(group);
+  });
+
+  it("groups every status into a real column", () => {
+    for (const status of ["planned", "active", "on_hold", "complete", "cancelled"]) {
+      expect(BOARD_GROUPS).toContain(boardGroupFor(status));
+    }
+  });
+});
+
+describe("the view parameter", () => {
+  it("accepts only the two views", () => {
+    expect(isListView("table")).toBe(true);
+    expect(isListView("board")).toBe(true);
+    expect(isListView("cards")).toBe(false);
+    expect(isListView(undefined)).toBe(false);
   });
 });

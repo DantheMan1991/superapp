@@ -13,6 +13,61 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-15 — The board, and the last designed slice (`claude/jobs-board`, jobs redesign 1c)
+
+The module home gets a second view: the same jobs as cards, grouped by what is
+happening on site. **Both views read the same `ProjectListEntry`**, so a figure
+cannot differ between them — the board adds only what a card shows and a row
+does not.
+
+`Table` / `Board` is a segmented pill of two LINKS, and the view is a `?v=`
+search param like the filter beside it, so it survives a refresh and can be sent
+to somebody. Every link carries the other two choices through, so switching view
+never resets the filter or the search.
+
+**THREE COLUMNS, WHICH ARE NOT THE SAME CUT AS THE PILLS.** The pills are a
+status filter; the board asks what is happening, so five statuses collapse into
+three: On site (active), Coming up (planned), Stalled & closed (on hold,
+complete **and cancelled**). Cancelled joins them rather than vanishing, for the
+reason the table keeps it under All — a job that disappears from a view is the
+one nobody notices.
+
+**THREE STATEMENTS FOR THE WHOLE BOARD** (`boardExtras` in `list-ops.ts`). The
+obvious build — `listPhases`, `selectionSummary` and the certificate reads per
+card — is three queries per project: sixty jobs would be a hundred and eighty
+round trips to draw one screen. Each is grouped in the database and keyed by
+project id:
+
+- **The next scheduled item.** A phase's dates live on the scheduling module's
+  calendar item, never on the phase row (ADR 0071), so the date comes through
+  the join; rows come back soonest-first and the first one seen per project is
+  the next one. Past its date is still what is next — it is late, and the line
+  goes red.
+- **Pending selections**, with the overdue ones counted separately so the chip
+  can say which it is.
+- **Lapsing certificates**, `selectDistinct` because one subcontractor can hold
+  several orders on the same job and a lapsed certificate is one problem, not
+  one per order. A job's parties are the ones it has actually ORDERED from: a
+  party in the address book with a lapsed certificate is not this job's problem.
+
+**Only the board pays for those three.** The table shows none of it, and three
+more statements on every visit to a list that does not use them is a cost for
+nothing.
+
+The ring is an SVG rather than a conic gradient, because the arc has to start at
+twelve o'clock and a gradient starts wherever the box says. A finished job has
+no ring at all — 100% on a job that is over says nothing — and drops to
+`bg-muted`, the one case where muting is right, because there is genuinely no
+next action on it.
+
+Chips appear only when there is something to do. A card covered in chips that
+mean nothing teaches people to stop reading them.
+
+Driven on Hilltop Farm: Miller barn showing `Site work · 2026-09-14` in red
+(late) and `2 certificates lapsing`, Lane drainage showing `Billed ahead`, the
+toggle carrying `f=active&q=barn` through both ways, and no horizontal scroll at
+375px.
+
 ### 2026-09-15 — The four tabs, restyled in their new homes (`claude/jobs-tabs`)
 
 Jobs redesign `3a`–`3d`, the last step of the handoff's own order after the

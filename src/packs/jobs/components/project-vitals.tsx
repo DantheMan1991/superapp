@@ -130,6 +130,13 @@ export function ProjectVitalsStrip({
             ) : (
               formatMoney(0, symbol)
             )
+          ) : vitals.valuation.kind === "no_estimate" ? (
+            /*
+             * NOT A FIGURE, because there is not one. Saying "over-billed" here
+             * on a job whose Complete cell has just said "no budget to measure
+             * against" is the strip contradicting itself in adjacent cells.
+             */
+            <span className="text-warning-foreground">Needs an estimate</span>
           ) : (
             <span className="text-muted-foreground">—</span>
           )
@@ -145,7 +152,9 @@ export function ProjectVitalsStrip({
                   : `level with earned · ${formatMoney(vitals.billedCents, symbol)} billed`
             : vitals.valuation.kind === "by_hours"
               ? `earned on the WIP schedule · ${formatMoney(vitals.billedCents, symbol)} billed`
-              : `nothing earned yet · ${formatMoney(vitals.billedCents, symbol)} billed`
+              : vitals.valuation.kind === "no_estimate"
+                ? `${formatMoney(vitals.billedCents, symbol)} billed, and nothing to measure it against`
+                : `nothing earned yet · ${formatMoney(vitals.billedCents, symbol)} billed`
         }
       />
     </div>

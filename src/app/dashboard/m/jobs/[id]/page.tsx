@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import {
   AlertTriangle,
+  Calculator,
   ClipboardList,
   Clock,
   FileDiff,
@@ -224,6 +225,10 @@ export default async function ProjectPage({
     figures:
       data.vitals && data.vitals.valuation.kind === "measured"
         ? data.vitals.valuation.figures
+        : null,
+    unmeasurable:
+      data.vitals && data.vitals.valuation.kind === "no_estimate"
+        ? { billedCents: data.vitals.valuation.billedCents }
         : null,
     costRows: data.costRows,
     selections: { pending: data.selections.pending, overdue: data.selections.overdue },
@@ -645,6 +650,7 @@ const CONTRACT_TONES: Record<string, StatusTone> = {
 };
 
 const DECISION_ICONS: Record<DecisionKind, typeof AlertTriangle> = {
+  no_estimate: Calculator,
   over_billed: TrendingUp,
   code_over: AlertTriangle,
   selection_overdue: Clock,

@@ -23,6 +23,7 @@ import type { WipFigures } from "./wip-math";
  * shared by server and client and carries no `server-only`.
  */
 export type DecisionKind =
+  | "no_estimate"
   | "over_billed"
   | "code_over"
   | "selection_overdue"
@@ -50,6 +51,12 @@ export interface DecisionInput {
   symbol: string | null;
   /** From the same `measureProject` the list and the vitals strip use. */
   figures: WipFigures | null;
+  /**
+   * Signed, billed, and with no budget or estimate to measure against — the
+   * shape `reasonFor` calls `no_estimate` and refuses to post. Carries what has
+   * been billed, because that is what makes it urgent rather than tidy.
+   */
+  unmeasurable: { billedCents: number } | null;
   costRows: readonly {
     costCodeId: string;
     code: string;
@@ -81,6 +88,24 @@ export function decisionsFor(input: DecisionInput): Decision[] {
    * Over-billed is the one that needs a judgement, because the fix is either to
    * re-estimate the cost or to hold the next application.
    */
+  /*
+   * A JOB BILLED AGAINST NOTHING TO MEASURE IT BY. This used to surface as
+   * "billed $X ahead of the work done" — earned falls to zero when the
+   * percentage is null, so the whole billing read as an overage, on a page that
+   * had just said there was no budget to measure against. The honest row is
+   * that the job cannot be measured, and the action is to give it an estimate.
+   * The WIP schedule says the same and refuses to post the period.
+   */
+  if (input.unmeasurable && input.unmeasurable.billedCents > 0) {
+    out.push({
+      kind: "no_estimate",
+      severity: "bad",
+      title: `${formatMoney(input.unmeasurable.billedCents, symbol)} billed with nothing to measure it against`,
+      why: "No budget and no estimate, so what the job has earned cannot be worked out — and the WIP schedule will not post while that is true.",
+      action: { label: "Set a budget", href: `${job}/cost` },
+    });
+  }
+
   if (input.figures && input.figures.overBilledCents > 0) {
     out.push({
       kind: "over_billed",

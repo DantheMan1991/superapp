@@ -577,6 +577,9 @@ function ProjectRowCells({
           )
         ) : valuation.kind === "by_hours" ? (
           <span className="block text-xs text-muted-foreground">earned on the WIP schedule</span>
+        ) : valuation.kind === "no_estimate" ? (
+          /* Not "level", not "over": unmeasurable, and the row says which. */
+          <span className="block text-xs text-warning-foreground">needs an estimate</span>
         ) : null}
       </TableCell>
 

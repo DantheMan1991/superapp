@@ -13,6 +13,53 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-15 — A job with nothing to measure it by is not over-billed (`claude/jobs-unmeasurable`)
+
+The founder asked where `$22,556.25 billed ahead of the work done` on 24-111
+was coming from, because the job showed **$0 committed, $0 spent, and "no budget
+to measure against"** two cells to the left. The money was real — it is the
+ledger's GROSS billing, the pay application's $20,300.62 payment due plus
+$2,255.63 of retainage held, which the contract's own *Balance to finish* of
+$27,443.75 confirms against a $50,000 value. The **overage** was not.
+
+**`wipFigures` COMPUTES EARNED AS ZERO WHEN THE PERCENTAGE IS NULL**, which is
+correct arithmetic and the wrong thing to report. Feed it a job with no budget
+and no estimate and it returns earned `0`, so the whole billing comes back as
+over-billed. Three screens printed that: the vitals strip contradicted itself in
+adjacent cells, the row said `over-billed`, and the module home's **Over-billed
+stat card was $22,556.25 of pure fabrication** — the tenant's headline figure,
+derived entirely from a job nothing could measure.
+
+**THE PACK ALREADY HAD THE RIGHT ANSWER AND THE NEW SCREENS WERE NOT ASKING
+IT.** `reasonFor` in `wip-ops.ts` returns `no_estimate` for exactly this shape;
+the schedule refuses to post the period and names the job as a blocker —
+*"24-111 has no budget and no estimate"*. `measureProject` now applies the same
+test in the same order, so a cost-plus job's null percentage still measures
+(it needs no estimate) and everything else with one returns a new
+`{ kind: "no_estimate" }` valuation instead of a fictional zero.
+
+Every screen now says what the schedule says:
+
+- **Vitals**: `Needs an estimate` · `$22,556.25 billed, and nothing to measure
+  it against`.
+- **The list**: `needs an estimate` in the row, and the job is in no headline
+  figure — `summariseList` already skipped anything that was not `measured`, so
+  Over-billed fell to $0.00 and the header sentence dropped its clause.
+- **The board card**: `Needs an estimate`.
+- **Needs a decision**: the row is now *"$22,556.25 billed with nothing to
+  measure it against"* with **Set a budget**, which is the actual next action —
+  rather than "billed ahead of the work done", which invited somebody to hold an
+  application over a number that did not exist.
+
+**A test was pinning the bug.** `tests/jobs-list.test.ts` asserted a `measured`
+valuation carrying a null percentage — the exact state that produces the
+phantom overage — so the suite was green throughout. It now asserts the refusal,
+with a second case proving a cost-plus job still measures.
+
+**How to apply:** `wipFigures` returns a number for every field whatever you
+feed it. Null-percent is not "earned nothing", and a screen reading its output
+must ask `reasonFor`'s question before quoting a variance.
+
 ### 2026-09-15 — The Overview `2a` shipped without (`claude/jobs-overview`)
 
 **`2a` delivered its header, vitals strip, section strip and route split, and

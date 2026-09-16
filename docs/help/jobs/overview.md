@@ -884,6 +884,29 @@ The sheet number and title, then the discipline, the set and its date, `rev 2`, 
 
 A sheet that has been reissued shows **Issues of A-102** under the drawing: every set it came in, newest first, with `current` on the newest and `(this one)` on the one you are looking at. Opening an earlier issue shows a note above the drawing — *Superseded. This is the Permit set issue of A-102, dated 2026-06-01; the current one is from ASI 3, dated 2026-08-15* — with **Open the current A-102**.
 
+### Marking up a sheet
+
+Anybody on the {{project|lower}} may draw on a sheet. Above the drawing, a row of tools and five colours:
+
+| Tool | What it does |
+| --- | --- |
+| {button:Move about|primary} | Drag the sheet about with a finger or the mouse; two fingers pinch to zoom; ctrl and the wheel zoom about the pointer. Tap a shape to select it — its row in the list lights up. This is the tool a reader has. |
+| {button:Cloud|outline} | Drag a box around what changed. The revision cloud is drawn when you let go. |
+| {button:Arrow|outline} | Drag from where the arrow starts to what it points at. |
+| {button:Note|outline} | Tap where the note goes, type it, {button:Add the note|primary}. The words sit on the sheet in the colour chosen. |
+| {button:Pin|outline} | Tap where the problem is. Type `What needs doing`; leave **Put it on the punch list** ticked and give it a `Due` date if it has one; {button:Place the pin|primary}. The pin is numbered in the order pins were placed. |
+| the five colours | Red, blue, green, yellow, black — the pen for the next thing you draw. |
+
+A line under the tools says what the chosen tool wants; `Esc` goes back to moving about. The zoom is the same as before — {button:−|outline} {button:+|outline} and {button:⛶|outline} to fit the width — and what you draw at 3× is exactly where it is at 1×: a markup is stored as a place on the page, not on the screen.
+
+**A pin is a punch item.** Placing one with the box ticked puts `What needs doing` on the {{project|lower}}'s punch list as a work item — the same row the **Punch list** on the Field page and Work show, with *On sheet A-101 · First floor plan* in its notes — and the pin follows it: the row in the list below the drawing says `On the punch list`, `Due 2026-09-30` or `Done`, and the tick beside it closes the item from here. A done pin shows ✓ on the sheet and fades. A pin placed with the box unticked is a marker and raises nothing.
+
+**The list under the drawing** — *1 cloud, 1 arrow, 1 note, 2 pins; 1 pin is still open on the punch list.* — has a row per markup: the kind, the words, who drew it and the day. Tap a row to find it on the sheet. The pencil opens its words and colour — {button:Save|primary} — and {button:Rub out|ghost} then {button:Rub out|destructive} removes it. Rubbing out a pin **leaves its punch item on the list**: the site still owes it. Clearing the item in Work leaves the pin on the sheet as a note, marked `Punch item gone`.
+
+**Which issue.** A markup belongs to the issue it was drawn on. When a set reissues the sheet, the new issue starts clean and the earlier one keeps what was drawn; **Issues of A-102** says `3 markups` beside an issue that carries some. Nothing is carried forward for you: the cloud may have been about the very thing the reissue fixed.
+
+The sheet's file is never changed by any of this. {button:The file|outline} downloads the PDF exactly as it came in.
+
 ## On site — the daily log, photos and the punch list
 
 Anyone on the team, not only owners: the field is a chore, and the person with the phone on the site is rarely the owner.
@@ -1056,7 +1079,7 @@ Worth knowing so you are not looking for it:
 - **A subcontractor's application does not print**, and neither does a change order on an order. They are the subcontractor's documents, prepared on their side; your own applications print from their row.
 - **A lien waiver is not generated.** The form itself is your state's or your lawyer's, not something Jobs prints; the signed one attaches as a photo, a file or from Documents.
 - **The schedule counts calendar days, and a phase waits only for the one it follows.** No working-day calendar or holidays yet, no start-to-start dependencies, no baseline to measure slip against, and nothing tells the trade — the phase names them, and the company calendar and the feed are how they hear. A schedule is typed per {{project|lower}}; a template that fills a new one is next.
-- **A drawing is a page to look at, not yet to draw on.** No clouds, arrows or pins on a sheet, no measuring, no overlay of one issue on another, and the cover sheet's index is not read to fill titles. A scanned set has no text to read numbers from; type them off the pictures. A sheet shows the file as it is in Documents today: replace the file's bytes there and the sheet shows the new bytes — a reissue is a new set, not a replaced file.
+- **A markup is drawn once.** A cloud, an arrow, a note or a pin cannot be moved or resized after the fact — rub it out and draw it again — there is no freehand pen, nothing carries a markup onto a reissued sheet, and a marked-up sheet is not printed or sent with its markups on it. No measuring on a sheet yet, no overlay of one issue on another, and the cover sheet's index is not read to fill titles. A scanned set has no text to read numbers from; type them off the pictures. A sheet shows the file as it is in Documents today: replace the file's bytes there and the sheet shows the new bytes — a reissue is a new set, not a replaced file.
 - **An estimate is lines you type.** No assemblies (a bundle of lines dropped in as one), no unit cost book that remembers what concrete cost last time, no takeoff from the drawings. A supplier's quote cannot be attached to an estimate yet. The proposal prints but is not sent from here, and the client cannot accept it on a screen of their own — the signed page comes back the way it always has.
 - **A subcontractor out of standing is not stopped.** An order can be issued and a bill paid while a certificate is missing or expired; the Subcontractors page and the order's page say so in red, and the decision is yours. Which kinds are required is set in the module's configuration for now, not on a screen.
 - **The option book is per job.** The same selections with the same choices on every plan are entered on each job for now; a book that seeds a new job is next. Nothing here lets the client choose for themselves; the office records what they said.
@@ -1083,6 +1106,7 @@ Worth knowing so you are not looking for it:
 | Add, move, mark done or remove a phase of the schedule | ● | ● | ● |
 | Add a set of drawings, read its pages into sheets, correct or remove a sheet | ● | ● | ● |
 | Upload a set's file, or attach one from Documents | ● | ● | |
+| Draw on a sheet, place a pin on the punch list, or rub a markup out | ● | ● | ● |
 | Log a day on site, or add and tick a punch item | ● | ● | ● |
 | Add photos to a day | ● | ● | |
 | See the work in progress schedule | ● | ● | ● |

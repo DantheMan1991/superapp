@@ -3,6 +3,7 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../../src/db";
 import { d, seedParty } from "./_shared";
+import { addPunchItem } from "../../src/packs/jobs/field-ops";
 
 /**
  * `job_cost_code_sets`, `job_cost_codes` and `job_projects` — RLS.
@@ -2039,6 +2040,110 @@ d("jobs tables (RLS)", () => {
     expect(await withSystem((tx) => tx.select().from(schema.jobSheets).where(eq(schema.jobSheets.id, sheetId)))).toEqual([]);
     await withSystem(async (tx) => {
       await tx.delete(schema.jobDrawingSets).where(eq(schema.jobDrawingSets.id, setB));
+      await tx.delete(schema.documents).where(inArray(schema.documents.id, [docA, docB]));
+    });
+  });
+  it("cannot read or change another tenant's MARKUPS; a markup hangs off this tenant's job, sheet and punch item; the kind, the colour, the words and the shape are checked; a punch item cleared sets the pin's key null and nothing else; the markups go with the sheet and with the job", async () => {
+    const docA = await withSystem(async (tx) => {
+      const r = await tx
+        .insert(schema.documents)
+        .values({
+          tenantId: tenantA,
+          origin: "dms",
+          blobPathname: `docs/${tenantA}/files/${STAMP}-markups.pdf`,
+          fileName: "markups.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 10,
+          sha256: `${STAMP}-${tenantA}-markups`,
+          effectiveVisibility: "members",
+        })
+        .returning();
+      return r[0].id;
+    });
+    const setId = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobDrawingSets).values({ tenantId: tenantA, projectId: projectA, name: "Markup set", issuedOn: "2026-06-01" }).returning();
+      return r[0].id;
+    });
+    const sheetId = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobSheets).values({ tenantId: tenantA, projectId: projectA, setId, documentId: docA, pageNumber: 1, sheetNumber: "M-101" }).returning();
+      return r[0].id;
+    });
+    // A punch item of each tenant, through the pack's own verb so the list is provisioned as it would be.
+    const punchA = await asOwner((tx) => addPunchItem(tx, { tenantId: tenantA, userId: OWNER, role: "owner" }, projectA, { title: "Tenant A's pin" }));
+    const punchB = await asOtherTenant((tx) => addPunchItem(tx, { tenantId: tenantB, userId: OTHER, role: "owner" }, projectB, { title: "Tenant B's pin" }));
+    const base = { tenantId: tenantA, projectId: projectA, sheetId, kind: "pin", geometry: { x: 0.5, y: 0.5 }, text: "Fix it" } as const;
+    const markupId = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobSheetMarkups).values({ ...base, workItemId: punchA }).returning();
+      return r[0].id;
+    });
+    const seen = await asOtherTenant(async (tx) => ({
+      rows: await tx.select().from(schema.jobSheetMarkups).where(eq(schema.jobSheetMarkups.id, markupId)),
+      changed: await tx.update(schema.jobSheetMarkups).set({ text: "Theirs" }).where(eq(schema.jobSheetMarkups.id, markupId)).returning(),
+    }));
+    expect([seen.rows, seen.changed]).toEqual([[], []]);
+    expect(await asStaff((tx) => tx.select().from(schema.jobSheetMarkups).where(eq(schema.jobSheetMarkups.id, markupId)))).toHaveLength(1);
+
+    // Tenant B's job, sheet or punch item under tenant A's row: unrepresentable.
+    const setB = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobDrawingSets).values({ tenantId: tenantB, projectId: projectB, name: "Theirs", issuedOn: "2026-06-01" }).returning();
+      return r[0].id;
+    });
+    const docB = await withSystem(async (tx) => {
+      const r = await tx
+        .insert(schema.documents)
+        .values({
+          tenantId: tenantB,
+          origin: "dms",
+          blobPathname: `docs/${tenantB}/files/${STAMP}-markups-b.pdf`,
+          fileName: "markups-b.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 10,
+          sha256: `${STAMP}-${tenantB}-markups`,
+          effectiveVisibility: "members",
+        })
+        .returning();
+      return r[0].id;
+    });
+    const sheetB = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobSheets).values({ tenantId: tenantB, projectId: projectB, setId: setB, documentId: docB, pageNumber: 1, sheetNumber: "M-101" }).returning();
+      return r[0].id;
+    });
+    await expect(withSystem((tx) => tx.insert(schema.jobSheetMarkups).values({ ...base, projectId: projectB }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobSheetMarkups).values({ ...base, sheetId: sheetB }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobSheetMarkups).values({ ...base, workItemId: punchB }))).rejects.toThrow();
+    // The CHECKs.
+    await expect(withSystem((tx) => tx.insert(schema.jobSheetMarkups).values({ ...base, kind: "scribble" }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobSheetMarkups).values({ ...base, color: "pink" }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobSheetMarkups).values({ ...base, text: "  " }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobSheetMarkups).values({ ...base, kind: "text", text: "" }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobSheetMarkups).values({ ...base, geometry: [0.5, 0.5] }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobSheetMarkups).values({ ...base, text: "x".repeat(2001) }))).rejects.toThrow();
+    // A cloud carries no words and is fine without them.
+    const cloudId = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobSheetMarkups).values({ ...base, kind: "cloud", geometry: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 }, text: "" }).returning();
+      return r[0].id;
+    });
+
+    // The punch item cleared: the pin's key is null and the pin is still there.
+    await withSystem((tx) => tx.delete(schema.workItems).where(eq(schema.workItems.id, punchA)));
+    const after = await withSystem((tx) => tx.select().from(schema.jobSheetMarkups).where(eq(schema.jobSheetMarkups.id, markupId)));
+    expect(after).toHaveLength(1);
+    expect([after[0].workItemId, after[0].tenantId, after[0].text]).toEqual([null, tenantA, "Fix it"]);
+    // The sheet gone takes its markups; the job gone takes both.
+    await withSystem((tx) => tx.delete(schema.jobSheets).where(eq(schema.jobSheets.id, sheetId)));
+    expect(await withSystem((tx) => tx.select().from(schema.jobSheetMarkups).where(inArray(schema.jobSheetMarkups.id, [markupId, cloudId])))).toEqual([]);
+    const scratch = await withSystem(async (tx) => {
+      const p = await tx.insert(schema.jobProjects).values({ tenantId: tenantA, entityId: entityA, number: `${STAMP}-MK`, name: "Goes with the job" }).returning();
+      const set = await tx.insert(schema.jobDrawingSets).values({ tenantId: tenantA, projectId: p[0].id, name: "Scratch set", issuedOn: "2026-06-01" }).returning();
+      const sh = await tx.insert(schema.jobSheets).values({ tenantId: tenantA, projectId: p[0].id, setId: set[0].id, documentId: docA, pageNumber: 1, sheetNumber: "G-001" }).returning();
+      const mk = await tx.insert(schema.jobSheetMarkups).values({ tenantId: tenantA, projectId: p[0].id, sheetId: sh[0].id, kind: "arrow", geometry: { x1: 0.1, y1: 0.1, x2: 0.2, y2: 0.2 } }).returning();
+      return { projectId: p[0].id, markupId: mk[0].id };
+    });
+    await withSystem((tx) => tx.delete(schema.jobProjects).where(eq(schema.jobProjects.id, scratch.projectId)));
+    expect(await withSystem((tx) => tx.select().from(schema.jobSheetMarkups).where(eq(schema.jobSheetMarkups.id, scratch.markupId)))).toEqual([]);
+    await withSystem(async (tx) => {
+      await tx.delete(schema.workItems).where(eq(schema.workItems.id, punchB));
+      await tx.delete(schema.jobDrawingSets).where(inArray(schema.jobDrawingSets.id, [setId, setB]));
       await tx.delete(schema.documents).where(inArray(schema.documents.id, [docA, docB]));
     });
   });

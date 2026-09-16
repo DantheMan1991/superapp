@@ -9,7 +9,6 @@ import { labelFor } from "@/lib/packs/resolve";
 import { packContext } from "@/lib/packs/tenant-context";
 import { allowsWrite } from "@/lib/packs/authorize";
 import { todayInTimezone } from "@/lib/timezone";
-import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
 import { Badge } from "@/components/ui/badge";
 import { roleMayWrite } from "@/modules/documents/core/errors";
@@ -83,11 +82,13 @@ export default async function DrawingsPage({ params }: { params: Promise<{ id: s
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="Drawings"
-        description={`${projectWord} ${project.number} · ${sentence}`}
-        actions={canFile ? <AddDrawingSetDialog projectId={project.id} tenantId={ctx.tenant.id} parties={data.parties} today={today} /> : undefined}
-      />
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="font-heading text-lg font-semibold tracking-heading">Drawings</h2>
+          <p className="mt-0.5 max-w-2xl text-sm text-muted-foreground">{`${projectWord} ${project.number} · ${sentence}`}</p>
+        </div>
+        {canFile && <AddDrawingSetDialog projectId={project.id} tenantId={ctx.tenant.id} parties={data.parties} today={today} />}
+      </div>
 
       <Panel className="p-5">
         <h2 className="mb-3 font-heading text-sm font-medium tracking-heading">Current set</h2>

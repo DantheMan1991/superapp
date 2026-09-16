@@ -5,21 +5,25 @@ import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { allowsWrite } from "@/lib/packs/authorize";
-import { PageHeader } from "@/components/app/page-header";
+import { listAssignableMembers, memberLabel } from "@/lib/team";
+import { dateInTimezone } from "@/lib/timezone";
 import { Panel } from "@/components/app/panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getProject } from "@/packs/jobs/ops";
 import { getSheet, listSheets } from "@/packs/jobs/drawings-ops";
 import { disciplineLabel } from "@/packs/jobs/drawings-math";
-import { SheetViewer } from "@/packs/jobs/components/sheet-viewer";
+import { listMarkups, markupCounts } from "@/packs/jobs/markups-ops";
+import { SheetViewer, type MarkupView } from "@/packs/jobs/components/sheet-viewer";
+import { isMarkupColor, isMarkupKind } from "@/packs/jobs/vocabulary";
 import { SheetForm } from "@/packs/jobs/components/sheet-form";
 import { PACK } from "@/packs/jobs/vocabulary";
 
 /**
- * One sheet, large: the page of the set's PDF drawn by pdf.js, the sheet
- * before and after it in the current set, every issue this number has had,
- * and a plain word when this is not the current one (ADR 0072).
+ * One sheet, large: the page of the set's PDF drawn by pdf.js, what is drawn
+ * on it (ADR 0073), the sheet before and after it in the current set, every
+ * issue this number has had, and a plain word when this is not the current
+ * one (ADR 0072).
  */
 export default async function SheetPage({ params }: { params: Promise<{ id: string; sheetId: string }> }) {
   const { id, sheetId } = await params;
@@ -34,7 +38,13 @@ export default async function SheetPage({ params }: { params: Promise<{ id: stri
       const sheet = await getSheet(tx, ctx.tenant.id, sheetId);
       if (!sheet || sheet.projectId !== project.id) return null;
       const sheets = await listSheets(tx, ctx.tenant.id, project.id);
-      return { project, sheet, sheets };
+      const issueIds = sheets.filter((s) => s.sheet.sheetNumber === sheet.sheetNumber).map((s) => s.sheet.id);
+      const [markups, members, counts] = await Promise.all([
+        listMarkups(tx, ctx.tenant.id, sheet.id),
+        listAssignableMembers(tx, ctx.tenant.id),
+        markupCounts(tx, ctx.tenant.id, issueIds),
+      ]);
+      return { project, sheet, sheets, markups, members, counts };
     },
     { role: ctx.role },
   );
@@ -53,17 +63,39 @@ export default async function SheetPage({ params }: { params: Promise<{ id: stri
   const head = row.currentId ? sheets.find((s) => s.sheet.id === row.currentId) : null;
   const url = `/api/documents/${sheet.documentId}/file`;
   const label = `${sheet.sheetNumber}${sheet.title ? ` · ${sheet.title}` : ""}`;
+  const names = new Map(data.members.map((m) => [m.clerkUserId, memberLabel(m)]));
+  // The rows leave the server as the viewer's own shape: fractions of the page, the day in the tenant's zone, a name.
+  const markups: MarkupView[] = data.markups.flatMap((r) => {
+    if (!isMarkupKind(r.markup.kind) || !isMarkupColor(r.markup.color)) return [];
+    return [
+      {
+        id: r.markup.id,
+        kind: r.markup.kind,
+        color: r.markup.color,
+        geometry: r.markup.geometry as Record<string, number>,
+        text: r.markup.text,
+        version: r.markup.version,
+        createdOn: dateInTimezone(r.markup.createdAt, ctx.tenant.timezone),
+        createdBy: r.markup.createdByClerkUserId ? (names.get(r.markup.createdByClerkUserId) ?? "") : "",
+        workItemId: r.markup.workItemId,
+        punch: r.punch,
+      },
+    ];
+  });
 
   return (
     <div className="space-y-4">
       <Link href={base} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ChevronLeft className="size-4" /> {project.number} · Drawings
       </Link>
-      <PageHeader
-        title={label}
-        description={`${disciplineLabel(row.discipline)} · ${row.setName}, dated ${row.issuedOn}${sheet.revision ? ` · rev ${sheet.revision}` : ""} · page ${sheet.pageNumber} of ${row.fileName}`}
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="font-heading text-lg font-semibold tracking-heading">{label}</h2>
+          <p className="mt-0.5 max-w-2xl text-sm text-muted-foreground">
+            {`${disciplineLabel(row.discipline)} · ${row.setName}, dated ${row.issuedOn}${sheet.revision ? ` · rev ${sheet.revision}` : ""} · page ${sheet.pageNumber} of ${row.fileName}`}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
             {row.isCurrent && (
               <>
                 <Button variant="outline" size="sm" asChild disabled={!previous}>
@@ -111,9 +143,8 @@ export default async function SheetPage({ params }: { params: Promise<{ id: stri
                 afterDelete={base}
               />
             )}
-          </div>
-        }
-      />
+        </div>
+      </div>
 
       {!row.isCurrent && head && (
         <div role="note" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
@@ -126,7 +157,7 @@ export default async function SheetPage({ params }: { params: Promise<{ id: stri
       )}
 
       <Panel className="p-5">
-        <SheetViewer url={url} page={sheet.pageNumber} label={label} />
+        <SheetViewer url={url} page={sheet.pageNumber} label={label} sheetId={sheet.id} projectId={project.id} markups={markups} canEdit={canEdit} />
       </Panel>
 
       {issues.length > 1 && (
@@ -147,6 +178,7 @@ export default async function SheetPage({ params }: { params: Promise<{ id: stri
                   {s.issuedOn}
                   {s.sheet.revision ? ` · rev ${s.sheet.revision}` : ""}
                   {s.sheet.title && s.sheet.title !== sheet.title ? ` · ${s.sheet.title}` : ""}
+                  {(data.counts.get(s.sheet.id) ?? 0) > 0 ? ` · ${data.counts.get(s.sheet.id)} ${data.counts.get(s.sheet.id) === 1 ? "markup" : "markups"}` : ""}
                 </span>
                 {s.isCurrent && (
                   <Badge variant="secondary" className="text-[10px]">

@@ -4342,7 +4342,7 @@ d("jobs ops", () => {
     // An expert is a member in a pack and may keep the schedule; only the calendar itself is an owner's to make.
     expect((await run((tx) => createPhase(tx, { ...ctx, role: "expert" }, { projectId: project.id, name: "Punch walk", startOn: "2026-11-02" }, TZ))).name).toBe("Punch walk");
   }, 120_000);
-  it("A JOB'S DRAWINGS are sets of pages in Documents: a set is an issue with a date and its files hang on it; a page read into a sheet carries its number, normalised, once per set; only a PDF the set holds is read; the newest issue of each number is the current set — by the date on the drawings, then by which set was made later — and older ones are superseded; a file read again replaces its sheets; a set removed lets go of its files and takes its sheets", async () => {
+  it("A JOB'S DRAWINGS are sets of pages in Documents: a set is an issue with a date and its files hang on it; a page read into a sheet carries its number, normalised, once per set; only a PDF the set holds is read; the newest issue of each number is the current set — by the date on the drawings, then by which set was made later — and older ones are superseded; a file read again keeps its sheets' rows; a set removed lets go of its files and takes its sheets", async () => {
     const entity = await newCompany("Drawings Co 1");
     const { project, architect } = await run(async (tx) => ({
       project: await createProject(tx, ctx, { entityId: entity, number: "OPS-DRW1", name: "Drawn" }),
@@ -4472,7 +4472,7 @@ d("jobs ops", () => {
     expect([permit2.name, permit2.notes, permit2.issuedOn, permit2.version]).toEqual(["Permit set (stamped)", "Stamped by the county.", "2026-06-01", 2]);
     await expect(run((tx) => updateDrawingSet(tx, staffCtx, permit.id, { name: "x", version: 1 }))).rejects.toMatchObject({ code: "STALE_VERSION" });
 
-    // A file read again replaces what it was read into: A-103 is A-101 again, E-101 (left out this time) is gone, S-201 keeps its number and gets a new id.
+    // A file read again is the correction: A-103 is A-101 again, E-101 (left out this time) is gone, and S-201 KEEPS its row — since 9b its markups and since 9c its scale hang off the id (ADR 0074).
     const s201Before = rows.find((r) => r.sheet.sheetNumber === "S-201")!.sheet.id;
     await index(staffCtx, permit.id, permitPdf, [
       { pageNumber: 2, sheetNumber: "A-101", title: "First floor plan" },
@@ -4481,7 +4481,7 @@ d("jobs ops", () => {
     ]);
     rows = await rowsOf();
     expect(rows.map((r) => r.sheet.sheetNumber)).toEqual(["S-201", "A-101", "A-102", "A-102", "A-102", "A-104"]);
-    expect(rows.find((r) => r.sheet.sheetNumber === "S-201")!.sheet.id).not.toBe(s201Before);
+    expect(rows.find((r) => r.sheet.sheetNumber === "S-201")!.sheet.id).toBe(s201Before);
     // A page that was never a sheet, taken out; the file untouched.
     await run((tx) => deleteSheet(tx, staffCtx, rows.find((r) => r.sheet.sheetNumber === "S-201")!.sheet.id));
     expect((await rowsOf()).map((r) => r.sheet.sheetNumber)).toEqual(["A-101", "A-102", "A-102", "A-102", "A-104"]);

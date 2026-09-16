@@ -66,6 +66,7 @@ import {
   updateDrawingSet,
   updateSheet,
 } from "./drawings-ops";
+import { addMarkup, deleteMarkup, updateMarkup } from "./markups-ops";
 import {
   approveSubApplication,
   createSubApplication,
@@ -128,6 +129,9 @@ import {
   PROJECT_STATUSES,
   hoursToTenths,
   DRAWING_DOC_KIND,
+  MARKUP_COLORS,
+  MARKUP_KINDS,
+  MARKUP_TEXT_MAX,
 } from "./vocabulary";
 
 /**
@@ -3499,6 +3503,106 @@ export async function deleteSheetAction(input: unknown) {
     if (!sheet) throw new JobsError("NOT_FOUND", `sheet ${parsed.data.id} not found`);
     await withTenant(ctx.tenantId, (tx) => deleteSheet(tx, ctx, parsed.data.id), { role: ctx.role, userId: ctx.userId });
     revalidateDrawings(parsed.data.projectId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// ------------------------------------------------------------------- markups
+
+/**
+ * Markups on a sheet (ADR 0073): `member`, as the drawings are. A pin's punch
+ * item goes through `addPunchItem` inside `addMarkup`, so the Work item is the
+ * ordinary kind with the ordinary link to the job and the job's own pages and
+ * the daily digest see it with nothing more.
+ */
+function revalidateSheet(projectId: string, sheetId: string): void {
+  revalidatePath(`${BASE}/${projectId}/drawings/${sheetId}`);
+  revalidatePath(`${BASE}/${projectId}`);
+  revalidatePath(`${BASE}/${projectId}/log`);
+  revalidatePath("/dashboard/m/work");
+}
+
+const markupGeometry = z.record(z.string().max(4), z.number());
+
+export async function addMarkupAction(input: unknown) {
+  const parsed = z
+    .object({
+      sheetId: z.string().uuid(),
+      projectId: z.string().uuid(),
+      kind: z.enum(MARKUP_KINDS),
+      color: z.enum(MARKUP_COLORS).default("red"),
+      geometry: markupGeometry,
+      text: z.string().max(MARKUP_TEXT_MAX).default(""),
+      raise: z.boolean().default(true),
+      dueOn: z.union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]).default(""),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the markup and try again." };
+  try {
+    const ctx = await drawingsGate();
+    const markup = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const made = await addMarkup(tx, ctx, {
+          sheetId: parsed.data.sheetId,
+          kind: parsed.data.kind,
+          color: parsed.data.color,
+          geometry: parsed.data.geometry,
+          text: parsed.data.text,
+          punch: { raise: parsed.data.raise, dueOn: parsed.data.dueOn === "" ? null : parsed.data.dueOn },
+        });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "sheet_markup.added",
+          targetType: "sheet_markup",
+          targetId: made.id,
+          meta: { projectId: parsed.data.projectId, sheetId: parsed.data.sheetId, kind: made.kind, workItemId: made.workItemId },
+        });
+        return made;
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateSheet(parsed.data.projectId, parsed.data.sheetId);
+    return { ok: true as const, id: markup.id, workItemId: markup.workItemId };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function updateMarkupAction(input: unknown) {
+  const parsed = z
+    .object({
+      id: z.string().uuid(),
+      sheetId: z.string().uuid(),
+      projectId: z.string().uuid(),
+      version: z.number().int().positive(),
+      geometry: markupGeometry.optional(),
+      text: z.string().max(MARKUP_TEXT_MAX).optional(),
+      color: z.enum(MARKUP_COLORS).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the markup and try again." };
+  try {
+    const ctx = await drawingsGate();
+    const { id, sheetId, projectId, ...patch } = parsed.data;
+    await withTenant(ctx.tenantId, (tx) => updateMarkup(tx, ctx, id, patch), { role: ctx.role, userId: ctx.userId });
+    revalidateSheet(projectId, sheetId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function deleteMarkupAction(input: unknown) {
+  const parsed = z.object({ id: z.string().uuid(), sheetId: z.string().uuid(), projectId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  try {
+    const ctx = await drawingsGate();
+    await withTenant(ctx.tenantId, (tx) => deleteMarkup(tx, ctx, parsed.data.id), { role: ctx.role, userId: ctx.userId });
+    revalidateSheet(parsed.data.projectId, parsed.data.sheetId);
     return { ok: true as const };
   } catch (err) {
     return toResult(err);

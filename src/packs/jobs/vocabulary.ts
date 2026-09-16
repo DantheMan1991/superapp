@@ -531,6 +531,45 @@ export const DISCIPLINE_LABELS: Readonly<Record<string, string>> = {
 export const DISCIPLINE_ORDER: readonly string[] = ["G", "H", "V", "B", "C", "L", "S", "A", "I", "Q", "F", "P", "D", "M", "E", "W", "T", "R", "X", "Z"];
 export const OTHER_DISCIPLINE = "Other";
 
+// --------------------------------------------------------------------- markups
+
+/** Mirrors `job_sheet_markups_kind_valid`. Kept in sync by tests/jobs-markups.test.ts. */
+export const MARKUP_KINDS = ["cloud", "arrow", "text", "pin"] as const;
+export type MarkupKind = (typeof MARKUP_KINDS)[number];
+export const MARKUP_KIND_LABELS: Record<MarkupKind, string> = {
+  cloud: "Cloud",
+  arrow: "Arrow",
+  text: "Note",
+  pin: "Pin",
+};
+export function isMarkupKind(v: string): v is MarkupKind {
+  return (MARKUP_KINDS as readonly string[]).includes(v);
+}
+
+/** Mirrors `job_sheet_markups_color_valid`: the five pens a site has, never a picker. */
+export const MARKUP_COLORS = ["red", "blue", "green", "yellow", "black"] as const;
+export type MarkupColor = (typeof MARKUP_COLORS)[number];
+export const MARKUP_COLOR_LABELS: Record<MarkupColor, string> = {
+  red: "Red",
+  blue: "Blue",
+  green: "Green",
+  yellow: "Yellow",
+  black: "Black",
+};
+export const MARKUP_COLOR_HEX: Record<MarkupColor, string> = {
+  red: "#dc2626",
+  blue: "#2563eb",
+  green: "#16a34a",
+  yellow: "#ca8a04",
+  black: "#111827",
+};
+export function isMarkupColor(v: string): v is MarkupColor {
+  return (MARKUP_COLORS as readonly string[]).includes(v);
+}
+
+/** What a markup's words may run to; mirrors `job_sheet_markups_text_bounded`. */
+export const MARKUP_TEXT_MAX = 2000;
+
 // ------------------------------------------------------------------ selections
 
 /**

@@ -70,4 +70,5 @@ export * from "./jobs-selections";
 export * from "./jobs-estimates";
 export * from "./jobs-schedule";
 export * from "./jobs-drawings";
+export * from "./jobs-markups";
 export * from "./jobs-party-documents";

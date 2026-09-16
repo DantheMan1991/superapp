@@ -121,6 +121,7 @@ import {
   updateSheet,
 } from "../src/packs/jobs/drawings-ops";
 import { attachDocumentToRecord } from "../src/modules/documents/attachments";
+import { addMarkup, deleteMarkup, listMarkups, markupCounts, updateMarkup } from "../src/packs/jobs/markups-ops";
 import { certificateInputFrom } from "../src/packs/jobs/certificate";
 import { loadInvoice, loadInvoiceLines } from "../src/modules/accounting/invoicing/invoices";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
@@ -4504,5 +4505,113 @@ d("jobs ops", () => {
     // An expert is a member in a pack and may keep the drawings; a set on a job that does not exist is refused.
     expect((await run((tx) => createDrawingSet(tx, { ...ctx, role: "expert" }, { projectId: project.id, name: "Bid set", issuedOn: "2026-05-01" }))).name).toBe("Bid set");
     await expect(run((tx) => createDrawingSet(tx, staffCtx, { projectId: "00000000-0000-0000-0000-000000000000", name: "Nowhere", issuedOn: "2026-05-01" }))).rejects.toMatchObject({ code: "NOT_FOUND" });
+  }, 120_000);
+  it("MARKUPS ON A SHEET are vectors in fractions of the page — a cloud, an arrow, a note and a pin on one issue; a pin raises a punch item on the job's list and follows it; every shape is checked in words; a pin's punch item cleared from Work leaves the pin as a note; a markup rubbed out leaves the punch item; the sheet gone takes its markups; an expert may draw", async () => {
+    const entity = await newCompany("Markups Co 1");
+    const project = await run((tx) => createProject(tx, ctx, { entityId: entity, number: "OPS-MK1", name: "Marked up" }));
+    const set = await run((tx) => createDrawingSet(tx, staffCtx, { projectId: project.id, name: "Permit set", issuedOn: "2026-06-01" }));
+    const pdf = await run(async (tx) => {
+      const rows = await tx
+        .insert(schema.documents)
+        .values({
+          tenantId,
+          origin: "dms",
+          blobPathname: `docs/${tenantId}/files/${STAMP}-markups-set.pdf`,
+          fileName: "markups-set.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 10,
+          sha256: `${STAMP}-sha-markups`,
+          effectiveVisibility: "members",
+        })
+        .returning();
+      return rows[0].id;
+    });
+    await run((tx) => attachDocumentToRecord(tx, { tenantId, userId: ctx.userId, role: "owner" }, { documentId: pdf, target: setTarget(set.id), makePrimary: false }));
+    const [sheet] = await run((tx) => indexSheets(tx, staffCtx, { setId: set.id, documentId: pdf, sheets: [{ pageNumber: 2, sheetNumber: "A-101", title: "First floor plan" }] }));
+    const draw = (who: JobsCtx, input: Parameters<typeof addMarkup>[2]) => run((tx) => addMarkup(tx, who, input));
+
+    // The shape, in words.
+    await expect(draw(staffCtx, { sheetId: sheet.id, kind: "scribble", geometry: {} })).rejects.toMatchObject({ code: "INVALID_KIND" });
+    await expect(draw(staffCtx, { sheetId: sheet.id, kind: "cloud", geometry: { x: 0.1, y: 0.1, w: 0.001, h: 0.2 } })).rejects.toMatchObject({ code: "INVALID_VALUE", message: "a cloud needs some size" });
+    await expect(draw(staffCtx, { sheetId: sheet.id, kind: "cloud", geometry: { x: 0.9, y: 0.1, w: 0.2, h: 0.2 } })).rejects.toMatchObject({ code: "INVALID_VALUE", message: "a cloud must stay within the page" });
+    await expect(draw(staffCtx, { sheetId: sheet.id, kind: "arrow", geometry: { x1: 0.5, y1: 0.5, x2: 0.5, y2: 0.5 } })).rejects.toMatchObject({ code: "INVALID_VALUE", message: "an arrow needs some length" });
+    await expect(draw(staffCtx, { sheetId: sheet.id, kind: "cloud", geometry: "nope" })).rejects.toMatchObject({ code: "INVALID_VALUE", message: "geometry must be an object" });
+    await expect(draw(staffCtx, { sheetId: sheet.id, kind: "pin", geometry: { x: 0.5, y: 0.5 }, text: "  " })).rejects.toMatchObject({ code: "INVALID_VALUE", message: "a pin needs saying what needs doing" });
+    await expect(draw(staffCtx, { sheetId: sheet.id, kind: "text", geometry: { x: 0.5, y: 0.5 } })).rejects.toMatchObject({ code: "INVALID_VALUE", message: "a note needs some words" });
+    await expect(draw(staffCtx, { sheetId: sheet.id, kind: "cloud", geometry: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 }, color: "pink" })).rejects.toMatchObject({ code: "INVALID_VALUE", message: "pick one of the five colours" });
+    await expect(draw(staffCtx, { sheetId: "00000000-0000-0000-0000-000000000000", kind: "cloud", geometry: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 } })).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    // Drawn: the shape stored as fractions with unknown fields dropped, the colour, the words trimmed, the job remembered.
+    const cloud = await draw(staffCtx, { sheetId: sheet.id, kind: "cloud", geometry: { x: 0.1, y: 0.2, w: 0.3, h: 0.1, junk: 9 }, color: "blue" });
+    expect([cloud.kind, cloud.color, cloud.geometry, cloud.text, cloud.workItemId, cloud.projectId, cloud.version]).toEqual(["cloud", "blue", { x: 0.1, y: 0.2, w: 0.3, h: 0.1 }, "", null, project.id, 1]);
+    const arrow = await draw(staffCtx, { sheetId: sheet.id, kind: "arrow", geometry: { x1: 0.5, y1: 0.5, x2: 0.6, y2: 0.55 } });
+    expect([arrow.color, arrow.geometry]).toEqual(["red", { x1: 0.5, y1: 0.5, x2: 0.6, y2: 0.55 }]);
+    const note = await draw(staffCtx, { sheetId: sheet.id, kind: "text", geometry: { x: 0.3, y: 0.3 }, text: " Verify in field " });
+    expect(note.text).toBe("Verify in field");
+    // A pin raises a punch item on the job's list — the ordinary Work item, linked to the job, its notes naming the sheet.
+    const pin = await draw(staffCtx, { sheetId: sheet.id, kind: "pin", geometry: { x: 0.7, y: 0.7 }, text: "Touch up paint by the window", punch: { raise: true, dueOn: "2026-09-30" } });
+    expect(pin.workItemId).not.toBeNull();
+    let punch = (await run((tx) => listPunchItems(tx, tenantId, project.id))).find((w) => w.id === pin.workItemId)!;
+    expect([punch.title, punch.dueOn, punch.completedAt, punch.notes, punch.links]).toEqual([
+      "Touch up paint by the window",
+      "2026-09-30",
+      null,
+      "On sheet A-101 · First floor plan.",
+      [{ entityType: "project", entityId: project.id }],
+    ]);
+    // A pin that is only a marker raises nothing.
+    const marker = await draw(staffCtx, { sheetId: sheet.id, kind: "pin", geometry: { x: 0.8, y: 0.8 }, text: "Just a marker", punch: { raise: false } });
+    expect(marker.workItemId).toBeNull();
+
+    // The list: oldest first, each pin's punch item as Work has it now.
+    const rowsOf = () => run((tx) => listMarkups(tx, tenantId, sheet.id));
+    let rows = await rowsOf();
+    expect(rows.map((r) => [r.markup.kind, r.punch])).toEqual([
+      ["cloud", null],
+      ["arrow", null],
+      ["text", null],
+      ["pin", { title: "Touch up paint by the window", done: false, dueOn: "2026-09-30" }],
+      ["pin", null],
+    ]);
+    // Done on the punch list is done on the sheet.
+    await run((tx) => setPunchDone(tx, staffCtx, pin.workItemId!, true));
+    rows = await rowsOf();
+    expect(rows[3].punch?.done).toBe(true);
+    expect(await run((tx) => markupCounts(tx, tenantId, [sheet.id, "00000000-0000-0000-0000-000000000000"]))).toEqual(new Map([[sheet.id, 5]]));
+
+    // Words, colour and place after the fact; a stale edit refused; the pin's punch item keeps its own words.
+    const moved = await run((tx) => updateMarkup(tx, staffCtx, cloud.id, { geometry: { x: 0.2, y: 0.2, w: 0.2, h: 0.2 }, color: "green", version: 1 }));
+    expect([moved.geometry, moved.color, moved.version]).toEqual([{ x: 0.2, y: 0.2, w: 0.2, h: 0.2 }, "green", 2]);
+    await expect(run((tx) => updateMarkup(tx, staffCtx, cloud.id, { text: "x", version: 1 }))).rejects.toMatchObject({ code: "STALE_VERSION" });
+    await expect(run((tx) => updateMarkup(tx, staffCtx, note.id, { text: "  ", version: note.version }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => updateMarkup(tx, staffCtx, arrow.id, { color: "pink", version: arrow.version }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    const reworded = await run((tx) => updateMarkup(tx, staffCtx, pin.id, { text: "Touch up paint by the window and the door", version: pin.version }));
+    expect(reworded.text).toBe("Touch up paint by the window and the door");
+    punch = (await run((tx) => listPunchItems(tx, tenantId, project.id))).find((w) => w.id === pin.workItemId)!;
+    expect(punch.title).toBe("Touch up paint by the window");
+
+    // A punch item cleared from Work leaves the pin as a note: the key sets null and nothing cascades.
+    await withSystem((tx) => tx.delete(schema.workItems).where(eq(schema.workItems.id, pin.workItemId!)));
+    rows = await rowsOf();
+    expect(rows.map((r) => [r.markup.kind, r.markup.workItemId, r.punch])).toEqual([
+      ["cloud", null, null],
+      ["arrow", null, null],
+      ["text", null, null],
+      ["pin", null, null],
+      ["pin", null, null],
+    ]);
+    // A pin rubbed out leaves its punch item on the list: the site still owes it.
+    const pin2 = await draw(staffCtx, { sheetId: sheet.id, kind: "pin", geometry: { x: 0.4, y: 0.6 }, text: "Grout the tile" });
+    await run((tx) => deleteMarkup(tx, staffCtx, pin2.id));
+    expect((await run((tx) => listPunchItems(tx, tenantId, project.id))).some((w) => w.id === pin2.workItemId)).toBe(true);
+    await run((tx) => deleteMarkup(tx, staffCtx, marker.id));
+    expect((await rowsOf()).map((r) => r.markup.kind)).toEqual(["cloud", "arrow", "text", "pin"]);
+    await expect(run((tx) => deleteMarkup(tx, staffCtx, marker.id))).rejects.toMatchObject({ code: "NOT_FOUND" });
+    // An expert is a member in a pack and may draw.
+    expect((await draw({ ...ctx, role: "expert" }, { sheetId: sheet.id, kind: "cloud", geometry: { x: 0.5, y: 0.5, w: 0.1, h: 0.1 } })).kind).toBe("cloud");
+    // The sheet taken out of the set takes its markups; the punch items stay.
+    await run((tx) => deleteSheet(tx, staffCtx, sheet.id));
+    expect(await rowsOf()).toEqual([]);
+    expect((await run((tx) => listPunchItems(tx, tenantId, project.id))).some((w) => w.id === pin2.workItemId)).toBe(true);
   }, 120_000);
 });

@@ -13,6 +13,95 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-15 — Slice 9b: markups on a sheet (`claude/markups`, ADR 0073)
+
+The reason a crew opens a plan app: `job_sheet_markups`, and the sheet page
+grows a toolbar — move about, cloud, arrow, note, pin, five colours — a
+markup list, pinch and drag and ctrl+wheel, and a pin that is a punch item.
+
+**A MARKUP IS A VECTOR IN FRACTIONS OF THE PAGE; THE PDF IS NEVER
+TOUCHED.** A cloud is `{x, y, w, h}`, an arrow `{x1, y1, x2, y2}`, a note or
+a pin `{x, y}`, every number a fraction of the page's width or height in
+viewport space (so a rotated sheet's corner is where the eye sees it), a
+colour from `MARKUP_COLORS` (the five pens a site has, never a picker), and
+words for a note or a pin. `SheetViewer` draws the page on a canvas as
+before and lays an SVG over it in the page's own units (`viewBox` = the
+page's points), so a cloud is the same cloud at every zoom and strokes keep
+two screen pixels (`vector-effect: non-scaling-stroke`); `cloudPath` in
+`markups-math.ts` draws the revision cloud as arcs bulging outward, capped
+at 400 arcs an edge because a zero scallop once asked for a million and
+took the test runner down. `parseGeometry` is pure and shared — the viewer
+never sends what it would refuse, the server refuses in a sentence.
+
+**A PIN IS A PUNCH ITEM WHERE IT SITS.** `addMarkup` for a pin with *Put it
+on the punch list* ticked calls the field slice's own `addPunchItem`, so
+the item is the ordinary Work item linked to the job, its notes naming the
+sheet, and the pin remembers it in `work_item_id`. The key to `work_items`
+SETS NULL in the column-list form (`ON DELETE SET NULL ("work_item_id")`,
+hand-edited into 0363 as the mail links were in 0046): a punch item
+cleared from Work leaves the pin as a note; a pin rubbed out leaves the
+item on the list. `listMarkups` reads each pin's item live — done, due —
+and the list's tick calls `setPunchDoneAction`, the same verb the job's
+punch list uses. A markup hangs off one issue of a sheet and cascades
+with it; the issues list on the sheet page says how many markups an
+earlier issue carries.
+
+**THE VIEWER.** Continuous zoom 1× to 8×, the `+`/`−` by 1.5×, *Fit* to
+1×, ctrl+wheel about the cursor (a native listener, since React's wheel is
+passive), two fingers pinching through pointer events with a CSS transform
+during the gesture and one re-render at the end, one finger or the mouse
+dragging the sheet about in *Move about*, and the same drag drawing a cloud
+or an arrow with the other tools; a tap places a note or a pin and asks for
+its words in a dialog. Esc goes back to moving about. A tap on a shape or
+its row selects it and the row scrolls it into view. The canvas is drawn
+at device resolution up to a 24-million-pixel cap — 9a's viewer at 6× on a
+retina screen asked for seventy million. Pins are numbered in the order
+placed (`pinNumbers`), so pin 3 is pin 3 on the drawing, in the list and
+on the site; a done pin shows ✓ and fades.
+
+**WHO.** `member`, as the drawings are. The two drawings pages also take the
+section header the redesign gave every job page (an `<h2>` and a sentence
+under the layout's own header) in place of the `PageHeader` they had.
+
+Migrations `0363_job_sheet_markups.sql` (the SET NULL hand-edited) and
+`0364_job_sheet_markups_rls.sql`, applied to dev and prod before the merge;
+`db:verify-rls` 223 tables on both, `db:verify-modules` 19/19 on both.
+Tests: `tests/jobs-markups.test.ts` (the kind, colour, words and bound
+CHECK mirrors, the SET NULL form, the cascades, every shape refusal in
+words, the drag from any corner, the cloud's arcs on the rectangle's edges
+walked clockwise and capped, the arrowhead's barbs, pin numbering, the
+summary and the sentence), one more ops scenario in `tests/jobs-ops.test.ts`
+(every refusal, the four kinds drawn with unknown fields dropped, the pin's
+punch item on the job's list with the sheet in its notes, a marker pin
+raising nothing, done on the list read on the sheet, words and colour and
+place after the fact, a stale edit, the pin's words parting from the item's,
+the item cleared leaving the pin, a pin rubbed out leaving the item, the
+expert as a member, the sheet gone taking its markups), one more isolation
+certification (cross-tenant, the job, the sheet and the punch item held to
+the tenant, the CHECKs, the null on the item's clearing, the cascades).
+
+**DRIVEN on the dev branch's Hilltop Farm, job 24-109, sheet A-101 of
+the permit set 9a uploaded, from an out-of-repo worktree's server on port
+3100 signed in as the owner.** *Cloud*, a drag around the room dimensions:
+the toast *Cloud drawn*, the red scalloped cloud on the sheet, the list
+*1 cloud.* with the author and the day. *Arrow*, a drag from the title
+block toward the cloud: the head at the cloud, *1 cloud, 1 arrow.* Blue,
+*Note*, a tap above the arrow, *Verify in field* in the dialog, *Add the
+note*: the words on the sheet in blue with a white halo. *Pin*, a tap below
+the cloud, *Touch up paint by the window*, due 2026-09-30, *Place the pin*:
+a blue pin numbered 1, the row *Due 2026-09-30*, the sentence *1 pin is
+still open on the punch list*, and the Field page's punch list carrying
+*Touch up paint by the window*. The tick on the pin's row: *Done* on the
+row, ✓ on the pin, the sentence without its clause. `+` twice: *2.3×*, the
+canvas and the SVG both 1453px in a scrolling box, the cloud still around
+the room dimensions and the arrow still pointing at it. At 375px the tools
+wrap to two rows, the sheet keeps to its width with all four shapes, and
+the list reads. Found by driving: the pane's `type` action does not reach
+a dialog's autofocused textarea — `form_input` by ref does — which is a
+trap for the next drive and not a defect in the page. Not driven: the
+pinch (the pane has no touch), ctrl+wheel, rubbing out and editing words
+or colour (the ops suite covers both), an expert's read-only toolbar.
+
 ### 2026-09-15 — A job with nothing to measure it by is not over-billed (`claude/jobs-unmeasurable`)
 
 The founder asked where `$22,556.25 billed ahead of the work done` on 24-111
@@ -2835,6 +2924,7 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_party_documents` | What a subcontractor or supplier has on file with the business (11b, ADR 0068): the party, an open-taxonomy `kind` (format-checked; three suggested), title, issuer, number, issued and expires dates, a coverage limit, requested / received / void with the receipt date, notes. The scanned copy is a Documents attachment (`job_party_document`). | **No action to the party** — one with documents on file cannot be merged away. CHECK: the kind is a slug; received has its date, requested has none, void keeps what it had; limit ≥ 0. Standing (missing / expired / expiring / ok) is derived against today and the tenant's required list, never stored. |
 | `job_drawing_sets` | One issue of a job's drawings (ADR 0072): name, the date on the drawings (`issued_on`, which orders the issues), who issued it (a party), notes. Its PDFs are cabinet documents hung on it through `document_attachments` (`job_drawing_set`). | Cascade from the project; **no action to the party**. CHECK: name present. The current set is never stored — it is derived from the issues' dates. |
 | `job_sheets` | One page of one of a set's files with the number the trade calls it by, normalised on write, a title and a revision mark. | Cascade from the project, the set AND the document (a page of a file that is gone is nothing to open). UNIQUE (set, number) and (set, document, page). CHECK: number present, page ≥ 1. The discipline is read off the number, never stored. |
+| `job_sheet_markups` | A cloud, an arrow, a note or a pin on ONE issue of a sheet (ADR 0073): the shape as fractions of the page (`geometry` jsonb), a colour from the five, words for a note or a pin, and the punch item a pin raised while it exists (`work_item_id`). | Cascade from the project and from the sheet; **SET NULL (column-list form) from `work_items`** — a punch item cleared leaves the pin as a note. CHECK: kind, colour, words present for a note or a pin, words ≤ 2,000, geometry an object. |
 | `job_phases` | A phase or milestone of a job's schedule (ADR 0071): the calendar item that holds its dates, name, kind, planned / underway / done, the predecessor and its lag, the party doing it, the cost code, notes, order. | Cascade from the project AND from its `schedule_items` row (a phase without its item is nothing); **no action to itself, the party and the code** (the verb re-points successors before a removal). One phase per item. CHECK: kind, status, lag within a year, not its own predecessor. The dates are NOT here — they are the item's. |
 | `job_lien_waivers` | A lien waiver as a RECORD (11a, ADR 0066): the claimant (any party), the job, the order and the billed application it covers, its kind (conditional/unconditional × progress/final), the through date, the amount, and whether it was requested or received. The signed copy is a Documents attachment (`job_lien_waiver`). | Cascade from the project and the order; **no action to the party and to the application** — who signed is held, and a named application stays. CHECK: received has its date, requested has none, void keeps what it had; amount ≥ 0. Nothing here says "outstanding": the gap is derived from the applications' bills at read time. |
 | `job_commitment_lines` | The money, one cost code at a time — the lines the order was placed with (`change_order_id` null) and each change order's, tagged with it (4b). | Cascade from the commitment and from the change; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative on an original line — a credit is a change order — and a change's line may be negative, the one exception in the CHECK. A line counts when it is original or its change is approved: `countedCommitmentLine`, one predicate for every roll-up. |
@@ -2866,6 +2956,11 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Key files & seams
 
+- `src/packs/jobs/markups-ops.ts` + `markups-math.ts` + `components/sheet-viewer.tsx`
+  — markups (ADR 0073): the shape checked once in `parseGeometry` on both
+  sides, the revision cloud as `cloudPath`, a pin's punch item through the
+  field slice's own `addPunchItem`, and the viewer's SVG over the canvas in
+  the page's own units.
 - `src/packs/jobs/drawings-ops.ts` + `drawings-math.ts` — the sets and sheets
   (ADR 0072): the file is Documents' (`registerAttachedFile` with
   `docKind: "drawing"`, `attachDocumentToRecord`), the pack keeps which page
@@ -2951,6 +3046,11 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Decisions & gotchas
 
+- **[ADR 0073](../decisions/0073-a-markup-is-a-vector-on-a-sheets-issue-and-a-pin-is-a-punch-item-where-it-sits.md)** —
+  a markup is a vector in fractions of the page over one issue of a sheet,
+  the PDF untouched; a pin is a punch item where it sits, the ordinary Work
+  item with a key that SETS NULL in the column-list form; a reissue starts
+  clean and nothing is carried forward for anybody.
 - **[ADR 0072](../decisions/0072-a-drawing-set-is-an-issue-of-pages-in-documents-and-the-current-set-is-derived.md)** —
   a drawing set is an issue of pages in Documents, a sheet is a page with a
   number, and the current set is DERIVED as the newest issue of every number
@@ -3121,13 +3221,15 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Open items
 
-- **A sheet is a page to look at (9a, ADR 0072).** Markups — clouds, arrows,
-  text and pins that raise a punch item where they sit — stored as vectors
-  over a sheet and revision (9b), a scale set on a sheet with lengths and
-  areas measured and pushed onto an estimate line as the takeoff (9c),
-  comparing two issues of a sheet by overlay, reading the cover sheet's
-  index to fill titles, and a per-job Drawings folder in the cabinet are
-  each a slice of their own once a real set has been read. A scanned set's
+- **A sheet is a page to look at and draw on (9a, 9b; ADRs 0072, 0073).**
+  ~~Markups~~ shipped as 9b. Still each a slice of its own: a scale set on a
+  sheet with lengths and areas measured and pushed onto an estimate line as
+  the takeoff (9c), comparing two issues of a sheet by overlay, reading the
+  cover sheet's index to fill titles, a per-job Drawings folder in the
+  cabinet; and from the markups, moving or resizing a shape after the fact
+  (today: rub it out and draw again), a freehand pen, carrying markups onto
+  a reissue by choice, a markup on a photo, burning markups into a PDF to
+  send, and telling the pinned trade (the digest and Mail are the seams). A scanned set's
   numbers are typed off the thumbnails. The "From Documents" door leaves a
   picked file's `doc_kind` as it was; only an upload through the set is
   filed as a `drawing`.

@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, lte } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { JobLienWaiver, JobPartyDocument } from "@/db/schema";
 import { attachmentCounts } from "@/modules/documents/attachments";
@@ -10,6 +10,7 @@ import {
   type EntityWorkRow,
 } from "@/lib/work/entity-work";
 import { JobsError, getProject, requireWrite, type JobsCtx } from "./ops";
+import { addDays } from "@/lib/timezone";
 import {
   COMMITMENT_ENTITY,
   COMMITTED_STATUSES,
@@ -849,4 +850,47 @@ export async function askForPartyDocument(
       dueOn: input.dueOn ?? null,
     },
   );
+}
+
+/**
+ * THE CERTIFICATES THIS JOB SHOULD WORRY ABOUT: expired, or expiring inside
+ * `EXPIRING_SOON_DAYS`, held by a party the job has actually ORDERED from.
+ *
+ * A party in the address book with a lapsed certificate is not this job's
+ * problem — the scope is the commitments, which is what `boardExtras` applies
+ * for the card board. `selectDistinct` on the document, because one
+ * subcontractor can hold several orders on the same job and a lapsed
+ * certificate is one problem, not one per order.
+ */
+export async function lapsedCertificatesForProject(
+  tx: Tx,
+  tenantId: string,
+  projectId: string,
+  asOf: string,
+): Promise<{ partyName: string; kind: string; expiresOn: string | null }[]> {
+  const rows = await tx
+    .selectDistinct({
+      partyName: schema.parties.displayName,
+      kind: schema.jobPartyDocuments.kind,
+      expiresOn: schema.jobPartyDocuments.expiresOn,
+    })
+    .from(schema.jobCommitments)
+    .innerJoin(
+      schema.jobPartyDocuments,
+      and(
+        eq(schema.jobPartyDocuments.tenantId, schema.jobCommitments.tenantId),
+        eq(schema.jobPartyDocuments.partyId, schema.jobCommitments.partyId),
+      ),
+    )
+    .innerJoin(schema.parties, eq(schema.parties.id, schema.jobCommitments.partyId))
+    .where(
+      and(
+        eq(schema.jobCommitments.tenantId, tenantId),
+        eq(schema.jobCommitments.projectId, projectId),
+        inArray(schema.jobCommitments.status, [...COMMITTED_STATUSES]),
+        lte(schema.jobPartyDocuments.expiresOn, addDays(asOf, EXPIRING_SOON_DAYS)),
+      ),
+    );
+  // Soonest to expire first: the one to chase is the one furthest gone.
+  return rows.sort((a, b) => (a.expiresOn ?? "").localeCompare(b.expiresOn ?? ""));
 }

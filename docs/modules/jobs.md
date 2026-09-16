@@ -13,6 +13,68 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-15 — The Overview `2a` shipped without (`claude/jobs-overview`)
+
+**`2a` delivered its header, vitals strip, section strip and route split, and
+left the Overview as the old flat panel stack.** The design's spec for it was
+explicit — two columns, a **Needs a decision** panel, Job cost by code and
+Contracts on the left, Details / Next on the schedule / Punch list / Last days
+logged on the right — and the slice shipped without any of it, described in the
+PR as if the restructure were complete. The founder spotted it against the
+mockups. This is the half that was missing.
+
+**LEFT IS WHAT TO DO, RIGHT IS WHAT IT IS.** The left column is the working
+column; the right rail is reference. That split is the point of two columns
+rather than one longer page: a panel answering "what should I do" belongs left,
+one answering "what is this" belongs right.
+
+**`decisions.ts` derives the panel, and stores nothing.** Every fact in it was
+already on the page, spread across eleven panels — the billing variance in one,
+a negative code variance in another, a pending selection in a third — so reading
+them meant scrolling past four tables and knowing what to look for. Rules worth
+keeping:
+
+- **A decision is a fact plus a next action.** If the button would be "look at
+  it", the row belongs in a table instead. That is the test for adding a kind.
+- **Over-billed only.** Under-billed is money you are owed and have not asked
+  for — real, and on the strip — but not a decision: the answer is always
+  "invoice it". Over-billed needs a judgement.
+- **The worst code, not every code.** Six codes over do not need six rows; they
+  need the one to open first and a count of the rest.
+- **NAME THE FIGURE THAT CAUSED IT.** The variance is budget less the GREATER of
+  ordered and spent, so the first draft printed "$34,000 ordered against $40,000
+  budgeted" under a headline of "$23,650 over" — a sentence whose own numbers
+  cannot reach its total. Whichever of ordered and spent is larger is named.
+
+**Three corrections to `2a` itself, all against its written spec:**
+
+- **The vitals' Billed vs earned showed the wrong figure.** The spec says the
+  signed, tinted variance is the number; it was showing what had been billed.
+  "Billed vs earned" asks which way the job is out, and $45,597.50 billed does
+  not answer it — $14,402.50 under-billed does. What has been invoiced is now
+  the small print beneath.
+- **`Contract, revised`**, not `Contract`: it is original plus approved changes,
+  which is not what anybody signed.
+- **The status badge belongs beside the title**, where it qualifies the thing
+  named. Among the actions it read as one. `PageHeader` gained a `titleAfter`
+  slot — deliberately not a node `title`, because the title is the page's one
+  `<h1>` and keeping it a string is what stops callers putting layout in it.
+
+The module home's sentence now names the job: "One is billed ahead" makes the
+reader hunt the table for which.
+
+**A one-column grid sizes to its CONTENT.** The two-column layout was
+`lg:grid-cols-[minmax(0,1fr)_316px]` with nothing set below the breakpoint, so
+on a phone the implicit `auto` column grew past the viewport and the whole page
+scrolled sideways — 142px of it. The base track needs `minmax(0,1fr)` as much as
+the wide one does.
+
+Still not built from the design: the header's primary **Add**. What it adds is
+not stated, and every tab already has its own add action, so guessing would mean
+inventing a control rather than implementing one.
+
+Driven on Hilltop Farm's Miller barn conversion, at 1280px and 375px.
+
 ### 2026-09-15 — The three tabs the design never drew (`claude/jobs-remaining-tabs`)
 
 Contracts, Ordered and Estimates reached their own routes in `2a` as panels

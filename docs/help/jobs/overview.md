@@ -101,11 +101,11 @@ Then the {{project|lower}}'s name, with its number, address, {{customer|lower}} 
 
 One strip, read left to right. It is the same arithmetic the list uses, so a figure here matches what you just saw on the list.
 
-- **`Contract`** — the revised value: signed and complete agreements, moved by approved change orders. `incl. $… in changes` underneath when changes have moved it, or just `revised` when they have not. A {{project|lower}} with nothing signed reads `Nothing signed`, and underneath either what is out for signature or `nothing out for signature`.
+- **`Contract, revised`** — the revised value: signed and complete agreements, moved by approved change orders. `incl. $… in changes` underneath when changes have moved it, or just `revised` when they have not. A {{project|lower}} with nothing signed reads `Nothing signed`, and underneath either what is out for signature or `nothing out for signature`.
 - **`Committed`** — what you have ordered against the job, billed or not.
 - **`Actual cost`** — what it has cost, read from your books. Not typed in by anyone, which is why it agrees with your profit and loss.
 - **`Complete`** — how far along, with a bar. `Not started` when nothing has been spent, `No estimate` when money has gone out but there is no budget to measure it against, and `By hours` on a time-and-materials job, whose earned figure is worked out on **Work in progress** instead.
-- **`Billed vs earned`** — what has been invoiced, and underneath whether that is behind or ahead: `under-billed` in green, `over-billed` in red, `level with earned` when they match. A complete {{project|lower}} shows its gross profit instead, because the variance stops mattering once the job is done.
+- **`Billed vs earned`** — **how far out the billing is**, green when you are under and red when you are ahead, with what has actually been invoiced on the line beneath. The figure answers "which way is this job out", which is the question the label asks; what has been billed is the supporting number. A complete {{project|lower}} shows its gross profit instead, because the variance stops mattering once the job is done.
 
 ### The sections
 
@@ -126,11 +126,32 @@ Opening a record inside a section — a contract, an order — keeps that sectio
 
 ### What is on Overview
 
-`Details` lists the {{customer|lower}}, company, division, kind of work, cost codes, start and end, plus one row worth understanding:
+Two columns on a wide screen, stacked on a phone. The left is what to do; the right is what the {{project|lower}} is.
 
-- **`Charged to`** — the name this job appears under in your cost reports, which is its number and its name together. If it ever reads `Not a cost object — this should not happen; tell us`, tell us: it means the job was created but the thing that lets reports group by it was not, and costs put against it will not show up where you expect.
+#### `Needs a decision`
 
-Under it, a short panel for each of Estimates, Selections, Drawings, Schedule, On site, Punch list and Cost codes — a sentence or a few rows, the buttons to add something, and a link through to the full section.
+Everything waiting on somebody, most urgent first, each with the one place to go about it. Nothing here is stored — it is worked out from the same figures the rest of the page shows:
+
+- **Billed ahead of the work** — invoiced past what has been earned. {button:Open WIP|outline}. Under-billing is not listed: it is on the strip above, and the answer is always just to invoice it.
+- **A cost code over its budget** — the worst one, with how many others are also over, and whichever of ordered or spent caused it. {button:Open code|outline}.
+- **A selection overdue**, or waiting on the client when none is late yet. {button:Send reminder|outline}.
+- **Changes proposed, not approved** — nothing counts toward the contract until the owner says yes. {button:View|outline}.
+- **Somebody paid with no unconditional lien waiver** — the money has already gone out. {button:Chase|outline}.
+- **A subcontractor certificate lapsed** while they are on site. {button:Request a copy|outline}.
+
+When there is nothing, it says so plainly rather than showing an empty box.
+
+#### `Job cost by code` and `Contracts`
+
+Short versions of their own tabs — the codes with a bar for spend against budget and the over ones tinted, and the agreements with what each is worth now and what has been billed. {button:All codes|outline} and {button:All contracts|outline} go to the full screens.
+
+#### The right-hand rail
+
+- **`Details`** — the {{customer|lower}}, company, division, kind of work, cost codes, start and end, plus one row worth understanding:
+  - **`Charged to`** — the name this job appears under in your cost reports, which is its number and its name together. If it ever reads `Not a cost object — this should not happen; tell us`, tell us: it means the job was created but the thing that lets reports group by it was not, and costs put against it will not show up where you expect.
+- **`Next on the schedule`** — the next three phases that are not done, with anything overdue in red.
+- **`Punch list`** — the same list as the Field tab, with its add row. Tick an item to close it.
+- **`Last days logged`** — the two most recent daily reports.
 
 ## Estimates — pricing the {{project|lower}} before anybody signs
 

@@ -157,17 +157,15 @@ export default async function ProjectLayout({
       <PageHeader
         icon={<HardHat />}
         title={project.name}
-        description={description}
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            {editProject}
-            <StatusBadge tone={projectStatusTone(project.status)}>
-              {isProjectStatus(project.status)
-                ? STATUS_LABELS[project.status]
-                : project.status}
-            </StatusBadge>
-          </div>
+        titleAfter={
+          <StatusBadge tone={projectStatusTone(project.status)}>
+            {isProjectStatus(project.status)
+              ? STATUS_LABELS[project.status]
+              : project.status}
+          </StatusBadge>
         }
+        description={description}
+        actions={editProject}
       />
 
       <ProjectVitalsStrip vitals={vitals} symbol={ctx.tenant.currencySymbol} />

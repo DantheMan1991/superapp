@@ -124,3 +124,19 @@ export function costTotals(rows: readonly CostRowLike[]): CostTotals {
     unbudgetedCount: rows.length - budgeted.length,
   };
 }
+
+/**
+ * How much of a code's budget has actually been SPENT, as opposed to spoken
+ * for.
+ *
+ * The Job cost tab measures `projectedCents` — the greater of ordered and
+ * spent — because that is what `Left` subtracts and what decides whether a
+ * trade is over. The Overview's summary column is labelled "Spent of budget"
+ * and therefore measures spend: a column that says one word and measures
+ * another is how a figure ends up being quoted for the wrong thing.
+ */
+export function spentOfBudgetPpm(row: CostRowLike): number | null {
+  if (!row.hasBudget || row.budgetCents <= 0) return null;
+  if (row.actualCents <= 0) return 0;
+  return Math.round((row.actualCents * COST_PPM) / row.budgetCents);
+}

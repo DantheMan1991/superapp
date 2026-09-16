@@ -6,6 +6,16 @@ import { ReportButton } from "@/components/app/report-button";
 interface PageHeaderProps {
   title: string;
   /**
+   * Rendered on the title's own line, immediately after it — for a badge that
+   * qualifies the thing named rather than acting on it. A job's status reads as
+   * part of its name ("Miller barn conversion · Active"); over in `actions` it
+   * sat among the buttons and read as one.
+   *
+   * Deliberately NOT a node `title`: the title is the page's one `<h1>` and
+   * keeping it a string is what stops callers putting layout in it.
+   */
+  titleAfter?: ReactNode;
+  /**
    * The line under the title. Takes a node, not a string, because most callers
    * put a live figure in it — "$12,480 outstanding · $2,140 overdue" — and the
    * overdue half needs its own colour.
@@ -41,6 +51,7 @@ interface PageHeaderProps {
  */
 export function PageHeader({
   title,
+  titleAfter,
   description,
   actions,
   icon,
@@ -60,9 +71,12 @@ export function PageHeader({
           </div>
         )}
         <div className="min-w-0">
-          <h1 className="font-heading text-2xl font-semibold tracking-heading">
-            {title}
-          </h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="font-heading text-2xl font-semibold tracking-heading">
+              {title}
+            </h1>
+            {titleAfter}
+          </div>
           {description && (
             <p className="mt-0.5 text-sm text-muted-foreground">
               {description}

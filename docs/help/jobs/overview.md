@@ -907,6 +907,32 @@ A line under the tools says what the chosen tool wants; `Esc` goes back to movin
 
 The sheet's file is never changed by any of this. {button:The file|outline} downloads the PDF exactly as it came in.
 
+### Measuring a sheet, and the takeoff
+
+Three more tools on the same row — {button:Length|outline}, {button:Area|outline}, {button:Count|outline} — and beside them {button:Set the scale|secondary}, which reads the sheet's scale once it has one: `1/4" = 1'-0"`, or `18.00 pt per ft` when it matches no standard.
+
+**The scale first.** A length or an area is nothing without it; a count needs none. {button:Set the scale|secondary} opens the sheet's scale:
+
+- **From a dimension the drawing states** — {button:Tap a known dimension|outline}, then tap the two ends of a dimension on the sheet (the wall the drawing says is `24'-6"`), and type what it says: `Length` as a decimal (`24.5`), `Unit` feet or metres, {button:Set the scale|primary}. This is the honest way and works on any plot — a half-size print, a sheet somebody printed to fit.
+- **From the title block** — pick the scale the title block states (`1/4" = 1'-0"`, `1" = 20'`, `1:100`) and {button:Use it|primary}. Right only when the PDF is the sheet's own size, which the dialog says; a set printed to letter size is not, and the known dimension is the way.
+- {button:Clear the scale|ghost} takes it off. Setting it again, either way, corrects every length and area already on the sheet at once: a measurement is points on the page, and its feet are read through the scale every time.
+
+**Measuring.** Pick the tool and tap: along a wall corner by corner for a length, around a room corner by corner for an area, on each fixture for a count. The tool line counts the taps and shows the quantity so far — *4 points · 59 sq ft* — with {button:Finish|primary} (or `Enter`) to keep it and {button:Start over|ghost} to clear it. On the sheet a length carries its feet at its middle, an area its square feet in a tinted fill, a count `×N` beside the first tap. In the list a measurement reads its quantity, `needs the scale` when the sheet has none, and the pencil names it (*Kitchen*, *North wall*) and colours it; the points stay where they are. Rub it out and draw again to change one.
+
+**The takeoff.** {button:Takeoff|outline} on a measurement's row puts its quantity onto an estimate line:
+
+| Field | What it is |
+| --- | --- |
+| `Measurements to add up` | When the sheet has more of the same kind, tick the ones that go together — two floors onto one flooring line. A length, an area and a count never share a line. |
+| the line above the fields | *59 sq ft goes on the line as 59.026 sf* — the quantity in the unit the estimate prices by: `lf` and `sf` (or `m` and `m2`), `ea` for a count. |
+| `Estimate` | The {{project|lower}}'s draft and sent estimates. An accepted one is the agreement and cannot take a quantity. |
+| `Line` | An existing line of that estimate, or *A new line*. |
+| `The new line`, `Cost code` | For a new line: what it is and its code. Its unit is the measurement's; its notes say *From the takeoff.* |
+
+{button:Add the line|primary} or {button:Set the quantity|primary}: **the line's quantity becomes the total** — a push states, it never adds — and the toast says what went where. The row then carries a chip: `→ EST-2 · Flooring, kitchen · 59.026 sf`, reading the line as it is now on the estimate. Measure the sheet again and the chip says `measured since`; push again to bring the line up to date, or leave it. {button:×|ghost} beside the chip lets the measurement go without touching the line. Taking the line off the estimate leaves the measurement, marked `Line gone`.
+
+The estimate's unit prices do the rest: open the estimate, and the line has its quantity waiting for a cost per unit.
+
 ## On site — the daily log, photos and the punch list
 
 Anyone on the team, not only owners: the field is a chore, and the person with the phone on the site is rarely the owner.
@@ -1079,7 +1105,8 @@ Worth knowing so you are not looking for it:
 - **A subcontractor's application does not print**, and neither does a change order on an order. They are the subcontractor's documents, prepared on their side; your own applications print from their row.
 - **A lien waiver is not generated.** The form itself is your state's or your lawyer's, not something Jobs prints; the signed one attaches as a photo, a file or from Documents.
 - **The schedule counts calendar days, and a phase waits only for the one it follows.** No working-day calendar or holidays yet, no start-to-start dependencies, no baseline to measure slip against, and nothing tells the trade — the phase names them, and the company calendar and the feed are how they hear. A schedule is typed per {{project|lower}}; a template that fills a new one is next.
-- **A markup is drawn once.** A cloud, an arrow, a note or a pin cannot be moved or resized after the fact — rub it out and draw it again — there is no freehand pen, nothing carries a markup onto a reissued sheet, and a marked-up sheet is not printed or sent with its markups on it. No measuring on a sheet yet, no overlay of one issue on another, and the cover sheet's index is not read to fill titles. A scanned set has no text to read numbers from; type them off the pictures. A sheet shows the file as it is in Documents today: replace the file's bytes there and the sheet shows the new bytes — a reissue is a new set, not a replaced file.
+- **A markup is drawn once.** A cloud, an arrow, a note, a pin or a measurement cannot be moved or resized after the fact — rub it out and draw it again — there is no freehand pen, nothing carries a markup onto a reissued sheet, and a marked-up sheet is not printed or sent with its markups on it. No overlay of one issue on another, and the cover sheet's index is not read to fill titles.
+- **The takeoff pushes one way.** A measurement puts its quantity on an estimate line and remembers the line; the estimate does not point back at the sheets, an opening is not deducted from an area, nothing measures a volume, and a total across sheets is added up by you. The scale is set by hand — from a known dimension or the title block — never read from the PDF.
 - **An estimate is lines you type.** No assemblies (a bundle of lines dropped in as one), no unit cost book that remembers what concrete cost last time, no takeoff from the drawings. A supplier's quote cannot be attached to an estimate yet. The proposal prints but is not sent from here, and the client cannot accept it on a screen of their own — the signed page comes back the way it always has.
 - **A subcontractor out of standing is not stopped.** An order can be issued and a bill paid while a certificate is missing or expired; the Subcontractors page and the order's page say so in red, and the decision is yours. Which kinds are required is set in the module's configuration for now, not on a screen.
 - **The option book is per job.** The same selections with the same choices on every plan are entered on each job for now; a book that seeds a new job is next. Nothing here lets the client choose for themselves; the office records what they said.
@@ -1107,6 +1134,7 @@ Worth knowing so you are not looking for it:
 | Add a set of drawings, read its pages into sheets, correct or remove a sheet | ● | ● | ● |
 | Upload a set's file, or attach one from Documents | ● | ● | |
 | Draw on a sheet, place a pin on the punch list, or rub a markup out | ● | ● | ● |
+| Set a sheet's scale, measure on it, or push a quantity onto an estimate line | ● | ● | ● |
 | Log a day on site, or add and tick a punch item | ● | ● | ● |
 | Add photos to a day | ● | ● | |
 | See the work in progress schedule | ● | ● | ● |

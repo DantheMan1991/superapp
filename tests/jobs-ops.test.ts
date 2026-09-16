@@ -114,6 +114,7 @@ import {
   detachSetFile,
   drawingsSummary,
   indexSheets,
+  getSheet,
   listDrawingSets,
   listSheets,
   setTarget,
@@ -122,6 +123,7 @@ import {
 } from "../src/packs/jobs/drawings-ops";
 import { attachDocumentToRecord } from "../src/modules/documents/attachments";
 import { addMarkup, deleteMarkup, listMarkups, markupCounts, updateMarkup } from "../src/packs/jobs/markups-ops";
+import { clearSheetScale, measurementOf, pushTakeoff, scaleOf, setSheetScale, unpushTakeoff } from "../src/packs/jobs/takeoff-ops";
 import { certificateInputFrom } from "../src/packs/jobs/certificate";
 import { loadInvoice, loadInvoiceLines } from "../src/modules/accounting/invoicing/invoices";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
@@ -4340,7 +4342,7 @@ d("jobs ops", () => {
     // An expert is a member in a pack and may keep the schedule; only the calendar itself is an owner's to make.
     expect((await run((tx) => createPhase(tx, { ...ctx, role: "expert" }, { projectId: project.id, name: "Punch walk", startOn: "2026-11-02" }, TZ))).name).toBe("Punch walk");
   }, 120_000);
-  it("A JOB'S DRAWINGS are sets of pages in Documents: a set is an issue with a date and its files hang on it; a page read into a sheet carries its number, normalised, once per set; only a PDF the set holds is read; the newest issue of each number is the current set — by the date on the drawings, then by which set was made later — and older ones are superseded; a file read again replaces its sheets; a set removed lets go of its files and takes its sheets", async () => {
+  it("A JOB'S DRAWINGS are sets of pages in Documents: a set is an issue with a date and its files hang on it; a page read into a sheet carries its number, normalised, once per set; only a PDF the set holds is read; the newest issue of each number is the current set — by the date on the drawings, then by which set was made later — and older ones are superseded; a file read again keeps its sheets' rows; a set removed lets go of its files and takes its sheets", async () => {
     const entity = await newCompany("Drawings Co 1");
     const { project, architect } = await run(async (tx) => ({
       project: await createProject(tx, ctx, { entityId: entity, number: "OPS-DRW1", name: "Drawn" }),
@@ -4470,7 +4472,7 @@ d("jobs ops", () => {
     expect([permit2.name, permit2.notes, permit2.issuedOn, permit2.version]).toEqual(["Permit set (stamped)", "Stamped by the county.", "2026-06-01", 2]);
     await expect(run((tx) => updateDrawingSet(tx, staffCtx, permit.id, { name: "x", version: 1 }))).rejects.toMatchObject({ code: "STALE_VERSION" });
 
-    // A file read again replaces what it was read into: A-103 is A-101 again, E-101 (left out this time) is gone, S-201 keeps its number and gets a new id.
+    // A file read again is the correction: A-103 is A-101 again, E-101 (left out this time) is gone, and S-201 KEEPS its row — since 9b its markups and since 9c its scale hang off the id (ADR 0074).
     const s201Before = rows.find((r) => r.sheet.sheetNumber === "S-201")!.sheet.id;
     await index(staffCtx, permit.id, permitPdf, [
       { pageNumber: 2, sheetNumber: "A-101", title: "First floor plan" },
@@ -4479,7 +4481,7 @@ d("jobs ops", () => {
     ]);
     rows = await rowsOf();
     expect(rows.map((r) => r.sheet.sheetNumber)).toEqual(["S-201", "A-101", "A-102", "A-102", "A-102", "A-104"]);
-    expect(rows.find((r) => r.sheet.sheetNumber === "S-201")!.sheet.id).not.toBe(s201Before);
+    expect(rows.find((r) => r.sheet.sheetNumber === "S-201")!.sheet.id).toBe(s201Before);
     // A page that was never a sheet, taken out; the file untouched.
     await run((tx) => deleteSheet(tx, staffCtx, rows.find((r) => r.sheet.sheetNumber === "S-201")!.sheet.id));
     expect((await rowsOf()).map((r) => r.sheet.sheetNumber)).toEqual(["A-101", "A-102", "A-102", "A-102", "A-104"]);
@@ -4613,5 +4615,138 @@ d("jobs ops", () => {
     await run((tx) => deleteSheet(tx, staffCtx, sheet.id));
     expect(await rowsOf()).toEqual([]);
     expect((await run((tx) => listPunchItems(tx, tenantId, project.id))).some((w) => w.id === pin2.workItemId)).toBe(true);
+  }, 120_000);
+  it("THE TAKEOFF: the scale is the sheet's, set from a known dimension or the title block; a length, an area and a count are markups with points that read through it; a push puts the total onto an estimate line, new or existing, and the measurement remembers the line; an accepted estimate refuses; a line taken off the estimate leaves the measurement; a file read again keeps the sheet, its scale and its markups", async () => {
+    const entity = await newCompany("Takeoff Co 1");
+    const project = await run((tx) => createProject(tx, ctx, { entityId: entity, number: "OPS-TK1", name: "Measured" }));
+    const set = await run((tx) => createDrawingSet(tx, staffCtx, { projectId: project.id, name: "Permit set", issuedOn: "2026-06-01" }));
+    const pdf = await run(async (tx) => {
+      const rows = await tx
+        .insert(schema.documents)
+        .values({
+          tenantId,
+          origin: "dms",
+          blobPathname: `docs/${tenantId}/files/${STAMP}-takeoff-set.pdf`,
+          fileName: "takeoff-set.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 10,
+          sha256: `${STAMP}-sha-takeoff`,
+          effectiveVisibility: "members",
+        })
+        .returning();
+      return rows[0].id;
+    });
+    await run((tx) => attachDocumentToRecord(tx, { tenantId, userId: ctx.userId, role: "owner" }, { documentId: pdf, target: setTarget(set.id), makePrimary: false }));
+    const [sheet] = await run((tx) => indexSheets(tx, staffCtx, { setId: set.id, documentId: pdf, sheets: [{ pageNumber: 2, sheetNumber: "A-101", title: "First floor plan" }] }));
+    const draw = (input: Parameters<typeof addMarkup>[2]) => run((tx) => addMarkup(tx, staffCtx, input));
+    const page = { pageWidthPt: 792, pageHeightPt: 612 };
+
+    // No scale yet: a count reads, a length and an area do not.
+    const count = await draw({ sheetId: sheet.id, kind: "count", geometry: { points: [{ x: 0.1, y: 0.1 }, { x: 0.2, y: 0.1 }, { x: 0.3, y: 0.1 }] }, text: "Recessed cans" });
+    const walls = await draw({ sheetId: sheet.id, kind: "length", geometry: { points: [{ x: 0.25, y: 0.25 }, { x: 0.5, y: 0.25 }, { x: 0.5, y: 0.5 }] } });
+    const room = await draw({ sheetId: sheet.id, kind: "area", geometry: { points: [{ x: 0.25, y: 0.25 }, { x: 0.5, y: 0.25 }, { x: 0.5, y: 0.5 }, { x: 0.25, y: 0.5 }] }, text: "Kitchen" });
+    expect([count.kind, walls.kind, room.kind, room.text]).toEqual(["count", "length", "area", "Kitchen"]);
+    expect(measurementOf(count, null)).toEqual({ quantity: 3, unit: "each" });
+    expect(measurementOf(walls, null)).toBeNull();
+    // The shape, in words.
+    await expect(draw({ sheetId: sheet.id, kind: "length", geometry: { points: [{ x: 0.1, y: 0.1 }] } })).rejects.toMatchObject({ code: "INVALID_VALUE", message: "a length needs two points" });
+    await expect(draw({ sheetId: sheet.id, kind: "area", geometry: { points: [{ x: 0.1, y: 0.1 }, { x: 0.2, y: 0.2 }] } })).rejects.toMatchObject({ code: "INVALID_VALUE", message: "an area needs three points" });
+    await expect(draw({ sheetId: sheet.id, kind: "count", geometry: { points: [{ x: 1.5, y: 0.1 }] } })).rejects.toMatchObject({ code: "INVALID_VALUE", message: "point 1 must be within the page" });
+    await expect(draw({ sheetId: sheet.id, kind: "count", geometry: { x: 0.5, y: 0.5 } })).rejects.toMatchObject({ code: "INVALID_VALUE", message: "points must be a list" });
+
+    // The scale from a known dimension: a quarter of the width is eleven feet, so a quarter inch is a foot.
+    await expect(run((tx) => setSheetScale(tx, staffCtx, sheet.id, { by: "known", a: { x: 0.25, y: 0.5 }, b: { x: 0.25, y: 0.5 }, length: 11, unit: "ft", ...page }))).rejects.toMatchObject({ code: "INVALID_VALUE", message: "the two points are on top of each other" });
+    await expect(run((tx) => setSheetScale(tx, staffCtx, sheet.id, { by: "known", a: { x: 0.25, y: 0.5 }, b: { x: 0.5, y: 0.5 }, length: 0, unit: "ft", ...page }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => setSheetScale(tx, staffCtx, sheet.id, { by: "known", a: { x: 0.25, y: 0.5 }, b: { x: 0.5, y: 0.5 }, length: 11, unit: "yd", ...page }))).rejects.toMatchObject({ code: "INVALID_VALUE", message: "the unit is feet or metres" });
+    await expect(run((tx) => setSheetScale(tx, staffCtx, sheet.id, { by: "standard", key: "arch:99", ...page }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    const scaled = await run((tx) => setSheetScale(tx, staffCtx, sheet.id, { by: "known", a: { x: 0.25, y: 0.5 }, b: { x: 0.5, y: 0.5 }, length: 11, unit: "ft", ...page }));
+    expect([scaled.scaleUnit, scaled.pageWidthPt, scaled.pageHeightPt, scaled.scaleSetByClerkUserId, scaled.version]).toEqual(["ft", 792, 612, staffCtx.userId, 2]);
+    expect(scaled.scalePointsPerUnit).toBeCloseTo(18, 9);
+    const scale = scaleOf(scaled)!;
+    expect(measurementOf(walls, scale)).toEqual({ quantity: 19.5, unit: "ft" });
+    expect(measurementOf(room, scale)?.quantity).toBeCloseTo(93.5, 9);
+    // The list carries no line yet.
+    let rows = await run((tx) => listMarkups(tx, tenantId, sheet.id));
+    expect(rows.map((r) => [r.markup.kind, r.takeoff])).toEqual([
+      ["count", null],
+      ["length", null],
+      ["area", null],
+    ]);
+
+    // An estimate to push onto, and the pushes.
+    const est = await run((tx) => createEstimate(tx, staffCtx, { projectId: project.id, number: "EST-TK1", lines: [{ description: "Baseboard", unit: "lf", unitCostCents: 3_00 }] }));
+    const baseboard = (await run((tx) => listEstimates(tx, tenantId, project.id))).find((e) => e.estimate.id === est.id)!.lines[0];
+    const pushed = await run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [room.id], newLine: { description: "Flooring, kitchen" } }));
+    expect([pushed.kind, pushed.unit, pushed.quantityThousandths, pushed.measurement.unit]).toEqual(["area", "sf", 93_500, "sq ft"]);
+    let lines = (await run((tx) => listEstimates(tx, tenantId, project.id))).find((e) => e.estimate.id === est.id)!.lines;
+    expect(lines.map((l) => [l.description, l.unit, l.quantityThousandths, l.notes])).toEqual([
+      ["Baseboard", "lf", 1000, ""],
+      ["Flooring, kitchen", "sf", 93_500, "From the takeoff."],
+    ]);
+    // Onto the existing baseboard line: the quantity becomes the length, the line's own unit kept.
+    const onto = await run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [walls.id], lineId: baseboard.id }));
+    expect([onto.lineId, onto.quantityThousandths, onto.unit]).toEqual([baseboard.id, 19_500, "lf"]);
+    rows = await run((tx) => listMarkups(tx, tenantId, sheet.id));
+    expect(rows.map((r) => [r.markup.kind, r.markup.pushedQuantityThousandths, r.takeoff?.estimateNumber ?? null, r.takeoff?.lineDescription ?? null, r.takeoff?.lineQuantityThousandths ?? null])).toEqual([
+      ["count", null, null, null, null],
+      ["length", 19_500, "EST-TK1", "Baseboard", 19_500],
+      ["area", 93_500, "EST-TK1", "Flooring, kitchen", 93_500],
+    ]);
+    // Two areas add up onto one line; a floor and a wall do not; a count needs no scale and goes on as each.
+    const hall = await draw({ sheetId: sheet.id, kind: "area", geometry: { points: [{ x: 0.6, y: 0.25 }, { x: 0.7, y: 0.25 }, { x: 0.7, y: 0.5 }, { x: 0.6, y: 0.5 }] }, text: "Hall" });
+    const both = await run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [room.id, hall.id], lineId: pushed.lineId }));
+    expect(both.quantityThousandths).toBe(93_500 + 37_400);
+    await expect(run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [room.id, walls.id], lineId: pushed.lineId }))).rejects.toMatchObject({ code: "INVALID_VALUE", message: expect.stringContaining("cannot go onto one line together") });
+    const cans = await run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [count.id], newLine: { description: "Recessed cans", unit: "" } }));
+    expect([cans.unit, cans.quantityThousandths]).toEqual(["ea", 3_000]);
+    // A push is a statement: the hall taken out of the flooring line leaves the room standing behind it alone.
+    await run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [room.id], lineId: pushed.lineId }));
+    rows = await run((tx) => listMarkups(tx, tenantId, sheet.id));
+    expect(rows.find((r) => r.markup.id === hall.id)!.takeoff).toBeNull();
+    expect(rows.find((r) => r.markup.id === room.id)!.takeoff?.lineQuantityThousandths).toBe(93_500);
+    // Refusals: a cloud has no quantity; another job's estimate; a line not on the estimate; nothing picked; no line said.
+    const cloud = await draw({ sheetId: sheet.id, kind: "cloud", geometry: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 } });
+    await expect(run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [cloud.id], newLine: { description: "x" } }))).rejects.toMatchObject({ code: "INVALID_KIND" });
+    const other = await run((tx) => createProject(tx, ctx, { entityId: entity, number: "OPS-TK2", name: "Other" }));
+    const otherEst = await run((tx) => createEstimate(tx, staffCtx, { projectId: other.id, number: "EST-TK2" }));
+    await expect(run((tx) => pushTakeoff(tx, staffCtx, { estimateId: otherEst.id, markupIds: [room.id], newLine: { description: "x" } }))).rejects.toMatchObject({ code: "WRONG_PROJECT" });
+    await expect(run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [room.id], lineId: "00000000-0000-0000-0000-000000000000" }))).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [], newLine: { description: "x" } }))).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [room.id] }))).rejects.toMatchObject({ code: "INVALID_VALUE", message: expect.stringContaining("say which line") });
+    // Unpushed: the line keeps its quantity, the measurement stops claiming it.
+    await run((tx) => unpushTakeoff(tx, staffCtx, count.id));
+    rows = await run((tx) => listMarkups(tx, tenantId, sheet.id));
+    expect(rows.find((r) => r.markup.id === count.id)!.takeoff).toBeNull();
+    lines = (await run((tx) => listEstimates(tx, tenantId, project.id))).find((e) => e.estimate.id === est.id)!.lines;
+    expect(lines.find((l) => l.description === "Recessed cans")?.quantityThousandths).toBe(3_000);
+    // A line taken off the estimate leaves the measurement, unpushed, by the key that sets null.
+    const kept = lines.filter((l) => l.description !== "Flooring, kitchen").map((l) => ({ id: l.id, description: l.description, unit: l.unit, quantityThousandths: l.quantityThousandths, unitCostCents: l.unitCostCents }));
+    const estNow = (await run((tx) => listEstimates(tx, tenantId, project.id))).find((e) => e.estimate.id === est.id)!.estimate;
+    await run((tx) => updateEstimate(tx, staffCtx, est.id, { version: estNow.version, lines: kept }));
+    rows = await run((tx) => listMarkups(tx, tenantId, sheet.id));
+    expect([rows.find((r) => r.markup.id === room.id)!.markup.estimateLineId, rows.find((r) => r.markup.id === room.id)!.markup.pushedQuantityThousandths, rows.find((r) => r.markup.id === room.id)!.takeoff]).toEqual([null, 93_500, null]);
+    // An accepted estimate refuses a push: its quantities are the agreement.
+    const contract = await run((tx) => createContract(tx, ctx, { projectId: project.id, kind: "construction", role: "prime" }));
+    await run((tx) => acceptEstimate(tx, ctx, est.id, { contractId: contract.id, decidedOn: "2026-09-16" }));
+    await expect(run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [walls.id], lineId: baseboard.id }))).rejects.toMatchObject({ code: "ESTIMATE_ACCEPTED" });
+    // The scale set again corrects every measurement at once; cleared, a length reads as unmeasured.
+    const rescaled = await run((tx) => setSheetScale(tx, staffCtx, sheet.id, { by: "standard", key: "arch:1/8", ...page }));
+    expect(measurementOf(walls, scaleOf(rescaled)!)).toEqual({ quantity: 39, unit: "ft" });
+    const cleared = await run((tx) => clearSheetScale(tx, staffCtx, sheet.id));
+    expect([cleared.scalePointsPerUnit, cleared.scaleUnit, cleared.pageWidthPt, scaleOf(cleared)]).toEqual([null, "", null, null]);
+    expect(measurementOf(walls, null)).toBeNull();
+    // A file read again KEEPS the sheet's row — its markups and its scale — where the page still exists; a page left out loses its row.
+    await run((tx) => setSheetScale(tx, staffCtx, sheet.id, { by: "standard", key: "arch:1/4", ...page }));
+    const reread = await run((tx) => indexSheets(tx, staffCtx, { setId: set.id, documentId: pdf, sheets: [{ pageNumber: 2, sheetNumber: "A-101", title: "First floor plan, revised" }, { pageNumber: 3, sheetNumber: "A-102" }] }));
+    expect(reread.map((s) => [s.pageNumber, s.sheetNumber, s.title, s.id === sheet.id])).toEqual([
+      [2, "A-101", "First floor plan, revised", true],
+      [3, "A-102", "", false],
+    ]);
+    expect((await run((tx) => getSheet(tx, tenantId, sheet.id)))?.scalePointsPerUnit).toBeCloseTo(18, 9);
+    expect((await run((tx) => listMarkups(tx, tenantId, sheet.id))).length).toBe(rows.length);
+    const again = await run((tx) => indexSheets(tx, staffCtx, { setId: set.id, documentId: pdf, sheets: [{ pageNumber: 3, sheetNumber: "A-102" }] }));
+    expect(again.map((s) => s.pageNumber)).toEqual([3]);
+    expect(await run((tx) => getSheet(tx, tenantId, sheet.id))).toBeNull();
+    expect(await run((tx) => listMarkups(tx, tenantId, sheet.id))).toEqual([]);
   }, 120_000);
 });

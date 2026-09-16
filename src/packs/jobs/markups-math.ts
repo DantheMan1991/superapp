@@ -6,7 +6,7 @@
  * one drawn on a desk at 1×, and the sheet's PDF is never touched.
  */
 
-import { MARKUP_COLORS, MARKUP_KINDS, type MarkupColor, type MarkupKind } from "./vocabulary";
+import { MARKUP_COLORS, MARKUP_KINDS, MEASURE_POINTS_MAX, type MarkupColor, type MarkupKind, type MeasureKind } from "./vocabulary";
 
 export interface CloudGeometry {
   x: number;
@@ -24,7 +24,33 @@ export interface PointGeometry {
   x: number;
   y: number;
 }
-export type MarkupGeometry = CloudGeometry | ArrowGeometry | PointGeometry;
+/** A length, an area or a count: points on the page (ADR 0074). */
+export interface PointsGeometry {
+  points: PointGeometry[];
+}
+export type MarkupGeometry = CloudGeometry | ArrowGeometry | PointGeometry | PointsGeometry;
+
+/** The fewest points a measuring kind needs: a length is a line, an area a triangle, a count a tap. */
+export const MIN_POINTS: Record<MeasureKind, number> = { length: 2, area: 3, count: 1 };
+
+/** The stored shape of a measurement: points within the page, enough of them, not too many. */
+export function parsePoints(kind: MeasureKind, raw: unknown): PointsGeometry {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new Error("geometry must be an object");
+  const list = (raw as Record<string, unknown>).points;
+  if (!Array.isArray(list)) throw new Error("points must be a list");
+  if (list.length < MIN_POINTS[kind]) {
+    throw new Error(kind === "length" ? "a length needs two points" : kind === "area" ? "an area needs three points" : "a count needs a tap");
+  }
+  if (list.length > MEASURE_POINTS_MAX) throw new Error(`a measurement has at most ${MEASURE_POINTS_MAX} points`);
+  const points = list.map((p, i) => {
+    if (typeof p !== "object" || p === null) throw new Error(`point ${i + 1} must be a point`);
+    const { x, y } = p as Record<string, unknown>;
+    if (typeof x !== "number" || !Number.isFinite(x) || typeof y !== "number" || !Number.isFinite(y)) throw new Error(`point ${i + 1} must be numbers`);
+    if (x < 0 || x > 1 || y < 0 || y > 1) throw new Error(`point ${i + 1} must be within the page`);
+    return { x, y };
+  });
+  return { points };
+}
 
 /** Smaller than this, as a fraction of the page, is a slip of the finger and not a markup. */
 export const MIN_EXTENT = 0.004;
@@ -66,6 +92,10 @@ export function parseGeometry(kind: MarkupKind, raw: unknown): MarkupGeometry {
     case "text":
     case "pin":
       return { x: fraction(r, "x"), y: fraction(r, "y") };
+    case "length":
+    case "area":
+    case "count":
+      return parsePoints(kind, raw);
   }
 }
 
@@ -187,13 +217,24 @@ export function pinNumbers(markups: readonly MarkupLike[]): Map<string, number> 
   return new Map(pins.map((p, i) => [p.id, i + 1]));
 }
 
+/** The kinds as the sentence says them, one and many. A length was once "a pin" here, found by driving. */
+const KIND_WORDS: Record<MarkupKind, [string, string]> = {
+  cloud: ["cloud", "clouds"],
+  arrow: ["arrow", "arrows"],
+  text: ["note", "notes"],
+  pin: ["pin", "pins"],
+  length: ["length", "lengths"],
+  area: ["area", "areas"],
+  count: ["count", "counts"],
+};
+
 /** One sentence for the sheet's page. */
 export function markupSentence(summary: MarkupSummary): string {
   if (summary.count === 0) return "Nothing drawn on this issue.";
   const parts: string[] = [];
   for (const k of MARKUP_KINDS) {
     const n = summary.byKind[k];
-    if (n > 0) parts.push(`${n} ${k === "cloud" ? (n === 1 ? "cloud" : "clouds") : k === "arrow" ? (n === 1 ? "arrow" : "arrows") : k === "text" ? (n === 1 ? "note" : "notes") : n === 1 ? "pin" : "pins"}`);
+    if (n > 0) parts.push(`${n} ${n === 1 ? KIND_WORDS[k][0] : KIND_WORDS[k][1]}`);
   }
   const pins = summary.openPins > 0 ? `; ${summary.openPins} ${summary.openPins === 1 ? "pin is" : "pins are"} still open on the punch list` : "";
   return `${parts.join(", ")}${pins}.`;

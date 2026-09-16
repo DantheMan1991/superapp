@@ -2147,4 +2147,71 @@ d("jobs tables (RLS)", () => {
       await tx.delete(schema.documents).where(inArray(schema.documents.id, [docA, docB]));
     });
   });
+  it("cannot point a MEASUREMENT at another tenant's estimate line; the sheet's scale is positive, in feet or metres and whole; a measuring kind is a kind; a line taken off sets the key null and nothing else", async () => {
+    const docA = await withSystem(async (tx) => {
+      const r = await tx
+        .insert(schema.documents)
+        .values({
+          tenantId: tenantA,
+          origin: "dms",
+          blobPathname: `docs/${tenantA}/files/${STAMP}-takeoff.pdf`,
+          fileName: "takeoff.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 10,
+          sha256: `${STAMP}-${tenantA}-takeoff`,
+          effectiveVisibility: "members",
+        })
+        .returning();
+      return r[0].id;
+    });
+    const setId = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobDrawingSets).values({ tenantId: tenantA, projectId: projectA, name: "Takeoff set", issuedOn: "2026-06-01" }).returning();
+      return r[0].id;
+    });
+    const sheetId = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobSheets).values({ tenantId: tenantA, projectId: projectA, setId, documentId: docA, pageNumber: 1, sheetNumber: "T-101" }).returning();
+      return r[0].id;
+    });
+    // The scale: positive, in feet or metres, and whole — a scale without a page size or a unit is not a scale.
+    const whole = { scalePointsPerUnit: 18, scaleUnit: "ft", pageWidthPt: 792, pageHeightPt: 612 };
+    await expect(withSystem((tx) => tx.update(schema.jobSheets).set({ ...whole, scalePointsPerUnit: 0 }).where(eq(schema.jobSheets.id, sheetId)))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.update(schema.jobSheets).set({ ...whole, scaleUnit: "yd" }).where(eq(schema.jobSheets.id, sheetId)))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.update(schema.jobSheets).set({ ...whole, scaleUnit: "" }).where(eq(schema.jobSheets.id, sheetId)))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.update(schema.jobSheets).set({ ...whole, pageWidthPt: null }).where(eq(schema.jobSheets.id, sheetId)))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.update(schema.jobSheets).set({ scalePointsPerUnit: null, scaleUnit: "ft" }).where(eq(schema.jobSheets.id, sheetId)))).rejects.toThrow();
+    await withSystem((tx) => tx.update(schema.jobSheets).set(whole).where(eq(schema.jobSheets.id, sheetId)));
+    expect((await asStaff((tx) => tx.select().from(schema.jobSheets).where(eq(schema.jobSheets.id, sheetId))))[0].scaleUnit).toBe("ft");
+    expect(await asOtherTenant((tx) => tx.select().from(schema.jobSheets).where(eq(schema.jobSheets.id, sheetId)))).toEqual([]);
+
+    // An estimate line of each tenant.
+    const lineFor = async (tenant: string, project: string, number: string) =>
+      withSystem(async (tx) => {
+        const est = await tx.insert(schema.jobEstimates).values({ tenantId: tenant, projectId: project, number }).returning();
+        const line = await tx.insert(schema.jobEstimateLines).values({ tenantId: tenant, estimateId: est[0].id, description: "Flooring" }).returning();
+        return { estimateId: est[0].id, lineId: line[0].id };
+      });
+    const mine = await lineFor(tenantA, projectA, `${STAMP}-EST-A`);
+    const theirs = await lineFor(tenantB, projectB, `${STAMP}-EST-B`);
+    const base = { tenantId: tenantA, projectId: projectA, sheetId, kind: "area", geometry: { points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.1 }, { x: 0.5, y: 0.5 }] } } as const;
+    await expect(withSystem((tx) => tx.insert(schema.jobSheetMarkups).values({ ...base, estimateLineId: theirs.lineId }))).rejects.toThrow();
+    const markupId = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobSheetMarkups).values({ ...base, estimateLineId: mine.lineId, pushedQuantityThousandths: 93_500 }).returning();
+      return r[0].id;
+    });
+    expect(await asOtherTenant((tx) => tx.select().from(schema.jobSheetMarkups).where(eq(schema.jobSheetMarkups.id, markupId)))).toEqual([]);
+    // The measuring kinds are kinds; a made-up one is not.
+    await expect(withSystem((tx) => tx.update(schema.jobSheetMarkups).set({ kind: "volume" }).where(eq(schema.jobSheetMarkups.id, markupId)))).rejects.toThrow();
+    await withSystem((tx) => tx.update(schema.jobSheetMarkups).set({ kind: "length" }).where(eq(schema.jobSheetMarkups.id, markupId)));
+    await withSystem((tx) => tx.update(schema.jobSheetMarkups).set({ kind: "count" }).where(eq(schema.jobSheetMarkups.id, markupId)));
+    // The line taken off the estimate: the key is null, the pushed quantity and the measurement remain.
+    await withSystem((tx) => tx.delete(schema.jobEstimateLines).where(eq(schema.jobEstimateLines.id, mine.lineId)));
+    const after = await withSystem((tx) => tx.select().from(schema.jobSheetMarkups).where(eq(schema.jobSheetMarkups.id, markupId)));
+    expect(after).toHaveLength(1);
+    expect([after[0].estimateLineId, after[0].pushedQuantityThousandths, after[0].tenantId]).toEqual([null, 93_500, tenantA]);
+    await withSystem(async (tx) => {
+      await tx.delete(schema.jobEstimates).where(inArray(schema.jobEstimates.id, [mine.estimateId, theirs.estimateId]));
+      await tx.delete(schema.jobDrawingSets).where(eq(schema.jobDrawingSets.id, setId));
+      await tx.delete(schema.documents).where(eq(schema.documents.id, docA));
+    });
+  });
 });

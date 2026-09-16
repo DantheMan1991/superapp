@@ -533,15 +533,32 @@ export const OTHER_DISCIPLINE = "Other";
 
 // --------------------------------------------------------------------- markups
 
-/** Mirrors `job_sheet_markups_kind_valid`. Kept in sync by tests/jobs-markups.test.ts. */
-export const MARKUP_KINDS = ["cloud", "arrow", "text", "pin"] as const;
+/** Mirrors `job_sheet_markups_kind_valid`. Kept in sync by tests/jobs-markups.test.ts. The last three MEASURE (ADR 0074). */
+export const MARKUP_KINDS = ["cloud", "arrow", "text", "pin", "length", "area", "count"] as const;
 export type MarkupKind = (typeof MARKUP_KINDS)[number];
 export const MARKUP_KIND_LABELS: Record<MarkupKind, string> = {
   cloud: "Cloud",
   arrow: "Arrow",
   text: "Note",
   pin: "Pin",
+  length: "Length",
+  area: "Area",
+  count: "Count",
 };
+/** The kinds that carry a quantity: a length and an area need the sheet's scale, a count does not. */
+export const MEASURE_KINDS = ["length", "area", "count"] as const;
+export type MeasureKind = (typeof MEASURE_KINDS)[number];
+export function isMeasureKind(v: string): v is MeasureKind {
+  return (MEASURE_KINDS as readonly string[]).includes(v);
+}
+/** Mirrors `job_sheets_scale_unit_valid` less the empty string: the world's unit a sheet's scale is in. */
+export const SCALE_UNITS = ["ft", "m"] as const;
+export type ScaleUnit = (typeof SCALE_UNITS)[number];
+export function isScaleUnit(v: string): v is ScaleUnit {
+  return (SCALE_UNITS as readonly string[]).includes(v);
+}
+/** A measurement has at most this many points; a wall has fewer corners. */
+export const MEASURE_POINTS_MAX = 500;
 export function isMarkupKind(v: string): v is MarkupKind {
   return (MARKUP_KINDS as readonly string[]).includes(v);
 }

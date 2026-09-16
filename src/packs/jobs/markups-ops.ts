@@ -136,6 +136,8 @@ export interface MarkupRow {
   markup: JobSheetMarkup;
   /** The pin's punch item as Work has it now, while it exists. */
   punch: { title: string; done: boolean; dueOn: string | null } | null;
+  /** The estimate line a measurement was pushed onto, as the estimate has it now, while the line exists (ADR 0074). */
+  takeoff: { estimateId: string; estimateNumber: string; estimateStatus: string; lineDescription: string; lineUnit: string; lineQuantityThousandths: number } | null;
 }
 
 /** Everything drawn on one issue of a sheet, oldest first, with each pin's punch item as it stands. */
@@ -146,9 +148,20 @@ export async function listMarkups(tx: Tx, tenantId: string, sheetId: string): Pr
       punchTitle: schema.workItems.title,
       punchClosedAt: schema.workItems.closedAt,
       punchDueOn: schema.workItems.dueOn,
+      lineDescription: schema.jobEstimateLines.description,
+      lineUnit: schema.jobEstimateLines.unit,
+      lineQuantityThousandths: schema.jobEstimateLines.quantityThousandths,
+      estimateId: schema.jobEstimates.id,
+      estimateNumber: schema.jobEstimates.number,
+      estimateStatus: schema.jobEstimates.status,
     })
     .from(schema.jobSheetMarkups)
     .leftJoin(schema.workItems, and(eq(schema.workItems.tenantId, schema.jobSheetMarkups.tenantId), eq(schema.workItems.id, schema.jobSheetMarkups.workItemId)))
+    .leftJoin(
+      schema.jobEstimateLines,
+      and(eq(schema.jobEstimateLines.tenantId, schema.jobSheetMarkups.tenantId), eq(schema.jobEstimateLines.id, schema.jobSheetMarkups.estimateLineId)),
+    )
+    .leftJoin(schema.jobEstimates, and(eq(schema.jobEstimates.tenantId, schema.jobEstimateLines.tenantId), eq(schema.jobEstimates.id, schema.jobEstimateLines.estimateId)))
     .where(and(eq(schema.jobSheetMarkups.tenantId, tenantId), eq(schema.jobSheetMarkups.sheetId, sheetId)))
     .orderBy(asc(schema.jobSheetMarkups.createdAt), asc(schema.jobSheetMarkups.id));
   return rows.map((r) => ({
@@ -156,6 +169,17 @@ export async function listMarkups(tx: Tx, tenantId: string, sheetId: string): Pr
     punch:
       r.markup.workItemId && r.punchTitle !== null
         ? { title: r.punchTitle, done: r.punchClosedAt !== null, dueOn: r.punchDueOn ?? null }
+        : null,
+    takeoff:
+      r.markup.estimateLineId && r.lineDescription !== null && r.estimateId !== null
+        ? {
+            estimateId: r.estimateId,
+            estimateNumber: r.estimateNumber ?? "",
+            estimateStatus: r.estimateStatus ?? "",
+            lineDescription: r.lineDescription,
+            lineUnit: r.lineUnit ?? "",
+            lineQuantityThousandths: r.lineQuantityThousandths ?? 0,
+          }
         : null,
   }));
 }

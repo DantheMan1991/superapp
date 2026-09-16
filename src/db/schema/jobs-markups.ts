@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
-import { check, foreignKey, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigint, check, foreignKey, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { jobSheets } from "./jobs-drawings";
+import { jobEstimateLines } from "./jobs-estimates";
 import { jobProjects } from "./jobs";
 import { tenants } from "./platform";
 import { workItems } from "./work";
@@ -31,7 +32,7 @@ export const jobSheetMarkups = pgTable(
       .references(() => tenants.id, { onDelete: "cascade" }),
     projectId: uuid("project_id").notNull(),
     sheetId: uuid("sheet_id").notNull(),
-    /** cloud | arrow | text | pin — `MARKUP_KINDS`. */
+    /** cloud | arrow | text | pin, and the measuring kinds length | area | count — `MARKUP_KINDS`. */
     kind: text("kind").notNull(),
     /** red | blue | green | yellow | black — `MARKUP_COLORS`. */
     color: text("color").notNull().default("red"),
@@ -41,6 +42,13 @@ export const jobSheetMarkups = pgTable(
     text: text("text").notNull().default(""),
     /** The punch item a pin raised, while it exists. */
     workItemId: uuid("work_item_id"),
+    /**
+     * THE TAKEOFF (ADR 0074): the estimate line a measurement's quantity was
+     * pushed onto, while the line exists, and the quantity that was pushed —
+     * so the page can say when the measurement has drifted from the line.
+     */
+    estimateLineId: uuid("estimate_line_id"),
+    pushedQuantityThousandths: bigint("pushed_quantity_thousandths", { mode: "number" }),
     createdByClerkUserId: text("created_by_clerk_user_id"),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -51,6 +59,7 @@ export const jobSheetMarkups = pgTable(
     index("job_sheet_markups_tenant_sheet_idx").on(t.tenantId, t.sheetId),
     index("job_sheet_markups_tenant_project_idx").on(t.tenantId, t.projectId),
     index("job_sheet_markups_tenant_work_idx").on(t.tenantId, t.workItemId),
+    index("job_sheet_markups_tenant_line_idx").on(t.tenantId, t.estimateLineId),
     foreignKey({
       name: "job_sheet_markups_project_fk",
       columns: [t.tenantId, t.projectId],
@@ -68,7 +77,13 @@ export const jobSheetMarkups = pgTable(
       columns: [t.tenantId, t.workItemId],
       foreignColumns: [workItems.tenantId, workItems.id],
     }).onDelete("set null"),
-    check("job_sheet_markups_kind_valid", sql`${t.kind} in ('cloud', 'arrow', 'text', 'pin')`),
+    // The same column-list SET NULL: a line taken off the estimate leaves the measurement, unpushed.
+    foreignKey({
+      name: "job_sheet_markups_line_fk",
+      columns: [t.tenantId, t.estimateLineId],
+      foreignColumns: [jobEstimateLines.tenantId, jobEstimateLines.id],
+    }).onDelete("set null"),
+    check("job_sheet_markups_kind_valid", sql`${t.kind} in ('cloud', 'arrow', 'text', 'pin', 'length', 'area', 'count')`),
     check("job_sheet_markups_color_valid", sql`${t.color} in ('red', 'blue', 'green', 'yellow', 'black')`),
     check("job_sheet_markups_geometry_object", sql`jsonb_typeof(${t.geometry}) = 'object'`),
     check("job_sheet_markups_words_present", sql`${t.kind} not in ('text', 'pin') or length(btrim(${t.text})) > 0`),

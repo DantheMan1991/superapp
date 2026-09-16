@@ -244,9 +244,10 @@ export interface IndexInput {
 
 /**
  * The set's file read into sheets: one row per page that carries a number.
- * Replaces whatever this file was read into before (re-indexing is the
- * correction), so the same sheets come back with the same numbers and new
- * ids — a sheet's id is not a thing anything else holds on to.
+ * Re-reading is the correction, and since 9b a sheet's row is a thing other
+ * rows hold on to — its markups, its scale — so a page read again KEEPS its
+ * row (the number, title and revision updated), a page left out this time
+ * loses its row, and a page new to the reading gets one.
  *
  * The file must already hang on the set (the attach actions prove the set
  * exists and the cabinet's own rule allowed the write) and be a PDF, because
@@ -313,12 +314,31 @@ export async function indexSheets(tx: Tx, ctx: JobsCtx, input: IndexInput): Prom
       throw new JobsError("SHEET_TAKEN", `${e.sheetNumber} is already in this set, on another file's page ${e.pageNumber}`);
     }
   }
-  await tx
-    .delete(schema.jobSheets)
+  const held = await tx
+    .select({ id: schema.jobSheets.id, pageNumber: schema.jobSheets.pageNumber })
+    .from(schema.jobSheets)
     .where(and(eq(schema.jobSheets.tenantId, ctx.tenantId), eq(schema.jobSheets.setId, set.id), eq(schema.jobSheets.documentId, input.documentId)));
-  if (rows.length === 0) return [];
-  const inserted = await tx.insert(schema.jobSheets).values(rows).returning();
-  return inserted.sort((a, b) => a.pageNumber - b.pageNumber);
+  const byPage = new Map(held.map((h) => [h.pageNumber, h.id]));
+  const gone = held.filter((h) => !pages.has(h.pageNumber)).map((h) => h.id);
+  if (gone.length > 0) {
+    await tx.delete(schema.jobSheets).where(and(eq(schema.jobSheets.tenantId, ctx.tenantId), inArray(schema.jobSheets.id, gone)));
+  }
+  const out: JobSheet[] = [];
+  for (const row of rows) {
+    const id = byPage.get(row.pageNumber);
+    if (id) {
+      const updated = await tx
+        .update(schema.jobSheets)
+        .set({ sheetNumber: row.sheetNumber, title: row.title, revision: row.revision, updatedAt: new Date() })
+        .where(and(eq(schema.jobSheets.tenantId, ctx.tenantId), eq(schema.jobSheets.id, id)))
+        .returning();
+      out.push(updated[0]);
+    } else {
+      const inserted = await tx.insert(schema.jobSheets).values(row).returning();
+      out.push(inserted[0]);
+    }
+  }
+  return out.sort((a, b) => a.pageNumber - b.pageNumber);
 }
 
 export async function getSheet(tx: Tx, tenantId: string, id: string): Promise<JobSheet | null> {

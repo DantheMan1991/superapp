@@ -133,6 +133,8 @@ function ProjectCard({
           <div className="min-w-0 text-xs text-muted-foreground">
             {entry.valuation.kind === "by_hours" ? (
               <span>Billed by the hour</span>
+            ) : entry.valuation.kind === "no_estimate" ? (
+              <span className="text-warning-foreground">Needs an estimate</span>
             ) : ppm === null ? (
               <span>{entry.costToDateCents === 0 ? "Not started" : "No estimate"}</span>
             ) : (

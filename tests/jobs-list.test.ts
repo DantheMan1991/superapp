@@ -92,9 +92,35 @@ describe("measureProject", () => {
     expect(f.earnedCents).toBe(44_000_00);
   });
 
-  it("returns a null percent rather than 0% when there is no estimate", () => {
-    const f = measured(measureProject(input({ budgetCents: 0 })));
+  it("refuses to measure a signed job with no budget and no estimate", () => {
+    /*
+     * THIS TEST USED TO ASSERT THE BUG. It expected a `measured` valuation
+     * carrying a null percentage — and `wipFigures` computes earned as ZERO
+     * when the percentage is null, so every screen reported the job's whole
+     * billing as an overage. A job billed $22,556.25 against no estimate read
+     * as "$22,556.25 billed ahead of the work done", on the same strip that
+     * had just said "no budget to measure against".
+     *
+     * `reasonFor` in `wip-ops.ts` has always returned `no_estimate` for this
+     * shape and the schedule refuses to post it. The list now agrees.
+     */
+    const v = measureProject(input({ budgetCents: 0, billedCents: 22_556_25 }));
+    expect(v).toEqual({ kind: "no_estimate", billedCents: 22_556_25 });
+  });
+
+  it("still measures a COST-PLUS job with no estimate, which needs none", () => {
+    // The same null percentage, and not a problem: earned is cost plus the fee.
+    const f = measured(
+      measureProject(
+        input({
+          budgetCents: 0,
+          costToDateCents: 40_000_00,
+          terms: { method: "cost_plus", feePpm: 100_000, feeCents: null, gmaxCents: null },
+        }),
+      ),
+    );
     expect(f.percentCompletePpm).toBeNull();
+    expect(f.earnedCents).toBe(44_000_00);
   });
 
   it("treats a complete job as fully complete whatever its cost says", () => {

@@ -22,9 +22,9 @@
  * - `unsigned` — nothing is signed, so there is no contract value. The old
  *   table printed an em dash; the truth is usually "a proposal is out at
  *   $X", which is a number somebody can chase.
- * - `no_estimate` — nothing to measure against, so percent complete is null
- *   rather than 0%. `percentCompletePpm` already returns null; this carries
- *   the reason up to the cell so it can say "Not started" instead.
+ * - `no_estimate` — nothing to measure against. `percentCompletePpm` returns
+ *   null, and the cell says so instead of printing 0%. **It also means the job
+ *   has no earned figure at all**, which is the harder half: see below.
  * - `by_hours` — a time-and-materials job earns its approved hours at their
  *   bill rates (ADR 0062), and those hours are a query per job. A list of
  *   sixty jobs cannot afford sixty of them, so the row shows what it honestly
@@ -64,7 +64,24 @@ export type ProjectValuation =
   | { kind: "unsigned"; proposedCents: number }
   /** Billed by the hour; earned is measured on the WIP schedule, not here. */
   | { kind: "by_hours" }
-  /** Measured. `figures.percentCompletePpm` is still null when there is no estimate. */
+  /**
+   * Signed, but with nothing to measure against — no budget and no estimate on
+   * a job billed by a fixed value.
+   *
+   * **THIS IS NOT "EARNED NOTHING", AND THE DIFFERENCE IS THE WHOLE POINT.**
+   * `wipFigures` computes earned as zero when the percentage is null, and a
+   * screen that reported that number said a job billed $22,556.25 against no
+   * estimate was $22,556.25 OVER-BILLED — on the same strip that had just
+   * said "no budget to measure against". It cannot be both.
+   *
+   * The pack already had the right answer and this was not asking it:
+   * `reasonFor` in `wip-ops.ts` returns `no_estimate` for exactly this shape,
+   * the schedule refuses to post the period, and it names the job as a
+   * blocker — "24-111 has no budget and no estimate". Every screen now says
+   * the same thing the schedule does.
+   */
+  | { kind: "no_estimate"; billedCents: number }
+  /** Measured. A cost-plus job is measured here too — it needs no estimate. */
   | { kind: "measured"; figures: WipFigures };
 
 export interface ProjectMeasureInput {
@@ -101,20 +118,26 @@ export function measureProject(input: ProjectMeasureInput): ProjectValuation {
     return { kind: "unsigned", proposedCents: input.proposedCents };
   }
   if (input.terms?.method === "time_and_materials") return { kind: "by_hours" };
-  return {
-    kind: "measured",
-    figures: wipFigures({
-      contractCents: input.contractCents,
-      estimatedCostCents: input.budgetCents,
-      costToDateCents: input.costToDateCents,
-      billedCents: input.billedCents,
-      complete: input.status === "complete",
-      // A cost-plus job earns cost plus its fee and needs no estimate to say
-      // so; passing the terms is what stops it being measured against a budget
-      // it was never sold against.
-      costPlus: input.terms?.method === "cost_plus" ? input.terms : undefined,
-    }),
-  };
+  const figures = wipFigures({
+    contractCents: input.contractCents,
+    estimatedCostCents: input.budgetCents,
+    costToDateCents: input.costToDateCents,
+    billedCents: input.billedCents,
+    complete: input.status === "complete",
+    // A cost-plus job earns cost plus its fee and needs no estimate to say
+    // so; passing the terms is what stops it being measured against a budget
+    // it was never sold against.
+    costPlus: input.terms?.method === "cost_plus" ? input.terms : undefined,
+  });
+  /*
+   * THE SAME TEST `reasonFor` APPLIES, and in the same order: a cost-plus job
+   * needs no estimate, so its null percentage is not a problem — anything else
+   * with a null percentage has no earned figure and must not pretend to one.
+   */
+  if (!input.terms && figures.percentCompletePpm === null) {
+    return { kind: "no_estimate", billedCents: input.billedCents };
+  }
+  return { kind: "measured", figures };
 }
 
 /** The pill a status falls under. Anything unrecognised sits under All only. */

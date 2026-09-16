@@ -14,6 +14,7 @@ function input(over: Partial<DecisionInput> = {}): DecisionInput {
     projectId: "p1",
     symbol: "$",
     figures: null,
+    unmeasurable: null,
     costRows: [],
     selections: { pending: 0, overdue: 0 },
     proposedChanges: { count: 0, cents: 0 },
@@ -38,6 +39,25 @@ const code = (o: Partial<DecisionInput["costRows"][number]> = {}) => ({
 describe("a quiet job has nothing to decide", () => {
   it("returns no rows at all", () => {
     expect(decisionsFor(input())).toEqual([]);
+  });
+});
+
+describe("a job with nothing to measure it against", () => {
+  it("says so, and asks for an estimate — it does NOT call the billing an overage", () => {
+    // wipFigures computes earned as zero when the percentage is null, so the
+    // whole billing once read as over-billed on a page that had just said
+    // there was no budget to measure against. `reasonFor` in wip-ops refuses
+    // to post exactly this shape; every screen now agrees with it.
+    const rows = decisionsFor(input({ unmeasurable: { billedCents: 22_556_25 } }));
+    expect(rows.map((r) => r.kind)).toEqual(["no_estimate"]);
+    expect(rows[0].title).toContain("$22,556.25");
+    expect(rows[0].title).not.toContain("ahead");
+    expect(rows[0].action.label).toBe("Set a budget");
+  });
+
+  it("stays quiet when nothing has been billed against it yet", () => {
+    // Unmeasurable and unbilled is just a job nobody has started.
+    expect(decisionsFor(input({ unmeasurable: { billedCents: 0 } }))).toEqual([]);
   });
 });
 

@@ -1,8 +1,8 @@
 import "server-only";
-import { and, asc, eq, ilike, inArray, or } from "drizzle-orm";
+import { and, asc, eq, ilike, inArray, or, type SQL } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { EntityLinkCtx, EntityLinkProvider, LinkableEntity } from "@/lib/entity-links/types";
-import { PACK, PROJECT_ENTITY, STATUS_LABELS } from "./vocabulary";
+import { PACK, PROJECT_ENTITY, STATUS_LABELS, WARRANTY_CLAIM_ENTITY } from "./vocabulary";
 
 /**
  * The jobs pack as a place things can be attached to (ADR 0071): a project
@@ -61,6 +61,57 @@ async function resolveProjects(tx: Tx, ctx: EntityLinkCtx, ids: readonly string[
   return rows.map(toEntity);
 }
 
+/**
+ * A warranty claim is linkable too (ADR 0076): the Work item a claim raises
+ * points at the claim rather than the job, so the Work module names which
+ * call it is and the job's punch list stays the punch list. The href lands
+ * on the job's Warranty tab at the claim's row.
+ */
+type ClaimRow = { id: string; number: number; title: string; projectId: string; projectNumber: string };
+
+function toClaimEntity(row: ClaimRow): LinkableEntity {
+  return {
+    entityType: WARRANTY_CLAIM_ENTITY,
+    entityId: row.id,
+    label: `Warranty claim ${row.number} · ${row.projectNumber}`,
+    sublabel: row.title,
+    href: `${hrefFor(row.projectId)}/warranty#claim-${row.id}`,
+  };
+}
+
+const claimColumns = {
+  id: schema.jobWarrantyClaims.id,
+  number: schema.jobWarrantyClaims.number,
+  title: schema.jobWarrantyClaims.title,
+  projectId: schema.jobWarrantyClaims.projectId,
+  projectNumber: schema.jobProjects.number,
+};
+
+function claimQuery(tx: Tx, ctx: EntityLinkCtx, where?: SQL) {
+  return tx
+    .select(claimColumns)
+    .from(schema.jobWarrantyClaims)
+    .innerJoin(
+      schema.jobProjects,
+      and(eq(schema.jobProjects.tenantId, schema.jobWarrantyClaims.tenantId), eq(schema.jobProjects.id, schema.jobWarrantyClaims.projectId)),
+    )
+    .where(and(eq(schema.jobWarrantyClaims.tenantId, ctx.tenantId), where));
+}
+
+async function searchClaims(tx: Tx, ctx: EntityLinkCtx, query: string, limit: number): Promise<LinkableEntity[]> {
+  const q = `%${query.trim()}%`;
+  const rows = await claimQuery(tx, ctx, query.trim() === "" ? undefined : or(ilike(schema.jobWarrantyClaims.title, q), ilike(schema.jobProjects.number, q)))
+    .orderBy(asc(schema.jobProjects.number), asc(schema.jobWarrantyClaims.number))
+    .limit(limit);
+  return rows.map(toClaimEntity);
+}
+
+async function resolveClaims(tx: Tx, ctx: EntityLinkCtx, ids: readonly string[]): Promise<LinkableEntity[]> {
+  if (ids.length === 0) return [];
+  const rows = await claimQuery(tx, ctx, inArray(schema.jobWarrantyClaims.id, [...ids]));
+  return rows.map(toClaimEntity);
+}
+
 export const jobsEntityLinks: EntityLinkProvider = {
   slug: PACK,
   moduleSlug: PACK,
@@ -73,6 +124,14 @@ export const jobsEntityLinks: EntityLinkProvider = {
       icon: "hard-hat",
       search: searchProjects,
       resolve: resolveProjects,
+    },
+    {
+      type: WARRANTY_CLAIM_ENTITY,
+      label: "Warranty claim",
+      pluralLabel: "Warranty claims",
+      icon: "shield-check",
+      search: searchClaims,
+      resolve: resolveClaims,
     },
   ],
 };

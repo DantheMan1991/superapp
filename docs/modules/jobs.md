@@ -13,6 +13,104 @@ a software engagement and a house are the same row.
 
 ## Build log
 
+### 2026-09-16 — Slice 13a: warranty (`claude/warranty`, ADR 0076)
+
+The last row of the construction plan, the half of it every builder in the
+survey lives with: the job closes, and for a year or two the owner calls.
+A `Warranty` tab on every job and a Warranty page across jobs
+(`/dashboard/m/jobs/warranty`, a button beside *Subcontractors* on the
+module home); one table, `job_warranty_claims`, and two nullable columns
+on `job_projects` (migrations 0367/0368, live on dev and prod, 224 tables
+verified).
+
+**THE PERIOD IS THE JOB'S.** `warranty_months` and
+`substantial_completion_on` on the project, owner-set from the tab's
+*Set the period* dialog, and the expiry DERIVED — `addMonths` with the day
+clamped to the month's last, so 31 January plus a month is 28 February —
+never stored. `warrantyStanding` reads unset / not started / running /
+expiring (sixty days or fewer) / expired against today; the tab's
+sentence says *Under warranty until 2027-06-30, 287 days left.* The
+months CHECK is written `coalesce(months, 1) between 1 and 1200`, the
+lesson of 0366.
+
+**A CLAIM IS THE RECORD OF THE CALL, AND ITS WORK IS A WORK ITEM.** What,
+where, when and by whom, the trade responsible (a party; the job's
+ordered parties listed first under *On this job*), the cost code the fix
+is charged under (the job's own list), the decision with its day and
+reason. `recordClaim` takes the next number on the job and raises a Work
+item at once through `createWorkForEntity`, linked to the CLAIM
+(`WARRANTY_CLAIM_ENTITY`, a second entity type on the pack's link
+provider) rather than the job — so the Work module names which call it
+is (*Warranty claim 1 · 24-109*, with *open* landing on the row) and
+`listPunchItems` does not pick it up. The item's title follows an edit;
+its due date is the claim's *Schedule*; the tick on the claim is
+`setWorkComplete`. `work_item_id` SETS NULL in the column-list form; a
+claim whose item was cleared reads open and the next tick raises it again.
+
+**WHERE A CLAIM STANDS IS DERIVED** (`claimStanding`): not covered by the
+decision whatever the work says; else done, scheduled or open by the
+item. `decideClaim` to *not covered* completes the item — going to look
+was the work — and back to *undecided* clears the day and leaves the item
+as it was. A claim reported after the expiry is recorded and its row says
+*Outside the warranty period*; nothing refuses it.
+
+**THE COST IS THE JOB'S.** When any claim names a code the tab reads
+`jobCostRows` for those codes and says what was spent under them, from
+the job cost report; no ledger of its own.
+
+**WHO.** Any member records, schedules, decides and ticks; the period and
+removing a claim are the owner's. Removing leaves the item in Work,
+unlinked (`detachEntityType`), because it may already have been worked.
+
+Tests: `tests/jobs-warranty.test.ts` (the decision CHECK and the months
+bound mirrored from 0367, the two column-list SET NULLs, the link
+provider's type, `addMonths` across month ends and a leap year,
+`daysBetween`, the expiry, every standing against today, inside and
+outside by the day reported, the standing from decision and work, the
+counts and the sentences, the work title); one more ops scenario in
+`tests/jobs-ops.test.ts` (the period owner-only and checked, a claim by
+staff with its number and its Work item linked to the claim and absent
+from the punch list, the words for bad input, the list with the trade and
+the code by name, a claim after the period said, scheduling as the
+item's date, the tick as the item's state with the date kept, the
+decision closing the work and reopening leaving it closed, the edit
+following into the title, a stale version, the item cleared from Work
+and raised again by a tick, the lists across jobs, removal owner-only
+with the item left); one more block in `tests/isolation/jobs.test.ts`
+(the other tenant's claims unreadable and unchangeable; the other
+tenant's job, party, code and work item unrepresentable; number, title,
+decision, the dated rule and every bound as CHECKs; the months bound
+with null passing; the two SET NULLs touching one column each; the
+claims going with the job). The whole ops suite run alone before the
+push.
+
+**DRIVEN on the dev branch's Hilltop Farm, signed in as the owner.**
+24-109's new Warranty tab read *No warranty period set. No claims.*;
+*Set the period* with 12 months and 2026-06-30 gave *Under warranty until
+2027-06-30, 287 days left* and *Ends 2027-06-30*. *Record a claim* — *Drip
+under the kitchen sink*, Kitchen, by The Millers, look at it by
+2026-09-22, the trade picked from *On this job* (Pleasant Valley Feed
+Mill, the subcontract's party), the code 06 10 00 — toasted *Claim
+recorded, and the work raised.* and the row read claim 1, Scheduled
+2026-09-22; the panel then said *$63,650.00 spent under the claims' cost
+code (06 10 00)*, which on this dev job is the whole rough-carpentry
+spend and on a real one would be the warranty code's. Work, filtered to
+*Anyone*, listed *Warranty claim 1 on 24-109: Drip under the kitchen
+sink*, due 09/22/2026, with *Where: Kitchen · Reported 2026-09-16 by The
+Millers* in its notes and *Warranty claim 1 · 24-109 — open* under WHAT
+THIS IS ABOUT; *open* landed on the tab at the row. A second claim
+reported 2027-08-01 came in Open with *Outside the warranty period* in
+red; *Decide → Not covered* with a reason put it last as *Not covered ·
+2026-09-16 · Sprinkler overspray on the deck; not a defect.* with its
+Schedule button gone and its tick box greyed. Ticking claim 1 read
+*Done* and the sentence *2 claims: 1 done, 1 not covered.* The Warranty
+page across jobs read *No open claims · 1 project under warranty*, the
+job under UNDER WARRANTY with *287 days left*, and both claims under
+RECENTLY CLOSED. At 375 px the period facts stack and the claims table
+scrolls inside its panel. Not driven: the edit dialog and the Schedule
+dialog beyond their buttons (both ops-tested), removing a claim, an
+expiring or expired period (table-tested), the staff and expert views.
+
 ### 2026-09-16 — Paper for the outside: the change order and the order print (`claude/paper`, ADR 0075)
 
 The two documents every builder hands to somebody to sign, which did not
@@ -3122,10 +3220,11 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_drawing_sets` | One issue of a job's drawings (ADR 0072): name, the date on the drawings (`issued_on`, which orders the issues), who issued it (a party), notes. Its PDFs are cabinet documents hung on it through `document_attachments` (`job_drawing_set`). | Cascade from the project; **no action to the party**. CHECK: name present. The current set is never stored — it is derived from the issues' dates. |
 | `job_sheets` | One page of one of a set's files with the number the trade calls it by, normalised on write, a title and a revision mark; **and its scale** (ADR 0074): page points per foot or metre with the page's size in points beside it, so a measurement's fractions become feet without the PDF. | Cascade from the project, the set AND the document (a page of a file that is gone is nothing to open). UNIQUE (set, number) and (set, document, page). CHECK: number present, page ≥ 1. The discipline is read off the number, never stored. |
 | `job_sheet_markups` | A cloud, an arrow, a note or a pin on ONE issue of a sheet (ADR 0073): the shape as fractions of the page (`geometry` jsonb), a colour from the five, words for a note or a pin, and the punch item a pin raised while it exists (`work_item_id`); **and a length, an area or a count** (ADR 0074): `{points}`, its quantity derived through the sheet's scale, the estimate line it was pushed onto while the line exists (`estimate_line_id`) and what it pushed. | Cascade from the project and from the sheet; **SET NULL (column-list form) from `work_items` and from `job_estimate_lines`** — a punch item cleared leaves the pin as a note, a line taken off leaves the measurement. CHECK: kind (seven), colour, words present for a note or a pin, words ≤ 2,000, geometry an object. |
+| `job_warranty_claims` | The call after the job is done (ADR 0076): a number per job, what and where, reported when and by whom, the trade responsible (a party), the cost code the fix is charged under, the decision — pending / covered / not_covered — with its day and reason, and the Work item raised for it while it exists (`work_item_id`). | Cascade from the project; **SET NULL (column-list form) from `work_items` and from `job_cost_codes`**; no `onDelete` to the party (the CRM merge rule). UNIQUE (project, number). CHECK: number > 0, title present and ≤ 300, decision in the three, `(decision = 'pending') = (decided_on is null)`, every text bounded. The project's months: `coalesce(months, 1) between 1 and 1200`. Standing is never stored. |
 | `job_phases` | A phase or milestone of a job's schedule (ADR 0071): the calendar item that holds its dates, name, kind, planned / underway / done, the predecessor and its lag, the party doing it, the cost code, notes, order. | Cascade from the project AND from its `schedule_items` row (a phase without its item is nothing); **no action to itself, the party and the code** (the verb re-points successors before a removal). One phase per item. CHECK: kind, status, lag within a year, not its own predecessor. The dates are NOT here — they are the item's. |
 | `job_lien_waivers` | A lien waiver as a RECORD (11a, ADR 0066): the claimant (any party), the job, the order and the billed application it covers, its kind (conditional/unconditional × progress/final), the through date, the amount, and whether it was requested or received. The signed copy is a Documents attachment (`job_lien_waiver`). | Cascade from the project and the order; **no action to the party and to the application** — who signed is held, and a named application stays. CHECK: received has its date, requested has none, void keeps what it had; amount ≥ 0. Nothing here says "outstanding": the gap is derived from the applications' bills at read time. |
 | `job_commitment_lines` | The money, one cost code at a time — the lines the order was placed with (`change_order_id` null) and each change order's, tagged with it (4b). | Cascade from the commitment and from the change; **RESTRICT to the cost code**, which is the backstop for "codes are retired, never deleted". Amount non-negative on an original line — a credit is a change order — and a change's line may be negative, the one exception in the CHECK. A line counts when it is original or its change is approved: `countedCommitmentLine`, one predicate for every roll-up. |
-| `job_projects` | The spine. | FOUR composite FKs, each certified in `tests/isolation/jobs.test.ts`: company, division, client, cost code list. `delivery_method` is an open taxonomy (P1) with a **format check and no value check**, and is nullable. `metadata` is the P2 extension bag. |
+| `job_projects` | The spine; since ADR 0076 also the WARRANTY PERIOD — `warranty_months` and `substantial_completion_on`, both nullable, the expiry derived and never stored. | FOUR composite FKs, each certified in `tests/isolation/jobs.test.ts`: company, division, client, cost code list. `delivery_method` is an open taxonomy (P1) with a **format check and no value check**, and is nullable. `metadata` is the P2 extension bag. |
 
 Migrations `0325_jobs.sql` / `0326_jobs_rls.sql` (slice 0) and
 `0327_job_contracts.sql` / `0328_job_contracts_rls.sql` (slice 1), each applied
@@ -3153,6 +3252,12 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Key files & seams
 
+- `src/packs/jobs/warranty-ops.ts` + `warranty-math.ts` + `components/warranty-forms.tsx`
+  — the warranty (ADR 0076): the period's arithmetic pure (`addMonths`,
+  `warrantyExpiresOn`, `warrantyStanding`, `withinWarranty`,
+  `claimStanding`), the claim's Work item through `createWorkForEntity`
+  linked to the CLAIM (`WARRANTY_CLAIM_ENTITY`, registered in `links.ts`),
+  the tab at `[id]/warranty` and the page across jobs at `jobs/warranty`.
 - `src/packs/jobs/paper.ts` + `paper-model.ts` + `paper-pdf.tsx` — the client's
   change order and the issued order as PDFs (ADR 0075): two pure model
   builders, one layout in the proposal's styles, two loaders that read the
@@ -3252,6 +3357,14 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Decisions & gotchas
 
+- **[ADR 0076](../decisions/0076-a-warranty-claim-is-the-record-of-a-call-its-work-is-a-work-item-the-period-is-the-jobs-and-a-claim-outside-it-is-said-never-refused.md)** —
+  a warranty claim is the record of a call and its work is a Work item
+  linked to the CLAIM (so the punch list stays the punch list and Work says
+  which call); where it stands is derived from the decision and the item;
+  the period is the job's — months from substantial completion, the expiry
+  derived; the cost is read from the job cost report under the claim's code;
+  a claim outside the period is said, never refused. Not covered closes the
+  work item: going to look was the work.
 - **[ADR 0075](../decisions/0075-a-change-order-and-an-order-print-from-their-rows-the-change-order-at-its-price-with-the-contract-sum-either-side-the-order-with-its-changes-beneath-it.md)** —
   the change order prints at its PRICE with the contract sum before and
   after it, read as a ladder through the approved changes; the order prints
@@ -3439,6 +3552,11 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Open items
 
+- **A warranty is one period per job.** The 1-2-10 tiers some builders
+  carry, a per-contract warranty, telling the owner by Mail and the
+  back-charge to the responsible trade (still open from ADR 0065; a claim
+  now names the trade, which is the first half of it) are not built; a
+  manufacturer's warranty on a product is a document in the cabinet.
 - **A sheet is a page to look at, draw on and measure (9a–9c; ADRs 0072–0074).**
   ~~Markups~~ shipped as 9b, ~~the takeoff~~ as 9c. Still each a slice of its
   own: comparing two issues of a sheet by overlay, reading the cover sheet's

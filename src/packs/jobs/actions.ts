@@ -67,6 +67,7 @@ import {
   updateSheet,
 } from "./drawings-ops";
 import { addMarkup, deleteMarkup, updateMarkup } from "./markups-ops";
+import { decideClaim, deleteClaim, recordClaim, scheduleClaim, setClaimDone, setWarrantyPeriod, updateClaim } from "./warranty-ops";
 import { clearSheetScale, pushTakeoff, setSheetScale, unpushTakeoff } from "./takeoff-ops";
 import {
   approveSubApplication,
@@ -134,6 +135,7 @@ import {
   MARKUP_KINDS,
   MARKUP_TEXT_MAX,
   SCALE_UNITS,
+  WARRANTY_DECISIONS,
 } from "./vocabulary";
 
 /**
@@ -3727,6 +3729,208 @@ export async function unpushTakeoffAction(input: unknown) {
     const ctx = await drawingsGate();
     await withTenant(ctx.tenantId, (tx) => unpushTakeoff(tx, ctx, parsed.data.id), { role: ctx.role, userId: ctx.userId });
     revalidateSheet(parsed.data.projectId, parsed.data.sheetId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// ------------------------------------------------------------------ warranty
+
+/** The job's Warranty tab, its Overview, the page across jobs, and Work — a claim is a Work item. */
+function revalidateWarranty(projectId: string): void {
+  revalidatePath(`${BASE}/${projectId}/warranty`);
+  revalidatePath(`${BASE}/${projectId}`);
+  revalidatePath(`${BASE}/warranty`);
+  revalidatePath("/dashboard/m/work");
+}
+
+const claimFields = {
+  title: z.string().trim().min(1).max(300),
+  location: z.string().trim().max(300).optional(),
+  reportedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  reportedBy: z.string().trim().max(200).optional(),
+  partyId: z.string().uuid().nullable().optional(),
+  costCodeId: z.string().uuid().nullable().optional(),
+  notes: z.string().trim().max(4000).optional(),
+};
+
+/** The period as a form types it: months as digits or blank, the date or blank. Owner-only in the op. */
+export async function setWarrantyPeriodAction(input: unknown) {
+  const parsed = z
+    .object({
+      projectId: z.string().uuid(),
+      warrantyMonths: z.union([z.string().trim().regex(/^\d{1,4}$/).transform(Number), z.literal("").transform(() => null), z.null()]),
+      substantialCompletionOn: optionalDate,
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "A warranty runs a whole number of months, like 12." };
+  const { projectId, ...period } = parsed.data;
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        await setWarrantyPeriod(tx, ctx, projectId, period);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "project.warranty_period_set",
+          targetType: "project",
+          targetId: projectId,
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateWarranty(projectId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function recordClaimAction(input: unknown) {
+  const parsed = z.object({ projectId: z.string().uuid(), ...claimFields, dueOn: optionalDate }).safeParse(input);
+  if (!parsed.success) return { error: "Say what is wrong and when it was reported." };
+  const { projectId, ...claim } = parsed.data;
+  try {
+    const ctx = await gate();
+    const created = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const row = await recordClaim(tx, ctx, projectId, claim);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "warranty_claim.recorded",
+          targetType: "warranty_claim",
+          targetId: row.id,
+          meta: { projectId, number: row.number },
+        });
+        return row;
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateWarranty(projectId);
+    return { ok: true as const, id: created.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function updateClaimAction(input: unknown) {
+  const parsed = z
+    .object({ projectId: z.string().uuid(), id: z.string().uuid(), version: z.number().int().positive(), ...claimFields })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Say what is wrong and when it was reported." };
+  const { projectId, id, version, ...patch } = parsed.data;
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        await updateClaim(tx, ctx, id, patch, version);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "warranty_claim.updated",
+          targetType: "warranty_claim",
+          targetId: id,
+          meta: { projectId },
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateWarranty(projectId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function decideClaimAction(input: unknown) {
+  const parsed = z
+    .object({
+      projectId: z.string().uuid(),
+      id: z.string().uuid(),
+      decision: z.enum(WARRANTY_DECISIONS),
+      note: z.string().trim().max(2000).optional(),
+      decidedOn: optionalDate,
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Say whether the warranty covers it." };
+  const { projectId, id, ...decision } = parsed.data;
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        await decideClaim(tx, ctx, id, decision);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "warranty_claim.decided",
+          targetType: "warranty_claim",
+          targetId: id,
+          meta: { projectId, decision: decision.decision },
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateWarranty(projectId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function scheduleClaimAction(input: unknown) {
+  const parsed = z.object({ projectId: z.string().uuid(), id: z.string().uuid(), dueOn: optionalDate }).safeParse(input);
+  if (!parsed.success) return { error: "Pick a day." };
+  try {
+    const ctx = await gate();
+    await withTenant(ctx.tenantId, (tx) => scheduleClaim(tx, ctx, parsed.data.id, parsed.data.dueOn), { role: ctx.role, userId: ctx.userId });
+    revalidateWarranty(parsed.data.projectId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function setClaimDoneAction(input: unknown) {
+  const parsed = z.object({ projectId: z.string().uuid(), id: z.string().uuid(), done: z.boolean() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+    await withTenant(ctx.tenantId, (tx) => setClaimDone(tx, ctx, parsed.data.id, parsed.data.done), { role: ctx.role, userId: ctx.userId });
+    revalidateWarranty(parsed.data.projectId);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function deleteClaimAction(input: unknown) {
+  const parsed = z.object({ projectId: z.string().uuid(), id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        await deleteClaim(tx, ctx, parsed.data.id);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "warranty_claim.deleted",
+          targetType: "warranty_claim",
+          targetId: parsed.data.id,
+          meta: { projectId: parsed.data.projectId },
+        });
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    revalidateWarranty(parsed.data.projectId);
     return { ok: true as const };
   } catch (err) {
     return toResult(err);

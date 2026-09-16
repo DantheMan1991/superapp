@@ -121,6 +121,7 @@ A row of tabs under the figures. Whichever you are on is underlined and coloured
 - **`Field`** — the daily log and the punch list.
 - **`Drawings`** — the drawing sets and their sheets.
 - **`Estimates`** — pricing the job before anybody signs.
+- **`Warranty`** — the warranty period, and the claims that come in after the job is done.
 
 Opening a record inside a section — a contract, an order — keeps that section's tab lit, so you can see where you are and get back with one click.
 
@@ -959,6 +960,77 @@ Three more tools on the same row — {button:Length|outline}, {button:Area|outli
 
 The estimate's unit prices do the rest: open the estimate, and the line has its quantity waiting for a cost per unit.
 
+## Warranty — after the {{project|lower}} is done
+
+The `Warranty` tab on a {{project|lower}}: the period you warrant the work for, and the claims that come in once the {{customer|lower}} has moved in. A claim is the record of the call; the work it needs is an ordinary work item, so it shows up in Work and in the daily digest beside everything else that needs doing.
+
+The line under the heading says where things stand in one sentence — *Under warranty until 2027-06-30, 287 days left. 3 claims: 1 open, 1 scheduled, 1 done.* — or *No warranty period set.* until an owner sets one.
+
+### The period
+
+The `The period` panel shows four things: `Substantial completion`, `Warranty` (in months), `Ends` (worked out from the two) and `Standing`:
+
+- `No period` — nothing set yet.
+- `Not started` — today is before the completion date.
+- `Under warranty` — running.
+- `Ending soon` — sixty days or fewer to go. Book the last walk-through.
+- `Ended` — the date has passed.
+
+Owners see {button:Set the period|outline} (or {button:Change the period|outline} once it is set). Type the months — `12`, `24` — and pick the day the job was substantially complete, then {button:Save|primary}. Either can be left blank; clear both to remove the period. A month count that is not a whole number from 1 to 1,200 says *A warranty runs a whole number of months, like 12.* The end date is never typed: it is the completion date plus the months, with the day clamped to the month's last (31 January plus a month is 28 February).
+
+When any claim names a cost code, a line under the panel says what the job cost report shows spent under those codes — *1,240.00 spent under the claims' cost code (WAR-01)* — because the bills for the fix land on the {{project|lower}} like any other cost. Nothing is typed here: code the bill to the {{project|lower}} and the warranty code, and the figure appears.
+
+### Recording a claim
+
+{button:Record a claim|primary} at the top right. Anybody except an accountant can, because the person who takes the call is rarely the owner. The dialog:
+
+| Field | What to put |
+| --- | --- |
+| `What is wrong` | In the caller's words. Required. |
+| `Where` | The room or the elevation. |
+| `Reported by` | Who called — the owner, the tenant, the property manager. |
+| `Reported on` | Today, unless the call came in earlier. |
+| `Look at it by` | The day somebody should have been to see it. It goes on the work item as its due date. |
+| `Trade responsible` | The subcontractor you think it comes back to. The parties with an order on this {{project|lower}} are listed first under `On this job`; everybody else follows. `Not named yet` is fine. |
+| `Cost code for the fix` | The code the fix will be charged under — most builders keep a warranty code. The list is the {{project|lower}}'s own cost code list. |
+| `Notes` | What they said, what you saw. |
+
+{button:Record|primary} gives the claim the next number on the {{project|lower}} — claim 1, claim 2 — and raises a work item titled *Warranty claim 1 on 24-109: Drip under the sink*, with the where, who and when in its notes. The toast says *Claim recorded, and the work raised.* Open Work and it is there, linked to the claim, ready to be assigned to somebody.
+
+A claim reported after the period ends is recorded like any other, and its row says *Outside the warranty period* in red under the date. Nothing refuses it: whether you fix it anyway is your call, and the decision below is where you record what you decided.
+
+### The claims table
+
+Open and scheduled claims first, then the rest, newest first.
+
+| Column | What it is |
+| --- | --- |
+| `No.` | The claim's number, with a tick box in front of it. |
+| `What` | What is wrong, with where and the notes underneath. Greyed once done or not covered. |
+| `Reported` | The date, who reported it, and *Outside the warranty period* when it is. |
+| `Trade` | The subcontractor named, if any. |
+| `Cost code` | The code named, if any. |
+| `Standing` | `Open`, `Scheduled` (with the day underneath), `Done`, or `Not covered`. Worked out from the decision and the work item — nothing here is typed. If the work item was deleted in Work the row says *No work item — cleared in Work*; ticking the claim raises a new one. |
+| `Decision` | `Covered` or `Not covered` with the day and the reason; `—` while undecided. |
+
+At the end of each row:
+
+- **The tick box** (in the `No.` column) marks the claim done — the same as ticking its work item in Work. Untick to reopen it; the scheduled day is kept. Greyed out on a claim that is not covered.
+- {button:Schedule|outline} (or the day already set) — pick the day somebody will be there and {button:Save|primary}. It goes on the work item, so Work and the digest carry it. {button:Clear the day|outline} takes it off.
+- {button:Decide|outline} (or {button:Decision|outline} once decided) — `Covered`, `Not covered` or `Undecided`, the day decided (filled with today), and `Why` in a line. **Not covered closes the work item**: going to look was the work, and the claim stays on record with your reason. Covered leaves the work open for the fix. Putting it back to `Undecided` clears the day; the work item stays as it was.
+- **The pencil** edits the claim — every field except the number and the look-by day, which lives on the work item. The work item's title follows the new wording.
+- **The bin** (owners only) removes a claim recorded by mistake, after *Remove claim 2? Its work item stays in Work.* The work item is left in Work with its link removed, because somebody may already have been out to look.
+
+### The Warranty page across {{project|plural|lower}}
+
+{button:Warranty|outline} at the top of the {{project|plural|lower}} list opens `/dashboard/m/jobs/warranty`, which reads across every {{project|lower}}:
+
+- **`Open claims`** — every open or scheduled claim in the workspace with its {{project|lower}}, newest reported first. The {{project|lower}} number is a link to the claim's row on its Warranty tab. Nothing is changed here; a claim is recorded, scheduled and decided on its {{project|lower}}.
+- **`Under warranty`** — every {{project|lower}} with a period set, soonest to end first, with the days left. `Ending soon` is the sixty-day mark.
+- **`Recently closed`** — the last ten claims done or not covered, with the decision and its day.
+
+The line under the heading counts them: *2 open claims on 2 {{project|plural|lower}} · 3 {{project|plural|lower}} under warranty, 1 ending within 60 days.*
+
 ## On site — the daily log, photos and the punch list
 
 Anyone on the team, not only owners: the field is a chore, and the person with the phone on the site is rarely the owner.
@@ -1163,6 +1235,8 @@ Worth knowing so you are not looking for it:
 | Draw on a sheet, place a pin on the punch list, or rub a markup out | ● | ● | ● |
 | Set a sheet's scale, measure on it, or push a quantity onto an estimate line | ● | ● | ● |
 | Log a day on site, or add and tick a punch item | ● | ● | ● |
+| Record a warranty claim, schedule it, decide it, tick it done | ● | ● | ● |
+| Set a {{project|lower}}'s warranty period, or remove a claim | ● | | |
 | Add photos to a day | ● | ● | |
 | See the work in progress schedule | ● | ● | ● |
 | Type an estimate, post or unpost a work in progress period | ● | | |

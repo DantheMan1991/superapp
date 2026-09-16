@@ -233,6 +233,15 @@ export const jobProjects = pgTable(
     address: text("address").notNull().default(""),
     startsOn: date("starts_on", { mode: "string" }),
     endsOn: date("ends_on", { mode: "string" }),
+    /**
+     * THE WARRANTY PERIOD (ADR 0076): how many months the business warrants
+     * its work, from the day of substantial completion. Both null until
+     * somebody sets them; the expiry is DERIVED (`warrantyExpiresOn`), never
+     * stored. One period per job, the general warranty; a longer structural
+     * or systems tier is a refinement nobody has asked for.
+     */
+    warrantyMonths: integer("warranty_months"),
+    substantialCompletionOn: date("substantial_completion_on", { mode: "string" }),
     notes: text("notes").notNull().default(""),
     /** P2 extension bag: `NOT NULL DEFAULT '{}'` so `metadata->>'x'` is always safe. */
     metadata: jsonb("metadata").notNull().default({}),
@@ -273,6 +282,8 @@ export const jobProjects = pgTable(
       foreignColumns: [jobCostCodeSets.tenantId, jobCostCodeSets.id],
     }),
     check("job_projects_number_present", sql`length(btrim(${t.number})) > 0`),
+    /** `coalesce`, because a CHECK that evaluates to NULL passes (migration 0366 paid for that). */
+    check("job_projects_warranty_months_whole", sql`coalesce(${t.warrantyMonths}, 1) between 1 and 1200`),
     check("job_projects_name_present", sql`length(btrim(${t.name})) > 0`),
     check(
       "job_projects_status_valid",

@@ -10,6 +10,7 @@ import {
   Layers,
   LayoutDashboard,
   Palette,
+  ShieldCheck,
   ShoppingCart,
 } from "lucide-react";
 import {
@@ -55,6 +56,8 @@ export function ProjectNav({ projectId }: { projectId: string }) {
     // slice landed (ADR 0072) — leaving it out would hide a shipped feature.
     { href: `${base}/drawings`, label: "Drawings", icon: Layers },
     { href: `${base}/estimates`, label: "Estimates", icon: FileText },
+    // After the job is done (ADR 0076): the period, and the calls that come in.
+    { href: `${base}/warranty`, label: "Warranty", icon: ShieldCheck },
   ];
   return <CategoryStrip items={tabs} />;
 }

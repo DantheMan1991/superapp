@@ -190,7 +190,20 @@ Newest first.
 
 ### The estimate's page
 
-The header shows the number, the title, the {{project|lower}}, the contract it became, and its status. Everything below is one form: nothing is saved until {button:Save|primary}, and `Estimate saved` confirms it.
+The header shows the number, the title, the {{project|lower}}, the contract it became, and its status.
+
+**It saves itself.** About a second after you stop typing, whatever you have changed is saved — you do not have to remember to. Beside the {button:Save|primary} button a line tells you where you stand:
+
+| It says | It means |
+| --- | --- |
+| `Saved` | the estimate on screen and the estimate on file are the same |
+| `Unsaved changes` | you have just changed something; it will save itself in a moment |
+| `Saving…` | it is going now |
+| `Not saved — try Save` | something went wrong and **your changes are still only on this screen**. The message above it says what; press {button:Save|primary} once you have dealt with it. |
+
+{button:Save|primary} still works and does one thing the automatic save does not: it refreshes the figures beside the editor — **By cost code** and the panels on the {{project|lower}}'s page. The automatic save deliberately leaves the page alone so nothing moves under your cursor while you are typing.
+
+Two things worth knowing. Anything you type *while* a save is in flight is not in that save — it is picked up by the next one, and the line will say `Unsaved changes` until it is. And if you leave the page while it still says `Unsaved changes`, those changes are lost, so give it a second or press {button:Save|primary}.
 
 **The top block.**
 

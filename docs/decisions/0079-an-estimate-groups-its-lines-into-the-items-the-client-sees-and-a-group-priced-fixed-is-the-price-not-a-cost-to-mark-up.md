@@ -96,10 +96,19 @@ sum either way and there is no error case to design.
 proposal uses: each group at its price, its note beneath it, the children
 nowhere. ADR 0070's `codes` stays — a commercial client does expect a CSI
 breakdown — it simply stops being the answer to "show the client a
-summary". `lines` prints groups as headings with their children beneath, so
-a takeoff still reads as a takeoff. The cent-perfect property ADR 0070
-established holds in all four: the rows add to the total, with a *Rounding*
-row when unit-price arithmetic leaves cents.
+summary".
+
+`lines` still reads as a takeoff: a ROLLUP group prints as a heading with
+its children beneath it. **A FIXED group prints as one row at its price**,
+and that clause is not decoration — without it, printing a takeoff of an
+estimate with a fixed group would print its children at their shares of
+that price, publishing the build-up the typed price existed to hide. Typing
+a price is itself the statement that what is behind it is not the client's
+business, and it holds in every presentation.
+
+The cent-perfect property ADR 0070 established holds in all four: the rows
+add to the total, with a *Rounding* row when unit-price arithmetic leaves
+cents.
 
 ## Consequences
 

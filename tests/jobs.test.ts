@@ -150,6 +150,12 @@ import {
   scheduleFromEstimate,
   spreadCents,
 } from "../src/packs/jobs/estimate-math";
+import {
+  COMMON_UNITS,
+  parseEstimateLine,
+  parseEstimateLines,
+  unitsFor,
+} from "../src/packs/jobs/estimate-parse";
 import { GENERAL_COA } from "../src/modules/accounting/templates/general";
 import { packRegistry } from "../src/packs";
 import { describeProject, findProjects, type OpenProject } from "../src/packs/jobs/tell/find";
@@ -1718,6 +1724,111 @@ describe("what the client reads of a line", () => {
       );
       expect(bare[0].description).toBe("Cabinets, per SM quote 9/2");
     });
+  });
+});
+
+// ------------------------------------------- typing an estimate line (0081)
+
+describe("one typed sentence into one estimate line", () => {
+  const P = (s: string, units?: ReadonlySet<string>) => parseEstimateLine(s, units);
+  const T = (s: string) => {
+    const r = P(s);
+    return r === null ? null : [r.description, r.quantityThousandths, r.unit, r.unitCostCents];
+  };
+
+  it("reads a quantity, a unit, a description and a price, whichever order they are said in", () => {
+    expect(T("320 sf tile @ 4.20")).toEqual(["tile", 320_000, "sf", 4_20]);
+    expect(T("tile labour 320 sf @ 3.50")).toEqual(["tile labour", 320_000, "sf", 3_50]);
+    expect(T("120 cy concrete @ 185")).toEqual(["concrete", 120_000, "cy", 185_00]);
+    // The `@` is optional: a trailing number is the price.
+    expect(T("120 cy concrete 185")).toEqual(["concrete", 120_000, "cy", 185_00]);
+    // Said as a rate, which is how it is spoken.
+    expect(T("120 tile @ 4.20 sf")).toEqual(["tile", 120_000, "sf", 4_20]);
+  });
+
+  it("makes a lump sum of a sentence with no quantity, which is what a subcontract is", () => {
+    expect(T("plumbing rough 12000")).toEqual(["plumbing rough", 1_000, "", 12_000_00]);
+    expect(T("plumbing rough @ 12,000.00")).toEqual(["plumbing rough", 1_000, "", 12_000_00]);
+    // No price at all: the description now, the money later.
+    expect(T("plumbing rough")).toEqual(["plumbing rough", 1_000, "", 0]);
+    expect(T("Demolition and haul away")).toEqual(["Demolition and haul away", 1_000, "", 0]);
+  });
+
+  it("reads a spreadsheet row, tabs and all, in either column order", () => {
+    expect(T("Tile\t320\tsf\t4.20")).toEqual(["Tile", 320_000, "sf", 4_20]);
+    expect(T("320\tsf\tTile\t4.20")).toEqual(["Tile", 320_000, "sf", 4_20]);
+    expect(T("Plumbing rough\t12000")).toEqual(["Plumbing rough", 1_000, "", 12_000_00]);
+  });
+
+  it("takes commas, dollar signs and thousandths of a unit", () => {
+    expect(T("1,250.5 sf tile @ 4.20")).toEqual(["tile", 1_250_500, "sf", 4_20]);
+    expect(T("320 sf tile @ $4.20")).toEqual(["tile", 320_000, "sf", 4_20]);
+    expect(T("2 ea door @ 1,250")).toEqual(["door", 2_000, "ea", 1_250_00]);
+    expect(T("0.333 cy footing @ 200")).toEqual(["footing", 333, "cy", 200_00]);
+  });
+
+  it("keeps the unit as it was typed but matches it whatever the case", () => {
+    expect(T("320 SF tile @ 4.20")).toEqual(["tile", 320_000, "SF", 4_20]);
+    expect(T("320 Sf tile @ 4.20")).toEqual(["tile", 320_000, "Sf", 4_20]);
+  });
+
+  it("knows a unit from a word that merely follows a number", () => {
+    // "coats" is not a unit anybody typed, so it belongs to the description.
+    expect(T("2 coats paint @ 1.10")).toEqual(["coats paint", 2_000, "", 1_10]);
+    // And it IS a unit once this business has typed one.
+    expect(P("2 coats paint @ 1.10", unitsFor(["coats"]))).toMatchObject({
+      description: "paint",
+      unit: "coats",
+      quantityThousandths: 2_000,
+    });
+    // A unit the trade uses needs no teaching.
+    expect(T("3 bdl shingles @ 34")).toEqual(["shingles", 3_000, "bdl", 34_00]);
+  });
+
+  it("REFUSES what it cannot read, rather than putting a zero on a bid", () => {
+    expect(T("tile @ four twenty")).toBeNull();
+    expect(T("tile @")).toBeNull();
+    expect(T("tile @ 4.20 each please")).toBeNull();
+    expect(T("")).toBeNull();
+    expect(T("   ")).toBeNull();
+    // A quantity and a price for nothing is not a line.
+    expect(T("320 sf @ 4.20")).toBeNull();
+    expect(T("12000")).toBeNull();
+    // More than two decimals is not money.
+    expect(T("tile @ 4.2015")).toBeNull();
+  });
+
+  it("does not mistake a number inside a description for the quantity or the price", () => {
+    // Nothing trails, so nothing is taken: 4in stays in the words.
+    expect(T("Slab 4in fibre mesh")).toEqual(["Slab 4in fibre mesh", 1_000, "", 0]);
+    // With a takeoff on the end, the takeoff wins and the 4in stays put.
+    expect(T("Slab 4in fibre mesh 120 cy @ 185")).toEqual(["Slab 4in fibre mesh", 120_000, "cy", 185_00]);
+  });
+
+  describe("a pasted block", () => {
+    it("gives every line a row, read or not, and drops the blanks", () => {
+      const rows = parseEstimateLines(
+        ["320 sf tile @ 4.20", "", "  ", "plumbing rough 12000", "tile @ four twenty"].join("\n"),
+      );
+      expect(rows).toHaveLength(3);
+      expect(rows.map((r) => r.parsed?.description ?? null)).toEqual(["tile", "plumbing rough", null]);
+      // The line it could not read keeps its text, so the preview can show it.
+      expect(rows[2].input).toBe("tile @ four twenty");
+    });
+
+    it("reads a block pasted with Windows line endings", () => {
+      const rows = parseEstimateLines("320 sf tile @ 4.20\r\nplumbing rough 12000\r\n");
+      expect(rows.map((r) => r.parsed?.unitCostCents)).toEqual([4_20, 12_000_00]);
+    });
+  });
+
+  it("offers the trade's units without needing any to be configured", () => {
+    expect(COMMON_UNITS).toContain("sf");
+    expect(COMMON_UNITS).toContain("cy");
+    expect(COMMON_UNITS).toContain("ls");
+    expect(unitsFor([]).has("lf")).toBe(true);
+    // Whatever the business typed, however it typed it.
+    expect(unitsFor(["  Bdl  ", ""]).has("bdl")).toBe(true);
   });
 });
 

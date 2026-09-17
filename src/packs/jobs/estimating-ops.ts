@@ -333,6 +333,21 @@ async function saveLines(
   }
 }
 
+/**
+ * Every unit this business has typed on an estimate line, so the entry bar's
+ * grammar knows `bdl` is a unit the first time somebody uses it and nothing
+ * has to be configured (E3, ADR 0081). Distinct, non-blank, and it is a HINT
+ * to a parser rather than a validation of anything — the unit column stays
+ * free text.
+ */
+export async function unitsInUse(tx: Tx, tenantId: string): Promise<string[]> {
+  const rows = await tx
+    .selectDistinct({ unit: schema.jobEstimateLines.unit })
+    .from(schema.jobEstimateLines)
+    .where(and(eq(schema.jobEstimateLines.tenantId, tenantId), sql`btrim(${schema.jobEstimateLines.unit}) <> ''`));
+  return rows.map((r) => r.unit.trim()).filter((u) => u !== "");
+}
+
 /** The terms of the newest estimate that has any: a business's terms are mostly boilerplate, so a new estimate starts with them. */
 async function lastTerms(tx: Tx, tenantId: string): Promise<string> {
   const rows = await tx

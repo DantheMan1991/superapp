@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { getProject, listContracts, listCostCodes } from "@/packs/jobs/ops";
-import { getEstimate } from "@/packs/jobs/estimating-ops";
+import { getEstimate, unitsInUse } from "@/packs/jobs/estimating-ops";
 import { EstimateEditor } from "@/packs/jobs/components/estimate-editor";
 import { ESTIMATE_STATUS_LABELS, PACK, isEstimateStatus, slugLabel } from "@/packs/jobs/vocabulary";
 
@@ -40,12 +40,14 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
       if (!project) return null;
       const row = await getEstimate(tx, ctx.tenant.id, estimateId);
       if (!row || row.estimate.projectId !== project.id) return null;
-      const [contracts, codes, pack] = await Promise.all([
+      const [contracts, codes, pack, units] = await Promise.all([
         listContracts(tx, ctx.tenant.id, project.id),
         project.costCodeSetId ? listCostCodes(tx, ctx.tenant.id, project.costCodeSetId) : Promise.resolve([]),
         packContext(tx, ctx.tenant.id, ctx.tenant.industry, PACK),
+        // What the entry bar's grammar should recognise as a unit (ADR 0081).
+        unitsInUse(tx, ctx.tenant.id),
       ]);
-      return { project, row, contracts, codes, labels: pack.labels };
+      return { project, row, contracts, codes, labels: pack.labels, units };
     },
     { role: ctx.role },
   );
@@ -129,6 +131,7 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
               unitPriceCents: l.unitPriceCents,
             })),
           }}
+          units={data.units}
           codes={codeOptions}
           contracts={contractOptions}
           canEdit={canEdit}

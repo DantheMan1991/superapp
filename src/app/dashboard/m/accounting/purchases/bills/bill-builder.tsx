@@ -478,8 +478,18 @@ export function BillBuilder({
           groupings on a wide screen, so their children become grid cells
           again, and `md:order-*` puts those cells back in the column order
           the header names. One set of inputs and handlers either way.
+
+          `md:relative` is load-bearing, not decoration, and carries the same
+          `md:` as the overflow because the label it contains does: Credit is
+          `md:sr-only`, which Tailwind makes `position: absolute`. Without a
+          positioned ancestor its containing block is the PAGE, so it is laid
+          out at its static x and stretches the DOCUMENT's scroll width —
+          `md:overflow-x-auto` cannot clip what it is not the containing block
+          of. It sits in a middle column, so that x stays on screen and nothing
+          shows today; the journal editor, whose label is in the LAST column,
+          scrolled the page sideways by 202px. See docs/conventions.md.
         */}
-        <div className="md:overflow-x-auto">
+        <div className="md:relative md:overflow-x-auto">
           <div className="space-y-3 md:min-w-[640px] md:space-y-2">
             <div className="hidden text-xs font-medium text-muted-foreground md:grid md:grid-cols-[1fr_130px_60px_1fr_32px] md:items-center md:gap-2">
               <span>Description</span>

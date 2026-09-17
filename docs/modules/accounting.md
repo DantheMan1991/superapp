@@ -22,6 +22,61 @@ changes this module MUST add an entry here (rule in AGENTS.md).
 > at the start of every accounting session, so its length is a real cost — it was
 > 4,367 lines before the 2026-09-14 sweep, 94% of it build log.
 
+### 2026-09-16 — The hidden label that scrolled the page (`claude/sr-only-needs-a-containing-block`)
+
+The journal entry editor scrolled the WHOLE PAGE sideways on a phone — 202px
+of it (`documentElement.scrollWidth` 577 against a 375 client width) — while
+the line grid inside it was clipped exactly as intended. The cause is one word
+missing, and it is worth knowing because it looks impossible: each line's
+remove button carries an `sr-only` label, Tailwind's `sr-only` is
+`position: absolute`, and the `overflow-x-auto` wrapper was not positioned. An
+absolutely positioned box is only clipped by an overflow ancestor that is its
+CONTAINING BLOCK, so the label's containing block was the page: it was laid
+out at its static x — the right edge of a 560px grid, past the viewport — and
+it stretched the document's scroll width from there. `relative` on the wrapper
+makes the wrapper the containing block, which takes the page back to 375/375
+with the grid still scrolling in its own box — 293px visible of 560.
+
+**Driven on the screen, both states, one sitting.** At 375px on
+`/dashboard/m/accounting/journal/new`, as shipped: 375/375, no page overflow,
+no escaping child. Removing `relative` from the live wrapper and re-measuring:
+**577/375, 202px**, two escapees reporting `offsetParent: BODY` with a right
+edge of 577 — the page's scroll width exactly. Restoring it: back to 375/375.
+Toggling the one word on and off is what makes this causation rather than
+correlation.
+
+The wrapper still does the job it exists for: `scrollLeft` moves 0 to 249, its
+whole range, with the page unmoved at 375/375. Add line takes the grid to
+three rows and a third hidden label, and none of the three escapes; Remove
+line deletes its row and both survivors go disabled again at two rows.
+
+The builders were driven the same way. The bill builder's two labels go from 2
+escaping to 0 with the word, and stay at 0 even when forced into the
+overflowing `showTax` geometry (700 in a 673 box); the invoice builder's goes
+from 1 to 0. Page overflow was 0 in every state on both, which is the evidence
+for calling them latent rather than broken. The commitment detail page, left
+alone, was re-measured too: 11 wrappers, 0 escaping, and both its labels report
+the `<Table>` primitive's `relative w-full overflow-x-auto` as their
+`offsetParent`.
+
+The same word went on the bill and invoice builders' `md:overflow-x-auto`
+wrappers, which have the same escape (their `md:sr-only` Credit, Discount and
+Tax labels report an `offsetParent` of `BODY`) but do not show it: those
+labels sit in MIDDLE columns, so their static x stays on screen even when the
+grid outgrows its box — which the invoice grid does at a 768px viewport once a
+tax rate is chosen, 700 against 688. Caught before it could bite, not fixed
+after.
+
+Five other screens named as suspects were driven and left alone: subcontractors,
+a job's changes, a commitment's five tables and a job's contracts all compose
+the shared `<Table>`, which already renders `relative w-full overflow-x-auto`
+and so contains its own `sr-only` labels — measured with tables 463–826px wide
+inside 303px boxes and no page overflow at all. The scheduling calendar holds
+192 absolutely positioned children and every one of them is inside a `relative`
+parent. Adding the class to any of those would have been noise. The rule, and
+the console check that tells the two apart, is now in
+[conventions.md](../conventions.md) §8.
+
 ### 2026-09-14 — A customer for a party, read only (`claude/pay-application-printout`)
 
 One verb: `customerForParty` in `invoicing/customers.ts`, the read-only twin

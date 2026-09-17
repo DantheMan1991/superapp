@@ -352,6 +352,23 @@ npm run test:isolation   # required before deploy
   branches on a module slug.
 - Mobile matters — a real share of usage is one-handed, in the field, on a
   phone. Test narrow viewports for anything a non-office user touches.
+- **A horizontally scrolled wrapper needs `relative` if anything inside it is
+  absolutely positioned — and `sr-only` counts.** Tailwind's `sr-only` is
+  `position: absolute`, so inside an `overflow-x-auto` div that has no
+  positioned ancestor its containing block is the PAGE, not the scroll box. It
+  is laid out at its static x — on a wide grid, well past the viewport — and it
+  stretches `documentElement.scrollWidth`, so the WHOLE PAGE scrolls sideways
+  while the table itself is correctly clipped. `overflow-x-auto` never clips
+  what it is not the containing block of. One word on the wrapper fixes it, and
+  the table still scrolls in its own box. It bites when the hidden label sits
+  in the LAST column and the content is wider than the viewport: the journal
+  entry editor scrolled the page sideways by 202px at 375px wide (2026-09-16).
+  **Do not add it blind** — the shared `<Table>` primitive already renders
+  `relative w-full overflow-x-auto`, so anything composed from it is already
+  contained and the class would be noise. Confirm first, in the console: an
+  escaping child reports an `offsetParent` outside the wrapper —
+  `[...w.querySelectorAll('*')].filter(e => getComputedStyle(e).position ===
+  'absolute' && !w.contains(e.offsetParent))`.
 
 ---
 

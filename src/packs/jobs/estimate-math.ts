@@ -31,6 +31,12 @@ export interface EstimateLineFigures {
   unitPriceCents: number | null;
   /** The client-facing item this line is part of; null or absent makes it loose. */
   groupId?: string | null;
+  /**
+   * Whether the line is a row on the proposal (ADR 0080); absent means it is.
+   * A hidden line's money counts everywhere it counted before — it simply is
+   * not printed, and it collapses the item that holds it.
+   */
+  clientVisible?: boolean;
 }
 
 /** A group as the arithmetic reads it: how it is priced, and the price when it is typed. */
@@ -81,6 +87,22 @@ export function linePriceCents(line: EstimateLineFigures, defaultMarkupPpm: numb
  */
 export function isFixedPrice(group: EstimateGroupFigures): boolean {
   return group.priceMode === "fixed" && group.fixedPriceCents !== null;
+}
+
+/**
+ * AN ITEM COLLAPSES to a single row at its price, instead of a heading over
+ * its lines, when it is **priced by hand** or **hides any of its lines** (ADR
+ * 0080). Both are the same statement — that the build-up behind it is not the
+ * client's business — so they share one predicate rather than two that have to
+ * be kept in step, and the places that would otherwise print a partial build-up
+ * that does not add up (the proposal's takeoff, and a schedule written line by
+ * line) both ask this and nothing else.
+ */
+export function itemCollapses(
+  group: EstimateGroupFigures,
+  children: readonly EstimateLineFigures[],
+): boolean {
+  return isFixedPrice(group) || children.some((l) => l.clientVisible === false);
 }
 
 /** The fixed groups by id, with the price each was given. */
@@ -302,6 +324,8 @@ export function scheduleFromEstimate(
 /** A line as the schedule and the proposal need it: the figures, and the words. */
 export interface EstimateScheduleLine extends EstimateLineFigures {
   description: string;
+  /** What the client reads instead (ADR 0080); blank or absent uses the description. */
+  clientDescription?: string;
   unit: string;
   costCodeId: string | null;
 }
@@ -340,10 +364,13 @@ export interface ScheduledRow {
  * signed instead of like a two-hundred-line takeoff. A group bills as a sum
  * and takes its lines' single cost code when they agree on one.
  *
- * **By line** — one row per line, as before groups existed. A fixed group's
- * price is shared across its own lines, so this shape still totals the
- * contract sum; a fixed group with no lines at all prints as a row of its own
- * rather than losing its money.
+ * **By line** — one row per line, as before items existed, except that an item
+ * which COLLAPSES (ADR 0080: priced by hand, or hiding any of its lines) is one
+ * row at its price. That supersedes ADR 0079's clause about sharing a fixed
+ * price across the item's own lines here: a continuation sheet is a document the
+ * owner certifies, and publishing a build-up the builder chose not to publish —
+ * in synthetic shares, at that — was the wrong answer to the same question the
+ * proposal already had a rule for.
  *
  * **Detail** — the proposal's takeoff shape, never a schedule's: a rollup
  * group prints as a heading with its lines beneath, and **a fixed group prints
@@ -365,7 +392,10 @@ export function scheduleRows(
   const scheduled = scheduleLines(lines, terms, groups);
   const totals = estimateTotals(lines, terms, groups);
   const rowOfLine = (l: EstimateScheduleLine, i: number): ScheduledRow => ({
-    description: l.description,
+    // The client's words wherever a LINE's words reach the client — the proposal's
+    // rows, and the schedule of values, because a pay application is an invoice the
+    // owner receives (ADR 0080). An item needs none; its name is already theirs.
+    description: l.clientDescription?.trim() || l.description,
     scheduledCents: scheduled[i].scheduledCents,
     costCodeId: l.costCodeId,
     unit: l.unit,
@@ -400,25 +430,7 @@ export function scheduleRows(
   };
 
   let rows: ScheduledRow[];
-  if (shape === "line") {
-    rows = lines.map(rowOfLine);
-    // A fixed group with no line to carry its price would otherwise go missing.
-    for (const g of groups) {
-      if (isFixedPrice(g) && !lines.some((l) => l.groupId === g.id)) {
-        rows.push({
-          description: g.name,
-          scheduledCents: g.fixedPriceCents as number,
-          costCodeId: null,
-          unit: "",
-          quantityThousandths: null,
-          unitPriceCents: null,
-          groupId: g.id,
-          heading: false,
-          lineQuantityThousandths: null,
-        });
-      }
-    }
-  } else if (shape === "group") {
+  if (shape === "group") {
     rows = [];
     for (const g of groups) {
       const indices = childrenOf(g);
@@ -431,14 +443,19 @@ export function scheduleRows(
     }
     for (const i of looseIndices()) rows.push(rowOfLine(lines[i], i));
   } else {
+    // `detail` and `line` differ by one thing: whether an item that does NOT
+    // collapse gets a heading over its lines. A collapsed one is a single row in
+    // both, which is also how a fixed item with no lines at all keeps its price.
     rows = [];
     for (const g of groups) {
       const indices = childrenOf(g);
-      if (isFixedPrice(g)) {
+      if (itemCollapses(g, indices.map((i) => lines[i]))) {
         rows.push(rowOfGroup(g, indices));
         continue;
       }
-      rows.push({ ...rowOfGroup(g, indices), scheduledCents: 0, heading: true });
+      if (shape === "detail") {
+        rows.push({ ...rowOfGroup(g, indices), scheduledCents: 0, heading: true });
+      }
       for (const i of indices) rows.push(rowOfLine(lines[i], i));
     }
     for (const i of looseIndices()) rows.push(rowOfLine(lines[i], i));

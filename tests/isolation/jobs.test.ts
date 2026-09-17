@@ -1902,6 +1902,55 @@ d("jobs tables (RLS)", () => {
       ),
     ).rejects.toThrow();
 
+    // The CHECKs on a LINE's client wording (ADR 0080): the client's words are bounded at
+    // 300 like the description they stand in for, and a line kept off the proposal must sit
+    // in an item — hidden money needs somewhere to hide.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobEstimateLines).values({
+          tenantId: tenantA,
+          estimateId: seeded.estimateId,
+          groupId: seeded.groupId,
+          description: "Too much to say",
+          clientDescription: "x".repeat(301),
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobEstimateLines).values({
+          tenantId: tenantA,
+          estimateId: seeded.estimateId,
+          description: "Hidden with nowhere to hide",
+          clientVisible: false,
+        }),
+      ),
+    ).rejects.toThrow();
+    // Inside the item it is allowed, and it is the only way hiding is allowed.
+    const hidden = await withSystem((tx) =>
+      tx
+        .insert(schema.jobEstimateLines)
+        .values({
+          tenantId: tenantA,
+          estimateId: seeded.estimateId,
+          groupId: seeded.groupId,
+          description: "Contingency",
+          clientVisible: false,
+        })
+        .returning(),
+    );
+    expect(hidden[0].clientVisible).toBe(false);
+    // And taking its item away would leave it hidden and loose, so the CHECK refuses that too.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.jobEstimateLines)
+          .set({ groupId: null })
+          .where(eq(schema.jobEstimateLines.id, hidden[0].id)),
+      ),
+    ).rejects.toThrow();
+    await withSystem((tx) => tx.delete(schema.jobEstimateLines).where(eq(schema.jobEstimateLines.id, hidden[0].id)));
+
     // The CHECKs: a blank name, a mode off the list, fixed with no price, adding up WITH one, a negative price.
     for (const bad of [
       { name: "   " },

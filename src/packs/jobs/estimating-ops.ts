@@ -58,6 +58,10 @@ export interface EstimateLineInput {
   groupRef?: string | null;
   costCodeId?: string | null;
   description: string;
+  /** What the client reads instead (ADR 0080); blank uses the description. */
+  clientDescription?: string;
+  /** Whether the line is a row on the proposal; false is only allowed inside an item. */
+  clientVisible?: boolean;
   unit?: string;
   /** In thousandths; 1,000 — one — for a lump sum. */
   quantityThousandths?: number;
@@ -95,6 +99,8 @@ export interface EstimateInput {
   notes?: string;
   /** The proposal (ADR 0070): how the price is shown, and the client's three texts. */
   presentation?: string;
+  /** Whether the `codes` presentation prints a code's number beside its name (ADR 0080). */
+  showCodeNumbers?: boolean;
   scope?: string;
   exclusions?: string;
   terms?: string;
@@ -161,6 +167,14 @@ function validateEstimateShape(input: Partial<EstimateInput>): void {
     const price = line.unitPriceCents ?? null;
     if (price !== null && (!Number.isInteger(price) || price < 0)) {
       throw new JobsError("INVALID_VALUE", "a unit price cannot be negative");
+    }
+    // Hidden money must have somewhere to hide, and an item is that somewhere:
+    // a hidden loose line is money with no row and a page that stops adding up.
+    if (line.clientVisible === false && !line.groupRef) {
+      throw new JobsError(
+        "INVALID_VALUE",
+        `put ${line.description.trim()} in an item before keeping it off the proposal`,
+      );
     }
   }
 }
@@ -298,6 +312,8 @@ async function saveLines(
       groupId,
       costCodeId: l.costCodeId ?? null,
       description: l.description.trim(),
+      clientDescription: l.clientDescription?.trim() ?? "",
+      clientVisible: l.clientVisible ?? true,
       unit: l.unit?.trim() ?? "",
       quantityThousandths: l.quantityThousandths ?? 1000,
       unitCostCents: l.unitCostCents ?? 0,
@@ -350,6 +366,7 @@ export async function createEstimate(tx: Tx, ctx: JobsCtx, input: EstimateInput)
       profitPpm: input.profitPpm ?? 0,
       notes: input.notes?.trim() ?? "",
       presentation: input.presentation ?? "lines",
+      showCodeNumbers: input.showCodeNumbers ?? false,
       scope: input.scope?.trim() ?? "",
       exclusions: input.exclusions?.trim() ?? "",
       terms,
@@ -426,6 +443,8 @@ export async function updateEstimate(
   if (input.profitPpm !== undefined) patch.profitPpm = input.profitPpm;
   if (input.notes !== undefined) patch.notes = input.notes.trim();
   if (input.presentation !== undefined) patch.presentation = input.presentation;
+  // A printing choice, like the presentation: free even on an accepted estimate.
+  if (input.showCodeNumbers !== undefined) patch.showCodeNumbers = input.showCodeNumbers;
   if (input.scope !== undefined) patch.scope = input.scope.trim();
   if (input.exclusions !== undefined) patch.exclusions = input.exclusions.trim();
   if (input.terms !== undefined) patch.terms = input.terms.trim();
@@ -439,6 +458,8 @@ export async function updateEstimate(
 
 export interface EstimateLineRow extends JobEstimateLine {
   codeLabel: string | null;
+  /** The same code without its number, for a proposal that does not print one (ADR 0080). */
+  codeName: string | null;
   /** Quantity at the unit cost, rounded once. */
   costCents: number;
   /** Quantity at the explicit unit price, or the cost marked up by the line's rate or the estimate's. */
@@ -517,6 +538,7 @@ export async function listEstimates(tx: Tx, tenantId: string, projectId: string)
           .where(and(eq(schema.jobContracts.tenantId, tenantId), inArray(schema.jobContracts.id, contractIds))),
   ]);
   const codeLabel = new Map(codes.map((c) => [c.id, `${c.code} · ${c.name}`]));
+  const codeName = new Map(codes.map((c) => [c.id, c.name]));
   const contractById = new Map(contracts.map((c) => [c.id, c]));
   return estimates.map((estimate) => {
     const own = lines.filter((l) => l.estimateId === estimate.id);
@@ -539,6 +561,7 @@ export async function listEstimates(tx: Tx, tenantId: string, projectId: string)
     const rows: EstimateLineRow[] = own.map((l) => ({
       ...l,
       codeLabel: l.costCodeId ? (codeLabel.get(l.costCodeId) ?? null) : null,
+      codeName: l.costCodeId ? (codeName.get(l.costCodeId) ?? null) : null,
       costCents: lineCostCents(l),
       priceCents: linePriceCents(l, estimate.markupPpm),
     }));

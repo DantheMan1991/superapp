@@ -141,6 +141,7 @@ import {
   groupCostCents,
   groupPriceCents,
   isFixedPrice,
+  itemCollapses,
   scheduleRows,
   lineCostCents,
   linePriceCents,
@@ -1496,13 +1497,18 @@ describe("items on an estimate", () => {
       ]);
     });
 
-    it("shares the typed price across its own lines when the schedule is written line by line", () => {
+    it("COLLAPSES to one row at its price when the schedule is written line by line (ADR 0080)", () => {
+      // ADR 0079 shared the typed price across the item's own lines here. ADR 0080
+      // supersedes that clause: a continuation sheet is a document the OWNER
+      // certifies, so publishing a build-up the builder chose not to publish — in
+      // synthetic shares, at that — was the wrong answer.
       const rows = scheduleRows(lines, TEN_AND_TEN, [tile], "line");
       expect(rows.map((r) => [r.description, r.scheduledCents])).toEqual([
-        ["Tile, material and labour", 8_400_00],
+        ["Tile flooring", 8_400_00],
         ["Everything else", 110_836_00],
       ]);
       expect(rows.reduce((sum, r) => sum + r.scheduledCents, 0)).toBe(119_236_00);
+      expect(itemCollapses(tile, [lines[0]])).toBe(true);
     });
 
     it("prices a line by its share of the typed price when the estimate is read by code", () => {
@@ -1558,15 +1564,25 @@ describe("items on an estimate", () => {
   describe("the degenerate items, which must not lose money", () => {
     const FLAT = { markupPpm: 0, overheadPpm: 0, profitPpm: 0 };
 
-    it("shares a typed price EQUALLY when no line under it has a price of its own", () => {
+    it("shares a typed price EQUALLY across its lines when none of them has a price of its own", () => {
       const g = { id: "g", name: "Allowance, fixtures", priceMode: "fixed", fixedPriceCents: 8_400_00 };
       const lines = [
-        { description: "To be selected", unit: "", costCodeId: null, groupId: "g", quantityThousandths: 1_000, unitCostCents: 0, markupPpm: null, unitPriceCents: null },
-        { description: "Install", unit: "", costCodeId: null, groupId: "g", quantityThousandths: 1_000, unitCostCents: 0, markupPpm: null, unitPriceCents: null },
+        { description: "To be selected", unit: "", costCodeId: "a", groupId: "g", quantityThousandths: 1_000, unitCostCents: 0, markupPpm: null, unitPriceCents: null },
+        { description: "Install", unit: "", costCodeId: "b", groupId: "g", quantityThousandths: 1_000, unitCostCents: 0, markupPpm: null, unitPriceCents: null },
       ];
-      const rows = scheduleRows(lines, FLAT, [g], "line");
-      expect(rows.map((r) => r.scheduledCents)).toEqual([4_200_00, 4_200_00]);
+      // The by-code read is where the per-line share still surfaces now that a fixed
+      // item collapses in every printed shape (ADR 0080): equal shares, because a row
+      // of zeros would have swallowed the whole $8,400.
+      const byCode = estimateByCode(lines, FLAT.markupPpm, [g]);
+      expect(byCode.get("a")?.priceCents).toBe(4_200_00);
+      expect(byCode.get("b")?.priceCents).toBe(4_200_00);
       expect(estimateTotals(lines, FLAT, [g]).totalCents).toBe(8_400_00);
+      // And the printed row is the item, once, at what was typed.
+      for (const shape of ["group", "line", "detail"] as const) {
+        expect(scheduleRows(lines, FLAT, [g], shape).map((r) => [r.description, r.scheduledCents]), shape).toEqual([
+          ["Allowance, fixtures", 8_400_00],
+        ]);
+      }
     });
 
     it("keeps a typed price that has no lines at all, in either shape", () => {
@@ -1584,6 +1600,123 @@ describe("items on an estimate", () => {
       ];
       expect(estimateTotals(lines, FLAT, []).totalCents).toBe(1_000_00);
       expect(scheduleRows(lines, FLAT, [], "group").map((r) => r.scheduledCents)).toEqual([1_000_00]);
+    });
+  });
+});
+
+// -------------------------------------- the client's words on a line (0080)
+
+describe("what the client reads of a line", () => {
+  const WORDING_SQL = readFileSync("drizzle/0375_estimate_client_wording.sql", "utf8");
+
+  it("MIRRORS the CHECKs: the client's words are bounded, and hidden money needs an item to hide in", () => {
+    expect(WORDING_SQL).toMatch(/job_estimate_lines_client_description_bounded[^;]*<= 300/);
+    expect(WORDING_SQL).toMatch(
+      /job_estimate_lines_hidden_needs_item[^;]*"client_visible" or [^;]*"group_id" is not null/,
+    );
+    // Columns on existing tables, so no RLS migration: the 0347 and 0358 precedent.
+    expect(WORDING_SQL).toContain('ADD COLUMN "client_description" text DEFAULT \'\' NOT NULL');
+    expect(WORDING_SQL).toContain('ADD COLUMN "client_visible" boolean DEFAULT true NOT NULL');
+    expect(WORDING_SQL).toContain('ADD COLUMN "show_code_numbers" boolean DEFAULT false NOT NULL');
+  });
+
+  /**
+   * drizzle-kit generated a DROP and re-ADD of the item key here, in the BARE
+   * `ON DELETE set null` form that can never run on a composite key — three hours
+   * after 0373 installed it correctly. Both statements were removed by hand.
+   * `tests/migrations.test.ts` guards the class; this guards the instance.
+   */
+  it("does NOT touch the item foreign key, which drizzle wanted to revert to the bare SET NULL", () => {
+    // The comment lines explain why it was removed and name it, so only the STATEMENTS count.
+    const statements = WORDING_SQL.replace(/^[ ]*--.*$/gm, "");
+    expect(statements).not.toContain("job_estimate_lines_group_fk");
+    expect(WORDING_SQL).toContain("job_estimate_lines_group_fk"); // the comment says what was removed
+    expect(readFileSync("drizzle/0373_job_estimate_groups.sql", "utf8")).toMatch(
+      /job_estimate_lines_group_fk[^;]*ON DELETE SET NULL \("group_id"\)/,
+    );
+  });
+
+  describe("an item collapses when its build-up is not the client's", () => {
+    const L = (clientVisible?: boolean) => ({
+      quantityThousandths: 1_000,
+      unitCostCents: 1_000_00,
+      markupPpm: null,
+      unitPriceCents: null,
+      groupId: "g",
+      ...(clientVisible === undefined ? {} : { clientVisible }),
+    });
+    const rollup = { id: "g", priceMode: "rollup", fixedPriceCents: null };
+    const fixed = { id: "g", priceMode: "fixed", fixedPriceCents: 5_000_00 };
+
+    it("collapses on a typed price, on a hidden line, and on neither it does not", () => {
+      expect(itemCollapses(rollup, [L(), L()])).toBe(false);
+      expect(itemCollapses(rollup, [L(), L(true)])).toBe(false);
+      expect(itemCollapses(rollup, [L(), L(false)])).toBe(true);
+      expect(itemCollapses(fixed, [L(), L()])).toBe(true);
+      expect(itemCollapses(fixed, [L(), L(false)])).toBe(true);
+      // No lines at all: a typed price still collapses, an empty rollup does not.
+      expect(itemCollapses(fixed, [])).toBe(true);
+      expect(itemCollapses(rollup, [])).toBe(false);
+    });
+  });
+
+  describe("a line kept off the proposal", () => {
+    const FLAT = { markupPpm: 0, overheadPpm: 0, profitPpm: 0 };
+    const kitchen = { id: "g-kit", name: "The kitchen", priceMode: "rollup", fixedPriceCents: null };
+    const lines = [
+      { description: "Cabinets, per SM quote 9/2", clientDescription: "Custom cabinetry, painted", unit: "", costCodeId: "a", groupId: "g-kit", quantityThousandths: 1_000, unitCostCents: 30_000_00, markupPpm: null, unitPriceCents: null },
+      { description: "Contingency, kitchen", unit: "", costCodeId: "a", groupId: "g-kit", quantityThousandths: 1_000, unitCostCents: 3_000_00, markupPpm: null, unitPriceCents: null, clientVisible: false },
+      { description: "Drive and walk", clientDescription: "Driveway and front walk", unit: "sf", costCodeId: "b", groupId: null, quantityThousandths: 900_000, unitCostCents: 12_00, markupPpm: null, unitPriceCents: null },
+    ];
+
+    it("counts its money everywhere it counted before", () => {
+      const t = estimateTotals(lines, FLAT, [kitchen]);
+      // 30,000 + 3,000 of kitchen, 10,800 of drive: the hidden line is in all of it.
+      expect(t.costCents).toBe(43_800_00);
+      expect(t.subtotalCents).toBe(43_800_00);
+      expect(t.totalCents).toBe(43_800_00);
+      // And in its cost code's sum: hiding is about not itemising, not concealment.
+      expect(estimateByCode(lines, FLAT.markupPpm, [kitchen]).get("a")).toEqual({
+        costCents: 33_000_00,
+        priceCents: 33_000_00,
+      });
+    });
+
+    it("COLLAPSES its item in the takeoff and in a line-by-line schedule, so the rows still add up", () => {
+      for (const shape of ["detail", "line"] as const) {
+        const rows = scheduleRows(lines, FLAT, [kitchen], shape);
+        expect(rows.map((r) => [r.description, r.scheduledCents]), shape).toEqual([
+          ["The kitchen", 33_000_00],
+          ["Driveway and front walk", 10_800_00],
+        ]);
+        expect(rows.reduce((sum, r) => sum + r.scheduledCents, 0), shape).toBe(43_800_00);
+        // Not one word of the build-up, and no heading either: it is one row.
+        expect(rows.some((r) => r.heading), shape).toBe(false);
+        expect(JSON.stringify(rows), shape).not.toContain("Contingency");
+      }
+    });
+
+    it("leaves the item shape alone, where an item was already one row", () => {
+      const rows = scheduleRows(lines, FLAT, [kitchen], "group");
+      expect(rows.map((r) => [r.description, r.scheduledCents])).toEqual([
+        ["The kitchen", 33_000_00],
+        ["Driveway and front walk", 10_800_00],
+      ]);
+    });
+
+    it("takes the client's words on a line's row, and the estimator's when there are none", () => {
+      const visible = [{ ...lines[0], clientVisible: true }, lines[2]];
+      const rows = scheduleRows(visible, FLAT, [kitchen], "line");
+      // The kitchen no longer hides anything, so its line prints — in the client's words.
+      expect(rows.map((r) => r.description)).toEqual(["Custom cabinetry, painted", "Driveway and front walk"]);
+      // Blank client wording falls back to the description the estimator typed.
+      const bare = scheduleRows(
+        [{ ...lines[0], clientVisible: true, clientDescription: "   " }],
+        FLAT,
+        [kitchen],
+        "line",
+      );
+      expect(bare[0].description).toBe("Cabinets, per SM quote 9/2");
     });
   });
 });

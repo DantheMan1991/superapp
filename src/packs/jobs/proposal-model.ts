@@ -34,9 +34,13 @@ import {
 
 export interface ProposalLineInput extends EstimateLineFigures {
   description: string;
+  /** What the client reads instead (ADR 0080); blank uses the description. */
+  clientDescription?: string;
   unit: string;
   /** "03 30 00 · Cast-in-place concrete", or null for a line with no code. */
   codeLabel: string | null;
+  /** The same code without its number — "Cast-in-place concrete". */
+  codeName?: string | null;
 }
 
 /** A client-facing item on the proposal (ADR 0079): its name, its paragraph, its price rule. */
@@ -72,6 +76,12 @@ export interface ProposalInput {
   lines: ProposalLineInput[];
   /** The client-facing items, in their order; empty on an estimate of loose lines. */
   groups?: ProposalGroupInput[];
+  /**
+   * Whether the `codes` presentation prints a cost code's NUMBER beside its
+   * name (ADR 0080). Off by default: the number is an internal accounting key
+   * and a homeowner reading `09 30 00` learns nothing.
+   */
+  showCodeNumbers?: boolean;
 }
 
 export interface ProposalRow {
@@ -192,9 +202,13 @@ export function buildProposalModel(input: ProposalInput): ProposalModel {
   } else if (input.presentation === "codes") {
     const groups = new Map<string, number>();
     let other = 0;
+    // The number is an accounting key, so it prints only when the business asks (ADR 0080).
+    const labelOf = (l: ProposalLineInput): string | null =>
+      input.showCodeNumbers ? l.codeLabel : (l.codeName ?? l.codeLabel);
     input.lines.forEach((l, i) => {
-      if (l.codeLabel === null) other += schedule[i].scheduledCents;
-      else groups.set(l.codeLabel, (groups.get(l.codeLabel) ?? 0) + schedule[i].scheduledCents);
+      const label = labelOf(l);
+      if (label === null) other += schedule[i].scheduledCents;
+      else groups.set(label, (groups.get(label) ?? 0) + schedule[i].scheduledCents);
     });
     rows = [...groups.entries()].map(([label, cents]) => ({ description: label, quantity: "", unitPrice: "", amount: money(cents) }));
     if (other > 0 || (rows.length === 0 && input.lines.length > 0)) {

@@ -4222,7 +4222,9 @@ d("jobs ops", () => {
       ["Everything else", 110_836_00, codes.other.id],
     ]);
 
-    // Line by line, asked for by name: the typed price is shared across its own lines.
+    // Line by line, asked for by name: the item still COLLAPSES to one row, because a
+    // typed price says its build-up is not the client's and a continuation sheet is the
+    // owner's document (ADR 0080 supersedes 0079's sharing clause here).
     expect(await run((tx) => applyEstimateToSchedule(tx, ctx, est.id, contract.id, "line"))).toEqual({
       lines: 2,
       scheduledCents: 119_236_00,
@@ -4230,7 +4232,7 @@ d("jobs ops", () => {
     });
     sov = await run((tx) => listSovLines(tx, tenantId, contract.id));
     expect(sov.map((l) => [l.description, l.scheduledCents])).toEqual([
-      ["Tile, material and labour", 8_400_00],
+      ["Tile flooring", 8_400_00],
       ["Everything else", 110_836_00],
     ]);
     await expect(run((tx) => applyEstimateToSchedule(tx, ctx, est.id, contract.id, "poster"))).rejects.toMatchObject({
@@ -4264,6 +4266,91 @@ d("jobs ops", () => {
     await run((tx) => acceptEstimate(tx, ctx, est.id, { contractId: contract.id, decidedOn: "2026-09-16" }));
     await expect(
       run((tx) => updateEstimate(tx, staffCtx, est.id, { groups: [{ key: "k-new", name: "After the fact" }] })),
+    ).rejects.toMatchObject({ code: "ESTIMATE_ACCEPTED" });
+  }, 120_000);
+
+  it("THE CLIENT'S WORDS: a line's client wording reaches the schedule of values, a line kept off the proposal is refused outside an item and collapses its item inside one, and the code numbers are a printing choice", async () => {
+    const entity = await newCompany("Wording Co");
+    const { project, contract, code } = await run(async (tx) => {
+      await ensureBilling(tx);
+      const project = await createProject(tx, ctx, { entityId: entity, number: "OPS-WORD", name: "Wording" });
+      const contract = await createContract(tx, ctx, { projectId: project.id, kind: "new_home", valueCents: 0 });
+      const set = (await getDefaultCostCodeSet(tx, tenantId)) ?? (await createCostCodeSet(tx, ctx, { name: "Word codes" }));
+      const code = await createCostCode(tx, ctx, { setId: set.id, code: "WORD-06-10", name: "Carpentry", sortOrder: 60 });
+      return { project, contract, code };
+    });
+
+    // A hidden line with no item is refused: hidden money needs somewhere to hide.
+    await expect(
+      run((tx) =>
+        createEstimate(tx, staffCtx, {
+          projectId: project.id,
+          number: "EST-WORD-X",
+          lines: [{ description: "Contingency", unitCostCents: 5_000_00, clientVisible: false }],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE", message: expect.stringContaining("Contingency") });
+
+    const est = await run((tx) =>
+      createEstimate(tx, staffCtx, {
+        projectId: project.id,
+        number: "EST-WORD-1",
+        markupPpm: 0,
+        presentation: "codes",
+        groups: [{ key: "k-kit", name: "The kitchen", priceMode: "rollup" }],
+        lines: [
+          {
+            groupRef: "k-kit",
+            costCodeId: code.id,
+            description: "Cabinets, per SM quote 9/2",
+            clientDescription: "Custom cabinetry, painted",
+            unitCostCents: 30_000_00,
+          },
+          { groupRef: "k-kit", costCodeId: code.id, description: "Contingency, kitchen", unitCostCents: 3_000_00, clientVisible: false },
+          { costCodeId: code.id, description: "Drive and walk", clientDescription: "Driveway and front walk", unit: "sf", quantityThousandths: 900_000, unitCostCents: 12_00 },
+        ],
+      }),
+    );
+    const rowOf = async () => {
+      const rows = await run((tx) => listEstimates(tx, tenantId, project.id));
+      return rows.find((r) => r.estimate.id === est.id)!;
+    };
+    let row = await rowOf();
+    expect(row.lines.map((l) => [l.description, l.clientDescription, l.clientVisible])).toEqual([
+      ["Cabinets, per SM quote 9/2", "Custom cabinetry, painted", true],
+      ["Contingency, kitchen", "", false],
+      ["Drive and walk", "Driveway and front walk", true],
+    ]);
+    // The hidden line's money is in the item, the cost and the total, as it always was.
+    expect(row.groups[0].priceCents).toBe(33_000_00);
+    expect(row.totals).toMatchObject({ costCents: 43_800_00, totalCents: 43_800_00 });
+    expect(row.estimate.showCodeNumbers).toBe(false);
+
+    // THE SCHEDULE TAKES THE CLIENT'S WORDS, because the continuation sheet is the
+    // owner's document — and the item that hides a line collapses to one row.
+    for (const shape of ["group", "line"] as const) {
+      expect(await run((tx) => applyEstimateToSchedule(tx, ctx, est.id, contract.id, shape))).toMatchObject({
+        lines: 2,
+        scheduledCents: 43_800_00,
+        shape,
+      });
+      const sov = await run((tx) => listSovLines(tx, tenantId, contract.id));
+      expect(sov.map((l) => [l.description, l.scheduledCents]), shape).toEqual([
+        ["The kitchen", 33_000_00],
+        ["Driveway and front walk", 10_800_00],
+      ]);
+    }
+
+    // The code numbers are a printing choice, so they move even once it is accepted.
+    await run((tx) => updateEstimate(tx, staffCtx, est.id, { showCodeNumbers: true }));
+    expect((await rowOf()).estimate.showCodeNumbers).toBe(true);
+    await run((tx) => acceptEstimate(tx, ctx, est.id, { contractId: contract.id, decidedOn: "2026-09-16" }));
+    await run((tx) => updateEstimate(tx, staffCtx, est.id, { showCodeNumbers: false, presentation: "groups" }));
+    row = await rowOf();
+    expect([row.estimate.showCodeNumbers, row.estimate.presentation]).toEqual([false, "groups"]);
+    // The words on the lines are the agreement, so they are fixed with the money.
+    await expect(
+      run((tx) => updateEstimate(tx, staffCtx, est.id, { lines: [{ description: "Anything" }] })),
     ).rejects.toMatchObject({ code: "ESTIMATE_ACCEPTED" });
   }, 120_000);
 

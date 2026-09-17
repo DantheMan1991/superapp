@@ -30,6 +30,15 @@ import { d } from "./_shared";
  * was nearly written for constraints that were already correct on both
  * databases.
  *
+ * THE FILE SCAN IS STILL WORTH HAVING, and it is `tests/migrations.test.ts`.
+ * It reads the migrations as WRITTEN, which is the only version that exists
+ * before one is applied — so it is what stops a bare form from ever reaching a
+ * database, while the file can still be edited. Its
+ * `APPLIED_THEN_REPAIRED` list holds the three above as SUPERSEDED, each named
+ * with the migration that repaired it. The two tests answer different
+ * questions: that one guards what is about to be applied, this one certifies
+ * what is installed.
+ *
  * WHY IT IS WORTH A STANDING TEST AT ALL. The bare form comes BACK on its own.
  * `.onDelete()` in Drizzle takes an action, not a column list, so the TS
  * declaration and the drizzle-kit snapshot both record a plain `set null` and

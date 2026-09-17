@@ -51,6 +51,65 @@ open item while every test passes.
 
 ## Build log
 
+### 2026-09-17 — The scan says "superseded", because that is what it found (branch `claude/youthful-mestorf-bbe0aa`)
+
+The entry below replaced the file scan with a `pg_constraint` guard and wrote
+down why. **It left the file scan itself still asserting the thing that was
+disproved.** `tests/migrations.test.ts` kept a list called
+`APPLIED_AND_WRONG`, headed *"ALREADY APPLIED AND ALREADY WRONG"*, stating that
+its three entries installed a constraint whose *"delete they describe fails at
+run time"* and that the repair was still owed. A reader of that file — human or
+agent — had no way to reach the correct conclusion, and the pointer to the real
+guard was in the other file.
+
+**Nothing was broken and nothing needed repairing.** Re-checked here against
+`pg_constraint` on the dev branch before editing anything: **17 composite FKs
+with `ON DELETE SET NULL`, 0 of them bare**, and `schedule_items_parent_fk`,
+`work_items_parent_fk` and `production_order_lines_price_item_fk` each carrying
+the column-list form, e.g.
+
+```
+FOREIGN KEY (tenant_id, parent_id) REFERENCES work_items(tenant_id, id)
+  ON DELETE SET NULL (parent_id)
+```
+
+So the list is renamed **`APPLIED_THEN_REPAIRED`** and each entry is a record,
+not a defect: `{ offender, constraint, repairedBy }`, naming `drizzle/0192` for
+the two nesting FKs and `drizzle/0200` for the production one. The comment says
+plainly that the delete works and that the entries can never leave the list by
+being fixed, because they already were.
+
+**Why the scan stays.** It reads the migrations as WRITTEN, which is the only
+version that exists *before* one is applied — so it is what stops a bare form
+from ever reaching a database, while the file can still be edited. That is not
+theoretical: it is how `job_estimate_lines_group_fk` was caught in `0375`, three
+hours after `0373` installed it correctly, and the fix was deleting two
+statements from an unapplied file. The two tests answer different questions, and
+each now points at the other: **the scan guards what is about to be applied,
+`tests/isolation/constraints.test.ts` certifies what is installed.**
+
+**A grandfathered entry now has to prove it.** The list is a hole in a guard, so
+it is no longer taken on trust: a new test requires each entry's `repairedBy` to
+exist in `drizzle/`, to come *after* the offender, to re-add that very named
+constraint, and to do it in the column-list form. Adding a genuinely broken
+migration to the list to silence the scan therefore fails — on that test and on
+the closed-at-three assertion both. The assertion message on the scan itself now
+says the same thing in the place somebody will read it: *fix the migration now,
+while it is still unapplied; do not add it to `APPLIED_THEN_REPAIRED`.*
+
+All five guards were driven backwards before being believed — a repair that does
+not exist, a repair dated earlier than its offender, a repair that does not
+mention the constraint, a fresh bare composite SET NULL dropped into
+`drizzle/0376`, and that same offender appended to the list as camouflage. Each
+one fails with the message that names the fix. **No migration, and no schema
+change.** `docs/modules/jobs.md` carried the same false claim in #599's build
+log and is corrected in place.
+
+**The lesson is about where a claim lives.** The disproof was written down
+correctly in one file and in this dossier, and was still false in a third place
+that a reader would hit first. A correction is not finished when the reasoning is
+recorded; it is finished when every copy of the claim is gone.
+
 ### 2026-09-16 — Ask the catalogue, not the migrations (branch `claude/composite-set-null-proof`)
 
 **A SCAN OVER MIGRATION FILES CANNOT SEE A REPAIR, so it reports bugs that were
@@ -414,6 +473,8 @@ None. No tables, no migrations.
 | `tests/db-backed-files.ts` | Which files are database-backed |
 | `tests/db-backed-files.test.ts` | Recomputes that list and fails if it drifted |
 | `tests/setup/database-guard.ts` | Aims DB suites at `TEST_DATABASE_URL`, or skips them. Also refuses a local proxy pointed at a non-localhost host |
+| `tests/migrations.test.ts` | Rules scanned from the migration FILES, so they can stop a bad constraint **before** it is applied. Holds `APPLIED_THEN_REPAIRED` — files whose original text is bare and which a later migration repaired — and proves each named repair really exists |
+| `tests/isolation/constraints.test.ts` | The same class asked of `pg_constraint`: what is actually INSTALLED. Authoritative, because a text scan cannot see a repair |
 | `scripts/migrate.ts` | `-- --dev` targets `TEST_DATABASE_URL_OWNER`; CI uses it to build its own database from zero |
 | `scripts/lib/neon-local.ts` | Points the Neon driver at a local Postgres through `wsproxy`. **No-op unless `NEON_LOCAL_PROXY` is set** |
 | `scripts/lib/app-role.ts` | The `app_user` grants, shared by the interactive and CI paths so they cannot drift |

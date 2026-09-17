@@ -248,7 +248,7 @@ constraint keeps its original bare wording forever. The three are now
 listed as `APPLIED_THEN_REPAIRED`, each named with the migration that
 repaired it, and the authoritative guard is
 **`tests/isolation/constraints.test.ts`**, which asks the catalogue instead
-(#601, and #602 for the correction). The scan's real value is the case
+(#601, and #603 for the correction). The scan's real value is the case
 above: a bare form caught *before* it is applied, while the file can still
 be edited.
 

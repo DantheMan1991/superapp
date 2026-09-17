@@ -197,6 +197,30 @@ async function linesOf(tx: Tx, tenantId: string, estimateId: string): Promise<Jo
     .orderBy(asc(schema.jobEstimateLines.sortOrder), asc(schema.jobEstimateLines.createdAt));
 }
 
+/**
+ * Whether a row already holds every value we are about to write (E3b, ADR 0082).
+ *
+ * **Derived from the keys of `values`, never a hand-written field list**, so a
+ * column added to the write is compared without anybody remembering to add it
+ * here — the alternative is a list that silently stops noticing a field, which
+ * is how a save quietly starts dropping one. A non-primitive in `values` would
+ * never compare equal and the row would simply be written, which is the safe
+ * direction to fail in.
+ */
+function rowHolds(existing: Record<string, unknown>, values: Record<string, unknown>): boolean {
+  return Object.entries(values).every(([key, value]) => existing[key] === value);
+}
+
+/** What a save actually touched, so autosave can say "Saved" without lying about it. */
+export interface SaveCounts {
+  inserted: number;
+  updated: number;
+  removed: number;
+  unchanged: number;
+}
+
+const noCounts = (): SaveCounts => ({ inserted: 0, updated: 0, removed: 0, unchanged: 0 });
+
 async function groupsOf(tx: Tx, tenantId: string, estimateId: string): Promise<JobEstimateGroup[]> {
   return tx
     .select()
@@ -218,10 +242,12 @@ async function saveGroups(
   tenantId: string,
   estimateId: string,
   groups: EstimateGroupInput[],
-): Promise<{ refs: Map<string, string>; keptIds: Set<string> }> {
+): Promise<{ refs: Map<string, string>; keptIds: Set<string>; counts: SaveCounts }> {
   const existing = await groupsOf(tx, tenantId, estimateId);
+  const byId = new Map(existing.map((e) => [e.id, e]));
   const refs = new Map<string, string>();
   const keptIds = new Set<string>();
+  const counts = noCounts();
   for (const [i, g] of groups.entries()) {
     const mode = g.priceMode ?? "rollup";
     const values = {
@@ -232,13 +258,19 @@ async function saveGroups(
       sortOrder: (i + 1) * 10,
     };
     if (g.id) {
-      if (!existing.some((e) => e.id === g.id)) {
+      const row = byId.get(g.id);
+      if (!row) {
         throw new JobsError("NOT_FOUND", `item ${g.id} is not on this estimate`);
       }
-      await tx
-        .update(schema.jobEstimateGroups)
-        .set({ ...values, updatedAt: new Date() })
-        .where(and(eq(schema.jobEstimateGroups.tenantId, tenantId), eq(schema.jobEstimateGroups.id, g.id)));
+      if (rowHolds(row as unknown as Record<string, unknown>, values)) {
+        counts.unchanged += 1;
+      } else {
+        await tx
+          .update(schema.jobEstimateGroups)
+          .set({ ...values, updatedAt: new Date() })
+          .where(and(eq(schema.jobEstimateGroups.tenantId, tenantId), eq(schema.jobEstimateGroups.id, g.id)));
+        counts.updated += 1;
+      }
       refs.set(g.id, g.id);
       keptIds.add(g.id);
     } else {
@@ -248,9 +280,10 @@ async function saveGroups(
         .returning({ id: schema.jobEstimateGroups.id });
       if (g.key) refs.set(g.key, rows[0].id);
       keptIds.add(rows[0].id);
+      counts.inserted += 1;
     }
   }
-  return { refs, keptIds };
+  return { refs, keptIds, counts };
 }
 
 /** The groups no longer on the estimate. Their lines, if any survived, go loose (the FK's SET NULL). */
@@ -259,7 +292,7 @@ async function deleteGroupsGone(
   tenantId: string,
   estimateId: string,
   kept: Set<string>,
-): Promise<void> {
+): Promise<number> {
   const existing = await groupsOf(tx, tenantId, estimateId);
   const gone = existing.filter((e) => !kept.has(e.id)).map((e) => e.id);
   if (gone.length > 0) {
@@ -267,6 +300,7 @@ async function deleteGroupsGone(
       .delete(schema.jobEstimateGroups)
       .where(and(eq(schema.jobEstimateGroups.tenantId, tenantId), inArray(schema.jobEstimateGroups.id, gone)));
   }
+  return gone.length;
 }
 
 /**
@@ -286,7 +320,7 @@ async function saveLines(
   estimateId: string,
   lines: EstimateLineInput[],
   groupRefs: Map<string, string> = new Map(),
-): Promise<void> {
+): Promise<SaveCounts> {
   const existing = await linesOf(tx, tenantId, estimateId);
   const keep = new Set(lines.map((l) => l.id).filter((id): id is string => !!id));
   for (const id of keep) {
@@ -294,12 +328,15 @@ async function saveLines(
       throw new JobsError("NOT_FOUND", `estimate line ${id} is not on this estimate`);
     }
   }
+  const counts = noCounts();
   const removed = existing.filter((e) => !keep.has(e.id)).map((e) => e.id);
   if (removed.length > 0) {
     await tx
       .delete(schema.jobEstimateLines)
       .where(and(eq(schema.jobEstimateLines.tenantId, tenantId), inArray(schema.jobEstimateLines.id, removed)));
+    counts.removed = removed.length;
   }
+  const byId = new Map(existing.map((e) => [e.id, e]));
   for (const [i, l] of lines.entries()) {
     let groupId: string | null = null;
     if (l.groupRef) {
@@ -323,14 +360,24 @@ async function saveLines(
       sortOrder: (i + 1) * 10,
     };
     if (l.id) {
+      // A row that already holds all of this is left alone — autosave on a
+      // two-hundred-line estimate must not rewrite two hundred rows a second.
+      const row = byId.get(l.id);
+      if (row && rowHolds(row as unknown as Record<string, unknown>, values)) {
+        counts.unchanged += 1;
+        continue;
+      }
       await tx
         .update(schema.jobEstimateLines)
         .set({ ...values, updatedAt: new Date() })
         .where(and(eq(schema.jobEstimateLines.tenantId, tenantId), eq(schema.jobEstimateLines.id, l.id)));
+      counts.updated += 1;
     } else {
       await tx.insert(schema.jobEstimateLines).values({ tenantId, estimateId, ...values });
+      counts.inserted += 1;
     }
   }
+  return counts;
 }
 
 /**
@@ -414,6 +461,8 @@ export async function updateEstimate(
     throw new JobsError("STALE_VERSION", "estimate changed since loaded");
   }
   const status = input.status ?? existing.status;
+  /** Whether a child row was inserted, changed or removed, so an untouched save writes nothing. */
+  let wrote = false;
   if (existing.status === "accepted") {
     // The money, and the proposal's words — they are the agreement. The presentation is a printing choice and stays free.
     const moneyMoves =
@@ -439,15 +488,15 @@ export async function updateEstimate(
     const refs =
       saved?.refs ?? new Map((await groupsOf(tx, ctx.tenantId, id)).map((g) => [g.id, g.id]));
     if (input.lines !== undefined) {
-      await saveLines(tx, ctx.tenantId, id, input.lines, refs);
+      const lineCounts = await saveLines(tx, ctx.tenantId, id, input.lines, refs);
+      wrote = wrote || lineCounts.inserted + lineCounts.updated + lineCounts.removed > 0;
     }
-    if (saved) await deleteGroupsGone(tx, ctx.tenantId, id, saved.keptIds);
+    if (saved) {
+      wrote = wrote || saved.counts.inserted + saved.counts.updated > 0;
+      wrote = (await deleteGroupsGone(tx, ctx.tenantId, id, saved.keptIds)) > 0 || wrote;
+    }
   }
-  const patch: Record<string, unknown> = {
-    updatedAt: new Date(),
-    version: existing.version + 1,
-    status,
-  };
+  const patch: Record<string, unknown> = { status };
   if (input.number !== undefined) patch.number = input.number.trim();
   if (input.title !== undefined) patch.title = input.title.trim();
   if (input.sentOn !== undefined) patch.sentOn = input.sentOn;
@@ -463,9 +512,19 @@ export async function updateEstimate(
   if (input.scope !== undefined) patch.scope = input.scope.trim();
   if (input.exclusions !== undefined) patch.exclusions = input.exclusions.trim();
   if (input.terms !== undefined) patch.terms = input.terms.trim();
+  /**
+   * NOTHING CHANGED, NOTHING WRITTEN, AND THE VERSION DOES NOT MOVE (E3b, ADR
+   * 0082). Autosave fires on a timer, so a save that would rewrite the row with
+   * the values it already holds must be a SELECT and no more — otherwise the
+   * version churns under an editor that has not been touched, and the next real
+   * edit is refused as stale.
+   */
+  if (!wrote && rowHolds(existing as unknown as Record<string, unknown>, patch)) {
+    return existing;
+  }
   const rows = await tx
     .update(schema.jobEstimates)
-    .set(patch)
+    .set({ ...patch, updatedAt: new Date(), version: existing.version + 1 })
     .where(and(eq(schema.jobEstimates.tenantId, ctx.tenantId), eq(schema.jobEstimates.id, id)))
     .returning();
   return rows[0];

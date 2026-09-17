@@ -65,7 +65,8 @@ unzipped function budget with sharp's libvips and the Noto TTFs that
 | **E1** | ~~**Items**~~ **SHIPPED 2026-09-16** ([ADR 0079](../decisions/0079-an-estimate-groups-its-lines-into-the-items-the-client-sees-and-a-group-priced-fixed-is-the-price-not-a-cost-to-mark-up.md)) | `job_estimate_groups`, one level deep, rolling up or priced by hand; a fourth presentation `groups`; the schedule of values by item. The keystone: everything below hangs off this table. |
 | **E2** | ~~**What the client sees**~~ **SHIPPED 2026-09-16** ([ADR 0080](../decisions/0080-an-estimate-line-carries-the-clients-words-beside-the-estimators-and-a-line-kept-off-the-proposal-collapses-the-item-that-holds-it.md)) | `client_description` on a line (the estimator types `Tile — mud set, Schluter, mtl only, per AJ quote 8/14`, the client reads `Porcelain tile flooring`) and `client_visible`, **offered only inside an item** — hidden money must have somewhere to hide or the printed rows stop adding up, and **the item that hides a line collapses** on the same predicate as one priced by hand. The cost code's number off by default. One switch in the editor, not two columns. |
 | **E3a** | ~~**Typing fast**~~ **SHIPPED 2026-09-16** ([ADR 0081](../decisions/0081-an-estimate-line-can-be-typed-as-one-sentence-and-the-grammar-that-reads-it-is-pure-and-refuses-what-it-cannot-read.md)) | The entry bar, the paste box, `Ctrl+D`, and the units the parser learns from the business's own estimates. One pure grammar, three doors — the third is voice. No migration. |
-| E3b | **Saving fast** | **Per-row saving** and keyboard grid navigation. The editor still holds every line in one `useState` with one Save button, which a two-hundred-line estimate cannot be. Its own slice because it changes the concurrency model (`STALE_VERSION`) rather than adding a way in. |
+| **E3b** | ~~**Saving fast**~~ **SHIPPED 2026-09-17** ([ADR 0082](../decisions/0082-an-estimate-saves-itself-unsaved-is-derived-from-the-form-and-a-save-that-changes-nothing-writes-nothing.md)) | The form saves itself 1.2s after typing stops. "Unsaved" DERIVED from the payload, not flagged by setters; the version held in the client and handed to every guarded verb; **a save that changes nothing writes nothing and does not move the version**, which is what makes a timer cheap. Not per-row actions — one call, made safe to repeat. No migration. |
+| E3c | **Keyboard grid** | Arrows and Tab between cells, Enter on the last row making another. Split out of E3b, with which it shares nothing but the file. |
 | ~~E3~~ | ~~**Speed**~~ — split into E3a and E3b above | The **entry bar**: one field that parses `320 sf tile @ 4.20`, `plumbing rough 12000` (a lump), `@tile 320` (drop an assembly), Enter commits and the cursor stays. A **paste target** — `src/lib/paste-targets` is a finished framework and eight packs use it; jobs has no `paste/` directory at all. **Per-row saving** (today the whole estimate is one `useState` and one Save button, which a two-hundred-line takeoff cannot be). `Ctrl+D` to duplicate the row above, because most lines are near-copies. The parser is pure and table-tested, and it is also the voice feature: one function, two doors. |
 | E4 | **Price memory** | Every `job_estimate_line` across the tenant already IS a price history: type a description, get *"last priced $4.20 on 24-108, three weeks ago"*, Tab accepts. Then the half nobody else can do, because the actuals are in the same database: *"you estimated $4.20 — you actually paid $4.65 on the last three jobs"* (the `Spent` column per code). Before assemblies, because it is what tells us what an assembly should look like. |
 | E5 | **The proposal as sections, the HTML document, and the client link** | Presentation (how the money is grouped) and format (what the paper is) are two choices tangled in one field today. Split them, then build the document as a **section list** over pack data — and the point is that every page a custom-home proposal wants is already data here: the cover's elevation is the current drawing set (9a), the narrative is the items' names and notes, the allowances are selections (ADR 0067), the milestones are phases (ADR 0071), the warranty is a period on the job (13a), the insurance and bonding are rows (0068/0078). A brochure is a page order over things that exist. `letter` and `brochure` are two presets over that list. Stage 1 is the HTML plus print CSS, shipped as the tokenised client link with **Accept**; stage 2 adds the Chromium render behind the same route so the product can attach and email the file. Stage 1 is the first half of stage 2, so nothing is wasted. |
@@ -76,6 +77,72 @@ Not in the program, and deliberately: a takeoff from the drawings (shipped as
 9c), and anything that would make an estimate post to the books.
 
 ## Build log
+
+### 2026-09-17 — The estimate saves itself (`claude/estimate-autosave`, ADR 0082)
+
+Slice **E3b** of [the estimate program](#the-estimate-program-open-started-2026-09-16):
+the other half of "think speed", and the half that could lose an
+afternoon. **No migration, no new action, no new op** — the same one call,
+made safe to put on a timer.
+
+**THE FORM SAVES ITSELF 1.2 SECONDS AFTER TYPING STOPS**, and the Save
+button stays. An autosave passes `quiet`: no toast, and **no
+revalidation**, so the page does not re-render under the cursor. The
+explicit Save refreshes, and so does the next navigation.
+
+**"UNSAVED" IS DERIVED, NEVER FLAGGED.** The payload is built in one
+function, stringified, and compared with what was last saved — so a field
+added to the form is watched with nothing to remember. Twenty
+`setDirty(true)` calls with one missing is a screen that says *Saved* over
+work that is not, which is the worst failure available here. What was SENT
+becomes the snapshot, so anything typed during a save stays unsaved for the
+next one.
+
+**A SAVE THAT CHANGES NOTHING WRITES NOTHING.** This is what makes a timer
+cheap instead of ruinous. `rowHolds` skips a line or an item whose row
+already holds every value being written, and **derives its comparison from
+the keys it is about to write** rather than a hand-written field list — the
+list is how a save quietly stops persisting one column. A non-primitive
+would never compare equal and the row would just be written, which is the
+right direction to fail in. Above that: if nothing was inserted, changed or
+removed and the estimate's own columns already hold the patch, the estimate
+row is not touched — no `updated_at`, no `version` — and no audit row is
+written either, because the trail is for what people did, not for what a
+timer did.
+
+**THE VERSION IS NOT CONTENT.** It rides along at send time and is held in
+the client, advancing with each reply, because the props do not move until
+the page navigates — and **every verb that guards on a version (accept, use
+as budget, use as schedule) is handed the live one** rather than the stale
+prop, which would otherwise start failing after the first autosave.
+
+**And comparing it was a real bug, found by driving.** Each successful save
+came back with a new version, which made the form dirty against its own
+snapshot, which saved again: two POSTs and a status stuck on *Unsaved
+changes* over work that was already on disk. A reload proved the data was
+fine and the indicator was lying, which is the failure this slice exists to
+prevent — so it is in the ADR as the reason the token is excluded, not just
+fixed. The first attempt also saved 1.2s after typing STARTED rather than
+stopped, because the effect's dependencies left the payload out.
+
+**THE DRIFT GUARD IS A TEST.** A db scenario patches every field a line
+writes, one at a time — description, client description, unit, quantity,
+unit cost, markup, unit price, notes, cost code, visibility, the item it
+sits in — and asserts the version moved for each, then did NOT move when
+the same form was sent again. Plus reordering, plus an item's own values,
+plus `updated_at` on an untouched line being byte-identical after two
+no-op saves. A field that stopped being compared leaves the version
+standing still and the test names it.
+
+**Driven** on Oak Row: *Unsaved changes* → *Saved* on the title, then two
+more consecutive autosaves on a line's unit cost — the case a stale version
+would have refused — then a full reload showing the title, the unit cost
+($6,950.00) and the total ($190,537.53) all persisted with **Save never
+pressed**.
+
+**Not built, and named rather than implied: E3c is keyboard grid
+navigation** — arrows and Tab between cells, Enter on the last row making
+another. It shares nothing with this slice but the file.
 
 ### 2026-09-16 — Typing a line as one sentence (`claude/estimate-entry-bar`, ADR 0081)
 
@@ -3872,7 +3939,11 @@ ordering only bites when two new tables reference each other in one file.
   the client's), plus `scheduleFromEstimate` for the per-line view and
   `estimateByCode` for the budget — whose COST is untouched by items.
 - `src/packs/jobs/estimating-ops.ts` + `components/estimate-editor.tsx` — the
-  estimate's verbs and its one screen. `saveGroups` returns the map from what a
+  estimate's verbs and its one screen. **The screen saves itself** (E3b, ADR
+  0082): "unsaved" is the payload compared with the last one sent, the version
+  is held in the editor and handed to every guarded verb, and `rowHolds` skips
+  a row that already holds what is being written — its comparison derived from
+  the keys of the write, so it cannot drift. `saveGroups` returns the map from what a
   line called an item to the id the server minted, and runs before `saveLines`
   and before the deletions, so no line is orphaned mid-write; a `groupRef` that
   resolves to nothing is refused. `applyEstimateToSchedule` takes a shape, `group`
@@ -4229,12 +4300,11 @@ ordering only bites when two new tables reference each other in one file.
   proposal is HTML and a magazine-grade PDF is that same HTML through
   Chromium. The PDF export stays a requirement, so E5 carries the Chromium
   route rather than leaving it to a later slice.
-- **The estimate program is open; E1, E2 and E3a are shipped** — see
-  [the plan](#the-estimate-program-open-started-2026-09-16) for E3b–E7, each
+- **The estimate program is open; E1, E2, E3a and E3b are shipped** — see
+  [the plan](#the-estimate-program-open-started-2026-09-16) for E3c–E7, each
   with the founder's decision behind it. What is NOT built:
-  **per-row saving** and keyboard grid navigation — the editor is still one
-  `useState` and one Save button, which a two-hundred-line takeoff cannot be
-  (E3b); the **price
+  **keyboard grid navigation** — arrows and Tab between cells, Enter on the
+  last row making another (E3c); the **price
   memory**, including the estimated-versus-actual read the pack already has
   the data for (E4); **the proposal as sections**, the brochure, and the
   client link with Accept (E5); and **assemblies**, which are a saved item

@@ -4354,6 +4354,139 @@ d("jobs ops", () => {
     ).rejects.toMatchObject({ code: "ESTIMATE_ACCEPTED" });
   }, 120_000);
 
+  it("AUTOSAVE: a save that changes nothing writes nothing and does not move the version, and a change to ANY field of a line does", async () => {
+    const entity = await newCompany("Autosave Co");
+    const { project, code } = await run(async (tx) => {
+      await ensureBilling(tx);
+      const project = await createProject(tx, ctx, { entityId: entity, number: "OPS-AUTO", name: "Autosave" });
+      const set = (await getDefaultCostCodeSet(tx, tenantId)) ?? (await createCostCodeSet(tx, ctx, { name: "Auto codes" }));
+      const code = await createCostCode(tx, ctx, { setId: set.id, code: "AUTO-01", name: "General", sortOrder: 10 });
+      return { project, code };
+    });
+    const est = await run((tx) =>
+      createEstimate(tx, staffCtx, {
+        projectId: project.id,
+        number: "EST-AUTO-1",
+        groups: [{ key: "k", name: "The item", priceMode: "rollup" }],
+        lines: [
+          { groupRef: "k", description: "First", unitCostCents: 1_000_00 },
+          { description: "Second", unitCostCents: 2_000_00 },
+        ],
+      }),
+    );
+    const load = async () => {
+      const rows = await run((tx) => listEstimates(tx, tenantId, project.id));
+      return rows.find((r) => r.estimate.id === est.id)!;
+    };
+    let row = await load();
+    const groupId = row.groups[0].id;
+    /** The whole form as the editor sends it, with one field of the first line patched. */
+    const formWith = (patch: Record<string, unknown>) => ({
+      title: "Autosave",
+      groups: [{ id: groupId, name: "The item", priceMode: "rollup" }],
+      lines: [
+        {
+          id: row.lines[0].id,
+          // Read from the row, not hardcoded: once the line has left its item, the
+          // next unchanged form must not quietly put it back.
+          groupRef: row.lines[0].groupId,
+          costCodeId: row.lines[0].costCodeId,
+          description: row.lines[0].description,
+          clientDescription: row.lines[0].clientDescription,
+          clientVisible: row.lines[0].clientVisible,
+          unit: row.lines[0].unit,
+          quantityThousandths: row.lines[0].quantityThousandths,
+          unitCostCents: row.lines[0].unitCostCents,
+          markupPpm: row.lines[0].markupPpm,
+          unitPriceCents: row.lines[0].unitPriceCents,
+          notes: row.lines[0].notes,
+          ...patch,
+        },
+        {
+          id: row.lines[1].id,
+          description: row.lines[1].description,
+          unitCostCents: row.lines[1].unitCostCents,
+        },
+      ],
+    });
+
+    // The title moves once, and the version with it.
+    const first = await run((tx) => updateEstimate(tx, staffCtx, est.id, formWith({})));
+    expect(first.title).toBe("Autosave");
+    row = await load();
+    const settled = row.estimate.version;
+    const lineUpdatedAt = row.lines[0].updatedAt;
+
+    // NOW THE SAME FORM AGAIN, twice: nothing is written and nothing moves.
+    for (const attempt of [1, 2]) {
+      const again = await run((tx) => updateEstimate(tx, staffCtx, est.id, formWith({})));
+      expect(again.version, `attempt ${attempt}`).toBe(settled);
+    }
+    row = await load();
+    expect(row.estimate.version).toBe(settled);
+    // The line was not rewritten either, which is what makes autosave cheap.
+    expect(row.lines[0].updatedAt.getTime()).toBe(lineUpdatedAt.getTime());
+    // (Whether an unchanged save also skips the AUDIT row is the action's
+    // business, not the op's — the op writes no audit at all.)
+
+    /**
+     * EVERY FIELD THE SAVE WRITES HAS TO BE NOTICED. `rowHolds` derives its
+     * comparison from the keys it is about to write, so this cannot drift — and
+     * this loop is the proof: a field that stopped being compared would leave
+     * the version standing still, and the row stale on the screen.
+     */
+    const patches: Array<[string, Record<string, unknown>]> = [
+      ["description", { description: "First, renamed" }],
+      ["clientDescription", { clientDescription: "What the client reads" }],
+      ["unit", { unit: "sf" }],
+      ["quantityThousandths", { quantityThousandths: 320_000 }],
+      ["unitCostCents", { unitCostCents: 4_20 }],
+      ["markupPpm", { markupPpm: 150_000 }],
+      ["unitPriceCents", { unitPriceCents: 9_99 }],
+      ["notes", { notes: "off AJ's quote" }],
+      ["costCodeId", { costCodeId: code.id }],
+      ["clientVisible", { clientVisible: false }],
+      // Back on before the line leaves its item: a hidden LOOSE line is refused
+      // (ADR 0080), so the two patches have to be taken one at a time.
+      ["clientVisible back", { clientVisible: true }],
+      ["groupRef", { groupRef: null }],
+    ];
+    for (const [field, patch] of patches) {
+      const before = (await load()).estimate.version;
+      await run((tx) => updateEstimate(tx, staffCtx, est.id, formWith(patch)));
+      const after = await load();
+      expect(after.estimate.version, `${field} was not noticed`).toBe(before + 1);
+      // Row and form now agree, so sending it again is free.
+      row = after;
+      const repeat = await run((tx) => updateEstimate(tx, staffCtx, est.id, formWith({})));
+      expect(repeat.version, `${field} rewrote on an unchanged save`).toBe(after.estimate.version);
+    }
+
+    // Reordering is a change too: sort_order is one of the written fields.
+    row = await load();
+    const swapped = {
+      title: "Autosave",
+      groups: [{ id: groupId, name: "The item", priceMode: "rollup" }],
+      lines: [
+        { id: row.lines[1].id, description: row.lines[1].description, unitCostCents: row.lines[1].unitCostCents },
+        { id: row.lines[0].id, description: row.lines[0].description, unitCostCents: row.lines[0].unitCostCents },
+      ],
+    };
+    const before = row.estimate.version;
+    await run((tx) => updateEstimate(tx, staffCtx, est.id, swapped));
+    expect((await load()).estimate.version).toBe(before + 1);
+
+    // An ITEM that holds its values is left alone as well.
+    row = await load();
+    const itemOnly = { groups: [{ id: groupId, name: "The item", priceMode: "rollup" as const }] };
+    const held = await run((tx) => updateEstimate(tx, staffCtx, est.id, itemOnly));
+    expect(held.version).toBe(row.estimate.version);
+    const renamed = await run((tx) =>
+      updateEstimate(tx, staffCtx, est.id, { groups: [{ id: groupId, name: "The item, renamed", priceMode: "rollup" }] }),
+    );
+    expect(renamed.version).toBe(row.estimate.version + 1);
+  }, 180_000);
+
   // -------------------------------------------------------- party documents (11b)
 
   it("A SUBCONTRACTOR'S DOCUMENTS hang off the party: the standing page lists everybody with an order on a live job, a certificate past its date is a gap, the chase is Work on the party, and a kind is whatever the business names", async () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ClipboardPaste, CornerDownLeft, EyeOff, FileText, FolderPlus, Plus, Trash2 } from "lucide-react";
@@ -304,6 +304,8 @@ export function EstimateEditor({
   const [notes, setNotes] = useState(estimate.notes);
   const [presentation, setPresentation] = useState(estimate.presentation);
   const [showCodeNumbers, setShowCodeNumbers] = useState(estimate.showCodeNumbers);
+  /** The version every guarded verb is handed; it advances with each save. */
+  const [version, setVersion] = useState(estimate.version);
   /**
    * Writing the client's words is a pass of its own, so the two controls that do
    * it are behind one switch and off by default: the table is already wider than
@@ -461,12 +463,16 @@ export function EstimateEditor({
     if ((next === "declined" || next === "accepted") && decidedOn === "") setDecidedOn(today());
   }
 
-  function save() {
-    startTransition(async () => {
-      const payload = {
+  /**
+   * THE WHOLE FORM, as the action takes it. Built in one place because the
+   * unsaved-changes check compares THIS against what was last saved — so a
+   * field added to the payload is watched without anybody remembering to mark
+   * it dirty, which is the failure a list of setters invites.
+   */
+  function buildPayload() {
+      return {
         projectId,
         id: estimate.id,
-        version: estimate.version,
         number: number.trim(),
         title: title.trim(),
         status,
@@ -516,15 +522,71 @@ export function EstimateEditor({
                 })),
             }),
       };
-      const result = await updateEstimateAction(payload);
+  }
+
+  /**
+   * AUTOSAVE (E3b, ADR 0082). One Save button holding two hundred lines is a
+   * way to lose an afternoon, so the form saves itself once typing stops.
+   *
+   * **Unsaved is derived, not flagged.** The payload is stringified and compared
+   * with what was last saved, so a field added to `buildPayload` is watched with
+   * no setter to remember — the alternative is twenty `setDirty(true)` calls and
+   * one of them missing.
+   *
+   * The version comes back with every save and is kept HERE rather than read
+   * from the props, because the props do not move until the page navigates; and
+   * every verb that guards on a version is handed this one.
+   */
+  /**
+   * The CONTENT, without the version: a concurrency token is not something the
+   * form can be dirty about. Comparing it made every successful save dirty
+   * again the moment the new version came back — two POSTs and a status stuck
+   * on "Unsaved changes", found by driving it.
+   */
+  const payloadJson = JSON.stringify(buildPayload());
+  const [savedJson, setSavedJson] = useState(payloadJson);
+  const [failed, setFailed] = useState(false);
+  const unsaved = payloadJson !== savedJson;
+
+  /**
+   * Held in a ref so the timer always fires the CURRENT closure without the
+   * effect having to list the whole form as a dependency — and assigned in an
+   * effect rather than during render, because writing a ref while rendering is
+   * impure. This effect is declared first, so it has run before the timer below
+   * can fire.
+   */
+  const saveRef = useRef<(quiet: boolean) => void>(() => undefined);
+  useEffect(() => {
+    saveRef.current = (quiet: boolean) => {
+    const sending = buildPayload();
+    const sendingJson = JSON.stringify(sending);
+    startTransition(async () => {
+      const result = await updateEstimateAction({ ...sending, version, quiet });
       if ("error" in result) {
+        setFailed(true);
+        // A failed autosave is as loud as a failed Save: it is the same lost work.
         toast.error(result.error);
         return;
       }
-      toast.success("Estimate saved");
-      router.refresh();
+      setFailed(false);
+      // What was SENT is what is saved; anything typed since stays unsaved.
+      setSavedJson(sendingJson);
+      if (typeof result.version === "number") setVersion(result.version);
+      if (!quiet) {
+        toast.success("Estimate saved");
+        router.refresh();
+      }
     });
-  }
+    };
+  });
+
+  useEffect(() => {
+    if (!canEdit || !unsaved || pending) return;
+    // `payloadJson` is a dependency so each edit restarts the clock: a save
+    // lands 1.2s after somebody STOPS typing, not 1.2s after they start.
+    const timer = setTimeout(() => saveRef.current(true), 1_200);
+    return () => clearTimeout(timer);
+  }, [canEdit, unsaved, pending, payloadJson]);
 
   /**
    * The rows an item holds, and the rows no item holds — by the item's local
@@ -1252,7 +1314,7 @@ export function EstimateEditor({
                 <AcceptEstimateDialog
                   projectId={projectId}
                   estimateId={estimate.id}
-                  version={estimate.version}
+                  version={version}
                   contracts={contracts}
                   totalCents={totals.totalCents}
                   symbol={symbol}
@@ -1262,7 +1324,22 @@ export function EstimateEditor({
           )}
         </div>
         {canEdit && (
-          <Button onClick={save} disabled={pending || number.trim() === ""}>
+          <span
+            className="mr-3 text-xs text-muted-foreground"
+            aria-live="polite"
+            data-testid="estimate-save-state"
+          >
+            {pending
+              ? "Saving…"
+              : failed
+                ? "Not saved — try Save"
+                : unsaved
+                  ? "Unsaved changes"
+                  : "Saved"}
+          </span>
+        )}
+        {canEdit && (
+          <Button onClick={() => saveRef.current(false)} disabled={pending || number.trim() === ""}>
             {pending ? "Saving…" : "Save"}
           </Button>
         )}

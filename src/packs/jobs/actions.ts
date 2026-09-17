@@ -2765,35 +2765,48 @@ export async function updateEstimateAction(input: unknown) {
       /** For revalidation only. */
       projectId: z.string().uuid(),
       version: z.number().int().positive().optional(),
+      /**
+       * An AUTOSAVE (E3b, ADR 0082): no revalidation, so the page does not
+       * re-render under the cursor while somebody is still typing in it. The
+       * explicit Save refreshes, and so does the next navigation.
+       */
+      quiet: z.boolean().optional(),
     });
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { error: "Check the form and try again." };
-  const { id, version, number, ...rest } = parsed.data;
+  const { id, version, quiet, number, ...rest } = parsed.data;
   const { projectId, fields } = estimateFields({ ...rest, number: number ?? "" } as z.infer<typeof estimateSchema>);
   // A blank number is "not sent", never "make it blank": the op leaves undefined alone.
   const patch = number === undefined ? { ...fields, number: undefined } : fields;
   try {
     const ctx = await estimateGate();
-    await withTenant(
+    const saved = await withTenant(
       ctx.tenantId,
       async (tx) => {
         const row = await updateEstimate(tx, ctx, id, { ...patch, version });
-        await logAuditInTx(tx, {
-          tenantId: ctx.tenantId,
-          actorClerkUserId: ctx.userId,
-          action: "estimate.updated",
-          targetType: "estimate",
-          targetId: row.id,
-          meta: { projectId: row.projectId, status: row.status },
-        });
+        // An autosave that changed nothing does not move the version, and there is
+        // nothing to record: the audit trail is for edits, not for timers.
+        // With no version sent we cannot tell, so we record; an autosave always sends one.
+        if (version === undefined || row.version !== version) {
+          await logAuditInTx(tx, {
+            tenantId: ctx.tenantId,
+            actorClerkUserId: ctx.userId,
+            action: "estimate.updated",
+            targetType: "estimate",
+            targetId: row.id,
+            meta: { projectId: row.projectId, status: row.status },
+          });
+        }
         return row;
       },
       { role: ctx.role },
     );
-    revalidatePath(`${BASE}/${projectId}`);
-    revalidatePath(`${BASE}/${projectId}/estimates`);
-    revalidatePath(`${BASE}/${projectId}/estimates/${id}`);
-    return { ok: true as const };
+    if (quiet !== true) {
+      revalidatePath(`${BASE}/${projectId}`);
+      revalidatePath(`${BASE}/${projectId}/estimates`);
+      revalidatePath(`${BASE}/${projectId}/estimates/${id}`);
+    }
+    return { ok: true as const, version: saved.version };
   } catch (err) {
     return toResult(err);
   }

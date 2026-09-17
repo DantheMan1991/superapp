@@ -37,17 +37,27 @@ it stretched the document's scroll width from there. `relative` on the wrapper
 makes the wrapper the containing block, which takes the page back to 375/375
 with the grid still scrolling in its own box — 293px visible of 560.
 
-**Provenance, because it is uneven.** The 202px BEFORE was measured on the
-screen itself. The AFTER was measured on a standalone reproduction of this
-same grid (Tailwind's `sr-only` written out, the same
-`min-w-[560px]` and `grid-cols-[1fr_120px_120px_1fr_32px]`): 588/375 before,
-375/375 after, escaping children 2 to 0. The pane's Clerk session expired
-overnight between the two passes and only the founder can sign it back in, so
-the fixed screen has not itself been driven. Two independent live checks say
-it holds anyway: applying `position: relative` by hand to the invoice
-builder's wrapper in the running app took its escaping child from 1 to 0, and
-[#600](https://github.com/DantheMan1991/superapp/pull/600) shipped the same
-one word on the estimate editor for the same symptom, 1220 down to 929.
+**Driven on the screen, both states, one sitting.** At 375px on
+`/dashboard/m/accounting/journal/new`, as shipped: 375/375, no page overflow,
+no escaping child. Removing `relative` from the live wrapper and re-measuring:
+**577/375, 202px**, two escapees reporting `offsetParent: BODY` with a right
+edge of 577 — the page's scroll width exactly. Restoring it: back to 375/375.
+Toggling the one word on and off is what makes this causation rather than
+correlation.
+
+The wrapper still does the job it exists for: `scrollLeft` moves 0 to 249, its
+whole range, with the page unmoved at 375/375. Add line takes the grid to
+three rows and a third hidden label, and none of the three escapes; Remove
+line deletes its row and both survivors go disabled again at two rows.
+
+The builders were driven the same way. The bill builder's two labels go from 2
+escaping to 0 with the word, and stay at 0 even when forced into the
+overflowing `showTax` geometry (700 in a 673 box); the invoice builder's goes
+from 1 to 0. Page overflow was 0 in every state on both, which is the evidence
+for calling them latent rather than broken. The commitment detail page, left
+alone, was re-measured too: 11 wrappers, 0 escaping, and both its labels report
+the `<Table>` primitive's `relative w-full overflow-x-auto` as their
+`offsetParent`.
 
 The same word went on the bill and invoice builders' `md:overflow-x-auto`
 wrappers, which have the same escape (their `md:sr-only` Credit, Discount and

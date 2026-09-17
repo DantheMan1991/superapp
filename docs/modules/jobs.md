@@ -193,10 +193,35 @@ proposal as sections with the brochure and the client link (E5), and
 assemblies — **which are a saved item**, and which is why they waited for
 this table rather than arriving with one of their own (E6).
 
-**Not verified in the browser.** The pane has come up signed out since
-2026-09-09 and only the founder can sign back in, so the editor's item
-rows, the schedule dialog's shape choice and the by-item proposal PDF are
-proven by the suites and by nothing having been clicked.
+**DRIVEN, on the founder's own screen.** EST-ITEMS-1 on Oak Row (24-108) on
+the dev branch, at 959px and at 375px: the item, its sentence, its line and
+the loose line save and reload; the figures compute live to the cent
+($98,550.00 cost, $100,000.00 price of which **$8,400.00 priced by hand**,
+$9,160.00 overhead, $10,076.00 profit, **$119,236.00 total**, 17.3% margin —
+the example in this entry, from the database); the by-code panel's price
+column adds to the subtotal, which is the fixed-share rule working; the
+schedule dialog defaults to *By item — 1 item, as the proposal shows them*;
+and the **proposal PDF prints the item at 8,400.00** with its sentence
+beneath it, the loose line at 110,836.00, the total at 119,236.00, and no
+sign of the tile line behind the typed price. The estimate is left on the dev
+branch as a worked example.
+
+**Three things the driving changed, none of which a test could have caught.**
+An item's cost and price were in the Cost and Price columns, lined up with
+its lines — tidy, and useless: the table is 1,178px in an 822px box, so those
+two columns are the first thing off the right edge, and an item's **margin**
+is the number that says whether a round price was safe. It moved under the
+name, in the leftmost cells; the price and the margin come first in that line
+because at 375px its right end is cut off. And the schedule dialog had the
+optional shape above the required contract.
+
+**What the driving found and did not fix:** this screen makes the PAGE scroll
+sideways 276px — `documentElement.scrollWidth` 1220 against a 944 client
+width — although the `overflow-x-auto` wrapper is correctly bounded and every
+ancestor is too; hiding the table alone removes it, and `overflow: hidden` on
+the wrapper does not. The table was already wider than its box before this
+slice and the item column made it worse. **E3 rebuilds this table** for the
+keyboard grid and is where the fix belongs.
 
 ### 2026-09-16 — Bonding: the record on the job, the capacity across them (`claude/bonding`, ADR 0078)
 

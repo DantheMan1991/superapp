@@ -368,7 +368,7 @@ export function EstimateEditor({
       children,
       terms.markupPpm,
     );
-    return { costCents, priceCents, marginCents: priceCents - costCents };
+    return { costCents, priceCents, marginCents: priceCents - costCents, lineCount: children.length };
   }
   function changeStatus(next: string) {
     setStatus(next);
@@ -695,6 +695,32 @@ export function EstimateEditor({
                           className="h-8 min-w-48 font-medium"
                           disabled={!editable}
                         />
+                        {/*
+                          The item's money lives UNDER ITS NAME, not in the Cost and Price
+                          columns where it would line up with its lines: the table is wider
+                          than the page and those columns are the first thing to go off the
+                          right edge — and an item's margin is the number that says whether
+                          a round price was a safe one. It has to be readable without
+                          scrolling anything.
+                        */}
+                        {/* The price and the margin FIRST: on a phone this line is cut off at the
+                            right edge, and the last thing to lose is what the client pays and
+                            what it leaves. */}
+                        <p className="mt-1 px-0.5 text-xs text-muted-foreground tabular-nums">
+                          {fmt(money.priceCents, symbol)} to the client
+                          {money.priceCents > 0 && (
+                            <>
+                              {" · "}
+                              <span className="font-medium text-foreground">
+                                {fmt(money.marginCents, symbol)} margin
+                              </span>{" "}
+                              · {((money.marginCents / money.priceCents) * 100).toFixed(1)}%
+                            </>
+                          )}
+                          {" · "}
+                          {fmt(money.costCents, symbol)} cost
+                          {money.lineCount === 0 && " · no lines under it yet"}
+                        </p>
                       </td>
                       <td className="px-1 py-1.5" colSpan={3}>
                         <Select
@@ -729,18 +755,7 @@ export function EstimateEditor({
                           <span className="block text-right text-xs text-muted-foreground">Its lines add up</span>
                         )}
                       </td>
-                      <td className="px-1 py-2 text-right tabular-nums text-muted-foreground">
-                        {fmt(money.costCents, symbol)}
-                      </td>
-                      <td className="px-1 py-2 text-right font-medium tabular-nums">
-                        {fmt(money.priceCents, symbol)}
-                        {money.priceCents > 0 && (
-                          <span className="block text-xs font-normal text-muted-foreground">
-                            {fmt(money.marginCents, symbol)} margin ·{" "}
-                            {((money.marginCents / money.priceCents) * 100).toFixed(1)}%
-                          </span>
-                        )}
-                      </td>
+                      <td colSpan={2} />
                       {editable && (
                         <td className="px-1 py-1">
                           <Button
@@ -1053,6 +1068,21 @@ function ApplyToScheduleDialog({
               line sold at a price per unit keeps billing by the quantity, its unit price raised by the same share. A
               line an application has billed against cannot be removed.
             </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="ats-contract">Contract</Label>
+              <Select value={contractId} onValueChange={setContractId}>
+                <SelectTrigger className="w-full" id="ats-contract">
+                  <SelectValue placeholder="Which agreement" />
+                </SelectTrigger>
+                <SelectContent>
+                  {contracts.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             {itemCount > 0 && (
               <div className="space-y-1.5">
                 <Label htmlFor="ats-shape">Written</Label>
@@ -1069,21 +1099,6 @@ function ApplyToScheduleDialog({
                 </Select>
               </div>
             )}
-            <div className="space-y-1.5">
-              <Label htmlFor="ats-contract">Contract</Label>
-              <Select value={contractId} onValueChange={setContractId}>
-                <SelectTrigger className="w-full" id="ats-contract">
-                  <SelectValue placeholder="Which agreement" />
-                </SelectTrigger>
-                <SelectContent>
-                  {contracts.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
           <DialogFooter>
             <Button

@@ -4108,7 +4108,8 @@ d("jobs ops", () => {
     // Use as schedule of values: one line per estimate line at its price with overhead and profit spread across them, so the schedule totals the contract sum; the unit-priced line keeps its quantity with its unit price raised by the same share.
     await expect(run((tx) => applyEstimateToSchedule(tx, staffCtx, est.id, contract.id))).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(run((tx) => applyEstimateToSchedule(tx, ctx, est.id, otherContract.id))).rejects.toMatchObject({ code: "WRONG_PROJECT" });
-    expect(await run((tx) => applyEstimateToSchedule(tx, ctx, est.id, contract.id))).toEqual({ lines: 4, scheduledCents: 89_122_55 });
+    // No items on this estimate, so there is no choice to make: by line.
+    expect(await run((tx) => applyEstimateToSchedule(tx, ctx, est.id, contract.id))).toEqual({ lines: 4, scheduledCents: 89_122_55, shape: "line" });
     const sov = await run((tx) => listSovLines(tx, tenantId, contract.id));
     expect(sov.map((l) => [l.description, l.scheduledCents, l.costCodeId, l.unit, l.quantityThousandths, l.unitPriceCents])).toEqual([
       ["Slab, 4in, fibre mesh", 30_891_30, codes.a.id, "cy", null, null],
@@ -4131,6 +4132,139 @@ d("jobs ops", () => {
       ["EST-2", "draft", 80_000_00],
       ["EST-1", "superseded", 89_122_55],
     ]);
+  }, 120_000);
+
+  // ------------------------------------------------ items on an estimate (0079)
+
+  it("ITEMS: an item and its lines are saved in one go, a typed price is what the client pays and takes no overhead or profit, the schedule is written BY ITEM, and removing an item leaves its lines", async () => {
+    const entity = await newCompany("Item Co");
+    const { project, contract, codes } = await run(async (tx) => {
+      await ensureBilling(tx);
+      const project = await createProject(tx, ctx, { entityId: entity, number: "OPS-ITEM", name: "Items" });
+      const contract = await createContract(tx, ctx, { projectId: project.id, kind: "new_home", valueCents: 0 });
+      const set = (await getDefaultCostCodeSet(tx, tenantId)) ?? (await createCostCodeSet(tx, ctx, { name: "Item codes" }));
+      const tile = await createCostCode(tx, ctx, { setId: set.id, code: "ITEM-09-30", name: "Tiling", sortOrder: 90 });
+      const other = await createCostCode(tx, ctx, { setId: set.id, code: "ITEM-01-00", name: "General", sortOrder: 10 });
+      return { project, contract, codes: { tile, other } };
+    });
+
+    // THE FOUNDER'S EXAMPLE, ten and ten: an item priced by hand at $8,400 over $6,950
+    // of cost, and $91,600 of loose lines. A new item and its lines in ONE save, the
+    // lines naming the item by the key the client gave it (ADR 0079).
+    const est = await run((tx) =>
+      createEstimate(tx, staffCtx, {
+        projectId: project.id,
+        number: "EST-ITEM-1",
+        markupPpm: 0,
+        overheadPpm: 100_000,
+        profitPpm: 100_000,
+        presentation: "groups",
+        groups: [
+          { key: "k-tile", name: "Tile flooring", clientNote: "Porcelain, master and hall baths.", priceMode: "fixed", fixedPriceCents: 8_400_00 },
+        ],
+        lines: [
+          { groupRef: "k-tile", costCodeId: codes.tile.id, description: "Tile, material and labour", unitCostCents: 6_950_00 },
+          { costCodeId: codes.other.id, description: "Everything else", unitCostCents: 91_600_00 },
+        ],
+      }),
+    );
+    const rowOf = async () => {
+      const rows = await run((tx) => listEstimates(tx, tenantId, project.id));
+      return rows.find((r) => r.estimate.id === est.id)!;
+    };
+    let row = await rowOf();
+    expect(row.groups.map((g) => [g.name, g.fixed, g.priceCents, g.costCents, g.marginCents, g.lineCount])).toEqual([
+      ["Tile flooring", true, 8_400_00, 6_950_00, 1_450_00, 1],
+    ]);
+    expect(row.lines.map((l) => l.groupId)).toEqual([row.groups[0].id, null]);
+    expect(row.totals).toMatchObject({
+      spreadableCents: 91_600_00,
+      fixedCents: 8_400_00,
+      subtotalCents: 100_000_00,
+      overheadCents: 9_160_00,
+      profitCents: 10_076_00,
+      totalCents: 119_236_00,
+      costCents: 98_550_00,
+      marginCents: 20_686_00,
+    });
+
+    // A refused shape: the mode and the price have to say the same thing.
+    await expect(
+      run((tx) => updateEstimate(tx, staffCtx, est.id, { groups: [{ id: row.groups[0].id, name: "Tile", priceMode: "fixed" }] })),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    await expect(
+      run((tx) =>
+        updateEstimate(tx, staffCtx, est.id, {
+          groups: [{ id: row.groups[0].id, name: "Tile", priceMode: "rollup", fixedPriceCents: 1 }],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_VALUE" });
+    // A line naming an item that is not on the estimate is refused, never quietly dropped.
+    await expect(
+      run((tx) =>
+        updateEstimate(tx, staffCtx, est.id, {
+          groups: [{ id: row.groups[0].id, name: "Tile flooring", priceMode: "fixed", fixedPriceCents: 8_400_00 }],
+          lines: [{ groupRef: "k-nothing", description: "Stray" }],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    // BY ITEM is the shape once there are items: one line per item and per loose line,
+    // the typed price untouched, the loose line carrying all the overhead and profit.
+    expect(await run((tx) => applyEstimateToSchedule(tx, ctx, est.id, contract.id))).toEqual({
+      lines: 2,
+      scheduledCents: 119_236_00,
+      shape: "group",
+    });
+    let sov = await run((tx) => listSovLines(tx, tenantId, contract.id));
+    expect(sov.map((l) => [l.description, l.scheduledCents, l.costCodeId])).toEqual([
+      ["Tile flooring", 8_400_00, codes.tile.id],
+      ["Everything else", 110_836_00, codes.other.id],
+    ]);
+
+    // Line by line, asked for by name: the typed price is shared across its own lines.
+    expect(await run((tx) => applyEstimateToSchedule(tx, ctx, est.id, contract.id, "line"))).toEqual({
+      lines: 2,
+      scheduledCents: 119_236_00,
+      shape: "line",
+    });
+    sov = await run((tx) => listSovLines(tx, tenantId, contract.id));
+    expect(sov.map((l) => [l.description, l.scheduledCents])).toEqual([
+      ["Tile, material and labour", 8_400_00],
+      ["Everything else", 110_836_00],
+    ]);
+    await expect(run((tx) => applyEstimateToSchedule(tx, ctx, est.id, contract.id, "poster"))).rejects.toMatchObject({
+      code: "INVALID_VALUE",
+    });
+
+    // THE BUDGET IS UNTOUCHED BY ITEMS: cost by code, per line, whatever the client was asked.
+    expect(await run((tx) => applyEstimateToBudget(tx, ctx, est.id))).toEqual({
+      codes: 2,
+      budgetCents: 98_550_00,
+      uncodedCents: 0,
+    });
+
+    // REMOVING AN ITEM LEAVES ITS LINES: they go loose and keep their pricing, and the
+    // money the item was holding is gone with it — the lines price themselves again.
+    await run((tx) =>
+      updateEstimate(tx, staffCtx, est.id, {
+        groups: [],
+        lines: row.lines.map((l) => ({ id: l.id, description: l.description, costCodeId: l.costCodeId, unitCostCents: l.unitCostCents })),
+      }),
+    );
+    row = await rowOf();
+    expect(row.groups).toEqual([]);
+    expect(row.lines.map((l) => [l.description, l.groupId, l.unitCostCents])).toEqual([
+      ["Tile, material and labour", null, 6_950_00],
+      ["Everything else", null, 91_600_00],
+    ]);
+    expect(row.totals).toMatchObject({ fixedCents: 0, spreadableCents: 98_550_00, totalCents: 119_245_50 });
+
+    // An accepted estimate's items are fixed with its lines and its rates.
+    await run((tx) => acceptEstimate(tx, ctx, est.id, { contractId: contract.id, decidedOn: "2026-09-16" }));
+    await expect(
+      run((tx) => updateEstimate(tx, staffCtx, est.id, { groups: [{ key: "k-new", name: "After the fact" }] })),
+    ).rejects.toMatchObject({ code: "ESTIMATE_ACCEPTED" });
   }, 120_000);
 
   // -------------------------------------------------------- party documents (11b)

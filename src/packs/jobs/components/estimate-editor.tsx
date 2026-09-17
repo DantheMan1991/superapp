@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useTransition, type ReactNode } from "react";
+import { Fragment, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { FileText, Plus, Trash2 } from "lucide-react";
+import { FileText, FolderPlus, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -30,12 +30,22 @@ import {
   updateEstimateAction,
 } from "../actions";
 import { quantityStringToThousandths, thousandthsToQuantityString } from "../billing-math";
-import { estimateTotals, lineCostCents, linePriceCents, rateStringToPpm } from "../estimate-math";
+import {
+  estimateTotals,
+  groupCostCents,
+  groupPriceCents,
+  lineCostCents,
+  linePriceCents,
+  rateStringToPpm,
+} from "../estimate-math";
 import {
   ESTIMATE_STATUSES,
   ESTIMATE_STATUS_LABELS,
+  GROUP_PRICE_MODES,
+  GROUP_PRICE_MODE_LABELS,
   PROPOSAL_PRESENTATIONS,
   PROPOSAL_PRESENTATION_LABELS,
+  type GroupPriceMode,
 } from "../vocabulary";
 
 const NONE = "__none__";
@@ -61,8 +71,34 @@ function today(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+/**
+ * A CLIENT-FACING ITEM being edited (ADR 0079). `key` is what this item's
+ * lines hold: its id once it has one, a local key until then, which is what
+ * lets a new item and its lines be saved in one go.
+ */
+interface GroupDraft {
+  id: string | null;
+  key: string;
+  name: string;
+  clientNote: string;
+  priceMode: GroupPriceMode;
+  fixedPrice: string;
+}
+
+let nextKey = 0;
+const emptyGroup = (): GroupDraft => ({
+  id: null,
+  key: `new-item-${(nextKey += 1)}`,
+  name: "",
+  clientNote: "",
+  priceMode: "rollup",
+  fixedPrice: "",
+});
+
 interface LineDraft {
   id: string | null;
+  /** The item this line sits in; "" leaves it loose. */
+  groupKey: string;
   costCodeId: string;
   description: string;
   unit: string;
@@ -72,8 +108,9 @@ interface LineDraft {
   unitPrice: string;
 }
 
-const emptyLine = (): LineDraft => ({
+const emptyLine = (groupKey = ""): LineDraft => ({
   id: null,
+  groupKey,
   costCodeId: NONE,
   description: "",
   unit: "",
@@ -111,8 +148,17 @@ export interface EditableEstimate {
   exclusions: string;
   terms: string;
   contractId: string | null;
+  /** The client-facing items, in their order (ADR 0079). */
+  groups: Array<{
+    id: string;
+    name: string;
+    clientNote: string;
+    priceMode: string;
+    fixedPriceCents: number | null;
+  }>;
   lines: Array<{
     id: string;
+    groupId: string | null;
     costCodeId: string | null;
     description: string;
     unit: string;
@@ -249,6 +295,7 @@ export function EstimateEditor({
     estimate.lines.length > 0
       ? estimate.lines.map((l) => ({
           id: l.id,
+          groupKey: l.groupId ?? "",
           costCodeId: l.costCodeId ?? NONE,
           description: l.description,
           unit: l.unit,
@@ -265,11 +312,63 @@ export function EstimateEditor({
     overheadPpm: rateStringToPpm(overhead) ?? 0,
     profitPpm: rateStringToPpm(profit) ?? 0,
   };
-  const figures = lines.filter((l) => l.description.trim() !== "").map(figuresOf);
-  const totals = estimateTotals(figures, terms);
+  const [groups, setGroups] = useState<GroupDraft[]>(
+    estimate.groups.map((g) => ({
+      id: g.id,
+      key: g.id,
+      name: g.name,
+      clientNote: g.clientNote,
+      priceMode: g.priceMode === "fixed" ? "fixed" : "rollup",
+      fixedPrice: g.fixedPriceCents === null ? "" : (g.fixedPriceCents / 100).toFixed(2),
+    })),
+  );
+  const named = groups.filter((g) => g.name.trim() !== "");
+  const groupFigures = named.map((g) => ({
+    id: g.key,
+    priceMode: g.priceMode,
+    fixedPriceCents: g.priceMode === "fixed" ? toCents(g.fixedPrice) : null,
+  }));
+  /** Only a named item can hold a line: a blank row is ignored, so its lines are loose. */
+  const keyOf = (l: LineDraft): string | null =>
+    named.some((g) => g.key === l.groupKey) ? l.groupKey : null;
+  const figures = lines
+    .filter((l) => l.description.trim() !== "")
+    .map((l) => ({ ...figuresOf(l), groupId: keyOf(l) }));
+  const totals = estimateTotals(figures, terms, groupFigures);
+  const hasGroups = named.length > 0;
+  /** Every item priced by hand leaves the rates nothing to spread over; the page says so. */
+  const ratesIdle =
+    totals.spreadableCents === 0 &&
+    totals.fixedCents > 0 &&
+    terms.overheadPpm + terms.profitPpm > 0;
 
   function setLine(i: number, patch: Partial<LineDraft>) {
     setLines((prev) => prev.map((l, j) => (i === j ? { ...l, ...patch } : l)));
+  }
+  function setGroup(i: number, patch: Partial<GroupDraft>) {
+    setGroups((prev) => prev.map((g, j) => (i === j ? { ...g, ...patch } : g)));
+  }
+  /** Removing an item leaves its lines loose, never deletes what was priced. */
+  function removeGroup(key: string) {
+    setLines((prev) => prev.map((l) => (l.groupKey === key ? { ...l, groupKey: "" } : l)));
+    setGroups((prev) => prev.filter((g) => g.key !== key));
+  }
+  function addLine(groupKey: string) {
+    setLines((prev) => [...prev, emptyLine(groupKey)]);
+  }
+  /** An item's cost and price as the editor shows them, from the same pure arithmetic. */
+  function groupMoney(g: GroupDraft) {
+    const children = lines
+      .filter((l) => l.groupKey === g.key && l.description.trim() !== "")
+      .map(figuresOf);
+    const fixed = g.priceMode === "fixed" ? toCents(g.fixedPrice) : null;
+    const costCents = groupCostCents(children);
+    const priceCents = groupPriceCents(
+      { id: g.key, priceMode: g.priceMode, fixedPriceCents: fixed },
+      children,
+      terms.markupPpm,
+    );
+    return { costCents, priceCents, marginCents: priceCents - costCents, lineCount: children.length };
   }
   function changeStatus(next: string) {
     setStatus(next);
@@ -301,10 +400,23 @@ export function EstimateEditor({
               scope: scope.trim(),
               exclusions: exclusions.trim(),
               terms: termsText.trim(),
-              lines: lines
-                .filter((l) => l.description.trim() !== "")
+              groups: named.map((g) => ({
+                id: g.id ?? "",
+                key: g.key,
+                name: g.name.trim(),
+                clientNote: g.clientNote.trim(),
+                priceMode: g.priceMode,
+                fixedPriceCents: g.priceMode === "fixed" ? g.fixedPrice : "",
+              })),
+              // In the order shown: each item's lines beneath it, the loose ones last,
+              // so what comes back from the database is already grouped.
+              lines: [...named.map((g) => g.key), ""]
+                .flatMap((key) =>
+                  lines.filter((l) => (keyOf(l) ?? "") === key && l.description.trim() !== ""),
+                )
                 .map((l) => ({
                   id: l.id ?? "",
+                  groupRef: keyOf(l) ?? "",
                   costCodeId: l.costCodeId === NONE ? "" : l.costCodeId,
                   description: l.description.trim(),
                   unit: l.unit.trim(),
@@ -323,6 +435,150 @@ export function EstimateEditor({
       toast.success("Estimate saved");
       router.refresh();
     });
+  }
+
+  /**
+   * The rows an item holds, and the rows no item holds — by the item's local
+   * key, so a line under an item whose name is still blank shows where it was
+   * put even though the arithmetic counts it loose (a blank row is ignored).
+   */
+  const rowsOf = (key: string) => lines.map((l, i) => ({ l, i })).filter(({ l }) => l.groupKey === key);
+  const loose = lines
+    .map((l, i) => ({ l, i }))
+    .filter(({ l }) => !groups.some((g) => g.key === l.groupKey));
+  const colCount = (hasGroups ? 1 : 0) + 9 + (editable ? 1 : 0);
+
+  /** One line's row. Its first cell is the item it sits in, once the estimate has any. */
+  function lineRow(l: LineDraft, i: number) {
+    const f = figuresOf(l);
+    const blank = l.description.trim() === "";
+    return (
+      <tr key={l.id ?? `new-${i}`} className="border-t border-border/50 align-top">
+        {hasGroups && (
+          <td className="px-1 py-1">
+            <Select
+              value={l.groupKey === "" ? NONE : l.groupKey}
+              onValueChange={(v) => setLine(i, { groupKey: v === NONE ? "" : v })}
+              disabled={!editable}
+            >
+              <SelectTrigger aria-label={`Item, line ${i + 1}`} className="h-8 w-36">
+                <SelectValue placeholder="Item" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE}>Not in an item</SelectItem>
+                {named.map((g) => (
+                  <SelectItem key={g.key} value={g.key}>
+                    {g.name.trim()}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </td>
+        )}
+        <td className="px-1 py-1">
+          <Select value={l.costCodeId} onValueChange={(v) => setLine(i, { costCodeId: v })} disabled={!editable}>
+            <SelectTrigger aria-label={`Cost code, line ${i + 1}`} className="h-8 w-40">
+              <SelectValue placeholder="Code" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NONE}>No code</SelectItem>
+              {codes.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </td>
+        <td className="px-1 py-1">
+          <Input
+            aria-label={`Description, line ${i + 1}`}
+            value={l.description}
+            onChange={(e) => setLine(i, { description: e.target.value })}
+            placeholder="Tile, master bath floor"
+            maxLength={300}
+            className="h-8 min-w-48"
+            disabled={!editable}
+          />
+        </td>
+        <td className="px-1 py-1">
+          <Input
+            aria-label={`Quantity, line ${i + 1}`}
+            value={l.quantity}
+            onChange={(e) => setLine(i, { quantity: e.target.value })}
+            placeholder="1"
+            inputMode="decimal"
+            className="h-8 w-20 text-right"
+            disabled={!editable}
+          />
+        </td>
+        <td className="px-1 py-1">
+          <Input
+            aria-label={`Unit, line ${i + 1}`}
+            value={l.unit}
+            onChange={(e) => setLine(i, { unit: e.target.value })}
+            placeholder="ls"
+            maxLength={20}
+            className="h-8 w-16"
+            disabled={!editable}
+          />
+        </td>
+        <td className="px-1 py-1">
+          <Input
+            aria-label={`Unit cost, line ${i + 1}`}
+            value={l.unitCost}
+            onChange={(e) => setLine(i, { unitCost: e.target.value })}
+            placeholder="0.00"
+            inputMode="decimal"
+            className="h-8 w-24 text-right"
+            disabled={!editable}
+          />
+        </td>
+        <td className="px-1 py-1">
+          <Input
+            aria-label={`Markup, line ${i + 1}`}
+            value={l.markup}
+            onChange={(e) => setLine(i, { markup: e.target.value })}
+            placeholder={markup.trim() === "" ? "0" : markup}
+            inputMode="decimal"
+            className="h-8 w-20 text-right"
+            disabled={!editable || l.unitPrice.trim() !== ""}
+          />
+        </td>
+        <td className="px-1 py-1">
+          <Input
+            aria-label={`Unit price, line ${i + 1}`}
+            value={l.unitPrice}
+            onChange={(e) => setLine(i, { unitPrice: e.target.value })}
+            placeholder="by markup"
+            inputMode="decimal"
+            className="h-8 w-24 text-right"
+            disabled={!editable}
+          />
+        </td>
+        <td className="px-1 py-2 text-right tabular-nums text-muted-foreground">
+          {blank ? "—" : fmt(lineCostCents(f), symbol)}
+        </td>
+        <td className="px-1 py-2 text-right tabular-nums">
+          {blank ? "—" : fmt(linePriceCents(f, terms.markupPpm), symbol)}
+        </td>
+        {editable && (
+          <td className="px-1 py-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              disabled={lines.length === 1}
+              onClick={() => setLines((prev) => prev.filter((_, j) => j !== i))}
+            >
+              <Trash2 className="size-4" />
+              <span className="sr-only">Remove line {i + 1}</span>
+            </Button>
+          </td>
+        )}
+      </tr>
+    );
   }
 
   return (
@@ -395,15 +651,21 @@ export function EstimateEditor({
         <div className="mb-2 flex items-center justify-between">
           <h2 className="font-heading text-sm font-medium tracking-heading">Lines</h2>
           {editable && (
-            <Button type="button" variant="ghost" size="sm" onClick={() => setLines((prev) => [...prev, emptyLine()])}>
-              <Plus className="mr-1.5 size-4" /> Add line
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button type="button" variant="ghost" size="sm" onClick={() => setGroups((prev) => [...prev, emptyGroup()])}>
+                <FolderPlus className="mr-1.5 size-4" /> Add item
+              </Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => addLine("")}>
+                <Plus className="mr-1.5 size-4" /> Add line
+              </Button>
+            </div>
           )}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-xs text-muted-foreground">
               <tr>
+                {hasGroups && <th className="px-1 py-1.5 text-left">Item</th>}
                 <th className="px-1 py-1.5 text-left">Cost code</th>
                 <th className="px-1 py-1.5 text-left">Description</th>
                 <th className="px-1 py-1.5 text-right">Qty</th>
@@ -417,116 +679,135 @@ export function EstimateEditor({
               </tr>
             </thead>
             <tbody>
-              {lines.map((l, i) => {
-                const f = figuresOf(l);
-                const blank = l.description.trim() === "";
+              {groups.map((g, gi) => {
+                const money = groupMoney(g);
+                const own = rowsOf(g.key);
                 return (
-                  <tr key={l.id ?? `new-${i}`} className="border-t border-border/50 align-top">
-                    <td className="px-1 py-1">
-                      <Select value={l.costCodeId} onValueChange={(v) => setLine(i, { costCodeId: v })} disabled={!editable}>
-                        <SelectTrigger aria-label={`Cost code, line ${i + 1}`} className="h-8 w-40">
-                          <SelectValue placeholder="Code" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={NONE}>No code</SelectItem>
-                          {codes.map((c) => (
-                            <SelectItem key={c.id} value={c.id}>
-                              {c.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </td>
-                    <td className="px-1 py-1">
-                      <Input
-                        aria-label={`Description, line ${i + 1}`}
-                        value={l.description}
-                        onChange={(e) => setLine(i, { description: e.target.value })}
-                        placeholder="Tile, master bath floor"
-                        maxLength={300}
-                        className="h-8 min-w-48"
-                        disabled={!editable}
-                      />
-                    </td>
-                    <td className="px-1 py-1">
-                      <Input
-                        aria-label={`Quantity, line ${i + 1}`}
-                        value={l.quantity}
-                        onChange={(e) => setLine(i, { quantity: e.target.value })}
-                        placeholder="1"
-                        inputMode="decimal"
-                        className="h-8 w-20 text-right"
-                        disabled={!editable}
-                      />
-                    </td>
-                    <td className="px-1 py-1">
-                      <Input
-                        aria-label={`Unit, line ${i + 1}`}
-                        value={l.unit}
-                        onChange={(e) => setLine(i, { unit: e.target.value })}
-                        placeholder="ls"
-                        maxLength={20}
-                        className="h-8 w-16"
-                        disabled={!editable}
-                      />
-                    </td>
-                    <td className="px-1 py-1">
-                      <Input
-                        aria-label={`Unit cost, line ${i + 1}`}
-                        value={l.unitCost}
-                        onChange={(e) => setLine(i, { unitCost: e.target.value })}
-                        placeholder="0.00"
-                        inputMode="decimal"
-                        className="h-8 w-24 text-right"
-                        disabled={!editable}
-                      />
-                    </td>
-                    <td className="px-1 py-1">
-                      <Input
-                        aria-label={`Markup, line ${i + 1}`}
-                        value={l.markup}
-                        onChange={(e) => setLine(i, { markup: e.target.value })}
-                        placeholder={markup.trim() === "" ? "0" : markup}
-                        inputMode="decimal"
-                        className="h-8 w-20 text-right"
-                        disabled={!editable || l.unitPrice.trim() !== ""}
-                      />
-                    </td>
-                    <td className="px-1 py-1">
-                      <Input
-                        aria-label={`Unit price, line ${i + 1}`}
-                        value={l.unitPrice}
-                        onChange={(e) => setLine(i, { unitPrice: e.target.value })}
-                        placeholder="by markup"
-                        inputMode="decimal"
-                        className="h-8 w-24 text-right"
-                        disabled={!editable}
-                      />
-                    </td>
-                    <td className="px-1 py-2 text-right tabular-nums text-muted-foreground">
-                      {blank ? "—" : fmt(lineCostCents(f), symbol)}
-                    </td>
-                    <td className="px-1 py-2 text-right tabular-nums">
-                      {blank ? "—" : fmt(linePriceCents(f, terms.markupPpm), symbol)}
-                    </td>
-                    {editable && (
-                      <td className="px-1 py-1">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-8"
-                          disabled={lines.length === 1}
-                          onClick={() => setLines((prev) => prev.filter((_, j) => j !== i))}
-                        >
-                          <Trash2 className="size-4" />
-                          <span className="sr-only">Remove line {i + 1}</span>
-                        </Button>
+                  <Fragment key={g.key}>
+                    <tr className="border-t-2 border-border bg-muted/30 align-top">
+                      <td className="px-1 py-1.5" colSpan={3}>
+                        <Input
+                          aria-label={`Item name, item ${gi + 1}`}
+                          value={g.name}
+                          onChange={(e) => setGroup(gi, { name: e.target.value })}
+                          placeholder="Tile flooring, master and hall baths"
+                          maxLength={200}
+                          className="h-8 min-w-48 font-medium"
+                          disabled={!editable}
+                        />
+                        {/*
+                          The item's money lives UNDER ITS NAME, not in the Cost and Price
+                          columns where it would line up with its lines: the table is wider
+                          than the page and those columns are the first thing to go off the
+                          right edge — and an item's margin is the number that says whether
+                          a round price was a safe one. It has to be readable without
+                          scrolling anything.
+                        */}
+                        {/* The price and the margin FIRST: on a phone this line is cut off at the
+                            right edge, and the last thing to lose is what the client pays and
+                            what it leaves. */}
+                        <p className="mt-1 px-0.5 text-xs text-muted-foreground tabular-nums">
+                          {fmt(money.priceCents, symbol)} to the client
+                          {money.priceCents > 0 && (
+                            <>
+                              {" · "}
+                              <span className="font-medium text-foreground">
+                                {fmt(money.marginCents, symbol)} margin
+                              </span>{" "}
+                              · {((money.marginCents / money.priceCents) * 100).toFixed(1)}%
+                            </>
+                          )}
+                          {" · "}
+                          {fmt(money.costCents, symbol)} cost
+                          {money.lineCount === 0 && " · no lines under it yet"}
+                        </p>
                       </td>
+                      <td className="px-1 py-1.5" colSpan={3}>
+                        <Select
+                          value={g.priceMode}
+                          onValueChange={(v) => setGroup(gi, { priceMode: v as GroupPriceMode })}
+                          disabled={!editable}
+                        >
+                          <SelectTrigger aria-label={`How item ${gi + 1} is priced`} className="h-8">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {GROUP_PRICE_MODES.map((m) => (
+                              <SelectItem key={m} value={m}>
+                                {GROUP_PRICE_MODE_LABELS[m]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="px-1 py-1.5" colSpan={2}>
+                        {g.priceMode === "fixed" ? (
+                          <Input
+                            aria-label={`Price the client pays, item ${gi + 1}`}
+                            value={g.fixedPrice}
+                            onChange={(e) => setGroup(gi, { fixedPrice: e.target.value })}
+                            placeholder="0.00"
+                            inputMode="decimal"
+                            className="ml-auto h-8 w-28 text-right"
+                            disabled={!editable}
+                          />
+                        ) : (
+                          <span className="block text-right text-xs text-muted-foreground">Its lines add up</span>
+                        )}
+                      </td>
+                      <td colSpan={2} />
+                      {editable && (
+                        <td className="px-1 py-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="size-8"
+                            onClick={() => removeGroup(g.key)}
+                          >
+                            <Trash2 className="size-4" />
+                            <span className="sr-only">Remove item {gi + 1}; its lines stay, on their own</span>
+                          </Button>
+                        </td>
+                      )}
+                    </tr>
+                    <tr>
+                      <td colSpan={colCount} className="px-1 pb-1">
+                        <Input
+                          aria-label={`What the client reads under item ${gi + 1}`}
+                          value={g.clientNote}
+                          onChange={(e) => setGroup(gi, { clientNote: e.target.value })}
+                          placeholder="One sentence the client reads under this item on the proposal. Optional."
+                          maxLength={4000}
+                          className="h-8 w-full"
+                          disabled={!editable}
+                        />
+                      </td>
+                    </tr>
+                    {own.map(({ l, i }) => lineRow(l, i))}
+                    {editable && (
+                      <tr>
+                        <td colSpan={colCount} className="px-1 pb-2">
+                          <Button type="button" variant="ghost" size="sm" onClick={() => addLine(g.key)}>
+                            <Plus className="mr-1.5 size-4" /> Add line to {g.name.trim() || `item ${gi + 1}`}
+                          </Button>
+                        </td>
+                      </tr>
                     )}
-                  </tr>
+                  </Fragment>
                 );
               })}
+              {hasGroups && loose.length > 0 && (
+                <tr>
+                  <td
+                    colSpan={colCount}
+                    className="px-1 pt-3 text-xs uppercase tracking-wide text-muted-foreground"
+                  >
+                    Not in an item
+                  </td>
+                </tr>
+              )}
+              {loose.map(({ l, i }) => lineRow(l, i))}
             </tbody>
           </table>
         </div>
@@ -534,6 +815,12 @@ export function EstimateEditor({
           A line is a quantity of a unit at a cost — a blank quantity is one, a lump sum. It sells at the markup on its
           cost, this line&apos;s or the estimate&apos;s, unless a price per unit is typed, which wins. A line with no
           description is ignored.
+          {" "}
+          An <strong>item</strong> is what the client buys: name it in their words, put the lines that build it up
+          underneath, and the proposal shows the item and its price with the build-up nowhere. Let its lines add up, or
+          price it yourself — <strong>a price you type is the price that prints</strong>, so overhead and profit are not
+          added to it again. Removing an item leaves its lines; an item with no name is ignored, as a line with no
+          description is.
         </p>
       </div>
 
@@ -552,11 +839,20 @@ export function EstimateEditor({
             <dt className="text-xs text-muted-foreground">
               {label}
               {label === "Margin" && totals.marginPpm !== null && ` · ${(totals.marginPpm / 10_000).toFixed(1)}%`}
+              {label === "Price" && totals.fixedCents > 0 && ` · ${fmt(totals.fixedCents, symbol)} priced by hand`}
             </dt>
             <dd className="text-base font-medium tabular-nums">{fmt(cents, symbol)}</dd>
           </div>
         ))}
       </div>
+
+      {ratesIdle && (
+        <p className="text-xs text-muted-foreground">
+          Every item is priced by hand, so overhead and profit have nothing left to be taken on and the total is the
+          sum of the prices you typed. That is how a typed price works — it is the price that prints — but if you meant
+          the rates to apply, let an item&apos;s lines add up instead.
+        </p>
+      )}
 
       <div className="rounded-lg border border-border/60 p-4">
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
@@ -640,7 +936,14 @@ export function EstimateEditor({
           {isOwner && (
             <>
               <ApplyToBudgetButton projectId={projectId} estimateId={estimate.id} costCents={totals.costCents} symbol={symbol} />
-              <ApplyToScheduleDialog projectId={projectId} estimateId={estimate.id} contracts={contracts} totalCents={totals.totalCents} symbol={symbol} />
+              <ApplyToScheduleDialog
+                projectId={projectId}
+                estimateId={estimate.id}
+                contracts={contracts}
+                totalCents={totals.totalCents}
+                itemCount={estimate.groups.length}
+                symbol={symbol}
+              />
               {!locked && (
                 <AcceptEstimateDialog
                   projectId={projectId}
@@ -727,18 +1030,24 @@ function ApplyToScheduleDialog({
   estimateId,
   contracts,
   totalCents,
+  itemCount,
   symbol,
 }: {
   projectId: string;
   estimateId: string;
   contracts: Array<{ id: string; label: string; status: string }>;
   totalCents: number;
+  /** How many client-facing items the estimate has, as SAVED: none means there is no choice to offer. */
+  itemCount: number;
   symbol: string | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [contractId, setContractId] = useState(contracts.length === 1 ? contracts[0].id : "");
+  // By item once there are items: the schedule the owner certifies against should
+  // read like the proposal they signed, not like the takeoff behind it (ADR 0079).
+  const [shape, setShape] = useState<"group" | "line">(itemCount > 0 ? "group" : "line");
   return (
     <>
       <Button variant="outline" size="sm" onClick={() => setOpen(true)} disabled={contracts.length === 0}>
@@ -751,10 +1060,13 @@ function ApplyToScheduleDialog({
           </DialogHeader>
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              One schedule line per estimate line at its price, with overhead and profit spread across them in
-              proportion, so the schedule adds up to the estimate&apos;s total — {fmt(totalCents, symbol)}{" "}as saved —
-              replacing the contract&apos;s schedule. A line sold at a price per unit keeps billing by the quantity,
-              its unit price raised by the same share. A line an application has billed against cannot be removed.
+              {shape === "group"
+                ? "One schedule line per item, and one for every line in no item, each at its price"
+                : "One schedule line per estimate line at its price"}
+              , with overhead and profit spread across them in proportion, so the schedule adds up to the
+              estimate&apos;s total — {fmt(totalCents, symbol)}{" "}as saved — replacing the contract&apos;s schedule. A
+              line sold at a price per unit keeps billing by the quantity, its unit price raised by the same share. A
+              line an application has billed against cannot be removed.
             </p>
             <div className="space-y-1.5">
               <Label htmlFor="ats-contract">Contract</Label>
@@ -771,13 +1083,34 @@ function ApplyToScheduleDialog({
                 </SelectContent>
               </Select>
             </div>
+            {itemCount > 0 && (
+              <div className="space-y-1.5">
+                <Label htmlFor="ats-shape">Written</Label>
+                <Select value={shape} onValueChange={(v) => setShape(v as "group" | "line")}>
+                  <SelectTrigger className="w-full" id="ats-shape">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="group">
+                      By item — {itemCount} {itemCount === 1 ? "item" : "items"}, as the proposal shows them
+                    </SelectItem>
+                    <SelectItem value="line">Line by line — the whole takeoff</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button
               disabled={pending || contractId === ""}
               onClick={() =>
                 startTransition(async () => {
-                  const result = await applyEstimateToScheduleAction({ projectId, id: estimateId, contractId });
+                  const result = await applyEstimateToScheduleAction({
+                    projectId,
+                    id: estimateId,
+                    contractId,
+                    shape,
+                  });
                   if ("error" in result) {
                     toast.error(result.error);
                     return;

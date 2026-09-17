@@ -42,6 +42,15 @@ export function proposalInputFrom(data: ProposalData, brand: CertificateBrand & 
       markupPpm: l.markupPpm,
       unitPriceCents: l.unitPriceCents,
       codeLabel: l.codeLabel,
+      groupId: l.groupId,
+    })),
+    /** The client-facing items (ADR 0079); the prices they carry are the client's. */
+    groups: row.groups.map((g) => ({
+      id: g.id,
+      name: g.name,
+      clientNote: g.clientNote,
+      priceMode: g.priceMode,
+      fixedPriceCents: g.fixedPriceCents,
     })),
   };
 }

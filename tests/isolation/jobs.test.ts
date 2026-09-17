@@ -1847,6 +1847,98 @@ d("jobs tables (RLS)", () => {
     await withSystem((tx) => tx.delete(schema.jobEstimates).where(eq(schema.jobEstimates.id, otherEstimate)));
   });
 
+  it("cannot read or change another tenant's ESTIMATE ITEMS; an item hangs off this tenant's estimate and a line off this tenant's item; the mode and the price say the same thing; an item deleted leaves its lines LOOSE and an estimate deleted takes its items", async () => {
+    const seeded = await withSystem(async (tx) => {
+      const e = await tx
+        .insert(schema.jobEstimates)
+        .values({ tenantId: tenantA, projectId: projectA, number: "EST-ITEM-1", markupPpm: 0 })
+        .returning();
+      const g = await tx
+        .insert(schema.jobEstimateGroups)
+        .values({ tenantId: tenantA, estimateId: e[0].id, name: "Tile flooring", priceMode: "fixed", fixedPriceCents: 8_400_00, sortOrder: 10 })
+        .returning();
+      const l = await tx
+        .insert(schema.jobEstimateLines)
+        .values({ tenantId: tenantA, estimateId: e[0].id, groupId: g[0].id, description: "Tile, material", unitCostCents: 6_950_00, sortOrder: 10 })
+        .returning();
+      return { estimateId: e[0].id, groupId: g[0].id, lineId: l[0].id };
+    });
+
+    // Tenant B sees nothing of it and changes nothing of it.
+    const seen = await asOtherTenant(async (tx) => ({
+      rows: await tx.select().from(schema.jobEstimateGroups).where(eq(schema.jobEstimateGroups.id, seeded.groupId)),
+      changed: await tx
+        .update(schema.jobEstimateGroups)
+        .set({ name: "theirs" })
+        .where(eq(schema.jobEstimateGroups.id, seeded.groupId))
+        .returning(),
+    }));
+    expect(seen.rows).toEqual([]);
+    expect(seen.changed).toEqual([]);
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.jobEstimateGroups).where(eq(schema.jobEstimateGroups.id, seeded.groupId)),
+    );
+    expect(mine).toHaveLength(1);
+    expect(mine[0].fixedPriceCents).toBe(8_400_00);
+
+    // Tenant B's estimate under tenant A's item, or tenant B's item under tenant A's line: unrepresentable.
+    const otherEstimate = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobEstimates).values({ tenantId: tenantB, projectId: projectB, number: "EST-B-ITEM" }).returning();
+      return r[0].id;
+    });
+    const otherGroup = await withSystem(async (tx) => {
+      const r = await tx
+        .insert(schema.jobEstimateGroups)
+        .values({ tenantId: tenantB, estimateId: otherEstimate, name: "Theirs" })
+        .returning();
+      return r[0].id;
+    });
+    await expect(
+      withSystem((tx) => tx.insert(schema.jobEstimateGroups).values({ tenantId: tenantA, estimateId: otherEstimate, name: "x" })),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobEstimateLines).values({ tenantId: tenantA, estimateId: seeded.estimateId, groupId: otherGroup, description: "x" }),
+      ),
+    ).rejects.toThrow();
+
+    // The CHECKs: a blank name, a mode off the list, fixed with no price, adding up WITH one, a negative price.
+    for (const bad of [
+      { name: "   " },
+      { name: "x", priceMode: "guess" },
+      { name: "x", priceMode: "fixed" },
+      { name: "x", priceMode: "rollup", fixedPriceCents: 1 },
+      { name: "x", priceMode: "fixed", fixedPriceCents: -1 },
+    ]) {
+      await expect(
+        withSystem((tx) => tx.insert(schema.jobEstimateGroups).values({ tenantId: tenantA, estimateId: seeded.estimateId, ...bad })),
+        JSON.stringify(bad),
+      ).rejects.toThrow();
+    }
+
+    // AN ITEM DELETED LEAVES ITS LINES LOOSE: the column-list SET NULL, which a bare
+    // SET NULL could never do on a composite key. The pricing survives its item.
+    await withSystem((tx) => tx.delete(schema.jobEstimateGroups).where(eq(schema.jobEstimateGroups.id, seeded.groupId)));
+    const orphaned = await withSystem((tx) =>
+      tx.select().from(schema.jobEstimateLines).where(eq(schema.jobEstimateLines.id, seeded.lineId)),
+    );
+    expect(orphaned).toHaveLength(1);
+    expect(orphaned[0].groupId).toBeNull();
+    expect(orphaned[0].unitCostCents).toBe(6_950_00);
+
+    // The items go with the estimate.
+    await withSystem((tx) =>
+      tx.insert(schema.jobEstimateGroups).values({ tenantId: tenantA, estimateId: seeded.estimateId, name: "Goes with the estimate" }),
+    );
+    await withSystem((tx) => tx.delete(schema.jobEstimates).where(eq(schema.jobEstimates.id, seeded.estimateId)));
+    expect(
+      await withSystem((tx) =>
+        tx.select().from(schema.jobEstimateGroups).where(eq(schema.jobEstimateGroups.estimateId, seeded.estimateId)),
+      ),
+    ).toEqual([]);
+    await withSystem((tx) => tx.delete(schema.jobEstimates).where(eq(schema.jobEstimates.id, otherEstimate)));
+  });
+
   it("cannot read or change another tenant's PARTY DOCUMENTS; a document hangs off this tenant's party; the kind is a slug, received has its date, the limit has a floor, and the party is held", async () => {
     const docId = await withSystem(async (tx) => {
       const rows = await tx

@@ -29,7 +29,12 @@ import {
   RATE_PPM_MAX,
   ESTIMATE_STATUSES,
   ESTIMATE_STATUS_LABELS,
+  GROUP_PRICE_MODES,
+  GROUP_PRICE_MODE_LABELS,
+  SCHEDULE_SHAPES,
   isEstimateStatus,
+  isGroupPriceMode,
+  isScheduleShape,
   PROPOSAL_PRESENTATIONS,
   PROPOSAL_PRESENTATION_LABELS,
   isProposalPresentation,
@@ -133,6 +138,10 @@ import {
 import {
   estimateByCode,
   estimateTotals,
+  groupCostCents,
+  groupPriceCents,
+  isFixedPrice,
+  scheduleRows,
   lineCostCents,
   linePriceCents,
   rateCents,
@@ -1211,6 +1220,8 @@ describe("selections", () => {
 
 const ESTIMATES_SQL = readFileSync("drizzle/0356_estimates.sql", "utf8");
 const PROPOSAL_SQL = readFileSync("drizzle/0358_proposal.sql", "utf8");
+const ITEMS_SQL = readFileSync("drizzle/0373_job_estimate_groups.sql", "utf8");
+const ITEMS_RLS_SQL = readFileSync("drizzle/0374_job_estimate_groups_rls.sql", "utf8");
 
 describe("estimates", () => {
   it("MIRRORS the status CHECK and labels every status", () => {
@@ -1222,8 +1233,12 @@ describe("estimates", () => {
     expect(isEstimateStatus("won")).toBe(false);
   });
 
-  it("MIRRORS the proposal's presentation CHECK (10b) and labels every way of showing the price", () => {
-    const m = PROPOSAL_SQL.match(/job_estimates_presentation_valid[^(]*\(([^)]*)\)/);
+  it("MIRRORS the proposal's presentation CHECK and labels every way of showing the price", () => {
+    // 0373 dropped and re-added the CHECK to admit `groups` (ADR 0079), so the live
+    // definition is there, not in the migration that first wrote it.
+    // Anchored on ADD CONSTRAINT: 0373 DROPS the old one first, and the drop's name
+    // followed by `[^(]*` would run on into the next statement's bracket.
+    const m = ITEMS_SQL.match(/ADD CONSTRAINT "job_estimates_presentation_valid" CHECK \(([^)]*\))/);
     expect(m, "constraint not found").not.toBeNull();
     expect([...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]).sort()).toEqual([...PROPOSAL_PRESENTATIONS].sort());
     for (const p of PROPOSAL_PRESENTATIONS) expect(PROPOSAL_PRESENTATION_LABELS[p]).toBeTruthy();
@@ -1298,6 +1313,9 @@ describe("estimates", () => {
       expect(t).toEqual({
         costCents: 65_500_00,
         subtotalCents: 73_655_00,
+        // With no items, everything is spreadable and nothing is priced by hand (ADR 0079).
+        spreadableCents: 73_655_00,
+        fixedCents: 0,
         overheadCents: 7_365_50,
         profitCents: 8_102_05,
         totalCents: 89_122_55,
@@ -1310,6 +1328,8 @@ describe("estimates", () => {
       expect(estimateTotals([], { markupPpm: 150_000, overheadPpm: 100_000, profitPpm: 100_000 })).toEqual({
         costCents: 0,
         subtotalCents: 0,
+        spreadableCents: 0,
+        fixedCents: 0,
         overheadCents: 0,
         profitCents: 0,
         totalCents: 0,
@@ -1377,6 +1397,193 @@ describe("estimates", () => {
       expect(rateStringToPpm("-5")).toBeNull();
       expect(rateStringToPpm("")).toBeNull();
       expect(rateStringToPpm("ten")).toBeNull();
+    });
+  });
+});
+
+// ------------------------------------------ items on an estimate (ADR 0079)
+
+describe("items on an estimate", () => {
+  it("MIRRORS the price-mode CHECK, labels every mode, and ties the mode to the number", () => {
+    const m = ITEMS_SQL.match(/job_estimate_groups_price_mode_valid[^;]*in \(([^)]*)\)/);
+    expect(m, "constraint not found").not.toBeNull();
+    expect([...m![1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]).sort()).toEqual([...GROUP_PRICE_MODES].sort());
+    for (const mode of GROUP_PRICE_MODES) expect(GROUP_PRICE_MODE_LABELS[mode]).toBeTruthy();
+    expect(isGroupPriceMode("fixed")).toBe(true);
+    expect(isGroupPriceMode("guess")).toBe(false);
+    // The mode and the price say the same thing or the row is refused.
+    expect(ITEMS_SQL).toMatch(/job_estimate_groups_fixed_priced[^;]*= 'fixed'\) = \(.*is not null\)/);
+    expect(ITEMS_SQL).toMatch(/job_estimate_groups_fixed_nonnegative[^;]*is null or/);
+    expect(ITEMS_SQL).toMatch(/job_estimate_groups_name_present/);
+  });
+
+  it("hangs off the estimate (cascade) and leaves a line loose when its item goes, in the COLUMN-LIST SET NULL form", () => {
+    expect(ITEMS_SQL).toMatch(/job_estimate_groups_estimate_fk[^;]*ON DELETE cascade/);
+    // A bare SET NULL can never run on a composite key (the 0046 precedent).
+    expect(ITEMS_SQL).toMatch(
+      /job_estimate_lines_group_fk[^;]*REFERENCES "public"\."job_estimate_groups"[^;]*ON DELETE SET NULL \("group_id"\)/,
+    );
+    expect(ITEMS_SQL.indexOf('CREATE UNIQUE INDEX "job_estimate_groups_tenant_id_id_idx"')).toBeLessThan(
+      ITEMS_SQL.indexOf('ADD CONSTRAINT "job_estimate_lines_group_fk"'),
+    );
+  });
+
+  it("has RLS enabled AND forced, with the pack's two policies", () => {
+    expect(ITEMS_RLS_SQL).toMatch(/ALTER TABLE "job_estimate_groups" ENABLE ROW LEVEL SECURITY/);
+    expect(ITEMS_RLS_SQL).toMatch(/ALTER TABLE "job_estimate_groups" FORCE ROW LEVEL SECURITY/);
+    expect(ITEMS_RLS_SQL).toMatch(/job_estimate_groups_superadmin_all[^;]*app_is_superadmin\(\)/);
+    expect(ITEMS_RLS_SQL).toMatch(/job_estimate_groups_member_all[^;]*app_current_tenant\(\)/);
+  });
+
+  it("names the two shapes a schedule can take", () => {
+    expect([...SCHEDULE_SHAPES]).toEqual(["group", "line"]);
+    expect(isScheduleShape("group")).toBe(true);
+    expect(isScheduleShape("detail")).toBe(false); // the proposal's shape is never a schedule's
+  });
+
+  /**
+   * THE FOUNDER'S EXAMPLE, to the cent (ADR 0079): ten and ten, an item priced
+   * by hand at $8,400 with $6,950 of cost behind it, and $91,600 of loose lines.
+   * A fixed item sits OUTSIDE the overhead-and-profit spread, so $8,400 is what
+   * prints; had it ridden the spread it would have printed $10,164, which is the
+   * trap the decision was taken to avoid.
+   */
+  describe("an item priced by hand", () => {
+    const TEN_AND_TEN = { markupPpm: 0, overheadPpm: 100_000, profitPpm: 100_000 };
+    const tile = { id: "g-tile", name: "Tile flooring", priceMode: "fixed", fixedPriceCents: 8_400_00 };
+    const lines = [
+      { description: "Tile, material and labour", unit: "", costCodeId: "c-tile", groupId: "g-tile", quantityThousandths: 1_000, unitCostCents: 6_950_00, markupPpm: null, unitPriceCents: null },
+      { description: "Everything else", unit: "", costCodeId: "c-other", groupId: null, quantityThousandths: 1_000, unitCostCents: 91_600_00, markupPpm: null, unitPriceCents: null },
+    ];
+
+    it("adds the typed price AFTER the rates, and the rates are taken on what is left", () => {
+      const t = estimateTotals(lines, TEN_AND_TEN, [tile]);
+      expect(t.spreadableCents).toBe(91_600_00);
+      expect(t.fixedCents).toBe(8_400_00);
+      expect(t.subtotalCents).toBe(100_000_00);
+      expect(t.overheadCents).toBe(9_160_00);
+      expect(t.profitCents).toBe(10_076_00);
+      expect(t.totalCents).toBe(119_236_00);
+      // Cost is every line's, grouped or loose, fixed or not.
+      expect(t.costCents).toBe(98_550_00);
+      expect(t.marginCents).toBe(20_686_00);
+      // THE TRAP THE DECISION AVOIDS: at ten and ten the spread factor is 1.21, so an
+      // item typed at $8,400 that rode the spread would have printed $10,164.
+      expect(8_400_00 + rateCents(8_400_00, 210_000)).toBe(10_164_00);
+      expect(scheduleRows(lines, TEN_AND_TEN, [tile], "group")[0].scheduledCents).toBe(8_400_00);
+      // Left to add up its lines instead, the same item prices at cost plus the spread.
+      expect(estimateTotals(lines, TEN_AND_TEN, [{ ...tile, priceMode: "rollup", fixedPriceCents: null }]).totalCents).toBe(
+        119_245_50,
+      );
+    });
+
+    it("prints the number that was typed, and the loose lines carry all the overhead and profit", () => {
+      const rows = scheduleRows(lines, TEN_AND_TEN, [tile], "group");
+      expect(rows.map((r) => [r.description, r.scheduledCents])).toEqual([
+        ["Tile flooring", 8_400_00],
+        ["Everything else", 110_836_00],
+      ]);
+      expect(rows.reduce((sum, r) => sum + r.scheduledCents, 0)).toBe(119_236_00);
+      // An item bills as a sum, and takes its lines' code only when they agree on one.
+      expect(rows[0]).toMatchObject({ costCodeId: "c-tile", quantityThousandths: null, unitPriceCents: null });
+    });
+
+    it("NEVER shows its build-up in the takeoff shape: one row at its price, no lines beneath", () => {
+      const rows = scheduleRows(lines, TEN_AND_TEN, [tile], "detail");
+      expect(rows.map((r) => [r.description, r.heading, r.scheduledCents])).toEqual([
+        ["Tile flooring", false, 8_400_00],
+        ["Everything else", false, 110_836_00],
+      ]);
+    });
+
+    it("shares the typed price across its own lines when the schedule is written line by line", () => {
+      const rows = scheduleRows(lines, TEN_AND_TEN, [tile], "line");
+      expect(rows.map((r) => [r.description, r.scheduledCents])).toEqual([
+        ["Tile, material and labour", 8_400_00],
+        ["Everything else", 110_836_00],
+      ]);
+      expect(rows.reduce((sum, r) => sum + r.scheduledCents, 0)).toBe(119_236_00);
+    });
+
+    it("prices a line by its share of the typed price when the estimate is read by code", () => {
+      const byCode = estimateByCode(lines, TEN_AND_TEN.markupPpm, [tile]);
+      expect(byCode.get("c-tile")).toEqual({ costCents: 6_950_00, priceCents: 8_400_00 });
+      expect(byCode.get("c-other")).toEqual({ costCents: 91_600_00, priceCents: 91_600_00 });
+      // The prices still add to the subtotal: the budget's cost is untouched either way.
+      expect([...byCode.values()].reduce((s, r) => s + r.priceCents, 0)).toBe(100_000_00);
+    });
+  });
+
+  describe("an item that adds up its lines", () => {
+    const TERMS = { markupPpm: 100_000, overheadPpm: 100_000, profitPpm: 0 };
+    const paint = { id: "g-paint", name: "Paint, whole house", priceMode: "rollup", fixedPriceCents: null };
+    const lines = [
+      { description: "Paint, material", unit: "gal", costCodeId: "c-paint", groupId: "g-paint", quantityThousandths: 20_000, unitCostCents: 45_00, markupPpm: null, unitPriceCents: null },
+      { description: "Paint, labour", unit: "", costCodeId: "c-paint", groupId: "g-paint", quantityThousandths: 1_000, unitCostCents: 3_100_00, markupPpm: null, unitPriceCents: null },
+    ];
+
+    it("rides the spread like any line, and its row is exactly its lines' rows added up", () => {
+      const t = estimateTotals(lines, TERMS, [paint]);
+      // 900 + 3,100 = 4,000 of cost, 10% on = 4,400 of price, 10% overhead = 440.
+      expect(t).toMatchObject({ costCents: 4_000_00, spreadableCents: 4_400_00, fixedCents: 0, totalCents: 4_840_00 });
+      const byGroup = scheduleRows(lines, TERMS, [paint], "group");
+      const byLine = scheduleRows(lines, TERMS, [paint], "line");
+      expect(byGroup.map((r) => [r.description, r.scheduledCents])).toEqual([["Paint, whole house", 4_840_00]]);
+      expect(byLine.reduce((sum, r) => sum + r.scheduledCents, 0)).toBe(4_840_00);
+      expect(byGroup[0].scheduledCents).toBe(byLine.reduce((sum, r) => sum + r.scheduledCents, 0));
+    });
+
+    it("shows as a heading with its lines beneath it in the takeoff shape, the heading carrying no money", () => {
+      const rows = scheduleRows(lines, TERMS, [paint], "detail");
+      expect(rows.map((r) => [r.description, r.heading])).toEqual([
+        ["Paint, whole house", true],
+        ["Paint, material", false],
+        ["Paint, labour", false],
+      ]);
+      expect(rows[0].scheduledCents).toBe(0);
+      expect(rows.reduce((sum, r) => sum + r.scheduledCents, 0)).toBe(4_840_00);
+    });
+
+    it("costs and prices an item from its lines, and a typed price answers the other question", () => {
+      const children = lines.map((l) => ({ ...l }));
+      expect(groupCostCents(children)).toBe(4_000_00);
+      expect(groupPriceCents(paint, children, TERMS.markupPpm)).toBe(4_400_00);
+      expect(groupPriceCents({ ...paint, priceMode: "fixed", fixedPriceCents: 5_000_00 }, children, TERMS.markupPpm)).toBe(5_000_00);
+      // Says it is fixed but carries no number: not fixed. The CHECK stops the row; this stops the arithmetic.
+      expect(isFixedPrice({ id: "x", priceMode: "fixed", fixedPriceCents: null })).toBe(false);
+      expect(isFixedPrice(paint)).toBe(false);
+    });
+  });
+
+  describe("the degenerate items, which must not lose money", () => {
+    const FLAT = { markupPpm: 0, overheadPpm: 0, profitPpm: 0 };
+
+    it("shares a typed price EQUALLY when no line under it has a price of its own", () => {
+      const g = { id: "g", name: "Allowance, fixtures", priceMode: "fixed", fixedPriceCents: 8_400_00 };
+      const lines = [
+        { description: "To be selected", unit: "", costCodeId: null, groupId: "g", quantityThousandths: 1_000, unitCostCents: 0, markupPpm: null, unitPriceCents: null },
+        { description: "Install", unit: "", costCodeId: null, groupId: "g", quantityThousandths: 1_000, unitCostCents: 0, markupPpm: null, unitPriceCents: null },
+      ];
+      const rows = scheduleRows(lines, FLAT, [g], "line");
+      expect(rows.map((r) => r.scheduledCents)).toEqual([4_200_00, 4_200_00]);
+      expect(estimateTotals(lines, FLAT, [g]).totalCents).toBe(8_400_00);
+    });
+
+    it("keeps a typed price that has no lines at all, in either shape", () => {
+      const g = { id: "g", name: "Allowance, appliances", priceMode: "fixed", fixedPriceCents: 12_000_00 };
+      expect(estimateTotals([], FLAT, [g]).totalCents).toBe(12_000_00);
+      for (const shape of ["group", "line"] as const) {
+        const rows = scheduleRows([], FLAT, [g], shape);
+        expect(rows.map((r) => [r.description, r.scheduledCents]), shape).toEqual([["Allowance, appliances", 12_000_00]]);
+      }
+    });
+
+    it("counts a line whose item is not on the estimate as loose, rather than dropping it", () => {
+      const lines = [
+        { description: "Orphan", unit: "", costCodeId: null, groupId: "gone", quantityThousandths: 1_000, unitCostCents: 1_000_00, markupPpm: null, unitPriceCents: null },
+      ];
+      expect(estimateTotals(lines, FLAT, []).totalCents).toBe(1_000_00);
+      expect(scheduleRows(lines, FLAT, [], "group").map((r) => r.scheduledCents)).toEqual([1_000_00]);
     });
   });
 });

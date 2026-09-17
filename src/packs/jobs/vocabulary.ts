@@ -446,16 +446,44 @@ export function isEstimateStatus(v: string): v is EstimateStatus {
 /** The most a markup, an overhead or a profit rate may be: 1,000% in ppm, which is a typo guard, not a policy. */
 export const RATE_PPM_MAX = 10_000_000;
 
-/** How a proposal shows its price (ADR 0070): every line, each cost code's sum, or one figure. */
-export const PROPOSAL_PRESENTATIONS = ["lines", "codes", "sum"] as const;
+/**
+ * How a proposal shows its price (ADR 0070): every line, each cost code's sum,
+ * each client-facing item's price (ADR 0079) or one figure. `groups` is what a
+ * custom-home proposal uses; `codes` is for the commercial client who expects
+ * a CSI breakdown, and is no longer the answer to "show the client a summary".
+ */
+export const PROPOSAL_PRESENTATIONS = ["lines", "codes", "groups", "sum"] as const;
 export type ProposalPresentation = (typeof PROPOSAL_PRESENTATIONS)[number];
 export const PROPOSAL_PRESENTATION_LABELS: Record<ProposalPresentation, string> = {
   lines: "Line by line",
   codes: "By cost code",
+  groups: "By item",
   sum: "One sum",
 };
 export function isProposalPresentation(v: string): v is ProposalPresentation {
   return (PROPOSAL_PRESENTATIONS as readonly string[]).includes(v);
+}
+
+/**
+ * How a group is priced (ADR 0079): its lines sum, or the client's price is
+ * typed. A fixed group sits outside the overhead-and-profit spread, so the
+ * number typed is the number printed.
+ */
+export const GROUP_PRICE_MODES = ["rollup", "fixed"] as const;
+export type GroupPriceMode = (typeof GROUP_PRICE_MODES)[number];
+export const GROUP_PRICE_MODE_LABELS: Record<GroupPriceMode, string> = {
+  rollup: "Add up the lines",
+  fixed: "Price it myself",
+};
+export function isGroupPriceMode(v: string): v is GroupPriceMode {
+  return (GROUP_PRICE_MODES as readonly string[]).includes(v);
+}
+
+/** The shape a schedule of values takes from an estimate (ADR 0079). */
+export const SCHEDULE_SHAPES = ["group", "line"] as const;
+export type ScheduleShape = (typeof SCHEDULE_SHAPES)[number];
+export function isScheduleShape(v: string): v is ScheduleShape {
+  return (SCHEDULE_SHAPES as readonly string[]).includes(v);
 }
 
 // ------------------------------------------------------------- the schedule

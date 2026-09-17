@@ -40,7 +40,7 @@ const base: ProposalInput = {
 const rowsOf = (m: ReturnType<typeof buildProposalModel>) =>
   m.price.rows.map((r) => [r.description, r.quantity, r.unitPrice, r.amount]);
 
-describe("the price, three ways", () => {
+describe("the price, four ways", () => {
   it("line by line: every line at its price with overhead and profit in it, the unit line's raised unit price, and the total the contract is signed at", () => {
     const m = buildProposalModel(base);
     expect(m.price.heading).toBe("THE PRICE");
@@ -67,6 +67,82 @@ describe("the price, three ways", () => {
     // Nothing coded at all: one row, the lot.
     const uncoded = buildProposalModel({ ...base, presentation: "codes", lines: base.lines.map((l) => ({ ...l, codeLabel: null })) });
     expect(rowsOf(uncoded)).toEqual([["Other", "", "", "89,122.55"]]);
+  });
+
+  /**
+   * BY ITEM (ADR 0079), which is what a custom-home proposal uses: the same four
+   * lines gathered into two items, one adding up its lines and one priced by
+   * hand, and the client reads the item and its price with the build-up nowhere.
+   */
+  const itemised: ProposalInput = {
+    ...base,
+    presentation: "groups",
+    overheadPpm: 0,
+    profitPpm: 0,
+    groups: [
+      { id: "g-shell", name: "The shell", clientNote: "Slab, framing and rebar, as drawn.", priceMode: "rollup", fixedPriceCents: null },
+      { id: "g-paper", name: "Permits and approvals", clientNote: "", priceMode: "fixed", fixedPriceCents: 2_500_00 },
+    ],
+    lines: [
+      { ...base.lines[0], groupId: "g-shell" },
+      { ...base.lines[1], groupId: "g-shell" },
+      { ...base.lines[2], groupId: "g-shell" },
+      { ...base.lines[3], groupId: "g-paper" },
+    ],
+  };
+
+  it("by item: one row per item at its price, its sentence beneath it, and the build-up nowhere", () => {
+    const m = buildProposalModel(itemised);
+    // The shell: 25,530 + 44,000 + 2,400 of price. Permits: the 2,500 that was typed.
+    expect(rowsOf(m)).toEqual([
+      ["The shell", "", "", "71,930.00"],
+      ["Permits and approvals", "", "", "2,500.00"],
+    ]);
+    expect(m.price.rows.map((r) => r.note)).toEqual(["Slab, framing and rebar, as drawn.", ""]);
+    expect(m.price.columns).toEqual({ quantity: false, unitPrice: false });
+    expect(m.price.rounding).toBeNull();
+    expect(m.price.total.amount).toBe("74,430.00");
+    // Not one line's description is a row: the client reads items, never the build-up.
+    const shown = m.price.rows.map((r) => r.description);
+    for (const l of base.lines) expect(shown).not.toContain(l.description);
+  });
+
+  it("by item: a loose line keeps its own row, its quantity and its unit price", () => {
+    const m = buildProposalModel({
+      ...itemised,
+      lines: [{ ...base.lines[0], groupId: "g-shell" }, { ...base.lines[2], groupId: null }],
+    });
+    expect(rowsOf(m)).toEqual([
+      ["The shell", "", "", "25,530.00"],
+      ["Permits and approvals", "", "", "2,500.00"],
+      ["Rebar", "2 ton", "1,200.00", "2,400.00"],
+    ]);
+    expect(m.price.total.amount).toBe("30,430.00");
+  });
+
+  it("line by line: an item that adds up shows as a heading over its lines, and one priced by hand shows as ONE row", () => {
+    const m = buildProposalModel({ ...itemised, presentation: "lines" });
+    expect(m.price.rows.map((r) => [r.description, r.heading, r.amount])).toEqual([
+      ["The shell", true, ""],
+      ["Slab, 4in, fibre mesh", false, "25,530.00"],
+      ["Framing labour", false, "44,000.00"],
+      ["Rebar", false, "2,400.00"],
+      // The permit line is behind a typed price, so the client never sees it.
+      ["Permits and approvals", false, "2,500.00"],
+    ]);
+    expect(m.price.rows.map((r) => r.quantity)).toEqual(["", "120 cy", "", "2 ton", ""]);
+    expect(m.price.total.amount).toBe("74,430.00");
+    expect(m.price.rounding).toBeNull();
+  });
+
+  it("by cost code: a line behind a typed price is priced at its share of it, so the codes still add to the total", () => {
+    const m = buildProposalModel({ ...itemised, presentation: "codes" });
+    expect(rowsOf(m)).toEqual([
+      ["03 30 00 · Cast-in-place concrete", "", "", "27,930.00"],
+      ["06 10 00 · Rough carpentry", "", "", "44,000.00"],
+      ["Other", "", "", "2,500.00"],
+    ]);
+    expect(m.price.total.amount).toBe("74,430.00");
   });
 
   it("one sum: no rows, the price on its own line", () => {
@@ -154,7 +230,7 @@ describe("the words around the price", () => {
 
   it("NEVER PRINTS COST, MARKUP, OVERHEAD, PROFIT OR MARGIN — the client sees prices", () => {
     // The business's own words are blanked so only the model's words are scanned.
-    for (const presentation of ["lines", "codes", "sum"]) {
+    for (const presentation of ["lines", "codes", "groups", "sum"]) {
       const m = buildProposalModel({
         ...base,
         presentation,
@@ -162,7 +238,17 @@ describe("the words around the price", () => {
         scope: "",
         exclusions: "",
         terms: "",
-        lines: base.lines.map((l, i) => ({ ...l, description: `Item ${i + 1}`, codeLabel: l.codeLabel ? `Code ${i}` : null })),
+        // Items too, one priced by hand: the typed price must not print its margin either.
+        groups: [
+          { id: "g1", name: "Part one", clientNote: "As drawn.", priceMode: "rollup", fixedPriceCents: null },
+          { id: "g2", name: "Part two", clientNote: "", priceMode: "fixed", fixedPriceCents: 2_500_00 },
+        ],
+        lines: base.lines.map((l, i) => ({
+          ...l,
+          description: `Item ${i + 1}`,
+          codeLabel: l.codeLabel ? `Code ${i}` : null,
+          groupId: i < 2 ? "g1" : "g2",
+        })),
       });
       expect(JSON.stringify(m).toLowerCase()).not.toMatch(/cost|markup|overhead|profit|margin/);
     }
@@ -174,6 +260,18 @@ describe("renderProposalPdf", () => {
     const bytes = await renderProposalPdf({ ...base, brand: { tagline: "Built right", primaryColor: "#1d4ed8", logo: null } });
     expect(bytes.length).toBeGreaterThan(1000);
     expect(Buffer.from(bytes.slice(0, 5)).toString("latin1")).toBe("%PDF-");
+  });
+
+  it("renders the by-item proposal, headings and an item's sentence included", async () => {
+    const groups = [
+      { id: "g1", name: "The shell", clientNote: "Slab, framing and rebar, as drawn.", priceMode: "rollup", fixedPriceCents: null },
+      { id: "g2", name: "Permits and approvals", clientNote: "", priceMode: "fixed", fixedPriceCents: 2_500_00 },
+    ];
+    const lines = base.lines.map((l, i) => ({ ...l, groupId: i < 3 ? "g1" : "g2" }));
+    for (const presentation of ["groups", "lines"]) {
+      const bytes = await renderProposalPdf({ ...base, presentation, groups, lines });
+      expect(Buffer.from(bytes.slice(0, 5)).toString("latin1"), presentation).toBe("%PDF-");
+    }
   });
 
   it("renders the by-code draft (watermark) and the one-sum proposal with no client", async () => {

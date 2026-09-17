@@ -69,7 +69,10 @@ unzipped function budget with sharp's libvips and the Noto TTFs that
 | E3c | **Keyboard grid** | Arrows and Tab between cells, Enter on the last row making another. Split out of E3b, with which it shares nothing but the file. |
 | ~~E3~~ | ~~**Speed**~~ — split into E3a and E3b above | The **entry bar**: one field that parses `320 sf tile @ 4.20`, `plumbing rough 12000` (a lump), `@tile 320` (drop an assembly), Enter commits and the cursor stays. A **paste target** — `src/lib/paste-targets` is a finished framework and eight packs use it; jobs has no `paste/` directory at all. **Per-row saving** (today the whole estimate is one `useState` and one Save button, which a two-hundred-line takeoff cannot be). `Ctrl+D` to duplicate the row above, because most lines are near-copies. The parser is pure and table-tested, and it is also the voice feature: one function, two doors. |
 | E4 | **Price memory** | Every `job_estimate_line` across the tenant already IS a price history: type a description, get *"last priced $4.20 on 24-108, three weeks ago"*, Tab accepts. Then the half nobody else can do, because the actuals are in the same database: *"you estimated $4.20 — you actually paid $4.65 on the last three jobs"* (the `Spent` column per code). Before assemblies, because it is what tells us what an assembly should look like. |
-| E5 | **The proposal as sections, the HTML document, and the client link** | Presentation (how the money is grouped) and format (what the paper is) are two choices tangled in one field today. Split them, then build the document as a **section list** over pack data — and the point is that every page a custom-home proposal wants is already data here: the cover's elevation is the current drawing set (9a), the narrative is the items' names and notes, the allowances are selections (ADR 0067), the milestones are phases (ADR 0071), the warranty is a period on the job (13a), the insurance and bonding are rows (0068/0078). A brochure is a page order over things that exist. `letter` and `brochure` are two presets over that list. Stage 1 is the HTML plus print CSS, shipped as the tokenised client link with **Accept**; stage 2 adds the Chromium render behind the same route so the product can attach and email the file. Stage 1 is the first half of stage 2, so nothing is wasted. |
+| **E5a** | ~~**The proposal as sections, and the brochure**~~ **SHIPPED 2026-09-17** ([ADR 0083](../decisions/0083-a-proposal-is-an-ordered-list-of-sections-a-brochure-is-a-page-order-over-facts-the-pack-already-holds-and-the-document-is-html.md)) | `format` (letter / brochure) split from `presentation`; the proposal as `ProposalSection[]`; the brochure's pages read from the items, the selections and the phases; the document served as HTML from a GET route — the same URL E5b prints and E5c shares. The letter's PDF path untouched. |
+| E5b | **The brochure's PDF** | A headless Chromium print of that same URL, so the product can attach and email the file. The founder's "i do want the proposal to be exported to pdf still". Real cost on Vercel: `puppeteer-core` + `@sparticuz/chromium-min` sharing a 250 MB unzipped budget with sharp's libvips. |
+| E5c | **The client link, with Accept** | A tokenised link that serves the same document with no session, and an Accept the client presses. A security design of its own: what a token is, what it may read, what pressing Accept writes. |
+| ~~E5~~ | ~~**The proposal as sections, the HTML document, and the client link**~~ — split into E5a/b/c above | Presentation (how the money is grouped) and format (what the paper is) are two choices tangled in one field today. Split them, then build the document as a **section list** over pack data — and the point is that every page a custom-home proposal wants is already data here: the cover's elevation is the current drawing set (9a), the narrative is the items' names and notes, the allowances are selections (ADR 0067), the milestones are phases (ADR 0071), the warranty is a period on the job (13a), the insurance and bonding are rows (0068/0078). A brochure is a page order over things that exist. `letter` and `brochure` are two presets over that list. Stage 1 is the HTML plus print CSS, shipped as the tokenised client link with **Accept**; stage 2 adds the Chromium render behind the same route so the product can attach and email the file. Stage 1 is the first half of stage 2, so nothing is wasted. |
 | E6 | **Assemblies** | Built backwards on purpose: **"save this item as an assembly"** first, so the library assembles itself out of real work instead of needing to be seeded — nobody ever fills in an assembly library up front. Then dropping one with a driving quantity explodes it into an item whose lines' quantities are computed (1.05 sf of tile per sf of floor for waste, 0.02 bags of thinset, 1 sf of labour) with the cost codes pre-filled. **An assembly is a saved item**, which is why it waits for E1's table rather than arriving with one of its own — and ADR 0069 said assemblies wanted a few real estimates typed first, which E1 is. |
 | E7 | **The rest** | Bid alternates and options ("upgrade to quartz: +$4,200") as items outside the total until chosen; copy an estimate / a plan template, which is a production builder's whole workflow and nearly free because the rows exist; the tenant-level unit cost book, once E4 has shown what it should hold. |
 
@@ -77,6 +80,77 @@ Not in the program, and deliberately: a takeoff from the drawings (shipped as
 9c), and anything that would make an estimate post to the books.
 
 ## Build log
+
+### 2026-09-17 — The brochure: a proposal as a page order, and the document is HTML (`claude/estimate-brochure`, ADR 0083)
+
+Slice **E5a** of [the estimate program](#the-estimate-program-open-started-2026-09-16),
+and the founder's "more like a brochure with the price sheet… more for
+custom homes, then a more simple proposal for a production home". Two
+columns (migration `0376`, live on dev and prod, 228 tables verified) and
+three files.
+
+**A PROPOSAL IS AN ORDERED LIST OF SECTIONS.** `proposal-sections.ts`
+returns `ProposalSection[]` — cover, letter, facts, parties, text,
+narrative, price, allowances, milestones, acceptance — and `format` says
+which order. `letter` is **exactly** the document ADR 0070 built, section
+for section, because nothing about it was wrong; `brochure` is the
+custom-home one. And `presentation` is now orthogonal: what the paper IS
+and how the money is GROUPED were tangled in one field and are two.
+
+**A BROCHURE IS NOT A LAYOUT PROBLEM, IT IS A PAGE ORDER OVER FACTS THE
+PACK ALREADY HOLDS** — the claim the whole slice rested on, and it held.
+*What is included* is the items' names and their `client_note` (E1);
+*Allowances* is the job's selections with their chosen choices (slice 8);
+*How it goes* is the job's phases with their dates and trades (the
+schedule); the price sheet is `proposal-model.ts`, untouched. **Two
+columns were added and nothing else**: `format`, and the `letter` the
+brochure opens with.
+
+**THE MONEY STILL HAS ONE SOURCE.** Sections WRAP `buildProposalModel`
+rather than replace it, and nothing in the section model computes a price —
+two things that both work out a total is how they come to disagree. The
+cost-word scan now runs over the sections too, in both formats.
+
+**A PAGE WITH NOTHING ON IT IS NOT PRINTED.** No letter, no selections, no
+phases, no items — the section is absent rather than a heading over a
+blank. A brochure on a bare estimate is three sections long, which is
+pinned.
+
+**THE SENTENCE IS PRINTED ONCE**, and this was found by reading the first
+real brochure rather than by a test: the narrative and the price sheet sit
+next to each other, and every item's sentence appeared on both. When the
+narrative carries the notes the price sheet now prints names and money
+only.
+
+**THE DOCUMENT IS HTML, SERVED BY A GET ROUTE** at
+`/api/jobs/estimates/[id]/document`. Not a page — a page arrives wearing
+the app's sidebar — and not more react-pdf, which has no `break-inside`,
+no orphan control and no running furniture. The stylesheet is inline and
+the logo is a data URI, so it prints the same offline, headless, or from a
+saved copy: a document that needs the network to look right is not a
+document. **`proposal-pdf.tsx` was not touched** and its pinned tests pass
+unchanged, which is the proof the letter still works.
+
+**And it is the same URL the next two slices need**, which is why this one
+came first: **E5b** points a headless Chromium at it for the PDF the
+founder asked to keep, and **E5c** serves it from a tokenised link the
+client can open and accept on. One document, three doors.
+
+**Driven** on EST-ITEMS-1 (Oak Row, dev branch): the format switched to a
+brochure, a three-paragraph letter typed and picked up by autosave, and the
+document opened — the accent band and the logo on a cover of its own, the
+letter over the business's name, *The work*, *What is included* with each
+item's sentence in small type, *THE PRICE* at $190,537.53 with names and
+money only, *Allowances* reading the job's real selection (*Master bath
+tile · 4,000.00 allowed · Marble herringbone · 6,500.00*), the terms, and
+the signature blocks under a DRAFT watermark. No milestones section,
+correctly, because that job has no phases.
+
+**Not built, each its own slice:** the brochure's PDF (E5b); the client
+link with Accept (E5c); a cover photograph or the elevation off the current
+drawing set, which wants an image pipeline the cover does not need in order
+to be good; and the assurances page (warranty, bonding, insurance), which
+is a commercial want rather than a residential one.
 
 ### 2026-09-17 — The estimate saves itself (`claude/estimate-autosave`, ADR 0082)
 
@@ -3885,7 +3959,7 @@ hand-reordered like 0329) and `0335_job_billing.sql` / `0336_job_billing_rls.sql
 `wip_adjustment` to `journal_entry_source`, which nothing in the file uses)
 and `0341_cost_plus.sql` / `0342_cost_plus_rls.sql` (slice 5b; as generated,
 since the new table references existing ones only) and `0343_sub_billing.sql`
-/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) and `0350_lien_waivers.sql` / `0351_lien_waivers_rls.sql` (slice 11a; as generated, one new table referencing existing ones) and `0352_selections.sql` / `0353_selections_rls.sql` (slice 8; hand-reordered — two new tables, the selections' unique index ahead of the choices' key) and `0354_party_documents.sql` / `0355_party_documents_rls.sql` (slice 11b; as generated) and `0356_estimates.sql` / `0357_estimates_rls.sql` (slice 10; hand-reordered — two new tables, the estimates' unique index ahead of the lines' key) and `0358_proposal.sql` (slice 10b; four columns and a CHECK on `job_estimates`, so no RLS migration) and `0359_job_phases.sql` / `0360_job_phases_rls.sql` (the schedule; hand-reordered — a self-referencing key needs the table's own unique index first) and `0373_job_estimate_groups.sql` / `0374_job_estimate_groups_rls.sql` (E1, ADR 0079; as generated but for the line's key to the item, **hand-edited to the column-list `ON DELETE SET NULL ("group_id")`** as every composite SET NULL in this repo is) and `0375_estimate_client_wording.sql` (E2, ADR 0080; three columns and two CHECKs on existing tables, so no RLS migration — **and hand-edited to REMOVE a DROP and re-ADD of that same key, which drizzle regenerated in the bare form that can never run**; `tests/migrations.test.ts` now guards the class) follow the same rule —
+/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) and `0350_lien_waivers.sql` / `0351_lien_waivers_rls.sql` (slice 11a; as generated, one new table referencing existing ones) and `0352_selections.sql` / `0353_selections_rls.sql` (slice 8; hand-reordered — two new tables, the selections' unique index ahead of the choices' key) and `0354_party_documents.sql` / `0355_party_documents_rls.sql` (slice 11b; as generated) and `0356_estimates.sql` / `0357_estimates_rls.sql` (slice 10; hand-reordered — two new tables, the estimates' unique index ahead of the lines' key) and `0358_proposal.sql` (slice 10b; four columns and a CHECK on `job_estimates`, so no RLS migration) and `0359_job_phases.sql` / `0360_job_phases_rls.sql` (the schedule; hand-reordered — a self-referencing key needs the table's own unique index first) and `0373_job_estimate_groups.sql` / `0374_job_estimate_groups_rls.sql` (E1, ADR 0079; as generated but for the line's key to the item, **hand-edited to the column-list `ON DELETE SET NULL ("group_id")`** as every composite SET NULL in this repo is) and `0375_estimate_client_wording.sql` (E2, ADR 0080; three columns and two CHECKs on existing tables, so no RLS migration — **and hand-edited to REMOVE a DROP and re-ADD of that same key, which drizzle regenerated in the bare form that can never run**; `tests/migrations.test.ts` now guards the class) and `0376_estimate_format_and_letter.sql` (E5a, ADR 0083; two columns and a CHECK on `job_estimates`, so no RLS migration — **generated clean, with no stray foreign key to repair**, because 0375's snapshot recorded the item key's intent) follow the same rule —
 and from slice 3 the pair is `db:verify-rls` **and `db:verify-modules`**, after
 the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **220 tables**, all enabled, forced and with
 policies, on both.
@@ -3922,6 +3996,12 @@ ordering only bites when two new tables reference each other in one file.
   builders, one layout in the proposal's styles, two loaders that read the
   rows in one transaction; the routes under `src/app/api/jobs/change-orders`
   and `src/app/api/jobs/commitments`.
+- `src/packs/jobs/proposal-sections.ts` + `proposal-html.ts` — **the proposal as
+  a page order, and the document** (E5a, ADR 0083). The sections decide which
+  pages a format has and every word on them, WRAPPING `proposal-model.ts` so the
+  money keeps one source; the HTML file is layout only and computes nothing. Its
+  route, `/api/jobs/estimates/[id]/document`, is deliberately the URL E5b prints
+  headlessly and E5c shares with the client.
 - `src/packs/jobs/estimate-parse.ts` — **one typed sentence into one estimate
   line** (E3a, ADR 0081), pure and table-tested: `parseEstimateLine`,
   `parseEstimateLines`, `COMMON_UNITS`, `unitsFor`. The entry bar, the paste
@@ -4295,13 +4375,13 @@ ordering only bites when two new tables reference each other in one file.
 - **The proposal prints; it is not sent, and the client cannot accept it on
   a screen of their own (10b, ADR 0070).** Mail's seam is there for the
   sending when somebody asks. **The client link WITH an Accept button is now
-  E5**, chosen by the founder on 2026-09-16 along with a magazine-grade
+  E5c** (and the brochure's own PDF is E5b), chosen by the founder on 2026-09-16 along with a magazine-grade
   brochure for luxury work — and the two are one build, because a web
   proposal is HTML and a magazine-grade PDF is that same HTML through
   Chromium. The PDF export stays a requirement, so E5 carries the Chromium
   route rather than leaving it to a later slice.
-- **The estimate program is open; E1, E2, E3a and E3b are shipped** — see
-  [the plan](#the-estimate-program-open-started-2026-09-16) for E3c–E7, each
+- **The estimate program is open; E1, E2, E3a, E3b and E5a are shipped** — see
+  [the plan](#the-estimate-program-open-started-2026-09-16) for the rest, each
   with the founder's decision behind it. What is NOT built:
   **keyboard grid navigation** — arrows and Tab between cells, Enter on the
   last row making another (E3c); the **price

@@ -2633,6 +2633,13 @@
       "when": 1789609372369,
       "tag": "0375_estimate_client_wording",
       "breakpoints": true
+    },
+    {
+      "idx": 376,
+      "version": "7",
+      "when": 1789679813244,
+      "tag": "0376_estimate_format_and_letter",
+      "breakpoints": true
     }
   ]
 }

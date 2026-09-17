@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { buildProposalModel, paragraphs, type ProposalInput } from "../src/packs/jobs/proposal-model";
 import { renderProposalPdf } from "../src/packs/jobs/proposal-pdf";
+import {
+  allowanceOf,
+  buildProposalDocument,
+  isProposalFormat,
+  milestoneOf,
+} from "../src/packs/jobs/proposal-sections";
+import { renderProposalHtml } from "../src/packs/jobs/proposal-html";
+import { PROPOSAL_FORMATS, PROPOSAL_FORMAT_LABELS } from "../src/packs/jobs/vocabulary";
 
 /**
  * The proposal — an estimate as the document the client is sent (slice
@@ -334,6 +342,210 @@ describe("the words around the price", () => {
       });
       expect(JSON.stringify(m).toLowerCase()).not.toMatch(/cost|markup|overhead|profit|margin/);
     }
+  });
+});
+
+describe("the proposal as a list of sections (E5a, ADR 0083)", () => {
+  const items = [
+    { id: "g1", name: "The shell", clientNote: "Slab, framing and rebar, as drawn.", priceMode: "rollup", fixedPriceCents: null },
+    { id: "g2", name: "Permits and approvals", clientNote: "", priceMode: "fixed", fixedPriceCents: 2_500_00 },
+  ];
+  const grouped: ProposalInput = {
+    ...base,
+    presentation: "groups",
+    overheadPpm: 0,
+    profitPpm: 0,
+    groups: items,
+    lines: base.lines.map((l, i) => ({ ...l, groupId: i < 3 ? "g1" : "g2" })),
+  };
+  const extras = {
+    letter: "Thank you for asking us to price the house.\nWe would be glad to build it.",
+    allowances: [
+      allowanceOf({ name: "Kitchen tile", allowanceCents: 6_000_00, chosenLabel: null, chosenPriceCents: null, neededBy: "2026-10-14" }),
+      allowanceOf({ name: "Appliances", allowanceCents: 12_000_00, chosenLabel: "Café 36in range", chosenPriceCents: 13_400_00, neededBy: null }),
+    ],
+    milestones: [
+      milestoneOf({ name: "Foundation", startOn: "2026-03-03", endOn: "2026-03-28", partyName: "Miller Concrete" }),
+      milestoneOf({ name: "Substantial completion", startOn: "2026-11-02", endOn: "2026-11-02", partyName: null }),
+    ],
+  };
+  const kinds = (d: ReturnType<typeof buildProposalDocument>) => d.sections.map((s) => s.kind);
+
+  it("the LETTER is exactly the document ADR 0070 built, in sections", () => {
+    const doc = buildProposalDocument(base, {}, "letter");
+    expect(doc.format).toBe("letter");
+    expect(kinds(doc)).toEqual(["facts", "parties", "text", "price", "text", "text", "acceptance"]);
+    // And its money is the model's, untouched.
+    expect(doc.model.price.total.amount).toBe("89,122.55");
+  });
+
+  it("the BROCHURE opens with a cover and a letter, then the narrative, the price, the allowances and the dates", () => {
+    const doc = buildProposalDocument(grouped, extras, "brochure");
+    expect(kinds(doc)).toEqual([
+      "cover",
+      "letter",
+      "text",
+      "narrative",
+      "price",
+      "allowances",
+      "milestones",
+      "text",
+      "text",
+      "acceptance",
+    ]);
+    const cover = doc.sections[0];
+    expect(cover.kind === "cover" && cover.toName).toBe("Oak Row Owner");
+    expect(cover.kind === "cover" && cover.project).toBe("24-108 · Oak Row residence — phase 2");
+    const letter = doc.sections[1];
+    expect(letter.kind === "letter" && letter.paragraphs).toEqual([
+      "Thank you for asking us to price the house.",
+      "We would be glad to build it.",
+    ]);
+    // THE NARRATIVE IS THE ITEMS' OWN WORDS, and carries no money at all.
+    const narrative = doc.sections[3];
+    expect(narrative.kind === "narrative" && narrative.items).toEqual([
+      { name: "The shell", note: "Slab, framing and rebar, as drawn." },
+      { name: "Permits and approvals", note: "" },
+    ]);
+    expect(JSON.stringify(narrative)).not.toContain("8,400");
+    // AND THE SENTENCE IS PRINTED ONCE: the narrative has the notes, so the price
+    // sheet beside it prints names and money only.
+    const price = doc.sections.find((s) => s.kind === "price");
+    expect(price?.kind === "price" && price.price.rows.map((r) => r.note)).toEqual(["", ""]);
+    expect(price?.kind === "price" && price.price.rows.map((r) => r.description)).toEqual([
+      "The shell",
+      "Permits and approvals",
+    ]);
+    // With no notes to print there is nothing to deduplicate, so they stay where they were.
+    const plain = buildProposalDocument(
+      { ...grouped, groups: items.map((g) => ({ ...g, clientNote: "" })) },
+      extras,
+      "brochure",
+    );
+    expect(plain.sections.some((s) => s.kind === "narrative")).toBe(true);
+  });
+
+  it("leaves a page out rather than printing a heading over nothing", () => {
+    // No letter, no selections, no phases, no items, no scope, no exclusions, no terms.
+    const bare = buildProposalDocument(
+      { ...base, scope: "", exclusions: "", terms: "", groups: [] },
+      {},
+      "brochure",
+    );
+    expect(kinds(bare)).toEqual(["cover", "price", "acceptance"]);
+  });
+
+  it("reads an allowance the way a client does, chosen or not", () => {
+    const doc = buildProposalDocument(grouped, extras, "brochure");
+    const allowances = doc.sections.find((s) => s.kind === "allowances");
+    expect(allowances?.kind === "allowances" && allowances.rows).toEqual([
+      { name: "Kitchen tile", allowance: "6,000.00 allowed", chosen: "", standing: "Still to choose, by 2026-10-14" },
+      {
+        name: "Appliances",
+        allowance: "12,000.00 allowed",
+        chosen: "Café 36in range · 13,400.00",
+        standing: "Chosen",
+      },
+    ]);
+    // A selection with no allowance is not an allowance line; that filter is the loader's.
+    expect(allowanceOf({ name: "x", allowanceCents: 0, chosenLabel: null, chosenPriceCents: null, neededBy: null }).standing).toBe(
+      "Still to choose",
+    );
+  });
+
+  it("reads a milestone as a span, or a single date when it is one day", () => {
+    const doc = buildProposalDocument(grouped, extras, "brochure");
+    const milestones = doc.sections.find((s) => s.kind === "milestones");
+    expect(milestones?.kind === "milestones" && milestones.rows).toEqual([
+      { name: "Foundation", when: "2026-03-03 – 2026-03-28", who: "Miller Concrete" },
+      { name: "Substantial completion", when: "2026-11-02", who: "" },
+    ]);
+  });
+
+  it("falls back to the letter for a format nobody recognises, rather than printing nothing", () => {
+    expect(buildProposalDocument(base, {}, "poster").format).toBe("letter");
+    expect(isProposalFormat("brochure")).toBe(true);
+    expect(isProposalFormat("poster")).toBe(false);
+    for (const f of PROPOSAL_FORMATS) expect(PROPOSAL_FORMAT_LABELS[f]).toBeTruthy();
+  });
+
+  it("NEVER CARRIES COST, MARKUP, OVERHEAD, PROFIT OR MARGIN — in either format", () => {
+    for (const format of PROPOSAL_FORMATS) {
+      const doc = buildProposalDocument(
+        {
+          ...grouped,
+          title: "",
+          scope: "",
+          exclusions: "",
+          terms: "",
+          groups: items.map((g, i) => ({ ...g, name: `Part ${i + 1}`, clientNote: "" })),
+          lines: grouped.lines.map((l, i) => ({ ...l, description: `Item ${i + 1}`, codeLabel: null })),
+        },
+        { letter: "A letter.", allowances: extras.allowances, milestones: extras.milestones },
+        format,
+      );
+      expect(JSON.stringify(doc.sections).toLowerCase(), format).not.toMatch(
+        /cost|markup|overhead|profit|margin/,
+      );
+    }
+  });
+});
+
+describe("the proposal as one HTML document", () => {
+  const brandless = { businessName: "Ops Builder LLC", tagline: "", primaryColor: null, logo: null };
+
+  it("renders a whole page for both formats, with nothing fetched from the network", () => {
+    for (const format of PROPOSAL_FORMATS) {
+      const html = renderProposalHtml(buildProposalDocument(base, { letter: "A letter." }, format), brandless);
+      expect(html.startsWith("<!doctype html>"), format).toBe(true);
+      expect(html, format).toContain("@page");
+      expect(html, format).toContain("89,122.55");
+      // No stylesheet, script or image that would need the network to look right.
+      expect(html, format).not.toMatch(/<link|<script|src="http/);
+    }
+  });
+
+  it("ESCAPES what the business typed, so a stray angle bracket cannot become markup", () => {
+    const html = renderProposalHtml(
+      buildProposalDocument(
+        { ...base, title: "", scope: '<script>alert("x")</script> & "quoted"' },
+        {},
+        "letter",
+      ),
+      brandless,
+    );
+    expect(html).not.toContain("<script>alert");
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).toContain("&amp;");
+  });
+
+  it("prints the brochure's cover, its letter and its allowance table", () => {
+    const html = renderProposalHtml(
+      buildProposalDocument(
+        { ...base, presentation: "groups", groups: [{ id: "g", name: "The shell", clientNote: "As drawn.", priceMode: "rollup", fixedPriceCents: null }], lines: base.lines.map((l) => ({ ...l, groupId: "g" })) },
+        {
+          letter: "Thank you for asking us.",
+          allowances: [allowanceOf({ name: "Kitchen tile", allowanceCents: 6_000_00, chosenLabel: null, chosenPriceCents: null, neededBy: null })],
+          milestones: [milestoneOf({ name: "Foundation", startOn: "2026-03-03", endOn: "2026-03-28", partyName: null })],
+        },
+        "brochure",
+      ),
+      brandless,
+    );
+    expect(html).toContain("Thank you for asking us.");
+    expect(html).toContain("class=\"section cover\"");
+    expect(html).toContain("page-break");
+    expect(html).toContain("Kitchen tile");
+    expect(html).toContain("Foundation");
+    // The item's own sentence reaches the page; the build-up does not.
+    expect(html).toContain("As drawn.");
+    expect(html).not.toContain("Slab, 4in, fibre mesh");
+  });
+
+  it("carries the DRAFT watermark into the document", () => {
+    const html = renderProposalHtml(buildProposalDocument({ ...base, status: "draft" }, {}, "brochure"), brandless);
+    expect(html).toContain("DRAFT");
+    expect(renderProposalHtml(buildProposalDocument(base, {}, "brochure"), brandless)).not.toContain("watermark\">");
   });
 });
 

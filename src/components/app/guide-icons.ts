@@ -16,6 +16,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleQuestionMark,
+  BookOpen,
   ClipboardPaste,
   Copy,
   Crosshair,
@@ -114,6 +115,8 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   "chevron-left": ChevronLeft,
   "chevron-right": ChevronRight,
   "circle-question-mark": CircleQuestionMark,
+  // Opening the proposal as a brochure (jobs, E5a).
+  "book-open": BookOpen,
   // Pasting a block of estimate lines (jobs, E3a).
   "clipboard-paste": ClipboardPaste,
   copy: Copy,

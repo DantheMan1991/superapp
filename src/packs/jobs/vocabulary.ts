@@ -460,6 +460,17 @@ export const PROPOSAL_PRESENTATION_LABELS: Record<ProposalPresentation, string> 
   groups: "By item",
   sum: "One sum",
 };
+/**
+ * What the paper IS, as against how the money is grouped (E5a, ADR 0083):
+ * the business document ADR 0070 built, or the custom-home brochure.
+ */
+export const PROPOSAL_FORMATS = ["letter", "brochure"] as const;
+export type ProposalFormat = (typeof PROPOSAL_FORMATS)[number];
+export const PROPOSAL_FORMAT_LABELS: Record<ProposalFormat, string> = {
+  letter: "A letter",
+  brochure: "A brochure",
+};
+
 export function isProposalPresentation(v: string): v is ProposalPresentation {
   return (PROPOSAL_PRESENTATIONS as readonly string[]).includes(v);
 }

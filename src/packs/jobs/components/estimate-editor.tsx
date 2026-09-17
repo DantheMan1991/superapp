@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ClipboardPaste, CornerDownLeft, EyeOff, FileText, FolderPlus, Plus, Trash2 } from "lucide-react";
+import { BookOpen, ClipboardPaste, CornerDownLeft, EyeOff, FileText, FolderPlus, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -45,6 +45,8 @@ import {
   ESTIMATE_STATUS_LABELS,
   GROUP_PRICE_MODES,
   GROUP_PRICE_MODE_LABELS,
+  PROPOSAL_FORMATS,
+  PROPOSAL_FORMAT_LABELS,
   PROPOSAL_PRESENTATIONS,
   PROPOSAL_PRESENTATION_LABELS,
   type GroupPriceMode,
@@ -158,6 +160,10 @@ export interface EditableEstimate {
   contractId: string | null;
   /** Whether the by-code proposal prints a code's number (ADR 0080). */
   showCodeNumbers: boolean;
+  /** What the paper is (E5a, ADR 0083). */
+  format: string;
+  /** The letter the brochure opens with. */
+  letter: string;
   /** The client-facing items, in their order (ADR 0079). */
   groups: Array<{
     id: string;
@@ -304,6 +310,8 @@ export function EstimateEditor({
   const [notes, setNotes] = useState(estimate.notes);
   const [presentation, setPresentation] = useState(estimate.presentation);
   const [showCodeNumbers, setShowCodeNumbers] = useState(estimate.showCodeNumbers);
+  const [format, setFormat] = useState(estimate.format);
+  const [letterText, setLetterText] = useState(estimate.letter);
   /** The version every guarded verb is handed; it advances with each save. */
   const [version, setVersion] = useState(estimate.version);
   /**
@@ -482,6 +490,7 @@ export function EstimateEditor({
         notes: notes.trim(),
         presentation,
         showCodeNumbers,
+        format,
         // An accepted estimate's money is not sent, nor the proposal's words: they are the agreement.
         ...(locked
           ? {}
@@ -489,6 +498,7 @@ export function EstimateEditor({
               markupPercent: markup,
               overheadPercent: overhead,
               profitPercent: profit,
+              letter: letterText.trim(),
               scope: scope.trim(),
               exclusions: exclusions.trim(),
               terms: termsText.trim(),
@@ -1206,16 +1216,60 @@ export function EstimateEditor({
       <div className="rounded-lg border border-border/60 p-4">
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-heading text-sm font-medium tracking-heading">Proposal</h2>
-          <Button variant="outline" size="sm" asChild>
-            <a href={`/api/jobs/estimates/${estimate.id}/pdf`} target="_blank" rel="noopener noreferrer">
-              <FileText className="mr-1.5 size-4" /> Print proposal
-            </a>
-          </Button>
+          <div className="flex items-center gap-1">
+            {/* The brochure is the HTML document; the letter is the PDF ADR 0070 built. */}
+            <Button variant="outline" size="sm" asChild>
+              <a href={`/api/jobs/estimates/${estimate.id}/document`} target="_blank" rel="noopener noreferrer">
+                <BookOpen className="mr-1.5 size-4" /> Open {format === "brochure" ? "brochure" : "document"}
+              </a>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <a href={`/api/jobs/estimates/${estimate.id}/pdf`} target="_blank" rel="noopener noreferrer">
+                <FileText className="mr-1.5 size-4" /> Print proposal
+              </a>
+            </Button>
+          </div>
         </div>
         <p className="mb-3 text-xs text-muted-foreground">
           What the client is sent: the price as saved, shown the way you choose, with the words below around it.
           Cost, markup, overhead and profit never print — they are in the prices.
         </p>
+        <div className="mb-3 grid gap-3 sm:grid-cols-[14rem_1fr]">
+          <div className="space-y-1.5">
+            <Label htmlFor="est-format">What it is</Label>
+            <Select value={format} onValueChange={setFormat} disabled={!canEdit}>
+              <SelectTrigger className="w-full" id="est-format">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PROPOSAL_FORMATS.map((f) => (
+                  <SelectItem key={f} value={f}>
+                    {PROPOSAL_FORMAT_LABELS[f]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="est-letter">
+              {format === "brochure" ? "The letter it opens with" : "A letter (printed on the brochure only)"}
+            </Label>
+            <Textarea
+              id="est-letter"
+              value={letterText}
+              onChange={(e) => setLetterText(e.target.value)}
+              rows={3}
+              maxLength={8000}
+              placeholder="Dear Mr and Mrs Shrock, thank you for asking us to price the house at 118 Oak Row…"
+              disabled={!editable}
+            />
+            <p className="text-xs text-muted-foreground">
+              {format === "brochure"
+                ? "In your own voice, over your name. Each line is its own paragraph; leave it blank and the page is left out."
+                : "A letterhead proposal has no page for this. Switch to a brochure and it opens with it."}
+            </p>
+          </div>
+        </div>
         <div className="grid gap-3 sm:grid-cols-[14rem_1fr]">
           <div className="space-y-1.5">
             <Label htmlFor="est-presentation">Show the price</Label>

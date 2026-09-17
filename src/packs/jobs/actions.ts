@@ -122,6 +122,7 @@ import {
   SELECTION_STATUSES,
   ESTIMATE_STATUSES,
   GROUP_PRICE_MODES,
+  PROPOSAL_FORMATS,
   SCHEDULE_SHAPES,
   PROPOSAL_PRESENTATIONS,
   PHASE_KINDS,
@@ -2646,6 +2647,9 @@ const estimateSchema = z.object({
   presentation: z.enum(PROPOSAL_PRESENTATIONS).optional(),
   /** Whether the `codes` presentation prints a code's number (ADR 0080). */
   showCodeNumbers: z.boolean().optional(),
+  /** What the paper is (E5a, ADR 0083). */
+  format: z.enum(PROPOSAL_FORMATS).optional(),
+  letter: z.string().trim().max(8000).optional(),
   scope: z.string().trim().max(8000).optional(),
   exclusions: z.string().trim().max(8000).optional(),
   terms: z.string().trim().max(8000).optional(),

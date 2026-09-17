@@ -298,6 +298,10 @@ Hiding a line keeps it off the *list*; it is not a way to make money untraceable
 
 **The proposal block.** What the client is sent, saved with the rest of the form.
 
+- **`What it is`** — two documents, and this picks which one you get.
+  - **`A letter`** — the default, and what a production job, a remodel or a repair sends: two or three pages on your letterhead with the facts, the scope, the price, the exclusions, the terms and a line to sign. {button:Print proposal|outline|file-text} gives you the PDF.
+  - **`A brochure`** — for a custom home, where the proposal is the thing that wins the job. A cover of its own with your logo and colour, a letter from you, what is being built in plain words, the price sheet, the allowances still to be chosen, when the work happens, then the terms and the signatures. {button:Open brochure|outline|book-open} opens it in a new tab; print it from there with your browser's Print (choose **Save as PDF**) until the product prints it for you.
+- **`The letter it opens with`** — only printed on the brochure. Write it in your own voice, over your business's name; each line you type is its own paragraph. **Leave it blank and the page is left out** — that is true of every page of the brochure, so an estimate with no allowances has no allowances page rather than an empty heading.
 - **`Show the price`** — four ways, and the total is the same in all four. Overhead and profit are in the prices whichever you pick: **cost, markup, overhead, profit and margin never print.**
   - **`By item`** — one row per item at its price with its sentence beneath it, and one row for each line in no item. What a custom-home client reads, and the one that shows nothing of the build-up.
   - **`Line by line`** — a takeoff, with quantity and per-unit columns when a line has them, each line in the client's wording where you wrote some. Items that add up their lines print as a heading with their lines beneath; **an item prints as one row at its price if you priced it yourself or if it hides any of its lines**, because either one is you saying the build-up is not the client's.
@@ -306,9 +310,24 @@ Hiding a line keeps it off the *list*; it is not a way to make money untraceable
 - **`Scope of work`** — what the price covers, in the client's words. Every line you type is its own paragraph on the page.
 - **`Not included`** — one exclusion per line: *Permits and utility fees.* *Landscaping.*
 - **`Terms`** — the payment schedule, what a change costs, how long the price holds. A new estimate starts with the terms of the last one you wrote, so this is usually a read-through.
-- {button:Print proposal|outline|file-text} opens the PDF in a new tab. It prints the estimate **as saved** — save first.
+- {button:Print proposal|outline|file-text} opens the letter as a PDF in a new tab, and {button:Open brochure|outline|book-open} opens the brochure. Both print the estimate **as saved**; it saves itself about a second after you stop typing, so watch for `Saved` beside the {button:Save|primary} button first.
 
-Once the estimate is accepted the three texts are fixed with the price (they are the agreement); how the price is shown can still change.
+**What the brochure puts on each page, and where it comes from.** Nothing here is typed twice — every page reads something the {{project|lower}} already holds, which is why filling in the rest of the {{project|lower}} makes the proposal better on its own.
+
+| Page | What is on it | Where it comes from |
+| --- | --- | --- |
+| The cover | The estimate's title, who it is for, the {{project|lower}} and the site, your logo and colour | the estimate and your brand kit |
+| The letter | Your paragraphs, over your business's name | **`The letter it opens with`**, above |
+| The work | Your scope, paragraph by paragraph | **`Scope of work`**, above |
+| What is included | Each item's name with its sentence underneath, and **no money at all** | the items on the **Lines** block and the sentence each carries |
+| The price | The price the way you chose to show it | the lines and items |
+| Allowances | Each allowance, what is set aside and what has been chosen — or `Still to choose` and the date it is needed by | the **Selections** tab |
+| How it goes | Each stage, its dates and the trade on it | the **Schedule** tab |
+| Terms, exclusions, signatures | As on the letter | above |
+
+Two things follow from that. A page with nothing behind it does not print, so a brochure on a bare estimate is a cover, a price and a signature page. And **an item's sentence prints once** — on *What is included*, not again beside its price.
+
+Once the estimate is accepted the letter and the three texts are fixed with the price (they are the agreement); how the price is shown, and whether it prints as a letter or a brochure, can still change — those are printing choices.
 
 **`Notes`** — anything the estimate should remember that the client does not see.
 

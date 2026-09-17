@@ -11,7 +11,192 @@ is the industry that forced it. Nothing here is construction-shaped: a project
 has a number, a client, a company, a division and a kind of work, and a fit-out,
 a software engagement and a house are the same row.
 
+## The estimate program (open, started 2026-09-16)
+
+The founder reviewed the estimate tool ([ADR 0069](../decisions/0069-an-estimate-prices-the-job-before-anybody-signs-and-accepting-it-names-the-contract.md))
+and the proposal ([ADR 0070](../decisions/0070-a-proposal-is-the-estimate-at-its-price-and-its-words-are-fixed-with-the-money.md))
+against how a builder actually sells, and asked for four things: an **item**
+the client sees at one price with the build-up behind it; a way to **keep the
+internals from the client** ("clients don't care about cost codes"); the
+estimate to be **fast to type**; and the proposal to look like a **brochure**
+for a custom home and a simple page for a production one. Spare no expense on
+it — "it's very important, i want to make it top notch."
+
+**The diagnosis.** Estimating has three axes and the model had two, so the
+third was being borrowed from the second:
+
+| Axis | Unit | Who reads it | Before |
+| --- | --- | --- | --- |
+| Cost | a line — quantity of a unit at a unit cost | the estimator | `job_estimate_lines` |
+| Accounting | a cost code | the office, the books | `cost_code_id` |
+| **The sale** | **an item at a price** | **the client** | **borrowed from the cost code** |
+
+That is why the proposal read like a ledger: its only summary was *by cost
+code*, and `09 30 00 · Tiling` is not a thing anybody buys.
+
+**The four decisions the founder took** (2026-09-16, in the thread):
+
+1. **A fixed item price is what prints.** Shown the arithmetic — at ten and
+   ten, an item typed at $8,400 inside the overhead-and-profit spread prints
+   $10,164 — he chose to keep the typed number outside the spread. The model
+   already has a place for a lump you want *costed* and marked up: a line of
+   quantity one. [ADR 0079](../decisions/0079-an-estimate-groups-its-lines-into-the-items-the-client-sees-and-a-group-priced-fixed-is-the-price-not-a-cost-to-mark-up.md).
+2. **The schedule of values follows the items**, and by item is the default
+   once an estimate has any.
+3. **Magazine-grade for luxury, not for production** — so two documents, not
+   one, and the luxury one needs a layout `@react-pdf/renderer` cannot reach.
+4. **The client gets a link and can accept on it**, and the PDF export stays a
+   requirement either way ("i do want the proposal to be exported to pdf
+   still").
+
+**3 and 4 turn out to be one build.** A web proposal is HTML; a magazine-grade
+PDF is that same HTML with print CSS through Chromium. So the luxury brochure
+and the client link are one slice, and `proposal-model.ts` stays the single
+pure source of every word and figure with three consumers instead of one: the
+`@react-pdf/renderer` letter (production, already built, no cold start), the
+HTML page (the link, and the luxury print), and Chromium's render of that page.
+Two layouts, one truth — the split ADR 0070 already set. The cost is real and
+on Vercel: `puppeteer-core` + `@sparticuz/chromium-min` share a 250 MB
+unzipped function budget with sharp's libvips and the Noto TTFs that
+`next.config.ts` already traces by hand.
+
+| # | Slice | What it is |
+| --- | --- | --- |
+| **E1** | ~~**Items**~~ **SHIPPED 2026-09-16** ([ADR 0079](../decisions/0079-an-estimate-groups-its-lines-into-the-items-the-client-sees-and-a-group-priced-fixed-is-the-price-not-a-cost-to-mark-up.md)) | `job_estimate_groups`, one level deep, rolling up or priced by hand; a fourth presentation `groups`; the schedule of values by item. The keystone: everything below hangs off this table. |
+| E2 | **What the client sees** | `client_description` on a line (the estimator types `Tile — mud set, Schluter, mtl only, per AJ quote 8/14`, the client reads `Porcelain tile flooring`) and `client_visible`, **offered only inside an item** — hidden money must have somewhere to hide or the printed rows stop adding up. Plus: a cost code's number suppressed for a residential client, which is a ten-minute fix on today's `codes` presentation. |
+| E3 | **Speed** | The **entry bar**: one field that parses `320 sf tile @ 4.20`, `plumbing rough 12000` (a lump), `@tile 320` (drop an assembly), Enter commits and the cursor stays. A **paste target** — `src/lib/paste-targets` is a finished framework and eight packs use it; jobs has no `paste/` directory at all. **Per-row saving** (today the whole estimate is one `useState` and one Save button, which a two-hundred-line takeoff cannot be). `Ctrl+D` to duplicate the row above, because most lines are near-copies. The parser is pure and table-tested, and it is also the voice feature: one function, two doors. |
+| E4 | **Price memory** | Every `job_estimate_line` across the tenant already IS a price history: type a description, get *"last priced $4.20 on 24-108, three weeks ago"*, Tab accepts. Then the half nobody else can do, because the actuals are in the same database: *"you estimated $4.20 — you actually paid $4.65 on the last three jobs"* (the `Spent` column per code). Before assemblies, because it is what tells us what an assembly should look like. |
+| E5 | **The proposal as sections, the HTML document, and the client link** | Presentation (how the money is grouped) and format (what the paper is) are two choices tangled in one field today. Split them, then build the document as a **section list** over pack data — and the point is that every page a custom-home proposal wants is already data here: the cover's elevation is the current drawing set (9a), the narrative is the items' names and notes, the allowances are selections (ADR 0067), the milestones are phases (ADR 0071), the warranty is a period on the job (13a), the insurance and bonding are rows (0068/0078). A brochure is a page order over things that exist. `letter` and `brochure` are two presets over that list. Stage 1 is the HTML plus print CSS, shipped as the tokenised client link with **Accept**; stage 2 adds the Chromium render behind the same route so the product can attach and email the file. Stage 1 is the first half of stage 2, so nothing is wasted. |
+| E6 | **Assemblies** | Built backwards on purpose: **"save this item as an assembly"** first, so the library assembles itself out of real work instead of needing to be seeded — nobody ever fills in an assembly library up front. Then dropping one with a driving quantity explodes it into an item whose lines' quantities are computed (1.05 sf of tile per sf of floor for waste, 0.02 bags of thinset, 1 sf of labour) with the cost codes pre-filled. **An assembly is a saved item**, which is why it waits for E1's table rather than arriving with one of its own — and ADR 0069 said assemblies wanted a few real estimates typed first, which E1 is. |
+| E7 | **The rest** | Bid alternates and options ("upgrade to quartz: +$4,200") as items outside the total until chosen; copy an estimate / a plan template, which is a production builder's whole workflow and nearly free because the rows exist; the tenant-level unit cost book, once E4 has shown what it should hold. |
+
+Not in the program, and deliberately: a takeoff from the drawings (shipped as
+9c), and anything that would make an estimate post to the books.
+
 ## Build log
+
+### 2026-09-16 — Items: what the client buys, with the build-up behind it (`claude/estimate-groups`, ADR 0079)
+
+Slice E1 of [the estimate program](#the-estimate-program-open-started-2026-09-16),
+and the keystone the other six hang off. One table
+(`job_estimate_groups`) and one column (`job_estimate_lines.group_id`);
+migrations 0373/0374, live on dev and prod, **228 tables verified**.
+
+**THE THIRD AXIS.** A builder does not sell "320 sf of tile at $4.20, 320
+sf of tile labour at $3.50, two bags of thinset". A builder sells **tile
+flooring, $8,400**, and keeps the three lines behind it to know that
+$8,400 is safe. The only grouping the proposal had was by COST CODE, and
+a cost code is an accounting fact a homeowner has no use for — which is
+exactly what the founder objected to. An **item** is the client-facing
+noun that was missing: a name in their words, an optional paragraph, its
+lines beneath it. One level deep on purpose; every estimating tool that
+allowed a real tree became a tree nobody can read on a phone, and a
+builder who wants a third writes two items.
+
+**A TYPED PRICE IS THE PRICE THAT PRINTS.** The decision of the slice,
+taken by the founder with the arithmetic in front of him. An item either
+ROLLS UP (its lines sum, each riding the overhead-and-profit spread as
+any line does) or is FIXED — the number the client pays, typed, and
+**excluded from that spread**. At ten and ten the spread factor is 1.21,
+so an item typed at $8,400 that rode the spread would print $10,164,
+which is a trap. And there was no need for it to: the model already has
+a place for a lump you want *costed* and marked up — a line of quantity
+one, ADR 0069's rule. A fixed item answers the other question. When every
+item is fixed the rates have nothing left to spread over and the total is
+the sum of what was typed; that is correct, and the page says so out loud
+rather than leaving it to be discovered (`ratesIdle`).
+
+**COST IS ALWAYS THE LINES', SO THE BUDGET DID NOT MOVE.** Every line's
+extended cost counts toward the estimate's cost, grouped or loose, fixed
+or rolled up — so the item shows its own margin ($8,400 less the $6,950
+behind it) and `applyEstimateToBudget` is untouched: still cost by code,
+per line. **Nothing in the budget, the job cost report or the books
+learns what an item is.** That was the test of whether the design was
+right: three axes, three consumers, each taking the one it needs.
+
+**THE SCHEDULE OF VALUES, REPAIRED.** `applyEstimateToSchedule` took a
+shape: **by item** once the estimate has any (the new default) or **by
+line**. This was the practical defect nobody had named — a two-hundred-line
+takeoff became a two-hundred-line G703 that no owner would certify and
+that matched no proposal anybody had signed. By item it is one row per
+item and per loose line, and the owner's schedule reads like the document
+they signed. By line stays well defined under fixed items: the typed
+price is shared across its own lines, so the schedule still totals the
+contract sum, and there is no error case to design.
+
+**ONE PURE MODULE, THREE SHAPES, AND THE LEAK THE THIRD ONE CLOSES.**
+`estimate-math.ts` took a trailing `groups` argument that defaults to
+none, so **an estimate with no items computes exactly what it computed
+the day before** — the change is additive by construction. Every shape
+reads one internal per-line function (`scheduleLines`), so an item's row
+is exactly its lines' rows added up and the residual cents land on the
+last row priced as a sum whichever shape was asked for. The third shape,
+`detail`, is the proposal's and never a schedule's, and it exists because
+of a defect found while writing it: printing a takeoff of an estimate
+with a fixed item would have printed that item's children at their shares
+of the price — **publishing the build-up the typed price was there to
+hide.** So in `detail` a rollup item prints as a heading with its lines
+beneath and **a fixed item prints as one row at its price**. Typing a
+price is itself the statement that what is behind it is not the client's
+business.
+
+**`groups` is the fourth presentation**, and what a custom-home proposal
+should use; ADR 0070's `codes` stays for the commercial client who does
+expect a CSI breakdown, it simply stops being the answer to "show the
+client a summary".
+
+**The editor** grew item header rows inside the one table rather than a
+table per item, so the columns stay aligned: the name, how it is priced,
+the typed price, and its cost / price / margin in the Cost and Price
+columns where they read naturally. A line's first cell is the item it
+sits in — a select, not drag-and-drop — and **that column is not there at
+all until the estimate has an item**, so an ungrouped estimate looks
+exactly as it did. Removing an item leaves its lines loose (the FK's
+column-list `SET NULL`, PG 15, the 0046 precedent — a bare `SET NULL`
+can never run on a composite key); it never deletes what was priced.
+
+**Only the server mints an item's id.** A new item and its lines are
+saved in one go, the lines naming the item by a `key` the client gave it;
+`saveGroups` returns the map from what a line called it to the id it now
+has, and a `groupRef` that resolves to neither is **refused, not quietly
+dropped** — a line that lost its item is a line the client would see at
+the wrong price. The order is fixed: items written, then lines, then the
+items that went, so no line is ever orphaned mid-write.
+
+**Three layers hold the mode-and-price invariant**, each doing its own
+job: the action normalises (an item that adds up sends no price, so
+toggling the mode in the editor cannot leave a stale number behind), the
+op refuses an inconsistent pair for its other callers, and the CHECK
+`(price_mode = 'fixed') = (fixed_price_cents is not null)` holds it for
+everyone.
+
+**What the tests caught.** The `estimateTotals` shape gained
+`spreadableCents` and `fixedCents` — the values an ungrouped estimate
+reports are unchanged, but two pinned `toEqual`s had to name the new
+fields, which is the suite doing its job. The presentation CHECK mirror
+broke for a better reason: 0373 DROPS the old constraint before adding
+it, and the test's `[^(]*` ran from the drop's name into the next
+statement's bracket, so it matched an empty list and passed vacuously
+until the enumeration changed. It is now anchored on `ADD CONSTRAINT`.
+The founder's own example is pinned to the cent in both suites —
+$8,400 typed, $6,950 behind it, $91,600 of loose lines, $119,236.00 the
+total — so the decision and the arithmetic cannot drift apart. Two
+degenerate items are pinned because each would silently lose money: an
+item whose lines are all at zero shares its price EQUALLY (the one place
+`spreadCents`' honest row of zeros would swallow a real number), and an
+item with no lines at all keeps its price in both shapes.
+
+**Not built here, and each named in ADR 0079 rather than left implied:**
+the client-facing line title and the line hidden from the client (E2),
+the entry bar and per-row saving (E3), the price memory (E4), the
+proposal as sections with the brochure and the client link (E5), and
+assemblies — **which are a saved item**, and which is why they waited for
+this table rather than arriving with one of their own (E6).
+
+**Not verified in the browser.** The pane has come up signed out since
+2026-09-09 and only the founder can sign back in, so the editor's item
+rows, the schedule dialog's shape choice and the by-item proposal PDF are
+proven by the suites and by nothing having been clicked.
 
 ### 2026-09-16 — Bonding: the record on the job, the capacity across them (`claude/bonding`, ADR 0078)
 
@@ -3396,8 +3581,9 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_sub_application_lines` | One line per subcontract line: previous, this period, stored. | Cascade from the application; **RESTRICT to the subcontract line** — a billed line cannot be replaced out from under its certificate. `this_period` may be negative; the total to date may not — on a DEDUCTIVE line (a change order's negative line) the floors flip: completed to less than nothing and never more, `scheduled_cents` kept equal to the line's amount by the sync while a draft (4b). |
 | `job_selections` | A decision the client owes (8, ADR 0067): name, room, cost code, the allowance the contract set aside, the date it is needed by, pending / selected / approved / cancelled, the date decided, and the change order its difference was raised as. | Cascade from the project; **no action to the contract, the change order and the code** (retired, never deleted). `allowance_cents` ≥ 0. The difference — chosen price less allowance — is computed, never stored; while the raised change order stands, the allowance and the choices are fixed (the verb). |
 | `job_selection_choices` | What is on offer for a selection, one row each: description, supplier, reference, a price by the unit (both or neither, ADR 0064's thousandths) or as a sum, `price_cents` the extended figure, and `is_selected` for the client's pick. | Cascade from the selection; no action to the party. **One chosen per selection**: a partial unique index on `(tenant, selection) where is_selected`. Price, quantity and unit price ≥ 0; the unit pair both or neither. Nothing points at a choice, so an edit replaces by id. |
-| `job_estimates` | The job priced before anybody signs (10, ADR 0069): a number unique per job, title, draft / sent / accepted / declined / superseded, sent / decided / valid-until dates, the three rates in ppm — markup on cost (the lines' default), overhead on the subtotal, profit on the subtotal plus overhead — notes, and the contract an accepted one became. | Cascade from the project; **no action to the contract**. CHECK: status on the list, every rate 0..10,000,000 ppm (`RATE_PPM_MAX`), number present. Nothing stores a total: `estimate-math.ts` computes them. Accepted, the rates and lines are fixed by the verb, not the database. Since 10b (ADR 0070) also `presentation` (CHECK lines / codes / sum) and the proposal's `scope`, `exclusions` and `terms` — the words fixed with the money, the presentation free. |
-| `job_estimate_lines` | One line of an estimate: cost code, description, unit, quantity in thousandths (1000 = one, a lump sum), unit cost, an optional markup of its own, an optional unit price that wins over any markup, notes, sort order. | Cascade from the estimate; **no action to the code**. CHECK: description present, quantity / unit cost / unit price ≥ 0, markup 0..10,000,000 ppm or null. Written by id (updated, inserted, removed when left out), so a line keeps its identity across an edit; nothing points at one. |
+| `job_estimates` | The job priced before anybody signs (10, ADR 0069): a number unique per job, title, draft / sent / accepted / declined / superseded, sent / decided / valid-until dates, the three rates in ppm — markup on cost (the lines' default), overhead on the subtotal, profit on the subtotal plus overhead — notes, and the contract an accepted one became. | Cascade from the project; **no action to the contract**. CHECK: status on the list, every rate 0..10,000,000 ppm (`RATE_PPM_MAX`), number present. Nothing stores a total: `estimate-math.ts` computes them. Accepted, the rates and lines are fixed by the verb, not the database. Since 10b (ADR 0070) also `presentation` — CHECK lines / codes / **groups** (E1, ADR 0079) / sum, the live definition being in `0373`, which drops and re-adds it — and the proposal's `scope`, `exclusions` and `terms`: the words fixed with the money, the presentation free. An accepted estimate's ITEMS are fixed with its lines and its rates. |
+| `job_estimate_groups` | **The item the client buys** (E1, ADR 0079): a name in the client's words, an optional `client_note` paragraph, `price_mode` — `rollup` (its lines sum) or `fixed` (the price is typed, and sits OUTSIDE the overhead-and-profit spread) — `fixed_price_cents`, sort order. One level deep, by the shape rather than by a rule. | Cascade from the estimate. CHECK: name present and ≤ 200, note ≤ 4,000, mode on the list, price ≥ 0, and **`(price_mode = 'fixed') = (fixed_price_cents is not null)`** so the mode and the number cannot disagree. Nothing stores a total; the item's cost, price and margin come from `estimate-math.ts`. |
+| `job_estimate_lines` | One line of an estimate: cost code, description, unit, quantity in thousandths (1000 = one, a lump sum), unit cost, an optional markup of its own, an optional unit price that wins over any markup, notes, sort order; and since E1 the **item** it sits in (`group_id`, null = loose). | Cascade from the estimate; **no action to the code**; **SET NULL (column-list form) from `job_estimate_groups`** — an item removed leaves its lines loose, which is what ungrouping means, and never destroys what was priced. CHECK: description present, quantity / unit cost / unit price ≥ 0, markup 0..10,000,000 ppm or null. Written by id (updated, inserted, removed when left out), so a line keeps its identity across an edit; nothing points at one but a measurement. |
 | `job_party_documents` | What a subcontractor or supplier has on file with the business (11b, ADR 0068): the party, an open-taxonomy `kind` (format-checked; three suggested), title, issuer, number, issued and expires dates, a coverage limit, requested / received / void with the receipt date, notes. The scanned copy is a Documents attachment (`job_party_document`). | **No action to the party** — one with documents on file cannot be merged away. CHECK: the kind is a slug; received has its date, requested has none, void keeps what it had; limit ≥ 0. Standing (missing / expired / expiring / ok) is derived against today and the tenant's required list, never stored. |
 | `job_drawing_sets` | One issue of a job's drawings (ADR 0072): name, the date on the drawings (`issued_on`, which orders the issues), who issued it (a party), notes. Its PDFs are cabinet documents hung on it through `document_attachments` (`job_drawing_set`). | Cascade from the project; **no action to the party**. CHECK: name present. The current set is never stored — it is derived from the issues' dates. |
 | `job_sheets` | One page of one of a set's files with the number the trade calls it by, normalised on write, a title and a revision mark; **and its scale** (ADR 0074): page points per foot or metre with the page's size in points beside it, so a measurement's fractions become feet without the PDF. | Cascade from the project, the set AND the document (a page of a file that is gone is nothing to open). UNIQUE (set, number) and (set, document, page). CHECK: number present, page ≥ 1. The discipline is read off the number, never stored. |
@@ -3425,7 +3611,7 @@ hand-reordered like 0329) and `0335_job_billing.sql` / `0336_job_billing_rls.sql
 `wip_adjustment` to `journal_entry_source`, which nothing in the file uses)
 and `0341_cost_plus.sql` / `0342_cost_plus_rls.sql` (slice 5b; as generated,
 since the new table references existing ones only) and `0343_sub_billing.sql`
-/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) and `0350_lien_waivers.sql` / `0351_lien_waivers_rls.sql` (slice 11a; as generated, one new table referencing existing ones) and `0352_selections.sql` / `0353_selections_rls.sql` (slice 8; hand-reordered — two new tables, the selections' unique index ahead of the choices' key) and `0354_party_documents.sql` / `0355_party_documents_rls.sql` (slice 11b; as generated) and `0356_estimates.sql` / `0357_estimates_rls.sql` (slice 10; hand-reordered — two new tables, the estimates' unique index ahead of the lines' key) and `0358_proposal.sql` (slice 10b; four columns and a CHECK on `job_estimates`, so no RLS migration) and `0359_job_phases.sql` / `0360_job_phases_rls.sql` (the schedule; hand-reordered — a self-referencing key needs the table's own unique index first) follow the same rule —
+/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) and `0350_lien_waivers.sql` / `0351_lien_waivers_rls.sql` (slice 11a; as generated, one new table referencing existing ones) and `0352_selections.sql` / `0353_selections_rls.sql` (slice 8; hand-reordered — two new tables, the selections' unique index ahead of the choices' key) and `0354_party_documents.sql` / `0355_party_documents_rls.sql` (slice 11b; as generated) and `0356_estimates.sql` / `0357_estimates_rls.sql` (slice 10; hand-reordered — two new tables, the estimates' unique index ahead of the lines' key) and `0358_proposal.sql` (slice 10b; four columns and a CHECK on `job_estimates`, so no RLS migration) and `0359_job_phases.sql` / `0360_job_phases_rls.sql` (the schedule; hand-reordered — a self-referencing key needs the table's own unique index first) and `0373_job_estimate_groups.sql` / `0374_job_estimate_groups_rls.sql` (E1, ADR 0079; as generated but for the line's key to the item, **hand-edited to the column-list `ON DELETE SET NULL ("group_id")`** as every composite SET NULL in this repo is) follow the same rule —
 and from slice 3 the pair is `db:verify-rls` **and `db:verify-modules`**, after
 the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **220 tables**, all enabled, forced and with
 policies, on both.
@@ -3462,6 +3648,25 @@ ordering only bites when two new tables reference each other in one file.
   builders, one layout in the proposal's styles, two loaders that read the
   rows in one transaction; the routes under `src/app/api/jobs/change-orders`
   and `src/app/api/jobs/commitments`.
+- `src/packs/jobs/estimate-math.ts` — **the whole arithmetic of an estimate,
+  pure and pinned** (ADR 0069, 0079). The items arrive as a trailing argument
+  that defaults to none, so an ungrouped estimate computes what it always did.
+  `estimateTotals` (with `spreadableCents` — the overhead-and-profit base — and
+  `fixedCents` beside the six it always had), `groupCostCents` /
+  `groupPriceCents`, and **one internal `scheduleLines`** that every shape
+  reads, so an item's row is exactly its lines' rows added up: `scheduleRows`
+  in `group` (the schedule of values), `line` and `detail` (the proposal's
+  takeoff, where a FIXED item prints as one row because its build-up was never
+  the client's), plus `scheduleFromEstimate` for the per-line view and
+  `estimateByCode` for the budget — whose COST is untouched by items.
+- `src/packs/jobs/estimating-ops.ts` + `components/estimate-editor.tsx` — the
+  estimate's verbs and its one screen. `saveGroups` returns the map from what a
+  line called an item to the id the server minted, and runs before `saveLines`
+  and before the deletions, so no line is orphaned mid-write; a `groupRef` that
+  resolves to nothing is refused. `applyEstimateToSchedule` takes a shape, `group`
+  by default once there are items. The editor holds items as header rows inside
+  the ONE table, so the columns stay aligned, and hides the item column entirely
+  until there is an item.
 - `src/packs/jobs/takeoff-ops.ts` + `takeoff-math.ts` — the scale and the takeoff
   (ADR 0074): `setSheetScale` from a known dimension or a standard,
   `measure` through the scale (pure, shared with the viewer), `pushTakeoff`
@@ -3806,14 +4011,35 @@ ordering only bites when two new tables reference each other in one file.
   with bars; nothing drags.
 - **The proposal prints; it is not sent, and the client cannot accept it on
   a screen of their own (10b, ADR 0070).** Mail's seam is there for the
-  sending when somebody asks; a client portal is a decision of its own.
-- **An estimate is lines, and nothing more yet (slice 10, ADR 0069).**
-  Assemblies — a named bundle of lines dropped in as one ("interior door,
-  prehung": slab, hardware, casing, labour) — a tenant-level unit cost book
+  sending when somebody asks. **The client link WITH an Accept button is now
+  E5**, chosen by the founder on 2026-09-16 along with a magazine-grade
+  brochure for luxury work — and the two are one build, because a web
+  proposal is HTML and a magazine-grade PDF is that same HTML through
+  Chromium. The PDF export stays a requirement, so E5 carries the Chromium
+  route rather than leaving it to a later slice.
+- **The estimate program is open, and E1 is the only slice shipped** — see
+  [the plan](#the-estimate-program-open-started-2026-09-16) for E2–E7, each
+  with the founder's decision behind it. What is NOT built, in order of
+  what was asked for: the **client-facing line title** and the **line hidden
+  from the client** (E2; hiding will only be offered inside an item, because
+  hidden money must have somewhere to hide or the printed rows stop adding
+  up); the **entry bar**, the **paste target** (jobs is the only pack with
+  no `paste/` directory) and **per-row saving** — the editor is still one
+  `useState` and one Save button, which a two-hundred-line takeoff cannot be
+  (E3); the **price memory**, including the estimated-versus-actual read the
+  pack already has the data for (E4); **the proposal as sections**, the
+  brochure, and the client link with Accept (E5); and **assemblies**, which
+  are a saved item (E6).
+- **An estimate is lines and items, and nothing more yet (slice 10, ADR 0069;
+  E1, ADR 0079).**
+  ~~Assemblies — a named bundle of lines dropped in as one ("interior door,
+  prehung": slab, hardware, casing, labour)~~ **now E6, and their shape is
+  settled: an assembly is a saved item.** A tenant-level unit cost book
   that fills a line's cost from the last time it was priced ~~and a takeoff
   from the drawings~~ are each a real thing the trade has and each a slice
-  of its own; the first two want a few real estimates typed before their
-  shape is set. **The takeoff shipped as drawings 9c, 2026-09-16 (ADR 0074).** ~~The proposal as a printed document~~ shipped as 10b. An estimate is not
+  of its own. **Items are one level deep** on purpose, and a loose line
+  always sorts after the items rather than between them — a builder who
+  wants "general conditions" printed first makes it an item. **The takeoff shipped as drawings 9c, 2026-09-16 (ADR 0074).** ~~The proposal as a printed document~~ shipped as 10b. An estimate is not
   attached to Documents (a scanned quote, a supplier's price sheet) — the
   gallery seam is there and nothing on the estimate calls it yet. An
   estimate on a schedule where every line is sold by the unit can miss the

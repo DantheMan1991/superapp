@@ -50,6 +50,7 @@ import {
   applyEstimateToSchedule,
   createEstimate,
   updateEstimate,
+  type EstimateGroupInput,
   type EstimateLineInput,
 } from "./estimating-ops";
 import { rateStringToPpm } from "./estimate-math";
@@ -120,6 +121,8 @@ import {
   SELECTION_ENTITY,
   SELECTION_STATUSES,
   ESTIMATE_STATUSES,
+  GROUP_PRICE_MODES,
+  SCHEDULE_SHAPES,
   PROPOSAL_PRESENTATIONS,
   PHASE_KINDS,
   PHASE_STATUSES,
@@ -2595,8 +2598,21 @@ const rateToPpm = z
     return ppm;
   });
 
+const estimateGroupSchema = z.object({
+  id: optionalUuid,
+  /** What this group's lines name in `groupRef` while it has no id yet. */
+  key: z.string().trim().max(64).optional(),
+  name: z.string().trim().max(200),
+  clientNote: z.string().trim().max(4000).optional(),
+  priceMode: z.enum(GROUP_PRICE_MODES).optional(),
+  /** The price the client pays, on a group that is priced by hand. */
+  fixedPriceCents: moneyToCents,
+});
+
 const estimateLineSchema = z.object({
   id: optionalUuid,
+  /** The item this line sits in: a group's id, or a new group's key. */
+  groupRef: z.string().trim().max(64).optional(),
   costCodeId: optionalUuid,
   description: z.string().trim().min(1).max(300),
   unit: z.string().trim().max(20).optional(),
@@ -2627,8 +2643,35 @@ const estimateSchema = z.object({
   scope: z.string().trim().max(8000).optional(),
   exclusions: z.string().trim().max(8000).optional(),
   terms: z.string().trim().max(8000).optional(),
+  /** The client-facing items (ADR 0079), in the order shown. */
+  groups: z.array(estimateGroupSchema).max(200).optional(),
   lines: z.array(estimateLineSchema).max(500).optional(),
 });
+
+/**
+ * A blank name is a blank row and is dropped. **A group that adds up its lines
+ * sends no price**, so toggling the mode back in the editor cannot leave a
+ * stale number behind for the op to refuse: this layer normalises, the op holds
+ * the invariant for its other callers, and the CHECK holds it for everyone.
+ */
+function estimateGroups(
+  groups: z.infer<typeof estimateGroupSchema>[] | undefined,
+): EstimateGroupInput[] | undefined {
+  if (groups === undefined) return undefined;
+  return groups
+    .filter((g) => g.name.trim() !== "")
+    .map((g) => {
+      const priceMode = g.priceMode ?? "rollup";
+      return {
+        id: g.id ?? undefined,
+        key: g.key,
+        name: g.name,
+        clientNote: g.clientNote,
+        priceMode,
+        fixedPriceCents: priceMode === "fixed" ? (g.fixedPriceCents ?? 0) : null,
+      };
+    });
+}
 
 /** A blank description is a blank row and is dropped; a blank quantity is one. */
 function estimateLines(
@@ -2639,6 +2682,7 @@ function estimateLines(
     .filter((l) => l.description.trim() !== "")
     .map((l) => ({
       id: l.id ?? undefined,
+      groupRef: l.groupRef ?? null,
       costCodeId: l.costCodeId,
       description: l.description,
       unit: l.unit,
@@ -2660,7 +2704,7 @@ async function estimateGate(): Promise<JobsCtx> {
 }
 
 function estimateFields(data: z.infer<typeof estimateSchema>) {
-  const { projectId, markupPercent, overheadPercent, profitPercent, lines, ...rest } = data;
+  const { projectId, markupPercent, overheadPercent, profitPercent, groups, lines, ...rest } = data;
   return {
     projectId,
     fields: {
@@ -2668,6 +2712,7 @@ function estimateFields(data: z.infer<typeof estimateSchema>) {
       ...(markupPercent === undefined ? {} : { markupPpm: markupPercent ?? 0 }),
       ...(overheadPercent === undefined ? {} : { overheadPpm: overheadPercent ?? 0 }),
       ...(profitPercent === undefined ? {} : { profitPpm: profitPercent ?? 0 }),
+      ...(groups === undefined ? {} : { groups: estimateGroups(groups) }),
       ...(lines === undefined ? {} : { lines: estimateLines(lines) }),
     },
   };
@@ -2791,6 +2836,8 @@ const applyEstimateSchema = z.object({
   projectId: z.string().uuid(),
   id: z.string().uuid(),
   contractId: optionalUuid,
+  /** How the schedule of values is written (ADR 0079); the op defaults it. */
+  shape: z.enum(SCHEDULE_SHAPES).optional(),
 });
 
 export async function applyEstimateToBudgetAction(input: unknown) {
@@ -2811,12 +2858,14 @@ export async function applyEstimateToBudgetAction(input: unknown) {
 export async function applyEstimateToScheduleAction(input: unknown) {
   const parsed = applyEstimateSchema.safeParse(input);
   if (!parsed.success || !parsed.data.contractId) return { error: "Pick the contract the schedule belongs to." };
-  const { projectId, id, contractId } = parsed.data;
+  const { projectId, id, contractId, shape } = parsed.data;
   try {
     const ctx = await gate();
-    const result = await withTenant(ctx.tenantId, (tx) => applyEstimateToSchedule(tx, ctx, id, contractId), {
-      role: ctx.role,
-    });
+    const result = await withTenant(
+      ctx.tenantId,
+      (tx) => applyEstimateToSchedule(tx, ctx, id, contractId, shape),
+      { role: ctx.role },
+    );
     revalidatePath(`${BASE}/${projectId}`);
     revalidatePath(`${BASE}/${projectId}/contracts/${contractId}`);
     revalidatePath(`${BASE}/${projectId}/estimates/${id}`);

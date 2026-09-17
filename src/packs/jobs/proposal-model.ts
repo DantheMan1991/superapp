@@ -2,7 +2,13 @@ import { fitLogo, readableOnWhite, type HexColor } from "@/lib/brand/core";
 import { formatCents } from "@/lib/money";
 import { formatQuantity } from "./billing-math";
 import type { CertificateBrand } from "./certificate-model";
-import { estimateTotals, scheduleFromEstimate, type EstimateLineFigures } from "./estimate-math";
+import {
+  estimateTotals,
+  scheduleFromEstimate,
+  scheduleRows,
+  type EstimateGroupFigures,
+  type EstimateLineFigures,
+} from "./estimate-math";
 
 /**
  * AN ESTIMATE AS THE PROPOSAL THE CLIENT IS SENT — pure, no database, no
@@ -33,6 +39,12 @@ export interface ProposalLineInput extends EstimateLineFigures {
   codeLabel: string | null;
 }
 
+/** A client-facing item on the proposal (ADR 0079): its name, its paragraph, its price rule. */
+export interface ProposalGroupInput extends EstimateGroupFigures {
+  name: string;
+  clientNote: string;
+}
+
 export interface ProposalInput {
   businessName: string;
   brand?: CertificateBrand;
@@ -58,6 +70,8 @@ export interface ProposalInput {
   overheadPpm: number;
   profitPpm: number;
   lines: ProposalLineInput[];
+  /** The client-facing items, in their order; empty on an estimate of loose lines. */
+  groups?: ProposalGroupInput[];
 }
 
 export interface ProposalRow {
@@ -67,6 +81,10 @@ export interface ProposalRow {
   /** The price per unit on a line sold by the unit, else "". */
   unitPrice: string;
   amount: string;
+  /** The item's paragraph, under its name; "" on a line and on a heading. */
+  note?: string;
+  /** An item's name over the lines beneath it: no amount, and no money of its own. */
+  heading?: boolean;
 }
 
 export interface ProposalModel {
@@ -130,24 +148,44 @@ export function buildProposalModel(input: ProposalInput): ProposalModel {
   const primary = input.brand?.primaryColor ?? null;
   const logo = input.brand?.logo ?? null;
   const terms = { markupPpm: input.markupPpm, overheadPpm: input.overheadPpm, profitPpm: input.profitPpm };
-  const totals = estimateTotals(input.lines, terms);
-  const schedule = scheduleFromEstimate(input.lines, terms);
+  const groups = input.groups ?? [];
+  const totals = estimateTotals(input.lines, terms, groups);
+  const schedule = scheduleFromEstimate(input.lines, terms, groups);
 
-  // ---- the price, three ways
+  // ---- the price, four ways
   let rows: ProposalRow[] = [];
   let rounding: ProposalRow | null = null;
   const columns = { quantity: false, unitPrice: false };
-  if (input.presentation === "lines") {
-    rows = input.lines.map((l, i) => {
-      const s = schedule[i];
-      const lump = l.quantityThousandths === 1000 && l.unit.trim() === "";
-      const quantity = lump ? "" : `${formatQuantity(l.quantityThousandths)} ${l.unit.trim()}`.trim();
-      const unitPrice = s.unitPriceCents === null ? "" : money(s.unitPriceCents);
+  const quantityOf = (thousandths: number | null, unit: string): string => {
+    if (thousandths === null) return "";
+    if (thousandths === 1000 && unit.trim() === "") return "";
+    return `${formatQuantity(thousandths)} ${unit.trim()}`.trim();
+  };
+  if (input.presentation === "lines" || input.presentation === "groups") {
+    // `groups` shows one row per item; `lines` shows a takeoff, where an item priced
+    // by hand still shows as one row — its build-up was never the client's (ADR 0079).
+    const scheduled = scheduleRows(
+      input.lines.map((l) => ({ ...l, costCodeId: null })),
+      terms,
+      groups,
+      input.presentation === "groups" ? "group" : "detail",
+    );
+    const noteOf = new Map(groups.map((g) => [g.id, g.clientNote.trim()]));
+    rows = scheduled.map((r) => {
+      const quantity = r.heading ? "" : quantityOf(r.lineQuantityThousandths, r.unit);
+      const unitPrice = r.unitPriceCents === null ? "" : money(r.unitPriceCents);
       if (quantity) columns.quantity = true;
       if (unitPrice) columns.unitPrice = true;
-      return { description: l.description, quantity, unitPrice, amount: money(s.scheduledCents) };
+      return {
+        description: r.description,
+        quantity,
+        unitPrice,
+        amount: r.heading ? "" : money(r.scheduledCents),
+        note: r.groupId === null ? "" : (noteOf.get(r.groupId) ?? ""),
+        heading: r.heading,
+      };
     });
-    const shown = schedule.reduce((sum, s) => sum + s.scheduledCents, 0);
+    const shown = scheduled.reduce((sum, r) => (r.heading ? sum : sum + r.scheduledCents), 0);
     if (shown !== totals.totalCents) {
       rounding = { description: "Rounding", quantity: "", unitPrice: "", amount: money(totals.totalCents - shown) };
     }

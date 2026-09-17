@@ -201,11 +201,39 @@ The header shows the number, the title, the {{project|lower}}, the contract it b
 - **`Overhead, %`** — on the lines' price. `10`.
 - **`Profit, %`** — on the price plus overhead. `10`. Leave both at nothing if you price everything on the lines; leave the markup at nothing if you sell at cost and take it all below. Either way it is the same estimate, and the margin at the bottom is the same number.
 
-**Lines.** One row per thing you are pricing. {button:Add line|ghost} adds a row; the bin at the end of a row removes it (the last row stays).
+**Items — what the client buys.** A client does not buy "320 sf of tile at $4.20, 320 sf of tile labour at $3.50, two bags of thinset". A client buys **tile flooring**, at one price. An **item** is that: a name in the client's own words, with the lines that build it up underneath it. The proposal shows the item and its price; the build-up behind it is yours.
+
+{button:Add item|ghost} adds one. An item is a shaded row across the table with its lines beneath it, and a second row under its name for the sentence the client reads:
+
+| On the item's row | What it is |
+| --- | --- |
+| `Item name` | What the client reads — `Tile flooring, master and hall baths`. Required: **an item with no name is ignored when you save**, the way a line with no description is, and its lines are saved as ordinary loose lines. |
+| How it is priced | `Add up the lines` or `Price it myself`. See below. |
+| The price | Only when you chose `Price it myself`: what the client pays for this item. Otherwise the cell reads *Its lines add up*. |
+| `Cost` | What the lines under it cost you. |
+| `Price` | What the client is asked for it, with the margin and its percentage underneath — this is the number that tells you whether a round price was a safe one. |
+| The bin | **Removes the item and leaves its lines.** They become ordinary lines again with their pricing untouched; nothing you typed is thrown away. |
+| The sentence below | One line the client reads under this item on the proposal — *Porcelain tile, master and hall baths, as selected.* Optional, and it prints only on the by-item and line-by-line proposals. |
+
+**The two ways to price an item.**
+
+- **`Add up the lines`** — the item is worth what its lines are worth, and each line takes the markup, the overhead and the profit exactly as any line does. This is the ordinary case.
+- **`Price it myself`** — you type what the client pays and **that is the number that prints**. Overhead and profit are *not* added to it again: typing $8,400 means the client is asked $8,400, and the margin beside it shows what that leaves you against the $6,950 behind it. Use it when you sell round numbers, or when the build-up is yours alone.
+
+If you want a lump you have *costed* — "the plumbing subcontract is $12,000 and I mark it up like everything else" — that is a **line** with a blank quantity, not an item priced by hand.
+
+**When every item is priced by hand** there is nothing left for overhead and profit to be taken on, and the total is simply the sum of the prices you typed. The page says so under the figures. That is how a typed price works; if you meant the rates to apply, let the item's lines add up instead.
+
+**{button:Add line|ghost} at the top** adds a line in no item. Each item has its own {button:Add line to …|ghost} underneath it. A line's first cell — **`Item`** — is which item it belongs to, and `Not in an item` moves it out; **that column is not there at all until the estimate has an item**, so an estimate of plain lines looks exactly as it always did. Lines in no item are listed last, under **Not in an item**.
+
+Once the estimate is accepted its items are fixed with its lines and its rates.
+
+**Lines.** One row per thing you are pricing. The bin at the end of a row removes it (the last row stays).
 
 | Column | What it is |
 | --- | --- |
-| `Cost code` | Where the money lands in the budget, from the {{project|lower}}'s cost code list. `No code` is allowed and the line still prices; it is left out when the estimate becomes the budget. |
+| `Item` | Which item this line builds up, or `Not in an item`. Only shown once the estimate has an item. |
+| `Cost code` | Where the money lands in the budget, from the {{project|lower}}'s cost code list. `No code` is allowed and the line still prices; it is left out when the estimate becomes the budget. **A cost code is yours and is not on the proposal** unless you choose to show the price by code. |
 | `Description` | Required; a row with none is ignored when you save. `Slab, 4in, fibre mesh`. |
 | `Qty` | Blank is one — a lump sum. `120`. |
 | `Unit` | `cy`, `sf`, `ea`, `ls` — yours. |
@@ -217,11 +245,15 @@ The header shows the number, the title, the {{project|lower}}, the contract it b
 
 Cost and price are worked out as you type and never stored, so a line typed as 320 sf at $4.20 and a line typed as $1,344.00 agree to the cent.
 
-**The six figures.** `Cost` (every line at cost), `Price` (every line at its price), `Overhead`, `Profit`, `Total` (price plus overhead plus profit — what the client is asked for) and `Margin` (total less cost, with its percentage of the total).
+**The six figures.** `Cost` (every line at cost — every line, whether it sits in an item or not), `Price` (what the client is asked for the lines and the items, before overhead and profit; it also names how much of that was **priced by hand** when any item is), `Overhead`, `Profit`, `Total` (price plus overhead plus profit — what the client is asked for) and `Margin` (total less cost, with its percentage of the total).
 
 **The proposal block.** What the client is sent, saved with the rest of the form.
 
-- **`Show the price`** — `Line by line` (every line, with quantity and per-unit columns when a line has them — a takeoff, or a unit-price bid), `By cost code` (each code's sum, the no-code lines as *Other*) or `One sum` (one figure). The total is the same in all three, and overhead and profit are in the prices whichever you pick: cost, markup, overhead and profit never print.
+- **`Show the price`** — four ways, and the total is the same in all four. Overhead and profit are in the prices whichever you pick: **cost, markup, overhead, profit and margin never print.**
+  - **`By item`** — one row per item at its price with its sentence beneath it, and one row for each line in no item. What a custom-home client reads, and the one that shows nothing of the build-up.
+  - **`Line by line`** — a takeoff, with quantity and per-unit columns when a line has them. Items that add up their lines print as a heading with their lines beneath; **an item you priced yourself prints as one row at its price**, because typing a price is itself saying the build-up is not the client's.
+  - **`By cost code`** — each code's sum, the no-code lines as *Other*. For a client who expects a trade breakdown; most clients do not, and `By item` is the better answer.
+  - **`One sum`** — one figure.
 - **`Scope of work`** — what the price covers, in the client's words. Every line you type is its own paragraph on the page.
 - **`Not included`** — one exclusion per line: *Permits and utility fees.* *Landscaping.*
 - **`Terms`** — the payment schedule, what a change costs, how long the price holds. A new estimate starts with the terms of the last one you wrote, so this is usually a read-through.
@@ -245,19 +277,26 @@ A **signed** contract's value moves by change order, not by accepting an estimat
 
 ### Making it the schedule of values
 
-{button:Use as schedule of values|outline} (owners; greyed until the {{project|lower}} has a contract). Pick the **`Contract`** and {button:Make it the schedule|primary}: one schedule line per estimate line at its **price**, with the overhead and profit spread across the lines in proportion so the schedule adds up to the estimate's total — the contract sum, which a pay application is measured against — replacing the contract's schedule and carrying each line's cost code. A line sold at a unit price keeps billing by the quantity, with its unit price raised by the same share. `Schedule written: 4 lines, $89,122.55`. The schedule is what a fixed-price or unit-price contract bills against; a cost-plus or time-and-materials contract bills its cost and leaves the schedule unread. A schedule line an application has already billed against cannot be removed, and the write is refused if the estimate would drop one — see **Billing a contract**. If you want overhead or your fee as a line of its own on the schedule, type it as a line of the estimate.
+{button:Use as schedule of values|outline} (owners; greyed until the {{project|lower}} has a contract). Pick the **`Contract`**, then — **once the estimate has items** — **`Written`**:
+
+- **`By item`**, the default: one schedule line per item and one for each line in no item. This is almost always what you want, because it is the schedule your client can read: it matches the proposal they signed, and every draw is measured against it. An item bills as a sum and carries its lines' cost code when they all share one.
+- **`Line by line`**: one schedule line per estimate line — the whole takeoff. Fine on a short estimate; on a two-hundred-line one it makes a schedule nobody will certify. An item you priced yourself has that price shared across its own lines, so the schedule still adds up to the total.
+
+An estimate with no items is written line by line and the choice is not offered.
+
+Then {button:Make it the schedule|primary}: each row at its **price**, with the overhead and profit spread across them in proportion so the schedule adds up to the estimate's total — the contract sum, which a pay application is measured against — replacing the contract's schedule and carrying the cost code. A line sold at a unit price keeps billing by the quantity, with its unit price raised by the same share. `Schedule written: 4 lines, $89,122.55`. The schedule is what a fixed-price or unit-price contract bills against; a cost-plus or time-and-materials contract bills its cost and leaves the schedule unread. A schedule line an application has already billed against cannot be removed, and the write is refused if the estimate would drop one — see **Billing a contract**. If you want overhead or your fee as a line of its own on the schedule, type it as a line of the estimate.
 
 Neither button is automatic on accepting: a {{project|lower}} budgeted at cost and billed on a schedule of milestones is written from the estimate for one and by hand for the other.
 
 ### By cost code
 
-Under the editor, once the estimate has lines: each code's cost and price from the saved lines — the cost is what **Use as budget** writes, the price is what the job cost report will compare it with once the {{project|lower}} is billed. `No cost code` is the last row.
+Under the editor, once the estimate has lines: each code's cost and price from the saved lines — the cost is what **Use as budget** writes, the price is what the job cost report will compare it with once the {{project|lower}} is billed. `No cost code` is the last row. A line held by an item you priced yourself is shown at its **share of that price** rather than at its own markup, so the prices here still add up to the estimate's.
 
 ### The proposal
 
 {button:Print proposal|outline|file-text} on the estimate's page, or {button:Proposal|outline|file-text} on the list. One letter page (a second when the scope, the lines or the terms need it), under your logo and colour where the brand kit has them: **PROPOSAL** and the estimate's title; the {{project|lower}} (number and name), the site if the {{project|lower}} carries an address, the proposal number, its date (the `Sent` date; *Not yet sent* on a draft) and `Valid until`; **To** the client — the contract's counterparty once the estimate names a contract, else the {{project|lower}}'s customer, with their address from Accounting when they have been billed before — and **From** your business.
 
-Then **Scope of work** (your paragraphs), **The price** the way you chose — item, quantity and per-unit columns only when a line needs them, amount; a *Rounding* line only when unit prices cannot add to the total to the cent; the **Total** — or, for one sum, *Price for the work described* on its own line; **Not included**; **Terms**; *This proposal is valid until …* when a date is set; the acceptance sentence; and two signature blocks, *Accepted for <the client>* (signed, name, date) and *For <your business>* (signed, date). A draft prints under **DRAFT**, a declined one under **DECLINED**, a superseded one under **SUPERSEDED**; sent and accepted print clean. The footer names the business, the proposal and the {{project|lower}} on every page.
+Then **Scope of work** (your paragraphs), **The price** the way you chose — item, quantity and per-unit columns only when a line needs them, amount, with an item's own sentence in smaller type under its name and an item that adds up its lines printed as a bold heading over them; a *Rounding* line only when unit prices cannot add to the total to the cent; the **Total** — or, for one sum, *Price for the work described* on its own line; **Not included**; **Terms**; *This proposal is valid until …* when a date is set; the acceptance sentence; and two signature blocks, *Accepted for <the client>* (signed, name, date) and *For <your business>* (signed, date). A draft prints under **DRAFT**, a declined one under **DECLINED**, a superseded one under **SUPERSEDED**; sent and accepted print clean. The footer names the business, the proposal and the {{project|lower}} on every page.
 
 The proposal is made from the estimate every time it is opened, never stored, so a draft's proposal is always the draft as it is now. It is not sent from here yet — save the PDF and attach it to your own message.
 

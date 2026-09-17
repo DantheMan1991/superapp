@@ -66,6 +66,11 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: rule },
   totalRow: { flexDirection: "row", paddingVertical: 6, borderTopWidth: 1, borderTopColor: ink, fontWeight: "bold" },
   pDesc: { flex: 1, paddingRight: 8 },
+  /** An item's paragraph, under its name: the client's sentence about what it covers (ADR 0079). */
+  pNote: { color: muted, fontSize: 8, marginTop: 2, paddingRight: 8 },
+  /** An item's name over the lines beneath it: no amount, and a rule of its own. */
+  headingRow: { flexDirection: "row", paddingTop: 7, paddingBottom: 3 },
+  headingText: { flex: 1, fontWeight: "bold" },
   pQty: { width: 72, textAlign: "right" },
   pUnit: { width: 78, textAlign: "right" },
   pAmount: { width: 90, textAlign: "right" },
@@ -152,15 +157,30 @@ function priceTable(m: ProposalModel): ReactElement {
       createElement(View, { style: styles.sumRow }, text({}, price.total.label), text({}, price.total.amount)),
     );
   }
-  const cells = (r: { description: string; quantity: string; unitPrice: string; amount: string }, key: string) =>
-    createElement(
+  const cells = (r: ProposalModel["price"]["rows"][number], key: string) => {
+    // A heading is an item's name over its lines: bold, no columns, no amount.
+    if (r.heading) {
+      return createElement(
+        View,
+        { key, style: styles.headingRow },
+        text(styles.headingText, r.description),
+      );
+    }
+    const note = r.note?.trim() ?? "";
+    return createElement(
       View,
       { key, style: styles.row },
-      text(styles.pDesc, r.description),
+      createElement(
+        View,
+        { style: styles.pDesc },
+        text({}, r.description),
+        ...(note === "" ? [] : [text(styles.pNote, note, `${key}n`)]),
+      ),
       ...(price.columns.quantity ? [text(styles.pQty, r.quantity)] : []),
       ...(price.columns.unitPrice ? [text(styles.pUnit, r.unitPrice)] : []),
       text(styles.pAmount, r.amount),
     );
+  };
   return createElement(
     View,
     { key: "price" },

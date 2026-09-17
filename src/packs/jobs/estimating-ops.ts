@@ -1,14 +1,17 @@
 import "server-only";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
-import type { JobEstimate, JobEstimateLine } from "@/db/schema";
+import type { JobEstimate, JobEstimateGroup, JobEstimateLine } from "@/db/schema";
 import {
   estimateByCode,
   estimateTotals,
+  groupCostCents,
+  groupPriceCents,
+  isFixedPrice,
   lineCostCents,
   linePriceCents,
+  scheduleRows,
   type EstimateTotals,
-  scheduleFromEstimate,
 } from "./estimate-math";
 import {
   JobsError,
@@ -20,7 +23,14 @@ import {
   type JobsCtx,
 } from "./ops";
 import { customerForParty } from "@/modules/accounting/invoicing/customers";
-import { RATE_PPM_MAX, isEstimateStatus, isProposalPresentation } from "./vocabulary";
+import {
+  RATE_PPM_MAX,
+  isEstimateStatus,
+  isGroupPriceMode,
+  isProposalPresentation,
+  isScheduleShape,
+  type ScheduleShape,
+} from "./vocabulary";
 
 /**
  * Estimates — slice 10 of the construction plan, ADR 0069: the front end of
@@ -39,6 +49,13 @@ import { RATE_PPM_MAX, isEstimateStatus, isProposalPresentation } from "./vocabu
 export interface EstimateLineInput {
   /** Present when editing a line that exists; absent for a new one. */
   id?: string;
+  /**
+   * The client-facing item this line sits in (ADR 0079): an existing group's
+   * id, or the `key` of a group being created in the same save. Null or absent
+   * leaves the line loose. Only the server mints a group's id, which is why a
+   * new group is referenced by a key and never by an id the client chose.
+   */
+  groupRef?: string | null;
   costCodeId?: string | null;
   description: string;
   unit?: string;
@@ -48,6 +65,20 @@ export interface EstimateLineInput {
   markupPpm?: number | null;
   unitPriceCents?: number | null;
   notes?: string;
+}
+
+/** A client-facing item on the estimate (ADR 0079). */
+export interface EstimateGroupInput {
+  /** Present when editing a group that exists. */
+  id?: string;
+  /** For a new group: what its lines name in `groupRef`. Ignored when `id` is given. */
+  key?: string;
+  name: string;
+  clientNote?: string;
+  /** "rollup" — its lines sum — or "fixed" — the price is typed. */
+  priceMode?: string;
+  /** Required by `fixed`, refused by `rollup`. */
+  fixedPriceCents?: number | null;
 }
 
 export interface EstimateInput {
@@ -67,6 +98,8 @@ export interface EstimateInput {
   scope?: string;
   exclusions?: string;
   terms?: string;
+  /** The client-facing items, in the order given (ADR 0079). */
+  groups?: EstimateGroupInput[];
   lines?: EstimateLineInput[];
 }
 
@@ -85,11 +118,33 @@ function validateEstimateShape(input: Partial<EstimateInput>): void {
     throw new JobsError("INVALID_STATUS", `invalid status: ${input.status}`);
   }
   if (input.presentation !== undefined && !isProposalPresentation(input.presentation)) {
-    throw new JobsError("INVALID_VALUE", "a proposal shows its price line by line, by cost code or as one sum");
+    throw new JobsError(
+      "INVALID_VALUE",
+      "a proposal shows its price line by line, by cost code, by item or as one sum",
+    );
   }
   validateRate(input.markupPpm, "a markup");
   validateRate(input.overheadPpm, "overhead");
   validateRate(input.profitPpm, "profit");
+  for (const group of input.groups ?? []) {
+    if (group.name.trim() === "") {
+      throw new JobsError("INVALID_VALUE", "an item needs a name the client will read");
+    }
+    const mode = group.priceMode ?? "rollup";
+    if (!isGroupPriceMode(mode)) {
+      throw new JobsError("INVALID_VALUE", `an item's price either adds up its lines or is typed: ${mode}`);
+    }
+    const fixed = group.fixedPriceCents ?? null;
+    if (mode === "fixed" && fixed === null) {
+      throw new JobsError("INVALID_VALUE", `give ${group.name.trim()} the price the client pays, or let its lines add up`);
+    }
+    if (mode === "rollup" && fixed !== null) {
+      throw new JobsError("INVALID_VALUE", `${group.name.trim()} adds up its lines, so it cannot also carry a price`);
+    }
+    if (fixed !== null && (!Number.isInteger(fixed) || fixed < 0)) {
+      throw new JobsError("INVALID_VALUE", "a price cannot be negative");
+    }
+  }
   for (const line of input.lines ?? []) {
     if (line.description.trim() === "") {
       throw new JobsError("INVALID_VALUE", "an estimate line needs a description");
@@ -128,13 +183,96 @@ async function linesOf(tx: Tx, tenantId: string, estimateId: string): Promise<Jo
     .orderBy(asc(schema.jobEstimateLines.sortOrder), asc(schema.jobEstimateLines.createdAt));
 }
 
+async function groupsOf(tx: Tx, tenantId: string, estimateId: string): Promise<JobEstimateGroup[]> {
+  return tx
+    .select()
+    .from(schema.jobEstimateGroups)
+    .where(and(eq(schema.jobEstimateGroups.tenantId, tenantId), eq(schema.jobEstimateGroups.estimateId, estimateId)))
+    .orderBy(asc(schema.jobEstimateGroups.sortOrder), asc(schema.jobEstimateGroups.createdAt));
+}
+
+/**
+ * Write an estimate's groups (ADR 0079): the ones given, in the order given —
+ * updated by id, inserted when new. Returns what each was referred to by,
+ * mapped to the id it now has, so the lines saved next can point at a group
+ * created in the same breath. **Deleting is left to the caller**, after the
+ * lines are written: a group removed while its lines still name it would take
+ * their pricing with it, and the order below makes that impossible.
+ */
+async function saveGroups(
+  tx: Tx,
+  tenantId: string,
+  estimateId: string,
+  groups: EstimateGroupInput[],
+): Promise<{ refs: Map<string, string>; keptIds: Set<string> }> {
+  const existing = await groupsOf(tx, tenantId, estimateId);
+  const refs = new Map<string, string>();
+  const keptIds = new Set<string>();
+  for (const [i, g] of groups.entries()) {
+    const mode = g.priceMode ?? "rollup";
+    const values = {
+      name: g.name.trim(),
+      clientNote: g.clientNote?.trim() ?? "",
+      priceMode: mode,
+      fixedPriceCents: mode === "fixed" ? (g.fixedPriceCents ?? null) : null,
+      sortOrder: (i + 1) * 10,
+    };
+    if (g.id) {
+      if (!existing.some((e) => e.id === g.id)) {
+        throw new JobsError("NOT_FOUND", `item ${g.id} is not on this estimate`);
+      }
+      await tx
+        .update(schema.jobEstimateGroups)
+        .set({ ...values, updatedAt: new Date() })
+        .where(and(eq(schema.jobEstimateGroups.tenantId, tenantId), eq(schema.jobEstimateGroups.id, g.id)));
+      refs.set(g.id, g.id);
+      keptIds.add(g.id);
+    } else {
+      const rows = await tx
+        .insert(schema.jobEstimateGroups)
+        .values({ tenantId, estimateId, ...values })
+        .returning({ id: schema.jobEstimateGroups.id });
+      if (g.key) refs.set(g.key, rows[0].id);
+      keptIds.add(rows[0].id);
+    }
+  }
+  return { refs, keptIds };
+}
+
+/** The groups no longer on the estimate. Their lines, if any survived, go loose (the FK's SET NULL). */
+async function deleteGroupsGone(
+  tx: Tx,
+  tenantId: string,
+  estimateId: string,
+  kept: Set<string>,
+): Promise<void> {
+  const existing = await groupsOf(tx, tenantId, estimateId);
+  const gone = existing.filter((e) => !kept.has(e.id)).map((e) => e.id);
+  if (gone.length > 0) {
+    await tx
+      .delete(schema.jobEstimateGroups)
+      .where(and(eq(schema.jobEstimateGroups.tenantId, tenantId), inArray(schema.jobEstimateGroups.id, gone)));
+  }
+}
+
 /**
  * Write an estimate's lines: the ones given, in the order given — updated by
  * id, inserted when new, removed when left out. The schedule of values' rule,
  * so a line keeps its identity across an edit. Nothing points at an estimate
  * line, so nothing holds one.
+ *
+ * `groupRef` names the client-facing item the line sits in, by a group's id or
+ * by the key a group created in this same save was given; a reference to
+ * neither is refused rather than quietly dropped, because a line that lost its
+ * item is a line the client would see at the wrong price.
  */
-async function saveLines(tx: Tx, tenantId: string, estimateId: string, lines: EstimateLineInput[]): Promise<void> {
+async function saveLines(
+  tx: Tx,
+  tenantId: string,
+  estimateId: string,
+  lines: EstimateLineInput[],
+  groupRefs: Map<string, string> = new Map(),
+): Promise<void> {
   const existing = await linesOf(tx, tenantId, estimateId);
   const keep = new Set(lines.map((l) => l.id).filter((id): id is string => !!id));
   for (const id of keep) {
@@ -149,7 +287,15 @@ async function saveLines(tx: Tx, tenantId: string, estimateId: string, lines: Es
       .where(and(eq(schema.jobEstimateLines.tenantId, tenantId), inArray(schema.jobEstimateLines.id, removed)));
   }
   for (const [i, l] of lines.entries()) {
+    let groupId: string | null = null;
+    if (l.groupRef) {
+      groupId = groupRefs.get(l.groupRef) ?? null;
+      if (groupId === null) {
+        throw new JobsError("NOT_FOUND", `${l.description.trim()} names an item that is not on this estimate`);
+      }
+    }
     const values = {
+      groupId,
       costCodeId: l.costCodeId ?? null,
       description: l.description.trim(),
       unit: l.unit?.trim() ?? "",
@@ -210,8 +356,9 @@ export async function createEstimate(tx: Tx, ctx: JobsCtx, input: EstimateInput)
       createdByClerkUserId: ctx.userId,
     })
     .returning();
-  if (input.lines && input.lines.length > 0) {
-    await saveLines(tx, ctx.tenantId, rows[0].id, input.lines);
+  if ((input.groups && input.groups.length > 0) || (input.lines && input.lines.length > 0)) {
+    const { refs } = await saveGroups(tx, ctx.tenantId, rows[0].id, input.groups ?? []);
+    await saveLines(tx, ctx.tenantId, rows[0].id, input.lines ?? [], refs);
   }
   return rows[0];
 }
@@ -239,6 +386,7 @@ export async function updateEstimate(
     // The money, and the proposal's words — they are the agreement. The presentation is a printing choice and stays free.
     const moneyMoves =
       input.lines !== undefined ||
+      input.groups !== undefined ||
       (input.markupPpm !== undefined && input.markupPpm !== existing.markupPpm) ||
       (input.overheadPpm !== undefined && input.overheadPpm !== existing.overheadPpm) ||
       (input.profitPpm !== undefined && input.profitPpm !== existing.profitPpm) ||
@@ -249,8 +397,19 @@ export async function updateEstimate(
       throw new JobsError("ESTIMATE_ACCEPTED", `estimate ${existing.number} was accepted; revise it as a new one`);
     }
   }
-  if (input.lines !== undefined) {
-    await saveLines(tx, ctx.tenantId, id, input.lines);
+  if (input.groups !== undefined || input.lines !== undefined) {
+    // Groups first so a line can name one made in the same save; the groups that
+    // went last, so no line is ever orphaned mid-write.
+    const saved =
+      input.groups === undefined
+        ? null
+        : await saveGroups(tx, ctx.tenantId, id, input.groups);
+    const refs =
+      saved?.refs ?? new Map((await groupsOf(tx, ctx.tenantId, id)).map((g) => [g.id, g.id]));
+    if (input.lines !== undefined) {
+      await saveLines(tx, ctx.tenantId, id, input.lines, refs);
+    }
+    if (saved) await deleteGroupsGone(tx, ctx.tenantId, id, saved.keptIds);
   }
   const patch: Record<string, unknown> = {
     updatedAt: new Date(),
@@ -286,6 +445,22 @@ export interface EstimateLineRow extends JobEstimateLine {
   priceCents: number;
 }
 
+/**
+ * A client-facing item with its arithmetic (ADR 0079). The COST is always its
+ * lines'; the PRICE is what the client is asked for it before overhead and
+ * profit — the typed one on a fixed group, its lines' otherwise — so the
+ * margin is the number that says whether a round price was a safe one.
+ */
+export interface EstimateGroupRow extends JobEstimateGroup {
+  costCents: number;
+  priceCents: number;
+  marginCents: number;
+  marginPpm: number | null;
+  lineCount: number;
+  /** Whether the price was typed, and so sits outside the overhead-and-profit spread. */
+  fixed: boolean;
+}
+
 export interface EstimateCodeRow {
   costCodeId: string | null;
   codeLabel: string | null;
@@ -295,6 +470,8 @@ export interface EstimateCodeRow {
 
 export interface EstimateRow {
   estimate: JobEstimate;
+  /** The client-facing items, in their order; empty on an estimate of loose lines. */
+  groups: EstimateGroupRow[];
   lines: EstimateLineRow[];
   totals: EstimateTotals;
   /** Cost and price by cost code, the no-code line last. */
@@ -312,12 +489,17 @@ export async function listEstimates(tx: Tx, tenantId: string, projectId: string)
   if (estimates.length === 0) return [];
   const ids = estimates.map((e) => e.id);
   const contractIds = [...new Set(estimates.map((e) => e.contractId).filter((x): x is string => !!x))];
-  const [lines, codes, contracts] = await Promise.all([
+  const [lines, groups, codes, contracts] = await Promise.all([
     tx
       .select()
       .from(schema.jobEstimateLines)
       .where(and(eq(schema.jobEstimateLines.tenantId, tenantId), inArray(schema.jobEstimateLines.estimateId, ids)))
       .orderBy(asc(schema.jobEstimateLines.sortOrder), asc(schema.jobEstimateLines.createdAt)),
+    tx
+      .select()
+      .from(schema.jobEstimateGroups)
+      .where(and(eq(schema.jobEstimateGroups.tenantId, tenantId), inArray(schema.jobEstimateGroups.estimateId, ids)))
+      .orderBy(asc(schema.jobEstimateGroups.sortOrder), asc(schema.jobEstimateGroups.createdAt)),
     tx
       .select({ id: schema.jobCostCodes.id, code: schema.jobCostCodes.code, name: schema.jobCostCodes.name })
       .from(schema.jobCostCodes)
@@ -338,13 +520,29 @@ export async function listEstimates(tx: Tx, tenantId: string, projectId: string)
   const contractById = new Map(contracts.map((c) => [c.id, c]));
   return estimates.map((estimate) => {
     const own = lines.filter((l) => l.estimateId === estimate.id);
+    const ownGroups = groups.filter((g) => g.estimateId === estimate.id);
+    const groupRows: EstimateGroupRow[] = ownGroups.map((g) => {
+      const children = own.filter((l) => l.groupId === g.id);
+      const costCents = groupCostCents(children);
+      const priceCents = groupPriceCents(g, children, estimate.markupPpm);
+      const marginCents = priceCents - costCents;
+      return {
+        ...g,
+        costCents,
+        priceCents,
+        marginCents,
+        marginPpm: priceCents > 0 ? Math.round((marginCents / priceCents) * 1_000_000) : null,
+        lineCount: children.length,
+        fixed: isFixedPrice(g),
+      };
+    });
     const rows: EstimateLineRow[] = own.map((l) => ({
       ...l,
       codeLabel: l.costCodeId ? (codeLabel.get(l.costCodeId) ?? null) : null,
       costCents: lineCostCents(l),
       priceCents: linePriceCents(l, estimate.markupPpm),
     }));
-    const byCode: EstimateCodeRow[] = [...estimateByCode(own, estimate.markupPpm).entries()]
+    const byCode: EstimateCodeRow[] = [...estimateByCode(own, estimate.markupPpm, ownGroups).entries()]
       .map(([costCodeId, figures]) => ({
         costCodeId,
         codeLabel: costCodeId ? (codeLabel.get(costCodeId) ?? null) : null,
@@ -353,8 +551,9 @@ export async function listEstimates(tx: Tx, tenantId: string, projectId: string)
       .sort((a, b) => (a.costCodeId === null ? 1 : b.costCodeId === null ? -1 : (a.codeLabel ?? "").localeCompare(b.codeLabel ?? "")));
     return {
       estimate,
+      groups: groupRows,
       lines: rows,
-      totals: estimateTotals(own, estimate),
+      totals: estimateTotals(own, estimate, ownGroups),
       byCode,
       contract: estimate.contractId ? (contractById.get(estimate.contractId) ?? null) : null,
     };
@@ -447,7 +646,11 @@ export async function acceptEstimate(
     throw new JobsError("ESTIMATE_ACCEPTED", `estimate ${existing.number} was already accepted`);
   }
   await assertContractOnProject(tx, ctx.tenantId, input.contractId, existing.projectId);
-  const totals = estimateTotals(await linesOf(tx, ctx.tenantId, id), existing);
+  const totals = estimateTotals(
+    await linesOf(tx, ctx.tenantId, id),
+    existing,
+    await groupsOf(tx, ctx.tenantId, id),
+  );
   const contract = await tx
     .select({ valueCents: schema.jobContracts.valueCents })
     .from(schema.jobContracts)
@@ -483,7 +686,11 @@ export async function applyEstimateToBudget(
 ): Promise<{ codes: number; budgetCents: number; uncodedCents: number }> {
   requireWrite(ctx, "owner");
   const estimate = await loadEstimate(tx, ctx.tenantId, id);
-  const byCode = estimateByCode(await linesOf(tx, ctx.tenantId, id), estimate.markupPpm);
+  const byCode = estimateByCode(
+    await linesOf(tx, ctx.tenantId, id),
+    estimate.markupPpm,
+    await groupsOf(tx, ctx.tenantId, id),
+  );
   const lines = [...byCode.entries()]
     .filter((entry): entry is [string, { costCents: number; priceCents: number }] => entry[0] !== null)
     .map(([costCodeId, figures]) => ({ costCodeId, originalCents: figures.costCents }));
@@ -496,40 +703,56 @@ export async function applyEstimateToBudget(
 }
 
 /**
- * MAKE THE ESTIMATE THE SCHEDULE OF VALUES on a contract: one schedule line
- * per estimate line at its PRICE with overhead and profit spread across the
- * lines in proportion (`scheduleFromEstimate`), so the schedule totals the
- * estimate's total — the contract sum an accepted estimate set, which is
- * what a G703 requires and what every application is measured against.
- * Each line carries its code; a line sold at an explicit unit price keeps
- * its unit and quantity with the unit price raised by the same share, so a
- * unit-price contract bills by the quantity (ADR 0064). The schedule is
- * replaced, through `saveSovLines`, which refuses to remove a line an
- * application has billed against.
+ * MAKE THE ESTIMATE THE SCHEDULE OF VALUES on a contract, at its PRICE with
+ * overhead and profit spread in proportion (`scheduleRows`), so the schedule
+ * totals the estimate's total — the contract sum an accepted estimate set,
+ * which is what a G703 requires and what every application is measured
+ * against. The schedule is replaced, through `saveSovLines`, which refuses to
+ * remove a line an application has billed against.
+ *
+ * **BY GROUP when the estimate has any** (ADR 0079), which is the shape a
+ * client can read: one line per client-facing item and per loose line, so the
+ * schedule an owner certifies against matches the proposal they signed rather
+ * than the takeoff behind it. BY LINE is the other shape and the only one an
+ * ungrouped estimate has; asked for by name, it stays available, and a line
+ * sold at an explicit unit price keeps its unit and quantity with the unit
+ * price raised by the same share, so a unit-price contract bills by the
+ * quantity (ADR 0064).
  */
 export async function applyEstimateToSchedule(
   tx: Tx,
   ctx: JobsCtx,
   id: string,
   contractId: string,
-): Promise<{ lines: number; scheduledCents: number }> {
+  shape?: string,
+): Promise<{ lines: number; scheduledCents: number; shape: ScheduleShape }> {
   requireWrite(ctx, "owner");
   const estimate = await loadEstimate(tx, ctx.tenantId, id);
   await assertContractOnProject(tx, ctx.tenantId, contractId, estimate.projectId);
+  if (shape !== undefined && !isScheduleShape(shape)) {
+    throw new JobsError("INVALID_VALUE", "a schedule is written by item or line by line");
+  }
   const lines = await linesOf(tx, ctx.tenantId, id);
-  const schedule = scheduleFromEstimate(lines, estimate);
+  const groups = await groupsOf(tx, ctx.tenantId, id);
+  // No groups, no choice: by line is the only shape an ungrouped estimate has.
+  const chosen: ScheduleShape = groups.length === 0 ? "line" : ((shape as ScheduleShape) ?? "group");
+  const rows = scheduleRows(lines, estimate, groups, chosen);
   const saved = await saveSovLines(
     tx,
     ctx,
     contractId,
-    lines.map((l, i) => ({
-      description: l.description,
-      scheduledCents: schedule[i].scheduledCents,
-      costCodeId: l.costCodeId,
-      unit: l.unit,
-      quantityThousandths: schedule[i].quantityThousandths,
-      unitPriceCents: schedule[i].unitPriceCents,
+    rows.map((r) => ({
+      description: r.description,
+      scheduledCents: r.scheduledCents,
+      costCodeId: r.costCodeId,
+      unit: r.unit,
+      quantityThousandths: r.quantityThousandths,
+      unitPriceCents: r.unitPriceCents,
     })),
   );
-  return { lines: saved.length, scheduledCents: saved.reduce((sum, l) => sum + l.scheduledCents, 0) };
+  return {
+    lines: saved.length,
+    scheduledCents: saved.reduce((sum, l) => sum + l.scheduledCents, 0),
+    shape: chosen,
+  };
 }

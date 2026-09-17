@@ -51,6 +51,82 @@ open item while every test passes.
 
 ## Build log
 
+### 2026-09-16 — Ask the catalogue, not the migrations (branch `claude/composite-set-null-proof`)
+
+**A SCAN OVER MIGRATION FILES CANNOT SEE A REPAIR, so it reports bugs that were
+fixed years of migrations ago.** A file scan flagged three composite foreign
+keys carrying a bare `ON DELETE SET NULL` — `schedule_items_parent_fk` (`0096`),
+`work_items_parent_fk` (`0104`) and `production_order_lines_price_item_fk`
+(`0197`) — as applied and still wrong, and a repair migration was nearly written
+for them. **All three had already been repaired**, by `drizzle/0192` and
+`drizzle/0200`, whose whole purpose was that fix. Checked against
+`pg_constraint` on both databases before anything was written: **17 composite
+FKs with `ON DELETE SET NULL`, and 0 of them bare**, dev and prod alike.
+
+The false positive is structural, not a slip. **An applied migration is never
+edited** — the repair is a NEW migration that drops and re-adds the constraint —
+so the file that first installed it keeps its original wording for good. A text
+scan therefore cannot be made quiet by doing the correct thing, and its offender
+list can only grow.
+
+**So the guard asks the database what is installed.**
+`tests/isolation/constraints.test.ts` reads `pg_constraint.confdelsetcols` for
+every composite FK in `public` whose delete action is SET NULL, and fails naming
+any that is bare. It lives in the isolation suite because
+`npm run test:isolation` must pass before any deploy, so the class is re-proved
+every time, and because the defect is the same shape as the ones that suite
+already certifies: a constraint that does not do what the schema says.
+
+It also covers **15 constraints that had no definition guard at all**.
+`tests/nesting-parent-fk.test.ts` already drove the two nesting FKs and asserted
+their definitions; nothing watched the other fifteen, including the `0200` one.
+
+**Why the class needs a standing guard rather than a review habit:** the bare
+form comes back on its own. `.onDelete()` takes an action, not a column list, so
+the TS declaration and the drizzle-kit snapshot both record a plain `set null`
+and any later migration touching one of these tables can re-emit the bare form.
+That happened to `job_estimate_lines_group_fk` three hours after `0373`
+installed it correctly, and was caught by hand.
+
+**AND IT IS STILL LOADED ON `main` AS THIS IS WRITTEN — `npm run db:generate` on
+a clean checkout emits it unprompted**, with no schema change of any kind:
+
+```
+ALTER TABLE "job_estimate_lines" DROP CONSTRAINT "job_estimate_lines_group_fk";
+ALTER TABLE "job_estimate_lines" ADD CONSTRAINT "job_estimate_lines_group_fk" ... ON DELETE set null ...
+```
+
+The cause is snapshot drift, not the column list: `drizzle/meta/0374_snapshot.json`
+records this FK as `"onDelete": "no action"` while `jobs-estimates.ts` declares
+`.onDelete("set null")`, so drizzle-kit sees a real diff and re-creates the
+constraint — in the bare form, the only one it can express. **The next person to
+run `db:generate` for an unrelated change gets this bundled into their
+migration**, and applying it would break the constraint on production, where it
+is currently correct. It is not fixed here: PR #599's `0375` already carries the
+snapshot that records `set null`, and a second migration numbered `0375` would
+collide with it. Until that merges, read what `db:generate` emits before
+committing it.
+
+**No migration in this PR**, because there is nothing to repair. Verified twice
+over on the dev branch inside a rolled-back transaction: with the constraint as
+installed, deleting a parent work item unparents the child and leaves
+`tenant_id` intact; with the constraint swapped to the bare form, the same
+delete fails with *"null value in column tenant_id … violates not-null
+constraint"*. The hazard is real; it is just not present.
+
+**And the same 30s trap the entry below fixed, two files along.** Adding a file
+to the isolation suite lengthened the run and tipped two scenarios in
+`tests/isolation/jobs.test.ts` — WARRANTY CLAIMS and BONDS — over the default
+timeout, while the file passed **69/69 alone in 175s**. They are the two newest
+and largest scenarios there (#594 and #596, both this date), and **that file
+declared no explicit timeout on any of its 69 scenarios**, where its sibling
+`tests/jobs-ops.test.ts` already declares `120_000` on twenty-six. They now do
+too. No assertion moved. The general rule from the entry below holds and is
+worth restating, because it has now been learned in two files: **a db-backed
+scenario that builds a whole job does not fit in a timeout chosen for pure
+tests**, and whether it passes otherwise depends on what else the machine is
+doing.
+
 ### 2026-09-16 — Four scenarios that were timing the machine, not the code (branch `claude/agitated-sinoussi-5cc252`)
 
 **A test at the default timeout is measuring the machine's spare capacity.**

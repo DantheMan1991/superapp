@@ -77,6 +77,27 @@ becomes 1d, unchanged.
 
 ## Build log
 
+### 2026-09-16 — `production_order_lines_price_item_fk` re-checked, and gains a guard (branch `claude/composite-set-null-proof`)
+
+A scan over the migration FILES reported this constraint as an applied and
+still-broken bare `ON DELETE SET NULL`, reading `0197`, the migration that first
+installed it. It has been correct since `drizzle/0200`, which rewrote it in PG
+15's column-list form — **a file scan cannot see a repair**, because an applied
+migration is never edited. Confirmed against `pg_constraint` on dev and prod:
+`ON DELETE SET NULL (price_item_id)` on both.
+
+**What was genuinely missing is a guard.** `tests/production.test.ts` and
+`tests/production-ops.test.ts` exercise the EFFECT — a line survives its price
+item being deleted and keeps the label, price, unit and minimum it was stamped
+with — but nothing asserted the constraint DEFINITION, which is the part that
+regresses silently: `.onDelete()` cannot express a column list, so the schema
+and the drizzle-kit snapshot both read plain `set null` and any later migration
+touching this table can re-emit the bare form. That is now covered, along with
+every other composite SET NULL FK in the schema, by
+`tests/isolation/constraints.test.ts` ([ci-and-tests.md](ci-and-tests.md)).
+
+**No change to this module and no migration.**
+
 ### 2026-09-03 — One answer for the cut sheet (`claude/one-answer-for-the-cut-sheet`)
 
 Two mismatches, in opposite directions, both closed.

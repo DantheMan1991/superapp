@@ -2480,7 +2480,7 @@ d("jobs tables (RLS)", () => {
       await tx.delete(schema.jobWarrantyClaims).where(eq(schema.jobWarrantyClaims.id, claimB));
       await tx.delete(schema.jobCostCodes).where(eq(schema.jobCostCodes.id, codeB));
     });
-  });
+  }, 120_000);
 
   it("cannot read or change another tenant's BONDS or BONDING LINE; a bond hangs off this tenant's job, contract, surety and code and a line off this tenant's company; the kind's format, the money, the dates and the limits are checked; one line per company; a contract or a code gone sets that key null and nothing else; the bonds go with the job", async () => {
     const { mine, theirs, contractX, codeX, suretyB, contractB, codeB } = await withSystem(async (tx) => {
@@ -2573,5 +2573,5 @@ d("jobs tables (RLS)", () => {
       await tx.delete(schema.jobContracts).where(eq(schema.jobContracts.id, contractB));
       await tx.delete(schema.jobCostCodes).where(eq(schema.jobCostCodes.id, codeB));
     });
-  });
+  }, 120_000);
 });

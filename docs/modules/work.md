@@ -10,6 +10,26 @@
 
 ## Build log
 
+### 2026-09-16 — `work_items_parent_fk` re-checked, and found already correct (branch `claude/composite-set-null-proof`)
+
+A scan over the migration FILES reported this constraint as an applied and
+still-broken bare `ON DELETE SET NULL`, and a repair migration was nearly
+written for it. It has been correct since `drizzle/0192` — see the 2026-08-23
+entry below, which is that repair. The scan was reading `0104`, the migration
+that first installed it, and **a file scan cannot see a repair**: an applied
+migration is never edited, so `0104` keeps its original wording for good.
+
+Confirmed against `pg_constraint` on dev and prod —
+`ON DELETE SET NULL (parent_id)` on both — and confirmed by behaviour on the dev
+branch inside a rolled-back transaction: deleting a parent work item that still
+has a child unparents the child and leaves `tenant_id` intact, and the same
+delete fails as described below once the constraint is swapped to the bare form.
+
+**No change to this module.** `tests/nesting-parent-fk.test.ts` already drove
+the case and asserted the definition; what was missing was a guard for the CLASS
+rather than these two constraints, now `tests/isolation/constraints.test.ts`
+([ci-and-tests.md](ci-and-tests.md)).
+
 ### 2026-09-12 — "Add a job to fix the top gate" (`claude/tell-work`)
 
 Voice slice 4. `src/modules/work/tell/source.ts` fills `tell-sources`

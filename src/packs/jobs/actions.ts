@@ -2615,6 +2615,10 @@ const estimateLineSchema = z.object({
   groupRef: z.string().trim().max(64).optional(),
   costCodeId: optionalUuid,
   description: z.string().trim().min(1).max(300),
+  /** What the client reads instead (ADR 0080); blank uses the description. */
+  clientDescription: z.string().trim().max(300).optional(),
+  /** Whether the line is a row on the proposal; false only inside an item. */
+  clientVisible: z.boolean().optional(),
   unit: z.string().trim().max(20).optional(),
   /** "320" → 320,000 thousandths; blank → one. */
   quantity: quantityToThousandths,
@@ -2640,6 +2644,8 @@ const estimateSchema = z.object({
   notes: z.string().trim().max(4000).optional(),
   /** The proposal (ADR 0070): how the price is shown, and the client's three texts. */
   presentation: z.enum(PROPOSAL_PRESENTATIONS).optional(),
+  /** Whether the `codes` presentation prints a code's number (ADR 0080). */
+  showCodeNumbers: z.boolean().optional(),
   scope: z.string().trim().max(8000).optional(),
   exclusions: z.string().trim().max(8000).optional(),
   terms: z.string().trim().max(8000).optional(),
@@ -2685,6 +2691,8 @@ function estimateLines(
       groupRef: l.groupRef ?? null,
       costCodeId: l.costCodeId,
       description: l.description,
+      clientDescription: l.clientDescription,
+      clientVisible: l.clientVisible,
       unit: l.unit,
       quantityThousandths: l.quantity ?? 1000,
       unitCostCents: l.unitCostCents ?? 0,

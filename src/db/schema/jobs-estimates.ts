@@ -34,6 +34,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   check,
   date,
   foreignKey,
@@ -83,6 +84,13 @@ export const jobEstimates = pgTable(
      * free. A new estimate starts with the last one's terms.
      */
     presentation: text("presentation").notNull().default("lines"),
+    /**
+     * Whether the `codes` presentation prints a cost code's NUMBER beside its
+     * name (ADR 0080). Off: `Tiling`. On: `09 30 00 · Tiling`, for the
+     * commercial client who expects the CSI breakdown. A printing choice, so
+     * it stays free on an accepted estimate.
+     */
+    showCodeNumbers: boolean("show_code_numbers").notNull().default(false),
     scope: text("scope").notNull().default(""),
     exclusions: text("exclusions").notNull().default(""),
     terms: text("terms").notNull().default(""),
@@ -208,6 +216,21 @@ export const jobEstimateLines = pgTable(
     /** Where the cost lands in the budget; null while the chart is not built. */
     costCodeId: uuid("cost_code_id"),
     description: text("description").notNull(),
+    /**
+     * What the CLIENT reads in place of the description (ADR 0080), blank to
+     * use the description itself. The estimator keeps `Tile — mud set,
+     * Schluter, mtl only, per AJ quote 8/14`; the client reads `Porcelain tile
+     * flooring`. An item needs none: its name is already the client's.
+     */
+    clientDescription: text("client_description").notNull().default(""),
+    /**
+     * Whether this line is a row on the proposal at all (ADR 0080).
+     * Contingency, supervision, an allowance carry. The money counts
+     * everywhere it counted before; it simply is not printed — and **only a
+     * line inside an item may be hidden**, by the CHECK below, because hidden
+     * money must have somewhere to hide or the printed rows stop adding up.
+     */
+    clientVisible: boolean("client_visible").notNull().default(true),
     /** "sf", "lf", "cy", "ea", "ls" — the business's own abbreviation; free text. */
     unit: text("unit").notNull().default(""),
     /** In thousandths, the grain estimating works to (ADR 0064). */
@@ -252,6 +275,15 @@ export const jobEstimateLines = pgTable(
       foreignColumns: [jobCostCodes.tenantId, jobCostCodes.id],
     }),
     check("job_estimate_lines_description_present", sql`length(btrim(${t.description})) > 0`),
+    check(
+      "job_estimate_lines_client_description_bounded",
+      sql`char_length(${t.clientDescription}) <= 300`,
+    ),
+    /** Hidden money has to have somewhere to hide, and an item is that somewhere (ADR 0080). */
+    check(
+      "job_estimate_lines_hidden_needs_item",
+      sql`${t.clientVisible} or ${t.groupId} is not null`,
+    ),
     check("job_estimate_lines_quantity_nonnegative", sql`${t.quantityThousandths} >= 0`),
     check("job_estimate_lines_unit_cost_nonnegative", sql`${t.unitCostCents} >= 0`),
     check(

@@ -28,6 +28,7 @@ export function proposalInputFrom(data: ProposalData, brand: CertificateBrand & 
     sentOn: e.sentOn,
     validUntil: e.validUntil,
     presentation: e.presentation,
+    showCodeNumbers: e.showCodeNumbers,
     scope: e.scope,
     exclusions: e.exclusions,
     terms: e.terms,
@@ -36,12 +37,15 @@ export function proposalInputFrom(data: ProposalData, brand: CertificateBrand & 
     profitPpm: e.profitPpm,
     lines: row.lines.map((l) => ({
       description: l.description,
+      clientDescription: l.clientDescription,
+      clientVisible: l.clientVisible,
       unit: l.unit,
       quantityThousandths: l.quantityThousandths,
       unitCostCents: l.unitCostCents,
       markupPpm: l.markupPpm,
       unitPriceCents: l.unitPriceCents,
       codeLabel: l.codeLabel,
+      codeName: l.codeName,
       groupId: l.groupId,
     })),
     /** The client-facing items (ADR 0079); the prices they carry are the client's. */

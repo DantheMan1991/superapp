@@ -232,9 +232,9 @@ Once the estimate is accepted its items are fixed with its lines and its rates.
 
 | Column | What it is |
 | --- | --- |
-| `Item` | Which item this line builds up, or `Not in an item`. Only shown once the estimate has an item. |
+| `Item` | Which item this line builds up, or `Not in an item`. Only shown once the estimate has an item. With **Client wording** on, a `Show it` tick appears under it for a line inside an item — see below. |
 | `Cost code` | Where the money lands in the budget, from the {{project|lower}}'s cost code list. `No code` is allowed and the line still prices; it is left out when the estimate becomes the budget. **A cost code is yours and is not on the proposal** unless you choose to show the price by code. |
-| `Description` | Required; a row with none is ignored when you save. `Slab, 4in, fibre mesh`. |
+| `Description` | Required; a row with none is ignored when you save. `Slab, 4in, fibre mesh`. Write it for **yourself** — where the price came from, what the scope excludes, which quote it is off. With **Client wording** on, a second smaller box appears underneath for what the client reads instead. |
 | `Qty` | Blank is one — a lump sum. `120`. |
 | `Unit` | `cy`, `sf`, `ea`, `ls` — yours. |
 | `Unit cost` | What one unit costs you. `185.00`. |
@@ -245,14 +245,27 @@ Once the estimate is accepted its items are fixed with its lines and its rates.
 
 Cost and price are worked out as you type and never stored, so a line typed as 320 sf at $4.20 and a line typed as $1,344.00 agree to the cent.
 
+**Client wording.** The tick beside {button:Add item|ghost} on the **Lines** header. Off by default, because writing the client's words is a pass of its own and you do not want a second box on every row while you are typing a takeoff. It comes up already on for an estimate that has client wording or a hidden line. With it on, every line gets two more controls:
+
+| Control | What it does |
+| --- | --- |
+| The second description box | What the client reads in place of your line. You keep `Tile — mud set, Schluter, mtl only, per AJ quote 8/14`; the client reads `Porcelain tile flooring`. **Leave it blank and the client reads your line as written** — so only fill it in where your own wording would not do. It is used on the proposal *and* on the schedule of values, because the schedule becomes the invoice the client receives. |
+| `Show it` | Only on a line **inside an item**. Untick it and the line is not a row on the proposal at all — contingency, supervision, an allowance carry, cleanup you price but will not itemise. **The money does not change**: it is still in the item's price, the cost, the total, the margin and the budget. It simply is not printed. |
+
+A line you have hidden reads **Not on the proposal** in its row whether the tick box is showing or not, so you cannot lose track of it.
+
+**A line can only be hidden inside an item**, and that is not fussiness: hidden money has to have somewhere to hide. On a line-by-line proposal a hidden loose line would be money with no row, and the page would stop adding up. The item is that somewhere — and **an item that hides any of its lines prints as one row at its price**, exactly as an item you priced yourself does, so the client never sees half a build-up.
+
+Hiding a line keeps it off the *list*; it is not a way to make money untraceable. A hidden line's cost still lands in its cost code, so if you show the price **By cost code** its amount is inside one of those sums. If you need the money itself not to be followable, price the item yourself.
+
 **The six figures.** `Cost` (every line at cost — every line, whether it sits in an item or not), `Price` (what the client is asked for the lines and the items, before overhead and profit; it also names how much of that was **priced by hand** when any item is), `Overhead`, `Profit`, `Total` (price plus overhead plus profit — what the client is asked for) and `Margin` (total less cost, with its percentage of the total).
 
 **The proposal block.** What the client is sent, saved with the rest of the form.
 
 - **`Show the price`** — four ways, and the total is the same in all four. Overhead and profit are in the prices whichever you pick: **cost, markup, overhead, profit and margin never print.**
   - **`By item`** — one row per item at its price with its sentence beneath it, and one row for each line in no item. What a custom-home client reads, and the one that shows nothing of the build-up.
-  - **`Line by line`** — a takeoff, with quantity and per-unit columns when a line has them. Items that add up their lines print as a heading with their lines beneath; **an item you priced yourself prints as one row at its price**, because typing a price is itself saying the build-up is not the client's.
-  - **`By cost code`** — each code's sum, the no-code lines as *Other*. For a client who expects a trade breakdown; most clients do not, and `By item` is the better answer.
+  - **`Line by line`** — a takeoff, with quantity and per-unit columns when a line has them, each line in the client's wording where you wrote some. Items that add up their lines print as a heading with their lines beneath; **an item prints as one row at its price if you priced it yourself or if it hides any of its lines**, because either one is you saying the build-up is not the client's.
+  - **`By cost code`** — each code's sum, the no-code lines as *Other*. For a client who expects a trade breakdown; most clients do not, and `By item` is the better answer. Picking it reveals **`Print the code numbers too`**, off by default: off you get `Tiling`, on you get `09 30 00 · Tiling`. Leave it off unless the client is genuinely reading a schedule — the number is your accounting key and it means nothing to a homeowner. The money is the same either way.
   - **`One sum`** — one figure.
 - **`Scope of work`** — what the price covers, in the client's words. Every line you type is its own paragraph on the page.
 - **`Not included`** — one exclusion per line: *Permits and utility fees.* *Landscaping.*
@@ -283,6 +296,8 @@ A **signed** contract's value moves by change order, not by accepting an estimat
 - **`Line by line`**: one schedule line per estimate line — the whole takeoff. Fine on a short estimate; on a two-hundred-line one it makes a schedule nobody will certify. An item you priced yourself has that price shared across its own lines, so the schedule still adds up to the total.
 
 An estimate with no items is written line by line and the choice is not offered.
+
+Either way the schedule takes each line's **client wording** where you wrote some, because the schedule is what a pay application invoices against and the client reads it. An item that hides a line is one schedule line, the same as on the proposal.
 
 Then {button:Make it the schedule|primary}: each row at its **price**, with the overhead and profit spread across them in proportion so the schedule adds up to the estimate's total — the contract sum, which a pay application is measured against — replacing the contract's schedule and carrying the cost code. A line sold at a unit price keeps billing by the quantity, with its unit price raised by the same share. `Schedule written: 4 lines, $89,122.55`. The schedule is what a fixed-price or unit-price contract bills against; a cost-plus or time-and-materials contract bills its cost and leaves the schedule unread. A schedule line an application has already billed against cannot be removed, and the write is refused if the estimate would drop one — see **Billing a contract**. If you want overhead or your fee as a line of its own on the schedule, type it as a line of the estimate.
 

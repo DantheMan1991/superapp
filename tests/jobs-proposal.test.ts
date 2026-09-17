@@ -173,6 +173,88 @@ describe("the price, four ways", () => {
   });
 });
 
+describe("what the client reads, and what they do not (ADR 0080)", () => {
+  /** The same four lines, with the estimator's shorthand on two of them. */
+  const shorthand: ProposalInput = {
+    ...base,
+    overheadPpm: 0,
+    profitPpm: 0,
+    lines: [
+      { ...base.lines[0], description: "Slab — 4in, fbr mesh, per RM 8/12", clientDescription: "Concrete slab, reinforced" },
+      { ...base.lines[1], description: "Frmg lab — TM crew, see est. notes", clientDescription: "Framing labour" },
+      base.lines[2],
+      base.lines[3],
+    ],
+  };
+
+  it("prints the client's words on a line, and the estimator's when there are none", () => {
+    const m = buildProposalModel(shorthand);
+    expect(m.price.rows.map((r) => r.description)).toEqual([
+      "Concrete slab, reinforced",
+      "Framing labour",
+      "Rebar",
+      "Permit",
+    ]);
+    // The shorthand — and what it points at — reaches nothing on the page.
+    const printed = JSON.stringify(m);
+    expect(printed).not.toContain("per RM 8/12");
+    expect(printed).not.toContain("TM crew");
+  });
+
+  it("never prints a line kept off the proposal, and the rows still add to the total", () => {
+    const m = buildProposalModel({
+      ...shorthand,
+      presentation: "lines",
+      groups: [{ id: "g", name: "The structure", clientNote: "", priceMode: "rollup", fixedPriceCents: null }],
+      lines: [
+        { ...shorthand.lines[0], groupId: "g" },
+        { ...shorthand.lines[1], groupId: "g" },
+        // Contingency, inside the item, kept off the page.
+        { description: "Contingency", unit: "", quantityThousandths: 1_000, unitCostCents: 5_000_00, markupPpm: null, unitPriceCents: null, codeLabel: null, groupId: "g", clientVisible: false },
+      ],
+    });
+    // The item collapses to one row: 25,530 + 44,000 + 5,750 of contingency at 15%.
+    expect(rowsOf(m)).toEqual([["The structure", "", "", "75,280.00"]]);
+    expect(m.price.rounding).toBeNull();
+    expect(m.price.total.amount).toBe("75,280.00");
+    expect(JSON.stringify(m)).not.toContain("Contingency");
+  });
+
+  it("keeps the cost code's NUMBER off the page unless the business asks for it", () => {
+    const withNames = base.lines.map((l) => ({
+      ...l,
+      codeName: l.codeLabel === null ? null : l.codeLabel.split(" · ")[1],
+    }));
+    const plain = buildProposalModel({ ...base, presentation: "codes", lines: withNames });
+    expect(rowsOf(plain).map((r) => r[0])).toEqual([
+      "Cast-in-place concrete",
+      "Rough carpentry",
+      "Other",
+    ]);
+    expect(JSON.stringify(plain)).not.toContain("03 30 00");
+
+    const csi = buildProposalModel({ ...base, presentation: "codes", showCodeNumbers: true, lines: withNames });
+    expect(rowsOf(csi).map((r) => r[0])).toEqual([
+      "03 30 00 · Cast-in-place concrete",
+      "06 10 00 · Rough carpentry",
+      "Other",
+    ]);
+    // Either way the money is the same; only the label moved.
+    expect(rowsOf(plain).map((r) => r[3])).toEqual(rowsOf(csi).map((r) => r[3]));
+    expect(plain.price.total).toEqual(csi.price.total);
+  });
+
+  it("falls back to the label when a line carries no name of its own", () => {
+    // An older caller that passes only `codeLabel` still prints something.
+    const m = buildProposalModel({ ...base, presentation: "codes" });
+    expect(rowsOf(m).map((r) => r[0])).toEqual([
+      "03 30 00 · Cast-in-place concrete",
+      "06 10 00 · Rough carpentry",
+      "Other",
+    ]);
+  });
+});
+
 describe("the words around the price", () => {
   it("names the client, the business, the job, the site and the dates", () => {
     const m = buildProposalModel(base);

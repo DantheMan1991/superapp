@@ -3,7 +3,7 @@
 import { Fragment, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { FileText, FolderPlus, Plus, Trash2 } from "lucide-react";
+import { EyeOff, FileText, FolderPlus, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -101,6 +102,10 @@ interface LineDraft {
   groupKey: string;
   costCodeId: string;
   description: string;
+  /** What the client reads instead (ADR 0080); blank uses the description. */
+  clientDescription: string;
+  /** Whether the line is a row on the proposal; only a line in an item may be hidden. */
+  clientVisible: boolean;
   unit: string;
   quantity: string;
   unitCost: string;
@@ -113,6 +118,8 @@ const emptyLine = (groupKey = ""): LineDraft => ({
   groupKey,
   costCodeId: NONE,
   description: "",
+  clientDescription: "",
+  clientVisible: true,
   unit: "",
   quantity: "",
   unitCost: "",
@@ -148,6 +155,8 @@ export interface EditableEstimate {
   exclusions: string;
   terms: string;
   contractId: string | null;
+  /** Whether the by-code proposal prints a code's number (ADR 0080). */
+  showCodeNumbers: boolean;
   /** The client-facing items, in their order (ADR 0079). */
   groups: Array<{
     id: string;
@@ -161,6 +170,8 @@ export interface EditableEstimate {
     groupId: string | null;
     costCodeId: string | null;
     description: string;
+    clientDescription: string;
+    clientVisible: boolean;
     unit: string;
     quantityThousandths: number;
     unitCostCents: number;
@@ -288,6 +299,15 @@ export function EstimateEditor({
   const [profit, setProfit] = useState(ppmToRate(estimate.profitPpm));
   const [notes, setNotes] = useState(estimate.notes);
   const [presentation, setPresentation] = useState(estimate.presentation);
+  const [showCodeNumbers, setShowCodeNumbers] = useState(estimate.showCodeNumbers);
+  /**
+   * Writing the client's words is a pass of its own, so the two controls that do
+   * it are behind one switch and off by default: the table is already wider than
+   * its box, and a second input on every row would slow down typing a takeoff.
+   */
+  const [clientWording, setClientWording] = useState(
+    estimate.lines.some((l) => l.clientDescription.trim() !== "" || !l.clientVisible),
+  );
   const [scope, setScope] = useState(estimate.scope);
   const [exclusions, setExclusions] = useState(estimate.exclusions);
   const [termsText, setTermsText] = useState(estimate.terms);
@@ -296,6 +316,8 @@ export function EstimateEditor({
       ? estimate.lines.map((l) => ({
           id: l.id,
           groupKey: l.groupId ?? "",
+          clientDescription: l.clientDescription,
+          clientVisible: l.clientVisible,
           costCodeId: l.costCodeId ?? NONE,
           description: l.description,
           unit: l.unit,
@@ -390,6 +412,7 @@ export function EstimateEditor({
         validUntil,
         notes: notes.trim(),
         presentation,
+        showCodeNumbers,
         // An accepted estimate's money is not sent, nor the proposal's words: they are the agreement.
         ...(locked
           ? {}
@@ -419,6 +442,9 @@ export function EstimateEditor({
                   groupRef: keyOf(l) ?? "",
                   costCodeId: l.costCodeId === NONE ? "" : l.costCodeId,
                   description: l.description.trim(),
+                  clientDescription: l.clientDescription.trim(),
+                  // A loose line is always shown: hidden money needs an item to hide in.
+                  clientVisible: keyOf(l) === null ? true : l.clientVisible,
                   unit: l.unit.trim(),
                   quantity: l.quantity,
                   unitCostCents: l.unitCost,
@@ -473,6 +499,19 @@ export function EstimateEditor({
                 ))}
               </SelectContent>
             </Select>
+            {/* Only a line IN an item may be kept off the proposal: hidden money needs
+                somewhere to hide, or the printed rows stop adding up (ADR 0080). */}
+            {clientWording && keyOf(l) !== null && (
+              <label className="mt-1.5 flex cursor-pointer items-center gap-1.5 px-0.5 text-xs text-muted-foreground">
+                <Checkbox
+                  checked={l.clientVisible}
+                  onCheckedChange={(v) => setLine(i, { clientVisible: v === true })}
+                  aria-label={`Show line ${i + 1} on the proposal`}
+                  disabled={!editable}
+                />
+                Show it
+              </label>
+            )}
           </td>
         )}
         <td className="px-1 py-1">
@@ -500,6 +539,23 @@ export function EstimateEditor({
             className="h-8 min-w-48"
             disabled={!editable}
           />
+          {clientWording && (
+            <Input
+              aria-label={`What the client reads, line ${i + 1}`}
+              value={l.clientDescription}
+              onChange={(e) => setLine(i, { clientDescription: e.target.value })}
+              placeholder="What the client reads. Blank uses the line above."
+              maxLength={300}
+              className="mt-1 h-7 min-w-48 text-xs"
+              disabled={!editable}
+            />
+          )}
+          {/* A line you cannot see is a line you will forget, so it says so with the switch off too. */}
+          {!l.clientVisible && keyOf(l) !== null && (
+            <p className="mt-1 flex items-center gap-1 px-0.5 text-xs text-muted-foreground">
+              <EyeOff className="size-3" /> Not on the proposal
+            </p>
+          )}
         </td>
         <td className="px-1 py-1">
           <Input
@@ -652,6 +708,14 @@ export function EstimateEditor({
           <h2 className="font-heading text-sm font-medium tracking-heading">Lines</h2>
           {editable && (
             <div className="flex items-center gap-1">
+              <label className="mr-2 flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+                <Checkbox
+                  checked={clientWording}
+                  onCheckedChange={(v) => setClientWording(v === true)}
+                  aria-label="Show the client wording on every line"
+                />
+                Client wording
+              </label>
               <Button type="button" variant="ghost" size="sm" onClick={() => setGroups((prev) => [...prev, emptyGroup()])}>
                 <FolderPlus className="mr-1.5 size-4" /> Add item
               </Button>
@@ -882,7 +946,24 @@ export function EstimateEditor({
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">Every line, each cost code&apos;s sum, or one figure.</p>
+            <p className="text-xs text-muted-foreground">
+              Each item&apos;s price, every line, each cost code&apos;s sum, or one figure.
+            </p>
+            {presentation === "codes" && (
+              <label className="flex cursor-pointer items-start gap-2 text-xs text-muted-foreground">
+                <Checkbox
+                  checked={showCodeNumbers}
+                  onCheckedChange={(v) => setShowCodeNumbers(v === true)}
+                  aria-label="Print the cost code numbers on the proposal"
+                  disabled={!canEdit}
+                  className="mt-0.5"
+                />
+                <span>
+                  Print the code numbers too — <span className="tabular-nums">09 30 00 · Tiling</span> rather than{" "}
+                  Tiling. Leave it off unless the client is reading a trade breakdown.
+                </span>
+              </label>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="est-scope">Scope of work</Label>

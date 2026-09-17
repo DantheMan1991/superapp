@@ -107,6 +107,7 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
             exclusions: row.estimate.exclusions,
             terms: row.estimate.terms,
             contractId: row.estimate.contractId,
+            showCodeNumbers: row.estimate.showCodeNumbers,
             groups: row.groups.map((g) => ({
               id: g.id,
               name: g.name,
@@ -119,6 +120,8 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
               groupId: l.groupId,
               costCodeId: l.costCodeId,
               description: l.description,
+              clientDescription: l.clientDescription,
+              clientVisible: l.clientVisible,
               unit: l.unit,
               quantityThousandths: l.quantityThousandths,
               unitCostCents: l.unitCostCents,

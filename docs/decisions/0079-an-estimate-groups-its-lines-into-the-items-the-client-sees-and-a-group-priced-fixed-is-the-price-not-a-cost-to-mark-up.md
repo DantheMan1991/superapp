@@ -111,10 +111,11 @@ row when unit-price arithmetic leaves cents.
   failing — the composite-key rule from 0046). Two migrations, schema and
   RLS, the pack's pattern.
 - `estimate-math.ts` stays the single pure module and gains an optional
-  third argument rather than a second entry point, so **an estimate with no
-  groups computes identically to the day before this decision** — the
-  existing pinned lines still pass unchanged, which is the proof the change
-  is additive.
+  third argument rather than a second entry point, so **every figure an
+  ungrouped estimate reports is what it reported the day before this
+  decision**. The pinned lines' values are untouched, which is the proof the
+  change is additive; the only edit the suite needed was for the two
+  exact-equality assertions to name the two fields the type gained.
 - `EstimateTotals` gains `spreadableCents` (the overhead-and-profit base)
   and `fixedCents`, so the base is explicit and testable rather than
   implied by a subtraction.

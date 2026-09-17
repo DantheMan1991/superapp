@@ -547,8 +547,20 @@ export function InvoiceBuilder({
           phone-only groupings on a wide screen, so their children become grid
           cells again, and `md:order-*` puts those cells back in the column
           order the header names. One set of inputs and handlers either way.
+
+          `md:relative` is load-bearing, not decoration, and carries the same
+          `md:` as the overflow because the labels it contains do: Discount and
+          Tax are `md:sr-only`, which Tailwind makes `position: absolute`.
+          Without a positioned ancestor their containing block is the PAGE, so
+          they are laid out at their static x and stretch the DOCUMENT's scroll
+          width — `md:overflow-x-auto` cannot clip what it is not the containing
+          block of. This grid really does outgrow its box once a rate is chosen
+          (700 against 688 at a 768px viewport), but both labels sit in middle
+          columns, so that x stays on screen and nothing shows today; the
+          journal editor, whose label is in the LAST column, scrolled the page
+          sideways by 202px. See docs/conventions.md.
         */}
-        <div className="md:overflow-x-auto">
+        <div className="md:relative md:overflow-x-auto">
           <div className={showTax ? "space-y-3 md:min-w-[700px] md:space-y-2" : "space-y-3 md:min-w-[640px] md:space-y-2"}>
             <div className={`hidden text-xs font-medium text-muted-foreground md:grid ${gridColsMd} md:items-center md:gap-2`}>
               <span>Description</span>

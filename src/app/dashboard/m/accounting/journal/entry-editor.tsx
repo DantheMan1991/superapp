@@ -322,7 +322,19 @@ export function EntryEditor({
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        {/*
+          `relative` is load-bearing, not decoration. Each line's remove
+          button carries an `sr-only` label, which Tailwind makes
+          `position: absolute` — so without a positioned ancestor here its
+          containing block is the PAGE. It is then laid out at its static x,
+          the right edge of a 560px grid, and it stretches the DOCUMENT's
+          scroll width even though the grid itself is clipped:
+          `overflow-x-auto` never clipped it, because it was not its
+          containing block. On a phone that scrolled the whole page sideways
+          by 202px (`documentElement.scrollWidth` 577 against a 375 client
+          width). One word fixes it and the grid still scrolls in its own box.
+        */}
+        <div className="relative overflow-x-auto">
           <div className="min-w-[560px] space-y-2">
             <div className="grid grid-cols-[1fr_120px_120px_1fr_32px] gap-2 text-xs font-medium text-muted-foreground">
               <span>Account</span>

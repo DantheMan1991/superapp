@@ -177,7 +177,7 @@ Newest first.
 | `Margin` | Total less cost, and the percentage of the total it is. |
 | `Status` | `Draft`, `Sent`, `Accepted`, `Declined` or `Superseded`, with the date decided under it. |
 | `Contract` | The agreement an accepted estimate became; opens it. |
-| {button:Proposal|outline|file-text} | Opens the proposal — the estimate as the client sees it — as a PDF in a new tab. |
+| {button:Proposal|outline|file-text} | Opens the proposal — the estimate as the client sees it — as a PDF in a new tab, the letter or the brochure according to what the estimate is set to. |
 
 ### Starting one
 
@@ -300,7 +300,7 @@ Hiding a line keeps it off the *list*; it is not a way to make money untraceable
 
 - **`What it is`** — two documents, and this picks which one you get.
   - **`A letter`** — the default, and what a production job, a remodel or a repair sends: two or three pages on your letterhead with the facts, the scope, the price, the exclusions, the terms and a line to sign. {button:Print proposal|outline|file-text} gives you the PDF.
-  - **`A brochure`** — for a custom home, where the proposal is the thing that wins the job. A cover of its own with your logo and colour, a letter from you, what is being built in plain words, the price sheet, the allowances still to be chosen, when the work happens, then the terms and the signatures. {button:Open brochure|outline|book-open} opens it in a new tab; print it from there with your browser's Print (choose **Save as PDF**) until the product prints it for you.
+  - **`A brochure`** — for a custom home, where the proposal is the thing that wins the job. A cover of its own with your logo and colour, a letter from you, what is being built in plain words, the price sheet, the allowances still to be chosen, when the work happens, then the terms and the signatures. {button:Open brochure|outline|book-open} opens it on screen and {button:Print proposal|outline|file-text} gives you the PDF, the same as for a letter.
 - **`The letter it opens with`** — only printed on the brochure. Write it in your own voice, over your business's name; each line you type is its own paragraph. **Leave it blank and the page is left out** — that is true of every page of the brochure, so an estimate with no allowances has no allowances page rather than an empty heading.
 - **`Show the price`** — four ways, and the total is the same in all four. Overhead and profit are in the prices whichever you pick: **cost, markup, overhead, profit and margin never print.**
   - **`By item`** — one row per item at its price with its sentence beneath it, and one row for each line in no item. What a custom-home client reads, and the one that shows nothing of the build-up.
@@ -310,7 +310,8 @@ Hiding a line keeps it off the *list*; it is not a way to make money untraceable
 - **`Scope of work`** — what the price covers, in the client's words. Every line you type is its own paragraph on the page.
 - **`Not included`** — one exclusion per line: *Permits and utility fees.* *Landscaping.*
 - **`Terms`** — the payment schedule, what a change costs, how long the price holds. A new estimate starts with the terms of the last one you wrote, so this is usually a read-through.
-- {button:Print proposal|outline|file-text} opens the letter as a PDF in a new tab, and {button:Open brochure|outline|book-open} opens the brochure. Both print the estimate **as saved**; it saves itself about a second after you stop typing, so watch for `Saved` beside the {button:Save|primary} button first.
+- {button:Print proposal|outline|file-text} opens the proposal as a PDF in a new tab — **whichever document `What it is` names**, so you never have to think about it — and {button:Open brochure|outline|book-open} opens the same document on screen, where a {button:Print|primary} button in the corner prints it from your browser. Both show the estimate **as saved**; it saves itself about a second after you stop typing, so watch for `Saved` beside the {button:Save|primary} button first.
+- **A brochure's PDF takes a few seconds the first time after a quiet spell**, because a brochure is printed by a browser on the server rather than drawn like the letter. If it comes back with a page saying it could not be printed, the proposal itself is fine: {button:Open brochure|outline|book-open} and use the {button:Print|primary} button, choosing **Save as PDF** as the destination. Tell us, though — that page means something needs setting on our side, not yours.
 
 **What the brochure puts on each page, and where it comes from.** Nothing here is typed twice — every page reads something the {{project|lower}} already holds, which is why filling in the rest of the {{project|lower}} makes the proposal better on its own.
 
@@ -368,7 +369,7 @@ Under the editor, once the estimate has lines: each code's cost and price from t
 
 Then **Scope of work** (your paragraphs), **The price** the way you chose — item, quantity and per-unit columns only when a line needs them, amount, with an item's own sentence in smaller type under its name and an item that adds up its lines printed as a bold heading over them; a *Rounding* line only when unit prices cannot add to the total to the cent; the **Total** — or, for one sum, *Price for the work described* on its own line; **Not included**; **Terms**; *This proposal is valid until …* when a date is set; the acceptance sentence; and two signature blocks, *Accepted for <the client>* (signed, name, date) and *For <your business>* (signed, date). A draft prints under **DRAFT**, a declined one under **DECLINED**, a superseded one under **SUPERSEDED**; sent and accepted print clean. The footer names the business, the proposal and the {{project|lower}} on every page.
 
-The proposal is made from the estimate every time it is opened, never stored, so a draft's proposal is always the draft as it is now. It is not sent from here yet — save the PDF and attach it to your own message.
+The proposal is made from the estimate every time it is opened, never stored, so a draft's proposal is always the draft as it is now, and an accepted one cannot drift from what was signed. It is not sent from here yet — save the PDF and attach it to your own message.
 
 ## Contracts
 
@@ -1438,7 +1439,7 @@ Worth knowing so you are not looking for it:
 - **The schedule counts calendar days, and a phase waits only for the one it follows.** No working-day calendar or holidays yet, no start-to-start dependencies, no baseline to measure slip against, and nothing tells the trade — the phase names them, and the company calendar and the feed are how they hear. A schedule is typed per {{project|lower}}; a template that fills a new one is next.
 - **A markup is drawn once.** A cloud, an arrow, a note, a pin or a measurement cannot be moved or resized after the fact — rub it out and draw it again — there is no freehand pen, nothing carries a markup onto a reissued sheet, and a marked-up sheet is not printed or sent with its markups on it. No overlay of one issue on another, and the cover sheet's index is not read to fill titles.
 - **The takeoff pushes one way.** A measurement puts its quantity on an estimate line and remembers the line; the estimate does not point back at the sheets, an opening is not deducted from an area, nothing measures a volume, and a total across sheets is added up by you. The scale is set by hand — from a known dimension or the title block — never read from the PDF.
-- **An estimate is lines you type.** No assemblies (a bundle of lines dropped in as one), no unit cost book that remembers what concrete cost last time, no takeoff from the drawings. A supplier's quote cannot be attached to an estimate yet. The proposal prints but is not sent from here, and the client cannot accept it on a screen of their own — the signed page comes back the way it always has.
+- **An estimate is lines you type.** No assemblies (a bundle of lines dropped in as one), no unit cost book that remembers what concrete cost last time, no takeoff from the drawings. A supplier's quote cannot be attached to an estimate yet. Both proposals print, as a PDF and on screen, but neither is **sent** from here and the client cannot accept one on a screen of their own — the signed page comes back the way it always has.
 - **A subcontractor out of standing is not stopped.** An order can be issued and a bill paid while a certificate is missing or expired; the Subcontractors page and the order's page say so in red, and the decision is yours. Which kinds are required is set in the module's configuration for now, not on a screen.
 - **The option book is per job.** The same selections with the same choices on every plan are entered on each job for now; a book that seeds a new job is next. Nothing here lets the client choose for themselves; the office records what they said.
 - **A back-charge is not a change order.** Money you deduct from a subcontractor's payment for something you paid on their behalf reduces the payment, not the scope; a deductive change order reduces the scope. Record a back-charge as a credit in Accounting for now.

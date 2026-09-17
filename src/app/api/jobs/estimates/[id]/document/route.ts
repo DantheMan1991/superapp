@@ -3,9 +3,7 @@ import { withTenant } from "@/db";
 import { resolveTenantContext } from "@/lib/auth";
 import { isModuleEnabled } from "@/lib/modules";
 import { todayInTimezone } from "@/lib/timezone";
-import { withLogoBytes } from "@/modules/accounting/invoicing/invoice-brand";
-import { loadBrochureExtras, loadProposal, proposalDocumentFrom } from "@/packs/jobs/proposal";
-import { renderProposalHtml } from "@/packs/jobs/proposal-html";
+import { loadProposalDocument, proposalHtml } from "@/packs/jobs/proposal";
 import { PACK } from "@/packs/jobs/vocabulary";
 
 export const runtime = "nodejs";
@@ -20,9 +18,9 @@ export const runtime = "nodejs";
  * caller's — and the same rule: **rendered on request, never stored**, so a
  * draft's brochure is the draft as it stands and an accepted one cannot move.
  *
- * It is deliberately the same URL a client link will serve and a headless
- * print will consume, so there is one document and three doors onto it rather
- * than three documents.
+ * It is the same URL a client link will serve, and since E5b the PDF beside it
+ * is a print of the very string this returns rather than a second rendering —
+ * one document, three doors.
  */
 export async function GET(
   req: NextRequest,
@@ -38,50 +36,16 @@ export async function GET(
   }
 
   const timeZone = ctx.tenant.timezone;
-  const today = todayInTimezone(timeZone);
   const loaded = await withTenant(
     ctx.tenant.id,
-    async (tx) => {
-      const proposal = await loadProposal(tx, ctx.tenant.id, id);
-      if (!proposal) return null;
-      // Only the brochure has a page for either, so the letter costs two queries less.
-      const extras =
-        proposal.data.row.estimate.format === "brochure"
-          ? await loadBrochureExtras(
-              tx,
-              ctx.tenant.id,
-              proposal.data.row.estimate.projectId,
-              proposal.data.row.estimate.letter,
-              timeZone,
-              today,
-            )
-          : {};
-      return { proposal, extras };
-    },
+    (tx) => loadProposalDocument(tx, ctx.tenant.id, id, timeZone, todayInTimezone(timeZone)),
     { role: ctx.role },
   );
   if (!loaded) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  const brand = await withLogoBytes(loaded.proposal.brand);
-  const doc = proposalDocumentFrom(
-    loaded.proposal.data,
-    {
-      businessName: loaded.proposal.brand.businessName,
-      tagline: brand.tagline,
-      primaryColor: brand.primaryColor,
-      logo: brand.logo,
-    },
-    loaded.extras,
-  );
-  const html = renderProposalHtml(doc, {
-    businessName: loaded.proposal.brand.businessName,
-    tagline: brand.tagline,
-    primaryColor: brand.primaryColor,
-    logo: brand.logo,
-  });
-  return new Response(html, {
+  return new Response(await proposalHtml(loaded), {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "private, no-store",

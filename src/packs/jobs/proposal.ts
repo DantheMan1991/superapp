@@ -1,8 +1,10 @@
 import "server-only";
 import type { Tx } from "@/db";
+import { printHtmlToPdf } from "@/lib/pdf/print-html";
 import { loadInvoiceBrand, withLogoBytes } from "@/modules/accounting/invoicing/invoice-brand";
 import type { CertificateBrand } from "./certificate-model";
 import { proposalData, type ProposalData } from "./estimating-ops";
+import { renderProposalHtml } from "./proposal-html";
 import type { ProposalInput } from "./proposal-model";
 import { renderProposalPdf } from "./proposal-pdf";
 import { listSelections } from "./selections-ops";
@@ -134,19 +136,75 @@ export async function loadProposal(
   return { data, brand };
 }
 
-/** The bytes of the proposal for a loaded estimate: the model, then the page. */
-export async function renderProposal(
-  loaded: NonNullable<Awaited<ReturnType<typeof loadProposal>>>,
-): Promise<{ bytes: Uint8Array; filename: string }> {
+export type LoadedProposal = NonNullable<Awaited<ReturnType<typeof loadProposal>>> & { extras: ProposalExtras };
+
+/**
+ * Everything the document needs, in one transaction — and the SAME read for
+ * every door onto it (E5b, ADR 0084). The HTML the browser opens, the PDF the
+ * press prints and the link a client will follow all come through here, so
+ * there is no way for one of them to be made from a different estimate than
+ * another. The brochure's two extra queries are still only the brochure's.
+ */
+export async function loadProposalDocument(
+  tx: Tx,
+  tenantId: string,
+  id: string,
+  timeZone: string,
+  today: string,
+): Promise<LoadedProposal | null> {
+  const loaded = await loadProposal(tx, tenantId, id);
+  if (!loaded) return null;
+  const e = loaded.data.row.estimate;
+  const extras =
+    e.format === "brochure"
+      ? await loadBrochureExtras(tx, tenantId, e.projectId, e.letter, timeZone, today)
+      : {};
+  return { ...loaded, extras };
+}
+
+/** The brand as both renderers want it, with the logo's bytes fetched once. */
+async function brandFor(loaded: LoadedProposal): Promise<CertificateBrand & { businessName: string }> {
   const brand = await withLogoBytes(loaded.brand);
-  const bytes = await renderProposalPdf(
-    proposalInputFrom(loaded.data, {
-      businessName: loaded.brand.businessName,
-      tagline: brand.tagline,
-      primaryColor: brand.primaryColor,
-      logo: brand.logo,
-    }),
-  );
+  return {
+    businessName: loaded.brand.businessName,
+    tagline: brand.tagline,
+    primaryColor: brand.primaryColor,
+    logo: brand.logo,
+  };
+}
+
+function htmlOf(loaded: LoadedProposal, brand: CertificateBrand & { businessName: string }): string {
+  return renderProposalHtml(proposalDocumentFrom(loaded.data, brand, loaded.extras), brand);
+}
+
+function proposalFilename(data: ProposalData): string {
   const safe = (s: string) => s.replace(/[^A-Za-z0-9._-]/g, "-");
-  return { bytes, filename: `proposal-${safe(loaded.data.row.estimate.number)}-${safe(loaded.data.project.number)}.pdf` };
+  return `proposal-${safe(data.row.estimate.number)}-${safe(data.project.number)}.pdf`;
+}
+
+/** The document as the page a browser opens, and what the press is handed. */
+export async function proposalHtml(loaded: LoadedProposal): Promise<string> {
+  return htmlOf(loaded, await brandFor(loaded));
+}
+
+/**
+ * THE PROPOSAL AS A FILE, AND THE FORMAT PICKS THE ENGINE (E5b, ADR 0084).
+ *
+ * A letter is the react-pdf document ADR 0070 built and is untouched: it costs
+ * nothing, needs no browser, and prints the same as it has since it shipped. A
+ * brochure is HTML, so a browser prints it — and **the string handed to the
+ * press is the very same `htmlOf` the page serves**, not a second rendering of
+ * it, which is what makes "one document, three doors" a fact about the code
+ * rather than an intention.
+ *
+ * Before this, every format printed the letter, so a brochure's `Print
+ * proposal` quietly handed back the plain letterhead document.
+ */
+export async function proposalPdf(loaded: LoadedProposal): Promise<{ bytes: Uint8Array; filename: string }> {
+  const brand = await brandFor(loaded);
+  const bytes =
+    loaded.data.row.estimate.format === "brochure"
+      ? await printHtmlToPdf(htmlOf(loaded, brand))
+      : await renderProposalPdf(proposalInputFrom(loaded.data, brand));
+  return { bytes, filename: proposalFilename(loaded.data) };
 }

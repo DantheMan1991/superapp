@@ -73,6 +73,20 @@ const nextConfig: NextConfig = {
     // Both traps above apply to it at once: the fonts and libvips.
     "/dashboard/m/marketing": [...SHARP_NATIVE, "./src/lib/pdf/fonts/**/*"],
   },
+  /**
+   * The headless print (E5b, ADR 0084) — copied out of node_modules rather
+   * than bundled.
+   *
+   * `puppeteer-core` resolves its own files at runtime, which a bundler
+   * rewrites into paths that are not there any more; `@sparticuz/chromium-min`
+   * does the same for the pack it inflates into /tmp. Both are small — 7.8MB
+   * and 67KB — because the ~50MB Chromium itself is NOT in either package: it
+   * is downloaded from `CHROMIUM_PACK_URL` on the first print of a cold
+   * function. That is the whole reason the `-min` package is the one here, and
+   * why a browser costs this deployment almost nothing against the 250MB a
+   * function is allowed.
+   */
+  serverExternalPackages: ["puppeteer-core", "@sparticuz/chromium-min"],
   experimental: {
     // Bank CSV imports travel as text through a server action (preview +
     // import). Server-side caps: 1M chars / 10k rows.

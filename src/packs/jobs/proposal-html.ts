@@ -21,7 +21,40 @@ import type { ProposalDocument, ProposalSection } from "./proposal-sections";
  * Self-contained on purpose: the CSS is inline and the logo is a data URI, so
  * the page prints the same offline, in a headless browser, and from a saved
  * copy. No external font — a document that needs the network to look right is
- * not a document.
+ * not a document. Since E5b (ADR 0084) that is not a hope: the brochure's PDF
+ * is a headless print of this exact string, and `load` is reached with nothing
+ * on the wire.
+ *
+ * **One control, and it is not part of the document.** `Print` calls the
+ * browser's own print, which is what makes the PDF route's failure page tell
+ * the truth when it says to print from the browser, and what a client on a
+ * shared link (E5c) will reach for to keep their own copy. It is hidden in
+ * print media, so it is on no sheet of paper and in no headless render.
+ *
+ * **WHY THE SECTIONS SIT IN A TABLE WITH AN EMPTY `tfoot`.** The running
+ * footer is `position: fixed`, so it repeats on every page and reserves room
+ * for itself on NONE: the last line of a FULL page printed straight through
+ * it — body text measured at 62pt off the paper against the footer's own
+ * baseline at 57pt. On screen it never happened, because there the sheet's
+ * 1.1in bottom padding holds the footer off the text; print drops that
+ * padding and reserved nothing in its place, so the collision existed only on
+ * paper. Found by printing a full page headlessly (E5b, ADR 0084): no screen
+ * and no unit test could have shown it, and `npm run print:probe` is what
+ * measures it now.
+ *
+ * A `tfoot` is the only thing that reserves a band page after page, so an
+ * empty one holds `.band` open and the fixed footer is pinned into it. Two
+ * mechanisms, one each for the two jobs: **tfoot reserves, fixed pins.** A
+ * bottom padding on the sheet was tried first and does NOT do it — it
+ * appeared to on a synthetic page, which was the page breaks falling
+ * differently, and the real document still printed through the footer. The
+ * wrapper's own cells have to undo the price sheet's `td` rules and the
+ * `break-inside: avoid` that would otherwise make the whole document one
+ * unbreakable row.
+ *
+ * **NO BACKTICK MAY APPEAR IN THE STYLESHEET, INCLUDING IN A COMMENT.** It is
+ * a template literal: one backtick in a CSS comment ended the string and made
+ * the `@page` after it a TypeScript statement.
  */
 
 export interface ProposalHtmlBrand {
@@ -86,7 +119,8 @@ h2 {
   border-bottom: 1px solid ${brochure ? "var(--rule)" : "var(--ink)"};
   padding-bottom: ${brochure ? "6px" : "3px"}; margin: 0 0 10px;
 }
-p { margin: 0 0 8px; max-width: 34em; }
+/* The orphan control a browser has and react-pdf does not — ADR 0083's own argument for HTML. */
+p { margin: 0 0 8px; max-width: 34em; orphans: 2; widows: 2; }
 .section { margin: 0 0 ${brochure ? "30px" : "18px"}; break-inside: avoid; }
 .muted { color: var(--muted); }
 .small { font-size: 8.5pt; }
@@ -135,12 +169,29 @@ tr, td, th { break-inside: avoid; }
 .footer { position: absolute; left: 0.9in; right: 0.9in; bottom: 0.5in; display: flex; justify-content: space-between;
           font-size: 7.5pt; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 6px; }
 
+/* The wrapper whose empty tfoot reserves the footer's band on every page. Its
+   own cells must undo the price sheet's table rules and the no-break rule. */
+table.paper { width: 100%; border-collapse: collapse; }
+table.paper > tbody > tr > td, table.paper > tfoot > tr > td { padding: 0; border: 0; break-inside: auto; }
+table.paper > tbody > tr, table.paper > tfoot > tr { break-inside: auto; }
+.band { height: 0; }
+
+/* print it yourself: the only thing on this page that is not the document */
+.print-me { position: fixed; top: 16px; right: 16px; z-index: 10; font: inherit; font-size: 9.5pt;
+            padding: 7px 15px; cursor: pointer; background: var(--ink); color: #fff; border: 0;
+            border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+.print-me:hover { background: #374151; }
+
 @media print {
   html, body { background: #fff; }
   .sheet { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; }
   .page-break { break-before: page; }
+  /* tfoot reserves the band, page after page; fixed pins the footer into it. */
+  .band { height: 0.4in; }
   .footer { position: fixed; left: 0; right: 0; bottom: 0; }
   .watermark { position: fixed; }
+  /* Never on the paper — and so never in the headless print either. */
+  .print-me { display: none; }
 }
 @page { size: letter; margin: 0.75in; }
 `.trim();
@@ -289,9 +340,12 @@ export function renderProposalHtml(doc: ProposalDocument, brand: ProposalHtmlBra
 <style>${styles(accent, brochure)}</style>
 </head>
 <body>
+<button class="print-me" type="button" onclick="window.print()">Print</button>
 <div class="sheet">
 ${watermark}
+<table class="paper"><tfoot><tr><td class="band"></td></tr></tfoot><tbody><tr><td>
 ${body}
+</td></tr></tbody></table>
 <div class="footer"><span>${esc(doc.model.footer)}</span><span>${esc(doc.model.title)}</span></div>
 </div>
 </body>

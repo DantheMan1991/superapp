@@ -549,6 +549,51 @@ describe("the proposal as one HTML document", () => {
   });
 });
 
+/**
+ * WHAT THE PAPER NEEDS THAT THE SCREEN DOES NOT (E5b, ADR 0084).
+ *
+ * These three are invisible on screen and were each found by printing the
+ * document headlessly. They are pinned because the only way to see them again
+ * is to print a full page and measure it — nothing about the markup looks
+ * wrong, and a tidy-up that removed any of them would look like an
+ * improvement.
+ */
+describe("the document as it prints", () => {
+  const brand = { businessName: "Ops Builder LLC", tagline: "", primaryColor: null, logo: null };
+  const html = () => renderProposalHtml(buildProposalDocument(base, { letter: "A letter." }, "brochure"), brand);
+
+  /**
+   * A `position: fixed` footer repeats on every page and reserves room on
+   * none, so a FULL page printed its last line straight through the footer —
+   * body text 62pt off the paper against the footer's baseline at 57pt. An
+   * empty `tfoot` is what reserves the band, page after page.
+   */
+  it("wraps the sections in a table whose empty tfoot reserves the footer's band", () => {
+    const out = html();
+    expect(out).toContain("<tfoot><tr><td class=\"band\"></td></tr></tfoot>");
+    expect(out).toContain(".band { height: 0.4in; }");
+    // The wrapper must not inherit the price sheet's cell rules or the
+    // no-break rule, or the whole document becomes one unbreakable row.
+    expect(out).toContain("table.paper > tbody > tr, table.paper > tfoot > tr { break-inside: auto; }");
+  });
+
+  it("puts a Print control on the screen and on no sheet of paper", () => {
+    const out = html();
+    expect(out).toContain('onclick="window.print()"');
+    expect(out).toMatch(/@media print \{[^}]*[\s\S]*?\.print-me \{ display: none; \}/);
+  });
+
+  /**
+   * The stylesheet is a template literal, so one backtick — even inside a CSS
+   * comment — ends the string and makes the rest of it TypeScript. It cost a
+   * build to find, and the next person writing a CSS comment here will not
+   * know.
+   */
+  it("has no backtick anywhere in the document", () => {
+    expect(html()).not.toContain("`");
+  });
+});
+
 describe("renderProposalPdf", () => {
   it("produces a real PDF for the line-by-line proposal, with a brand colour", async () => {
     const bytes = await renderProposalPdf({ ...base, brand: { tagline: "Built right", primaryColor: "#1d4ed8", logo: null } });

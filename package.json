@@ -39,7 +39,8 @@
     "test:isolation": "vitest run tests/isolation",
     "copy:map-worker": "tsx scripts/copy-map-worker.ts",
     "prebuild": "tsx scripts/copy-map-worker.ts",
-    "predev": "tsx scripts/copy-map-worker.ts"
+    "predev": "tsx scripts/copy-map-worker.ts",
+    "print:probe": "tsx --conditions react-server scripts/print-probe.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.3",
@@ -49,6 +50,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@neondatabase/serverless": "^1.1.0",
     "@react-pdf/renderer": "^4.5.1",
+    "@sparticuz/chromium-min": "^153.0.0",
     "@vercel/blob": "^2.6.1",
     "archiver": "^7.0.1",
     "class-variance-authority": "^0.7.1",
@@ -64,6 +66,7 @@
     "next-themes": "^0.4.6",
     "pdfjs-dist": "^6.1.200",
     "plaid": "^43.0.0",
+    "puppeteer-core": "^25.11.0",
     "radix-ui": "^1.6.2",
     "react": "19.2.4",
     "react-dom": "19.2.4",

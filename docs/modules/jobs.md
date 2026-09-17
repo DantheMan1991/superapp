@@ -55,10 +55,13 @@ and the client link are one slice, and `proposal-model.ts` stays the single
 pure source of every word and figure with three consumers instead of one: the
 `@react-pdf/renderer` letter (production, already built, no cold start), the
 HTML page (the link, and the luxury print), and Chromium's render of that page.
-Two layouts, one truth — the split ADR 0070 already set. The cost is real and
-on Vercel: `puppeteer-core` + `@sparticuz/chromium-min` share a 250 MB
-unzipped function budget with sharp's libvips and the Noto TTFs that
-`next.config.ts` already traces by hand.
+Two layouts, one truth — the split ADR 0070 already set. **The cost turned out
+to be nothing** (E5b, ADR 0084): `puppeteer-core` is 7.8MB and
+`@sparticuz/chromium-min` is 67KB against the 250 MB a function is allowed,
+because the ~50MB Chromium is in neither package — it is fetched from
+`CHROMIUM_PACK_URL` into `/tmp` on a cold start and found there while the
+function stays warm. What it shares that budget with — sharp's libvips and the
+Noto TTFs that `next.config.ts` already traces by hand — never came near it.
 
 | # | Slice | What it is |
 | --- | --- | --- |
@@ -70,7 +73,7 @@ unzipped function budget with sharp's libvips and the Noto TTFs that
 | ~~E3~~ | ~~**Speed**~~ — split into E3a and E3b above | The **entry bar**: one field that parses `320 sf tile @ 4.20`, `plumbing rough 12000` (a lump), `@tile 320` (drop an assembly), Enter commits and the cursor stays. A **paste target** — `src/lib/paste-targets` is a finished framework and eight packs use it; jobs has no `paste/` directory at all. **Per-row saving** (today the whole estimate is one `useState` and one Save button, which a two-hundred-line takeoff cannot be). `Ctrl+D` to duplicate the row above, because most lines are near-copies. The parser is pure and table-tested, and it is also the voice feature: one function, two doors. |
 | E4 | **Price memory** | Every `job_estimate_line` across the tenant already IS a price history: type a description, get *"last priced $4.20 on 24-108, three weeks ago"*, Tab accepts. Then the half nobody else can do, because the actuals are in the same database: *"you estimated $4.20 — you actually paid $4.65 on the last three jobs"* (the `Spent` column per code). Before assemblies, because it is what tells us what an assembly should look like. |
 | **E5a** | ~~**The proposal as sections, and the brochure**~~ **SHIPPED 2026-09-17** ([ADR 0083](../decisions/0083-a-proposal-is-an-ordered-list-of-sections-a-brochure-is-a-page-order-over-facts-the-pack-already-holds-and-the-document-is-html.md)) | `format` (letter / brochure) split from `presentation`; the proposal as `ProposalSection[]`; the brochure's pages read from the items, the selections and the phases; the document served as HTML from a GET route — the same URL E5b prints and E5c shares. The letter's PDF path untouched. |
-| E5b | **The brochure's PDF** | A headless Chromium print of that same URL, so the product can attach and email the file. The founder's "i do want the proposal to be exported to pdf still". Real cost on Vercel: `puppeteer-core` + `@sparticuz/chromium-min` sharing a 250 MB unzipped budget with sharp's libvips. |
+| **E5b** | ~~**The brochure's PDF**~~ **SHIPPED 2026-09-17** ([ADR 0084](../decisions/0084-the-brochures-pdf-is-a-headless-print-of-the-document-itself-and-the-format-picks-the-engine.md)) | The format picks the engine at one URL: a letter is react-pdf, a brochure is a headless Chromium print of **the very string the document route serves**. `pressFor` decides where the browser comes from, and `-min` keeps the ~50MB Chromium out of the function. Killed the live defect that printed the letter whatever the format said, and found the running footer printing through the text. `npm run print:probe` is what measures it. |
 | E5c | **The client link, with Accept** | A tokenised link that serves the same document with no session, and an Accept the client presses. A security design of its own: what a token is, what it may read, what pressing Accept writes. |
 | ~~E5~~ | ~~**The proposal as sections, the HTML document, and the client link**~~ — split into E5a/b/c above | Presentation (how the money is grouped) and format (what the paper is) are two choices tangled in one field today. Split them, then build the document as a **section list** over pack data — and the point is that every page a custom-home proposal wants is already data here: the cover's elevation is the current drawing set (9a), the narrative is the items' names and notes, the allowances are selections (ADR 0067), the milestones are phases (ADR 0071), the warranty is a period on the job (13a), the insurance and bonding are rows (0068/0078). A brochure is a page order over things that exist. `letter` and `brochure` are two presets over that list. Stage 1 is the HTML plus print CSS, shipped as the tokenised client link with **Accept**; stage 2 adds the Chromium render behind the same route so the product can attach and email the file. Stage 1 is the first half of stage 2, so nothing is wasted. |
 | E6 | **Assemblies** | Built backwards on purpose: **"save this item as an assembly"** first, so the library assembles itself out of real work instead of needing to be seeded — nobody ever fills in an assembly library up front. Then dropping one with a driving quantity explodes it into an item whose lines' quantities are computed (1.05 sf of tile per sf of floor for waste, 0.02 bags of thinset, 1 sf of labour) with the cost codes pre-filled. **An assembly is a saved item**, which is why it waits for E1's table rather than arriving with one of its own — and ADR 0069 said assemblies wanted a few real estimates typed first, which E1 is. |
@@ -80,6 +83,124 @@ Not in the program, and deliberately: a takeoff from the drawings (shipped as
 9c), and anything that would make an estimate post to the books.
 
 ## Build log
+
+### 2026-09-17 — The brochure's PDF: a headless print of the document itself (`claude/estimate-brochure-pdf`, ADR 0084)
+
+Slice **E5b** of [the estimate program](#the-estimate-program-open-started-2026-09-16),
+and the founder's "i do want the proposal to be exported to pdf still".
+No migration, no schema change: `format` shipped with `0376`.
+
+**There was a live defect, and it is the reason this slice is not just an
+addition.** `/api/jobs/estimates/[id]/pdf` rendered the letter's react-pdf
+document *whatever the estimate's format said*, so a custom-home estimate
+set to `brochure` answered `Print proposal` with the plain letterhead
+proposal — the wrong document, silently, on the estimate's page and on the
+list's `Proposal` button. **The format picks the engine now**, at the same
+URL: a letter is react-pdf and is untouched, a brochure is a headless
+Chromium print. One address for "the PDF of this proposal", so no button
+has to know which.
+
+**The press is handed the document, never a URL.** The route renders the
+HTML in its own process and passes the string to `page.setContent`. A
+headless browser fetching the app's own URL would have to carry the caller's
+session into Chromium to get past `requireTenant()`, and a document
+assembled twice can differ from itself. Both doors return the same
+`htmlOf(...)` expression — one function called from two places — which is
+what makes ADR 0083's "one document, three doors" a fact about the code.
+`loadProposalDocument` is the one read behind both, so the page and the file
+cannot be made from different estimates.
+
+**Where the browser comes from is one pure function**, `pressFor(env,
+platform, exists)`: a browser already on the machine, a hosted pack, or
+nothing with a message naming what to set. A local browser **wins over a
+pack**, because a developer holding production's variables has a pack URL on
+a machine that cannot run a Linux binary; in a function no local browser
+exists, so the pack is what is left. `exists` is injected, so all three
+platforms and every combination are tested with no filesystem and no
+browser.
+
+**The 250 MB fear this plan was written with was wrong by two orders of
+magnitude.** `puppeteer-core` is 7.8MB, `@sparticuz/chromium-min` is 67KB,
+and the ~50MB Chromium is in neither — it comes from `CHROMIUM_PACK_URL`
+into `/tmp`. Both are `serverExternalPackages`, copied out of `node_modules`
+rather than bundled, since both resolve their own files at runtime.
+
+**A dead end is worse than a plain answer.** A brochure whose print cannot
+run does not fall back to the letter — that is the silent wrong document
+this slice exists to end — and does not answer a blank 500. It answers 503
+with one page that says whether the deployment has no browser or the print
+itself broke, and links the document. So the document now carries a
+**Print** control of its own: screen only, hidden in print media, on no
+sheet of paper and in no headless render. It is what makes that sentence
+true, and what a client on a shared link (E5c) will reach for.
+
+**THE RUNNING FOOTER WAS PRINTING THROUGH THE TEXT.** The footer is
+`position: fixed`, so it repeats on every page and reserves room for itself
+on none: a FULL page put its last line at 62pt off the paper against the
+footer's own baseline at 57pt. On screen it never happened, because there
+the sheet's 1.1in bottom padding holds the footer off the text — print drops
+that padding and reserved nothing in its place, so the collision existed
+only on paper, in a document nobody had printed yet. An empty `tfoot` around
+the sections is the only thing that reserves a band page after page, with
+the fixed footer pinned into it: **tfoot reserves, fixed pins.** A bottom
+padding was tried first and does not do it (below).
+
+**DRIVEN, on the dev branch's Hilltop Farm.** EST-ITEMS-1 (Oak Row 24-108,
+`brochure`) printed through a real Chrome in 2.3s to a 216KB **4-page Letter
+PDF** — 612×792pt, so `preferCSSPageSize` handed the paper to the document's
+own `@page` — and read back page by page with the same `pdfjs-dist` the
+Documents module reads uploads with: the cover alone on page 1, the letter
+and *What is included* on 2, *THE PRICE* at 190,537.53 with the allowances
+under it on 3, the terms and both signature blocks on 4, the DRAFT watermark
+and the footer on every page, and the Print control on none of them. A
+letter-format estimate (EST-2) took the react-pdf branch with empty extras,
+as it should.
+
+`npm run print:probe` is the instrument, because nothing else can see any of
+this: it renders a multi-page brochure through the real stylesheet, prints
+it, reads it back and compares the footer's baseline to the lowest body text
+on every page, exiting 1 and naming the page when the clearance goes. It
+reports 37pt at worst today; shrinking the band to nothing drops two pages
+to 5pt and it exits 1. Verified both ways, on the exit code.
+
+**Traps.**
+
+- **A bottom padding does not reserve a per-page band, and a synthetic page
+  will tell you it does.** `.sheet { padding-bottom: 0.42in }` in print
+  looked like it worked — content stopped 23pt above the footer on pages 1
+  *and* 2 of an isolated test — and the real document still printed straight
+  through the footer. What actually changed in the isolated test was where
+  the page breaks fell. **Measure the real document, not a reduction of it.**
+- **A backtick in the stylesheet ends the stylesheet**, including inside a
+  CSS comment: `styles()` returns a template literal, and one backtick in a
+  comment made the following `@page` a TypeScript statement — `Expected ";"
+  but found "@"`. A test now asserts the rendered document contains no
+  backtick at all.
+- **A negative `bottom` does not push a fixed element into the page margin** —
+  Chromium clips fixed content to the page area, so `bottom: -0.35in` did not
+  move the footer below the text, it deleted the footer from every page. The
+  measurement said so immediately: no footer text in the PDF at all.
+- **`--conditions react-server` breaks `@react-pdf/reconciler`**
+  (`Cannot read properties of undefined (reading 'S')`), and it is the flag a
+  scratch script needs to get past `import "server-only"`. So a script cannot
+  drive both engines at once; the dossier's own recipe (stub `server-only`
+  through a tsconfig `paths` entry) is the way to drive the react-pdf half.
+- **A scratch script must live inside the repo.** In the session scratchpad it
+  cannot resolve `node_modules` at all — `Cannot find module 'dotenv/config'`.
+- **`new Response(bytes)` will not take a `Uint8Array<ArrayBufferLike>`**,
+  only a view over a plain `ArrayBuffer`; `new Uint8Array(bytes)` copies it
+  into one. `tsc` catches it and the message is about `URLSearchParams`.
+- **Gate on the exit code, not the tail.** `npm run print:probe | tail -14`
+  reported `EXIT=0` over a run that had failed — `$?` was `tail`'s.
+
+**Not built, on purpose:** attaching the PDF to an email or filing it in
+Documents — nothing in the product sends a proposal yet, and when something
+does it calls `proposalPdf` and gets bytes. The **serverless path is
+unverified** until a pack is hosted and `CHROMIUM_PACK_URL` is set, which is
+a deploy step with its own runbook
+([printing-html-documents](../runbooks/printing-html-documents.md)) and not
+a code one. Until then a brochure's PDF answers 503 and says so, and the
+letter — which needs no browser — is unaffected.
 
 ### 2026-09-17 — The brochure: a proposal as a page order, and the document is HTML (`claude/estimate-brochure`, ADR 0083)
 
@@ -4000,8 +4121,18 @@ ordering only bites when two new tables reference each other in one file.
   a page order, and the document** (E5a, ADR 0083). The sections decide which
   pages a format has and every word on them, WRAPPING `proposal-model.ts` so the
   money keeps one source; the HTML file is layout only and computes nothing. Its
-  route, `/api/jobs/estimates/[id]/document`, is deliberately the URL E5b prints
-  headlessly and E5c shares with the client.
+  route, `/api/jobs/estimates/[id]/document`, is the URL E5c will share with the
+  client — and since E5b the PDF beside it is a **print of the very string that
+  route returns**, not a second rendering of it. `proposal-html.ts` is also the
+  one file in the pack where **a backtick is a syntax error**, comment or not:
+  the stylesheet is a template literal.
+- `src/lib/pdf/print-press.ts` + `print-html.ts` — **the platform's one way to
+  print a page** (E5b, ADR 0084), in `src/lib` and not in the pack because the
+  next document written as HTML should not have to ask the jobs pack. The press
+  module is pure (`pressFor`: a local browser, a hosted pack, or nothing with a
+  message naming what to set — a local browser WINS over a pack); `print-html.ts`
+  is `server-only` and lazily imports `puppeteer-core`, so no route that does not
+  print pays for it. `npm run print:probe` measures what only paper shows.
 - `src/packs/jobs/estimate-parse.ts` — **one typed sentence into one estimate
   line** (E3a, ADR 0081), pure and table-tested: `parseEstimateLine`,
   `parseEstimateLines`, `COMMON_UNITS`, `unitsFor`. The entry bar, the paste
@@ -4372,23 +4503,38 @@ ordering only bites when two new tables reference each other in one file.
   log, and a template that seeds a new job's phases are each a slice of
   their own once a real job has run against this one. The Gantt is a table
   with bars; nothing drags.
-- **The proposal prints; it is not sent, and the client cannot accept it on
-  a screen of their own (10b, ADR 0070).** Mail's seam is there for the
-  sending when somebody asks. **The client link WITH an Accept button is now
-  E5c** (and the brochure's own PDF is E5b), chosen by the founder on 2026-09-16 along with a magazine-grade
-  brochure for luxury work — and the two are one build, because a web
-  proposal is HTML and a magazine-grade PDF is that same HTML through
-  Chromium. The PDF export stays a requirement, so E5 carries the Chromium
-  route rather than leaving it to a later slice.
-- **The estimate program is open; E1, E2, E3a, E3b and E5a are shipped** — see
-  [the plan](#the-estimate-program-open-started-2026-09-16) for the rest, each
-  with the founder's decision behind it. What is NOT built:
+- **The proposal prints in both formats; it is not SENT, and the client cannot
+  accept it on a screen of their own (10b, ADR 0070).** Mail's seam is there
+  for the sending when somebody asks, and since E5b there are bytes to attach:
+  `proposalPdf` returns them for either format. **The client link WITH an
+  Accept button is E5c**, chosen by the founder on 2026-09-16 along with a
+  magazine-grade brochure for luxury work — and it serves the same URL the
+  brochure and its PDF already come from, so it is a security design rather
+  than a document one: what a token is, what it may read, what pressing Accept
+  writes.
+- **The document is letter-width on a phone, and the client link is what will
+  care.** At 375px the sheet is 8.5in wide, so it scrolls sideways and the
+  cover's title is cut off — by design (ADR 0083: the screen is print on a grey
+  desk), and with no user today, because only the team opens it, from the
+  estimate's page. **E5c gives it one**: a client following a link on their
+  phone. Whether a small screen should fit the whole sheet the way a PDF reader
+  does (a viewport width of the page rather than the device) is E5c's call to
+  make and verify, not a guess to slip in beside the printing.
+- **The brochure's PDF needs one variable set before it works in production.**
+  `CHROMIUM_PACK_URL`, pointing at a hosted `chromium-v*-pack.x64.tar`
+  ([the runbook](../runbooks/printing-html-documents.md)). Unset, a brochure's
+  PDF answers 503 and says so; the letter needs no browser and is unaffected.
+  **The serverless path is unverified until that is done** — E5b was driven
+  against a real Chrome on a laptop, which proves the document and the press
+  but not the function.
+- **The estimate program is open; E1, E2, E3a, E3b, E5a and E5b are shipped** —
+  see [the plan](#the-estimate-program-open-started-2026-09-16) for the rest,
+  each with the founder's decision behind it. What is NOT built:
   **keyboard grid navigation** — arrows and Tab between cells, Enter on the
-  last row making another (E3c); the **price
-  memory**, including the estimated-versus-actual read the pack already has
-  the data for (E4); **the proposal as sections**, the brochure, and the
-  client link with Accept (E5); and **assemblies**, which are a saved item
-  (E6).
+  last row making another (E3c); the **price memory**, including the
+  estimated-versus-actual read the pack already has the data for (E4); the
+  **client link with Accept** (E5c); and **assemblies**, which are a saved
+  item (E6).
 - ~~**THE ESTIMATE SCREEN MAKES THE PAGE SCROLL SIDEWAYS.**~~ — **closed
   2026-09-16 (E3a, ADR 0081)**, and the cause was not the table's width:
   the row buttons' `sr-only` labels are `position: absolute`, so with no

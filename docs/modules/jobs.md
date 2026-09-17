@@ -235,14 +235,22 @@ it in PG 15's column-list form. Both statements were removed by hand, and
 because the snapshot cannot express the column list this will happen again
 to any table a later migration touches, so the class is now guarded:
 **`tests/migrations.test.ts`** scans every migration for a bare SET NULL on
-a composite key. Its first run found **three already applied and already
-wrong** — `schedule_items_parent_fk`, `work_items_parent_fk` and
-`production_order_lines_price_item_fk`, where deleting a parent work item,
-a parent schedule item or a referenced price item fails at run time. They
-are pinned in a closed list with the repair written down (a new migration,
-never an edit to an applied one) and spun off as their own task; the
-work-items one is the most likely to be met, since this pack raises Work
-items constantly.
+a composite key. Its first run also reported `schedule_items_parent_fk`,
+`work_items_parent_fk` and `production_order_lines_price_item_fk` as applied
+and still wrong, and this entry originally said so.
+
+**That was a false positive, and the correction is worth more than the
+claim was.** All three had been repaired long before, by `drizzle/0192` and
+`drizzle/0200`; `pg_constraint` on dev and prod holds the column-list form
+on all three, so no delete fails. **A text scan cannot see a repair** — an
+applied migration is never edited, so the file that first installed a
+constraint keeps its original bare wording forever. The three are now
+listed as `APPLIED_THEN_REPAIRED`, each named with the migration that
+repaired it, and the authoritative guard is
+**`tests/isolation/constraints.test.ts`**, which asks the catalogue instead
+(#601, and #602 for the correction). The scan's real value is the case
+above: a bare form caught *before* it is applied, while the file can still
+be edited.
 
 **Not built, on purpose:** a client-facing name on the cost code itself
 (ADR 0079 rejected that for the same reason — it is a rename of `09 30 00`

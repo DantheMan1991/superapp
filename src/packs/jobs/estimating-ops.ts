@@ -23,6 +23,7 @@ import {
   type JobsCtx,
 } from "./ops";
 import { customerForParty } from "@/modules/accounting/invoicing/customers";
+import { isProposalFormat } from "./proposal-sections";
 import {
   RATE_PPM_MAX,
   isEstimateStatus,
@@ -101,6 +102,10 @@ export interface EstimateInput {
   presentation?: string;
   /** Whether the `codes` presentation prints a code's number beside its name (ADR 0080). */
   showCodeNumbers?: boolean;
+  /** What the paper is (E5a, ADR 0083): `letter` or `brochure`. A printing choice. */
+  format?: string;
+  /** The letter the brochure opens with. One of the proposal's WORDS, so fixed with the money. */
+  letter?: string;
   scope?: string;
   exclusions?: string;
   terms?: string;
@@ -122,6 +127,9 @@ function validateEstimateShape(input: Partial<EstimateInput>): void {
   }
   if (input.status !== undefined && !isEstimateStatus(input.status)) {
     throw new JobsError("INVALID_STATUS", `invalid status: ${input.status}`);
+  }
+  if (input.format !== undefined && !isProposalFormat(input.format)) {
+    throw new JobsError("INVALID_VALUE", "a proposal prints as a letter or as a brochure");
   }
   if (input.presentation !== undefined && !isProposalPresentation(input.presentation)) {
     throw new JobsError(
@@ -429,6 +437,8 @@ export async function createEstimate(tx: Tx, ctx: JobsCtx, input: EstimateInput)
       notes: input.notes?.trim() ?? "",
       presentation: input.presentation ?? "lines",
       showCodeNumbers: input.showCodeNumbers ?? false,
+      format: input.format ?? "letter",
+      letter: input.letter?.trim() ?? "",
       scope: input.scope?.trim() ?? "",
       exclusions: input.exclusions?.trim() ?? "",
       terms,
@@ -471,6 +481,7 @@ export async function updateEstimate(
       (input.markupPpm !== undefined && input.markupPpm !== existing.markupPpm) ||
       (input.overheadPpm !== undefined && input.overheadPpm !== existing.overheadPpm) ||
       (input.profitPpm !== undefined && input.profitPpm !== existing.profitPpm) ||
+      (input.letter !== undefined && input.letter.trim() !== existing.letter) ||
       (input.scope !== undefined && input.scope.trim() !== existing.scope) ||
       (input.exclusions !== undefined && input.exclusions.trim() !== existing.exclusions) ||
       (input.terms !== undefined && input.terms.trim() !== existing.terms);
@@ -509,6 +520,9 @@ export async function updateEstimate(
   if (input.presentation !== undefined) patch.presentation = input.presentation;
   // A printing choice, like the presentation: free even on an accepted estimate.
   if (input.showCodeNumbers !== undefined) patch.showCodeNumbers = input.showCodeNumbers;
+  if (input.format !== undefined) patch.format = input.format;
+  // The letter is the agreement's words, so it is fixed with the money above.
+  if (input.letter !== undefined) patch.letter = input.letter.trim();
   if (input.scope !== undefined) patch.scope = input.scope.trim();
   if (input.exclusions !== undefined) patch.exclusions = input.exclusions.trim();
   if (input.terms !== undefined) patch.terms = input.terms.trim();

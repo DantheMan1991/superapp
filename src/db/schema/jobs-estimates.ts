@@ -91,6 +91,21 @@ export const jobEstimates = pgTable(
      * it stays free on an accepted estimate.
      */
     showCodeNumbers: boolean("show_code_numbers").notNull().default(false),
+    /**
+     * WHAT THE PAPER IS, as against how the money is grouped (E5a, ADR 0083).
+     * `letter` is the business document ADR 0070 built — two or three pages on
+     * letterhead, and what a production or remodelling job sends. `brochure` is
+     * the custom-home document: a cover, a letter, the narrative, the price
+     * sheet, the allowances, the milestones. `presentation` is orthogonal and
+     * both formats honour it.
+     */
+    format: text("format").notNull().default("letter"),
+    /**
+     * The letter the brochure opens with, in the builder's own voice, over a
+     * signature. Blank leaves the page out. The words are the agreement's, so
+     * they are fixed with the money once the estimate is accepted.
+     */
+    letter: text("letter").notNull().default(""),
     scope: text("scope").notNull().default(""),
     exclusions: text("exclusions").notNull().default(""),
     terms: text("terms").notNull().default(""),
@@ -121,6 +136,7 @@ export const jobEstimates = pgTable(
       foreignColumns: [jobContracts.tenantId, jobContracts.id],
     }),
     check("job_estimates_number_present", sql`length(btrim(${t.number})) > 0`),
+    check("job_estimates_format_valid", sql`${t.format} in ('letter', 'brochure')`),
     check(
       "job_estimates_status_valid",
       sql`${t.status} in ('draft', 'sent', 'accepted', 'declined', 'superseded')`,

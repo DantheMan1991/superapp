@@ -5,6 +5,15 @@ import type { CertificateBrand } from "./certificate-model";
 import { proposalData, type ProposalData } from "./estimating-ops";
 import type { ProposalInput } from "./proposal-model";
 import { renderProposalPdf } from "./proposal-pdf";
+import { listSelections } from "./selections-ops";
+import { listPhases } from "./schedule-ops";
+import {
+  allowanceOf,
+  buildProposalDocument,
+  milestoneOf,
+  type ProposalDocument,
+  type ProposalExtras,
+} from "./proposal-sections";
 
 /**
  * From the rows the pack holds to the words the proposal prints (slice 10b,
@@ -57,6 +66,60 @@ export function proposalInputFrom(data: ProposalData, brand: CertificateBrand & 
       fixedPriceCents: g.fixedPriceCents,
     })),
   };
+}
+
+/**
+ * WHAT THE BROCHURE NEEDS THAT THE LETTER DOES NOT (E5a, ADR 0083): the
+ * allowances still to be chosen and the order the work goes in. Both are
+ * ordinary reads of facts the pack already keeps — the job's selections (ADR
+ * 0067) and its phases (ADR 0071) — which is the whole claim behind the
+ * brochure being a page order rather than a new kind of document.
+ *
+ * Only called for the brochure: the letter has no page for either, so a
+ * letterhead proposal costs two queries less.
+ */
+export async function loadBrochureExtras(
+  tx: Tx,
+  tenantId: string,
+  projectId: string,
+  letter: string,
+  timeZone: string,
+  today: string,
+): Promise<ProposalExtras> {
+  const [selections, phases] = await Promise.all([
+    listSelections(tx, tenantId, projectId, today),
+    listPhases(tx, tenantId, projectId, timeZone, today),
+  ]);
+  return {
+    letter,
+    allowances: selections
+      .filter((r) => r.selection.allowanceCents > 0)
+      .map((r) =>
+        allowanceOf({
+          name: r.selection.name,
+          allowanceCents: r.selection.allowanceCents,
+          chosenLabel: r.chosen?.description ?? null,
+          chosenPriceCents: r.chosen?.priceCents ?? null,
+          neededBy: r.selection.neededBy,
+        }),
+      ),
+    milestones: phases.map((r) =>
+      milestoneOf({ name: r.phase.name, startOn: r.startOn, endOn: r.endOn, partyName: r.partyName }),
+    ),
+  };
+}
+
+/**
+ * The whole document, in sections, for whichever format the estimate names.
+ * One call for the page order, the money and the words; the renderer takes it
+ * from here.
+ */
+export function proposalDocumentFrom(
+  data: ProposalData,
+  brand: CertificateBrand & { businessName: string },
+  extras: ProposalExtras = {},
+): ProposalDocument {
+  return buildProposalDocument(proposalInputFrom(data, brand), extras, data.row.estimate.format);
 }
 
 /** The estimate's rows and its company's brand, read in ONE transaction; the logo's bytes come afterwards. */

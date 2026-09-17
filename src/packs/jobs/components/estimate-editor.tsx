@@ -1,9 +1,9 @@
 "use client";
 
-import { Fragment, useState, useTransition, type ReactNode } from "react";
+import { Fragment, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { EyeOff, FileText, FolderPlus, Plus, Trash2 } from "lucide-react";
+import { ClipboardPaste, CornerDownLeft, EyeOff, FileText, FolderPlus, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -31,6 +31,7 @@ import {
   updateEstimateAction,
 } from "../actions";
 import { quantityStringToThousandths, thousandthsToQuantityString } from "../billing-math";
+import { parseEstimateLine, parseEstimateLines, unitsFor, type ParsedEstimateLine } from "../estimate-parse";
 import {
   estimateTotals,
   groupCostCents,
@@ -275,9 +276,12 @@ export function EstimateEditor({
   canEdit,
   isOwner,
   symbol,
+  units,
 }: {
   projectId: string;
   estimate: EditableEstimate;
+  /** Every unit this business has typed before, so the entry bar's grammar knows it. */
+  units: string[];
   codes: Array<{ id: string; label: string }>;
   contracts: Array<{ id: string; label: string; status: string }>;
   canEdit: boolean;
@@ -364,8 +368,67 @@ export function EstimateEditor({
     totals.fixedCents > 0 &&
     terms.overheadPpm + terms.profitPpm > 0;
 
+  /**
+   * THE ENTRY BAR (ADR 0081). One field, one sentence, Enter, and the cursor
+   * never leaves it. `into` is the item the next line lands in and it STAYS
+   * where it was put, because a builder types an item's lines together.
+   */
+  const [entry, setEntry] = useState("");
+  const [entryError, setEntryError] = useState<string | null>(null);
+  const [into, setInto] = useState("");
+  const entryRef = useRef<HTMLInputElement>(null);
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  /** The row the cursor is in, so Ctrl+D knows what to copy. */
+  const [focusRow, setFocusRow] = useState<number | null>(null);
+
+  /**
+   * The trade's units, the ones this business has typed on other estimates, and
+   * the ones typed on THIS one since the page loaded — so a unit is known the
+   * moment it is used rather than after a save.
+   */
+  const knownUnits = useMemo(
+    () => unitsFor([...units, ...lines.map((l) => l.unit)]),
+    [units, lines],
+  );
+
   function setLine(i: number, patch: Partial<LineDraft>) {
     setLines((prev) => prev.map((l, j) => (i === j ? { ...l, ...patch } : l)));
+  }
+  /** A parsed sentence as a row of the table. */
+  function draftOf(parsed: ParsedEstimateLine, groupKey: string): LineDraft {
+    return {
+      ...emptyLine(groupKey),
+      description: parsed.description,
+      unit: parsed.unit,
+      quantity: parsed.quantityThousandths === 1000 ? "" : thousandthsToQuantityString(parsed.quantityThousandths),
+      unitCost: parsed.unitCostCents === 0 ? "" : (parsed.unitCostCents / 100).toFixed(2),
+    };
+  }
+  function commitEntry() {
+    const parsed = parseEstimateLine(entry, knownUnits);
+    if (parsed === null) {
+      setEntryError(
+        entry.trim() === ""
+          ? null
+          : "Could not read that. Try 320 sf tile @ 4.20, or plumbing rough 12000.",
+      );
+      return;
+    }
+    setLines((prev) => [...prev, draftOf(parsed, into)]);
+    setEntry("");
+    setEntryError(null);
+    entryRef.current?.focus();
+  }
+  /** Ctrl+D on a row: the line again, under it, without its id — most lines are near-copies. */
+  function duplicateFocused() {
+    if (focusRow === null) return;
+    setLines((prev) => {
+      const source = prev[focusRow];
+      if (!source) return prev;
+      const copy = { ...source, id: null };
+      return [...prev.slice(0, focusRow + 1), copy, ...prev.slice(focusRow + 1)];
+    });
   }
   function setGroup(i: number, patch: Partial<GroupDraft>) {
     setGroups((prev) => prev.map((g, j) => (i === j ? { ...g, ...patch } : g)));
@@ -473,13 +536,29 @@ export function EstimateEditor({
     .map((l, i) => ({ l, i }))
     .filter(({ l }) => !groups.some((g) => g.key === l.groupKey));
   const colCount = (hasGroups ? 1 : 0) + 9 + (editable ? 1 : 0);
+  /** The item a typed line lands in, or none once the item it named is gone. */
+  const intoKey = named.some((g) => g.key === into) ? into : "";
+  const pasted = useMemo(() => parseEstimateLines(pasteText, knownUnits), [pasteText, knownUnits]);
+  const readable = pasted
+    .map((r) => r.parsed)
+    .filter((p): p is ParsedEstimateLine => p !== null);
 
   /** One line's row. Its first cell is the item it sits in, once the estimate has any. */
   function lineRow(l: LineDraft, i: number) {
     const f = figuresOf(l);
     const blank = l.description.trim() === "";
     return (
-      <tr key={l.id ?? `new-${i}`} className="border-t border-border/50 align-top">
+      <tr
+        key={l.id ?? `new-${i}`}
+        className="border-t border-border/50 align-top"
+        onFocus={() => setFocusRow(i)}
+        onKeyDown={(e) => {
+          if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) {
+            e.preventDefault();
+            if (editable) duplicateFocused();
+          }
+        }}
+      >
         {hasGroups && (
           <td className="px-1 py-1">
             <Select
@@ -725,7 +804,18 @@ export function EstimateEditor({
             </div>
           )}
         </div>
-        <div className="overflow-x-auto">
+        {/*
+          `relative` is load-bearing, not decoration. The row buttons carry
+          `sr-only` labels, which Tailwind makes `position: absolute` — so
+          without a positioned ancestor here their containing block is the PAGE,
+          they sit at their static x (past 1,200px on this table) and they
+          stretch the DOCUMENT's scroll width even though the table itself is
+          clipped. That is what made this screen scroll sideways by 276px:
+          `overflow-x-auto` never clipped them, because it was not their
+          containing block. One word fixes it and the table still scrolls in its
+          own box.
+        */}
+        <div className="relative overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-xs text-muted-foreground">
               <tr>
@@ -875,6 +965,139 @@ export function EstimateEditor({
             </tbody>
           </table>
         </div>
+        {editable && (
+          <div className="mt-3 space-y-1.5 border-t border-border/50 pt-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-0 flex-1">
+                <Input
+                  ref={entryRef}
+                  aria-label="Type a line"
+                  value={entry}
+                  onChange={(e) => {
+                    setEntry(e.target.value);
+                    setEntryError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitEntry();
+                    }
+                  }}
+                  placeholder="320 sf tile @ 4.20"
+                  maxLength={400}
+                  className="h-9 pr-9"
+                />
+                <CornerDownLeft className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              </div>
+              {hasGroups && (
+                <Select value={intoKey === "" ? NONE : intoKey} onValueChange={(v) => setInto(v === NONE ? "" : v)}>
+                  <SelectTrigger aria-label="The item a typed line lands in" className="h-9 w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE}>Not in an item</SelectItem>
+                    {named.map((g) => (
+                      <SelectItem key={g.key} value={g.key}>
+                        {g.name.trim()}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <Button type="button" variant="outline" size="sm" onClick={() => setPasteOpen(true)}>
+                <ClipboardPaste className="mr-1.5 size-4" /> Paste lines
+              </Button>
+            </div>
+            {entryError === null ? (
+              <p className="text-xs text-muted-foreground">
+                Type a line and press Enter. <code className="text-foreground">320 sf tile @ 4.20</code>
+                {" · "}
+                <code className="text-foreground">tile labour 320 sf @ 3.50</code>
+                {" · "}
+                <code className="text-foreground">plumbing rough 12000</code> for a lump sum. The{" "}
+                <code className="text-foreground">@</code> is optional. <strong>Ctrl+D</strong> in a row copies it.
+              </p>
+            ) : (
+              <p className="text-xs text-destructive">{entryError}</p>
+            )}
+          </div>
+        )}
+
+        <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Paste lines</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                One line each, in the same words the box under the table takes — or straight out of a spreadsheet,
+                columns and all. Every line is shown below before anything is added
+                {hasGroups && intoKey !== "" ? `, and they land in ${named.find((g) => g.key === intoKey)?.name.trim() ?? "the item"}` : ""}.
+              </p>
+              <Textarea
+                aria-label="The lines to add"
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                rows={6}
+                placeholder={"320 sf tile @ 4.20\ntile labour 320 sf @ 3.50\nplumbing rough 12000"}
+                className="font-mono text-xs"
+              />
+              {pasted.length > 0 && (
+                <div className="max-h-64 overflow-y-auto rounded-md border border-border/60">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-muted/60 text-muted-foreground">
+                      <tr>
+                        <th className="px-2 py-1.5 text-left">Description</th>
+                        <th className="px-2 py-1.5 text-right">Qty</th>
+                        <th className="px-2 py-1.5 text-left">Unit</th>
+                        <th className="px-2 py-1.5 text-right">Unit cost</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pasted.map((r, i) => (
+                        <tr key={i} className="border-t border-border/50">
+                          {r.parsed === null ? (
+                            <td colSpan={4} className="px-2 py-1.5 text-destructive">
+                              Could not read <span className="font-mono">{r.input}</span> — it will be left out
+                            </td>
+                          ) : (
+                            <>
+                              <td className="px-2 py-1.5">{r.parsed.description}</td>
+                              <td className="px-2 py-1.5 text-right tabular-nums">
+                                {r.parsed.quantityThousandths === 1000 && r.parsed.unit === ""
+                                  ? "—"
+                                  : thousandthsToQuantityString(r.parsed.quantityThousandths)}
+                              </td>
+                              <td className="px-2 py-1.5">{r.parsed.unit || "—"}</td>
+                              <td className="px-2 py-1.5 text-right tabular-nums">
+                                {fmt(r.parsed.unitCostCents, symbol)}
+                              </td>
+                            </>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                disabled={readable.length === 0}
+                onClick={() => {
+                  setLines((prev) => [...prev, ...readable.map((p) => draftOf(p, intoKey))]);
+                  setPasteText("");
+                  setPasteOpen(false);
+                }}
+              >
+                Add {readable.length} {readable.length === 1 ? "line" : "lines"}
+                {pasted.length > readable.length ? `, leave out ${pasted.length - readable.length}` : ""}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <p className="mt-2 text-xs text-muted-foreground">
           A line is a quantity of a unit at a cost — a blank quantity is one, a lump sum. It sells at the markup on its
           cost, this line&apos;s or the estimate&apos;s, unless a price per unit is typed, which wins. A line with no

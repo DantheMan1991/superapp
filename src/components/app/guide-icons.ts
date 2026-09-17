@@ -16,6 +16,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleQuestionMark,
+  ClipboardPaste,
   Copy,
   Crosshair,
   Download,
@@ -113,6 +114,8 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   "chevron-left": ChevronLeft,
   "chevron-right": ChevronRight,
   "circle-question-mark": CircleQuestionMark,
+  // Pasting a block of estimate lines (jobs, E3a).
+  "clipboard-paste": ClipboardPaste,
   copy: Copy,
   // Re-centring a post's crop (marketing, slice S1).
   crosshair: Crosshair,

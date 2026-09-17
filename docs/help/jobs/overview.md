@@ -245,6 +245,29 @@ Once the estimate is accepted its items are fixed with its lines and its rates.
 
 Cost and price are worked out as you type and never stored, so a line typed as 320 sf at $4.20 and a line typed as $1,344.00 agree to the cent.
 
+**Typing a line as a sentence.** The box under the table is the fast way in, and it is what you will use for most of an estimate. Type one line, press **Enter**, and it appears in the table with the cursor still in the box ready for the next one.
+
+| Type this | You get |
+| --- | --- |
+| `320 sf tile @ 4.20` | 320 sf of *tile* at $4.20 |
+| `tile labour 320 sf @ 3.50` | the same, said the other way round — the quantity can come first or last |
+| `120 cy concrete 185` | the `@` is optional; a number on the end is the unit cost |
+| `plumbing rough 12000` | a lump sum of $12,000 — no quantity, no unit |
+| `plumbing rough` | just the description, to price later |
+| a row copied out of a spreadsheet | the columns read as if you had typed them, tabs and all |
+
+Prices take a `$` and commas if you like them: `2 ea door @ 1,250` and `@ $4.20` both work. Quantities go to thousandths, so `0.333 cy` is fine.
+
+**It knows the trade's units** — `sf`, `lf`, `cy`, `ea`, `ls`, `ton`, `bdl` and the rest — **and it learns yours.** Any unit you have ever typed on an estimate is recognised from then on, so if you write `coats`, `2 coats paint @ 1.10` reads `coats` as the unit the next time. A word it does not know stays part of the description, which is why `2 coats paint` reads as *coats paint*, quantity 2, until you have taught it.
+
+**A sentence it cannot read is refused, not guessed.** Type `tile @ four twenty` and nothing is added: your text stays in the box and it says so. That is deliberate — a line that quietly landed at $0.00 on a bid you sent is the expensive kind of mistake. A sentence with no description is refused the same way: `320 sf @ 4.20` is a quantity and a price for nothing.
+
+**Where a typed line lands.** Once the estimate has items, a select beside the box says which item the next line goes in, and **it stays where you put it** — you are usually typing one item's lines together. Set it back to `Not in an item` for loose lines.
+
+**{button:Paste lines|outline|clipboard-paste}** takes a whole block at once: one line each, in the same words, or straight out of a spreadsheet. Every line is shown in a preview before anything is added — quantity, unit and unit cost as they were read — and any line it could not read is marked in red and counted on the button, which reads *Add 4 lines, leave out 1*. Nothing is added until you press it, and the lines land in the item the select names.
+
+**{key:Ctrl+D}** while the cursor is in a row copies that row directly beneath it. Most lines in a takeoff are a small change from the line above, so this is usually quicker than typing another sentence.
+
 **Client wording.** The tick beside {button:Add item|ghost} on the **Lines** header. Off by default, because writing the client's words is a pass of its own and you do not want a second box on every row while you are typing a takeoff. It comes up already on for an estimate that has client wording or a hidden line. With it on, every line gets two more controls:
 
 | Control | What it does |

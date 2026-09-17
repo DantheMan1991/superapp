@@ -64,7 +64,9 @@ unzipped function budget with sharp's libvips and the Noto TTFs that
 | --- | --- | --- |
 | **E1** | ~~**Items**~~ **SHIPPED 2026-09-16** ([ADR 0079](../decisions/0079-an-estimate-groups-its-lines-into-the-items-the-client-sees-and-a-group-priced-fixed-is-the-price-not-a-cost-to-mark-up.md)) | `job_estimate_groups`, one level deep, rolling up or priced by hand; a fourth presentation `groups`; the schedule of values by item. The keystone: everything below hangs off this table. |
 | **E2** | ~~**What the client sees**~~ **SHIPPED 2026-09-16** ([ADR 0080](../decisions/0080-an-estimate-line-carries-the-clients-words-beside-the-estimators-and-a-line-kept-off-the-proposal-collapses-the-item-that-holds-it.md)) | `client_description` on a line (the estimator types `Tile — mud set, Schluter, mtl only, per AJ quote 8/14`, the client reads `Porcelain tile flooring`) and `client_visible`, **offered only inside an item** — hidden money must have somewhere to hide or the printed rows stop adding up, and **the item that hides a line collapses** on the same predicate as one priced by hand. The cost code's number off by default. One switch in the editor, not two columns. |
-| E3 | **Speed** | The **entry bar**: one field that parses `320 sf tile @ 4.20`, `plumbing rough 12000` (a lump), `@tile 320` (drop an assembly), Enter commits and the cursor stays. A **paste target** — `src/lib/paste-targets` is a finished framework and eight packs use it; jobs has no `paste/` directory at all. **Per-row saving** (today the whole estimate is one `useState` and one Save button, which a two-hundred-line takeoff cannot be). `Ctrl+D` to duplicate the row above, because most lines are near-copies. The parser is pure and table-tested, and it is also the voice feature: one function, two doors. |
+| **E3a** | ~~**Typing fast**~~ **SHIPPED 2026-09-16** ([ADR 0081](../decisions/0081-an-estimate-line-can-be-typed-as-one-sentence-and-the-grammar-that-reads-it-is-pure-and-refuses-what-it-cannot-read.md)) | The entry bar, the paste box, `Ctrl+D`, and the units the parser learns from the business's own estimates. One pure grammar, three doors — the third is voice. No migration. |
+| E3b | **Saving fast** | **Per-row saving** and keyboard grid navigation. The editor still holds every line in one `useState` with one Save button, which a two-hundred-line estimate cannot be. Its own slice because it changes the concurrency model (`STALE_VERSION`) rather than adding a way in. |
+| ~~E3~~ | ~~**Speed**~~ — split into E3a and E3b above | The **entry bar**: one field that parses `320 sf tile @ 4.20`, `plumbing rough 12000` (a lump), `@tile 320` (drop an assembly), Enter commits and the cursor stays. A **paste target** — `src/lib/paste-targets` is a finished framework and eight packs use it; jobs has no `paste/` directory at all. **Per-row saving** (today the whole estimate is one `useState` and one Save button, which a two-hundred-line takeoff cannot be). `Ctrl+D` to duplicate the row above, because most lines are near-copies. The parser is pure and table-tested, and it is also the voice feature: one function, two doors. |
 | E4 | **Price memory** | Every `job_estimate_line` across the tenant already IS a price history: type a description, get *"last priced $4.20 on 24-108, three weeks ago"*, Tab accepts. Then the half nobody else can do, because the actuals are in the same database: *"you estimated $4.20 — you actually paid $4.65 on the last three jobs"* (the `Spent` column per code). Before assemblies, because it is what tells us what an assembly should look like. |
 | E5 | **The proposal as sections, the HTML document, and the client link** | Presentation (how the money is grouped) and format (what the paper is) are two choices tangled in one field today. Split them, then build the document as a **section list** over pack data — and the point is that every page a custom-home proposal wants is already data here: the cover's elevation is the current drawing set (9a), the narrative is the items' names and notes, the allowances are selections (ADR 0067), the milestones are phases (ADR 0071), the warranty is a period on the job (13a), the insurance and bonding are rows (0068/0078). A brochure is a page order over things that exist. `letter` and `brochure` are two presets over that list. Stage 1 is the HTML plus print CSS, shipped as the tokenised client link with **Accept**; stage 2 adds the Chromium render behind the same route so the product can attach and email the file. Stage 1 is the first half of stage 2, so nothing is wasted. |
 | E6 | **Assemblies** | Built backwards on purpose: **"save this item as an assembly"** first, so the library assembles itself out of real work instead of needing to be seeded — nobody ever fills in an assembly library up front. Then dropping one with a driving quantity explodes it into an item whose lines' quantities are computed (1.05 sf of tile per sf of floor for waste, 0.02 bags of thinset, 1 sf of labour) with the cost codes pre-filled. **An assembly is a saved item**, which is why it waits for E1's table rather than arriving with one of its own — and ADR 0069 said assemblies wanted a few real estimates typed first, which E1 is. |
@@ -74,6 +76,90 @@ Not in the program, and deliberately: a takeoff from the drawings (shipped as
 9c), and anything that would make an estimate post to the books.
 
 ## Build log
+
+### 2026-09-16 — Typing a line as one sentence (`claude/estimate-entry-bar`, ADR 0081)
+
+Slice **E3a** of [the estimate program](#the-estimate-program-open-started-2026-09-16),
+and the first half of the founder's "think speed". **No migration** — one
+pure module, one read, and four controls.
+
+**A LINE IS ONE TYPED SENTENCE.** `320 sf tile @ 4.20` · `tile labour 320
+sf @ 3.50` · `120 cy concrete 185` (the `@` is optional) · `plumbing rough
+12000` (a lump) · `plumbing rough` (the description now, the money later) ·
+and a tab-separated spreadsheet row, because a tab means the same as a
+space. One field under the table, Enter commits, the cursor never leaves it.
+Nine cells became one sentence.
+
+**ONE PURE FUNCTION, THREE DOORS.** `estimate-parse.ts`. The entry bar
+commits one, the paste box runs a block through `parseEstimateLines`, and
+the day a phone hears *"kitchen tile, three hundred and twenty square feet,
+four twenty a foot"* it is the same function again — which is why the
+grammar is a tested pure module and not a handler in a component. The voice
+slice is a second door, never a second pipeline.
+
+**IT LEARNS THE UNITS.** `320 sf tile` has a unit and `2 coats paint` does
+not, and nothing about the shape of the words can tell them apart — so the
+parser is GIVEN the units it should know: `COMMON_UNITS` (the trade's own),
+plus every unit this business has typed on any estimate (`unitsInUse`), plus
+every unit typed on the estimate open in front of you. A business that
+writes `bdl` is understood the first time and nothing is configured; a word
+off both lists reads as part of the description.
+
+**WHAT IT CANNOT READ IS REFUSED.** `null`, never a line with a zero in it:
+`tile @ four twenty` leaves the text in the bar and says *"Could not read
+that. Try 320 sf tile @ 4.20, or plumbing rough 12000."*, and the paste
+preview marks the row and the button counts it — *Add 4 lines, leave out 1*.
+A silent $0.00 on a bid is the expensive kind of wrong. A sentence with no
+description is refused for the same reason: `320 sf @ 4.20` is a quantity
+and a price for nothing.
+
+**PASTING IS THE SAME GRAMMAR, NOT A PASTE TARGET**, and that is a change
+from the plan, made on reading the framework. A paste target (ADR 0036) is
+described per TENANT with no way to say *which estimate* — it exists to move
+a business in, and an estimate line is a row inside a document you already
+have open — and its `save` writes one row through the module's own verb,
+which here is `updateEstimate` over the whole array. Forcing it would have
+meant an "Estimate" choice column repeated on every row of a forty-line
+quote. So the box is a textarea, the pure parser per line, and a preview of
+every row before anything is added. The model-driven route stays there for
+the day somebody wants a supplier's PDF read, which is a different thing.
+
+**CTRL+D COPIES THE ROW THE CURSOR IS IN**, without its id, directly
+beneath. Most lines in a takeoff are near-copies of the one above.
+
+**THE ITEM A TYPED LINE LANDS IN HOLDS ITS CHOICE** — one select beside the
+bar rather than one bar per item, because a builder types an item's lines
+together. It is absent until the estimate has items, like the row's own item
+column.
+
+**AND THE SIDEWAYS PAGE SCROLL IS FIXED, IN ONE WORD.** The E1 entry
+recorded this screen scrolling the whole PAGE 276px sideways
+(`documentElement.scrollWidth` 1220 against a 944 client width) with the
+`overflow-x-auto` wrapper and every ancestor correctly bounded, and left it
+for E3. The cause is not the table's width at all: **the row buttons carry
+`sr-only` labels, Tailwind makes those `position: absolute`, and with no
+positioned ancestor their containing block is the PAGE** — so they sit at
+their static x past 1,200px and stretch the document, and `overflow-x-auto`
+never clips them because it is not their containing block. `relative` on the
+wrapper: measured 1220 → 944, and the table still scrolls in its own box.
+**Eight other screens have the same combination** — the invoice, bill and
+journal editors among them — and are their own task; the comment on the
+wrapper says why the word is load-bearing.
+
+**Driven end to end** on EST-ITEMS-1 (Oak Row, dev branch): three sentences
+typed and committed with the cursor staying put, the fourth refused with its
+text kept, Ctrl+D duplicating a row in place, and a pasted block of five
+read four ways — a tab-separated spreadsheet row, `1,250.5 sf hardwood @
+6.75`, `3 bdl shingles @ 34`, a lump with no price — with the fifth marked
+and left out. Twelve lines saved.
+
+**Not built, and E3b:** per-row saving and keyboard grid navigation. The
+editor still holds every line in one `useState` with one Save button, which
+a two-hundred-line estimate cannot be. It is a slice of its own because it
+changes the concurrency model (`STALE_VERSION`) rather than adding a way in.
+Also not built: `@assembly 320` (E6 — the grammar has room, and a LEADING
+`@` is free because the `@` is already the price separator), a cost code in
+the sentence, and E4's price memory.
 
 ### 2026-09-16 — The client's words, and the line they never see (`claude/estimate-client-wording`, ADR 0080)
 
@@ -3761,6 +3847,11 @@ ordering only bites when two new tables reference each other in one file.
   builders, one layout in the proposal's styles, two loaders that read the
   rows in one transaction; the routes under `src/app/api/jobs/change-orders`
   and `src/app/api/jobs/commitments`.
+- `src/packs/jobs/estimate-parse.ts` — **one typed sentence into one estimate
+  line** (E3a, ADR 0081), pure and table-tested: `parseEstimateLine`,
+  `parseEstimateLines`, `COMMON_UNITS`, `unitsFor`. The entry bar, the paste
+  box and (later) a phone are three doors onto it. A sentence it cannot read
+  is `null`, never a line with a zero in it.
 - `src/packs/jobs/estimate-math.ts` — **the whole arithmetic of an estimate,
   pure and pinned** (ADR 0069, 0079). The items arrive as a trailing argument
   that defaults to none, so an ungrouped estimate computes what it always did.
@@ -4130,24 +4221,25 @@ ordering only bites when two new tables reference each other in one file.
   proposal is HTML and a magazine-grade PDF is that same HTML through
   Chromium. The PDF export stays a requirement, so E5 carries the Chromium
   route rather than leaving it to a later slice.
-- **The estimate program is open; E1 and E2 are shipped** — see
-  [the plan](#the-estimate-program-open-started-2026-09-16) for E3–E7, each
-  with the founder's decision behind it. What is NOT built: the **entry
-  bar**, the **paste target** (jobs is the only pack with no `paste/`
-  directory, and `src/lib/paste-targets` is a finished framework) and
-  **per-row saving** — the editor is still one `useState` and one Save
-  button, which a two-hundred-line takeoff cannot be (E3); the **price
+- **The estimate program is open; E1, E2 and E3a are shipped** — see
+  [the plan](#the-estimate-program-open-started-2026-09-16) for E3b–E7, each
+  with the founder's decision behind it. What is NOT built:
+  **per-row saving** and keyboard grid navigation — the editor is still one
+  `useState` and one Save button, which a two-hundred-line takeoff cannot be
+  (E3b); the **price
   memory**, including the estimated-versus-actual read the pack already has
   the data for (E4); **the proposal as sections**, the brochure, and the
   client link with Accept (E5); and **assemblies**, which are a saved item
   (E6).
-- **THE ESTIMATE SCREEN MAKES THE PAGE SCROLL SIDEWAYS.** 276px at a 944px
-  client width (`documentElement.scrollWidth` 1220), although the lines
-  table's `overflow-x-auto` wrapper and every ancestor are correctly
-  bounded; hiding the table alone removes it and `overflow: hidden` on the
-  wrapper does not. It predates E1 — the table was already wider than its
-  box — and the item column made it obvious. **E3 rebuilds this table** and
-  is where the fix belongs.
+- ~~**THE ESTIMATE SCREEN MAKES THE PAGE SCROLL SIDEWAYS.**~~ — **closed
+  2026-09-16 (E3a, ADR 0081)**, and the cause was not the table's width:
+  the row buttons' `sr-only` labels are `position: absolute`, so with no
+  positioned ancestor their containing block is the PAGE and they stretch
+  the document from past 1,200px while `overflow-x-auto` — not their
+  containing block — never clips them. `relative` on the wrapper; measured
+  1220 → 944. **Eight other screens have `overflow-x-auto` and `sr-only` in
+  one subtree** (the invoice, bill and journal editors among them) and are
+  their own task.
 - **Hiding a line is about not itemising, not concealment (E2, ADR 0080).** A
   hidden line's money still lands in its cost code's sum, so the `codes`
   presentation can print an amount that is only a hidden line's. A business

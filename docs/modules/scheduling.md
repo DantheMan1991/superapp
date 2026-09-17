@@ -16,6 +16,20 @@
 
 ## Build log
 
+### 2026-09-16 — `schedule_items_parent_fk` re-checked, and found already correct (branch `claude/composite-set-null-proof`)
+
+The twin of [work.md](work.md)'s entry of this date, and for the same reason: a
+scan over the migration FILES reported this constraint as an applied and
+still-broken bare `ON DELETE SET NULL`. It has been correct since `drizzle/0192`
+— the 2026-08-23 entry below is that repair — and the scan was reading `0096`,
+the migration that first installed it. **A file scan cannot see a repair**,
+because an applied migration is never edited.
+
+Confirmed against `pg_constraint` on dev and prod:
+`ON DELETE SET NULL (parent_id)` on both. **No change to this module**; the
+class is now guarded schema-wide by `tests/isolation/constraints.test.ts`
+([ci-and-tests.md](ci-and-tests.md)).
+
 ### 2026-09-15 — The first trade pack arrives, and slice 6's managed calendar with it (`claude/job-schedule`)
 
 The jobs pack's schedule ([ADR 0071](../decisions/0071-a-jobs-schedule-is-its-phases-as-items-on-the-business-calendar-and-a-move-pushes-what-follows.md))

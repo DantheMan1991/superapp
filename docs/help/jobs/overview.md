@@ -288,6 +288,27 @@ Prices take a `$` and commas if you like them: `2 ea door @ 1,250` and `@ $4.20`
 
 **{key:Ctrl+D}** while the cursor is in a row copies that row directly beneath it. Most lines in a takeoff are a small change from the line above, so this is usually quicker than typing another sentence.
 
+**Assemblies — an item you price once and use on every job.**
+
+A thing you build often is the same handful of lines every time: tile flooring is tile, tile labour and thinset. Price it once as an item, save it, and drop it into the next {{project|lower}} at whatever size that one is.
+
+**Saving one.** Price an item the way you normally would, then press the {button:Save item as an assembly|ghost|package} icon on its header row. You get:
+
+| Field | What it is |
+| --- | --- |
+| `Call it` | The name you will pick it by later. Starts as the item's own name. |
+| `It is per` / `Of` | **The size you priced it at** — `320` `sf`. Guessed from the lines themselves, because most of them usually agree; change it if the guess is wrong. |
+| `A note to yourself` | What is in it, what it assumes. Yours only, never printed. |
+
+It saves the lines exactly as you priced them — descriptions, the client's wording, quantities, costs, markups, whether each line shows on the proposal, and the cost code. **You can save an item you have only just typed**; it does not have to be saved to the estimate first.
+
+**Using one.** {button:Add an assembly|outline|package} beside the type-a-line box — it only appears once you have saved at least one. Pick it, say how many, and it comes in as **an item with its lines underneath**, ready to edit like anything else.
+
+- **Only the quantities scale.** Drop a 320 sf assembly at 500 sf and every quantity grows in proportion — but the costs, the prices per unit and the markups do not, because those are already per unit. That is the point: it is the same work at a different size, not a different price.
+- **The cost codes are matched to this {{project|lower}}'s own list**, by the code number. A code your list has not got is left blank and the message says how many — pick them yourself, or leave them; an uncoded line still prices, it is only left out of the budget.
+- **It is a starting point, not a quote.** Check the quantities after you drop one. The dialog tells you what one of them costs at the size it was saved, so you can see straight away whether it is the right thing.
+- **{button:Take it out of the library|ghost}** removes an assembly you no longer want. **Lines it has already made are untouched** — those belong to the {{project|plural|lower}} they are on.
+- Assemblies belong to your business, not to a {{project|lower}}: every {{project|lower}} you estimate from now on can use them.
 **Moving around the table with the keyboard.** A takeoff is usually typed down one column — forty quantities, then forty costs — so the arrows work the way they do in a spreadsheet.
 
 | Key | What it does |
@@ -1478,7 +1499,7 @@ Worth knowing so you are not looking for it:
 - **The schedule counts calendar days, and a phase waits only for the one it follows.** No working-day calendar or holidays yet, no start-to-start dependencies, no baseline to measure slip against, and nothing tells the trade — the phase names them, and the company calendar and the feed are how they hear. A schedule is typed per {{project|lower}}; a template that fills a new one is next.
 - **A markup is drawn once.** A cloud, an arrow, a note, a pin or a measurement cannot be moved or resized after the fact — rub it out and draw it again — there is no freehand pen, nothing carries a markup onto a reissued sheet, and a marked-up sheet is not printed or sent with its markups on it. No overlay of one issue on another, and the cover sheet's index is not read to fill titles.
 - **The takeoff pushes one way.** A measurement puts its quantity on an estimate line and remembers the line; the estimate does not point back at the sheets, an opening is not deducted from an area, nothing measures a volume, and a total across sheets is added up by you. The scale is set by hand — from a known dimension or the title block — never read from the PDF.
-- **An estimate is lines you type**, though it now remembers what you last charged for each one. No assemblies (a bundle of lines dropped in as one), no unit cost book you keep and maintain by hand, no takeoff from the drawings. A supplier's quote cannot be attached to an estimate yet. Both proposals print, as a PDF and on screen, and a client can accept one on a link — but neither is **sent** from here (you paste the link or attach the PDF to your own email). When a client does accept, it reaches **What needs you** and your morning email if you own the business; everyone else sees it on the estimate.
+- **An estimate is lines you type**, though it now remembers what you last charged for each one. No unit cost book you keep and maintain by hand, no takeoff from the drawings. A supplier's quote cannot be attached to an estimate yet. Both proposals print, as a PDF and on screen, and a client can accept one on a link — but neither is **sent** from here (you paste the link or attach the PDF to your own email). When a client does accept, it reaches **What needs you** and your morning email if you own the business; everyone else sees it on the estimate.
 - **A subcontractor out of standing is not stopped.** An order can be issued and a bill paid while a certificate is missing or expired; the Subcontractors page and the order's page say so in red, and the decision is yours. Which kinds are required is set in the module's configuration for now, not on a screen.
 - **The option book is per job.** The same selections with the same choices on every plan are entered on each job for now; a book that seeds a new job is next. Nothing here lets the client choose for themselves; the office records what they said.
 - **A back-charge is not a change order.** Money you deduct from a subcontractor's payment for something you paid on their behalf reduces the payment, not the scope; a deductive change order reduces the scope. Record a back-charge as a credit in Accounting for now.

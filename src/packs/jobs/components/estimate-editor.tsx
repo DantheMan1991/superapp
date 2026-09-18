@@ -12,6 +12,7 @@ import {
   FileText,
   FolderPlus,
   Link2,
+  Package,
   Plus,
   Trash2,
 } from "lucide-react";
@@ -19,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -41,6 +43,9 @@ import {
   applyEstimateToScheduleAction,
   createEstimateAction,
   createEstimateShareAction,
+  deleteAssemblyAction,
+  dropAssemblyAction,
+  saveAssemblyAction,
   revealEstimateShareTokenAction,
   revokeEstimateShareAction,
   updateEstimateAction,
@@ -48,6 +53,7 @@ import {
 import { quantityStringToThousandths, thousandthsToQuantityString } from "../billing-math";
 import { parseEstimateLine, parseEstimateLines, unitsFor, type ParsedEstimateLine } from "../estimate-parse";
 import { SHARE_STANDING_LABELS, type ShareStanding } from "../estimate-share-status";
+import { suggestDriver } from "../assembly-math";
 import {
   fillFromMemory,
   howLongAgo,
@@ -298,6 +304,16 @@ export function NewEstimateDialog({ projectId, trigger }: { projectId: string; t
  * budget or a schedule; the rates and lines are shown and not sent. Revise
  * by starting a new one and marking this one superseded.
  */
+/** A saved item in the picker: enough to choose by, never its lines. */
+export interface AssemblyOption {
+  id: string;
+  name: string;
+  /** "per 320 sf" / "each", already worded by the page. */
+  per: string;
+  lineCount: number;
+  costCents: number;
+}
+
 /** A client link as the builder reads it. The token is never among these. */
 export interface ShareView {
   id: string;
@@ -321,6 +337,7 @@ export function EstimateEditor({
   units,
   shares,
   prices,
+  assemblies,
 }: {
   projectId: string;
   estimate: EditableEstimate;
@@ -328,6 +345,8 @@ export function EstimateEditor({
   units: string[];
   /** What each line cost the last time it was priced (E4a), newest first. */
   prices: RememberedPrice[];
+  /** The saved items this business can drop in (E6), by name. */
+  assemblies: AssemblyOption[];
   codes: Array<{ id: string; label: string }>;
   contracts: Array<{ id: string; label: string; status: string }>;
   canEdit: boolean;
@@ -512,6 +531,118 @@ export function EstimateEditor({
   }
   function addLine(groupKey: string) {
     setLines((prev) => [...prev, emptyLine(groupKey)]);
+  }
+
+  /* --------------------------------------------------- assemblies (E6) */
+
+  /**
+   * SAVING AN ITEM reads the editor's OWN STATE, not the database, so an item
+   * typed a minute ago and not yet saved can still go in the library — which
+   * is the moment somebody knows it is worth keeping.
+   */
+  const [saveFor, setSaveFor] = useState<string | null>(null);
+  const [asmName, setAsmName] = useState("");
+  const [asmPer, setAsmPer] = useState("");
+  const [asmUnit, setAsmUnit] = useState("");
+  const [asmNotes, setAsmNotes] = useState("");
+  const [dropOpen, setDropOpen] = useState(false);
+  const [dropId, setDropId] = useState("");
+  const [dropQty, setDropQty] = useState("");
+
+  /** The lines of an item, as the library keeps them. */
+  function assemblyLinesOf(groupKey: string) {
+    return rowsOf(groupKey)
+      .map(({ l }) => l)
+      .filter((l) => l.description.trim() !== "")
+      .map((l, i) => {
+        const f = figuresOf(l);
+        return {
+          description: l.description.trim(),
+          clientDescription: l.clientDescription.trim(),
+          clientVisible: l.clientVisible,
+          unit: l.unit.trim(),
+          quantityThousandths: f.quantityThousandths,
+          unitCostCents: f.unitCostCents,
+          markupPpm: f.markupPpm,
+          unitPriceCents: f.unitPriceCents,
+          // The code AS WRITTEN, so it survives a move to another job's set.
+          costCode: (codes.find((c) => c.id === l.costCodeId)?.label ?? "").split(" · ")[0].trim(),
+          sortOrder: (i + 1) * 10,
+        };
+      });
+  }
+
+  function openSaveAssembly(groupKey: string) {
+    const group = groups.find((g) => g.key === groupKey);
+    const lines = assemblyLinesOf(groupKey);
+    const driver = suggestDriver(lines);
+    setSaveFor(groupKey);
+    setAsmName(group?.name.trim() ?? "");
+    setAsmPer(thousandthsToQuantityString(driver.quantityThousandths));
+    setAsmUnit(driver.unit);
+    setAsmNotes("");
+  }
+
+  function commitSaveAssembly() {
+    if (saveFor === null) return;
+    const group = groups.find((g) => g.key === saveFor);
+    startTransition(async () => {
+      const res = await saveAssemblyAction({
+        projectId,
+        name: asmName,
+        clientNote: group?.clientNote ?? "",
+        notes: asmNotes,
+        drivingQuantity: asmPer,
+        drivingUnit: asmUnit,
+        lines: assemblyLinesOf(saveFor),
+      });
+      if ("error" in res) return void toast.error(res.error);
+      toast.success(`Saved ${res.name} to your assemblies`);
+      setSaveFor(null);
+      router.refresh();
+    });
+  }
+
+  /**
+   * DROPPING one adds a NEW ITEM with its lines. The server explodes and
+   * resolves the cost codes; the editor appends drafts and lets autosave write
+   * them, because the estimate is held in this component's state (ADR 0082)
+   * and a second writer to the same rows is how they come to disagree.
+   */
+  function commitDrop() {
+    startTransition(async () => {
+      const res = await dropAssemblyAction({ projectId, assemblyId: dropId, quantity: dropQty });
+      if ("error" in res) return void toast.error(res.error);
+      const key = `new-${Date.now()}`;
+      setGroups((prev) => [
+        ...prev,
+        { key, id: null, name: res.name, clientNote: res.clientNote, priceMode: "rollup", fixedPrice: "" },
+      ]);
+      setLines((prev) => [
+        ...prev,
+        ...res.lines.map((l) => ({
+          ...emptyLine(key),
+          costCodeId: l.costCodeId ?? "",
+          description: l.description,
+          clientDescription: l.clientDescription,
+          clientVisible: l.clientVisible,
+          unit: l.unit,
+          quantity:
+            l.quantityThousandths === 1000 ? "" : thousandthsToQuantityString(l.quantityThousandths),
+          unitCost: l.unitCostCents === 0 ? "" : (l.unitCostCents / 100).toFixed(2),
+          markup: l.markupPpm === null ? "" : (l.markupPpm / 10_000).toString(),
+          unitPrice: l.unitPriceCents === null ? "" : (l.unitPriceCents / 100).toFixed(2),
+        })),
+      ]);
+      toast.success(
+        res.uncoded > 0
+          ? `Added ${res.name}. ${res.uncoded} ${res.uncoded === 1 ? "line has" : "lines have"} no code on this job — pick one.`
+          : `Added ${res.name}`,
+      );
+      setDropOpen(false);
+      setDropId("");
+      setDropQty("");
+    });
   }
 
   /* ------------------------------------------------ the keyboard grid (E3c) */
@@ -1175,7 +1306,19 @@ export function EstimateEditor({
                       </td>
                       <td colSpan={2} />
                       {editable && (
-                        <td className="px-1 py-1">
+                        <td className="whitespace-nowrap px-1 py-1">
+                          {/* An assembly is this item, saved — E6, ADR 0086. */}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="size-8"
+                            onClick={() => openSaveAssembly(g.key)}
+                            disabled={rowsOf(g.key).every((r) => r.l.description.trim() === "")}
+                          >
+                            <Package className="size-4" />
+                            <span className="sr-only">Save item {gi + 1} as an assembly</span>
+                          </Button>
                           <Button
                             type="button"
                             variant="ghost"
@@ -1281,6 +1424,11 @@ export function EstimateEditor({
               <Button type="button" variant="outline" size="sm" onClick={() => setPasteOpen(true)}>
                 <ClipboardPaste className="mr-1.5 size-4" /> Paste lines
               </Button>
+              {assemblies.length > 0 && (
+                <Button type="button" variant="outline" size="sm" onClick={() => setDropOpen(true)}>
+                  <Package className="mr-1.5 size-4" /> Add an assembly
+                </Button>
+              )}
             </div>
             {entryError === null && entryMemory ? (
               <p className="text-xs">
@@ -1397,6 +1545,162 @@ export function EstimateEditor({
               >
                 Add {readable.length} {readable.length === 1 ? "line" : "lines"}
                 {pasted.length > readable.length ? `, leave out ${pasted.length - readable.length}` : ""}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Save this item as an assembly (E6, ADR 0086). */}
+        <Dialog open={saveFor !== null} onOpenChange={(o) => !o && setSaveFor(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Save this item as an assembly</DialogTitle>
+              <DialogDescription>
+                Its lines, their quantities and their cost codes, kept so the next job can have them. It goes in
+                at the size you say it is per, and scales from there.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="asm-name">Call it</Label>
+                <Input
+                  id="asm-name"
+                  value={asmName}
+                  onChange={(e) => setAsmName(e.target.value)}
+                  placeholder="Tile flooring"
+                  maxLength={160}
+                />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-[8rem_8rem]">
+                <div className="space-y-1.5">
+                  <Label htmlFor="asm-per">It is per</Label>
+                  <Input
+                    id="asm-per"
+                    value={asmPer}
+                    onChange={(e) => setAsmPer(e.target.value)}
+                    inputMode="decimal"
+                    placeholder="320"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="asm-unit">Of</Label>
+                  <Input
+                    id="asm-unit"
+                    value={asmUnit}
+                    onChange={(e) => setAsmUnit(e.target.value)}
+                    maxLength={20}
+                    placeholder="sf"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Guessed from the lines themselves. Drop it at 500 sf later and every quantity scales with it —
+                <strong> the costs and markups do not</strong>, because they are already per unit.
+              </p>
+              <div className="space-y-1.5">
+                <Label htmlFor="asm-notes">A note to yourself</Label>
+                <Textarea
+                  id="asm-notes"
+                  value={asmNotes}
+                  onChange={(e) => setAsmNotes(e.target.value)}
+                  rows={2}
+                  maxLength={2000}
+                  placeholder="What is in it, what it assumes. Never printed."
+                />
+              </div>
+              {saveFor !== null && (
+                <p className="text-xs text-muted-foreground">
+                  <strong>{assemblyLinesOf(saveFor).length}</strong> lines will be saved.
+                </p>
+              )}
+            </div>
+            <DialogFooter>
+              <Button type="button" onClick={commitSaveAssembly} disabled={pending || asmName.trim() === ""}>
+                {pending ? "Saving…" : "Save the assembly"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Drop one in: it arrives as a new item with its lines under it. */}
+        <Dialog open={dropOpen} onOpenChange={setDropOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add an assembly</DialogTitle>
+              <DialogDescription>
+                It comes in as an item with its lines underneath, priced as you saved it, with the cost codes
+                matched against the code list this estimate uses. A code that list has not got is left blank.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="drop-which">Which one</Label>
+                <Select value={dropId} onValueChange={setDropId}>
+                  <SelectTrigger id="drop-which" className="w-full">
+                    <SelectValue placeholder="Choose an assembly" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {assemblies.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.name} · {a.per} · {a.lineCount} {a.lineCount === 1 ? "line" : "lines"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="drop-qty">How many</Label>
+                <Input
+                  id="drop-qty"
+                  value={dropQty}
+                  onChange={(e) => setDropQty(e.target.value)}
+                  inputMode="decimal"
+                  className="w-32"
+                  placeholder={assemblies.find((a) => a.id === dropId)?.per.replace(/^per /, "") ?? "500"}
+                />
+              </div>
+              {dropId !== "" && (
+                <p className="text-xs text-muted-foreground">
+                  One of these costs{" "}
+                  <span className="tabular-nums">
+                    {fmt(assemblies.find((a) => a.id === dropId)?.costCents ?? 0, symbol)}
+                  </span>{" "}
+                  {" "}
+                  {assemblies.find((a) => a.id === dropId)?.per}. Check the quantities afterwards — an assembly
+                  is a starting point, not a quote.
+                </p>
+              )}
+            </div>
+            <DialogFooter className="sm:justify-between">
+              {/* A library you cannot take things out of fills up with mistakes. */}
+              {dropId !== "" ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={pending}
+                  onClick={() => {
+                    const gone = assemblies.find((a) => a.id === dropId)?.name ?? "It";
+                    startTransition(async () => {
+                      const res = await deleteAssemblyAction({ projectId, id: dropId });
+                      if ("error" in res) return void toast.error(res.error);
+                      toast.success(`${gone} is out of your assemblies. Lines it already made are untouched.`);
+                      setDropId("");
+                      router.refresh();
+                    });
+                  }}
+                >
+                  Take it out of the library
+                </Button>
+              ) : (
+                <span />
+              )}
+              <Button
+                type="button"
+                onClick={commitDrop}
+                disabled={pending || dropId === "" || dropQty.trim() === ""}
+              >
+                {pending ? "Adding…" : "Add it"}
               </Button>
             </DialogFooter>
           </DialogContent>

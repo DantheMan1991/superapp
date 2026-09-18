@@ -404,7 +404,129 @@ export const jobEstimateShares = pgTable(
   ],
 );
 
+/* ------------------------------------------------------------------------
+ * ASSEMBLIES: an item, saved, so the next job can have it too (E6, ADR 0086).
+ *
+ * **AN ASSEMBLY IS A SAVED ITEM.** Not a new kind of thing — the same shape
+ * as `job_estimate_groups` and its lines, which is why this waited for the
+ * items table rather than arriving with one of its own (ADR 0079).
+ *
+ * ── BUILT BACKWARDS, ON PURPOSE ────────────────────────────────────────────
+ *
+ * The library assembles itself out of work somebody has already priced:
+ * "save this item as an assembly" comes first, and dropping one comes second.
+ * **Nobody ever fills in an assembly library up front** — every estimating
+ * product that shipped the drop-down first has an empty drop-down in it.
+ *
+ * ── WHAT IT IS PER ─────────────────────────────────────────────────────────
+ *
+ * An item has no quantity of its own: 320 sf of tile, 320 sf of labour and 6
+ * bags of thinset are three lines that happen to be one floor. So an assembly
+ * records **the size it was saved at** — `driving_quantity` and
+ * `driving_unit`, 320 sf — and keeps every line's quantity EXACTLY as it was
+ * priced. Dropping it at another size scales by the ratio.
+ *
+ * Storing the quantities as they were, rather than as ratios, is the decision
+ * worth keeping: `6 bags at 320 sf` is a number the estimator recognises from
+ * the job it came off, and `0.01875 bags per sf` is not. The division happens
+ * once, at the moment of dropping, in one pure function.
+ *
+ * ── THE COST CODE IS TEXT, AND THAT IS ALSO A DECISION ─────────────────────
+ *
+ * A code id belongs to one cost code SET. An assembly saved on a job that
+ * uses the CSI set and dropped on a job that uses a different one would carry
+ * an id that is not merely wrong but unrepresentable there. So the line keeps
+ * the code AS WRITTEN — `09 30 00` — and the drop resolves it against the
+ * target job's own set, leaving the line uncoded when that set has no such
+ * code. An uncoded line still prices; a line pointing at another job's chart
+ * would not.
+ * ---------------------------------------------------------------------- */
+
+export const jobAssemblies = pgTable(
+  "job_assemblies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** What the estimator calls it. One per name, so the picker is a list of things. */
+    name: text("name").notNull(),
+    /** The item's sentence for the client, carried through to the item it makes. */
+    clientNote: text("client_note").notNull().default(""),
+    /** The estimator's own note: what is in it, what it assumes. Never printed. */
+    notes: text("notes").notNull().default(""),
+    /** The size it was saved at — `320` of `sf`. Everything scales off this. */
+    drivingQuantityThousandths: bigint("driving_quantity_thousandths", { mode: "number" })
+      .notNull()
+      .default(1_000),
+    drivingUnit: text("driving_unit").notNull().default(""),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull().default(""),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("job_assemblies_tenant_id_id_idx").on(t.tenantId, t.id),
+    /** One assembly per name: a library with two `Tile flooring` is not a library. */
+    uniqueIndex("job_assemblies_tenant_name_idx").on(t.tenantId, t.name),
+    check("job_assemblies_name_present", sql`length(btrim(${t.name})) > 0`),
+    /**
+     * A size of nothing cannot be scaled from — every dropped quantity would
+     * divide by zero — so it is refused at the table, not only in the ops.
+     */
+    check("job_assemblies_driving_positive", sql`${t.drivingQuantityThousandths} > 0`),
+  ],
+);
+
+export const jobAssemblyLines = pgTable(
+  "job_assembly_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    assemblyId: uuid("assembly_id").notNull(),
+    description: text("description").notNull(),
+    /** The client's words for this line, kept with it (ADR 0080). */
+    clientDescription: text("client_description").notNull().default(""),
+    clientVisible: boolean("client_visible").notNull().default(true),
+    unit: text("unit").notNull().default(""),
+    /** AS IT WAS PRICED, at the assembly's own driving quantity. */
+    quantityThousandths: bigint("quantity_thousandths", { mode: "number" }).notNull().default(1_000),
+    unitCostCents: bigint("unit_cost_cents", { mode: "number" }).notNull().default(0),
+    markupPpm: integer("markup_ppm"),
+    unitPriceCents: bigint("unit_price_cents", { mode: "number" }),
+    /** The code AS WRITTEN (`09 30 00`), resolved against the target job's set. */
+    costCode: text("cost_code").notNull().default(""),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("job_assembly_lines_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("job_assembly_lines_tenant_assembly_idx").on(t.tenantId, t.assemblyId),
+    foreignKey({
+      name: "job_assembly_lines_assembly_fk",
+      columns: [t.tenantId, t.assemblyId],
+      foreignColumns: [jobAssemblies.tenantId, jobAssemblies.id],
+    }).onDelete("cascade"),
+    check("job_assembly_lines_description_present", sql`length(btrim(${t.description})) > 0`),
+    check("job_assembly_lines_quantity_nonnegative", sql`${t.quantityThousandths} >= 0`),
+    check("job_assembly_lines_unit_cost_nonnegative", sql`${t.unitCostCents} >= 0`),
+    check(
+      "job_assembly_lines_unit_price_nonnegative",
+      sql`${t.unitPriceCents} is null or ${t.unitPriceCents} >= 0`,
+    ),
+    check(
+      "job_assembly_lines_markup_range",
+      sql`${t.markupPpm} is null or (${t.markupPpm} >= 0 and ${t.markupPpm} <= 10000000)`,
+    ),
+  ],
+);
+
 export type JobEstimate = typeof jobEstimates.$inferSelect;
 export type JobEstimateGroup = typeof jobEstimateGroups.$inferSelect;
 export type JobEstimateLine = typeof jobEstimateLines.$inferSelect;
 export type JobEstimateShare = typeof jobEstimateShares.$inferSelect;
+export type JobAssembly = typeof jobAssemblies.$inferSelect;
+export type JobAssemblyLine = typeof jobAssemblyLines.$inferSelect;

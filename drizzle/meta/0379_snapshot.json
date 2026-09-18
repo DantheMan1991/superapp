@@ -1,6 +1,6 @@
 {
-  "id": "684c460b-b93b-4c3d-94ec-e0cf1620d4e2",
-  "prevId": "73d1070f-3822-4d77-8e08-ebe6f07b1708",
+  "id": "e0173dd7-2b79-41cb-9736-2a476b56cb2f",
+  "prevId": "684c460b-b93b-4c3d-94ec-e0cf1620d4e2",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -43373,6 +43373,366 @@
         "job_selections_allowance_nonnegative": {
           "name": "job_selections_allowance_nonnegative",
           "value": "\"job_selections\".\"allowance_cents\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.job_assemblies": {
+      "name": "job_assemblies",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "client_note": {
+          "name": "client_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "driving_quantity_thousandths": {
+          "name": "driving_quantity_thousandths",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1000
+        },
+        "driving_unit": {
+          "name": "driving_unit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "created_by_clerk_user_id": {
+          "name": "created_by_clerk_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "job_assemblies_tenant_id_id_idx": {
+          "name": "job_assemblies_tenant_id_id_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "job_assemblies_tenant_name_idx": {
+          "name": "job_assemblies_tenant_name_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "job_assemblies_tenant_id_tenants_id_fk": {
+          "name": "job_assemblies_tenant_id_tenants_id_fk",
+          "tableFrom": "job_assemblies",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "job_assemblies_name_present": {
+          "name": "job_assemblies_name_present",
+          "value": "length(btrim(\"job_assemblies\".\"name\")) > 0"
+        },
+        "job_assemblies_driving_positive": {
+          "name": "job_assemblies_driving_positive",
+          "value": "\"job_assemblies\".\"driving_quantity_thousandths\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.job_assembly_lines": {
+      "name": "job_assembly_lines",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "assembly_id": {
+          "name": "assembly_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "client_description": {
+          "name": "client_description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "client_visible": {
+          "name": "client_visible",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "unit": {
+          "name": "unit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "quantity_thousandths": {
+          "name": "quantity_thousandths",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1000
+        },
+        "unit_cost_cents": {
+          "name": "unit_cost_cents",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "markup_ppm": {
+          "name": "markup_ppm",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "unit_price_cents": {
+          "name": "unit_price_cents",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cost_code": {
+          "name": "cost_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "job_assembly_lines_tenant_id_id_idx": {
+          "name": "job_assembly_lines_tenant_id_id_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "job_assembly_lines_tenant_assembly_idx": {
+          "name": "job_assembly_lines_tenant_assembly_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "assembly_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "job_assembly_lines_tenant_id_tenants_id_fk": {
+          "name": "job_assembly_lines_tenant_id_tenants_id_fk",
+          "tableFrom": "job_assembly_lines",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "job_assembly_lines_assembly_fk": {
+          "name": "job_assembly_lines_assembly_fk",
+          "tableFrom": "job_assembly_lines",
+          "tableTo": "job_assemblies",
+          "columnsFrom": [
+            "tenant_id",
+            "assembly_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "job_assembly_lines_description_present": {
+          "name": "job_assembly_lines_description_present",
+          "value": "length(btrim(\"job_assembly_lines\".\"description\")) > 0"
+        },
+        "job_assembly_lines_quantity_nonnegative": {
+          "name": "job_assembly_lines_quantity_nonnegative",
+          "value": "\"job_assembly_lines\".\"quantity_thousandths\" >= 0"
+        },
+        "job_assembly_lines_unit_cost_nonnegative": {
+          "name": "job_assembly_lines_unit_cost_nonnegative",
+          "value": "\"job_assembly_lines\".\"unit_cost_cents\" >= 0"
+        },
+        "job_assembly_lines_unit_price_nonnegative": {
+          "name": "job_assembly_lines_unit_price_nonnegative",
+          "value": "\"job_assembly_lines\".\"unit_price_cents\" is null or \"job_assembly_lines\".\"unit_price_cents\" >= 0"
+        },
+        "job_assembly_lines_markup_range": {
+          "name": "job_assembly_lines_markup_range",
+          "value": "\"job_assembly_lines\".\"markup_ppm\" is null or (\"job_assembly_lines\".\"markup_ppm\" >= 0 and \"job_assembly_lines\".\"markup_ppm\" <= 10000000)"
         }
       },
       "isRLSEnabled": false

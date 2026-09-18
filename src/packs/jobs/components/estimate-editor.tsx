@@ -49,6 +49,14 @@ import { quantityStringToThousandths, thousandthsToQuantityString } from "../bil
 import { parseEstimateLine, parseEstimateLines, unitsFor, type ParsedEstimateLine } from "../estimate-parse";
 import { SHARE_STANDING_LABELS, type ShareStanding } from "../estimate-share-status";
 import {
+  fillFromMemory,
+  howLongAgo,
+  priceBookFrom,
+  priceHint,
+  recall,
+  type RememberedPrice,
+} from "../price-memory";
+import {
   estimateTotals,
   groupCostCents,
   groupPriceCents,
@@ -312,11 +320,14 @@ export function EstimateEditor({
   symbol,
   units,
   shares,
+  prices,
 }: {
   projectId: string;
   estimate: EditableEstimate;
   /** Every unit this business has typed before, so the entry bar's grammar knows it. */
   units: string[];
+  /** What each line cost the last time it was priced (E4a), newest first. */
+  prices: RememberedPrice[];
   codes: Array<{ id: string; label: string }>;
   contracts: Array<{ id: string; label: string; status: string }>;
   canEdit: boolean;
@@ -431,6 +442,8 @@ export function EstimateEditor({
     () => unitsFor([...units, ...lines.map((l) => l.unit)]),
     [units, lines],
   );
+  /** Built once from the rows the page shipped; the first for each key wins. */
+  const priceBook = useMemo(() => priceBookFrom(prices), [prices]);
 
   function setLine(i: number, patch: Partial<LineDraft>) {
     setLines((prev) => prev.map((l, j) => (i === j ? { ...l, ...patch } : l)));
@@ -445,7 +458,20 @@ export function EstimateEditor({
       unitCost: parsed.unitCostCents === 0 ? "" : (parsed.unitCostCents / 100).toFixed(2),
     };
   }
-  function commitEntry() {
+  /**
+   * WHAT THIS LINE COST LAST TIME, while it is still being typed (E4a).
+   *
+   * Only ever when the sentence names NO price: the memory fills a blank and
+   * never argues with a number somebody typed. A sentence the grammar cannot
+   * read has no description to look up, so it has no hint either.
+   */
+  const entryMemory = useMemo(() => {
+    const parsed = parseEstimateLine(entry, knownUnits);
+    if (parsed === null || parsed.unitCostCents !== 0) return null;
+    return recall(priceBook, parsed.description);
+  }, [entry, knownUnits, priceBook]);
+
+  function commitEntry(useMemory = false) {
     const parsed = parseEstimateLine(entry, knownUnits);
     if (parsed === null) {
       setEntryError(
@@ -455,7 +481,13 @@ export function EstimateEditor({
       );
       return;
     }
-    setLines((prev) => [...prev, draftOf(parsed, into)]);
+    // Tab took the remembered price; Enter alone leaves the line unpriced, so
+    // a blank stays a blank unless somebody asked for the memory.
+    const remembered = useMemory ? fillFromMemory(priceBook, parsed) : null;
+    const line = remembered
+      ? { ...parsed, unitCostCents: remembered.unitCostCents, unit: parsed.unit || remembered.unit }
+      : parsed;
+    setLines((prev) => [...prev, draftOf(line, into)]);
     setEntry("");
     setEntryError(null);
     entryRef.current?.focus();
@@ -641,9 +673,39 @@ export function EstimateEditor({
   /** The item a typed line lands in, or none once the item it named is gone. */
   const intoKey = named.some((g) => g.key === into) ? into : "";
   const pasted = useMemo(() => parseEstimateLines(pasteText, knownUnits), [pasteText, knownUnits]);
-  const readable = pasted
-    .map((r) => r.parsed)
-    .filter((p): p is ParsedEstimateLine => p !== null);
+  /**
+   * WHAT A PASTED TAKEOFF IS WORTH (E4a). A takeoff comes off a spreadsheet as
+   * descriptions and quantities; the prices are what the estimator then types
+   * forty times. Every pasted line with NO price and a memory is filled from
+   * it, and the preview says how many — because a number that appeared without
+   * being typed has to be accounted for out loud.
+   */
+  /**
+   * ONE LIST FOR THE PREVIEW AND THE BUTTON, so the table cannot show a
+   * different price from the one that will land. It kept the unreadable rows
+   * (`line: null`) because the preview has to mark them, and the first version
+   * of this filtered them out first — which made the indices disagree and the
+   * table print $0.00 under a footer saying three had been priced.
+   */
+  const previewRows = useMemo(
+    () =>
+      pasted.map((r) => {
+        if (r.parsed === null) return { input: r.input, line: null, remembered: null };
+        const remembered = fillFromMemory(priceBook, r.parsed);
+        return {
+          input: r.input,
+          line: remembered
+            ? { ...r.parsed, unitCostCents: remembered.unitCostCents, unit: r.parsed.unit || remembered.unit }
+            : r.parsed,
+          remembered,
+        };
+      }),
+    [pasted, priceBook],
+  );
+  const readable = previewRows.filter(
+    (r): r is { input: string; line: ParsedEstimateLine; remembered: RememberedPrice | null } => r.line !== null,
+  );
+  const rememberedCount = readable.filter((r) => r.remembered !== null).length;
 
   /** One line's row. Its first cell is the item it sits in, once the estimate has any. */
   function lineRow(l: LineDraft, i: number) {
@@ -1083,6 +1145,16 @@ export function EstimateEditor({
                     if (e.key === "Enter") {
                       e.preventDefault();
                       commitEntry();
+                      return;
+                    }
+                    /**
+                     * Tab takes the remembered price — and ONLY when one is
+                     * showing, so Tab still moves focus the rest of the time
+                     * and nobody is trapped in the field.
+                     */
+                    if (e.key === "Tab" && !e.shiftKey && entryMemory) {
+                      e.preventDefault();
+                      commitEntry(true);
                     }
                   }}
                   placeholder="320 sf tile @ 4.20"
@@ -1110,7 +1182,17 @@ export function EstimateEditor({
                 <ClipboardPaste className="mr-1.5 size-4" /> Paste lines
               </Button>
             </div>
-            {entryError === null ? (
+            {entryError === null && entryMemory ? (
+              <p className="text-xs">
+                <span className="text-muted-foreground">Last priced</span>{" "}
+                <span className="font-medium tabular-nums text-foreground">
+                  {priceHint(entryMemory, fmt(entryMemory.unitCostCents, symbol), today())}
+                </span>{" "}
+                <span className="text-muted-foreground">
+                  — <strong className="text-foreground">Tab</strong> to use it, Enter to leave it blank
+                </span>
+              </p>
+            ) : entryError === null ? (
               <p className="text-xs text-muted-foreground">
                 Type a line and press Enter. <code className="text-foreground">320 sf tile @ 4.20</code>
                 {" · "}
@@ -1156,23 +1238,35 @@ export function EstimateEditor({
                       </tr>
                     </thead>
                     <tbody>
-                      {pasted.map((r, i) => (
+                      {previewRows.map((r, i) => (
                         <tr key={i} className="border-t border-border/50">
-                          {r.parsed === null ? (
+                          {r.line === null ? (
                             <td colSpan={4} className="px-2 py-1.5 text-destructive">
                               Could not read <span className="font-mono">{r.input}</span> — it will be left out
                             </td>
                           ) : (
                             <>
-                              <td className="px-2 py-1.5">{r.parsed.description}</td>
-                              <td className="px-2 py-1.5 text-right tabular-nums">
-                                {r.parsed.quantityThousandths === 1000 && r.parsed.unit === ""
-                                  ? "—"
-                                  : thousandthsToQuantityString(r.parsed.quantityThousandths)}
+                              <td className="px-2 py-1.5">
+                                {r.line.description}
+                                {r.remembered && (
+                                  <span className="block text-muted-foreground">
+                                    priced from {r.remembered.projectNumber},{" "}
+                                    {howLongAgo(r.remembered.pricedOn, today())}
+                                  </span>
+                                )}
                               </td>
-                              <td className="px-2 py-1.5">{r.parsed.unit || "—"}</td>
                               <td className="px-2 py-1.5 text-right tabular-nums">
-                                {fmt(r.parsed.unitCostCents, symbol)}
+                                {r.line.quantityThousandths === 1000 && r.line.unit === ""
+                                  ? "—"
+                                  : thousandthsToQuantityString(r.line.quantityThousandths)}
+                              </td>
+                              <td className="px-2 py-1.5">{r.line.unit || "—"}</td>
+                              <td
+                                className={`px-2 py-1.5 text-right tabular-nums${
+                                  r.remembered ? " font-medium" : ""
+                                }`}
+                              >
+                                {fmt(r.line.unitCostCents, symbol)}
                               </td>
                             </>
                           )}
@@ -1183,12 +1277,20 @@ export function EstimateEditor({
                 </div>
               )}
             </div>
-            <DialogFooter>
+            <DialogFooter className="sm:justify-between">
+              {rememberedCount > 0 ? (
+                <p className="text-xs text-muted-foreground sm:self-center">
+                  <span className="font-medium text-foreground">{rememberedCount}</span> priced from what you
+                  charged last time. Check them — a price can be a year old.
+                </p>
+              ) : (
+                <span />
+              )}
               <Button
                 type="button"
                 disabled={readable.length === 0}
                 onClick={() => {
-                  setLines((prev) => [...prev, ...readable.map((p) => draftOf(p, intoKey))]);
+                  setLines((prev) => [...prev, ...readable.map((r) => draftOf(r.line, intoKey))]);
                   setPasteText("");
                   setPasteOpen(false);
                 }}

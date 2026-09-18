@@ -71,7 +71,8 @@ Noto TTFs that `next.config.ts` already traces by hand — never came near it.
 | **E3b** | ~~**Saving fast**~~ **SHIPPED 2026-09-17** ([ADR 0082](../decisions/0082-an-estimate-saves-itself-unsaved-is-derived-from-the-form-and-a-save-that-changes-nothing-writes-nothing.md)) | The form saves itself 1.2s after typing stops. "Unsaved" DERIVED from the payload, not flagged by setters; the version held in the client and handed to every guarded verb; **a save that changes nothing writes nothing and does not move the version**, which is what makes a timer cheap. Not per-row actions — one call, made safe to repeat. No migration. |
 | E3c | **Keyboard grid** | Arrows and Tab between cells, Enter on the last row making another. Split out of E3b, with which it shares nothing but the file. |
 | ~~E3~~ | ~~**Speed**~~ — split into E3a and E3b above | The **entry bar**: one field that parses `320 sf tile @ 4.20`, `plumbing rough 12000` (a lump), `@tile 320` (drop an assembly), Enter commits and the cursor stays. A **paste target** — `src/lib/paste-targets` is a finished framework and eight packs use it; jobs has no `paste/` directory at all. **Per-row saving** (today the whole estimate is one `useState` and one Save button, which a two-hundred-line takeoff cannot be). `Ctrl+D` to duplicate the row above, because most lines are near-copies. The parser is pure and table-tested, and it is also the voice feature: one function, two doors. |
-| E4 | **Price memory** | Every `job_estimate_line` across the tenant already IS a price history: type a description, get *"last priced $4.20 on 24-108, three weeks ago"*, Tab accepts. Then the half nobody else can do, because the actuals are in the same database: *"you estimated $4.20 — you actually paid $4.65 on the last three jobs"* (the `Spent` column per code). Before assemblies, because it is what tells us what an assembly should look like. |
+| **E4a** | ~~**Price memory**~~ **SHIPPED 2026-09-17** | Every `job_estimate_line` across the tenant IS a price history, and nothing read it. The entry bar shows `Last priced 3.50/sf · 24-108 · 3 weeks ago` as you type and **Tab** takes it; a pasted takeoff with no prices is filled from memory and the preview counts what it filled. **Exact match on a normalised key, on purpose** — a wrong price offered confidently is worse than none. It only ever fills a blank. |
+| E4b | **The actual check** — the half nobody else can do | *"you estimated 4.20 — you actually paid 4.65 on the last three jobs"*. Split out of E4 because actuals live per COST CODE in the ledger (`actualByCode`), not per line, so it is a different read, a different comparison and a different screen from the typing aid above. |
 | **E5a** | ~~**The proposal as sections, and the brochure**~~ **SHIPPED 2026-09-17** ([ADR 0083](../decisions/0083-a-proposal-is-an-ordered-list-of-sections-a-brochure-is-a-page-order-over-facts-the-pack-already-holds-and-the-document-is-html.md)) | `format` (letter / brochure) split from `presentation`; the proposal as `ProposalSection[]`; the brochure's pages read from the items, the selections and the phases; the document served as HTML from a GET route — the same URL E5b prints and E5c shares. The letter's PDF path untouched. |
 | **E5b** | ~~**The brochure's PDF**~~ **SHIPPED 2026-09-17** ([ADR 0084](../decisions/0084-the-brochures-pdf-is-a-headless-print-of-the-document-itself-and-the-format-picks-the-engine.md)) | The format picks the engine at one URL: a letter is react-pdf, a brochure is a headless Chromium print of **the very string the document route serves**. `pressFor` decides where the browser comes from, and `-min` keeps the ~50MB Chromium out of the function. Killed the live defect that printed the letter whatever the format said, and found the running footer printing through the text. `npm run print:probe` is what measures it. |
 | **E5c** | ~~**The client link, with Accept**~~ **SHIPPED 2026-09-17** ([ADR 0085](../decisions/0085-a-client-link-is-a-tokenised-copy-of-the-proposal-and-accepting-on-it-records-a-signature-rather-than-accepting-the-estimate.md)) | `/proposal/<token>`: the same document with no session, `document_shares`' credentials verbatim, `withSystem` doing the token → tenant hop and nothing else, and every failure the same unbranded sentence. **Accepting records a SIGNATURE, it does not accept the estimate** — `acceptEstimate` needs an owner and the contract, and a client has neither. The version shown is checked not trusted; a link is signed once; the standing is derived, and `superseded` kills a link whose estimate moved after it was signed. |
@@ -83,6 +84,87 @@ Not in the program, and deliberately: a takeoff from the drawings (shipped as
 9c), and anything that would make an estimate post to the books.
 
 ## Build log
+
+### 2026-09-17 — Price memory: what you charged for this line last time (`claude/estimate-price-memory`)
+
+Slice **E4a**, and the half of the founder's speed ask nothing had touched:
+*"how can we make it extremely fast **and yet have all of the info we need**."*
+No migration — **every `job_estimate_line` this business has ever written was
+already a price history, and nothing read it.**
+
+**Two places, both at the moment of typing.** The entry bar shows
+`Last priced 3.50/sf · 24-108 · 3 weeks ago` under the field as the sentence
+becomes readable, and **Tab** takes it (Enter still commits the line unpriced,
+so a blank stays a blank unless somebody asks). And a **pasted takeoff** —
+which comes off a spreadsheet as descriptions and quantities, with the prices
+being exactly what the estimator then types forty times — has every unpriced
+line filled from memory, with the preview saying how many: *"12 priced from
+what you charged last time. Check them — a price can be a year old."* A number
+that appeared without being typed has to be accounted for out loud.
+
+**THE MATCH IS EXACT ON A NORMALISED KEY, AND THAT IS THE DECISION.** Trigram
+or full-text would catch `tile labor` against `tile labour` — and would also
+offer the price of `tile backer board` for `tile`. **A wrong price offered
+confidently is worse than no price at all**: it is money, it is quiet, and it
+goes out in a proposal. So the key lowercases, turns every run of non-alphanumerics
+into one space, and trims — which catches the way the same person types the
+same thing twice, and nothing else. A punctuation-only description gets an
+EMPTY key and is dropped from the book, because a key of `""` that matched
+would collide with everything. Fuzzier matching can be added when a real price
+book asks for it; it cannot be taken back.
+
+**It only ever fills a blank.** `fillFromMemory` returns null for any line with
+a price on it, in the entry bar, in a paste and anywhere later. The estimator
+prices the job; this is a memory, not an opinion.
+
+**Shipped with the page, like the units.** `priceBookRows` is one
+`DISTINCT ON` over the normalised key ordered newest-first, joined to the job
+for its number, **bounded at 600 distinct descriptions** — a business with more
+history than that gets the ones it is still using, rather than a payload that
+grows forever to answer a question about the line being typed now.
+Zero-cost lines are excluded: an allowance carry or a by-others note offered
+back as "what you charged" would be the feature teaching itself a blank.
+
+**DRIVEN as a read, on the dev branch's Hilltop Farm**: 14 remembered prices
+across 24-108 and 24-109, and `tile labour`, `Tile  Labour` and `TILE LABOUR!`
+all recalled `3.50/sf · 24-108 · today` while `nothing like this` recalled
+nothing — the normalisation doing exactly its job and no more.
+
+**DRIVEN IN THE BROWSER** once the founder signed the pane in, and **clicking
+it found a bug nothing else could have.** The entry bar hinted
+`Last priced $3.50/sf · 24-108 · today — Tab to use it, Enter to leave it
+blank`; **Tab** landed `tile labour · 320 · sf · 3.50` and put the cursor back
+in the bar; **Enter** landed `tile labour · 120 · sf · (blank)`, so the two
+halves of the rule both hold.
+
+**The paste preview showed $0.00 on the very rows its own footer said it had
+priced.** The table mapped `pasted` (the raw parse) while the footer counted
+`readable` (the filled version), and because `readable` had already dropped
+the unreadable rows the two lists could not even be indexed together. A single
+`previewRows` memo now carries `{input, line, remembered}` for every pasted
+line, the table reads `line`, and each filled row says **where the price came
+from** — `priced from 24-108, today` under the description. Six pasted lines
+then read correctly: three filled and marked, one at 0.00 with no memory, one
+keeping its typed `@ 9.99`, and `tile @ four twenty` refused in red under
+*Add 5 lines, leave out 1*. **A footer that contradicts the table above it is
+exactly what a type check cannot see.**
+
+**E5c's share block was driven in the same pass** (it had shipped unclicked):
+`Make a link` produced `Open · Not opened yet · Expires 10/17/2026` with Copy
+and Revoke on that row only, the button became `New link`, `Revoke` flipped it
+to `Revoked` and the button back to `Make a link`. Marion Whitfield's
+acceptance panel read `accepted this proposal on 9/17/2026 at $190,537.53`
+above four links showing three different derived standings at once — and the
+two that had been signed read **Estimate changed**, live, because the typing
+had bumped the estimate's version past their signatures. The junk lines were
+removed afterwards and the totals came back to `$190,537.53` to the cent.
+
+**E4 SPLIT, out loud.** The second half — *"you estimated 4.20, you actually
+paid 4.65 on the last three jobs"* — is now **E4b** on the plan, because the
+actuals live per COST CODE in the ledger (`actualByCode`, which takes a
+project) and never per line. It is a different read, a different comparison and
+a different screen from the typing aid, and pretending otherwise would have
+been half a slice deferred quietly.
 
 ### 2026-09-17 — The pack reaches What needs you (`claude/jobs-attention`)
 

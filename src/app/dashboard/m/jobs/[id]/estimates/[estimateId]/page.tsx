@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { getProject, listContracts, listCostCodes } from "@/packs/jobs/ops";
-import { getEstimate, unitsInUse } from "@/packs/jobs/estimating-ops";
+import { getEstimate, priceBookRows, unitsInUse } from "@/packs/jobs/estimating-ops";
 import { listEstimateShares } from "@/packs/jobs/estimate-shares";
 import { EstimateEditor } from "@/packs/jobs/components/estimate-editor";
 import { ESTIMATE_STATUS_LABELS, PACK, isEstimateStatus, slugLabel } from "@/packs/jobs/vocabulary";
@@ -41,17 +41,21 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
       if (!project) return null;
       const row = await getEstimate(tx, ctx.tenant.id, estimateId);
       if (!row || row.estimate.projectId !== project.id) return null;
-      const [contracts, codes, pack, units] = await Promise.all([
+      const [contracts, codes, pack, units, prices] = await Promise.all([
         listContracts(tx, ctx.tenant.id, project.id),
         project.costCodeSetId ? listCostCodes(tx, ctx.tenant.id, project.costCodeSetId) : Promise.resolve([]),
         packContext(tx, ctx.tenant.id, ctx.tenant.industry, PACK),
         // What the entry bar's grammar should recognise as a unit (ADR 0081).
         unitsInUse(tx, ctx.tenant.id),
+        // What each line cost the last time it was priced (E4a) — shipped with
+        // the page like the units, because the entry bar and the paste preview
+        // answer as somebody types and cannot wait on a round trip.
+        priceBookRows(tx, ctx.tenant.id),
       ]);
       // The client links on this estimate, each standing read off the facts
       // against the version the estimate is at right now (E5c, ADR 0085).
       const shares = await listEstimateShares(tx, ctx.tenant.id, estimateId, row.estimate.version);
-      return { project, row, contracts, codes, labels: pack.labels, units, shares };
+      return { project, row, contracts, codes, labels: pack.labels, units, prices, shares };
     },
     { role: ctx.role },
   );
@@ -95,6 +99,7 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
         <EstimateEditor
           key={`${row.estimate.id}:${row.estimate.version}`}
           projectId={project.id}
+          prices={data.prices}
           shares={data.shares.map((s) => ({
             id: s.share.id,
             standing: s.standing,

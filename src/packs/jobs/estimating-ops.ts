@@ -2,6 +2,7 @@ import "server-only";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { JobEstimate, JobEstimateGroup, JobEstimateLine } from "@/db/schema";
+import type { RememberedPrice } from "./price-memory";
 import {
   estimateByCode,
   estimateTotals,
@@ -401,6 +402,86 @@ export async function unitsInUse(tx: Tx, tenantId: string): Promise<string[]> {
     .from(schema.jobEstimateLines)
     .where(and(eq(schema.jobEstimateLines.tenantId, tenantId), sql`btrim(${schema.jobEstimateLines.unit}) <> ''`));
   return rows.map((r) => r.unit.trim()).filter((u) => u !== "");
+}
+
+/** How many remembered prices travel to the editor with the page. */
+export const PRICE_BOOK_LIMIT = 600;
+
+/**
+ * WHAT THIS BUSINESS CHARGED FOR EACH LINE LAST TIME (E4a) — every priced
+ * estimate line across the tenant, newest first, one per description.
+ *
+ * Loaded with the page like `unitsInUse`, and for the same reason: the entry
+ * bar and the paste preview have to answer as somebody types, and a server
+ * round trip per keystroke is not an answer. `priceBookFrom` keeps the first
+ * row for each key, so the ORDER here is what makes it "the last time".
+ *
+ * Bounded at `PRICE_BOOK_LIMIT` distinct descriptions. A business with more
+ * than six hundred different lines in its history gets the six hundred most
+ * recently priced, which are the ones it is still using; the alternative is
+ * shipping a payload that grows forever to answer a question about the line
+ * somebody is typing now.
+ *
+ * **Zero-cost lines are not memories.** A line priced at nothing is an
+ * allowance carry, a by-others note or a line somebody had not got to yet —
+ * offering it back as "what you charged last time" would be the feature
+ * teaching itself a blank.
+ */
+export async function priceBookRows(
+  tx: Tx,
+  tenantId: string,
+  limit: number = PRICE_BOOK_LIMIT,
+): Promise<RememberedPrice[]> {
+  const key = sql<string>`btrim(regexp_replace(lower(${schema.jobEstimateLines.description}), '[^a-z0-9]+', ' ', 'g'))`;
+  const rows = await tx
+    .selectDistinctOn([key], {
+      key,
+      description: schema.jobEstimateLines.description,
+      unitCostCents: schema.jobEstimateLines.unitCostCents,
+      unit: schema.jobEstimateLines.unit,
+      projectNumber: schema.jobProjects.number,
+      pricedOn: sql<string>`to_char(${schema.jobEstimateLines.createdAt}, 'YYYY-MM-DD')`,
+      createdAt: schema.jobEstimateLines.createdAt,
+    })
+    .from(schema.jobEstimateLines)
+    .innerJoin(
+      schema.jobEstimates,
+      and(
+        eq(schema.jobEstimates.tenantId, schema.jobEstimateLines.tenantId),
+        eq(schema.jobEstimates.id, schema.jobEstimateLines.estimateId),
+      ),
+    )
+    .innerJoin(
+      schema.jobProjects,
+      and(
+        eq(schema.jobProjects.tenantId, schema.jobEstimates.tenantId),
+        eq(schema.jobProjects.id, schema.jobEstimates.projectId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.jobEstimateLines.tenantId, tenantId),
+        sql`${schema.jobEstimateLines.unitCostCents} > 0`,
+        sql`${key} <> ''`,
+      ),
+    )
+    // DISTINCT ON needs its own expression first; the newest of each follows.
+    .orderBy(key, desc(schema.jobEstimateLines.createdAt))
+    .limit(limit);
+
+  // Newest first overall, so the editor's book and any "recent" reading agree.
+  // `createdAt` is ordered on and then dropped: the book carries `pricedOn`,
+  // which is the same instant as the tenant will read it.
+  return rows
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .map((r) => ({
+      key: r.key,
+      description: r.description,
+      unitCostCents: r.unitCostCents,
+      unit: r.unit,
+      projectNumber: r.projectNumber,
+      pricedOn: r.pricedOn,
+    }));
 }
 
 /** The terms of the newest estimate that has any: a business's terms are mostly boilerplate, so a new estimate starts with them. */

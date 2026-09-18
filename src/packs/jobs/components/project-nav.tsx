@@ -17,6 +17,7 @@ import {
   CategoryStrip,
   type CategoryItem,
 } from "@/components/app/category-strip";
+import type { JobTab } from "../tabs";
 
 /**
  * A job's sections.
@@ -41,23 +42,30 @@ import {
  * index route would light up on every tab at once. Everything else WANTS the
  * prefix match: a contract's own page at `/contracts/<id>` keeps Contracts lit.
  */
-export function ProjectNav({ projectId }: { projectId: string }) {
+/**
+ * **`show` IS THE TABS THIS BUSINESS DOES** (`../tabs.ts`), worked out on the
+ * server: what the tenant has switched on, plus anything this project already
+ * has rows for. The list still lives here, in this order, with the icons — the
+ * layout decides only which of them to pass.
+ */
+export function ProjectNav({ projectId, show }: { projectId: string; show: JobTab[] }) {
   const base = `/dashboard/m/jobs/${projectId}`;
-  const tabs: CategoryItem[] = [
-    { href: base, label: "Overview", icon: LayoutDashboard, exact: true },
-    { href: `${base}/contracts`, label: "Contracts", icon: FileSignature },
-    { href: `${base}/changes`, label: "Changes", icon: FileDiff },
-    { href: `${base}/cost`, label: "Job cost", icon: Calculator },
-    { href: `${base}/ordered`, label: "Ordered", icon: ShoppingCart },
-    { href: `${base}/schedule`, label: "Schedule", icon: CalendarDays },
-    { href: `${base}/selections`, label: "Selections", icon: Palette },
-    { href: `${base}/log`, label: "Field", icon: HardHat },
+  const all: (CategoryItem & { tab: JobTab })[] = [
+    { tab: "overview", href: base, label: "Overview", icon: LayoutDashboard, exact: true },
+    { tab: "contracts", href: `${base}/contracts`, label: "Contracts", icon: FileSignature },
+    { tab: "changes", href: `${base}/changes`, label: "Changes", icon: FileDiff },
+    { tab: "cost", href: `${base}/cost`, label: "Job cost", icon: Calculator },
+    { tab: "ordered", href: `${base}/ordered`, label: "Ordered", icon: ShoppingCart },
+    { tab: "schedule", href: `${base}/schedule`, label: "Schedule", icon: CalendarDays },
+    { tab: "selections", href: `${base}/selections`, label: "Selections", icon: Palette },
+    { tab: "log", href: `${base}/log`, label: "Field", icon: HardHat },
     // Added to the design's own list, which was drawn before the drawings
     // slice landed (ADR 0072) — leaving it out would hide a shipped feature.
-    { href: `${base}/drawings`, label: "Drawings", icon: Layers },
-    { href: `${base}/estimates`, label: "Estimates", icon: FileText },
+    { tab: "drawings", href: `${base}/drawings`, label: "Drawings", icon: Layers },
+    { tab: "estimates", href: `${base}/estimates`, label: "Estimates", icon: FileText },
     // After the job is done (ADR 0076): the period, and the calls that come in.
-    { href: `${base}/warranty`, label: "Warranty", icon: ShieldCheck },
+    { tab: "warranty", href: `${base}/warranty`, label: "Warranty", icon: ShieldCheck },
   ];
-  return <CategoryStrip items={tabs} />;
+  const shown = new Set(show);
+  return <CategoryStrip items={all.filter((t) => shown.has(t.tab))} />;
 }

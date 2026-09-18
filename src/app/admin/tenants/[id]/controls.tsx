@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import {
@@ -123,6 +124,21 @@ export function ModuleToggle({
  * action directly, which is why the pilot tenant ran four packs for a day with
  * `industry` still set to `general` and every profile-supplied word and setting
  * missing. This is the button.
+ *
+ * ── IT TELLS THE TRUTH ABOUT BEING ADDITIVE ─────────────────────────────────
+ *
+ * Installing does not BIND (ADR 0009): it switches a profile's packs on and
+ * seeds, and a client may perfectly well run two profiles' packs at once. The
+ * screen denied that. One select, "Installed: construction", and a button that
+ * said *Install profile* for any profile other than the stamped one — so the
+ * founder's own reading of it was "I don't see how to install multiple
+ * industries", when he already had.
+ *
+ * Now every profile shows how much of it is ON, which is the fact that answers
+ * "what is this client running". `tenants.industry` is named for what it really
+ * decides — the WORDS — because that is the one thing which genuinely cannot
+ * stack: labels are tenant-wide by a deliberate correction (a paddock is a
+ * paddock everywhere on a farm), so the last profile installed supplies them.
  */
 export function ProfileInstaller({
   tenantId,
@@ -136,6 +152,8 @@ export function ProfileInstaller({
     name: string;
     description: string;
     packs: string[];
+    /** Which of `packs` are already switched on for this client. */
+    packsOn: string[];
     /** What the profile contributes on install, counted (slice 7a); a line per pack seed (ADR 0057). */
     seed: { accounts: number; folders: number; packs: string[] };
   }[];
@@ -145,13 +163,42 @@ export function ProfileInstaller({
     profiles.some((p) => p.slug === currentIndustry) ? currentIndustry : "",
   );
   const chosen = profiles.find((p) => p.slug === slug);
-  const already = currentIndustry === slug;
+  /** Every pack it lists is already on — installed in the only sense that shows. */
+  const fullyOn = chosen !== undefined && chosen.packsOn.length === chosen.packs.length;
+  const speaksFor = profiles.find((p) => p.slug === currentIndustry);
 
   return (
     <div className="space-y-3">
+      {/*
+        The state of every profile at a glance, which is what "does this client
+        run more than one industry" actually asks. A profile with all its packs
+        on is installed whether or not it is the one supplying the words.
+      */}
+      <ul className="space-y-1 text-sm">
+        {profiles.map((p) => (
+          <li key={p.slug} className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">{p.name}</span>
+            {p.packsOn.length === p.packs.length ? (
+              <Badge variant="secondary" className="bg-success/15 text-success-foreground">
+                All {p.packs.length} packs on
+              </Badge>
+            ) : p.packsOn.length > 0 ? (
+              <Badge variant="secondary" className="bg-warning/15 text-warning-foreground">
+                {p.packsOn.length} of {p.packs.length} packs on
+              </Badge>
+            ) : (
+              <Badge variant="outline">Not installed</Badge>
+            )}
+            {p.slug === currentIndustry && (
+              <span className="text-xs text-muted-foreground">supplies the words</span>
+            )}
+          </li>
+        ))}
+      </ul>
+
       <Select value={slug} onValueChange={setSlug}>
         <SelectTrigger>
-          <SelectValue placeholder="Pick a profile" />
+          <SelectValue placeholder="Install another profile" />
         </SelectTrigger>
         <SelectContent>
           {profiles.map((p) => (
@@ -194,8 +241,21 @@ export function ProfileInstaller({
           <p>
             Installing is additive and can be re-run — it never switches
             anything off, because a pack the tenant disabled is a decision
-            rather than drift.
+            rather than drift. The client keeps every pack it already has.
           </p>
+          {/*
+            The one thing that does NOT stack, said before the button rather
+            than discovered afterwards: there is a single vocabulary per client.
+          */}
+          {speaksFor && speaksFor.slug !== chosen.slug && (
+            <p className="text-warning-foreground">
+              The words change: {chosen.name}
+              {" "}
+              becomes this client&apos;s vocabulary in place of{" "}
+              {speaksFor.name}. Anything renamed by hand on the Vocabulary card
+              below is kept.
+            </p>
+          )}
         </div>
       )}
 
@@ -236,9 +296,11 @@ export function ProfileInstaller({
       >
         {pending
           ? "Installing…"
-          : already
+          : fullyOn
             ? "Re-run install"
-            : "Install profile"}
+            : chosen && chosen.packsOn.length > 0
+              ? `Switch on the other ${chosen.packs.length - chosen.packsOn.length}`
+              : "Install profile"}
       </Button>
     </div>
   );

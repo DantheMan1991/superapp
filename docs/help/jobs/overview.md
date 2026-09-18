@@ -288,6 +288,17 @@ Prices take a `$` and commas if you like them: `2 ea door @ 1,250` and `@ $4.20`
 
 **{key:Ctrl+D}** while the cursor is in a row copies that row directly beneath it. Most lines in a takeoff are a small change from the line above, so this is usually quicker than typing another sentence.
 
+**Moving around the table with the keyboard.** A takeoff is usually typed down one column — forty quantities, then forty costs — so the arrows work the way they do in a spreadsheet.
+
+| Key | What it does |
+| --- | --- |
+| {key:↓} / {key:↑} | The same box one row down or up. What is in it is selected, so you can just type over it. |
+| {key:Enter} | The same box one row down. **On the last row it makes a new line** and puts you in the same box on it, so you can keep going without reaching for the mouse. The new line goes in the same item as the row you were on. |
+| {key:Tab} | The next box across, as it always has. {key:Shift+Tab} goes back. |
+| {key:←} / {key:→} | Move the cursor inside the box you are in. They never change rows — you need them to fix a typo in the middle of a price. |
+
+{key:↓} on the very last row does nothing: only {key:Enter} makes a line, so you cannot add rows by holding an arrow down.
+
 **Client wording.** The tick beside {button:Add item|ghost} on the **Lines** header. Off by default, because writing the client's words is a pass of its own and you do not want a second box on every row while you are typing a takeoff. It comes up already on for an estimate that has client wording or a hidden line. With it on, every line gets two more controls:
 
 | Control | What it does |

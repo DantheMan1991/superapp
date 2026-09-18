@@ -69,7 +69,7 @@ Noto TTFs that `next.config.ts` already traces by hand — never came near it.
 | **E2** | ~~**What the client sees**~~ **SHIPPED 2026-09-16** ([ADR 0080](../decisions/0080-an-estimate-line-carries-the-clients-words-beside-the-estimators-and-a-line-kept-off-the-proposal-collapses-the-item-that-holds-it.md)) | `client_description` on a line (the estimator types `Tile — mud set, Schluter, mtl only, per AJ quote 8/14`, the client reads `Porcelain tile flooring`) and `client_visible`, **offered only inside an item** — hidden money must have somewhere to hide or the printed rows stop adding up, and **the item that hides a line collapses** on the same predicate as one priced by hand. The cost code's number off by default. One switch in the editor, not two columns. |
 | **E3a** | ~~**Typing fast**~~ **SHIPPED 2026-09-16** ([ADR 0081](../decisions/0081-an-estimate-line-can-be-typed-as-one-sentence-and-the-grammar-that-reads-it-is-pure-and-refuses-what-it-cannot-read.md)) | The entry bar, the paste box, `Ctrl+D`, and the units the parser learns from the business's own estimates. One pure grammar, three doors — the third is voice. No migration. |
 | **E3b** | ~~**Saving fast**~~ **SHIPPED 2026-09-17** ([ADR 0082](../decisions/0082-an-estimate-saves-itself-unsaved-is-derived-from-the-form-and-a-save-that-changes-nothing-writes-nothing.md)) | The form saves itself 1.2s after typing stops. "Unsaved" DERIVED from the payload, not flagged by setters; the version held in the client and handed to every guarded verb; **a save that changes nothing writes nothing and does not move the version**, which is what makes a timer cheap. Not per-row actions — one call, made safe to repeat. No migration. |
-| E3c | **Keyboard grid** | Arrows and Tab between cells, Enter on the last row making another. Split out of E3b, with which it shares nothing but the file. |
+| **E3c** | ~~**Keyboard grid**~~ **SHIPPED 2026-09-18** | Up and Down move within a COLUMN (a takeoff is typed down one, and Tab already walks across); arriving selects the cell, the spreadsheet idiom. Enter moves down and, past the last row, makes another in the same item and lands in the same column. **Left, Right and Tab are deliberately untouched.** Movement resolves in DOM order, so grouping under items is handled for free. |
 | ~~E3~~ | ~~**Speed**~~ — split into E3a and E3b above | The **entry bar**: one field that parses `320 sf tile @ 4.20`, `plumbing rough 12000` (a lump), `@tile 320` (drop an assembly), Enter commits and the cursor stays. A **paste target** — `src/lib/paste-targets` is a finished framework and eight packs use it; jobs has no `paste/` directory at all. **Per-row saving** (today the whole estimate is one `useState` and one Save button, which a two-hundred-line takeoff cannot be). `Ctrl+D` to duplicate the row above, because most lines are near-copies. The parser is pure and table-tested, and it is also the voice feature: one function, two doors. |
 | **E4a** | ~~**Price memory**~~ **SHIPPED 2026-09-17** | Every `job_estimate_line` across the tenant IS a price history, and nothing read it. The entry bar shows `Last priced 3.50/sf · 24-108 · 3 weeks ago` as you type and **Tab** takes it; a pasted takeoff with no prices is filled from memory and the preview counts what it filled. **Exact match on a normalised key, on purpose** — a wrong price offered confidently is worse than none. It only ever fills a blank. |
 | E4b | **The actual check** — the half nobody else can do | *"you estimated 4.20 — you actually paid 4.65 on the last three jobs"*. Split out of E4 because actuals live per COST CODE in the ledger (`actualByCode`), not per line, so it is a different read, a different comparison and a different screen from the typing aid above. |
@@ -84,6 +84,57 @@ Not in the program, and deliberately: a takeoff from the drawings (shipped as
 9c), and anything that would make an estimate post to the books.
 
 ## Build log
+
+### 2026-09-18 — The keyboard grid: down a column, and Enter makes another row (`claude/estimate-grid-keys`)
+
+Slice **E3c**, the last named piece of the founder's speed ask. No migration,
+one file.
+
+**A TAKEOFF IS TYPED DOWN A COLUMN, NOT ACROSS A ROW.** Somebody entering
+forty quantities wants the next quantity, and Tab — which the browser already
+gives — walks sideways through description, unit, cost and markup to get
+there. So **Up and Down move within the column**, arriving selects the cell
+(the spreadsheet idiom: you came here to retype it), and **Tab is left exactly
+as it was**, because it is the one key a keyboard user has to be able to
+trust.
+
+**Left and Right are deliberately not claimed.** They move the caret inside
+the field, and a grid that stole them would make a price with a typo in the
+middle of it unfixable.
+
+**Enter moves down, and past the last row it makes another** — in the same
+item, because somebody typing down an item's lines is still in that item — and
+lands in the SAME COLUMN of the new row, so the rhythm does not break. Arrow
+Down at the end does nothing: running off the end of a list is not a request
+for more of it.
+
+**Movement resolves in DOM ORDER, not by index into `lines`.** Rows are
+grouped under their items on screen, so "the row below" is a fact about the
+document rather than about the array; asking the document costs nothing and
+cannot disagree with what somebody is looking at. Each editable cell carries
+`data-cell="<column>"` and each row a `data-group`, and the whole thing is one
+handler on the row that already handled `Ctrl+D`.
+
+**DRIVEN, every rule of it**, on the dev branch's EST-ITEMS-1: Down moved
+*Quantity, line 5* → *line 6* with the value selected on arrival; Up came
+back; Right stayed in the cell; Enter in the middle moved down twice and added
+nothing; **Enter on the last row took 12 quantity cells to 13 and focused the
+new empty one, still in the quantity column**; Tab went sideways to *Unit,
+line 5*. The added row was removed afterwards and the totals came back to
+`$190,537.53` to the cent.
+
+**Traps.**
+
+- **The pane's `key: "Down"` delivers an EMPTY `event.key`**, exactly as
+  `"Return"` does — the first press moved nothing and the feature looked
+  broken. `"ArrowDown"`, `"ArrowUp"` and `"Enter"` are the names that arrive.
+  A keydown listener pushing `{key, code}` into `window.__keys` is how to tell
+  in ten seconds rather than by re-reading the handler.
+- **`setState` inside an effect is an eslint ERROR here**
+  (`Calling setState synchronously within an effect can trigger cascading
+  renders`). The pending-focus target is a `useRef` cleared by the effect that
+  reads it — there is nothing to re-render for, and the ref is only ever
+  written from an event handler, never during render.
 
 ### 2026-09-17 — Price memory: what you charged for this line last time (`claude/estimate-price-memory`)
 

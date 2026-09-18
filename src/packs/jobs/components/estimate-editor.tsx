@@ -513,6 +513,96 @@ export function EstimateEditor({
   function addLine(groupKey: string) {
     setLines((prev) => [...prev, emptyLine(groupKey)]);
   }
+
+  /* ------------------------------------------------ the keyboard grid (E3c) */
+
+  /**
+   * A TAKEOFF IS TYPED DOWN A COLUMN, NOT ACROSS A ROW. Somebody putting in
+   * forty quantities wants the next quantity, and Tab — which the browser
+   * already gives — walks sideways through description, unit, cost and markup
+   * to get there. **Up and Down move within the column**; Tab is left exactly
+   * as it was, because it is the one key a keyboard user must be able to
+   * trust.
+   *
+   * **Left and Right are deliberately NOT claimed.** They move the caret
+   * inside the field, and a grid that stole them would make a price with a
+   * typo in the middle of it unfixable.
+   *
+   * Movement is resolved in DOM ORDER, not by index into `lines`: rows are
+   * grouped under their items on screen, so the row below is a fact about the
+   * document rather than about the array, and asking the document costs
+   * nothing and cannot disagree with what somebody is looking at.
+   */
+  const gridRef = useRef<HTMLDivElement>(null);
+  /**
+   * A cell to focus once React has rendered the row that holds it. A REF, not
+   * state: there is nothing to re-render for, and clearing state from inside
+   * the effect that read it is the cascading render eslint refuses.
+   */
+  const pendingCell = useRef<{ group: string; col: string } | null>(null);
+
+  function cellsIn(col: string): HTMLInputElement[] {
+    const root = gridRef.current;
+    if (!root) return [];
+    return [...root.querySelectorAll<HTMLInputElement>(`input[data-cell="${col}"]`)];
+  }
+
+  /** Focus and SELECT, the spreadsheet idiom: arriving at a cell means retyping it. */
+  function goTo(cell: HTMLInputElement | undefined) {
+    if (!cell || cell.disabled) return false;
+    cell.focus();
+    cell.select();
+    return true;
+  }
+
+  function gridKeyDown(e: React.KeyboardEvent, groupKey: string) {
+    const el = e.target as HTMLElement;
+    const col = el.dataset?.cell;
+    // A select, a checkbox or the remove button is not a cell; leave them be.
+    if (!col || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Enter") return;
+
+    const cells = cellsIn(col);
+    const at = cells.indexOf(el as HTMLInputElement);
+    if (at < 0) return;
+
+    if (e.key === "ArrowUp") {
+      if (goTo(cells[at - 1])) e.preventDefault();
+      return;
+    }
+    if (goTo(cells[at + 1])) {
+      e.preventDefault();
+      return;
+    }
+    /**
+     * Past the last row, ENTER makes another — in the same item, because
+     * somebody typing down an item's lines is still in that item. Arrow Down
+     * does not: running off the end of a list is not a request for more of it.
+     */
+    if (e.key === "Enter" && editable) {
+      e.preventDefault();
+      addLine(groupKey);
+      pendingCell.current = { group: groupKey, col };
+    }
+  }
+
+  /**
+   * Focus the new row once it exists. In an effect rather than after
+   * `setLines`, because the row is not in the DOM until React has rendered
+   * it — and assigning focus during render is the impurity eslint's
+   * `react-hooks/refs` rule refuses.
+   */
+  useEffect(() => {
+    const want = pendingCell.current;
+    if (!want) return;
+    // Cleared first, so a later change to the row count cannot focus twice.
+    pendingCell.current = null;
+    const root = gridRef.current;
+    if (!root) return;
+    const rows = [...root.querySelectorAll<HTMLElement>(`tr[data-group="${want.group}"]`)];
+    const last = rows[rows.length - 1];
+    goTo(last?.querySelector<HTMLInputElement>(`input[data-cell="${want.col}"]`) ?? undefined);
+  }, [lines.length]);
   /** An item's cost and price as the editor shows them, from the same pure arithmetic. */
   function groupMoney(g: GroupDraft) {
     const children = lines
@@ -714,13 +804,16 @@ export function EstimateEditor({
     return (
       <tr
         key={l.id ?? `new-${i}`}
+        data-group={l.groupKey}
         className="border-t border-border/50 align-top"
         onFocus={() => setFocusRow(i)}
         onKeyDown={(e) => {
           if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) {
             e.preventDefault();
             if (editable) duplicateFocused();
+            return;
           }
+          gridKeyDown(e, l.groupKey);
         }}
       >
         {hasGroups && (
@@ -775,6 +868,7 @@ export function EstimateEditor({
         <td className="px-1 py-1">
           <Input
             aria-label={`Description, line ${i + 1}`}
+            data-cell="description"
             value={l.description}
             onChange={(e) => setLine(i, { description: e.target.value })}
             placeholder="Tile, master bath floor"
@@ -785,6 +879,7 @@ export function EstimateEditor({
           {clientWording && (
             <Input
               aria-label={`What the client reads, line ${i + 1}`}
+            data-cell="clientDescription"
               value={l.clientDescription}
               onChange={(e) => setLine(i, { clientDescription: e.target.value })}
               placeholder="What the client reads. Blank uses the line above."
@@ -803,6 +898,7 @@ export function EstimateEditor({
         <td className="px-1 py-1">
           <Input
             aria-label={`Quantity, line ${i + 1}`}
+            data-cell="quantity"
             value={l.quantity}
             onChange={(e) => setLine(i, { quantity: e.target.value })}
             placeholder="1"
@@ -814,6 +910,7 @@ export function EstimateEditor({
         <td className="px-1 py-1">
           <Input
             aria-label={`Unit, line ${i + 1}`}
+            data-cell="unit"
             value={l.unit}
             onChange={(e) => setLine(i, { unit: e.target.value })}
             placeholder="ls"
@@ -825,6 +922,7 @@ export function EstimateEditor({
         <td className="px-1 py-1">
           <Input
             aria-label={`Unit cost, line ${i + 1}`}
+            data-cell="unitCost"
             value={l.unitCost}
             onChange={(e) => setLine(i, { unitCost: e.target.value })}
             placeholder="0.00"
@@ -836,6 +934,7 @@ export function EstimateEditor({
         <td className="px-1 py-1">
           <Input
             aria-label={`Markup, line ${i + 1}`}
+            data-cell="markup"
             value={l.markup}
             onChange={(e) => setLine(i, { markup: e.target.value })}
             placeholder={markup.trim() === "" ? "0" : markup}
@@ -847,6 +946,7 @@ export function EstimateEditor({
         <td className="px-1 py-1">
           <Input
             aria-label={`Unit price, line ${i + 1}`}
+            data-cell="unitPrice"
             value={l.unitPrice}
             onChange={(e) => setLine(i, { unitPrice: e.target.value })}
             placeholder="by markup"
@@ -979,7 +1079,7 @@ export function EstimateEditor({
           containing block. One word fixes it and the table still scrolls in its
           own box.
         */}
-        <div className="relative overflow-x-auto">
+        <div ref={gridRef} className="relative overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-xs text-muted-foreground">
               <tr>

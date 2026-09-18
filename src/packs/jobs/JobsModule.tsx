@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
 import { packContext } from "@/lib/packs/tenant-context";
+import { visibleTabs } from "./tabs";
 import { labelFor, pluralOf } from "@/lib/packs/resolve";
 import { formatMoney, formatMoneySign } from "@/lib/money";
 import { PageHeader } from "@/components/app/page-header";
@@ -151,6 +152,9 @@ export async function JobsModule({
       { role: ctx.role },
     );
 
+  // What this business does (`tabs.ts`). No project in front of us here, so it
+  // is the setting alone — the per-job "keep what has rows" rule is the layout's.
+  const uses = new Set(visibleTabs(config));
   const projectWord = labelFor(labels, "project", "Project");
   // The shared plural rule, never a second key: a declared plural for the word
   // nobody renamed, an "s" for the tenant's own. See `pluralOf`.
@@ -269,16 +273,25 @@ export async function JobsModule({
             <Button variant="outline" size="sm" asChild>
               <Link href="/dashboard/m/jobs/subcontractors">Subcontractors</Link>
             </Button>
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/dashboard/m/jobs/warranty">Warranty</Link>
-            </Button>
+            {/* The cross-job view of a section this business has switched off
+                is the same feature, so it goes with the tab (`tabs.ts`). */}
+            {uses.has("warranty") && (
+              <Button variant="outline" size="sm" asChild>
+                <Link href="/dashboard/m/jobs/warranty">Warranty</Link>
+              </Button>
+            )}
             <Button variant="outline" size="sm" asChild>
               <Link href="/dashboard/m/jobs/bonding">Bonding</Link>
             </Button>
             {isOwner && (
-              <Button variant="outline" size="sm" asChild>
-                <Link href="/dashboard/m/jobs/cost-codes">Cost codes</Link>
-              </Button>
+              <>
+                <Button variant="outline" size="sm" asChild>
+                  <Link href="/dashboard/m/jobs/cost-codes">Cost codes</Link>
+                </Button>
+                <Button variant="outline" size="sm" asChild>
+                  <Link href="/dashboard/m/jobs/setup">What you use</Link>
+                </Button>
+              </>
             )}
             {form}
           </div>

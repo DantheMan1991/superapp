@@ -125,6 +125,31 @@ A row of tabs under the figures. Whichever you are on is underlined and coloured
 
 Opening a record inside a section — a contract, an order — keeps that section's tab lit, so you can see where you are and get back with one click.
 
+**You will not have all of these**, and that is a setting, not a fault. **`Overview`**, **`Contracts`** and **`Job cost`** are always there — a {{project|lower}} with a number, what it is worth and what it is costing is what this whole tab is. The other eight are ways of working, and an owner turns off the ones this business does not do under {button:What you use|outline} — see below. A commercial contractor has no use for `Selections`; a sub who hands the work over and leaves has no `Warranty` period to track.
+
+**Nothing you turn off is deleted or hidden.** A {{project|lower}} that already has work on a section **keeps that section**, whatever the setting says, so you can never lose sight of a warranty call or a change order because somebody changed a preference. The setting decides what a *new* {{project|lower}} starts with. An old link or a bookmark to a switched-off section still opens, too.
+
+### What you use — turning off the sections this business does not do
+
+{button:What you use|outline} on the {{project|plural}} page, beside {button:Cost codes|outline}. **Owners only to change**; anybody may look, so you can find out why a tab you remember is not there.
+
+A tick per section, with a line saying what it is for. Ticked means the tab is there.
+
+| Section | What turning it off means |
+| --- | --- |
+| `Changes` | No change-order tab. The contract value still moves if a change is approved elsewhere. |
+| `Ordered` | No purchase orders or subcontracts on the {{project|lower}}. |
+| `Schedule` | No phases and no dates. |
+| `Selections` | No allowances and no client choices. **The one a commercial contractor usually turns off.** |
+| `Field` | No daily log and no punch list. |
+| `Drawings` | No drawing sets or sheets. |
+| `Estimates` | No pricing and no proposal, for a business that bids somewhere else. |
+| `Warranty` | No warranty period and no claims. The cross-{{project|lower}} **Warranty** page goes with it. |
+
+- **A section you have already used says so** when you untick it — *"Some jobs already have work here. Those keep the tab — nothing is hidden. New jobs will not show it."* You can still turn it off; the {{project|plural|lower}} that have work on it keep it.
+- {button:Save|primary} applies it to every {{project|lower}} at once. {button:Undo|ghost} puts back what was saved.
+- It changes what **everybody** on the team sees, which is why it is an owner's decision.
+
 ### What is on Overview
 
 Two columns on a wide screen, stacked on a phone. The left is what to do; the right is what the {{project|lower}} is.

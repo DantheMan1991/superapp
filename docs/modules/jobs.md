@@ -120,6 +120,61 @@ no equivalent for the editor, so a change here has to be clicked.
 
 ## Build log
 
+### 2026-09-18 — Which parts of a job this business does (`claude/jobs-tabs-you-use`, ADR 0089)
+
+The founder: *"How does it work for the construction companies that don't do
+warranty. That should be able to be turned off. Or selections is not a
+commercial contractor thing, so again turned off."* Eleven tabs, and no
+construction business uses eleven — `ProjectNav` built all of them from a
+hardcoded array with no conditional.
+
+**A tab is `tenant_modules.config`, not a pack.** Splitting `selections` and
+`warranty` into packs is the obvious move and it is wrong: they are facets of
+ONE record, which is what makes them tabs rather than rail rows in the first
+place. Packaging them apart would be packaging for navigation and would put
+seven more rows in the rail. So it is the pack's own config, the same seam
+`deliveryMethodsFrom` and the cost-code sets already use.
+
+**Three are not negotiable** — Overview, Contracts, Job cost. A job with a
+number, a value and a cost measured against it is what the pack claims to be.
+The action refuses them rather than ignoring them.
+
+**Stored as what is OFF.** A tab added next year is then ON for a business that
+configured this today; the other way round it would be silently missing for
+them and nobody would find out why.
+
+**AND SWITCHING ONE OFF NEVER HIDES WORK.** `visibleTabs(config, withRows)`
+draws any tab that has rows on the project in front of you, whatever the setting
+says — the setting decides what a job STARTS with, not what it is allowed to
+remember. A warranty claim is an obligation and a change order is money.
+Driven both ways on Hilltop Farm: with Selections off, *Lane drainage* and
+*Kitchen remodel* lose the tab and *Oak Row*, which has selections on it, keeps
+it. The settings screen says the same thing before the box is ticked, naming
+what the business has already used (`tabsInUse`).
+
+**`/dashboard/m/jobs/setup` — the pack's own settings screen**, owner-only to
+write and readable by anybody so a foreman can find out why a tab they remember
+is gone. Not Business settings: Layer 0 would have to know what a job tab is to
+draw it, and a core surface that learns one pack's shape learns every pack's
+next. The cross-job **Warranty** link comes off the module home with the tab,
+because it is the same feature from the other end. The PAGE stays reachable by
+URL — hiding a tab is a preference, not a permission.
+
+**`withSystem`, with the S2 justification `setTenantTimezoneAction` already
+carries.** `tenant_modules` is SELECT-only for tenant context on purpose — it is
+the entitlement table, and a member UPDATE policy would let an owner switch
+modules on and skip billing. Authorization first, tenant id from the session,
+constant module id, one field written. **The rest of the config is read and
+spread back**: writing `{ tabsOff }` over it would take a client's delivery
+methods away and nothing would have failed.
+
+Two `EXISTS` queries, one round trip each (`tab-rows.ts`): per project for the
+layout, tenant-wide for the settings screen. `changes` is the odd one and has to
+ask through `job_contracts`, because a change order hangs off a CONTRACT rather
+than a project. Both read the result as `!== false` rather than `=== true`: a
+raw-SQL result is not type-checked, and showing an empty tab costs a click while
+hiding a warranty claim costs the claim.
+
 ### 2026-09-18 — The estimate screen, redesigned: a working panel with a rail, and every row has a number (`claude/estimate-redesign-handoff`, ADR 0087)
 
 Slice **E8**, from a Claude Design handoff (option **2a**, "Quiet sections,

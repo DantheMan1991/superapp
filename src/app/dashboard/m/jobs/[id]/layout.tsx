@@ -16,6 +16,8 @@ import { projectVitals } from "@/packs/jobs/vitals-ops";
 import { ProjectVitalsStrip } from "@/packs/jobs/components/project-vitals";
 import { ProjectForm } from "@/packs/jobs/components/project-form";
 import { ProjectNav } from "@/packs/jobs/components/project-nav";
+import { tabsWithRows } from "@/packs/jobs/tab-rows";
+import { visibleTabs } from "@/packs/jobs/tabs";
 import { StatusBadge, projectStatusTone } from "@/packs/jobs/components/status-badge";
 import {
   PACK,
@@ -87,7 +89,19 @@ export default async function ProjectLayout({
         listCostCodeSets(tx, ctx.tenant.id),
         packContext(tx, ctx.tenant.id, ctx.tenant.industry, PACK),
       ]);
-      return { vitals, entities, parties, enterprises, sets, labels: pack.labels, config: pack.config };
+      // Which of the optional tabs this job already has work on, so a tenant
+      // who switched one off never loses sight of what was on it (`tabs.ts`).
+      const withRows = await tabsWithRows(tx, ctx.tenant.id, vitals.project.id);
+      return {
+        vitals,
+        entities,
+        parties,
+        enterprises,
+        sets,
+        labels: pack.labels,
+        config: pack.config,
+        withRows,
+      };
     },
     { role: ctx.role },
   );
@@ -170,7 +184,7 @@ export default async function ProjectLayout({
 
       <ProjectVitalsStrip vitals={vitals} symbol={ctx.tenant.currencySymbol} />
 
-      <ProjectNav projectId={project.id} />
+      <ProjectNav projectId={project.id} show={visibleTabs(data.config, data.withRows)} />
 
       {children}
     </div>

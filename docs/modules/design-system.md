@@ -21,6 +21,62 @@ tokens and gets its own pass later.
 
 ## Build log
 
+### 2026-09-18 — The page column is 100rem, and a sentence is 80ch (`claude/wide-screens`, ADR 0088)
+
+The founder, looking at the app on a 3,440px monitor: *"On a wide screen there
+is a lot of wasted real estate."* He was right, and the fix is two tokens rather
+than one bigger number.
+
+**`--container-content: 100rem`** is the shell's column, up from `max-w-6xl`'s
+72rem — the one line in `app-shell.tsx` that every standard page inherits. A
+**cap and not full bleed**, which he chose: past some width a table row stops
+being a row and becomes a journey.
+
+**`--container-measure: 80ch`** is how wide a sentence gets, and it is a
+different question. The old clamp was doing both jobs and was only ever right
+for one of them: at 1,152px the dashboard's explanatory paragraph was **already
+164 characters to the line**, and simply widening the column would have taken it
+to 219. The measure is in `ch`, so a 12px note gets a narrower box and the same
+character count — a measure in pixels is a measure for one font size.
+
+**The sentence cap is a rule, not 398 call sites.** A static scan found 398
+uncapped explanatory paragraphs across 188 files; two lines of CSS in
+`globals.css` cap all of them, scoped to `[data-app-main]` so dialogs, the
+public site and the printed proposal are untouched. Of 1,207 paragraphs in the
+app tree only 56 are flex rows or right-aligned figures, and every one sits in a
+container narrower than the cap, so it never reaches them — a paragraph that
+really is a layout row says `max-w-none`. The second rule keeps a centred "nothing
+here yet" placeholder centred, because centred text in a capped box otherwise
+sits off to the left of the panel it fills.
+
+**Form controls were deliberately left out of that rule.** The same blanket cap
+for `input`/`textarea` was written and thrown away: the estimate editor's
+description cell is *meant* to be 1,136px, and so is a search bar. There is no
+width right for both a domain name and a takeoff line. Five controls found over
+900px were capped where they are written instead — a 1,504px domain box, a
+1,403px box for the word "iPhone", a 999px memo, a 992px domain and a 1,224px
+question box.
+
+**Checked with an instrument, not a tour of 138 screens.** A same-origin iframe
+pinned at 2,400px loads each route and reports every control over 900px and
+every paragraph over 95 characters a line, the character count taken from
+Geist's real advance width (0.663em) rather than the usual 0.5em guess — which
+was over-reporting by a third until it was measured. 89 static routes, the
+module homes and 15 harvested detail pages came back clean apart from those
+five. Two flagged items were false positives worth recording: a `<li>` that is a
+flex row with `ml-auto`, and a `<p>` acting as a totals row, are full-width on
+purpose.
+
+**Both tokens fail silently.** `max-w-content` and `max-w-measure` are Tailwind
+v4 utilities generated from the tokens; drop or rename one and the class stops
+existing, the page un-clamps and nothing errors — no `tsc`, no lint, no build,
+no test. `tests/layout-width.test.ts` is the guard, and it was proved by
+breaking both and watching two assertions fail before restoring them.
+
+Nothing moved on a laptop: below 1,152px the layout is what it always was, and
+`layout: "full"` / `fullWidthPaths` are untouched and still right for the
+list-beside-detail shape.
+
 ### 2026-09-15 — `jobs` gets its own accent, and the rail had two wrong ones (`claude/jobs-accent`)
 
 - **`--accent-jobs: oklch(0.52 0.13 155)`**, in all three blocks. The pack had
@@ -522,6 +578,35 @@ also a Tailwind utility.
 | `--accent-brand` | — | The AA-safe emerald for **drawing with**. Not `--brand` |
 | `--success` / `--warning` | `bg-success/12`, `bg-warning/10` | Status **fills** only |
 | `--success-foreground` / `--warning-foreground` | `text-*-foreground` | The dark twins, for text and glyphs on those tints |
+| `--container-content` | `max-w-content` | **How wide a page gets** — 100rem, the shell's column (ADR 0088) |
+| `--container-measure` | `max-w-measure` | **How wide a sentence gets** — 80ch, and in `ch` so it scales with the type |
+
+### How wide things are (ADR 0088)
+
+**A page and a sentence are two different widths, and one number cannot be
+both.** The shell's column is `--container-content`, 100rem; running text is
+`--container-measure`, 80ch, wherever it appears. The column was 72rem and was
+doing both jobs, which is why explanatory paragraphs were already 164 characters
+a line before anyone complained about the margins.
+
+The sentence cap is **a rule in `globals.css`, not a class on 398 call sites**:
+
+```css
+[data-app-main] p { max-width: var(--container-measure); }
+[data-app-main] p.text-center { margin-inline: auto; }
+```
+
+- **A paragraph that is really a layout row says `max-w-none`.** There are very
+  few — a totals row, a metadata strip with `ml-auto` at the end — and they sit
+  in containers narrower than the cap anyway, so it rarely comes up.
+- **Form controls are NOT capped by a rule**, deliberately: there is no width
+  right for both a domain name and an estimate line. A control that is
+  needlessly wide gets a `max-w-*` where it is written.
+- **`ch`, never `px`.** A measure in pixels is a measure for one font size.
+- Both tokens fail SILENTLY — drop one and the Tailwind utility stops existing,
+  the page un-clamps and nothing errors. `tests/layout-width.test.ts` guards it.
+- The marketing site keeps `max-w-6xl` on purpose: a landing page is reading,
+  not working.
 
 ### Rules that are easy to get wrong
 

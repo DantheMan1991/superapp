@@ -315,6 +315,7 @@ export function EntryEditor({
             <Label htmlFor="entry-memo">Memo</Label>
             <Input
               id="entry-memo"
+              className="max-w-2xl"
               value={memo}
               onChange={(e) => setMemo(e.target.value)}
               placeholder="What is this entry for?"

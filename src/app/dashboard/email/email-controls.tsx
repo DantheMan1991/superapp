@@ -63,6 +63,7 @@ export function ConnectDomainForm() {
           <Label htmlFor="domain">At domain</Label>
           <Input
             id="domain"
+            className="max-w-md"
             value={domain}
             maxLength={253}
             placeholder="mail.yourcompany.com"

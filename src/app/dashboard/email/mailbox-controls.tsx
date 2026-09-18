@@ -73,6 +73,7 @@ export function SetupHostedDomainForm() {
         <Label htmlFor="hosted-domain">Your company domain</Label>
         <Input
           id="hosted-domain"
+          className="max-w-md"
           value={domain}
           maxLength={253}
           placeholder="yourcompany.com"

@@ -145,7 +145,8 @@ export function AdvisorChat({
           event.preventDefault();
           ask(draft);
         }}
-        className="space-y-2"
+        /* A question is a sentence. The box does not grow to the monitor. */
+        className="max-w-3xl space-y-2"
       >
         <Textarea
           ref={boxRef}
